@@ -105,6 +105,42 @@ fn overrides() -> Overrides {
     }
 }
 
+/// Directory holding the WebKitGTK helper processes shipped in this bundle, or `None` outside an
+/// AppImage and when the bundle does not carry them.
+///
+/// The bundled WebKit resolves `WebKitNetworkProcess` and `WebKitWebProcess` through a path that is
+/// relative to the working directory rather than anchored to the bundle, so it finds them only when the
+/// process happens to start from a directory that contains a matching `lib/<arch>/webkit2gtk-<abi>/`
+/// tree. Callers pass the result to `WEBKIT_EXEC_PATH` to make the lookup independent of that.
+pub fn webkit_exec_path() -> Option<std::path::PathBuf> {
+    find_webkit_exec_path(std::path::Path::new(appdir()?))
+}
+
+/// Scan one bundle root for the helper directory. Split out from process state so it is testable.
+///
+/// The architecture triple and the WebKit ABI version are discovered rather than hard-coded, so the
+/// lookup survives a cross-architecture build and a `webkit2gtk-4.1` to `4.x` bump.
+fn find_webkit_exec_path(appdir: &std::path::Path) -> Option<std::path::PathBuf> {
+    // $APPDIR/usr/lib/<arch-triple>/webkit2gtk-<abi>/WebKitNetworkProcess
+    for arch in std::fs::read_dir(appdir.join("usr").join("lib")).ok()?.flatten() {
+        let Ok(entries) = std::fs::read_dir(arch.path()) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let dir = entry.path();
+            if dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("webkit2gtk-"))
+                && dir.join("WebKitNetworkProcess").is_file()
+            {
+                return Some(dir);
+            }
+        }
+    }
+    None
+}
+
 /// Value a variable should have in a child process, with AppImage paths removed. `None` means the child
 /// must not receive it at all. Use this instead of `std::env::var` when building a child's environment.
 pub fn clean_var(key: &str) -> Option<String> {
@@ -253,5 +289,44 @@ mod tests {
             [("PATH".to_string(), "/usr/bin".to_string())].into_iter(),
         );
         assert!(o.is_empty());
+    }
+
+    /// Unique bundle root for the helper-lookup tests, which need real directories to scan. Removed
+    /// again by the test that creates it.
+    fn bundle_root(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("velaterm-{}-{}", name, std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        dir
+    }
+
+    /// The helpers sit under `usr/lib/<arch>/webkit2gtk-<abi>/`, the tree WebKit's own
+    /// working-directory-relative lookup misses. Neither the triple nor the ABI version is hard-coded,
+    /// so a value unlike the current build is used here on purpose.
+    #[test]
+    fn finds_bundled_webkit_helpers() {
+        let root = bundle_root("finds-helpers");
+        let helpers = root.join("usr/lib/aarch64-linux-gnu/webkit2gtk-4.2");
+        std::fs::create_dir_all(&helpers).unwrap();
+        std::fs::write(helpers.join("WebKitNetworkProcess"), b"").unwrap();
+        assert_eq!(find_webkit_exec_path(&root), Some(helpers));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// A bundle without the helpers must yield nothing, so the caller leaves `WEBKIT_EXEC_PATH` unset
+    /// rather than pointing it at a directory that holds no helpers.
+    #[test]
+    fn ignores_directories_without_helpers() {
+        let root = bundle_root("ignores-empty");
+        std::fs::create_dir_all(root.join("usr/lib/x86_64-linux-gnu/webkit2gtk-4.1")).unwrap();
+        std::fs::create_dir_all(root.join("usr/lib/x86_64-linux-gnu/gio/modules")).unwrap();
+        assert_eq!(find_webkit_exec_path(&root), None);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// Outside an AppImage there is no bundle to scan.
+    #[test]
+    fn finds_no_helpers_without_a_bundle() {
+        let root = bundle_root("no-bundle");
+        assert_eq!(find_webkit_exec_path(&root), None);
     }
 }

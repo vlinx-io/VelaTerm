@@ -70,6 +70,22 @@ fn main() {
         if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
             std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         }
+
+        // AppImage/WebKitGTK helper-process lookup: the bundled WebKit resolves WebKitNetworkProcess and
+        // WebKitWebProcess through a working-directory-relative path rather than one anchored to the
+        // bundle. A desktop launcher starts the app with the working directory set to $HOME or /, where
+        // that path resolves to nothing and startup aborts with "Unable to spawn a new child process";
+        // started from a shell sitting in /usr it instead finds the system helpers and silently pairs
+        // them with the bundled WebKit. Anchoring WEBKIT_EXEC_PATH to the bundle makes the correct
+        // helpers load from any working directory. Set it before WebKit initialization and only when the
+        // user has not supplied an override; outside an AppImage the lookup yields nothing and the
+        // system default applies.
+        #[cfg(target_os = "linux")]
+        if std::env::var_os("WEBKIT_EXEC_PATH").is_none() {
+            if let Some(dir) = velaterm_lib::appimage::webkit_exec_path() {
+                std::env::set_var("WEBKIT_EXEC_PATH", dir);
+            }
+        }
         let open_project = match velaterm_lib::open_project_from_args(
             &args,
             &std::env::current_dir().unwrap_or_default(),
