@@ -120,6 +120,53 @@ describe("executeSpawn launch configuration", () => {
     expect(vi.mocked(createSession).mock.calls[0][0].name).toBe("small task");
   });
 
+  it("inherits the parent's permission mode over the per-agent default", async () => {
+    useTermStore.setState({
+      sessions: [{ ...parent, permissionMode: "skip" }],
+      agentDefaults: { claude: { args: "", permissionMode: "default" } },
+    });
+    await useTermStore.getState().executeSpawn({
+      parentSessionId: "parent-1",
+      prompt: "task",
+      kind: "claude",
+      worktree: false,
+    });
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionMode: "skip" }),
+    );
+  });
+
+  it("prefers an explicitly requested permission mode over inheritance", async () => {
+    useTermStore.setState({
+      sessions: [{ ...parent, permissionMode: "default" }],
+      agentDefaults: { claude: { args: "", permissionMode: "default" } },
+    });
+    await useTermStore.getState().executeSpawn({
+      parentSessionId: "parent-1",
+      prompt: "task",
+      kind: "claude",
+      worktree: false,
+      permissionMode: "skip",
+    });
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ permissionMode: "skip" }),
+    );
+  });
+
+  it("releases a parked vagent spawn caller as soon as the card is queued", async () => {
+    useTermStore.setState({ spawnConfirm: true, notifyEnabled: false });
+    await useTermStore.getState().handleSpawnRequest({
+      parentSessionId: "parent-1",
+      prompt: "task",
+      requestId: "req-45",
+    });
+    expect(useTermStore.getState().pendingSpawns).toHaveLength(1);
+    expect(createSession).not.toHaveBeenCalled();
+    expect(spawnResult).toHaveBeenCalledWith("req-45", {
+      awaitingConfirmation: true,
+    });
+  });
+
   it("reports a correlated spawn back with the created session id and worktree error", async () => {
     await useTermStore.getState().executeSpawn({
       parentSessionId: "parent-1",

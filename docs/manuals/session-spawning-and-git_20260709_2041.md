@@ -33,7 +33,57 @@ agent-specific flags at launch: Claude uses `--model` and `--effort`; Codex uses
 `-c model_reasoning_effort=`. Other agent types currently ignore these settings. When omitted, the
 agent's own defaults apply.
 
-> **Prerequisite for agent skills:** enable **Vela Skills** in Settings ▸ General. This installs `vspawn`, `vspawn-tree`, and `vopen` into both `~/.claude/skills/` and the Codex skills directory (`$CODEX_HOME/skills` when set, otherwise `~/.codex/skills`); they're kept up to date automatically on app upgrades. After enabling, start a new Claude or Codex thread so the agent picks them up. Without this, only the terminal-typed `vspawn` / `vspawn-tree` commands work.
+> **Prerequisite for agent skills:** enable **Vela Skills** in Settings ▸ General. This installs `vspawn`, `vspawn-tree`, `vopen`, and `orch` into both `~/.claude/skills/` and the Codex skills directory (`$CODEX_HOME/skills` when set, otherwise `~/.codex/skills`); they're kept up to date automatically on app upgrades. After enabling, start a new Claude or Codex thread so the agent picks them up. Without this, only the terminal-typed `vspawn` / `vspawn-tree` commands work.
+
+### Supervising children with `vagent`
+
+The `vagent` terminal command (also injected into every session's PATH) lets a parent session
+supervise the children it spawned. All output is JSON, and a session can only reach its own live
+descendants, addressed by id or unique name:
+
+```text
+vagent spawn --profile <p> --name <n> "<task>"
+vagent spawn --agent <kind> --model <m> --effort <e> --name <n> [--worktree] "<task>"
+vagent config
+vagent list | status | wait | read | prompt | cancel | cleanup
+```
+
+`spawn` blocks until the child exists (respecting the confirmation card) and returns its session
+id; `wait` blocks while a child is working; `read` returns the child's last assistant reply
+(Claude, Codex, and Grok); `prompt` sends a follow-up into the child's conversation; `cancel`
+interrupts its current turn without closing the session, and `cancel --all` interrupts every
+running descendant.
+
+`config` prints the routing profiles, the spawn limits, and the caller's current child counts, all
+from Settings > Orchestration. A lead agent reads each profile description before it routes work.
+`--profile database` then launches a child with that profile's agent, model, effort, and worktree
+choice; an explicit flag still overrides the profile.
+
+`cleanup` lists the worktrees of children that have finished and hold no uncommitted changes;
+`cleanup --confirm` removes exactly those. A running child, or one whose worktree has uncommitted
+changes, is reported as blocked and never touched.
+
+### Orchestration settings
+
+Settings ▸ Orchestration is one place for everything a lead agent needs:
+
+- **Profiles**: named bundles of description, agent, model, effort, and worktree. Three ship by
+  default: `database`, `frontend`, `quick-edits`, and `tests`. Add, edit, and delete them freely.
+- **Limits**, enforced by the app on every spawn rather than by prompt text: `maxChildren` live
+  children per lead, `maxParallel` children working at once, `maxDepth` for child-of-child nesting,
+  the child count above which the confirmation card appears even when confirmation is off, and the
+  default `vagent wait` timeout. A spawn that would cross a limit fails with a message naming the
+  limit and the current count, so the agent waits and retries instead of failing blind.
+- **Worktree copy patterns**: globs such as `docs/plans/**` for untracked or ignored files copied
+  from the repository root into each new worktree, so a worker can see local-only notes. Build
+  output such as `node_modules` is never copied, and workers still build from scratch.
+
+### The `/orch` skill
+
+`/orch <task>` turns the current agent session into a lead agent: it reads the configured
+profiles and limits with `vagent config`, decomposes the task, routes each work item to a profile,
+waits on and reviews each result, follows up where needed, and integrates the outcome. `/vspawn`
+stays manual and single-shot; only `/orch` manages workers autonomously.
 
 ## 3. Confirm before spawn
 

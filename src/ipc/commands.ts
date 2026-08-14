@@ -374,13 +374,19 @@ export interface WorktreeInfo {
  * Returns false when the waiter already timed out; callers may ignore the result. */
 export function spawnResult(
   requestId: string,
-  result: { sessionId?: string; error?: string; worktreeError?: string },
+  result: {
+    sessionId?: string;
+    error?: string;
+    worktreeError?: string;
+    awaitingConfirmation?: boolean;
+  },
 ): Promise<boolean> {
   return invoke<boolean>("spawn_result", {
     requestId,
     sessionId: result.sessionId ?? null,
     error: result.error ?? null,
     worktreeError: result.worktreeError ?? null,
+    awaitingConfirmation: result.awaitingConfirmation ?? false,
   });
 }
 

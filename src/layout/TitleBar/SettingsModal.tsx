@@ -35,6 +35,7 @@ import { Field, Seg, SectionTitle } from "./settingsParts";
 import {
   AgentsPanel,
   GiteaIntegrationPanel,
+  OrchestrationPanel,
   SHOW_GITEA_INTEGRATION,
   ShortcutsPanel,
 } from "./settingsPanels";
@@ -610,7 +611,15 @@ function AccentPicker({
 }
 
 
-type Cat = "appearance" | "terminal" | "behavior" | "advanced" | "agents" | "shortcuts" | "general";
+type Cat =
+  | "appearance"
+  | "terminal"
+  | "behavior"
+  | "advanced"
+  | "agents"
+  | "orchestration"
+  | "shortcuts"
+  | "general";
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const t = useT();
@@ -672,6 +681,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     { key: "behavior", label: t("settings.catBehavior") },
     { key: "advanced", label: t("settings.catAdvanced") },
     { key: "agents", label: t("settings.catAgents") },
+    { key: "orchestration", label: t("settings.catOrchestration") },
     { key: "shortcuts", label: t("settings.catShortcuts") },
   ];
 
@@ -994,6 +1004,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             )}
 
             {cat === "agents" && <AgentsPanel />}
+
+            {cat === "orchestration" && <OrchestrationPanel />}
 
             {cat === "shortcuts" && <ShortcutsPanel />}
 

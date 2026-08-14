@@ -98,6 +98,33 @@ const ja: typeof en = {
   "settings.agentPathPlaceholder": "例: ~/.local/bin/claude — 空欄なら PATH から検索", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "設定すると、このタイプのセッションは PATH でコマンドを探す代わりに、この完全パスで起動します。インストール済みなのにシェルの PATH に無い場合に便利です。ワンクリックインストール成功後、場所を検出できた場合は自動で入力されます。", // Agent executable path hint
+  "settings.catOrchestration": "オーケストレーション",
+  "settings.orchProfilesTitle": "ワーカープロファイル",
+  "settings.orchProfile": "プロファイル",
+  "settings.orchDescription": "説明",
+  "settings.orchDescriptionPlaceholder": "このプロファイルを使用する場面を説明してください。",
+  "settings.orchNewProfile": "新しいプロファイル名",
+  "settings.orchAdd": "追加",
+  "settings.orchAddNew": "新規追加",
+  "settings.orchDelete": "削除",
+  "settings.orchNoProfiles": "プロファイルがありません。作成すると、すべての spawn で再利用できます。",
+  "settings.orchProfilesHint":
+    "プロファイルは各タスクに適したワーカー設定をリードエージェントに示します. 各プロファイルを使う条件を説明し, エージェント, モデル, 推論レベル, worktree を選択します.",
+  "settings.orchModel": "モデル",
+  "settings.orchEffort": "推論レベル",
+  "settings.orchWorktree": "専用 worktree",
+  "settings.orchLimitsTitle": "上限",
+  "settings.orchMaxChildren": "子セッションの最大数",
+  "settings.orchMaxParallel": "並列実行の最大数",
+  "settings.orchMaxDepth": "最大深さ",
+  "settings.orchConfirmAbove": "確認が必要になる数",
+  "settings.orchTimeout": "既定のタイムアウト（秒）",
+  "settings.orchConfirmAboveHint": "spawn によって稼働中の子セッション数がこの値を超える場合、spawn の確認がオフでも確認カードを表示します。",
+  "settings.orchLimitsHint":
+    "これらの上限はバックエンドが spawn ごとに強制します。リードエージェントは実行時に `vagent config` で現在の値を読み取ります。",
+  "settings.orchCopyPatterns": "worktree へのコピーパターン",
+  "settings.orchCopyPatternsHint":
+    "1 行に 1 つの glob を書きます。一致する未追跡ファイルや無視されたファイルは、リポジトリのルートから新しい worktree へコピーされます。node_modules などのビルド成果物はコピーされないため、ワーカーは毎回ビルドが必要です。",
   "settings.appearance": "外観", // Appearance
   "settings.accent": "アクセント", // Accent
   "settings.accentAuto": "テーマに従う", // Follow theme
@@ -142,6 +169,8 @@ const ja: typeof en = {
   "spawn.agentLabel": "Agent", // Agent
   "spawn.modelLabel": "モデル", // Model
   "spawn.effortLabel": "推論レベル", // Effort
+  "spawn.optionDefault": "デフォルト", // default
+  "spawn.optionOther": "その他...", // Other...
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending

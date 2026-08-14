@@ -109,6 +109,35 @@ const ru: typeof en = {
   "settings.agentPathPlaceholder": "напр. ~/.local/bin/claude — пусто = искать в PATH", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "Если задан, сессии этого типа запускаются по этому полному пути вместо поиска команды в PATH. Полезно, когда агент установлен, но отсутствует в PATH оболочки. Заполняется автоматически после успешной установки в один клик, если место установки удалось определить.", // Agent executable path hint
+  "settings.catOrchestration": "Оркестрация",
+  "settings.orchProfilesTitle": "Профили воркеров",
+  "settings.orchProfile": "Профиль",
+  "settings.orchDescription": "Описание",
+  "settings.orchDescriptionPlaceholder": "Опишите, когда следует использовать этот профиль.",
+  "settings.orchNewProfile": "Имя нового профиля",
+  "settings.orchAdd": "Добавить",
+  "settings.orchAddNew": "Добавить новый",
+  "settings.orchDelete": "Удалить",
+  "settings.orchNoProfiles":
+    "Профилей пока нет. Создайте один, чтобы использовать его при каждом spawn.",
+  "settings.orchProfilesHint":
+    "Профили сообщают ведущему агенту, какая конфигурация воркера подходит для каждой задачи. Опишите условия применения каждого профиля и выберите агента, модель, уровень усилий и worktree.",
+  "settings.orchModel": "Модель",
+  "settings.orchEffort": "Уровень усилий",
+  "settings.orchWorktree": "Отдельный worktree",
+  "settings.orchLimitsTitle": "Ограничения",
+  "settings.orchMaxChildren": "Макс. дочерних",
+  "settings.orchMaxParallel": "Макс. параллельно",
+  "settings.orchMaxDepth": "Макс. глубина",
+  "settings.orchConfirmAbove": "Подтверждать свыше",
+  "settings.orchTimeout": "Тайм-аут по умолчанию (секунды)",
+  "settings.orchConfirmAboveHint":
+    "Если после spawn число активных дочерних сессий превысит это значение, карточка подтверждения появится даже при выключенном подтверждении spawn.",
+  "settings.orchLimitsHint":
+    "Бэкенд применяет эти ограничения при каждом spawn. Ведущий агент читает текущие значения во время работы командой `vagent config`.",
+  "settings.orchCopyPatterns": "Шаблоны копирования в worktree",
+  "settings.orchCopyPatternsHint":
+    "По одному glob в строке. Неотслеживаемые или игнорируемые файлы, попавшие под шаблон, копируются из корня репозитория в каждый новый worktree. Результаты сборки, такие как node_modules, не копируются, поэтому воркеры всё равно собирают проект с нуля.",
   "settings.appearance": "Внешний вид", // Appearance
   "settings.accent": "Акцент", // Accent
   "settings.accentAuto": "Как тема", // Follow theme
@@ -153,6 +182,8 @@ const ru: typeof en = {
   "spawn.agentLabel": "Agent", // Agent
   "spawn.modelLabel": "Модель", // Model
   "spawn.effortLabel": "Уровень усилий", // Effort
+  "spawn.optionDefault": "по умолчанию", // default
+  "spawn.optionOther": "Другое...", // Other...
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending

@@ -84,6 +84,8 @@ import {
   visualOf,
   type AgentDefaultConfig,
   type ImagePasteMode,
+  type OrchestrationLimits,
+  type OrchestrationProfile,
   type PersistedSettings,
   type TermRenderer,
 } from "./settings";
@@ -91,7 +93,13 @@ import { docKindOf, makeDocTab, type DocTab } from "./docTab";
 
 // Re-export the public API after moving implementations to settings/docTab, preserving existing import paths.
 export { DEFAULT_MAX_LIVE_TABS } from "./settings";
-export type { AgentDefaultConfig, ImagePasteMode, TermRenderer } from "./settings";
+export type {
+  AgentDefaultConfig,
+  ImagePasteMode,
+  OrchestrationLimits,
+  OrchestrationProfile,
+  TermRenderer,
+} from "./settings";
 export { docKindOf } from "./docTab";
 export type { DocKind, DocTab } from "./docTab";
 
@@ -818,6 +826,8 @@ interface TermStore {
   agentDefaults: Record<string, AgentDefaultConfig>;
   /** Whether spawning a child requires confirmation. */
   spawnConfirm: boolean;
+  orchestrationProfiles: Record<string, OrchestrationProfile>;
+  orchestration: OrchestrationLimits;
   /** Usage auto-refresh interval in seconds; zero disables it. */
   usageRefreshSec: number;
   /** Image-paste mode, configurable only in the local desktop app. */
@@ -1114,6 +1124,8 @@ interface TermStore {
   resetShortcuts: () => void;
   /** Merges and persists an agent-type default patch, removing empty/default values. */
   setAgentDefault: (kind: string, patch: Partial<AgentDefaultConfig>) => void;
+  setOrchestrationProfile: (name: string, patch: Partial<OrchestrationProfile> | null) => void;
+  setOrchestrationLimits: (patch: Partial<OrchestrationLimits>) => void;
   /** Applies current theme and visual settings to `documentElement` on mount. */
   applyAppearance: () => void;
   /** Reloads preferences from local storage after startup reconciliation rewrites the cache from backend
@@ -1223,6 +1235,8 @@ function persistAndApplyVisual(getState: () => TermStore) {
     shortcutOverrides: s.shortcutOverrides,
     agentDefaults: s.agentDefaults,
     spawnConfirm: s.spawnConfirm,
+    orchestrationProfiles: s.orchestrationProfiles,
+    orchestration: s.orchestration,
     usageRefreshSec: s.usageRefreshSec,
     imagePasteMode: s.imagePasteMode,
   };
@@ -1648,12 +1662,16 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
 
   handleSpawnRequest: async (req) => {
-    // Queue for review when spawn confirmation is enabled; otherwise execute immediately.
-    if (!get().spawnConfirm) {
+    // Queue requests when confirmation is enabled or required by the backend.
+    if (!get().spawnConfirm && req.forceConfirm !== true) {
       await get().executeSpawn(req);
       return;
     }
     set((s) => ({ pendingSpawns: [...s.pendingSpawns, req] }));
+    // Return a progress result while the confirmation card is open.
+    if (req.requestId) {
+      void spawnResult(req.requestId, { awaitingConfirmation: true }).catch(() => {});
+    }
     // A spawn-confirmation card always notifies when notifications are enabled, even in a focused window,
     // because the nonmodal card is easy to miss. Dock badges derive reactively from queue length elsewhere.
     const s = get();
@@ -1757,9 +1775,15 @@ export const useTermStore = create<TermStore>((set, get) => ({
     }
 
     // Explicit request values win; otherwise apply per-agent defaults, matching manual creation.
+    // Permission mode additionally inherits from the parent so a lead running with skipped
+    // confirmations gets workers that do the same instead of stalling on every approval.
     const defaults = state.agentDefaults[kind];
     const agentArgs = req.agentArgs?.trim() || defaults?.args || null;
-    const permissionMode = defaults?.permissionMode ?? null;
+    const permissionMode =
+      req.permissionMode?.trim() ||
+      parent.permissionMode ||
+      defaults?.permissionMode ||
+      null;
 
     let created: Session | null = null;
     try {
@@ -3409,6 +3433,21 @@ export const useTermStore = create<TermStore>((set, get) => ({
       else delete next[kind];
       return { agentDefaults: next };
     });
+    persistAndApplyVisual(get);
+  },
+  setOrchestrationProfile: (name, patch) => {
+    const key = name.trim();
+    if (!key) return;
+    set((s) => {
+      const next = { ...s.orchestrationProfiles };
+      if (patch === null) delete next[key];
+      else next[key] = { ...(next[key] ?? {}), ...patch };
+      return { orchestrationProfiles: next };
+    });
+    persistAndApplyVisual(get);
+  },
+  setOrchestrationLimits: (patch) => {
+    set((s) => ({ orchestration: { ...s.orchestration, ...patch } }));
     persistAndApplyVisual(get);
   },
   applyAppearance: () => {

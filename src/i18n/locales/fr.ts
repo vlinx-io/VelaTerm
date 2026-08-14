@@ -99,6 +99,35 @@ const fr: typeof en = {
   "settings.agentPathPlaceholder": "ex. ~/.local/bin/claude — vide = recherche dans le PATH", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "Si défini, les sessions de ce type se lancent via ce chemin complet au lieu de chercher la commande dans le PATH. Utile quand l'agent est installé mais absent du PATH du shell. Rempli automatiquement après une installation en un clic si l'emplacement est détecté.", // Agent executable path hint
+  "settings.catOrchestration": "Orchestration",
+  "settings.orchProfilesTitle": "Profils de worker",
+  "settings.orchProfile": "Profil",
+  "settings.orchDescription": "Description",
+  "settings.orchDescriptionPlaceholder": "Décrivez quand utiliser ce profil.",
+  "settings.orchNewProfile": "Nom du nouveau profil",
+  "settings.orchAdd": "Ajouter",
+  "settings.orchAddNew": "Ajouter un profil",
+  "settings.orchDelete": "Supprimer",
+  "settings.orchNoProfiles":
+    "Aucun profil pour l'instant. Créez-en un pour le réutiliser à chaque spawn.",
+  "settings.orchProfilesHint":
+    "Les profils indiquent à un agent principal quelle configuration de worker convient à chaque tâche. Décrivez quand utiliser chaque profil, puis choisissez son agent, son modèle, son effort et son worktree.",
+  "settings.orchModel": "Modèle",
+  "settings.orchEffort": "Effort",
+  "settings.orchWorktree": "Worktree dédié",
+  "settings.orchLimitsTitle": "Limites",
+  "settings.orchMaxChildren": "Enfants max.",
+  "settings.orchMaxParallel": "Parallélisme max.",
+  "settings.orchMaxDepth": "Profondeur max.",
+  "settings.orchConfirmAbove": "Confirmer au-delà de",
+  "settings.orchTimeout": "Délai par défaut (secondes)",
+  "settings.orchConfirmAboveHint":
+    "Si un spawn portait le nombre d'enfants actifs au-dessus de cette valeur, la carte de confirmation apparaît même lorsque la confirmation de spawn est désactivée.",
+  "settings.orchLimitsHint":
+    "Le backend applique ces limites à chaque spawn. Un agent principal lit les valeurs actuelles à l'exécution avec `vagent config`.",
+  "settings.orchCopyPatterns": "Motifs de copie vers le worktree",
+  "settings.orchCopyPatternsHint":
+    "Un glob par ligne. Les fichiers non suivis ou ignorés qui correspondent sont copiés depuis la racine du dépôt vers chaque nouveau worktree. Les sorties de build comme node_modules ne sont jamais copiées, les workers compilent donc toujours à froid.",
   "settings.appearance": "Apparence", // Appearance
   "settings.accent": "Accent", // Accent
   "settings.accentAuto": "Suivre le thème", // Follow theme
@@ -143,6 +172,8 @@ const fr: typeof en = {
   "spawn.agentLabel": "Agent", // Agent
   "spawn.modelLabel": "Modèle", // Model
   "spawn.effortLabel": "Effort", // Effort
+  "spawn.optionDefault": "par défaut", // default
+  "spawn.optionOther": "Autre...", // Other...
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending

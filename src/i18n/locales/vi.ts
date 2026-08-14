@@ -99,6 +99,34 @@ const vi: typeof en = {
   "settings.agentPathPlaceholder": "vd. ~/.local/bin/claude — để trống = tìm trong PATH",
   "settings.agentPathHint":
     "Khi được đặt, phiên loại này sẽ khởi chạy bằng đường dẫn đầy đủ thay vì tìm lệnh trong PATH. Hữu ích khi tác nhân đã được cài nhưng không có trong PATH của shell. Tự động điền sau khi cài đặt một lần thành công nếu xác định được vị trí.",
+  "settings.catOrchestration": "Điều phối",
+  "settings.orchProfilesTitle": "Hồ sơ worker",
+  "settings.orchProfile": "Hồ sơ",
+  "settings.orchDescription": "Mô tả",
+  "settings.orchDescriptionPlaceholder": "Mô tả khi nào nên sử dụng hồ sơ này.",
+  "settings.orchNewProfile": "Tên hồ sơ mới",
+  "settings.orchAdd": "Thêm",
+  "settings.orchAddNew": "Thêm mới",
+  "settings.orchDelete": "Xóa",
+  "settings.orchNoProfiles": "Chưa có hồ sơ nào. Hãy tạo một hồ sơ để dùng lại cho mọi lần spawn.",
+  "settings.orchProfilesHint":
+    "Hồ sơ cho tác nhân dẫn dắt biết cấu hình worker nào phù hợp với từng tác vụ. Mô tả khi nào dùng từng hồ sơ, sau đó chọn tác nhân, mô hình, mức suy luận và worktree.",
+  "settings.orchModel": "Mô hình",
+  "settings.orchEffort": "Mức suy luận",
+  "settings.orchWorktree": "Worktree riêng",
+  "settings.orchLimitsTitle": "Giới hạn",
+  "settings.orchMaxChildren": "Số phiên con tối đa",
+  "settings.orchMaxParallel": "Số chạy song song tối đa",
+  "settings.orchMaxDepth": "Độ sâu tối đa",
+  "settings.orchConfirmAbove": "Xác nhận khi vượt",
+  "settings.orchTimeout": "Thời gian chờ mặc định (giây)",
+  "settings.orchConfirmAboveHint":
+    "Khi một lần spawn làm số phiên con đang chạy vượt quá giá trị này, thẻ xác nhận vẫn hiện dù xác nhận spawn đã tắt.",
+  "settings.orchLimitsHint":
+    "Backend áp dụng các giới hạn này cho mọi lần spawn. Tác nhân dẫn dắt đọc giá trị hiện tại khi chạy bằng `vagent config`.",
+  "settings.orchCopyPatterns": "Mẫu sao chép vào worktree",
+  "settings.orchCopyPatternsHint":
+    "Mỗi dòng một glob. Các tệp chưa theo dõi hoặc bị bỏ qua khớp mẫu sẽ được sao chép từ thư mục gốc của kho vào mỗi worktree mới. Kết quả build như node_modules không bao giờ được sao chép, nên worker vẫn phải build lại từ đầu.",
   "settings.appearance": "Giao diện",
   "settings.accent": "Màu nhấn",
   "settings.accentAuto": "Theo chủ đề",
@@ -143,6 +171,8 @@ const vi: typeof en = {
   "spawn.agentLabel": "Tác nhân",
   "spawn.modelLabel": "Mô hình", // Model
   "spawn.effortLabel": "Mức suy luận", // Effort
+  "spawn.optionDefault": "mặc định", // default
+  "spawn.optionOther": "Khác...", // Other...
   "spawn.worktreeLabel": "Git worktree riêng",
   "spawn.launch": "Khởi chạy",
   "spawn.remaining": (n: number) => `Còn ${n} yêu cầu đang chờ`,

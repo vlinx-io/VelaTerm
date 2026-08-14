@@ -99,6 +99,35 @@ const de: typeof en = {
   "settings.agentPathPlaceholder": "z. B. ~/.local/bin/claude — leer = über PATH suchen", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "Wenn gesetzt, starten Sitzungen dieses Typs über diesen vollständigen Pfad, statt den Befehl im PATH zu suchen. Nützlich, wenn der Agent installiert ist, aber nicht im PATH der Shell liegt. Wird nach erfolgreicher Ein-Klick-Installation automatisch ausgefüllt, wenn der Ort erkannt wird.", // Agent executable path hint
+  "settings.catOrchestration": "Orchestrierung",
+  "settings.orchProfilesTitle": "Worker-Profile",
+  "settings.orchProfile": "Profil",
+  "settings.orchDescription": "Beschreibung",
+  "settings.orchDescriptionPlaceholder": "Beschreiben Sie, wann dieses Profil verwendet werden soll.",
+  "settings.orchNewProfile": "Name des neuen Profils",
+  "settings.orchAdd": "Hinzufügen",
+  "settings.orchAddNew": "Neu hinzufügen",
+  "settings.orchDelete": "Löschen",
+  "settings.orchNoProfiles":
+    "Noch keine Profile. Legen Sie eines an, um es bei jedem Spawn wiederzuverwenden.",
+  "settings.orchProfilesHint":
+    "Profile zeigen einem Lead-Agenten, welche Worker-Konfiguration zu einer Aufgabe passt. Beschreiben Sie den Einsatzzweck jedes Profils und wählen Sie Agent, Modell, Effort und Worktree.",
+  "settings.orchModel": "Modell",
+  "settings.orchEffort": "Effort",
+  "settings.orchWorktree": "Eigener Worktree",
+  "settings.orchLimitsTitle": "Limits",
+  "settings.orchMaxChildren": "Max. Kindsitzungen",
+  "settings.orchMaxParallel": "Max. parallel",
+  "settings.orchMaxDepth": "Max. Tiefe",
+  "settings.orchConfirmAbove": "Bestätigen ab",
+  "settings.orchTimeout": "Standard-Timeout (Sekunden)",
+  "settings.orchConfirmAboveHint":
+    "Wenn ein Spawn die Zahl der aktiven Kindsitzungen über diesen Wert heben würde, erscheint die Bestätigungskarte auch bei ausgeschalteter Spawn-Bestätigung.",
+  "settings.orchLimitsHint":
+    "Das Backend erzwingt diese Limits bei jedem Spawn. Ein Lead-Agent liest die aktuellen Werte zur Laufzeit mit `vagent config`.",
+  "settings.orchCopyPatterns": "Kopiermuster für Worktrees",
+  "settings.orchCopyPatternsHint":
+    "Ein Glob pro Zeile. Passende nicht versionierte oder ignorierte Dateien werden aus dem Repository-Stammverzeichnis in jeden neuen Worktree kopiert. Build-Ausgaben wie node_modules werden nie kopiert, daher bauen Worker weiterhin von Grund auf.",
   "settings.appearance": "Darstellung", // Appearance
   "settings.accent": "Akzent", // Accent
   "settings.accentAuto": "Thema folgen", // Follow theme
@@ -143,6 +172,8 @@ const de: typeof en = {
   "spawn.agentLabel": "Agent", // Agent
   "spawn.modelLabel": "Modell", // Model
   "spawn.effortLabel": "Effort", // Effort
+  "spawn.optionDefault": "Standard", // default
+  "spawn.optionOther": "Andere...", // Other...
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending

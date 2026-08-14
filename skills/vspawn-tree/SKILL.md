@@ -49,7 +49,7 @@ Detect "specifying claude / codex" from the user input (or a leading `--claude` 
 flag, and **don't** write it into the prompt. The default follows the current session type. (This command always
 opens a worktree, so there's nothing to detect there.)
 
-Also detect launch configuration: naming a model ("use fable", "with opus-5") → add `--model <model>`; naming a
+Also detect launch configuration: naming a model ("use fable", "with opus") → add `--model <model>`; naming a
 reasoning effort ("high effort", "xhigh") → add `--effort <level>`; asking for a session name → add
 `--name <name>`. These persist on the child session and map to agent-specific launch flags; do not write them
 into the prompt. Defaults keep the agent's own model/effort.

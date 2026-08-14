@@ -139,6 +139,281 @@ body {
   cursor: not-allowed;
 }
 
+.settings-orchestration {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--text);
+}
+.orch-panel-hint {
+  margin: 10px 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.orch-profile-intro {
+  margin: 6px 0 12px;
+}
+.orch-panel-help {
+  margin: 10px 0 18px;
+}
+.orch-panel-help > .orch-panel-hint {
+  margin: 0;
+}
+.orch-panel-help > .orch-panel-hint + .orch-panel-hint {
+  margin-top: 6px;
+}
+.orch-profile-editor {
+  min-width: 0;
+  margin-bottom: 18px;
+}
+.orch-control-group {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  min-width: 0;
+}
+.orch-profile-selector-field {
+  align-items: center !important;
+  flex-direction: row;
+  gap: 16px;
+}
+.orch-profile-selector-field > span {
+  width: 150px !important;
+}
+.orch-profile-selector-field > div {
+  width: auto;
+  min-width: 0;
+}
+.orch-control-group > div:first-child {
+  width: auto;
+  min-width: 0;
+}
+.orch-control-group > div:first-child > button {
+  width: 180px !important;
+  max-width: 100%;
+}
+.orch-control-group > div:first-child > div:last-child {
+  max-width: 100%;
+}
+.orch-profile-actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  min-width: 0;
+}
+.orch-profile-actions > button {
+  flex: none;
+  min-width: 0;
+  max-width: 100%;
+}
+.orch-inline-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.orch-name-editor {
+  margin: 2px 0 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-line);
+  border-radius: 7px;
+  background: var(--accent-soft);
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+}
+.orch-name-editor-label {
+  margin-bottom: 7px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+}
+.orch-name-editor-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.orch-name-editor-controls input {
+  flex: 1 1 200px;
+  min-width: 0;
+  width: 100% !important;
+  max-width: 100%;
+}
+.orch-name-editor-controls > button {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.orch-name-editor-error {
+  margin-top: 6px;
+  color: var(--red);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+.orch-empty-state {
+  margin: 2px 0 8px;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.orch-profile-grid {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-bottom: 8px;
+}
+.orch-profile-row > div > .orch-inline-control {
+  max-width: 100%;
+}
+.orch-description-input {
+  width: 100%;
+  min-height: 60px;
+  padding: 9px 10px;
+  resize: vertical;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: none;
+  background: var(--bg-1);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.orch-description-block {
+  min-width: 0;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.orch-description-block > label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+}
+.orch-description-input:focus {
+  border-color: var(--accent);
+}
+.orch-limit-grid {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.orch-limit-row {
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 16px !important;
+  min-width: 0;
+  padding: 8px 0 !important;
+}
+.orch-limit-row > span {
+  width: 150px !important;
+  color: var(--text-dim) !important;
+}
+.orch-limit-row-wide > span {
+  width: 210px !important;
+  white-space: nowrap;
+}
+.orch-limit-row > div {
+  width: auto;
+  justify-content: flex-end !important;
+}
+.orch-limit-row input {
+  width: 96px !important;
+  height: 28px !important;
+  flex: none;
+}
+.orch-patterns-input {
+  display: block;
+  width: 100%;
+  min-height: 82px;
+  padding: 9px 10px;
+  resize: vertical;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: none;
+  background: var(--bg-1);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.orch-patterns-input:focus {
+  border-color: var(--accent);
+}
+
+@media (max-width: 560px) {
+  .orch-profile-selector-field,
+  .orch-profile-row,
+  .orch-limit-row {
+    align-items: flex-start !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+  }
+  .orch-profile-selector-field > span,
+  .orch-profile-row > span,
+  .orch-limit-row > span {
+    width: auto !important;
+  }
+  .orch-profile-selector-field > div,
+  .orch-profile-row > div,
+  .orch-limit-row > div {
+    width: 100%;
+    justify-content: flex-start !important;
+  }
+  .orch-control-group {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+  .orch-control-group > div:first-child,
+  .orch-control-group > div:first-child > button {
+    width: 100% !important;
+  }
+  .orch-profile-actions {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .orch-profile-actions > button {
+    flex: 1 1 120px;
+  }
+  .orch-inline-control {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .orch-name-editor-controls {
+    align-items: stretch;
+  }
+  .orch-name-editor-controls input {
+    flex: 1 1 100%;
+    max-width: none !important;
+    width: 100% !important;
+  }
+  .orch-name-editor-controls button {
+    flex: 1 1 calc(50% - 4px);
+    max-width: none !important;
+    width: auto !important;
+  }
+  .orch-inline-control > div,
+  .orch-inline-control > div > button {
+    width: 100% !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .orch-profile-actions > button {
+    flex-basis: 100%;
+  }
+}
+
 /* Breathing animation for in-progress status dots, shared through StatusDot. */
 @keyframes vlx-status-pulse {
   0%,

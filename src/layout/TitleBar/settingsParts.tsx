@@ -43,12 +43,15 @@ export function Seg<T extends string>({
 export function Field({
   label,
   children,
+  className,
 }: {
   label: string;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
     <div
+      className={className}
       style={{
         display: "flex",
         alignItems: "center",

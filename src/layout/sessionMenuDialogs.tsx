@@ -70,7 +70,9 @@ export function ConfirmDelete({
     <Backdrop onClose={onCancel}>
       <div
         style={{
-          width: 360,
+          width: 400,
+          maxWidth: "calc(100vw - 32px)",
+          boxSizing: "border-box",
           background: "var(--bg-panel)",
           border: "1px solid var(--border)",
           borderRadius: 10,
@@ -88,18 +90,34 @@ export function ConfirmDelete({
         {hasWt && (
           <label
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
+              display: "grid",
+              gridTemplateColumns: "16px minmax(0, 1fr)",
+              alignItems: "start",
+              gap: 10,
+              padding: "10px 12px",
               fontSize: 13,
               color: "var(--text-secondary)",
               lineHeight: 1.5,
               marginBottom: 16,
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
               cursor: "pointer",
             }}
           >
-            <input type="checkbox" checked={removeWt} onChange={(e) => setRemoveWt(e.target.checked)} />
-            {t("tree.deleteWorktrees", worktreePaths.length)}
+            <input
+              type="checkbox"
+              checked={removeWt}
+              onChange={(e) => setRemoveWt(e.target.checked)}
+              style={{
+                width: 16,
+                height: 16,
+                margin: "2px 0 0",
+                accentColor: "var(--accent)",
+                cursor: "pointer",
+              }}
+            />
+            <span>{t("tree.deleteWorktrees", worktreePaths.length)}</span>
           </label>
         )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>

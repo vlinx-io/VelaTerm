@@ -97,6 +97,32 @@ const zhTW: typeof en = {
   "settings.agentPathPlaceholder": "如 ~/.local/bin/claude——留空則從 PATH 尋找", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "設定後，該類型工作階段一律按這條完整路徑啟動，不再從 PATH 尋找命令。適用於「已安裝但不在 shell PATH 上」的情況。一鍵安裝成功且能偵測到安裝位置時會自動填入。", // Agent executable path hint
+  "settings.catOrchestration": "編排",
+  "settings.orchProfilesTitle": "Worker 設定檔",
+  "settings.orchProfile": "設定檔",
+  "settings.orchDescription": "說明",
+  "settings.orchDescriptionPlaceholder": "說明何時應使用此設定檔。",
+  "settings.orchNewProfile": "新設定檔名稱",
+  "settings.orchAdd": "新增",
+  "settings.orchAddNew": "新增設定檔",
+  "settings.orchDelete": "刪除",
+  "settings.orchNoProfiles": "尚無設定檔。新建一個即可在每次派生時重複使用。",
+  "settings.orchProfilesHint":
+    "設定檔告訴主控智能體每項任務適合哪套 worker 設定. 請說明每個設定檔的使用條件, 然後選擇智能體, 模型, 推理強度和 worktree.",
+  "settings.orchModel": "模型",
+  "settings.orchEffort": "推理強度",
+  "settings.orchWorktree": "獨立 worktree",
+  "settings.orchLimitsTitle": "限制",
+  "settings.orchMaxChildren": "子工作階段上限",
+  "settings.orchMaxParallel": "並行上限",
+  "settings.orchMaxDepth": "最大深度",
+  "settings.orchConfirmAbove": "超過此數需確認",
+  "settings.orchTimeout": "預設逾時（秒）",
+  "settings.orchConfirmAboveHint": "若本次派生會讓存活的子工作階段數超過此值，即使關閉派生確認，確認卡片仍會出現。",
+  "settings.orchLimitsHint": "這些限制由後端在每次派生時強制執行。主控智能體於執行時用 `vagent config` 讀取目前的值。",
+  "settings.orchCopyPatterns": "worktree 複製規則",
+  "settings.orchCopyPatternsHint":
+    "每行一個 glob。符合的未追蹤或被忽略的檔案會從儲存庫根目錄複製到每個新建 worktree。node_modules 等建置產物永遠不會複製，因此 worker 仍需從零建置。",
   "settings.appearance": "外觀", // Appearance
   "settings.accent": "強調色", // Accent
   "settings.accentAuto": "跟隨明暗", // Follow theme
@@ -141,6 +167,8 @@ const zhTW: typeof en = {
   "spawn.agentLabel": "智能體", // Agent
   "spawn.modelLabel": "模型", // Model
   "spawn.effortLabel": "推理強度", // Effort
+  "spawn.optionDefault": "預設", // default
+  "spawn.optionOther": "其他...", // Other...
   "spawn.worktreeLabel": "獨立 git worktree", // Separate git worktree
   "spawn.launch": "啟動", // Launch
   "spawn.remaining": (n: number) => `還有 ${n} 個待確認`, // ${n} more pending

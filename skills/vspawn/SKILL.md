@@ -52,7 +52,7 @@ flag, and **do not** write that instruction into the prompt:
 - "want a worktree / open a separate workspace / a separate branch," or a leading `--worktree` → add `--worktree`
   to the command.
 - Specifying claude / codex, or a leading `--claude` / `--codex` → add the matching flag.
-- Naming a model ("use fable", "with opus-5") → add `--model <model>`. Naming a reasoning effort
+- Naming a model ("use fable", "with opus") → add `--model <model>`. Naming a reasoning effort
   ("high effort", "xhigh") → add `--effort <level>`. Both persist on the child session and map to
   agent-specific launch flags; do not write them into the prompt.
 - Asking for a specific session name → add `--name <name>`.

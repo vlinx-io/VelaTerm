@@ -92,8 +92,10 @@ export interface SpawnRequest {
   name?: string | null;
   /** Raw launch arguments; empty applies the per-agent defaults. */
   agentArgs?: string | null;
+  permissionMode?: "default" | "skip" | null;
   /** Correlation id from `vagent spawn`; when set, the store reports the outcome via spawn_result. */
   requestId?: string | null;
+  forceConfirm?: boolean | null;
 }
 
 /** Listen for child-task requests as a global event registered once on mount. */
