@@ -406,14 +406,14 @@ mod tests {
     #[test]
     fn build_spawn_body_includes_launch_config() {
         let mut a = bare_args(true, Some("codex"));
-        a.model = Some("luna".to_string());
+        a.model = Some("gpt-5.6-luna".to_string());
         a.effort = Some("xhigh".to_string());
         a.name = Some("update-types".to_string());
         a.agent_args = Some("--foo bar".to_string());
         let body = build_spawn_body("p1", "update types", &a);
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["kind"], "codex");
-        assert_eq!(v["model"], "luna");
+        assert_eq!(v["model"], "gpt-5.6-luna");
         assert_eq!(v["effort"], "xhigh");
         assert_eq!(v["name"], "update-types");
         assert_eq!(v["agentArgs"], "--foo bar");

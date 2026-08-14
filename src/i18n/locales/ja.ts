@@ -113,12 +113,19 @@ const ja: typeof en = {
   "settings.orchModel": "モデル",
   "settings.orchEffort": "推論レベル",
   "settings.orchWorktree": "専用 worktree",
+  "settings.orchPermissionMode": "権限モード",
+  "settings.orchPermissionDefault": "デフォルト",
+  "settings.orchPermissionSkip": "確認をスキップ",
+  "settings.orchPermissionSkipWarning":
+    "このワーカーは worktree 内で確認なしに実行されます.",
   "settings.orchLimitsTitle": "上限",
   "settings.orchMaxChildren": "子セッションの最大数",
   "settings.orchMaxParallel": "並列実行の最大数",
   "settings.orchMaxDepth": "最大深さ",
   "settings.orchConfirmAbove": "確認が必要になる数",
   "settings.orchTimeout": "既定のタイムアウト（秒）",
+  "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
+  "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
   "settings.orchConfirmAboveHint": "spawn によって稼働中の子セッション数がこの値を超える場合、spawn の確認がオフでも確認カードを表示します。",
   "settings.orchLimitsHint":
     "これらの上限はバックエンドが spawn ごとに強制します。リードエージェントは実行時に `vagent config` で現在の値を読み取ります。",

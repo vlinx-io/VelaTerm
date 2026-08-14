@@ -374,7 +374,11 @@ pub fn merge_permission_flag(
 pub fn known_models(kind: SessionKind) -> Option<&'static [&'static str]> {
     match kind {
         SessionKind::Claude => Some(&["fable", "opus", "sonnet", "haiku"]),
-        SessionKind::Codex => Some(&["sol", "luna"]),
+        SessionKind::Codex => Some(&[
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+        ]),
         _ => None,
     }
 }
@@ -383,7 +387,7 @@ pub fn known_models(kind: SessionKind) -> Option<&'static [&'static str]> {
 pub fn known_efforts(kind: SessionKind) -> Option<&'static [&'static str]> {
     match kind {
         SessionKind::Claude => Some(&["low", "medium", "high"]),
-        SessionKind::Codex => Some(&["low", "medium", "high", "xhigh", "ultra", "max"]),
+        SessionKind::Codex => Some(&["low", "medium", "high", "xhigh", "max"]),
         _ => None,
     }
 }
@@ -1692,8 +1696,8 @@ mod tests {
         );
         // Codex uses -m and the reasoning-effort config override.
         assert_eq!(
-            model_effort_flags(SessionKind::Codex, Some("luna"), Some("xhigh")),
-            Some("-m luna -c model_reasoning_effort=xhigh".to_string())
+            model_effort_flags(SessionKind::Codex, Some("gpt-5.6-luna"), Some("xhigh")),
+            Some("-m gpt-5.6-luna -c model_reasoning_effort=xhigh".to_string())
         );
         // Agents without a verified mapping receive no flags.
         assert_eq!(

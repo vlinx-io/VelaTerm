@@ -10,6 +10,7 @@ const { state } = vi.hoisted(() => ({
       maxParallel: 4,
       maxDepth: 2,
       requireConfirmationAbove: 6,
+      autoApprove: false,
       defaultTimeoutSecs: 1800,
       worktreeCopyPatterns: ["docs/plans/**"],
     },
@@ -52,6 +53,39 @@ describe("OrchestrationPanel launch values", () => {
     render(<OrchestrationPanel />);
     expect(screen.getByText("fable")).toBeTruthy();
     expect(screen.queryByDisplayValue("fable")).toBeNull();
+  });
+
+  it("uses a dropdown for permission mode and persists the selection", () => {
+    state.orchestrationProfiles = {
+      critical: { agent: "claude", permissionMode: "default" },
+    };
+    render(<OrchestrationPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "settings.orchPermissionMode" }));
+    const skipOptions = screen.getAllByText("settings.orchPermissionSkip");
+    fireEvent.click(skipOptions[skipOptions.length - 1]);
+
+    expect(state.setOrchestrationProfile).toHaveBeenCalledWith("critical", {
+      permissionMode: "skip",
+    });
+  });
+
+  it("warns when the selected profile skips confirmations", () => {
+    state.orchestrationProfiles = {
+      critical: { agent: "claude", permissionMode: "skip" },
+    };
+    render(<OrchestrationPanel />);
+
+    expect(screen.getByText("settings.orchPermissionSkipWarning")).toBeTruthy();
+  });
+
+  it("does not warn when the selected profile uses default permissions", () => {
+    state.orchestrationProfiles = {
+      critical: { agent: "claude", permissionMode: "default" },
+    };
+    render(<OrchestrationPanel />);
+
+    expect(screen.queryByText("settings.orchPermissionSkipWarning")).toBeNull();
   });
 });
 
@@ -122,7 +156,7 @@ describe("OrchestrationPanel profile creation", () => {
 
   it("renames the selected profile and keeps its configuration", () => {
     state.orchestrationProfiles = {
-      docs: { agent: "codex", model: "luna", worktree: false },
+      docs: { agent: "codex", model: "gpt-5.6-luna", worktree: false },
     };
     render(<OrchestrationPanel />);
 
@@ -134,13 +168,24 @@ describe("OrchestrationPanel profile creation", () => {
     expect(state.setOrchestrationProfile).toHaveBeenNthCalledWith(1, "docs", null);
     expect(state.setOrchestrationProfile).toHaveBeenNthCalledWith(2, "review", {
       agent: "codex",
-      model: "luna",
+      model: "gpt-5.6-luna",
       worktree: false,
     });
   });
 });
 
 describe("OrchestrationPanel limits", () => {
+  it("shows auto-approval disabled by default and persists changes", () => {
+    state.orchestrationProfiles = {};
+    render(<OrchestrationPanel />);
+    const control = screen.getByRole("button", { name: "common.off" });
+    fireEvent.click(control);
+
+    const on = screen.getByRole("button", { name: "common.on" });
+    fireEvent.click(on);
+    expect(state.setOrchestrationLimits).toHaveBeenCalledWith({ autoApprove: true });
+  });
+
   it("restores the stored value instead of persisting a non-numeric entry", () => {
     state.orchestrationProfiles = {};
     render(<OrchestrationPanel />);

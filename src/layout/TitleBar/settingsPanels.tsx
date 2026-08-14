@@ -876,6 +876,29 @@ export function OrchestrationPanel() {
                   onChange={(v) => setProfile(active, { worktree: v === "on" })}
                 />
               </OrchProfileField>
+
+              <OrchProfileField label={t("settings.orchPermissionMode")}>
+                <ValueSelect
+                  width={200}
+                  value={cfg.permissionMode ?? "default"}
+                  options={[
+                    { value: "default", label: t("settings.orchPermissionDefault") },
+                    { value: "skip", label: t("settings.orchPermissionSkip") },
+                  ]}
+                  onChange={(v) =>
+                    setProfile(active, { permissionMode: v === "skip" ? "skip" : "default" })
+                  }
+                  ariaLabel={t("settings.orchPermissionMode")}
+                />
+              </OrchProfileField>
+              {cfg.permissionMode === "skip" && (
+                <p
+                  className="orch-panel-hint"
+                  style={{ margin: "6px 0 4px", color: "var(--warning, #c9a227)" }}
+                >
+                  {t("settings.orchPermissionSkipWarning")}
+                </p>
+              )}
             </div>
           </>
         )}
@@ -919,7 +942,18 @@ export function OrchestrationPanel() {
           onCommit={(v) => setLimits({ defaultTimeoutSecs: v })}
         />
       </div>
+      <Field label={t("settings.orchAutoApprove")}>
+        <Seg<"on" | "off">
+          value={limits.autoApprove ? "on" : "off"}
+          options={[
+            ["on", t("common.on")],
+            ["off", t("common.off")],
+          ]}
+          onChange={(v) => setLimits({ autoApprove: v === "on" })}
+        />
+      </Field>
       <div className="orch-panel-help">
+        <p className="orch-panel-hint">{t("settings.orchAutoApproveHint")}</p>
         <p className="orch-panel-hint">{t("settings.orchConfirmAboveHint")}</p>
         <p className="orch-panel-hint">{t("settings.orchLimitsHint")}</p>
       </div>

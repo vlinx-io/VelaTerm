@@ -115,12 +115,19 @@ const fr: typeof en = {
   "settings.orchModel": "Modèle",
   "settings.orchEffort": "Effort",
   "settings.orchWorktree": "Worktree dédié",
+  "settings.orchPermissionMode": "Mode d'autorisation",
+  "settings.orchPermissionDefault": "Par défaut",
+  "settings.orchPermissionSkip": "Ignorer les confirmations",
+  "settings.orchPermissionSkipWarning":
+    "Ce worker s'exécute sans confirmation dans son worktree.",
   "settings.orchLimitsTitle": "Limites",
   "settings.orchMaxChildren": "Enfants max.",
   "settings.orchMaxParallel": "Parallélisme max.",
   "settings.orchMaxDepth": "Profondeur max.",
   "settings.orchConfirmAbove": "Confirmer au-delà de",
   "settings.orchTimeout": "Délai par défaut (secondes)",
+  "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
+  "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
   "settings.orchConfirmAboveHint":
     "Si un spawn portait le nombre d'enfants actifs au-dessus de cette valeur, la carte de confirmation apparaît même lorsque la confirmation de spawn est désactivée.",
   "settings.orchLimitsHint":

@@ -112,12 +112,20 @@ const en = {
   "settings.orchModel": "Model",
   "settings.orchEffort": "Effort",
   "settings.orchWorktree": "Own worktree",
+  "settings.orchPermissionMode": "Permission mode",
+  "settings.orchPermissionDefault": "Default",
+  "settings.orchPermissionSkip": "Skip confirmations",
+  "settings.orchPermissionSkipWarning":
+    "This worker runs without confirmation inside its worktree.",
   "settings.orchLimitsTitle": "Limits",
   "settings.orchMaxChildren": "Max children",
   "settings.orchMaxParallel": "Max parallel",
   "settings.orchMaxDepth": "Max depth",
   "settings.orchConfirmAbove": "Confirm above",
   "settings.orchTimeout": "Default timeout (seconds)",
+  "settings.orchAutoApprove": "Auto-approve /orch spawns",
+  "settings.orchAutoApproveHint":
+    "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.",
   "settings.orchConfirmAboveHint":
     "When a spawn would raise the number of live children above this value, the confirmation card appears even if spawn confirmation is off.",
   "settings.orchLimitsHint":

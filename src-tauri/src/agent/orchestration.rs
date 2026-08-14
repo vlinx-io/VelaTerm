@@ -19,6 +19,7 @@ pub struct Profile {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub worktree: Option<bool>,
+    pub permission_mode: Option<String>,
 }
 
 impl Profile {
@@ -40,6 +41,9 @@ impl Profile {
         if let Some(v) = self.worktree {
             map.insert("worktree".into(), json!(v));
         }
+        if let Some(v) = &self.permission_mode {
+            map.insert("permissionMode".into(), json!(v));
+        }
         Value::Object(map)
     }
 
@@ -58,6 +62,8 @@ impl Profile {
             model: text("model"),
             effort: text("effort"),
             worktree: obj.get("worktree").and_then(Value::as_bool),
+            permission_mode: text("permissionMode")
+                .filter(|mode| matches!(mode.as_str(), "default" | "skip")),
         })
     }
 }
@@ -69,6 +75,7 @@ pub struct Limits {
     pub max_parallel: u32,
     pub max_depth: u32,
     pub require_confirmation_above: u32,
+    pub auto_approve: bool,
     pub default_timeout_secs: u64,
     pub worktree_copy_patterns: Vec<String>,
 }
@@ -80,6 +87,7 @@ impl Default for Limits {
             max_parallel: 4,
             max_depth: 2,
             require_confirmation_above: 6,
+            auto_approve: false,
             default_timeout_secs: 1800,
             worktree_copy_patterns: vec!["docs/plans/**".to_string()],
         }
@@ -94,6 +102,7 @@ impl Limits {
             "maxParallel": self.max_parallel,
             "maxDepth": self.max_depth,
             "requireConfirmationAbove": self.require_confirmation_above,
+            "autoApprove": self.auto_approve,
             "defaultTimeoutSecs": self.default_timeout_secs,
             "worktreeCopyPatterns": self.worktree_copy_patterns,
         })
@@ -116,6 +125,9 @@ impl Limits {
         }
         if let Some(n) = count("requireConfirmationAbove") {
             limits.require_confirmation_above = n as u32;
+        }
+        if let Some(v) = obj.get("autoApprove").and_then(Value::as_bool) {
+            limits.auto_approve = v;
         }
         if let Some(n) = count("defaultTimeoutSecs") {
             limits.default_timeout_secs = n;
@@ -174,6 +186,7 @@ fn default_profiles() -> HashMap<String, Profile> {
         model: Some(model.to_string()),
         effort: Some(effort.to_string()),
         worktree: Some(true),
+        permission_mode: Some("default".to_string()),
     };
     HashMap::from([
         (
@@ -199,7 +212,7 @@ fn default_profiles() -> HashMap<String, Profile> {
             mk(
                 "Use for simple, well-scoped updates such as find-and-replace changes, small configuration edits, text revisions, and other mechanical changes.",
                 "codex",
-                "luna",
+                "gpt-5.6-luna",
                 "xhigh",
             ),
         ),
@@ -208,7 +221,7 @@ fn default_profiles() -> HashMap<String, Profile> {
             mk(
                 "Use for focused unit, integration, regression, and end-to-end tests.",
                 "codex",
-                "luna",
+                "gpt-5.6-luna",
                 "xhigh",
             ),
         ),
@@ -256,6 +269,7 @@ pub struct ResolvedSpawn {
     pub model: Option<String>,
     pub effort: Option<String>,
     pub worktree: bool,
+    pub permission_mode: Option<String>,
 }
 
 /// Merge explicit CLI values over a profile.
@@ -265,6 +279,7 @@ pub fn resolve_spawn(
     model: Option<String>,
     effort: Option<String>,
     worktree: Option<bool>,
+    permission_mode: Option<String>,
 ) -> ResolvedSpawn {
     ResolvedSpawn {
         kind: kind.or_else(|| profile.and_then(|p| p.agent.clone())),
@@ -273,6 +288,8 @@ pub fn resolve_spawn(
         worktree: worktree
             .or_else(|| profile.and_then(|p| p.worktree))
             .unwrap_or(false),
+        permission_mode: permission_mode
+            .or_else(|| profile.and_then(|p| p.permission_mode.clone())),
     }
 }
 
@@ -379,6 +396,7 @@ mod tests {
                 model: Some("fable".into()),
                 effort: Some("high".into()),
                 worktree: Some(true),
+                permission_mode: Some("default".into()),
             }
         );
         assert_eq!(default.profiles["frontend"].model.as_deref(), Some("opus"));
@@ -390,9 +408,10 @@ mod tests {
                         .into()
                 ),
                 agent: Some("codex".into()),
-                model: Some("luna".into()),
+                model: Some("gpt-5.6-luna".into()),
                 effort: Some("xhigh".into()),
                 worktree: Some(true),
+                permission_mode: Some("default".into()),
             }
         );
     }
@@ -407,6 +426,7 @@ mod tests {
         assert_eq!(c.limits.max_parallel, 4);
         assert_eq!(c.limits.max_depth, 2);
         assert_eq!(c.limits.require_confirmation_above, 6);
+        assert!(!c.limits.auto_approve);
         assert_eq!(c.limits.worktree_copy_patterns, vec!["docs/plans/**"]);
         assert_eq!(c.profiles, default_profiles());
 
@@ -457,9 +477,10 @@ mod tests {
         let profile = Profile {
             description: None,
             agent: Some("codex".into()),
-            model: Some("luna".into()),
+            model: Some("gpt-5.6-luna".into()),
             effort: Some("xhigh".into()),
             worktree: Some(true),
+            permission_mode: Some("skip".into()),
         };
         let r = resolve_spawn(
             Some(&profile),
@@ -467,6 +488,7 @@ mod tests {
             Some("fable".into()),
             Some("low".into()),
             Some(false),
+            Some("default".into()),
         );
         assert_eq!(
             r,
@@ -475,17 +497,19 @@ mod tests {
                 model: Some("fable".into()),
                 effort: Some("low".into()),
                 worktree: false,
+                permission_mode: Some("default".into()),
             }
         );
 
-        let r = resolve_spawn(Some(&profile), None, None, None, None);
+        let r = resolve_spawn(Some(&profile), None, None, None, None, None);
         assert_eq!(
             r,
             ResolvedSpawn {
                 kind: Some("codex".into()),
-                model: Some("luna".into()),
+                model: Some("gpt-5.6-luna".into()),
                 effort: Some("xhigh".into()),
                 worktree: true,
+                permission_mode: Some("skip".into()),
             }
         );
 
@@ -493,7 +517,7 @@ mod tests {
             model: Some("opus".into()),
             ..Default::default()
         };
-        let r = resolve_spawn(Some(&partial), None, None, Some("high".into()), None);
+        let r = resolve_spawn(Some(&partial), None, None, Some("high".into()), None, None);
         assert_eq!(
             r,
             ResolvedSpawn {
@@ -501,10 +525,11 @@ mod tests {
                 model: Some("opus".into()),
                 effort: Some("high".into()),
                 worktree: false,
+                permission_mode: None,
             }
         );
 
-        let r = resolve_spawn(None, None, None, None, None);
+        let r = resolve_spawn(None, None, None, None, None, None);
         assert_eq!(
             r,
             ResolvedSpawn {
@@ -512,9 +537,34 @@ mod tests {
                 model: None,
                 effort: None,
                 worktree: false,
+                permission_mode: None,
             }
         );
-        assert!(resolve_spawn(None, None, None, None, Some(true)).worktree);
+        assert!(resolve_spawn(None, None, None, None, Some(true), None).worktree);
+    }
+
+    #[test]
+    fn permission_mode_resolves_from_explicit_then_profile() {
+        let profile = Profile {
+            permission_mode: Some("skip".into()),
+            ..Default::default()
+        };
+
+        let explicit = resolve_spawn(
+            Some(&profile),
+            None,
+            None,
+            None,
+            None,
+            Some("default".into()),
+        );
+        assert_eq!(explicit.permission_mode.as_deref(), Some("default"));
+
+        let profiled = resolve_spawn(Some(&profile), None, None, None, None, None);
+        assert_eq!(profiled.permission_mode.as_deref(), Some("skip"));
+
+        let inherited = resolve_spawn(None, None, None, None, None, None);
+        assert_eq!(inherited.permission_mode, None);
     }
 
     #[test]
@@ -568,6 +618,7 @@ mod tests {
         let limits = c.limits.to_json();
         assert_eq!(limits["maxChildren"], 10);
         assert_eq!(limits["requireConfirmationAbove"], 6);
+        assert_eq!(limits["autoApprove"], false);
         assert_eq!(limits["defaultTimeoutSecs"], 1800);
         assert_eq!(limits["worktreeCopyPatterns"][0], "docs/plans/**");
 
@@ -578,6 +629,7 @@ mod tests {
         );
         assert_eq!(profiles["tests"]["agent"], "codex");
         assert_eq!(profiles["tests"]["worktree"], true);
+        assert_eq!(profiles["tests"]["permissionMode"], "default");
         let partial = Profile {
             description: Some("Use for review.".into()),
             agent: Some("claude".into()),

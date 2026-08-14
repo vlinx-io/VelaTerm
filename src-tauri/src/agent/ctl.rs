@@ -329,6 +329,7 @@ fn op_spawn(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
         str_field(req, "model"),
         str_field(req, "effort"),
         req.get("worktree").and_then(Value::as_bool),
+        str_field(req, "permissionMode"),
     );
 
     // Reject values that the agent would ignore after launch.
@@ -347,7 +348,7 @@ fn op_spawn(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
         }
     }
 
-    let permission_mode = str_field(req, "permissionMode");
+    let permission_mode = resolved.permission_mode;
     if let Some(mode) = permission_mode.as_deref() {
         if !PERMISSION_MODES.contains(&mode) {
             return (
@@ -365,6 +366,7 @@ fn op_spawn(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
 
     let request_id = uuid::Uuid::new_v4().to_string();
     let rx = register_spawn_waiter(&request_id);
+    let force_confirm = orchestration::needs_confirmation(&config.limits, counts.children);
     let spawn_req = crate::agent::server::SpawnRequest {
         parent_session_id: parent.to_string(),
         prompt,
@@ -375,9 +377,9 @@ fn op_spawn(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
         name: str_field(req, "name"),
         agent_args: str_field(req, "agentArgs"),
         permission_mode,
+        auto_approve: config.limits.auto_approve && !force_confirm,
         request_id: Some(request_id.clone()),
-        force_confirm: orchestration::needs_confirmation(&config.limits, counts.children)
-            .then_some(true),
+        force_confirm: force_confirm.then_some(true),
     };
     app.emit("spawn://request", spawn_req);
 
@@ -1008,8 +1010,8 @@ mod tests {
         let app = headless_app();
         set_settings(
             &app,
-            r#"{"orchestrationProfiles":{"quick":{"agent":"codex","model":"luna","effort":"xhigh","worktree":true}},
-                "orchestration":{"requireConfirmationAbove":1}}"#,
+            r#"{"orchestrationProfiles":{"quick":{"agent":"codex","model":"gpt-5.6-luna","effort":"xhigh","worktree":true,"permissionMode":"skip"}},
+                "orchestration":{"requireConfirmationAbove":1,"autoApprove":true}}"#,
         );
         let root = seed(&app, "root", None);
         let _a = seed(&app, "a", Some(&root.id));
@@ -1019,7 +1021,7 @@ mod tests {
         let (status, _) = handle(
             "spawn",
             &format!(
-                r#"{{"parentSessionId":"{}","prompt":"work","profile":"quick","model":"sol","timeoutSecs":0}}"#,
+                r#"{{"parentSessionId":"{}","prompt":"work","profile":"quick","model":"gpt-5.6-sol","timeoutSecs":0}}"#,
                 root.id
             ),
             &app,
@@ -1027,12 +1029,17 @@ mod tests {
         assert_eq!(status, 200);
         let req = emitted.lock().unwrap()[0].clone();
         assert_eq!(req["kind"], "codex");
-        assert_eq!(req["model"], "sol");
+        assert_eq!(req["model"], "gpt-5.6-sol");
         assert_eq!(req["effort"], "xhigh");
         assert_eq!(req["worktree"], true);
+        assert_eq!(req["permissionMode"], "skip");
         assert_eq!(req["forceConfirm"], true);
+        assert_eq!(req["autoApprove"], false);
 
-        set_settings(&app, r#"{"orchestration":{"requireConfirmationAbove":10}}"#);
+        set_settings(
+            &app,
+            r#"{"orchestration":{"requireConfirmationAbove":10,"autoApprove":true}}"#,
+        );
         let (status, _) = handle(
             "spawn",
             &format!(
@@ -1047,6 +1054,7 @@ mod tests {
         assert_eq!(req["model"], Value::Null);
         assert_eq!(req["worktree"], false);
         assert_eq!(req["forceConfirm"], Value::Null);
+        assert_eq!(req["autoApprove"], true);
     }
 
     #[test]
@@ -1222,7 +1230,14 @@ mod tests {
         let v = check_launch_values(SessionKind::Claude, Some("opus"), Some("xhigh"))
             .expect("an unknown effort must be rejected");
         assert_eq!(v["field"], "effort");
-        assert!(check_launch_values(SessionKind::Codex, Some("luna"), Some("xhigh")).is_none());
+        assert!(check_launch_values(
+            SessionKind::Codex,
+            Some("gpt-5.6-luna"),
+            Some("xhigh")
+        )
+        .is_none());
+        assert!(check_launch_values(SessionKind::Codex, Some("gpt-5.6-luna"), Some("ultra"))
+            .is_some());
 
         assert!(check_launch_values(SessionKind::Grok, Some("whatever"), Some("nonsense")).is_none());
         assert!(check_launch_values(SessionKind::Claude, None, None).is_none());
@@ -1409,5 +1424,17 @@ mod tests {
                 "EFFORT_OPTIONS for {agent} must match known_efforts"
             );
         }
+    }
+
+    #[test]
+    fn codex_launch_values_use_current_chatgpt_identifiers() {
+        assert_eq!(
+            inject::known_models(SessionKind::Codex).unwrap(),
+            &["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]
+        );
+        assert_eq!(
+            inject::known_efforts(SessionKind::Codex).unwrap(),
+            &["low", "medium", "high", "xhigh", "max"]
+        );
     }
 }

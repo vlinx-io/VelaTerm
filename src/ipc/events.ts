@@ -93,6 +93,8 @@ export interface SpawnRequest {
   /** Raw launch arguments; empty applies the per-agent defaults. */
   agentArgs?: string | null;
   permissionMode?: "default" | "skip" | null;
+  /** Whether `/orch` may launch this child without the confirmation card. */
+  autoApprove?: boolean | null;
   /** Correlation id from `vagent spawn`; when set, the store reports the outcome via spawn_result. */
   requestId?: string | null;
   forceConfirm?: boolean | null;

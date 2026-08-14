@@ -125,12 +125,19 @@ const ru: typeof en = {
   "settings.orchModel": "Модель",
   "settings.orchEffort": "Уровень усилий",
   "settings.orchWorktree": "Отдельный worktree",
+  "settings.orchPermissionMode": "Режим разрешений",
+  "settings.orchPermissionDefault": "По умолчанию",
+  "settings.orchPermissionSkip": "Пропускать подтверждения",
+  "settings.orchPermissionSkipWarning":
+    "Этот worker запускается без подтверждения внутри своего worktree.",
   "settings.orchLimitsTitle": "Ограничения",
   "settings.orchMaxChildren": "Макс. дочерних",
   "settings.orchMaxParallel": "Макс. параллельно",
   "settings.orchMaxDepth": "Макс. глубина",
   "settings.orchConfirmAbove": "Подтверждать свыше",
   "settings.orchTimeout": "Тайм-аут по умолчанию (секунды)",
+  "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
+  "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
   "settings.orchConfirmAboveHint":
     "Если после spawn число активных дочерних сессий превысит это значение, карточка подтверждения появится даже при выключенном подтверждении spawn.",
   "settings.orchLimitsHint":

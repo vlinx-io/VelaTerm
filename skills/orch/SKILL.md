@@ -43,6 +43,10 @@ vagent cancel <id|name>                  # interrupts the current turn; session 
 vagent cancel --all                      # interrupts every running descendant
 ```
 
+For Codex children, use the current ChatGPT model identifiers `gpt-5.6-sol`, `gpt-5.6-terra`,
+or `gpt-5.6-luna`. Do not use the short names `sol`, `terra`, or `luna`. Use `low`, `medium`,
+`high`, `xhigh`, or `max` for reasoning effort. `ultra` is a lead-agent mode, not a child effort.
+
 States: `working`/`asking`/`waiting` (live), `starting` (booting), `not-started`, `exited`.
 
 Known behavior:

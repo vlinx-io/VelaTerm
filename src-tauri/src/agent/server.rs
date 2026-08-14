@@ -46,6 +46,9 @@ pub struct SpawnRequest {
     /// Permission mode for the child. An omitted value inherits the parent's mode.
     #[serde(default)]
     pub permission_mode: Option<String>,
+    /// Whether `/orch` may launch the child without the confirmation card.
+    #[serde(default)]
+    pub auto_approve: bool,
     /// Correlation id for `vagent spawn`. When set, the frontend reports the created session (or
     /// failure) back through the `spawn_result` command so the parked CLI request can answer.
     #[serde(default)]
@@ -1027,9 +1030,9 @@ mod tests {
 
         // Launch-configuration fields pass through unchanged.
         let full = r#"{"parentSessionId":"p1","prompt":"x","kind":"codex","worktree":true,
-            "model":"luna","effort":"xhigh","name":"update-types","agentArgs":"--foo bar"}"#;
+            "model":"gpt-5.6-luna","effort":"xhigh","name":"update-types","agentArgs":"--foo bar"}"#;
         let req_full = parse_spawn("/spawn?t=tok", full, "tok").expect("should parse");
-        assert_eq!(req_full.model.as_deref(), Some("luna"));
+        assert_eq!(req_full.model.as_deref(), Some("gpt-5.6-luna"));
         assert_eq!(req_full.effort.as_deref(), Some("xhigh"));
         assert_eq!(req_full.name.as_deref(), Some("update-types"));
         assert_eq!(req_full.agent_args.as_deref(), Some("--foo bar"));

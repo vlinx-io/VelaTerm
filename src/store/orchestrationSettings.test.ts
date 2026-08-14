@@ -43,6 +43,7 @@ const DEFAULT_LIMITS = {
   maxParallel: 4,
   maxDepth: 2,
   requireConfirmationAbove: 6,
+  autoApprove: false,
   defaultTimeoutSecs: 1800,
   worktreeCopyPatterns: ["docs/plans/**"],
 };
@@ -58,9 +59,10 @@ describe("orchestration settings persistence", () => {
       reviewer: {
         description: "Use for focused code review and defect analysis.",
         agent: "codex",
-        model: "luna",
+        model: "gpt-5.6-luna",
         effort: "xhigh",
         worktree: false,
+        permissionMode: "skip",
       },
     };
     saved.orchestration = {
@@ -68,6 +70,7 @@ describe("orchestration settings persistence", () => {
       maxParallel: 2,
       maxDepth: 1,
       requireConfirmationAbove: 2,
+      autoApprove: false,
       defaultTimeoutSecs: 600,
       worktreeCopyPatterns: ["docs/plans/**", ".env.local"],
     };
@@ -97,6 +100,7 @@ describe("orchestration settings persistence", () => {
       model: "fable",
       effort: "high",
       worktree: true,
+      permissionMode: "default",
     });
     expect(loaded.orchestrationProfiles.frontend.description).toBe(
       "Use for UI components, routes, styling, responsive behavior, and browser interactions.",
@@ -109,10 +113,16 @@ describe("orchestration settings persistence", () => {
       description:
         "Use for simple, well-scoped updates such as find-and-replace changes, small configuration edits, text revisions, and other mechanical changes.",
       agent: "codex",
-      model: "luna",
+      model: "gpt-5.6-luna",
       effort: "xhigh",
       worktree: true,
+      permissionMode: "default",
     });
+    expect(
+      Object.values(loaded.orchestrationProfiles).every(
+        (profile) => profile.permissionMode === "default",
+      ),
+    ).toBe(true);
   });
 
   it("fills the missing numeric fields of a partial orchestration object", () => {
@@ -136,6 +146,25 @@ describe("orchestration settings persistence", () => {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ orchestrationProfiles: null }));
     expect(Object.keys(loadSettings().orchestrationProfiles)).toHaveLength(4);
   });
+
+  it("normalizes missing and invalid profile permission modes to default", () => {
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        orchestrationProfiles: {
+          missing: { agent: "claude" },
+          invalid: { agent: "codex", permissionMode: "yolo" },
+          skipped: { agent: "codex", permissionMode: "skip" },
+        },
+      }),
+    );
+
+    expect(loadSettings().orchestrationProfiles).toEqual({
+      missing: { agent: "claude", permissionMode: "default" },
+      invalid: { agent: "codex", permissionMode: "default" },
+      skipped: { agent: "codex", permissionMode: "skip" },
+    });
+  });
 });
 
 describe("orchestration store setters", () => {
@@ -148,6 +177,7 @@ describe("orchestration store setters", () => {
           model: "fable",
           effort: "high",
           worktree: true,
+          permissionMode: "skip",
         },
       },
       orchestration: { ...DEFAULT_LIMITS, worktreeCopyPatterns: ["docs/plans/**"] },
@@ -162,12 +192,16 @@ describe("orchestration store setters", () => {
       model: "opus",
       effort: "high",
       worktree: true,
+      permissionMode: "skip",
     });
   });
 
   it("adds a new profile and deletes one with a null patch", () => {
     useTermStore.getState().setOrchestrationProfile("docs", { agent: "codex" });
-    expect(useTermStore.getState().orchestrationProfiles.docs).toEqual({ agent: "codex" });
+    expect(useTermStore.getState().orchestrationProfiles.docs).toEqual({
+      agent: "codex",
+      permissionMode: "default",
+    });
 
     useTermStore.getState().setOrchestrationProfile("database", null);
     expect(useTermStore.getState().orchestrationProfiles.database).toBeUndefined();
@@ -215,5 +249,27 @@ describe("forced spawn confirmation", () => {
     });
     expect(executeSpawn).toHaveBeenCalledTimes(1);
     expect(useTermStore.getState().pendingSpawns).toHaveLength(0);
+  });
+
+  it("auto-executes an orchestrated request when its setting is enabled", async () => {
+    useTermStore.setState({ spawnConfirm: true });
+    await useTermStore.getState().handleSpawnRequest({
+      parentSessionId: "parent-1",
+      prompt: "profiled child",
+      autoApprove: true,
+    });
+    expect(executeSpawn).toHaveBeenCalledTimes(1);
+    expect(useTermStore.getState().pendingSpawns).toHaveLength(0);
+  });
+
+  it("keeps the confirmation card when the orchestration threshold forces it", async () => {
+    await useTermStore.getState().handleSpawnRequest({
+      parentSessionId: "parent-1",
+      prompt: "threshold child",
+      autoApprove: true,
+      forceConfirm: true,
+    });
+    expect(executeSpawn).not.toHaveBeenCalled();
+    expect(useTermStore.getState().pendingSpawns).toHaveLength(1);
   });
 });

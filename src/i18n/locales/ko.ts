@@ -113,12 +113,19 @@ const ko: typeof en = {
   "settings.orchModel": "모델",
   "settings.orchEffort": "추론 수준",
   "settings.orchWorktree": "전용 worktree",
+  "settings.orchPermissionMode": "권한 모드",
+  "settings.orchPermissionDefault": "기본값",
+  "settings.orchPermissionSkip": "확인 건너뛰기",
+  "settings.orchPermissionSkipWarning":
+    "이 작업자는 worktree 안에서 확인 없이 실행됩니다.",
   "settings.orchLimitsTitle": "제한",
   "settings.orchMaxChildren": "최대 자식 수",
   "settings.orchMaxParallel": "최대 병렬 수",
   "settings.orchMaxDepth": "최대 깊이",
   "settings.orchConfirmAbove": "확인 요구 기준",
   "settings.orchTimeout": "기본 제한 시간(초)",
+  "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
+  "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
   "settings.orchConfirmAboveHint": "spawn 이후 활성 자식 수가 이 값을 넘게 되면 spawn 확인이 꺼져 있어도 확인 카드가 나타납니다.",
   "settings.orchLimitsHint":
     "이 제한은 백엔드가 모든 spawn에서 강제합니다. 리드 에이전트는 실행 중에 `vagent config`로 현재 값을 읽습니다.",

@@ -41,11 +41,11 @@ export const LAUNCH_CONFIG_KINDS: SpawnKind[] = ["claude", "codex"];
  *  hatch for models newer than this build. */
 export const MODEL_OPTIONS: Record<string, string[]> = {
   claude: ["fable", "opus", "sonnet", "haiku"],
-  codex: ["sol", "luna"],
+  codex: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
 };
 export const EFFORT_OPTIONS: Record<string, string[]> = {
   claude: ["low", "medium", "high"],
-  codex: ["low", "medium", "high", "xhigh", "ultra", "max"],
+  codex: ["low", "medium", "high", "xhigh", "max"],
 };
 
 /** Sentinel dropdown value that switches a launch-value field into free-text mode. */

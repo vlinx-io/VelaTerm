@@ -1662,8 +1662,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
 
   handleSpawnRequest: async (req) => {
-    // Queue requests when confirmation is enabled or required by the backend.
-    if (!get().spawnConfirm && req.forceConfirm !== true) {
+    // The backend threshold always wins over orchestration auto-approval.
+    if (req.forceConfirm !== true && (req.autoApprove === true || !get().spawnConfirm)) {
       await get().executeSpawn(req);
       return;
     }
@@ -3441,7 +3441,14 @@ export const useTermStore = create<TermStore>((set, get) => ({
     set((s) => {
       const next = { ...s.orchestrationProfiles };
       if (patch === null) delete next[key];
-      else next[key] = { ...(next[key] ?? {}), ...patch };
+      else {
+        const current = next[key];
+        next[key] = {
+          ...current,
+          ...patch,
+          permissionMode: patch.permissionMode ?? current?.permissionMode ?? "default",
+        };
+      }
       return { orchestrationProfiles: next };
     });
     persistAndApplyVisual(get);

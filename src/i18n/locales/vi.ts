@@ -114,12 +114,19 @@ const vi: typeof en = {
   "settings.orchModel": "Mô hình",
   "settings.orchEffort": "Mức suy luận",
   "settings.orchWorktree": "Worktree riêng",
+  "settings.orchPermissionMode": "Chế độ quyền",
+  "settings.orchPermissionDefault": "Mặc định",
+  "settings.orchPermissionSkip": "Bỏ qua xác nhận",
+  "settings.orchPermissionSkipWarning":
+    "Worker này chạy mà không cần xác nhận trong worktree của nó.",
   "settings.orchLimitsTitle": "Giới hạn",
   "settings.orchMaxChildren": "Số phiên con tối đa",
   "settings.orchMaxParallel": "Số chạy song song tối đa",
   "settings.orchMaxDepth": "Độ sâu tối đa",
   "settings.orchConfirmAbove": "Xác nhận khi vượt",
   "settings.orchTimeout": "Thời gian chờ mặc định (giây)",
+  "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
+  "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
   "settings.orchConfirmAboveHint":
     "Khi một lần spawn làm số phiên con đang chạy vượt quá giá trị này, thẻ xác nhận vẫn hiện dù xác nhận spawn đã tắt.",
   "settings.orchLimitsHint":

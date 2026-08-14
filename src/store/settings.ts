@@ -56,6 +56,7 @@ export interface OrchestrationProfile {
   model?: string;
   effort?: string;
   worktree?: boolean;
+  permissionMode: "default" | "skip";
 }
 
 /** Backend-enforced orchestration limits. */
@@ -64,6 +65,8 @@ export interface OrchestrationLimits {
   maxParallel: number;
   maxDepth: number;
   requireConfirmationAbove: number;
+  /** Whether `/orch` child sessions skip the launch confirmation card below the threshold. */
+  autoApprove: boolean;
   defaultTimeoutSecs: number;
   worktreeCopyPatterns: string[];
 }
@@ -161,6 +164,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
       model: "fable",
       effort: "high",
       worktree: true,
+      permissionMode: "default",
     },
     frontend: {
       description:
@@ -169,21 +173,24 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
       model: "opus",
       effort: "high",
       worktree: true,
+      permissionMode: "default",
     },
     "quick-edits": {
       description:
         "Use for simple, well-scoped updates such as find-and-replace changes, small configuration edits, text revisions, and other mechanical changes.",
       agent: "codex",
-      model: "luna",
+      model: "gpt-5.6-luna",
       effort: "xhigh",
       worktree: true,
+      permissionMode: "default",
     },
     tests: {
       description: "Use for focused unit, integration, regression, and end-to-end tests.",
       agent: "codex",
-      model: "luna",
+      model: "gpt-5.6-luna",
       effort: "xhigh",
       worktree: true,
+      permissionMode: "default",
     },
   },
   orchestration: {
@@ -191,6 +198,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
     maxParallel: 4,
     maxDepth: 2,
     requireConfirmationAbove: 6,
+    autoApprove: false,
     defaultTimeoutSecs: 1800,
     worktreeCopyPatterns: ["docs/plans/**"],
   },
@@ -218,11 +226,34 @@ function mergeOrchestration(stored: Partial<OrchestrationLimits> | undefined): O
     maxParallel: num(s.maxParallel, d.maxParallel),
     maxDepth: num(s.maxDepth, d.maxDepth),
     requireConfirmationAbove: num(s.requireConfirmationAbove, d.requireConfirmationAbove),
+    autoApprove: typeof s.autoApprove === "boolean" ? s.autoApprove : d.autoApprove,
     defaultTimeoutSecs: num(s.defaultTimeoutSecs, d.defaultTimeoutSecs),
     worktreeCopyPatterns: Array.isArray(s.worktreeCopyPatterns)
       ? s.worktreeCopyPatterns.filter((p): p is string => typeof p === "string")
       : [...d.worktreeCopyPatterns],
   };
+}
+
+/** Normalize stored profiles and migrate older entries to the default permission mode. */
+function mergeOrchestrationProfiles(stored: unknown): Record<string, OrchestrationProfile> {
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) {
+    return { ...SETTINGS_DEFAULTS.orchestrationProfiles };
+  }
+  return Object.fromEntries(
+    Object.entries(stored).flatMap(([name, value]) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      const profile = value as Partial<OrchestrationProfile>;
+      return [
+        [
+          name,
+          {
+            ...profile,
+            permissionMode: profile.permissionMode === "skip" ? "skip" : "default",
+          },
+        ],
+      ];
+    }),
+  );
 }
 
 export function loadSettings(): PersistedSettings {
@@ -238,9 +269,7 @@ export function loadSettings(): PersistedSettings {
       merged.termRenderer = parsed.gpuRender ? "webgl" : "dom";
     }
     merged.orchestration = mergeOrchestration(parsed.orchestration);
-    if (!parsed.orchestrationProfiles || typeof parsed.orchestrationProfiles !== "object") {
-      merged.orchestrationProfiles = { ...SETTINGS_DEFAULTS.orchestrationProfiles };
-    }
+    merged.orchestrationProfiles = mergeOrchestrationProfiles(parsed.orchestrationProfiles);
     return merged;
   } catch {
     return defaultSettings();
