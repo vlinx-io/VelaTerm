@@ -19,6 +19,7 @@ pub mod install;
 pub mod kimi;
 pub mod kiro;
 pub mod opencode;
+pub mod orchestration;
 pub mod pi;
 pub mod resume;
 pub mod server;

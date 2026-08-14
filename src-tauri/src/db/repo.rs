@@ -885,6 +885,32 @@ pub fn live_descendants(conn: &Connection, root_id: &str) -> Result<Vec<Session>
     Ok(result)
 }
 
+/// Return a session's generation and stop safely if its parent chain contains a cycle.
+pub fn session_depth(conn: &Connection, id: &str) -> Result<u32, String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut cur = id.to_string();
+    let mut depth = 0u32;
+    while seen.insert(cur.clone()) {
+        let parent: Option<String> = conn
+            .query_row(
+                "SELECT parent_session_id FROM sessions WHERE id = ?1",
+                params![cur],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|e| format!("Failed to read session depth: {e}"))?
+            .flatten();
+        match parent {
+            Some(p) => {
+                cur = p;
+                depth += 1;
+            }
+            None => return Ok(depth),
+        }
+    }
+    Err(format!("session ancestry of {id} contains a cycle"))
+}
+
 /// Read a remembered agent session ID for resume, returning Ok(None) when absent/unset.
 pub fn get_agent_session_id(conn: &Connection, id: &str) -> Result<Option<String>, String> {
     conn.query_row(
@@ -2758,6 +2784,42 @@ mod tests {
         let got = live_descendants(&conn, &root.id).unwrap();
         let ids: Vec<&str> = got.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, vec![&child_a.id, &child_b.id, &grandchild.id]);
+    }
+
+    #[test]
+    fn session_depth_counts_generations_and_detects_cycles() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        let mk = |name: &str, parent: Option<&str>| {
+            create_session(
+                &conn,
+                &project.id,
+                None,
+                name,
+                SessionKind::Claude,
+                None,
+                None,
+                None,
+                parent,
+                None,
+            )
+            .unwrap()
+        };
+        let root = mk("root", None);
+        let child = mk("child", Some(&root.id));
+        let grandchild = mk("grandchild", Some(&child.id));
+
+        assert_eq!(session_depth(&conn, &root.id).unwrap(), 0);
+        assert_eq!(session_depth(&conn, &child.id).unwrap(), 1);
+        assert_eq!(session_depth(&conn, &grandchild.id).unwrap(), 2);
+        assert_eq!(session_depth(&conn, "no-such-session").unwrap(), 0);
+
+        conn.execute(
+            "UPDATE sessions SET parent_session_id = ?1 WHERE id = ?2",
+            params![grandchild.id, root.id],
+        )
+        .unwrap();
+        assert!(session_depth(&conn, &child.id).is_err());
     }
 
     /// Model/effort round-trip through creation, tree reads, the launch-path reader, and fork;

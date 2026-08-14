@@ -43,10 +43,16 @@ pub struct SpawnRequest {
     /// Raw launch arguments; when omitted the frontend applies the per-agent defaults.
     #[serde(default)]
     pub agent_args: Option<String>,
+    /// Permission mode for the child. An omitted value inherits the parent's mode.
+    #[serde(default)]
+    pub permission_mode: Option<String>,
     /// Correlation id for `vagent spawn`. When set, the frontend reports the created session (or
     /// failure) back through the `spawn_result` command so the parked CLI request can answer.
     #[serde(default)]
     pub request_id: Option<String>,
+    /// Set when the spawn crosses the confirmation threshold.
+    #[serde(default)]
+    pub force_confirm: Option<bool>,
 }
 
 /// Request from `view <file|URL>` to open a tab.

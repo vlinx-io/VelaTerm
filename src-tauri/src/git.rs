@@ -345,6 +345,175 @@ pub fn worktree_add(repo_root: &str, name: &str) -> Result<WorktreeInfo, String>
     })
 }
 
+/// Directory names excluded from worktree copy candidates.
+const COPY_SKIP_DIRS: [&str; 6] = [
+    ".git",
+    ".vlx-worktrees",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+];
+
+/// Copy limits prevent broad patterns from filling the disk or stalling worktree creation.
+const COPY_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
+const COPY_MAX_FILES: usize = 500;
+
+/// Match a repository-relative path against a glob pattern.
+fn glob_match(pattern: &str, path: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let s: Vec<char> = path.chars().collect();
+    fn walk(p: &[char], pi: usize, s: &[char], si: usize) -> bool {
+        if pi == p.len() {
+            return si == s.len();
+        }
+        match p[pi] {
+            '*' => {
+                let double = p.get(pi + 1) == Some(&'*');
+                let next = if double { pi + 2 } else { pi + 1 };
+                let mut i = si;
+                loop {
+                    if walk(p, next, s, i) {
+                        return true;
+                    }
+                    if i == s.len() || (!double && s[i] == '/') {
+                        return false;
+                    }
+                    i += 1;
+                }
+            }
+            '?' => si < s.len() && s[si] != '/' && walk(p, pi + 1, s, si + 1),
+            c => si < s.len() && s[si] == c && walk(p, pi + 1, s, si + 1),
+        }
+    }
+    walk(&p, 0, &s, 0)
+}
+
+/// Return the literal root prefix of a glob pattern.
+fn pattern_root(pattern: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    let segments: Vec<&str> = pattern.split('/').collect();
+    for (i, seg) in segments.iter().enumerate() {
+        let last = i + 1 == segments.len();
+        if last || seg.contains(['*', '?']) {
+            break;
+        }
+        parts.push(seg);
+    }
+    parts.join("/")
+}
+
+/// Collect matching repository-relative files under `root` within the copy limits.
+fn copy_candidates(root: &std::path::Path, patterns: &[String]) -> Vec<String> {
+    let skipped = |rel: &str| rel.split('/').any(|s| COPY_SKIP_DIRS.contains(&s));
+    let mut found: std::collections::BTreeSet<String> = Default::default();
+    for pattern in patterns {
+        let pattern = pattern.trim();
+        if pattern.is_empty() || pattern.starts_with('/') || pattern.contains("..") {
+            continue;
+        }
+        let base = pattern_root(pattern);
+        if skipped(&base) {
+            continue;
+        }
+        let start = root.join(&base);
+        let mut stack = vec![start];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
+                let Ok(rel) = path.strip_prefix(root) else {
+                    continue;
+                };
+                let rel = rel.to_string_lossy().replace('\\', "/");
+                let Ok(meta) = entry.metadata() else {
+                    continue;
+                };
+                if meta.is_dir() {
+                    if !COPY_SKIP_DIRS.contains(&name.as_str()) {
+                        stack.push(path);
+                    }
+                } else if meta.is_file()
+                    && meta.len() <= COPY_MAX_FILE_BYTES
+                    && glob_match(pattern, &rel)
+                {
+                    found.insert(rel);
+                }
+            }
+        }
+    }
+    found.into_iter().take(COPY_MAX_FILES).collect()
+}
+
+/// Remove paths Git already tracks from a copy candidate list.
+fn drop_tracked(root: &str, candidates: Vec<String>) -> Vec<String> {
+    if candidates.is_empty() {
+        return candidates;
+    }
+    let mut args: Vec<String> = vec!["ls-files".into(), "-z".into(), "--".into()];
+    args.extend(candidates.iter().cloned());
+    let Ok(out) = crate::host::command("git")
+        .arg("-C")
+        .arg(root)
+        .args(&args)
+        .output()
+    else {
+        return candidates;
+    };
+    if !out.status.success() {
+        return candidates;
+    }
+    let tracked: std::collections::HashSet<String> = String::from_utf8_lossy(&out.stdout)
+        .split('\0')
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    candidates
+        .into_iter()
+        .filter(|c| !tracked.contains(c))
+        .collect()
+}
+
+/// Copy matching untracked or ignored files into a new worktree.
+pub fn copy_into_worktree(
+    repo_root: &str,
+    worktree_path: &str,
+    patterns: &[String],
+) -> Result<Vec<String>, String> {
+    if patterns.is_empty() {
+        return Ok(Vec::new());
+    }
+    let top = run_git(repo_root, &["rev-parse", "--show-toplevel"])
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| repo_root.to_string());
+    let src_root = std::path::Path::new(&top);
+    let dst_root = std::path::Path::new(worktree_path);
+    if !dst_root.is_dir() {
+        return Err(format!("Worktree directory does not exist: {worktree_path}"));
+    }
+    let candidates = drop_tracked(&top, copy_candidates(src_root, patterns));
+
+    let mut copied = Vec::new();
+    for rel in candidates {
+        let dst = dst_root.join(&rel);
+        if dst.exists() {
+            continue;
+        }
+        if let Some(parent) = dst.parent() {
+            if std::fs::create_dir_all(parent).is_err() {
+                continue;
+            }
+        }
+        if std::fs::copy(src_root.join(&rel), &dst).is_ok() {
+            copied.push(rel);
+        }
+    }
+    Ok(copied)
+}
+
 /// Derive a clone directory from the last URL/SCP-style path segment, removing `.git`; return None
 /// when no valid name can be parsed.
 pub fn derive_clone_dir_name(url: &str) -> Option<String> {
@@ -1729,6 +1898,87 @@ mod merge_tests {
         git(&dir, &["commit", "-q", "-m", "init"]);
         git(&dir, &["branch", "-M", "main"]);
         dir
+    }
+
+    #[test]
+    fn glob_match_separator_rules() {
+        assert!(glob_match("docs/plans/**", "docs/plans/a.md"));
+        assert!(glob_match("docs/plans/**", "docs/plans/archive/b.md"));
+        assert!(!glob_match("docs/plans/**", "docs/other/a.md"));
+        assert!(glob_match(".env*", ".env"));
+        assert!(glob_match(".env*", ".env.local"));
+        assert!(!glob_match(".env*", "sub/.env"));
+        assert!(glob_match("**/*.env", "sub/deep/x.env"));
+        assert!(glob_match("a?c.txt", "abc.txt"));
+        assert!(!glob_match("a?c.txt", "a/c.txt"));
+        assert!(glob_match("exact.md", "exact.md"));
+        assert!(!glob_match("exact.md", "exact.md.bak"));
+    }
+
+    #[test]
+    fn pattern_root_takes_literal_prefix() {
+        assert_eq!(pattern_root("docs/plans/**"), "docs/plans");
+        assert_eq!(pattern_root(".env*"), "");
+        assert_eq!(pattern_root("**/*.env"), "");
+        assert_eq!(pattern_root("docs/plans/archive/note.md"), "docs/plans/archive");
+    }
+
+    #[test]
+    fn copy_into_worktree_moves_untracked_matches_only() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+
+        std::fs::create_dir_all(repo.join("docs/plans/archive")).unwrap();
+        std::fs::write(repo.join("docs/plans/current.md"), "plan\n").unwrap();
+        std::fs::write(repo.join("docs/plans/archive/old.md"), "old\n").unwrap();
+        std::fs::write(repo.join(".env.local"), "SECRET=1\n").unwrap();
+        std::fs::create_dir_all(repo.join("docs/tracked")).unwrap();
+        std::fs::write(repo.join("docs/tracked/t.md"), "tracked\n").unwrap();
+        git(&repo, &["add", "docs/tracked/t.md"]);
+        git(&repo, &["commit", "-q", "-m", "add tracked doc"]);
+        std::fs::create_dir_all(repo.join("docs/plans/node_modules")).unwrap();
+        std::fs::write(repo.join("docs/plans/node_modules/junk.md"), "junk\n").unwrap();
+
+        let wt = worktree_add(&repo_str, "copy test").expect("creating the worktree should succeed");
+        let dst = std::path::Path::new(&wt.path);
+        std::fs::create_dir_all(dst.join("docs/plans")).unwrap();
+        std::fs::write(dst.join("docs/plans/current.md"), "worktree version\n").unwrap();
+
+        let patterns = vec![
+            "docs/**".to_string(),
+            ".env*".to_string(),
+            "node_modules/**".to_string(),
+        ];
+        let copied = copy_into_worktree(&repo_str, &wt.path, &patterns)
+            .expect("copying into an existing worktree should succeed");
+
+        assert!(copied.contains(&"docs/plans/archive/old.md".to_string()));
+        assert!(copied.contains(&".env.local".to_string()));
+        assert!(
+            !copied.contains(&"docs/tracked/t.md".to_string()),
+            "tracked files must not be copied"
+        );
+        assert!(
+            !copied.contains(&"docs/plans/node_modules/junk.md".to_string()),
+            "build directories must be skipped even inside a matching tree"
+        );
+        assert!(
+            !copied.contains(&"docs/plans/current.md".to_string()),
+            "an existing worktree file must not be overwritten"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dst.join("docs/plans/current.md")).unwrap(),
+            "worktree version\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dst.join("docs/plans/archive/old.md")).unwrap(),
+            "old\n"
+        );
+
+        assert!(copy_into_worktree(&repo_str, &wt.path, &[]).unwrap().is_empty());
+        assert!(copy_into_worktree(&repo_str, "/no/such/worktree", &patterns).is_err());
+
+        std::fs::remove_dir_all(&repo).unwrap();
     }
 
     /// Derive default clone directory names from common repository URL forms.

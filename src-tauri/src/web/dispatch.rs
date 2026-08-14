@@ -155,6 +155,10 @@ pub fn dispatch(app: &AppCtx, cmd: &str, args: &Value, source: &str) -> Result<V
                 session_id: opt_str(args, "sessionId"),
                 error: opt_str(args, "error"),
                 worktree_error: opt_str(args, "worktreeError"),
+                awaiting_confirmation: args
+                    .get("awaitingConfirmation")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             },
         )),
         "update_session" => {
@@ -353,10 +357,15 @@ pub fn dispatch(app: &AppCtx, cmd: &str, args: &Value, source: &str) -> Result<V
                 .ok_or("Missing pid")? as u32;
             to_value(crate::procstat::subtree_stats(pid))
         }
-        "create_worktree" => to_value(git::worktree_add(
-            &req_str(args, "repoRoot")?,
-            &req_str(args, "name")?,
-        )?),
+        "create_worktree" => {
+            let repo_root = req_str(args, "repoRoot")?;
+            let info = git::worktree_add(&repo_root, &req_str(args, "name")?)?;
+            let patterns = crate::agent::orchestration::load(app)
+                .limits
+                .worktree_copy_patterns;
+            let _ = git::copy_into_worktree(&repo_root, &info.path, &patterns);
+            to_value(info)
+        }
         "list_worktrees" => to_value(git::worktree_list(&req_str(args, "repoRoot")?)?),
         "worktrees_in_subtree" => to_value(core::worktrees_in_subtree(
             app,

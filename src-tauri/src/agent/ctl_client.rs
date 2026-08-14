@@ -11,18 +11,50 @@ const ENV_SID: &str = "VLX_SESSION_ID";
 const ENV_TOKEN: &str = "VLX_TOKEN";
 
 const USAGE: &str = "usage:
-  vagent spawn  [--agent <kind>] [--model <m>] [--effort <e>] [--name <n>] [--agent-args \"<raw>\"] [--worktree] [--timeout <secs>] <task...>
+  vagent spawn  [--profile <p>] [--agent <kind>] [--model <m>] [--effort <e>] [--name <n>] [--agent-args \"<raw>\"] [--permission-mode default|skip] [--worktree|--no-worktree] [--allow-unknown-launch-values] [--timeout <secs>] <task...>
+  vagent spawn-status <requestId>
   vagent list
+  vagent config
   vagent status <id|name>
   vagent wait   <id|name>... [--any|--all] [--timeout <secs>]
   vagent read   <id|name> [--full]
   vagent prompt <id|name> <text...>
-  vagent cancel <id|name>
+  vagent cancel <id|name>|--all
+  vagent cleanup [--confirm]
 
 All output is JSON. Sessions are addressed by id or unique name and must be
-descendants of the current session. spawn blocks until the child exists (or the
-timeout passes, returning {\"pending\":true}); wait blocks until the target is no
-longer working.";
+descendants of the current session. wait blocks until the target is no longer
+working.
+
+spawn blocks until the child exists. It returns {\"pending\":true} with a
+requestId instead when the user has a confirmation card open, or when the
+timeout passes. Keep working and collect the child later with
+`vagent spawn-status <requestId>`, which returns the session row once the user
+answers, 409 if they declined, and pending while the card is still open.
+
+wait returns a \"blocked\" array naming targets stopped at a permission prompt.
+Those are settled but not finished: tell the user, because only the user can
+answer the prompt. An empty array means every target finished its turn.
+
+config prints the available profiles, their routing descriptions, the spawn
+limits, and the current child counts. A profile supplies the agent, model,
+effort, and worktree choice; an explicit flag overrides the profile. spawn returns 429 when a limit is reached,
+so wait for a child to finish and try again. cancel --all interrupts every
+running descendant.
+
+spawn returns 400 for a model or effort the chosen agent does not accept, and
+names the valid values. Use --allow-unknown-launch-values for a model newer than
+this build.
+
+--permission-mode sets the child's approval behavior: default keeps the agent's
+own confirmations, skip passes its bypass flag. Without the flag the child
+inherits the parent's mode, which is nothing when the parent has none. Set it
+explicitly for a worker in its own worktree; otherwise the worker stalls on
+approvals with nobody watching its pane.
+
+cleanup lists the worktrees of finished children that hold no uncommitted
+changes; --confirm removes those worktrees. A running child, or one whose
+worktree has uncommitted changes, is reported as blocked and never touched.";
 
 /// `vlx-term --agent-ctl ...` entry point behind the `vagent` shim.
 pub fn run_agent_ctl(args: &[String]) -> ! {
@@ -92,7 +124,8 @@ fn parse_ctl_args(rest: &[String]) -> CtlParse {
     let mut any = false;
     let mut all = false;
     let mut full = false;
-    let mut worktree = false;
+    let mut confirm = false;
+    let mut worktree: Option<bool> = None;
     let mut i = 0;
     // Reads a value-taking option's required value; accepts values beginning with `-`.
     fn take_value(rest: &[String], i: &mut usize, flag: &str) -> Result<String, String> {
@@ -109,6 +142,8 @@ fn parse_ctl_args(rest: &[String]) -> CtlParse {
             ("--effort", "effort"),
             ("--name", "name"),
             ("--agent-args", "agentArgs"),
+            ("--profile", "profile"),
+            ("--permission-mode", "permissionMode"),
         ];
         if let Some((_, key)) = string_flags.iter().find(|(f, _)| *f == a) {
             match take_value(rest, &mut i, a) {
@@ -130,13 +165,17 @@ fn parse_ctl_args(rest: &[String]) -> CtlParse {
                     },
                     Err(e) => return CtlParse::Err(e),
                 },
-                "--worktree" | "--wt" => worktree = true,
-                "--no-worktree" | "--nowt" => worktree = false,
+                "--worktree" | "--wt" => worktree = Some(true),
+                "--no-worktree" | "--nowt" => worktree = Some(false),
                 "--any" => any = true,
                 "--all" => all = true,
                 "--full" => full = true,
+                "--confirm" => confirm = true,
                 "--force" => {
                     body.insert("force".into(), serde_json::json!(true));
+                }
+                "--allow-unknown-launch-values" => {
+                    body.insert("allowUnknownLaunchValues".into(), serde_json::json!(true));
                 }
                 "-h" | "--help" => return CtlParse::Help,
                 "--" => {
@@ -162,14 +201,49 @@ fn parse_ctl_args(rest: &[String]) -> CtlParse {
                 return CtlParse::Err("vagent: spawn needs a task description".to_string());
             }
             body.insert("prompt".into(), serde_json::json!(prompt));
-            body.insert("worktree".into(), serde_json::json!(worktree));
+            if let Some(w) = worktree {
+                body.insert("worktree".into(), serde_json::json!(w));
+            }
         }
-        "list" => {}
-        "status" | "cancel" => {
+        "list" | "config" => {}
+        "spawn-status" => {
+            let [request_id] = words.as_slice() else {
+                return CtlParse::Err(
+                    "vagent: spawn-status needs exactly one <requestId>".to_string(),
+                );
+            };
+            body.insert("requestId".into(), serde_json::json!(request_id));
+        }
+        "cleanup" => {
+            if !words.is_empty() {
+                return CtlParse::Err("vagent: cleanup takes no target".to_string());
+            }
+            if confirm {
+                body.insert("confirm".into(), serde_json::json!(true));
+            }
+        }
+        "status" => {
             let [target] = words.as_slice() else {
-                return CtlParse::Err(format!("vagent: {op} needs exactly one <id|name>"));
+                return CtlParse::Err("vagent: status needs exactly one <id|name>".to_string());
             };
             body.insert("target".into(), serde_json::json!(target));
+        }
+        "cancel" => {
+            if all {
+                if !words.is_empty() {
+                    return CtlParse::Err(
+                        "vagent: cancel takes a target or --all, not both".to_string(),
+                    );
+                }
+                body.insert("all".into(), serde_json::json!(true));
+            } else {
+                let [target] = words.as_slice() else {
+                    return CtlParse::Err(
+                        "vagent: cancel needs exactly one <id|name>, or --all".to_string(),
+                    );
+                };
+                body.insert("target".into(), serde_json::json!(target));
+            }
         }
         "read" => {
             let [target] = words.as_slice() else {
@@ -284,6 +358,46 @@ mod tests {
         assert_eq!(c.body["worktree"], true);
         assert_eq!(c.body["timeoutSecs"], 60);
         assert_eq!(c.body["prompt"], "implement auth");
+    }
+
+    #[test]
+    fn parse_spawn_profile_and_conditional_worktree() {
+        let c = ok(&["spawn", "--profile", "critical", "fix", "the", "parser"]);
+        assert_eq!(c.body["profile"], "critical");
+        assert!(!c.body.contains_key("worktree"));
+
+        let c = ok(&["spawn", "--profile", "critical", "--no-worktree", "task"]);
+        assert_eq!(c.body["worktree"], false);
+        let c = ok(&["spawn", "--wt", "task"]);
+        assert_eq!(c.body["worktree"], true);
+        let c = ok(&["spawn", "--nowt", "task"]);
+        assert_eq!(c.body["worktree"], false);
+    }
+
+    #[test]
+    fn parse_config_and_cancel_all() {
+        let c = ok(&["config"]);
+        assert_eq!(c.op, "config");
+        assert!(c.body.is_empty());
+
+        let c = ok(&["cancel", "--all"]);
+        assert_eq!(c.op, "cancel");
+        assert_eq!(c.body["all"], true);
+        assert!(!c.body.contains_key("target"));
+
+        assert!(matches!(
+            parse(&["cancel", "worker", "--all"]),
+            CtlParse::Err(_)
+        ));
+        assert!(matches!(parse(&["cancel"]), CtlParse::Err(_)));
+
+        let c = ok(&["cleanup"]);
+        assert_eq!(c.op, "cleanup");
+        assert!(c.body.is_empty());
+        let c = ok(&["cleanup", "--confirm"]);
+        assert_eq!(c.body["confirm"], true);
+        assert!(matches!(parse(&["cleanup", "worker"]), CtlParse::Err(_)));
+        assert!(matches!(parse(&["spawn", "--profile"]), CtlParse::Err(_)));
     }
 
     #[test]

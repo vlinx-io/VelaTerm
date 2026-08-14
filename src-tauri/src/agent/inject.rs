@@ -370,6 +370,24 @@ pub fn merge_permission_flag(
     }
 }
 
+/// Model values accepted by each agent's launch flags.
+pub fn known_models(kind: SessionKind) -> Option<&'static [&'static str]> {
+    match kind {
+        SessionKind::Claude => Some(&["fable", "opus", "sonnet", "haiku"]),
+        SessionKind::Codex => Some(&["sol", "luna"]),
+        _ => None,
+    }
+}
+
+/// Effort values accepted by each agent's launch flags.
+pub fn known_efforts(kind: SessionKind) -> Option<&'static [&'static str]> {
+    match kind {
+        SessionKind::Claude => Some(&["low", "medium", "high"]),
+        SessionKind::Codex => Some(&["low", "medium", "high", "xhigh", "ultra", "max"]),
+        _ => None,
+    }
+}
+
 /// Validates a model/effort value for unquoted command-line insertion: nonempty after trimming,
 /// only alphanumerics plus `- _ . :`. Invalid values are dropped rather than quoted so a bad
 /// setting can never alter the launch command.
