@@ -18,6 +18,7 @@ const SHIMS: &[(&str, &str)] = &[
     ("vspawn", "--spawn"),
     ("vspawn-tree", "--spawn --worktree"),
     ("vopen", "--view"),
+    ("vagent", "--agent-ctl"),
 ];
 
 #[cfg(feature = "gui")]

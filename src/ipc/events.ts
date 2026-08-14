@@ -84,6 +84,16 @@ export interface SpawnRequest {
   prompt: string;
   kind?: "claude" | "codex" | "opencode" | "copilot" | "cursor" | "antigravity" | "cline" | "pi" | "crush" | "kiro" | "grok" | "zoo" | "terminal" | null;
   worktree?: boolean | null;
+  /** Structured model selection; empty inherits the agent default. */
+  model?: string | null;
+  /** Structured effort selection; handled like `model`. */
+  effort?: string | null;
+  /** Child session name; empty derives one from the prompt. */
+  name?: string | null;
+  /** Raw launch arguments; empty applies the per-agent defaults. */
+  agentArgs?: string | null;
+  /** Correlation id from `vagent spawn`; when set, the store reports the outcome via spawn_result. */
+  requestId?: string | null;
 }
 
 /** Listen for child-task requests as a global event registered once on mount. */

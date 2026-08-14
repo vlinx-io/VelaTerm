@@ -31,6 +31,22 @@ pub struct SpawnRequest {
     /// Whether to create a dedicated Git worktree; the frontend defaults to true.
     #[serde(default)]
     pub worktree: Option<bool>,
+    /// Structured model selection, persisted on the child and translated to agent flags at launch.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Structured reasoning-effort selection; handled like `model`.
+    #[serde(default)]
+    pub effort: Option<String>,
+    /// Child session name; the frontend derives one from the prompt when omitted.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Raw launch arguments; when omitted the frontend applies the per-agent defaults.
+    #[serde(default)]
+    pub agent_args: Option<String>,
+    /// Correlation id for `vagent spawn`. When set, the frontend reports the created session (or
+    /// failure) back through the `spawn_result` command so the parked CLI request can answer.
+    #[serde(default)]
+    pub request_id: Option<String>,
 }
 
 /// Request from `view <file|URL>` to open a tab.
@@ -105,6 +121,7 @@ fn serve_loop(server: tiny_http::Server, app: AppCtx, token: String) {
     let app_for_spawn = app.clone();
     let app_for_prompt = app.clone();
     let app_for_view = app.clone();
+    let app_for_agent = app.clone();
     serve_with(
         server,
         &token,
@@ -166,6 +183,7 @@ fn serve_loop(server: tiny_http::Server, app: AppCtx, token: String) {
             // Forward an in-session `view <file>` request to open a document tab; ws.rs relays it to browsers.
             app_for_view.emit("view://request", req);
         },
+        Some(app_for_agent),
     );
 }
 
@@ -241,6 +259,7 @@ impl CodexTurnGuard {
 /// Core request loop. Pass mapped status to `on_signal`, the first user message to `on_prompt` for
 /// automatic naming, and the agent's parsed session_id to `on_session_id`, then return 200.
 /// Callback extraction permits real-HTTP integration tests without Tauri.
+#[allow(clippy::too_many_arguments)]
 fn serve_with(
     server: tiny_http::Server,
     token: &str,
@@ -249,6 +268,7 @@ fn serve_with(
     mut on_session_id: impl FnMut(String, String),
     mut on_spawn: impl FnMut(SpawnRequest),
     mut on_view: impl FnMut(ViewRequest),
+    agent_app: Option<AppCtx>,
 ) {
     let mut turn_guard = CodexTurnGuard::default();
     for mut request in server.incoming_requests() {
@@ -257,6 +277,24 @@ fn serve_with(
         // Hook, spawn, and view POST requests all carry JSON bodies.
         let mut body = String::new();
         let _ = request.as_reader().read_to_string(&mut body);
+
+        // `/agent/<op>` runs on a worker thread because wait/spawn block; the hook loop itself must
+        // never stall, or every agent status callback would queue behind one slow vagent request.
+        if let Some(op) = agent_op_path(&url) {
+            if query_token(&url) != Some(token.to_string()) {
+                let _ = request.respond(tiny_http::Response::empty(403));
+            } else if let Some(app) = agent_app.clone() {
+                std::thread::spawn(move || {
+                    let (status, resp) = crate::agent::ctl::handle(&op, &body, &app);
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(resp).with_status_code(status),
+                    );
+                });
+            } else {
+                let _ = request.respond(tiny_http::Response::empty(404));
+            }
+            continue;
+        }
 
         // `/view` is special: unlike always-200 routes, path validation returns a reason with 404
         // so the script can report missing files through curl -f.
@@ -503,6 +541,29 @@ fn parse_spawn(url: &str, body: &str, expected_token: &str) -> Option<SpawnReque
         return None;
     }
     Some(req)
+}
+
+/// Extract the operation from an `/agent/<op>` URL path, or None for other paths.
+fn agent_op_path(url: &str) -> Option<String> {
+    let path = url.split_once('?').map(|(p, _)| p).unwrap_or(url);
+    let op = path.strip_prefix("/agent/")?;
+    if op.is_empty() || op.contains('/') {
+        return None;
+    }
+    Some(op.to_string())
+}
+
+/// Extract the `t` query-parameter token from a URL.
+fn query_token(url: &str) -> Option<String> {
+    let query = url.split_once('?').map(|(_, q)| q)?;
+    for pair in query.split('&') {
+        if let Some((k, v)) = pair.split_once('=') {
+            if k == "t" {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Whether the URL path is `/view`, selecting its dedicated 404-capable branch.
@@ -958,7 +1019,16 @@ mod tests {
         assert_eq!(req.kind.as_deref(), Some("claude"));
         assert_eq!(req.worktree, Some(true));
 
-        // kind and worktree are optional.
+        // Launch-configuration fields pass through unchanged.
+        let full = r#"{"parentSessionId":"p1","prompt":"x","kind":"codex","worktree":true,
+            "model":"luna","effort":"xhigh","name":"update-types","agentArgs":"--foo bar"}"#;
+        let req_full = parse_spawn("/spawn?t=tok", full, "tok").expect("should parse");
+        assert_eq!(req_full.model.as_deref(), Some("luna"));
+        assert_eq!(req_full.effort.as_deref(), Some("xhigh"));
+        assert_eq!(req_full.name.as_deref(), Some("update-types"));
+        assert_eq!(req_full.agent_args.as_deref(), Some("--foo bar"));
+
+        // kind, worktree, and the launch-configuration fields are optional.
         let req2 = parse_spawn(
             "/spawn?t=tok",
             r#"{"parentSessionId":"p","prompt":"x"}"#,
@@ -967,6 +1037,10 @@ mod tests {
         .unwrap();
         assert_eq!(req2.kind, None);
         assert_eq!(req2.worktree, None);
+        assert_eq!(req2.model, None);
+        assert_eq!(req2.effort, None);
+        assert_eq!(req2.name, None);
+        assert_eq!(req2.agent_args, None);
 
         // Wrong token/path, empty required fields, or invalid JSON yields None.
         assert!(parse_spawn("/spawn?t=wrong", body, "tok").is_none());
@@ -1114,6 +1188,7 @@ mod tests {
                 move |req| {
                     let _ = tx.send(req);
                 },
+                None,
             );
         });
 
@@ -1216,6 +1291,7 @@ mod tests {
                 },
                 |_req| {},
                 |_req| {},
+                None,
             );
         });
 
@@ -1415,6 +1491,7 @@ mod tests {
                 },
                 |_req| {},
                 |_req| {},
+                None,
             );
         });
 
@@ -1455,6 +1532,7 @@ mod tests {
                 },
                 |_req| {},
                 |_req| {},
+                None,
             );
         });
 
@@ -1495,6 +1573,7 @@ mod tests {
                     let _ = tx.send(req);
                 },
                 |_req| {},
+                None,
             );
         });
 
@@ -1518,6 +1597,81 @@ mod tests {
         assert!(
             rx.recv_timeout(Duration::from_millis(500)).is_err(),
             "a /spawn with the wrong token must not trigger on_spawn"
+        );
+    }
+
+    /// Real HTTP test for `/agent/<op>` routing: token enforcement, worker-thread handling, and a
+    /// JSON response from the ctl handler backed by a headless AppCtx.
+    #[test]
+    fn serve_with_routes_agent_ops() {
+        let db_path = std::env::temp_dir().join(format!(
+            "vlx-agent-route-{}.db",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&db_path);
+        let db = crate::db::Db::open(&db_path).unwrap();
+        let parent_id = {
+            let conn = db.conn.lock().unwrap();
+            let project = crate::db::repo::import_project(
+                &conn,
+                std::env::temp_dir().to_str().unwrap(),
+            )
+            .unwrap();
+            crate::db::repo::create_session_full(
+                &conn,
+                &project.id,
+                None,
+                "lead",
+                crate::models::SessionKind::Claude,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+            .id
+        };
+        let app = AppCtx::Headless(std::sync::Arc::new(crate::host::HeadlessHost::new(
+            std::env::temp_dir(),
+            db,
+        )));
+
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        std::thread::spawn(move || {
+            serve_with(
+                server,
+                "tok",
+                |_sid, _sig| {},
+                |_sid, _prompt| {},
+                |_a, _b| {},
+                |_req| {},
+                |_req| {},
+                Some(app),
+            );
+        });
+
+        let body = format!(r#"{{"parentSessionId":"{parent_id}"}}"#);
+        let url = format!("http://127.0.0.1:{port}/agent/list?t=tok");
+        let (status, resp) =
+            crate::agent::ctl_client::post_json(&url, &body).expect("should connect");
+        assert_eq!(status, 200);
+        let v: serde_json::Value = serde_json::from_str(&resp).unwrap();
+        assert_eq!(v["sessions"], serde_json::json!([]));
+
+        // Wrong token is rejected before reaching the handler; unknown ops are 404.
+        let url_bad = format!("http://127.0.0.1:{port}/agent/list?t=wrong");
+        assert_eq!(crate::agent::ctl_client::post_json(&url_bad, &body).unwrap().0, 403);
+        let url_unknown = format!("http://127.0.0.1:{port}/agent/bogus?t=tok");
+        assert_eq!(
+            crate::agent::ctl_client::post_json(&url_unknown, &body).unwrap().0,
+            404
         );
     }
 }

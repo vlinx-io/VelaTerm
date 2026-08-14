@@ -9,6 +9,7 @@ import {
   getSessionCwd,
   ptyKill,
   ptyWrite,
+  spawnResult,
   type ShellOption,
 } from "../ipc/commands";
 import { pushSetting } from "../ipc/settingsSync";
@@ -1676,7 +1677,12 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
 
   cancelSpawn: () => {
-    // Cancel by removing the first request without creating a session.
+    // Cancel by removing the first request without creating a session, telling any parked
+    // vagent spawn caller so it does not sit out its full timeout.
+    const head = get().pendingSpawns[0];
+    if (head?.requestId) {
+      void spawnResult(head.requestId, { error: "cancelled by user" }).catch(() => {});
+    }
     set((s) => ({ pendingSpawns: s.pendingSpawns.slice(1) }));
   },
 
@@ -1686,9 +1692,21 @@ export const useTermStore = create<TermStore>((set, get) => ({
   closeChanges: () => set({ changesCwd: null }),
 
   executeSpawn: async (req) => {
+    // Answer a parked vagent spawn caller; fire-and-forget for plain vspawn requests.
+    const report = (result: {
+      sessionId?: string;
+      error?: string;
+      worktreeError?: string;
+    }) => {
+      if (req.requestId) void spawnResult(req.requestId, result).catch(() => {});
+    };
     const state = get();
     const parent = state.sessions.find((s) => s.id === req.parentSessionId);
-    if (!parent) return; // Ignore a deleted or unknown parent session.
+    if (!parent) {
+      // Ignore a deleted or unknown parent session.
+      report({ error: "parent session no longer exists" });
+      return;
+    }
     const project = state.projects.find((p) => p.id === parent.projectId);
     // Child kind preference: request, parent agent kind, then Claude.
     const fallbackKind =
@@ -1716,35 +1734,58 @@ export const useTermStore = create<TermStore>((set, get) => ({
                         ? "zoo"
                       : "claude";
     const kind = ((req.kind ?? null) || fallbackKind) as Session["kind"];
-    const name = req.prompt.trim().slice(0, 24) || t("store.subtask");
+    const name =
+      req.name?.trim() || req.prompt.trim().slice(0, 24) || t("store.subtask");
 
     // By default, create an isolated worktree in the parent's repository.
     const repoRoot = parent.cwd || project?.rootPath || null;
     let cwd: string | null = parent.cwd ?? project?.rootPath ?? null;
     let worktreePath: string | null = null;
     let worktreeBaseRef: string | null = null;
+    let worktreeError: string | undefined;
     if (req.worktree !== false && repoRoot) {
       try {
         const wt = await createWorktree(repoRoot, name);
         cwd = wt.path;
         worktreePath = wt.path;
         worktreeBaseRef = wt.baseRef || null;
-      } catch {
+      } catch (e) {
         // Worktree failure falls back to the parent directory without blocking the spawn.
+        worktreeError = e instanceof Error ? e.message : String(e);
+        console.warn("vspawn: worktree creation failed, using parent directory", e);
       }
     }
 
-    const created = await get().addSession({
-      projectId: parent.projectId,
-      groupId: parent.groupId ?? null,
-      name,
-      kind,
-      cwd,
-      parentSessionId: parent.id,
-      worktreePath,
-      worktreeBaseRef,
-    });
-    if (!created) return;
+    // Explicit request values win; otherwise apply per-agent defaults, matching manual creation.
+    const defaults = state.agentDefaults[kind];
+    const agentArgs = req.agentArgs?.trim() || defaults?.args || null;
+    const permissionMode = defaults?.permissionMode ?? null;
+
+    let created: Session | null = null;
+    try {
+      created = await get().addSession({
+        projectId: parent.projectId,
+        groupId: parent.groupId ?? null,
+        name,
+        kind,
+        cwd,
+        parentSessionId: parent.id,
+        worktreePath,
+        worktreeBaseRef,
+        agentArgs,
+        permissionMode,
+        model: req.model?.trim() || null,
+        effort: req.effort?.trim() || null,
+      });
+    } catch (e) {
+      report({ error: e instanceof Error ? e.message : String(e) });
+      throw e;
+    }
+    if (!created) {
+      report({ error: "session creation failed" });
+      return;
+    }
+    report({ sessionId: created.id, worktreeError });
 
     // Store the prompt for `usePtySession` to inject as a positional launch argument, avoiding a timed later write.
     set((s) => ({

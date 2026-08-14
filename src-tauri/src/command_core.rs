@@ -135,11 +135,15 @@ pub fn create_session(
     permission_mode: Option<&str>,
     agent_session_id: Option<&str>,
     worktree_base_ref: Option<&str>,
+    model: Option<&str>,
+    effort: Option<&str>,
 ) -> Result<Session, String> {
     // Normalize empty strings consistently across transports.
     let agent_args = empty_to_none(agent_args);
     let permission_mode = empty_to_none(permission_mode);
     let worktree_base_ref = empty_to_none(worktree_base_ref);
+    let model = empty_to_none(model);
+    let effort = empty_to_none(effort);
     let session = {
         let conn = ctx.db().conn.lock().unwrap();
         let mut session = repo::create_session_full(
@@ -156,6 +160,8 @@ pub fn create_session(
             agent_args,
             permission_mode,
             worktree_base_ref,
+            model,
+            effort,
         )?;
         let seeded_agent_id = agent_session_id
             .map(|s| s.trim().to_string())

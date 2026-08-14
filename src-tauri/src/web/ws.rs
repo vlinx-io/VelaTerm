@@ -486,8 +486,15 @@ fn web_pty_spawn(
         let in_db = session.is_some();
         let resume = session.as_ref().and_then(|s| s.agent_session_id.clone());
         let created_at = session.as_ref().map(|s| s.created_at).unwrap_or(0);
-        // Merge custom launch arguments with the agent-specific permission-mode flag, matching desktop behavior.
+        // Merge custom launch arguments with model/effort and permission-mode flags, matching desktop behavior.
         let args = repo::get_agent_args(&conn, sid)?;
+        let (model, effort) = repo::get_model_effort(&conn, sid)?;
+        let args = crate::agent::inject::merge_model_effort_flags(
+            kind,
+            model.as_deref(),
+            effort.as_deref(),
+            args.as_deref(),
+        );
         let perm = repo::get_permission_mode(&conn, sid)?;
         let args =
             crate::agent::inject::merge_permission_flag(kind, perm.as_deref(), args.as_deref());

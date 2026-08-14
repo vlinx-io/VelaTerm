@@ -78,6 +78,10 @@ export interface CreateSessionInput {
   agentArgs?: string | null;
   /** Agent permission mode: `"skip"` bypasses confirmations; empty/`"default"` asks incrementally. */
   permissionMode?: string | null;
+  /** Structured model selection, translated to agent flags at launch. */
+  model?: string | null;
+  /** Structured effort selection; handled like `model`. */
+  effort?: string | null;
 }
 
 export function createSession(input: CreateSessionInput): Promise<Session> {
@@ -95,6 +99,8 @@ export function createSession(input: CreateSessionInput): Promise<Session> {
     agentSessionId: input.agentSessionId ?? null,
     agentArgs: input.agentArgs ?? null,
     permissionMode: input.permissionMode ?? null,
+    model: input.model ?? null,
+    effort: input.effort ?? null,
   });
 }
 

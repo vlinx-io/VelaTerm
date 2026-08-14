@@ -132,6 +132,8 @@ pub fn dispatch(app: &AppCtx, cmd: &str, args: &Value, source: &str) -> Result<V
             opt_str(args, "permissionMode").as_deref(),
             opt_str(args, "agentSessionId").as_deref(),
             opt_str(args, "worktreeBaseRef").as_deref(),
+            opt_str(args, "model").as_deref(),
+            opt_str(args, "effort").as_deref(),
         )?),
         "persist_session" => to_value(core::persist_session(
             app,
@@ -146,6 +148,15 @@ pub fn dispatch(app: &AppCtx, cmd: &str, args: &Value, source: &str) -> Result<V
             opt_str(args, "parentSessionId").as_deref(),
         )?),
         "fork_session" => to_value(core::fork_session(app, &req_str(args, "sessionId")?)?),
+        // Deliver a spawn outcome to a parked `vagent spawn` request; false when it already timed out.
+        "spawn_result" => to_value(crate::agent::ctl::resolve_spawn(
+            &req_str(args, "requestId")?,
+            crate::agent::ctl::SpawnOutcome {
+                session_id: opt_str(args, "sessionId"),
+                error: opt_str(args, "error"),
+                worktree_error: opt_str(args, "worktreeError"),
+            },
+        )),
         "update_session" => {
             core::update_session(
                 app,

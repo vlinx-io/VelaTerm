@@ -121,6 +121,9 @@ fn map_session(row: &Row) -> rusqlite::Result<Session> {
         worktree_base_ref: row.get(20)?,
         // Append the emoji marker at index 21.
         mark: row.get(21)?,
+        // Append model/effort at indices 22/23.
+        model: row.get(22)?,
+        effort: row.get(23)?,
     })
 }
 
@@ -128,7 +131,7 @@ fn map_session(row: &Row) -> rusqlite::Result<Session> {
 const SESSION_COLUMNS: &str = "id, project_id, group_id, name, shell, cwd, env_json, init_cmd, \
      hotkey, sort_order, created_at, kind, agent_session_id, \
      parent_session_id, collapsed, worktree_path, archived_at, browser_url, agent_args, \
-     permission_mode, worktree_base_ref, mark";
+     permission_mode, worktree_base_ref, mark, model, effort";
 
 /// Import an existing directory as a project, using its directory name.
 pub fn import_project(conn: &Connection, root_path: &str) -> Result<Project, String> {
@@ -282,6 +285,8 @@ pub fn create_session(
         None,
         None,
         None,
+        None,
+        None,
     )
 }
 
@@ -302,6 +307,8 @@ pub fn create_session_full(
     agent_args: Option<&str>,
     permission_mode: Option<&str>,
     worktree_base_ref: Option<&str>,
+    model: Option<&str>,
+    effort: Option<&str>,
 ) -> Result<Session, String> {
     let session = Session {
         id: new_id(),
@@ -332,14 +339,16 @@ pub fn create_session_full(
         archived_at: None,
         browser_url: None,
         mark: None,
+        model: model.map(|s| s.to_string()).filter(|s| !s.is_empty()),
+        effort: effort.map(|s| s.to_string()).filter(|s| !s.is_empty()),
         sort_order: now_millis(),
         created_at: now_secs(),
     };
 
     conn.execute(
         "INSERT INTO sessions
-           (id, project_id, group_id, name, kind, shell, cwd, env_json, init_cmd, hotkey, parent_session_id, collapsed, worktree_path, sort_order, created_at, agent_args, permission_mode, worktree_base_ref)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+           (id, project_id, group_id, name, kind, shell, cwd, env_json, init_cmd, hotkey, parent_session_id, collapsed, worktree_path, sort_order, created_at, agent_args, permission_mode, worktree_base_ref, model, effort)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
         params![
             session.id,
             session.project_id,
@@ -359,6 +368,8 @@ pub fn create_session_full(
             session.agent_args,
             session.permission_mode,
             session.worktree_base_ref,
+            session.model,
+            session.effort,
         ],
     )
     .map_err(|e| format!("Failed to write session: {e}"))?;
@@ -405,6 +416,8 @@ pub fn persist_session(
         archived_at: None,
         browser_url: None,
         mark: None,
+        model: None,
+        effort: None,
         sort_order: now_millis(),
         created_at: now_secs(),
     };
@@ -468,6 +481,26 @@ pub fn get_agent_args(conn: &Connection, id: &str) -> Result<Option<String>, Str
     .optional()
     .map(|opt| opt.flatten())
     .map_err(|e| format!("Failed to read agent args: {e}"))
+}
+
+/// Model/effort pair read together at launch.
+pub type ModelEffort = (Option<String>, Option<String>);
+
+/// Read model/effort for launch translation; (None, None) when the session or values are absent.
+pub fn get_model_effort(conn: &Connection, id: &str) -> Result<ModelEffort, String> {
+    conn.query_row(
+        "SELECT model, effort FROM sessions WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+            ))
+        },
+    )
+    .optional()
+    .map(|opt| opt.unwrap_or((None, None)))
+    .map_err(|e| format!("Failed to read model/effort: {e}"))
 }
 
 /// Read permission mode for inject::permission_flag, returning Ok(None) when absent or unset.
@@ -768,9 +801,11 @@ pub fn fork_session(conn: &Connection, source_id: &str) -> Result<Session, Strin
         cwd: source.cwd.clone(),
         env_json: source.env_json.clone(),
         init_cmd: source.init_cmd.clone(),
-        // A fork is a parallel conversation in the same lineage, so copy launch arguments/permissions.
+        // A fork is a parallel conversation in the same lineage, so copy the launch configuration.
         agent_args: source.agent_args.clone(),
         permission_mode: source.permission_mode.clone(),
+        model: source.model.clone(),
+        effort: source.effort.clone(),
         hotkey: None,
         agent_session_id: Some(anchor.clone()),
         parent_session_id: source.parent_session_id.clone(),
@@ -789,8 +824,8 @@ pub fn fork_session(conn: &Connection, source_id: &str) -> Result<Session, Strin
         "INSERT INTO sessions
            (id, project_id, group_id, name, kind, shell, cwd, env_json, init_cmd, hotkey,
             agent_session_id, parent_session_id, collapsed, worktree_path,
-            fork_pending, sort_order, created_at, agent_args, permission_mode, mark)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, 1, ?14, ?15, ?16, ?17, ?18)",
+            fork_pending, sort_order, created_at, agent_args, permission_mode, mark, model, effort)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, 1, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
         params![
             session.id,
             session.project_id,
@@ -810,11 +845,44 @@ pub fn fork_session(conn: &Connection, source_id: &str) -> Result<Session, Strin
             session.agent_args,
             session.permission_mode,
             session.mark,
+            session.model,
+            session.effort,
         ],
     )
     .map_err(|e| format!("Failed to write forked session: {e}"))?;
 
     Ok(session)
+}
+
+/// Live (non-archived) descendants of a session, breadth-first, for agent-control scope checks and
+/// name resolution. The root itself is not included.
+pub fn live_descendants(conn: &Connection, root_id: &str) -> Result<Vec<Session>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {SESSION_COLUMNS} FROM sessions \
+             WHERE archived_at IS NULL AND parent_session_id IS NOT NULL"
+        ))
+        .map_err(|e| format!("Failed to query descendants: {e}"))?;
+    let all: Vec<Session> = stmt
+        .query_map([], map_session)
+        .map_err(|e| format!("Failed to query descendants: {e}"))?
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("Failed to read descendants: {e}"))?;
+
+    let mut result = Vec::new();
+    let mut frontier = std::collections::VecDeque::from([root_id.to_string()]);
+    let mut remaining = all;
+    while let Some(parent) = frontier.pop_front() {
+        let (children, rest): (Vec<_>, Vec<_>) = remaining
+            .into_iter()
+            .partition(|s| s.parent_session_id.as_deref() == Some(parent.as_str()));
+        remaining = rest;
+        for child in children {
+            frontier.push_back(child.id.clone());
+            result.push(child);
+        }
+    }
+    Ok(result)
 }
 
 /// Read a remembered agent session ID for resume, returning Ok(None) when absent/unset.
@@ -2577,6 +2645,8 @@ mod tests {
             Some("--model opus"),
             Some("skip"),
             None,
+            None,
+            None,
         )
         .unwrap();
         assert_eq!(s.agent_args.as_deref(), Some("--model opus"));
@@ -2653,5 +2723,114 @@ mod tests {
         let f = fork_session(&conn, &s.id).unwrap();
         assert_eq!(f.agent_args.as_deref(), Some("--model sonnet"));
         assert_eq!(f.permission_mode.as_deref(), Some("skip"));
+    }
+
+    /// live_descendants returns children and grandchildren of the root only, skipping archived
+    /// sessions and unrelated siblings, in breadth-first order.
+    #[test]
+    fn live_descendants_scopes_and_skips_archived() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        let mk = |name: &str, parent: Option<&str>| {
+            create_session(
+                &conn,
+                &project.id,
+                None,
+                name,
+                SessionKind::Claude,
+                None,
+                None,
+                None,
+                parent,
+                None,
+            )
+            .unwrap()
+        };
+        let root = mk("root", None);
+        let child_a = mk("child-a", Some(&root.id));
+        let child_b = mk("child-b", Some(&root.id));
+        let grandchild = mk("grandchild", Some(&child_a.id));
+        let archived = mk("archived", Some(&root.id));
+        let other = mk("other-root", None);
+        let _outside = mk("outside", Some(&other.id));
+        set_archived(&conn, &archived.id, true).unwrap();
+
+        let got = live_descendants(&conn, &root.id).unwrap();
+        let ids: Vec<&str> = got.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec![&child_a.id, &child_b.id, &grandchild.id]);
+    }
+
+    /// Model/effort round-trip through creation, tree reads, the launch-path reader, and fork;
+    /// empty strings normalize to None.
+    #[test]
+    fn model_effort_roundtrip_create_read_fork() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+
+        let s = create_session_full(
+            &conn,
+            &project.id,
+            None,
+            "c",
+            SessionKind::Claude,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("fable"),
+            Some("high"),
+        )
+        .unwrap();
+        assert_eq!(s.model.as_deref(), Some("fable"));
+        assert_eq!(s.effort.as_deref(), Some("high"));
+
+        // The tree read used at startup returns the persisted values.
+        let got = list_tree(&conn)
+            .unwrap()
+            .sessions
+            .into_iter()
+            .find(|x| x.id == s.id)
+            .unwrap();
+        assert_eq!(got.model.as_deref(), Some("fable"));
+        assert_eq!(got.effort.as_deref(), Some("high"));
+
+        // The launch path reads both values in one query.
+        assert_eq!(
+            get_model_effort(&conn, &s.id).unwrap(),
+            (Some("fable".to_string()), Some("high".to_string()))
+        );
+
+        // Fork copies the structured settings with the rest of the launch configuration.
+        set_agent_session_id(&conn, &s.id, "conv-2", SessionKind::Claude).unwrap();
+        let f = fork_session(&conn, &s.id).unwrap();
+        assert_eq!(f.model.as_deref(), Some("fable"));
+        assert_eq!(f.effort.as_deref(), Some("high"));
+
+        // Empty strings normalize to None; the legacy wrapper and missing sessions read as unset.
+        let e = create_session_full(
+            &conn,
+            &project.id,
+            None,
+            "e",
+            SessionKind::Codex,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(""),
+            Some(""),
+        )
+        .unwrap();
+        assert_eq!(e.model, None);
+        assert_eq!(e.effort, None);
+        assert_eq!(get_model_effort(&conn, "missing").unwrap(), (None, None));
     }
 }

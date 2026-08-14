@@ -141,6 +141,8 @@ const vi: typeof en = {
   "spawn.fromSession": "Từ",
   "spawn.promptLabel": "Lời nhắc",
   "spawn.agentLabel": "Tác nhân",
+  "spawn.modelLabel": "Mô hình", // Model
+  "spawn.effortLabel": "Mức suy luận", // Effort
   "spawn.worktreeLabel": "Git worktree riêng",
   "spawn.launch": "Khởi chạy",
   "spawn.remaining": (n: number) => `Còn ${n} yêu cầu đang chờ`,

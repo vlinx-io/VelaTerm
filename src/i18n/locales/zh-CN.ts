@@ -138,6 +138,8 @@ const zhCN: typeof en = {
   "spawn.fromSession": "来自",
   "spawn.promptLabel": "提示词",
   "spawn.agentLabel": "智能体",
+  "spawn.modelLabel": "模型",
+  "spawn.effortLabel": "推理强度",
   "spawn.worktreeLabel": "独立 git worktree",
   "spawn.launch": "启动",
   "spawn.remaining": (n: number) => `还有 ${n} 个待确认`,

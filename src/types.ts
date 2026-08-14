@@ -90,6 +90,11 @@ export interface Session {
   /** Two-state permission mode: empty/`"default"` asks incrementally (default); `"skip"` bypasses every permission
    *  confirmation. Agent sessions only; the backend maps it to the appropriate launch flag by kind (none for opencode). */
   permissionMode?: string | null;
+  /** Structured model selection such as `fable`; translated to agent flags at launch, before
+   *  `agentArgs` so explicit user arguments win. */
+  model?: string | null;
+  /** Structured reasoning-effort selection such as `high`; handled like `model`. */
+  effort?: string | null;
   hotkey?: string | null;
   /** Last remembered native agent session ID for automatic Claude/Codex resume; the frontend only passes/displays it. */
   agentSessionId?: string | null;

@@ -148,6 +148,11 @@ pub struct Session {
     /// `--force`; OpenCode/Pi have no flag, while Cline injects `--auto-approve true/false` in both modes.
     /// Persisted independently of `agent_args`.
     pub permission_mode: Option<String>,
+    /// Structured model selection such as `fable`. Translated to agent-specific flags at launch,
+    /// before `agent_args` so explicit user arguments win. None uses the agent default.
+    pub model: Option<String>,
+    /// Structured reasoning-effort selection such as `high`; handled like [`Session::model`].
+    pub effort: Option<String>,
     pub hotkey: Option<String>,
     /// Last recorded native agent session ID, or None before a resumable conversation exists. Reopening
     /// passes it unchanged to Claude `--resume`, Codex `resume`, or the corresponding agent mechanism.

@@ -129,6 +129,16 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         conn.execute("ALTER TABLE sessions ADD COLUMN permission_mode TEXT", [])
             .map_err(|e| format!("Failed to migrate sessions.permission_mode: {e}"))?;
     }
+    // Structured launch settings, separate from agent_args so orchestration never parses flag text;
+    // inject::model_effort_flags translates them at launch.
+    if !column_exists(conn, "sessions", "model") {
+        conn.execute("ALTER TABLE sessions ADD COLUMN model TEXT", [])
+            .map_err(|e| format!("Failed to migrate sessions.model: {e}"))?;
+    }
+    if !column_exists(conn, "sessions", "effort") {
+        conn.execute("ALTER TABLE sessions ADD COLUMN effort TEXT", [])
+            .map_err(|e| format!("Failed to migrate sessions.effort: {e}"))?;
+    }
     // Add deleted_at tombstones to projects/groups. Containers holding archived sessions are hidden rather
     // than deleted so restoration can revive the hierarchy. Production SCHEMA always creates both tables;
     // table_exists only supports migration tests containing a sessions table alone.

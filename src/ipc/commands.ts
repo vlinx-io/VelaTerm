@@ -370,6 +370,20 @@ export interface WorktreeInfo {
   baseRef: string;
 }
 
+/** Reports a correlated spawn outcome so a parked `vagent spawn` request can answer its caller.
+ * Returns false when the waiter already timed out; callers may ignore the result. */
+export function spawnResult(
+  requestId: string,
+  result: { sessionId?: string; error?: string; worktreeError?: string },
+): Promise<boolean> {
+  return invoke<boolean>("spawn_result", {
+    requestId,
+    sessionId: result.sessionId ?? null,
+    error: result.error ?? null,
+    worktreeError: result.worktreeError ?? null,
+  });
+}
+
 /** Creates an isolated Git worktree for a spawned/manual child; errors let callers fall back without one. */
 export function createWorktree(
   repoRoot: string,

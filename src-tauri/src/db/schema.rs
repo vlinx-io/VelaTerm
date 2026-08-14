@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   init_cmd    TEXT,
   agent_args  TEXT,
   permission_mode TEXT,
+  model       TEXT,
+  effort      TEXT,
   hotkey      TEXT,
   agent_session_id TEXT,
   parent_session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,

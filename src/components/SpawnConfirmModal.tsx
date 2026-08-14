@@ -164,6 +164,8 @@ export function SpawnConfirmModal() {
   const [prompt, setPrompt] = useState("");
   const [kind, setKind] = useState<SpawnKind>("claude");
   const [worktree, setWorktree] = useState(true);
+  const [model, setModel] = useState("");
+  const [effort, setEffort] = useState("");
 
   // Reset fields when the queue head changes after enqueue, confirmation, or cancellation. Each
   // queued request is a new object, so reference changes reliably trigger the reset.
@@ -188,6 +190,9 @@ export function SpawnConfirmModal() {
     setKind((req.kind ?? null) || fallback);
     // Worktrees default on, matching backend and legacy behavior; only explicit false disables them.
     setWorktree(req.worktree !== false);
+    // Empty model/effort keep the agent defaults.
+    setModel(req.model ?? "");
+    setEffort(req.effort ?? "");
     // Depend only on req because parent is derived from it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [req]);
@@ -207,6 +212,11 @@ export function SpawnConfirmModal() {
       prompt,
       kind,
       worktree,
+      model: model.trim() || null,
+      effort: effort.trim() || null,
+      name: req.name ?? null,
+      agentArgs: req.agentArgs ?? null,
+      requestId: req.requestId ?? null,
     });
   };
 
@@ -331,6 +341,65 @@ export function SpawnConfirmModal() {
               onChange={(e) => setWorktree(e.target.checked)}
             />
             {t("spawn.worktreeLabel")}
+          </label>
+        </div>
+
+        {/* Model and effort on one row; empty fields keep the agent defaults. */}
+        <div style={{ display: "flex", gap: 14 }}>
+          <label style={{ display: "block", flex: 1 }}>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-muted)",
+                marginBottom: 4,
+              }}
+            >
+              {t("spawn.modelLabel")}
+            </div>
+            <input
+              className="vlx-input"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="default"
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                height: 32,
+                fontFamily: "var(--font-mono)",
+                fontSize: 12.5,
+              }}
+            />
+          </label>
+          <label style={{ display: "block", flex: 1 }}>
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-muted)",
+                marginBottom: 4,
+              }}
+            >
+              {t("spawn.effortLabel")}
+            </div>
+            <input
+              className="vlx-input"
+              value={effort}
+              onChange={(e) => setEffort(e.target.value)}
+              placeholder="default"
+              list="vlx-spawn-effort-options"
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                height: 32,
+                fontFamily: "var(--font-mono)",
+                fontSize: 12.5,
+              }}
+            />
+            <datalist id="vlx-spawn-effort-options">
+              <option value="low" />
+              <option value="medium" />
+              <option value="high" />
+              <option value="xhigh" />
+            </datalist>
           </label>
         </div>
       </div>

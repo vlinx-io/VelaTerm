@@ -5,6 +5,8 @@
 
 pub mod antigravity;
 pub mod cli_client;
+pub mod ctl;
+pub mod ctl_client;
 pub mod cline;
 pub mod copilot;
 pub mod crush;

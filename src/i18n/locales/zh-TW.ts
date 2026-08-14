@@ -139,6 +139,8 @@ const zhTW: typeof en = {
   "spawn.fromSession": "來自", // From
   "spawn.promptLabel": "提示詞", // Prompt
   "spawn.agentLabel": "智能體", // Agent
+  "spawn.modelLabel": "模型", // Model
+  "spawn.effortLabel": "推理強度", // Effort
   "spawn.worktreeLabel": "獨立 git worktree", // Separate git worktree
   "spawn.launch": "啟動", // Launch
   "spawn.remaining": (n: number) => `還有 ${n} 個待確認`, // ${n} more pending

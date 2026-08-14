@@ -21,6 +21,18 @@ What you get is a real session in the tree — its own process, fully interactiv
 
 The two terminal commands are injected into every session's PATH automatically — zero install.
 
+Both commands accept optional launch configuration for the child session:
+
+- `--model <model>` selects the child's model (for example `vspawn --claude --model fable "task"`).
+- `--effort <level>` selects the reasoning effort (for example `high` or `xhigh`).
+- `--name <name>` sets the child session's name instead of deriving it from the task text.
+- `--agent-args "<raw args>"` replaces the per-agent default launch arguments from Settings.
+
+Model and effort persist on the child session, survive restart and resume, and are translated to
+agent-specific flags at launch: Claude uses `--model` and `--effort`; Codex uses `-m` and
+`-c model_reasoning_effort=`. Other agent types currently ignore these settings. When omitted, the
+agent's own defaults apply.
+
 > **Prerequisite for agent skills:** enable **Vela Skills** in Settings ▸ General. This installs `vspawn`, `vspawn-tree`, and `vopen` into both `~/.claude/skills/` and the Codex skills directory (`$CODEX_HOME/skills` when set, otherwise `~/.codex/skills`); they're kept up to date automatically on app upgrades. After enabling, start a new Claude or Codex thread so the agent picks them up. Without this, only the terminal-typed `vspawn` / `vspawn-tree` commands work.
 
 ## 3. Confirm before spawn
@@ -29,7 +41,7 @@ By default every spawn first shows a confirmation card (top-right, non-modal, do
 
 ![Spawn confirmation card](../assets/manuals/spawn-confirm.png)
 
-- Three editable fields: the **prompt** (multi-line), the **agent type** (defaults to the parent's), and **separate git worktree**.
+- Editable fields: the **prompt** (multi-line), the **agent type** (defaults to the parent's), **separate git worktree**, and the child's **model** and **effort** (empty keeps the agent's own defaults).
 - "Launch" starts the child session; "Cancel" drops the request. When an agent spawns several at once, cards are handled one at a time (the remaining count shows on the card).
 - If you'd rather skip confirmation entirely, turn off "Confirm before spawn" in Settings ▸ Behavior.
 

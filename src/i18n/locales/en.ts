@@ -139,6 +139,8 @@ const en = {
   "spawn.fromSession": "From",
   "spawn.promptLabel": "Prompt",
   "spawn.agentLabel": "Agent",
+  "spawn.modelLabel": "Model",
+  "spawn.effortLabel": "Effort",
   "spawn.worktreeLabel": "Separate git worktree",
   "spawn.launch": "Launch",
   "spawn.remaining": (n: number) => `${n} more pending`,

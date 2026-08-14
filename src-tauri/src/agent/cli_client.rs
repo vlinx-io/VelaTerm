@@ -39,12 +39,7 @@ pub fn run_spawn(args: &[String]) -> ! {
         }
     };
 
-    let body = build_spawn_body(
-        &sid,
-        &parsed.prompt,
-        parsed.kind.as_deref(),
-        parsed.worktree,
-    );
+    let body = build_spawn_body(&sid, &parsed.prompt, &parsed);
     let endpoint = format!("{url}/spawn?t={token}");
     match post_json(&endpoint, &body) {
         Some(code) if (200..300).contains(&code) => {
@@ -54,7 +49,14 @@ pub fn run_spawn(args: &[String]) -> ! {
                 "current dir"
             };
             let kind = parsed.kind.as_deref().unwrap_or("inherit current");
-            println!("spawned sub-session ({kind}, {wt}): {}", parsed.prompt);
+            let mut launch = String::new();
+            if let Some(m) = parsed.model.as_deref() {
+                launch.push_str(&format!(", model {m}"));
+            }
+            if let Some(e) = parsed.effort.as_deref() {
+                launch.push_str(&format!(", effort {e}"));
+            }
+            println!("spawned sub-session ({kind}{launch}, {wt}): {}", parsed.prompt);
             std::process::exit(0);
         }
         Some(code) => {
@@ -112,8 +114,10 @@ pub fn run_view(args: &[String]) -> ! {
     std::process::exit(exit);
 }
 
-const SPAWN_USAGE: &str =
-    "usage: vspawn [--worktree] [--claude|--codex|--copilot|--kiro] <task description...>";
+const SPAWN_USAGE: &str = "usage: vspawn [--worktree] [--claude|--codex|--copilot|--kiro] [--model <model>] [--effort <level>] [--name <name>] [--agent-args \"<raw args>\"] <task description...>\n\
+    --model/--effort persist on the child session and map to agent-specific flags at launch\n\
+    --name sets the child session name (otherwise derived from the task)\n\
+    --agent-args replaces the per-agent default launch arguments";
 const VIEW_USAGE: &str = "usage: vopen <file|url>...   (relative paths resolve against the current dir; opens multiple at once)\n\
     opens by type: markdown editor / image viewer / code editor (syntax highlight)\n\
     http/https urls open in an in-app browser tab (desktop only)";
@@ -139,6 +143,10 @@ struct SpawnArgs {
     worktree: bool,
     kind: Option<String>,
     prompt: String,
+    model: Option<String>,
+    effort: Option<String>,
+    name: Option<String>,
+    agent_args: Option<String>,
 }
 
 enum SpawnParse {
@@ -153,8 +161,19 @@ enum SpawnParse {
 fn parse_spawn_args(rest: &[String]) -> SpawnParse {
     let mut worktree = false;
     let mut kind: Option<String> = None;
+    let mut model: Option<String> = None;
+    let mut effort: Option<String> = None;
+    let mut name: Option<String> = None;
+    let mut agent_args: Option<String> = None;
     let mut words: Vec<&str> = Vec::new();
     let mut i = 0;
+    // Reads a value-taking option's required value; accepts values beginning with `-`.
+    fn take_value<'a>(rest: &'a [String], i: &mut usize, flag: &str) -> Result<&'a str, String> {
+        *i += 1;
+        rest.get(*i)
+            .map(|s| s.as_str())
+            .ok_or_else(|| format!("vspawn: {flag} requires a value"))
+    }
     while i < rest.len() {
         let a = rest[i].as_str();
         match a {
@@ -164,6 +183,22 @@ fn parse_spawn_args(rest: &[String]) -> SpawnParse {
             "--codex" => kind = Some("codex".to_string()),
             "--copilot" => kind = Some("copilot".to_string()),
             "--kiro" => kind = Some("kiro".to_string()),
+            "--model" => match take_value(rest, &mut i, a) {
+                Ok(v) => model = Some(v.to_string()),
+                Err(e) => return SpawnParse::Err(e),
+            },
+            "--effort" => match take_value(rest, &mut i, a) {
+                Ok(v) => effort = Some(v.to_string()),
+                Err(e) => return SpawnParse::Err(e),
+            },
+            "--name" => match take_value(rest, &mut i, a) {
+                Ok(v) => name = Some(v.to_string()),
+                Err(e) => return SpawnParse::Err(e),
+            },
+            "--agent-args" => match take_value(rest, &mut i, a) {
+                Ok(v) => agent_args = Some(v.to_string()),
+                Err(e) => return SpawnParse::Err(e),
+            },
             "-h" | "--help" => return SpawnParse::Help,
             "--" => {
                 for w in &rest[i + 1..] {
@@ -186,18 +221,32 @@ fn parse_spawn_args(rest: &[String]) -> SpawnParse {
         worktree,
         kind,
         prompt,
+        model,
+        effort,
+        name,
+        agent_args,
     })
 }
 
 /// Build the `/spawn` JSON body, omitting kind so the frontend can inherit it when absent. serde_json
 /// safely escapes quotes, newlines, and backslashes.
-fn build_spawn_body(sid: &str, prompt: &str, kind: Option<&str>, worktree: bool) -> String {
+fn build_spawn_body(sid: &str, prompt: &str, args: &SpawnArgs) -> String {
     let mut obj = serde_json::Map::new();
     obj.insert("parentSessionId".into(), serde_json::json!(sid));
     obj.insert("prompt".into(), serde_json::json!(prompt));
-    obj.insert("worktree".into(), serde_json::json!(worktree));
-    if let Some(k) = kind {
-        obj.insert("kind".into(), serde_json::json!(k));
+    obj.insert("worktree".into(), serde_json::json!(args.worktree));
+    // Optional fields are omitted so the frontend can inherit or derive defaults.
+    let optional = [
+        ("kind", &args.kind),
+        ("model", &args.model),
+        ("effort", &args.effort),
+        ("name", &args.name),
+        ("agentArgs", &args.agent_args),
+    ];
+    for (key, value) in optional {
+        if let Some(v) = value {
+            obj.insert(key.into(), serde_json::json!(v));
+        }
     }
     serde_json::Value::Object(obj).to_string()
 }
@@ -291,20 +340,93 @@ mod tests {
         ));
     }
 
+    /// Builds SpawnArgs with all optional fields unset for body tests.
+    fn bare_args(worktree: bool, kind: Option<&str>) -> SpawnArgs {
+        SpawnArgs {
+            worktree,
+            kind: kind.map(str::to_string),
+            prompt: String::new(),
+            model: None,
+            effort: None,
+            name: None,
+            agent_args: None,
+        }
+    }
+
+    #[test]
+    fn parse_spawn_model_effort_name_agent_args() {
+        let SpawnParse::Ok(p) = parse_spawn_args(&args(&[
+            "--claude",
+            "--model",
+            "fable",
+            "--effort",
+            "high",
+            "--name",
+            "critical-auth",
+            "--agent-args",
+            "--foo bar",
+            "implement",
+            "auth",
+        ])) else {
+            panic!("parsing should succeed");
+        };
+        assert_eq!(p.kind.as_deref(), Some("claude"));
+        assert_eq!(p.model.as_deref(), Some("fable"));
+        assert_eq!(p.effort.as_deref(), Some("high"));
+        assert_eq!(p.name.as_deref(), Some("critical-auth"));
+        // The quoted value arrives as one argv word, even with a leading dash.
+        assert_eq!(p.agent_args.as_deref(), Some("--foo bar"));
+        assert_eq!(p.prompt, "implement auth");
+    }
+
+    #[test]
+    fn parse_spawn_value_flags_require_values() {
+        for flag in ["--model", "--effort", "--name", "--agent-args"] {
+            assert!(
+                matches!(parse_spawn_args(&args(&["task", flag])), SpawnParse::Err(_)),
+                "{flag} without a value should be an error"
+            );
+        }
+    }
+
     #[test]
     fn build_spawn_body_omits_kind_when_none() {
-        let body = build_spawn_body("p1", "fix a bug", None, false);
+        let body = build_spawn_body("p1", "fix a bug", &bare_args(false, None));
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["parentSessionId"], "p1");
         assert_eq!(v["prompt"], "fix a bug");
         assert_eq!(v["worktree"], false);
         assert!(v.get("kind").is_none(), "the field should be omitted when kind is empty");
+        // The launch-configuration fields are likewise omitted when unset.
+        for key in ["model", "effort", "name", "agentArgs"] {
+            assert!(v.get(key).is_none(), "{key} should be omitted when unset");
+        }
+    }
+
+    #[test]
+    fn build_spawn_body_includes_launch_config() {
+        let mut a = bare_args(true, Some("codex"));
+        a.model = Some("luna".to_string());
+        a.effort = Some("xhigh".to_string());
+        a.name = Some("update-types".to_string());
+        a.agent_args = Some("--foo bar".to_string());
+        let body = build_spawn_body("p1", "update types", &a);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["kind"], "codex");
+        assert_eq!(v["model"], "luna");
+        assert_eq!(v["effort"], "xhigh");
+        assert_eq!(v["name"], "update-types");
+        assert_eq!(v["agentArgs"], "--foo bar");
     }
 
     #[test]
     fn build_spawn_body_escapes_special_chars() {
         // serde_json escapes quotes, newlines, and backslashes without handwritten json_escape.
-        let body = build_spawn_body("p", "line1\n\"quotes\" \\backslash", Some("claude"), true);
+        let body = build_spawn_body(
+            "p",
+            "line1\n\"quotes\" \\backslash",
+            &bare_args(true, Some("claude")),
+        );
         let v: serde_json::Value = serde_json::from_str(&body).expect("should be valid JSON");
         assert_eq!(v["prompt"], "line1\n\"quotes\" \\backslash");
         assert_eq!(v["kind"], "claude");
