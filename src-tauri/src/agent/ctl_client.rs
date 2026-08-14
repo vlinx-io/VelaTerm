@@ -20,6 +20,8 @@ const USAGE: &str = "usage:
   vagent read   <id|name> [--full]
   vagent prompt <id|name> <text...>
   vagent cancel <id|name>|--all
+  vagent diff   <id|name>
+  vagent merge  <id|name> [--delete-worktree]
   vagent cleanup [--confirm]
 
 All output is JSON. Sessions are addressed by id or unique name and must be
@@ -88,7 +90,7 @@ pub fn run_agent_ctl(args: &[String]) -> ! {
             std::process::exit(0);
         }
         Some((status, resp)) => {
-            eprintln!("vagent: {} failed ({status}): {resp}", parsed.op);
+            eprintln!("{}", server_error_envelope(&parsed.op, status, &resp));
             std::process::exit(1);
         }
         None => {
@@ -125,6 +127,7 @@ fn parse_ctl_args(rest: &[String]) -> CtlParse {
     let mut all = false;
     let mut full = false;
     let mut confirm = false;
+    let mut delete_worktree = false;
     let mut worktree: Option<bool> = None;
     let mut i = 0;
     // Reads a value-taking option's required value; accepts values beginning with `-`.
@@ -171,6 +174,7 @@ fn parse_ctl_args(rest: &[String]) -> CtlParse {
                 "--all" => all = true,
                 "--full" => full = true,
                 "--confirm" => confirm = true,
+                "--delete-worktree" => delete_worktree = true,
                 "--force" => {
                     body.insert("force".into(), serde_json::json!(true));
                 }
@@ -222,11 +226,16 @@ fn parse_ctl_args(rest: &[String]) -> CtlParse {
                 body.insert("confirm".into(), serde_json::json!(true));
             }
         }
-        "status" => {
+        "status" | "diff" | "merge" => {
             let [target] = words.as_slice() else {
-                return CtlParse::Err("vagent: status needs exactly one <id|name>".to_string());
+                return CtlParse::Err(format!(
+                    "vagent: {op} needs exactly one <id|name>"
+                ));
             };
             body.insert("target".into(), serde_json::json!(target));
+            if op == "merge" && delete_worktree {
+                body.insert("deleteWorktree".into(), serde_json::json!(true));
+            }
         }
         "cancel" => {
             if all {
@@ -288,6 +297,12 @@ fn session_env() -> Result<(String, String, String), String> {
         _ => Err(format!("not inside a VelaTerm session (missing {name})")),
     };
     Ok((get(ENV_URL)?, get(ENV_SID)?, get(ENV_TOKEN)?))
+}
+
+fn server_error_envelope(op: &str, status: u16, body: &str) -> String {
+    let error = serde_json::from_str::<serde_json::Value>(body)
+        .unwrap_or_else(|_| serde_json::Value::String(body.to_string()));
+    serde_json::json!({ "op": op, "status": status, "error": error }).to_string()
 }
 
 /// POST JSON and return (status, body). None on connection failure.
@@ -421,6 +436,15 @@ mod tests {
         let c = ok(&["cancel", "worker"]);
         assert_eq!(c.op, "cancel");
         assert_eq!(c.body["target"], "worker");
+
+        let c = ok(&["diff", "worker"]);
+        assert_eq!(c.op, "diff");
+        assert_eq!(c.body["target"], "worker");
+
+        let c = ok(&["merge", "worker", "--delete-worktree"]);
+        assert_eq!(c.op, "merge");
+        assert_eq!(c.body["target"], "worker");
+        assert_eq!(c.body["deleteWorktree"], true);
     }
 
     #[test]
@@ -430,6 +454,8 @@ mod tests {
         assert!(matches!(parse(&["spawn"]), CtlParse::Err(_)));
         assert!(matches!(parse(&["status"]), CtlParse::Err(_)));
         assert!(matches!(parse(&["status", "a", "b"]), CtlParse::Err(_)));
+        assert!(matches!(parse(&["diff"]), CtlParse::Err(_)));
+        assert!(matches!(parse(&["merge", "a", "b"]), CtlParse::Err(_)));
         assert!(matches!(parse(&["prompt", "only-target"]), CtlParse::Err(_)));
         assert!(matches!(
             parse(&["wait", "a", "--any", "--all"]),
@@ -437,5 +463,25 @@ mod tests {
         ));
         assert!(matches!(parse(&["spawn", "--model"]), CtlParse::Err(_)));
         assert!(matches!(parse(&["-h"]), CtlParse::Help));
+    }
+
+    #[test]
+    fn server_error_envelope_preserves_context_and_body_type() {
+        let json_body = server_error_envelope(
+            "merge",
+            409,
+            r#"{"error":"merge conflict","conflicts":["a.txt"]}"#,
+        );
+        let json_value: serde_json::Value = serde_json::from_str(&json_body).unwrap();
+        assert_eq!(json_value["op"], "merge");
+        assert_eq!(json_value["status"], 409);
+        assert_eq!(json_value["error"]["error"], "merge conflict");
+        assert_eq!(json_value["error"]["conflicts"][0], "a.txt");
+
+        let text_body = server_error_envelope("spawn", 400, "invalid request");
+        let text_value: serde_json::Value = serde_json::from_str(&text_body).unwrap();
+        assert_eq!(text_value["op"], "spawn");
+        assert_eq!(text_value["status"], 400);
+        assert_eq!(text_value["error"], "invalid request");
     }
 }

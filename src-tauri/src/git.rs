@@ -1331,6 +1331,19 @@ fn land_diff_stat(wt_path: &str, base: &str, branch: &str) -> String {
     stat.unwrap_or_else(committed)
 }
 
+/// Return the patch between a baseline ref and a worktree branch.
+pub fn branch_diff_patch(wt_path: &str, base: &str, branch: &str) -> Result<String, String> {
+    if wt_path.trim().is_empty() || base.trim().is_empty() || branch.trim().is_empty() {
+        return Err("Missing worktree path, base ref, or branch".into());
+    }
+    let range = format!("{base}..{branch}");
+    run_git(
+        wt_path,
+        &["diff", "--no-ext-diff", "--no-color", &range, "--"],
+    )
+    .ok_or_else(|| format!("Cannot read diff for {range}"))
+}
+
 /// Run landing preflight; return Err for non-Git worktrees or unresolved branches.
 pub fn land_targets(base_ref: Option<&str>, wt_path: &str) -> Result<LandTargets, String> {
     if wt_path.trim().is_empty() {

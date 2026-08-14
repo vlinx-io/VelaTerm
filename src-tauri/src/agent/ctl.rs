@@ -49,6 +49,7 @@ static SPAWN_OUTCOMES: LazyLock<Mutex<HashMap<String, (Instant, SpawnOutcome)>>>
 /// Retention limits for pending requests and stored outcomes.
 const OUTCOME_TTL: Duration = Duration::from_secs(3600);
 const OUTCOME_CAP: usize = 128;
+const DIFF_PATCH_MAX_BYTES: usize = 256 * 1024;
 
 /// Register a spawn correlation id and return the receiver its outcome arrives on.
 pub fn register_spawn_waiter(request_id: &str) -> mpsc::Receiver<SpawnOutcome> {
@@ -122,6 +123,8 @@ pub fn handle(op: &str, body: &str, app: &AppCtx) -> (u16, String) {
         "read" => op_read(app, &parent, &parsed),
         "prompt" => op_prompt(app, &parent, &parsed),
         "cancel" => op_cancel(app, &parent, &parsed),
+        "diff" => op_diff(app, &parent, &parsed),
+        "merge" => op_merge(app, &parent, &parsed),
         "spawn" => op_spawn(app, &parent, &parsed),
         "spawn-status" => op_spawn_status(app, &parsed),
         "config" => op_config(app, &parent),
@@ -549,6 +552,164 @@ fn op_cleanup(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
     }
 }
 
+fn op_diff(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
+    let session = match resolve_target(app, parent, req) {
+        Ok(session) => session,
+        Err(response) => return response,
+    };
+    let Some(path) = session
+        .worktree_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+    else {
+        return err(409, "session has no worktree");
+    };
+    let targets = match crate::git::land_targets(session.worktree_base_ref.as_deref(), path) {
+        Ok(targets) => targets,
+        Err(error) => return err(500, &error),
+    };
+    let patch = match crate::git::branch_diff_patch(path, &targets.base_ref, &targets.branch) {
+        Ok(patch) => patch,
+        Err(error) => return err(500, &error),
+    };
+    let (patch, truncated) = cap_patch(patch);
+    ok(json!({
+        "id": session.id,
+        "name": session.name,
+        "baseRef": targets.base_ref,
+        "baseBranch": targets.base_branch,
+        "branch": targets.branch,
+        "diffStat": targets.diff_stat,
+        "patch": patch,
+        "truncated": truncated,
+        "hasUncommitted": targets.has_uncommitted,
+    }))
+}
+
+fn cap_patch(mut patch: String) -> (String, bool) {
+    if patch.len() <= DIFF_PATCH_MAX_BYTES {
+        return (patch, false);
+    }
+    let mut end = DIFF_PATCH_MAX_BYTES;
+    while !patch.is_char_boundary(end) {
+        end -= 1;
+    }
+    patch.truncate(end);
+    (patch, true)
+}
+
+fn op_merge(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
+    let session = match resolve_target(app, parent, req) {
+        Ok(session) => session,
+        Err(response) => return response,
+    };
+    let Some(path) = session
+        .worktree_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+    else {
+        return err(409, "session has no worktree");
+    };
+    let targets = match crate::git::land_targets(session.worktree_base_ref.as_deref(), path) {
+        Ok(targets) => targets,
+        Err(error) => return err(500, &error),
+    };
+    if targets.has_uncommitted {
+        return (
+            409,
+            json!({
+                "error": "worktree has uncommitted changes",
+                "id": session.id,
+                "name": session.name,
+                "branch": targets.branch,
+            })
+            .to_string(),
+        );
+    }
+
+    let preview =
+        match crate::git::merge_branches_preview(path, &targets.branch, &targets.base_branch) {
+            Ok(preview) => preview,
+            Err(error) => return err(500, &error),
+        };
+    if preview.source_dirty {
+        return (
+            409,
+            json!({
+                "error": "worktree has uncommitted changes",
+                "id": session.id,
+                "name": session.name,
+                "branch": targets.branch,
+            })
+            .to_string(),
+        );
+    }
+    if !preview.available {
+        return (
+            409,
+            json!({
+                "error": "merge is unavailable",
+                "reason": preview.reason,
+                "source": targets.branch,
+                "target": targets.base_branch,
+            })
+            .to_string(),
+        );
+    }
+
+    let outcome =
+        match crate::git::merge_branches_apply(path, &targets.branch, &targets.base_branch, None) {
+            Ok(outcome) => outcome,
+            Err(error) => return err(500, &error),
+        };
+    if outcome.conflict {
+        return (
+            409,
+            json!({
+                "error": "merge conflict",
+                "source": targets.branch,
+                "target": targets.base_branch,
+                "conflicts": outcome.conflicts,
+            })
+            .to_string(),
+        );
+    }
+
+    let delete_worktree = req.get("deleteWorktree").and_then(Value::as_bool) == Some(true);
+    if delete_worktree {
+        if let Err(error) = crate::git::worktree_remove(path, false) {
+            return (
+                500,
+                json!({
+                    "error": error,
+                    "merged": true,
+                    "source": targets.branch,
+                    "target": targets.base_branch,
+                    "worktreeDeleted": false,
+                })
+                .to_string(),
+            );
+        }
+        if let Ok(conn) = app.db().conn.lock() {
+            let _ = crate::db::repo::clear_node_worktree(
+                &conn,
+                crate::models::NodeKind::Session,
+                &session.id,
+            );
+        }
+    }
+
+    ok(json!({
+        "id": session.id,
+        "name": session.name,
+        "source": targets.branch,
+        "target": targets.base_branch,
+        "merged": outcome.merged,
+        "message": outcome.message,
+        "worktreeDeleted": delete_worktree,
+    }))
+}
+
 // ── Shared helpers ──
 
 /// Live descendant counts and depth used by the spawn guardrails.
@@ -743,6 +904,65 @@ mod tests {
         .unwrap()
     }
 
+    fn git(dir: &std::path::Path, args: &[&str]) -> String {
+        let output = crate::host::command("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    }
+
+    fn init_repo() -> std::path::PathBuf {
+        let repo = std::env::temp_dir().join(format!("vlx-ctl-git-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-q"]);
+        git(&repo, &["config", "user.email", "t@example.com"]);
+        git(&repo, &["config", "user.name", "tester"]);
+        git(&repo, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(repo.join("a.txt"), "base\n").unwrap();
+        git(&repo, &["add", "-A"]);
+        git(&repo, &["commit", "-q", "-m", "init"]);
+        git(&repo, &["branch", "-M", "main"]);
+        repo
+    }
+
+    fn seed_worktree(
+        app: &AppCtx,
+        parent: &Session,
+        name: &str,
+        worktree: &crate::git::WorktreeInfo,
+    ) -> Session {
+        let db = app.db();
+        let conn = db.conn.lock().unwrap();
+        let project =
+            crate::db::repo::import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        crate::db::repo::create_session_full(
+            &conn,
+            &project.id,
+            None,
+            name,
+            SessionKind::Claude,
+            None,
+            Some(&worktree.path),
+            None,
+            Some(&parent.id),
+            Some(&worktree.path),
+            None,
+            None,
+            Some(&worktree.base_ref),
+            None,
+            None,
+        )
+        .unwrap()
+    }
+
     fn set_settings(app: &AppCtx, json: &str) {
         let db = app.db();
         let conn = db.conn.lock().unwrap();
@@ -844,6 +1064,13 @@ mod tests {
         let (status, body) = resolve_named(&app, &root.id, "worker").unwrap_err();
         assert_eq!(status, 409);
         assert!(body.contains(&child.id));
+
+        let request = format!(
+            r#"{{"parentSessionId":"{}","target":"{}"}}"#,
+            root.id, outsider.id
+        );
+        assert_eq!(handle("diff", &request, &app).0, 404);
+        assert_eq!(handle("merge", &request, &app).0, 404);
     }
 
     #[test]
@@ -872,6 +1099,152 @@ mod tests {
         assert_eq!(handle("bogus", &with_parent, &app).0, 404);
         assert_eq!(handle("list", "not json", &app).0, 400);
         assert_eq!(handle("list", "{}", &app).0, 400);
+    }
+
+    #[test]
+    fn diff_and_merge_round_trip_removes_the_worktree() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "round trip").unwrap();
+        std::fs::write(
+            std::path::Path::new(&worktree.path).join("worker.txt"),
+            "worker change\n",
+        )
+        .unwrap();
+        git(std::path::Path::new(&worktree.path), &["add", "-A"]);
+        git(
+            std::path::Path::new(&worktree.path),
+            &["commit", "-q", "-m", "worker change"],
+        );
+
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let child = seed_worktree(&app, &root, "worker", &worktree);
+        let request = format!(r#"{{"parentSessionId":"{}","target":"worker"}}"#, root.id);
+
+        let (status, body) = handle("diff", &request, &app);
+        assert_eq!(status, 200);
+        let diff: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(diff["id"], child.id);
+        assert_eq!(diff["baseRef"], "refs/heads/main");
+        assert_eq!(diff["baseBranch"], "main");
+        assert_eq!(diff["branch"], worktree.branch);
+        assert!(diff["diffStat"].as_str().unwrap().contains("worker.txt"));
+        let patch = diff["patch"].as_str().unwrap();
+        assert!(patch.contains("diff --git a/worker.txt b/worker.txt"));
+        assert!(patch.contains("+worker change"));
+        assert_eq!(diff["truncated"], false);
+        assert_eq!(diff["hasUncommitted"], false);
+
+        let merge_request = format!(
+            r#"{{"parentSessionId":"{}","target":"worker","deleteWorktree":true}}"#,
+            root.id
+        );
+        let (status, body) = handle("merge", &merge_request, &app);
+        assert_eq!(status, 200);
+        let merged: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(merged["merged"], true);
+        assert_eq!(merged["source"], worktree.branch);
+        assert_eq!(merged["target"], "main");
+        assert_eq!(merged["worktreeDeleted"], true);
+        assert!(repo.join("worker.txt").is_file());
+        assert!(!std::path::Path::new(&worktree.path).exists());
+        assert_eq!(session_by_id(&app, &child.id).unwrap().worktree_path, None);
+
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn diff_caps_large_patches() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "large diff").unwrap();
+        let worktree_path = std::path::Path::new(&worktree.path);
+        std::fs::write(worktree_path.join("large.txt"), "review line\n".repeat(30_000)).unwrap();
+        git(worktree_path, &["add", "-A"]);
+        git(worktree_path, &["commit", "-q", "-m", "large change"]);
+
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        seed_worktree(&app, &root, "worker", &worktree);
+        let request = format!(r#"{{"parentSessionId":"{}","target":"worker"}}"#, root.id);
+
+        let (status, body) = handle("diff", &request, &app);
+        assert_eq!(status, 200);
+        let diff: Value = serde_json::from_str(&body).unwrap();
+        assert!(diff["patch"].as_str().unwrap().len() <= 256 * 1024);
+        assert_eq!(diff["truncated"], true);
+
+        crate::git::worktree_remove(&worktree.path, true).unwrap();
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn merge_conflict_reports_files_and_preserves_branch_heads() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "conflict").unwrap();
+        let worktree_path = std::path::Path::new(&worktree.path);
+        std::fs::write(worktree_path.join("a.txt"), "from worker\n").unwrap();
+        git(worktree_path, &["commit", "-q", "-am", "worker edit"]);
+        std::fs::write(repo.join("a.txt"), "from parent\n").unwrap();
+        git(&repo, &["commit", "-q", "-am", "parent edit"]);
+        let source_head = git(&repo, &["rev-parse", &worktree.branch]);
+        let target_head = git(&repo, &["rev-parse", "main"]);
+
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        seed_worktree(&app, &root, "worker", &worktree);
+        let request = format!(r#"{{"parentSessionId":"{}","target":"worker"}}"#, root.id);
+        let (status, body) = handle("merge", &request, &app);
+        assert_eq!(status, 409);
+        let conflict: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(conflict["error"], "merge conflict");
+        assert_eq!(conflict["source"], worktree.branch);
+        assert_eq!(conflict["target"], "main");
+        assert!(conflict["conflicts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path == "a.txt"));
+        assert_eq!(git(&repo, &["rev-parse", &worktree.branch]), source_head);
+        assert_eq!(git(&repo, &["rev-parse", "main"]), target_head);
+
+        git(&repo, &["merge", "--abort"]);
+        crate::git::worktree_remove(&worktree.path, true).unwrap();
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn merge_refuses_uncommitted_worker_changes() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "dirty").unwrap();
+        std::fs::write(
+            std::path::Path::new(&worktree.path).join("dirty.txt"),
+            "not committed\n",
+        )
+        .unwrap();
+        let source_head = git(&repo, &["rev-parse", &worktree.branch]);
+        let target_head = git(&repo, &["rev-parse", "main"]);
+
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        seed_worktree(&app, &root, "worker", &worktree);
+        let request = format!(r#"{{"parentSessionId":"{}","target":"worker"}}"#, root.id);
+        let (status, body) = handle("merge", &request, &app);
+        assert_eq!(status, 409);
+        let refused: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(refused["error"], "worktree has uncommitted changes");
+        assert_eq!(refused["branch"], worktree.branch);
+        assert_eq!(git(&repo, &["rev-parse", &worktree.branch]), source_head);
+        assert_eq!(git(&repo, &["rev-parse", "main"]), target_head);
+        assert!(std::path::Path::new(&worktree.path)
+            .join("dirty.txt")
+            .is_file());
+
+        crate::git::worktree_remove(&worktree.path, true).unwrap();
+        std::fs::remove_dir_all(&repo).unwrap();
     }
 
     #[test]

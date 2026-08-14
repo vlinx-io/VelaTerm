@@ -9,7 +9,7 @@ description: >-
   VelaTerm-hosted sessions.
 argument-hint: "<project or multi-part task>"
 disable-model-invocation: true
-allowed-tools: Bash(vagent:*)
+allowed-tools: Bash(vagent:*) Bash(git:*)
 ---
 
 # /orch
@@ -41,6 +41,9 @@ vagent read <id|name> [--full]           # last assistant message (or whole conv
 vagent prompt <id|name> "<follow-up>"    # sends into the child's conversation
 vagent cancel <id|name>                  # interrupts the current turn; session stays alive
 vagent cancel --all                      # interrupts every running descendant
+vagent diff <id|name>                    # worktree branch diff against its recorded base
+vagent merge <id|name> [--delete-worktree]  # merge; use deletion only after confirmation
+vagent cleanup [--confirm]               # preview or remove clean finished child worktrees
 ```
 
 For Codex children, use the current ChatGPT model identifiers `gpt-5.6-sol`, `gpt-5.6-terra`,
@@ -113,6 +116,16 @@ A fresh worktree also has no permission configuration. Pass `--permission-mode` 
 spawn instead of relying on inheritance: an unset mode on you is inherited as an unset mode on the
 worker, and the worker then stalls on approvals in a pane nobody is watching.
 
+## Cross-review critical work
+
+Use this review pattern for critical work:
+
+1. Assign implementation to a Fable worker with high effort.
+2. Review the result with Sol at xhigh effort. Use `vagent read` and `vagent diff`.
+3. Spawn an Opus 5 reviewer with high effort. Name the worker branch in the review task.
+4. Reconcile both reviews. Send required fixes through `vagent prompt`.
+5. Run `vagent merge` only after the worker completes the fixes and validation.
+
 ## Spawn before you survey
 
 Your reading is not free: while you explore, every worker slot sits idle, and the workers repeat most
@@ -161,8 +174,21 @@ cannot discover, the definition of done, and the path to the plan document. Do n
 12. **Report failures.** Tell the user what failed and what you did about it; do not substitute
     lower-quality work without saying so.
 13. **Integrate only after validation.** Merge worktree branches through VelaTerm's merge tooling or
-    your own git commands, run the full test suites on the integrated result, then give the user a
-    final report: what each worker did, what was merged, and what remains.
+    your own git commands. Run the full test suites on the integrated result before cleanup.
+14. **Preview cleanup before deletion.** After integration and validation, run `vagent cleanup` without
+    `--confirm`. Record each candidate's child name, worktree path, and branch. Check each branch
+    against its base branch. Show the user the exact deletion list and report branches that need
+    separate discard confirmation. Report running or dirty worktrees separately because cleanup
+    blocks them.
+15. **Require confirmation before cleanup.** Ask the user to confirm the exact cleanup list. Run
+    `vagent cleanup --confirm` only after confirmation. This removes clean finished worktrees, but it
+    does not remove branches.
+16. **Delete branches safely.** After cleanup succeeds, delete each associated local branch with
+    `git branch -d <branch>` only when it is merged into its base branch. Keep unmerged branches and
+    report them unless the user explicitly confirms that they can be discarded. Never use `git branch -D`
+    automatically. Re-run `git worktree list` and `git branch --list`, then report what remains.
+17. **Give the final report.** State what each worker did, what was merged, what cleanup the user
+    approved, which worktrees and branches were removed, and what remains.
 
 ## Tell the user not to type into worker panes
 
