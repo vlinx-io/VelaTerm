@@ -413,7 +413,7 @@ svg { display: block; }
 .file-row .ic { width: 16px; flex: none; display: grid; place-items: center; }
 .file-row .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .file-row .gb { font-size: 9.5px; width: 14px; text-align: center; font-weight: 700; flex: none; }
-.gb-M { color: var(--yellow); } .gb-A { color: var(--green); } .gb-U { color: var(--text-faint); } .gb-D { color: var(--red); }
+.gb-M { color: var(--yellow); } .gb-A { color: var(--green); } .gb-U { color: var(--text-faint); } .gb-D { color: var(--red); } .gb-R { color: var(--cyan); }
 
 .insp-section { padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .insp-section h4 { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; margin-bottom: 10px; }

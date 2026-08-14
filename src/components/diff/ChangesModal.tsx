@@ -17,15 +17,7 @@ import {
 } from "../../ipc/commands";
 import { useTermStore } from "../../store/termStore";
 import { languageExtensionFor, vlxCmHighlighting } from "./codeMirrorTheme";
-
-/** Map status to a badge letter and color. */
-const STATUS_META: Record<string, { letter: string; color: string }> = {
-  added: { letter: "A", color: "var(--green, #3fb950)" },
-  modified: { letter: "M", color: "var(--yellow, #d29922)" },
-  deleted: { letter: "D", color: "var(--danger, #e05252)" },
-  untracked: { letter: "U", color: "var(--text-muted)" },
-  renamed: { letter: "R", color: "var(--cyan, #4aa)" },
-};
+import { statusMeta } from "./changeStatus";
 
 /** Render a single-file diff by loading both texts into a read-only MergeView, adding language support transparently once loaded. */
 function DiffView({ cwd, path }: { cwd: string; path: string }) {
@@ -212,7 +204,7 @@ export function ChangesModal() {
               </div>
             )}
             {files?.map((f) => {
-              const meta = STATUS_META[f.status] ?? STATUS_META.modified;
+              const meta = statusMeta(f.status);
               const active = f.path === selected;
               // Split into directory and filename. The directory may truncate with an ellipsis, while the filename
               // remains complete to preserve the most informative tail. Backend paths always use forward slashes
