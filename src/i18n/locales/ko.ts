@@ -98,6 +98,45 @@ const ko: typeof en = {
   "settings.agentPathPlaceholder": "예: ~/.local/bin/claude — 비워두면 PATH에서 검색", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "설정하면 이 유형의 세션은 PATH에서 명령을 찾는 대신 이 전체 경로로 실행됩니다. 설치되어 있지만 셸 PATH에 없는 경우에 유용합니다. 원클릭 설치 성공 후 위치가 감지되면 자동으로 입력됩니다.", // Agent executable path hint
+  "settings.catOrchestration": "오케스트레이션",
+  "settings.orchProfilesTitle": "워커 프로필",
+  "settings.orchProfile": "프로필",
+  "settings.orchDescription": "설명",
+  "settings.orchDescriptionPlaceholder": "이 프로필을 사용할 시점을 설명하세요.",
+  "settings.orchNewProfile": "새 프로필 이름",
+  "settings.orchAdd": "추가",
+  "settings.orchAddNew": "새로 추가",
+  "settings.orchDelete": "삭제",
+  "settings.orchNoProfiles": "프로필이 없습니다. 하나를 추가하면 모든 spawn에서 재사용할 수 있습니다.",
+  "settings.orchProfilesHint":
+    "프로필은 각 작업에 적합한 워커 설정을 리드 에이전트에 알려 줍니다. 각 프로필을 사용할 조건을 설명하고 에이전트, 모델, 추론 수준, worktree를 선택합니다.",
+  "settings.orchModel": "모델",
+  "settings.orchEffort": "추론 수준",
+  "settings.orchWorktree": "전용 worktree",
+  "settings.orchPermissionMode": "권한 모드",
+  "settings.orchPermissionDefault": "기본값",
+  "settings.orchPermissionSkip": "확인 건너뛰기",
+  "settings.orchPermissionInherit": "상위 세션에서 상속",
+  "settings.orchPermissionSkipWarning":
+    "이 작업자는 worktree 안에서 확인 없이 실행됩니다.",
+  "settings.orchLimitsTitle": "제한",
+  "settings.orchMaxDescendants": "최대 하위 세션 수",
+  "settings.orchMaxParallel": "최대 병렬 수",
+  "settings.orchMaxDepth": "최대 깊이",
+  "settings.orchConfirmAbove": "확인 요구 기준",
+  "settings.orchTimeout": "기본 제한 시간(초)",
+  "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
+  "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
+  "settings.orchAutoApproveRetire": "리타이어 자동 승인",
+  "settings.orchAutoApproveRetireHint":
+    "안정된 워커를 확인 카드 없이 보관합니다. 검증된 worktree 정리도 포함합니다. 검증되지 않은 정리를 재개하는 리타이어는 항상 확인합니다.",
+  "settings.orchConfirmAboveHint":
+    "spawn으로 활성 하위 세션 수가 이 값을 넘으면 spawn 확인을 꺼도 확인 카드가 표시됩니다. 활성 하위 세션은 시작 중이거나 작업 중이거나 권한 요청을 기다리는 세션입니다.",
+  "settings.orchLimitsHint":
+    "최대 하위 세션 수는 남아 있는 모든 하위 세션을 세며, 끝난 세션도 아카이브하거나 삭제할 때까지 자리를 차지합니다. 최대 병렬 수는 시작 중이거나 작업 중이거나 권한 요청을 기다리는 하위 세션을 셉니다.",
+  "settings.orchCopyPatterns": "worktree 복사 패턴",
+  "settings.orchCopyPatternsHint":
+    "한 줄에 glob 하나를 씁니다. 일치하는 추적되지 않은 파일이나 무시된 파일은 저장소 루트에서 새 worktree로 복사됩니다. node_modules 같은 빌드 산출물은 복사되지 않으므로 워커는 여전히 처음부터 빌드합니다.",
   "settings.appearance": "외관", // Appearance
   "settings.accent": "강조색", // Accent
   "settings.accentAuto": "테마 따름", // Follow theme
@@ -140,10 +179,31 @@ const ko: typeof en = {
   "spawn.fromSession": "From", // From
   "spawn.promptLabel": "Prompt", // Prompt
   "spawn.agentLabel": "Agent", // Agent
+  "spawn.modelLabel": "모델", // Model
+  "spawn.effortLabel": "추론 수준", // Effort
+  "spawn.optionDefault": "기본값", // default
+  "spawn.optionOther": "기타...", // Other...
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
+  "retire.title": "이 세션을 리타이어할까요?",
+  "retire.session": "세션",
+  "retire.actionArchive": "세션을 보관합니다. worktree는 삭제하지 않습니다.",
+  "retire.actionCleanup":
+    "아래 worktree를 삭제한 뒤 세션을 보관합니다.",
+  "retire.descendants": (n: number) => `하위 세션 ${n}개를 포함합니다.`,
+  "retire.irreversible": "이 작업은 되돌릴 수 없습니다",
+  "retire.worktreeCount": (n: number) =>
+    `worktree ${n}개와 해당 브랜치를 삭제합니다.`,
+  "retire.pathLabel": "경로",
+  "retire.branchLabel": "브랜치",
+  "retire.branchUnknown": "알 수 없음",
+  "retire.resumed": "디렉터리는 이미 없습니다. 브랜치만 남아 있습니다.",
+  "retire.keep": "유지",
+  "retire.approve": "리타이어",
+  "retire.remaining": (n: number) => `${n}개 더 대기 중`,
+  "retire.notifyTitle": "리타이어 확인 대기 중", // Retire awaiting confirmation
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "변경 사항 보기…",
@@ -371,6 +431,12 @@ const ko: typeof en = {
   "tree.killProcess": "프로세스 종료", // Kill Process
   "tree.archiveSession": "세션 보관", // Archive Session
   "tree.archiveGroup": "그룹 보관", // Archive Group
+  "tree.archiveBlockedTitle": "세션을 보관할 수 없습니다", // Cannot Archive Session
+  "tree.archiveBlockedBody": "보관이 거부되었습니다. 보관된 세션은 정리 범위에서 벗어나므로 워크트리와 브랜치가 남겨집니다.", // Archiving was refused. An archived session leaves the worker cleanup scope, so its worktree and branch would be stranded.
+  "tree.archiveConfirmTitle": "보관하고 worktree를 삭제할까요?", // Archive and delete worktrees?
+  "tree.archiveConfirmBody": (n: number) =>
+    `보관하면 워커 worktree ${n}개와 해당 브랜치를 삭제합니다. 되돌릴 수 없습니다. 작업 내용은 이미 상위 브랜치에 있습니다.`,
+  "tree.archiveConfirmAction": "보관", // Archive
   // Temporary (draft) sessions
   "tree.scratchTag": "임시", // scratch
   "tree.persistSession": "영구 세션으로 전환…", // Make Permanent Session…
@@ -547,6 +613,7 @@ const ko: typeof en = {
   "archive.empty1": "보관된 세션이 없습니다.", // No archived sessions.
   "archive.empty2": "사이드바의 세션에서 우클릭 후 \"세션 보관\"을 누르면 여기에 들어옵니다.", // Right-click a session in the sidebar…
   "archive.restore": "일반 세션으로 복원", // Restore to normal session
+  "archive.retiredNote": "은퇴한 워커는 그대로 재개할 수 없습니다. 은퇴가 이미 워크트리와 브랜치를 삭제했기 때문입니다.", // A retired worker cannot resume exactly, because retire already deleted its worktree and branch.
   "archive.export": "전체 컨텍스트를 Markdown으로 내보내기", // Export full context as Markdown
   "archive.deleteForever": "영구 삭제 (녹화 포함)", // Delete permanently (with recording)
   "archive.pickOne": "왼쪽에서 보관된 세션을 선택해 대화 기록을 확인하세요", // Select an archived session on the left…

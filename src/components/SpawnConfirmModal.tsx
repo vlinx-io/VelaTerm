@@ -8,7 +8,7 @@
 //!
 //! State comes from the store's pendingSpawns queue; like DirectoryPickerModal, it mounts at the App root.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useT } from "../i18n";
 import { useSuspendNativeViews } from "../hooks/nativeViewSuspend";
 import type { SpawnRequest } from "../ipc/events";
@@ -33,30 +33,56 @@ const KIND_OPTIONS: { value: SpawnKind; label: string }[] = [
   { value: "terminal", label: "Terminal" },
 ];
 
+/** Agents whose model/effort settings translate to launch flags; see inject::model_effort_flags.
+ *  The card hides both fields for other kinds because their values would be ignored at launch. */
+export const LAUNCH_CONFIG_KINDS: SpawnKind[] = ["claude", "codex"];
+
+/** Curated per-agent choices. `Other…` in the dropdown reveals a free-text input as the escape
+ *  hatch for models newer than this build. */
+export const MODEL_OPTIONS: Record<string, string[]> = {
+  claude: ["fable", "opus", "sonnet", "haiku"],
+  codex: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+};
+export const EFFORT_OPTIONS: Record<string, string[]> = {
+  claude: ["low", "medium", "high", "xhigh", "max"],
+  codex: ["low", "medium", "high", "xhigh", "max"],
+};
+
+/** Sentinel dropdown value that switches a launch-value field into free-text mode. */
+export const OTHER_VALUE = "__other__";
+
 /**
- * Custom agent-type dropdown matching the settings LangSelect. Native `<select>` is avoided because
- * macOS renders a system arrow and highlighted border that conflict with the dark form.
+ * Generic dropdown matching the settings LangSelect. Native `<select>` is avoided because macOS
+ * renders a system arrow and highlighted border that conflict with the dark form.
  */
-function KindSelect({
+export function ValueSelect({
   value,
+  options,
   onChange,
+  width = 150,
+  ariaLabel,
 }: {
-  value: SpawnKind;
-  onChange: (v: SpawnKind) => void;
+  value: string;
+  options: { value: string; label: string; icon?: ReactNode }[];
+  onChange: (v: string) => void;
+  width?: number | string;
+  ariaLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const current = KIND_OPTIONS.find((o) => o.value === value)?.label ?? value;
+  const currentOption = options.find((o) => o.value === value);
+  const current = currentOption?.label ?? value;
 
   return (
     <div style={{ position: "relative" }}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
+        aria-label={ariaLabel}
         style={{
           display: "flex",
           alignItems: "center",
           gap: 6,
-          width: 150,
+          width,
           height: 32,
           padding: "0 9px",
           background: "var(--bg-app)",
@@ -71,12 +97,20 @@ function KindSelect({
         <span
           style={{
             flex: 1,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
             textAlign: "left",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
           }}
         >
+          {currentOption?.icon && (
+            <span style={{ display: "inline-flex", color: "var(--accent)", flex: "none" }}>
+              {currentOption.icon}
+            </span>
+          )}
           {current}
         </span>
         <Icons.chevD
@@ -98,7 +132,7 @@ function KindSelect({
               top: "calc(100% + 4px)",
               left: 0,
               zIndex: 1150,
-              width: 150,
+              width,
               maxHeight: 260,
               overflowY: "auto",
               padding: 4,
@@ -108,7 +142,7 @@ function KindSelect({
               boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
             }}
           >
-            {KIND_OPTIONS.map((opt) => {
+            {options.map((opt) => {
               const on = opt.value === value;
               return (
                 <div
@@ -136,6 +170,11 @@ function KindSelect({
                     if (!on) e.currentTarget.style.background = "transparent";
                   }}
                 >
+                  {opt.icon && (
+                    <span style={{ display: "inline-flex", color: "var(--accent)", flex: "none" }}>
+                      {opt.icon}
+                    </span>
+                  )}
                   <span style={{ flex: 1 }}>{opt.label}</span>
                   {on && <Icons.check size={12} style={{ flex: "none" }} />}
                 </div>
@@ -145,6 +184,22 @@ function KindSelect({
         </>
       )}
     </div>
+  );
+}
+
+function KindSelect({
+  value,
+  onChange,
+}: {
+  value: SpawnKind;
+  onChange: (v: SpawnKind) => void;
+}) {
+  return (
+    <ValueSelect
+      value={value}
+      options={KIND_OPTIONS}
+      onChange={(v) => onChange(v as SpawnKind)}
+    />
   );
 }
 
@@ -164,6 +219,11 @@ export function SpawnConfirmModal() {
   const [prompt, setPrompt] = useState("");
   const [kind, setKind] = useState<SpawnKind>("claude");
   const [worktree, setWorktree] = useState(true);
+  const [model, setModel] = useState("");
+  const [effort, setEffort] = useState("");
+  // Free-text mode for values outside the curated per-agent lists.
+  const [modelOther, setModelOther] = useState(false);
+  const [effortOther, setEffortOther] = useState(false);
 
   // Reset fields when the queue head changes after enqueue, confirmation, or cancellation. Each
   // queued request is a new object, so reference changes reliably trigger the reset.
@@ -185,9 +245,17 @@ export function SpawnConfirmModal() {
         ? parent.kind
         : "claude";
     setPrompt(req.prompt);
-    setKind((req.kind ?? null) || fallback);
+    const k = (req.kind ?? null) || fallback;
+    setKind(k);
     // Worktrees default on, matching backend and legacy behavior; only explicit false disables them.
     setWorktree(req.worktree !== false);
+    // Empty model/effort keep the agent defaults; unlisted values open in free-text mode.
+    const m = req.model ?? "";
+    const e = req.effort ?? "";
+    setModel(m);
+    setEffort(e);
+    setModelOther(!!m && !(MODEL_OPTIONS[k] ?? []).includes(m));
+    setEffortOther(!!e && !(EFFORT_OPTIONS[k] ?? []).includes(e));
     // Depend only on req because parent is derived from it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [req]);
@@ -200,6 +268,9 @@ export function SpawnConfirmModal() {
   const canLaunch = prompt.trim().length > 0;
   const remaining = queue.length - 1;
 
+  // Model/effort only apply to agents whose launch flags support them; drop silently elsewhere.
+  const hasLaunchConfig = LAUNCH_CONFIG_KINDS.includes(kind);
+
   const launch = () => {
     if (!canLaunch) return;
     void confirmSpawn({
@@ -207,7 +278,20 @@ export function SpawnConfirmModal() {
       prompt,
       kind,
       worktree,
+      model: hasLaunchConfig ? model.trim() || null : null,
+      effort: hasLaunchConfig ? effort.trim() || null : null,
+      name: req.name ?? null,
+      agentArgs: req.agentArgs ?? null,
+      permissionMode: req.permissionMode ?? null,
+      requestId: req.requestId ?? null,
     });
+  };
+
+  // Switching agents keeps chosen values but re-evaluates whether they need free-text mode.
+  const changeKind = (k: SpawnKind) => {
+    setKind(k);
+    setModelOther(!!model && !(MODEL_OPTIONS[k] ?? []).includes(model));
+    setEffortOther(!!effort && !(EFFORT_OPTIONS[k] ?? []).includes(effort));
   };
 
   return (
@@ -270,6 +354,28 @@ export function SpawnConfirmModal() {
         </div>
       )}
 
+      {req.launchWarnings && req.launchWarnings.length > 0 && (
+        <div
+          role="alert"
+          style={{
+            marginBottom: 12,
+            padding: "8px 10px",
+            border: "1px solid var(--status-asking)",
+            borderRadius: 5,
+            color: "var(--text-primary)",
+            fontSize: 11,
+            lineHeight: 1.45,
+          }}
+        >
+          <div style={{ color: "var(--status-asking)", fontWeight: 600, marginBottom: 3 }}>
+            {t("status.error")}
+          </div>
+          {req.launchWarnings.map((warning) => (
+            <div key={warning}>{warning}</div>
+          ))}
+        </div>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {/* Editable multiline prompt without autoFocus, preserving terminal focus when the card appears. */}
         <label style={{ display: "block" }}>
@@ -311,7 +417,7 @@ export function SpawnConfirmModal() {
             >
               {t("spawn.agentLabel")}
             </div>
-            <KindSelect value={kind} onChange={setKind} />
+            <KindSelect value={kind} onChange={changeKind} />
           </label>
 
           <label
@@ -333,6 +439,109 @@ export function SpawnConfirmModal() {
             {t("spawn.worktreeLabel")}
           </label>
         </div>
+
+        {/* Model and effort dropdowns; "default" keeps the agent defaults and "Other..." reveals a
+            free-text input. Hidden entirely for agents whose launch flags ignore these values. */}
+        {hasLaunchConfig && (
+          <div style={{ display: "flex", gap: 14 }}>
+            <div style={{ flex: 1 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-muted)",
+                  marginBottom: 4,
+                }}
+              >
+                {t("spawn.modelLabel")}
+              </div>
+              <ValueSelect
+                width="100%"
+                value={modelOther ? OTHER_VALUE : model}
+                options={[
+                  { value: "", label: t("spawn.optionDefault") },
+                  ...(MODEL_OPTIONS[kind] ?? []).map((m) => ({
+                    value: m,
+                    label: m,
+                  })),
+                  { value: OTHER_VALUE, label: t("spawn.optionOther") },
+                ]}
+                onChange={(v) => {
+                  if (v === OTHER_VALUE) {
+                    setModelOther(true);
+                    setModel("");
+                  } else {
+                    setModelOther(false);
+                    setModel(v);
+                  }
+                }}
+              />
+              {modelOther && (
+                <input
+                  className="vlx-input"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder={t("spawn.modelLabel")}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    height: 32,
+                    marginTop: 6,
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 12.5,
+                  }}
+                />
+              )}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-muted)",
+                  marginBottom: 4,
+                }}
+              >
+                {t("spawn.effortLabel")}
+              </div>
+              <ValueSelect
+                width="100%"
+                value={effortOther ? OTHER_VALUE : effort}
+                options={[
+                  { value: "", label: t("spawn.optionDefault") },
+                  ...(EFFORT_OPTIONS[kind] ?? []).map((e) => ({
+                    value: e,
+                    label: e,
+                  })),
+                  { value: OTHER_VALUE, label: t("spawn.optionOther") },
+                ]}
+                onChange={(v) => {
+                  if (v === OTHER_VALUE) {
+                    setEffortOther(true);
+                    setEffort("");
+                  } else {
+                    setEffortOther(false);
+                    setEffort(v);
+                  }
+                }}
+              />
+              {effortOther && (
+                <input
+                  className="vlx-input"
+                  value={effort}
+                  onChange={(e) => setEffort(e.target.value)}
+                  placeholder={t("spawn.effortLabel")}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    height: 32,
+                    marginTop: 6,
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 12.5,
+                  }}
+                />
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div

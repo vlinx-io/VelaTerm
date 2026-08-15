@@ -70,7 +70,9 @@ export function ConfirmDelete({
     <Backdrop onClose={onCancel}>
       <div
         style={{
-          width: 360,
+          width: 400,
+          maxWidth: "calc(100vw - 32px)",
+          boxSizing: "border-box",
           background: "var(--bg-panel)",
           border: "1px solid var(--border)",
           borderRadius: 10,
@@ -88,18 +90,34 @@ export function ConfirmDelete({
         {hasWt && (
           <label
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
+              display: "grid",
+              gridTemplateColumns: "16px minmax(0, 1fr)",
+              alignItems: "start",
+              gap: 10,
+              padding: "10px 12px",
               fontSize: 13,
               color: "var(--text-secondary)",
               lineHeight: 1.5,
               marginBottom: 16,
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--border)",
+              borderRadius: 8,
               cursor: "pointer",
             }}
           >
-            <input type="checkbox" checked={removeWt} onChange={(e) => setRemoveWt(e.target.checked)} />
-            {t("tree.deleteWorktrees", worktreePaths.length)}
+            <input
+              type="checkbox"
+              checked={removeWt}
+              onChange={(e) => setRemoveWt(e.target.checked)}
+              style={{
+                width: 16,
+                height: 16,
+                margin: "2px 0 0",
+                accentColor: "var(--accent)",
+                cursor: "pointer",
+              }}
+            />
+            <span>{t("tree.deleteWorktrees", worktreePaths.length)}</span>
           </label>
         )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
@@ -112,6 +130,130 @@ export function ConfirmDelete({
             onClick={() => onConfirm(removeWt)}
           >
             {t("common.delete")}
+          </button>
+        </div>
+      </div>
+    </Backdrop>
+  );
+}
+
+/** Approval for an archive that deletes worker worktrees and their branches, which cannot be undone. */
+export function ConfirmArchive({
+  worktreePaths,
+  onConfirm,
+  onCancel,
+}: {
+  worktreePaths: string[];
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const t = useT();
+  return (
+    <Backdrop onClose={onCancel}>
+      <div
+        style={{
+          width: 440,
+          maxWidth: "calc(100vw - 32px)",
+          boxSizing: "border-box",
+          background: "var(--bg-panel)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          padding: 18,
+          boxShadow: "0 10px 40px rgba(0,0,0,0.5)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 10 }}>
+          {t("tree.archiveConfirmTitle")}
+        </div>
+        <div
+          role="alert"
+          style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: 12 }}
+        >
+          {t("tree.archiveConfirmBody", worktreePaths.length)}
+        </div>
+        <div
+          style={{
+            maxHeight: 200,
+            overflowY: "auto",
+            fontSize: 12,
+            fontFamily: "var(--font-mono, monospace)",
+            color: "var(--text-primary)",
+            lineHeight: 1.6,
+            wordBreak: "break-all",
+            padding: "10px 12px",
+            marginBottom: 18,
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+          }}
+        >
+          {worktreePaths.map((path) => (
+            <div key={path}>{path}</div>
+          ))}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button className="vlx-btn" onClick={onCancel}>
+            {t("common.cancel")}
+          </button>
+          <button className="vlx-btn vlx-btn-primary" onClick={onConfirm}>
+            {t("tree.archiveConfirmAction")}
+          </button>
+        </div>
+      </div>
+    </Backdrop>
+  );
+}
+
+/** Message of a rejected archive, which the IPC layer may reject with as a plain string. */
+export function archiveErrorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Refusal notice for an archive that would strand a worker worktree, showing the backend reason. */
+export function ArchiveBlocked({ message, onClose }: { message: string; onClose: () => void }) {
+  const t = useT();
+  return (
+    <Backdrop onClose={onClose}>
+      <div
+        style={{
+          width: 440,
+          maxWidth: "calc(100vw - 32px)",
+          boxSizing: "border-box",
+          background: "var(--bg-panel)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          padding: 18,
+          boxShadow: "0 10px 40px rgba(0,0,0,0.5)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)", marginBottom: 10 }}>
+          {t("tree.archiveBlockedTitle")}
+        </div>
+        <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: 12 }}>
+          {t("tree.archiveBlockedBody")}
+        </div>
+        <div
+          style={{
+            fontSize: 12,
+            fontFamily: "var(--font-mono, monospace)",
+            color: "var(--text-primary)",
+            lineHeight: 1.6,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            padding: "10px 12px",
+            marginBottom: 18,
+            background: "var(--bg-elevated)",
+            border: "1px solid var(--border)",
+            borderRadius: 8,
+          }}
+        >
+          {message}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button className="vlx-btn vlx-btn-primary" onClick={onClose}>
+            {t("common.close")}
           </button>
         </div>
       </div>

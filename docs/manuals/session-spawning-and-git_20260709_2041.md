@@ -1,6 +1,7 @@
 # Session Spawning & Git Collaboration
 
 Created: 2026-07-09 20:41
+Updated: 2026-08-14
 
 > Two features that work as a pair: spawning subtasks into independent child sessions with `vspawn` (optionally in isolated git worktrees), and a graphical merge to bring parallel branches back together. Together they make "several agents working the same repo in parallel" an everyday workflow.
 
@@ -21,7 +22,109 @@ What you get is a real session in the tree — its own process, fully interactiv
 
 The two terminal commands are injected into every session's PATH automatically — zero install.
 
-> **Prerequisite for agent skills:** enable **Vela Skills** in Settings ▸ General. This installs `vspawn`, `vspawn-tree`, and `vopen` into both `~/.claude/skills/` and the Codex skills directory (`$CODEX_HOME/skills` when set, otherwise `~/.codex/skills`); they're kept up to date automatically on app upgrades. After enabling, start a new Claude or Codex thread so the agent picks them up. Without this, only the terminal-typed `vspawn` / `vspawn-tree` commands work.
+Both commands accept optional launch configuration for the child session:
+
+- `--model <model>` selects the child's model (for example `vspawn --claude --model fable "task"`).
+- `--effort <level>` selects the reasoning effort (for example `high` or `xhigh`).
+- `--name <name>` sets the child session's name instead of deriving it from the task text.
+- `--agent-args "<raw args>"` replaces the per-agent default launch arguments from Settings.
+
+Model and effort persist on the child session, survive restart and resume, and are translated to
+agent-specific flags at launch: Claude uses `--model` and `--effort`; Codex uses `-m` and
+`-c model_reasoning_effort=`. Other agent types currently ignore these settings. When omitted, the
+agent's own defaults apply.
+
+> **Prerequisite for agent skills:** enable **Vela Skills** in Settings ▸ General. This installs `vspawn`, `vspawn-tree`, `vopen`, and `orch` into both `~/.claude/skills/` and the Codex skills directory (`$CODEX_HOME/skills` when set, otherwise `~/.codex/skills`); they're kept up to date automatically on app upgrades. After enabling, start a new Claude or Codex thread so the agent picks them up. Without this, the terminal commands still work, but the conversation skills are unavailable.
+
+### Supervising children with `vagent`
+
+The `vagent` terminal command (also injected into every session's PATH) lets a parent session
+supervise the children it spawned. All output is JSON, and a session can only reach its own live
+descendants, addressed by id or unique name:
+
+```text
+vagent spawn --profile <p> --name <n> "<task>"
+vagent spawn --agent <kind> --model <m> --effort <e> --name <n> [--worktree] "<task>"
+vagent config
+vagent spawn-status <requestId>
+vagent list
+vagent status <id|name>
+vagent wait <id|name>...
+vagent read <id|name>
+vagent prompt <id|name> "<follow-up>"
+vagent cancel <id|name> | --all
+vagent diff <id|name>
+vagent land <id|name> --message "<conventional-subject>"
+vagent cleanup [--confirm]
+vagent retire <id|name> [--confirm]
+```
+
+`spawn` blocks until the child exists (respecting the confirmation card) and returns its session
+id. If the confirmation card remains open, collect the request later with `spawn-status`. Unknown
+model or effort values produce a warning, but the installed CLI remains authoritative and can still
+launch newer values.
+
+`wait` blocks while a child is working. Its result includes `blocked` permission prompts and
+`failed` workers. A failed worker includes its provider error text. `status` and each wait row expose
+the last turn outcome as `ok`, `error`, or `unknown`. `read` returns the child's last assistant reply
+(Claude, Codex, and Grok), or an error-role response when the last turn failed. `prompt` sends a
+follow-up into the child's conversation. `cancel` interrupts its current turn without closing the
+session, and `cancel --all` interrupts every running descendant.
+
+`config` prints the routing profiles, the spawn limits, and the caller's current child counts, all
+from Settings > Orchestration. A lead agent reads each profile description before it routes work.
+`--profile database` then launches a child with that profile's agent, model, effort, and worktree
+choice; an explicit flag still overrides the profile.
+
+`diff` returns the branch patch, the diff summary, and the commits the branch adds over its base as
+`commits`, `commitCount`, and `commitsTruncated`.
+
+`cleanup` lists the worktrees of children that have finished and hold no uncommitted changes;
+`cleanup --confirm` removes only verified landed worktrees and their disposable branches. A running
+child, an uncommitted worktree, or an unverified landing is blocked.
+
+`retire` previews one settled direct child subtree. `retire --confirm` stops its settled processes,
+removes verified landed worktrees and branches, and archives the subtree. The archived sessions no
+longer count against `maxDescendants`. Dirty or unlanded worktrees block retirement.
+
+"Archive Session" in the tree menu runs the same worktree check. It cleans a verified landed
+worktree and its branch, and it refuses an archive that would strand an unverified worktree.
+A worker cannot resume exactly after archive cleanup deletes its worktree, branch, and stored
+worktree binding.
+
+`land` requires a Lead-written Conventional Commit subject. It applies the direct child's net
+change to the parent's current branch as one commit. Temporary worker commits do not enter the
+parent history.
+
+The worker must have a clean worktree and at least one commit ahead of its base. Landing does not
+rebase the worker. A conflict restores the parent and reports the conflicting paths.
+
+VelaTerm stores the worker change fingerprint and the resulting parent commit. This record makes
+landing retries and cleanup safe after a crash. Nested workers use the same boundary at each level.
+
+### Orchestration settings
+
+Settings ▸ Orchestration is one place for everything a lead agent needs:
+
+- **Profiles**: named bundles of description, agent, model, effort, worktree, and permission mode. `inherit` maps
+  the parent's abstract permission level to the child agent's closest equivalent. New and built-in profiles use
+  `inherit`. Four profiles ship by
+  default: `database`, `frontend`, `quick-edits`, and `tests`. Add, edit, and delete them freely.
+- **Limits**, enforced by the app on every spawn rather than by prompt text: `maxDescendants` retained
+  descendants per lead, `maxParallel` active descendants, `maxDepth` for child-of-child nesting,
+  the child count above which the confirmation card appears even when confirmation is off, and the
+  default `vagent wait` timeout. A spawn that would cross a limit fails with a message naming the
+  limit and the current count. The lead waits for parallel capacity or retires a settled child.
+- **Worktree copy patterns**: globs such as `docs/plans/**` for untracked or ignored files copied
+  from the repository root into each new worktree, so a worker can see local-only notes. Build
+  output such as `node_modules` is never copied, and workers still build from scratch.
+
+### The `/orch` skill
+
+`/orch <task>` turns the current agent session into a lead agent: it reads the configured
+profiles and limits with `vagent config`, decomposes the task, routes each work item to a profile,
+waits on and reviews each result, follows up where needed, and integrates the outcome. `/vspawn`
+stays manual and single-shot; only `/orch` manages workers autonomously.
 
 ## 3. Confirm before spawn
 
@@ -29,7 +132,7 @@ By default every spawn first shows a confirmation card (top-right, non-modal, do
 
 ![Spawn confirmation card](../assets/manuals/spawn-confirm.png)
 
-- Three editable fields: the **prompt** (multi-line), the **agent type** (defaults to the parent's), and **separate git worktree**.
+- Editable fields: the **prompt** (multi-line), the **agent type** (defaults to the parent's), **separate git worktree**, and the child's **model** and **effort** (empty keeps the agent's own defaults).
 - "Launch" starts the child session; "Cancel" drops the request. When an agent spawns several at once, cards are handled one at a time (the remaining count shows on the card).
 - If you'd rather skip confirmation entirely, turn off "Confirm before spawn" in Settings ▸ Behavior.
 

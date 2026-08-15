@@ -75,20 +75,20 @@ export async function flushNow(): Promise<void> {
   });
 }
 
-/**
- * Startup reconciliation: overwrite the local cache from the authoritative backend and seed missing backend keys
- * from local values.
- *
- * Return the set of keys overwritten by differing backend values so callers can **reapply** their settings,
- * causing at most one flash. Enable propagation (`syncEnabled`) after completion.
- *
- * If the backend is unavailable, for example before the sidecar is ready, leave the local cache unchanged, return
- * an empty set, and still enable propagation. Later user changes attempt normal writes and fail silently if needed.
- */
-export async function reconcileSettings(): Promise<Set<string>> {
+/** `backendReached: false` leaves the cache unverified, so a caller must not write shared settings from it. */
+export interface ReconcileResult {
+  changed: Set<string>;
+  backendReached: boolean;
+}
+
+/** Startup reconciliation against the authoritative backend, returning the keys a caller must reapply.
+ *  An unavailable backend leaves the local cache unchanged and still enables propagation. */
+export async function reconcileSettings(): Promise<ReconcileResult> {
   const changed = new Set<string>();
+  let backendReached = false;
   try {
     const backend = await invoke<Record<string, string>>("get_app_settings");
+    backendReached = true;
     const seed: Record<string, string> = {};
     for (const key of SYNCED_KEYS) {
       const local = localStorage.getItem(key);
@@ -111,5 +111,5 @@ export async function reconcileSettings(): Promise<Set<string>> {
   } finally {
     syncEnabled = true;
   }
-  return changed;
+  return { changed, backendReached };
 }

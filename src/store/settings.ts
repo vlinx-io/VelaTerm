@@ -49,8 +49,35 @@ export interface AgentDefaultConfig {
   path?: string;
 }
 
-/** Terminal renderer: DOM is the stable default; canvas uses a responsive 2D bitmap without GPU
- * contexts; WebGL is sharpest but many terminals can exhaust contexts and return blank or misaligned. */
+/** Reusable worker profile. */
+export interface OrchestrationProfile {
+  description?: string;
+  agent?: string;
+  model?: string;
+  effort?: string;
+  worktree?: boolean;
+  permissionMode: "default" | "skip" | "inherit";
+}
+
+/** Backend-enforced orchestration limits. */
+export interface OrchestrationLimits {
+  /** Counts every retained, non-archived descendant session, including finished sessions. */
+  maxDescendants: number;
+  maxParallel: number;
+  maxDepth: number;
+  requireConfirmationAbove: number;
+  /** Whether `/orch` child sessions skip the launch confirmation card below the threshold. */
+  autoApprove: boolean;
+  /** Whether `vagent retire` skips its card; a plan that deletes worktrees always shows it. */
+  autoApproveRetire: boolean;
+  defaultTimeoutSecs: number;
+  worktreeCopyPatterns: string[];
+}
+
+/** Terminal renderer: canvas is the default because it draws box-drawing characters as
+ * cell-filling custom glyphs, so TUI tables stay intact at lineHeight > 1. DOM cannot do that and
+ * remains the no-surprises fallback; WebGL is sharpest but many terminals can exhaust contexts
+ * and return blank or misaligned. */
 export type TermRenderer = "dom" | "canvas" | "webgl";
 
 /** Image paste mode, configurable only on local desktop clients; browser/remote always upload.
@@ -60,6 +87,9 @@ export type ImagePasteMode = "upload" | "agent";
 
 /** Persisted Vlinx appearance settings for accent, density, splits, separators, navigation, and Inspector. */
 export const SETTINGS_KEY = "vlx-settings";
+
+/** Marker for the agent probe that resolves the built-in orchestration profiles, which must run only once. */
+export const ORCH_RESOLVED_KEY = "vlx-orch-defaults-resolved";
 export interface PersistedSettings {
   accent: AccentChoice;
   density: Density;
@@ -69,8 +99,8 @@ export interface PersistedSettings {
   inspectorTab: InspectorTab;
   /** Single-tab mode reuses the current tab and keeps the previous tree alive in the background. */
   singleTabMode: boolean;
-  /** Terminal renderer. DOM is stable; canvas avoids DOM overhead without GPU contexts; WebGL is sharp
-   * but many terminals can hit context limits and return blank or misaligned. */
+  /** Terminal renderer. Canvas is the default and keeps box-drawing glyphs seamless; DOM is the
+   * fallback; WebGL is sharp but many terminals can hit context limits and return blank or misaligned. */
   termRenderer: TermRenderer;
   /** Advanced full redraw on tab return, off by default. Enable only to mitigate GPU artifacts or
    * blank frames; normal tab switching redraws only after a size change. */
@@ -108,6 +138,8 @@ export interface PersistedSettings {
   /** Image paste mode: upload writes a file path, while agent lets the agent read the clipboard and show
    * `[Image #x]`. Configurable only on local desktop clients; browser and remote clients always upload. */
   imagePasteMode: ImagePasteMode;
+  orchestrationProfiles: Record<string, OrchestrationProfile>;
+  orchestration: OrchestrationLimits;
 }
 const SETTINGS_DEFAULTS: PersistedSettings = {
   accent: "auto",
@@ -117,7 +149,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   navLayout: "tree",
   inspectorTab: "info",
   singleTabMode: true,
-  termRenderer: "dom",
+  termRenderer: "canvas",
   redrawOnReveal: false,
   outputScheduler: true,
   dynamicStatusFilter: true,
@@ -133,11 +165,154 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   saveWorkspaceOnQuit: false,
   usageRefreshSec: 300,
   imagePasteMode: "upload",
+  orchestrationProfiles: {
+    database: {
+      description:
+        "Use for database schemas, migrations, queries, indexes, persistence, and data access.",
+      agent: "claude",
+      model: "opus",
+      effort: "high",
+      worktree: true,
+      permissionMode: "inherit",
+    },
+    frontend: {
+      description:
+        "Use for UI components, routes, styling, responsive behavior, and browser interactions.",
+      agent: "claude",
+      model: "opus",
+      effort: "high",
+      worktree: true,
+      permissionMode: "inherit",
+    },
+    "quick-edits": {
+      description:
+        "Use for simple, well-scoped updates such as find-and-replace changes, small configuration edits, text revisions, and other mechanical changes.",
+      agent: "codex",
+      model: "gpt-5.6-luna",
+      effort: "xhigh",
+      worktree: true,
+      permissionMode: "inherit",
+    },
+    tests: {
+      description: "Use for focused unit, integration, regression, and end-to-end tests.",
+      agent: "codex",
+      model: "gpt-5.6-luna",
+      effort: "xhigh",
+      worktree: true,
+      permissionMode: "inherit",
+    },
+  },
+  orchestration: {
+    maxDescendants: 10,
+    maxParallel: 4,
+    maxDepth: 2,
+    requireConfirmationAbove: 6,
+    autoApprove: false,
+    autoApproveRetire: false,
+    defaultTimeoutSecs: 1800,
+    worktreeCopyPatterns: ["docs/plans/**"],
+  },
 };
+/** Copy defaults with fresh nested orchestration values. */
+function defaultSettings(): PersistedSettings {
+  return {
+    ...SETTINGS_DEFAULTS,
+    orchestrationProfiles: { ...SETTINGS_DEFAULTS.orchestrationProfiles },
+    orchestration: {
+      ...SETTINGS_DEFAULTS.orchestration,
+      worktreeCopyPatterns: [...SETTINGS_DEFAULTS.orchestration.worktreeCopyPatterns],
+    },
+  };
+}
+
+/** Fill missing or invalid orchestration limits from the defaults. */
+function mergeOrchestration(stored: Partial<OrchestrationLimits> | undefined): OrchestrationLimits {
+  const d = SETTINGS_DEFAULTS.orchestration;
+  const s = stored && typeof stored === "object" ? stored : {};
+  const num = (v: unknown, fallback: number) =>
+    typeof v === "number" && Number.isFinite(v) ? v : fallback;
+  return {
+    maxDescendants: num(s.maxDescendants, d.maxDescendants),
+    maxParallel: num(s.maxParallel, d.maxParallel),
+    maxDepth: num(s.maxDepth, d.maxDepth),
+    requireConfirmationAbove: num(s.requireConfirmationAbove, d.requireConfirmationAbove),
+    autoApprove: typeof s.autoApprove === "boolean" ? s.autoApprove : d.autoApprove,
+    autoApproveRetire:
+      typeof s.autoApproveRetire === "boolean" ? s.autoApproveRetire : d.autoApproveRetire,
+    defaultTimeoutSecs: num(s.defaultTimeoutSecs, d.defaultTimeoutSecs),
+    worktreeCopyPatterns: Array.isArray(s.worktreeCopyPatterns)
+      ? s.worktreeCopyPatterns.filter((p): p is string => typeof p === "string")
+      : [...d.worktreeCopyPatterns],
+  };
+}
+
+/** Normalize stored profiles and migrate missing or invalid permission modes to inherit. */
+function mergeOrchestrationProfiles(stored: unknown): Record<string, OrchestrationProfile> {
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) {
+    return { ...SETTINGS_DEFAULTS.orchestrationProfiles };
+  }
+  return Object.fromEntries(
+    Object.entries(stored).flatMap(([name, value]) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      const profile = value as Partial<OrchestrationProfile>;
+      return [
+        [
+          name,
+          {
+            ...profile,
+            permissionMode:
+              profile.permissionMode === "skip" || profile.permissionMode === "inherit"
+                ? profile.permissionMode
+                : "inherit",
+          },
+        ],
+      ];
+    }),
+  );
+}
+
+/** Profile sets shipped by earlier versions, marking an installation that never edited its profiles. */
+const SUPERSEDED_PROFILE_DEFAULTS: Record<string, OrchestrationProfile>[] = [
+  {
+    ...SETTINGS_DEFAULTS.orchestrationProfiles,
+    database: { ...SETTINGS_DEFAULTS.orchestrationProfiles.database, model: "fable" },
+  },
+];
+
+function sameProfileSet(
+  a: Record<string, OrchestrationProfile>,
+  b: Record<string, OrchestrationProfile>,
+): boolean {
+  const names = Object.keys(a);
+  if (names.length !== Object.keys(b).length) return false;
+  return names.every((name) => {
+    const x = a[name];
+    const y = b[name];
+    return (
+      y !== undefined &&
+      x.description === y.description &&
+      x.agent === y.agent &&
+      x.model === y.model &&
+      x.effort === y.effort &&
+      x.worktree === y.worktree &&
+      x.permissionMode === y.permissionMode
+    );
+  });
+}
+
+/** Whether the profiles still match a shipped default set, meaning the user has never edited them. */
+export function hasBuiltinOrchestrationProfiles(
+  profiles: Record<string, OrchestrationProfile>,
+): boolean {
+  return [SETTINGS_DEFAULTS.orchestrationProfiles, ...SUPERSEDED_PROFILE_DEFAULTS].some((set) =>
+    sameProfileSet(set, profiles),
+  );
+}
+
 export function loadSettings(): PersistedSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return { ...SETTINGS_DEFAULTS };
+    if (!raw) return defaultSettings();
     // Older versions stored boolean gpuRender outside PersistedSettings; declare it solely for migration.
     const parsed = JSON.parse(raw) as Partial<PersistedSettings> & { gpuRender?: boolean };
     const merged = { ...SETTINGS_DEFAULTS, ...parsed };
@@ -146,9 +321,11 @@ export function loadSettings(): PersistedSettings {
     if (parsed.termRenderer === undefined && typeof parsed.gpuRender === "boolean") {
       merged.termRenderer = parsed.gpuRender ? "webgl" : "dom";
     }
+    merged.orchestration = mergeOrchestration(parsed.orchestration);
+    merged.orchestrationProfiles = mergeOrchestrationProfiles(parsed.orchestrationProfiles);
     return merged;
   } catch {
-    return { ...SETTINGS_DEFAULTS };
+    return defaultSettings();
   }
 }
 export function saveSettings(s: PersistedSettings) {

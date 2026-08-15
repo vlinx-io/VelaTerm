@@ -8,6 +8,7 @@ import {
   type PtySpawnArgs,
   type PtySpawnResult,
 } from "./transport";
+import type { OrchestrationProfile } from "../store/settings";
 import type { Session } from "../types";
 
 /** PTY launch parameters, including a child session's first-launch prompt. */
@@ -142,6 +143,12 @@ export function agentInstallRecipe(agent: string): Promise<AgentInstallRecipe | 
  */
 export function agentLocateBin(agent: string): Promise<string | null> {
   return invoke<string | null>("agent_locate_bin", { agent });
+}
+
+/** Default orchestration profiles resolved against the installed agents. Detection runs a subprocess, so
+ *  call this once and store the result. */
+export function orchestrationDefaultProfiles(): Promise<Record<string, OrchestrationProfile>> {
+  return invoke<Record<string, OrchestrationProfile>>("orchestration_default_profiles");
 }
 
 /** Bundled/full Git Bash installation state, meaningful only on Windows. */
@@ -368,6 +375,39 @@ export interface WorktreeInfo {
   branch: string;
   /** Full base ref from repository root when created; landing targets it. */
   baseRef: string;
+}
+
+/** Reports a correlated spawn outcome so a parked `vagent spawn` request can answer its caller.
+ * Returns false when the waiter already timed out; callers may ignore the result. */
+export function spawnResult(
+  requestId: string,
+  result: {
+    sessionId?: string;
+    error?: string;
+    worktreeError?: string;
+    awaitingConfirmation?: boolean;
+  },
+): Promise<boolean> {
+  return invoke<boolean>("spawn_result", {
+    requestId,
+    sessionId: result.sessionId ?? null,
+    error: result.error ?? null,
+    worktreeError: result.worktreeError ?? null,
+    awaitingConfirmation: result.awaitingConfirmation ?? false,
+  });
+}
+
+/** Answers a correlated retire confirmation card so a parked `vagent retire` request can proceed.
+ * Returns false when the waiter already timed out; a late approval never retires the subtree. */
+export function retireResult(
+  requestId: string,
+  result: { approved: boolean; error?: string },
+): Promise<boolean> {
+  return invoke<boolean>("retire_result", {
+    requestId,
+    approved: result.approved,
+    error: result.error ?? null,
+  });
 }
 
 /** Creates an isolated Git worktree for a spawned/manual child; errors let callers fall back without one. */

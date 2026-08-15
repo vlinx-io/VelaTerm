@@ -2,9 +2,16 @@
 //! including their private controls and constants. Extracted from the growing SettingsModal; the main
 //! settings page renders the selected category. Shared Seg, Field, and SectionTitle live in settingsParts.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { normalizeArgDashes } from "../../args";
 import Icons from "../../components/Icons";
+import {
+  EFFORT_OPTIONS,
+  LAUNCH_CONFIG_KINDS,
+  MODEL_OPTIONS,
+  OTHER_VALUE,
+  ValueSelect,
+} from "../../components/SpawnConfirmModal";
 import { useT, type I18nKey } from "../../i18n";
 import {
   DEFAULT_BINDINGS,
@@ -508,6 +515,496 @@ export function AgentsPanel() {
         {t("settings.agentArgsHint")}
       </div>
     </>
+  );
+}
+
+/** Launch value control that preserves unsupported stored values as free text. */
+function LaunchValueField({
+  label,
+  value,
+  options,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  onCommit: (v: string) => void;
+}) {
+  const t = useT();
+  const [other, setOther] = useState(false);
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const free = other || (!!value && !options.includes(value));
+
+  return (
+    <Field label={label} className="orch-profile-row">
+      <div className="orch-inline-control orch-launch-control">
+        <ValueSelect
+          width={200}
+          value={free ? OTHER_VALUE : value}
+          options={[
+            { value: "", label: t("spawn.optionDefault") },
+            ...options.map((o) => ({ value: o, label: o })),
+            { value: OTHER_VALUE, label: t("spawn.optionOther") },
+          ]}
+          onChange={(v) => {
+            if (v === OTHER_VALUE) {
+              setOther(true);
+              return;
+            }
+            setOther(false);
+            onCommit(v);
+          }}
+        />
+        {free && (
+          <input
+            className="vlx-input"
+            type="text"
+            value={draft}
+            spellCheck={false}
+            placeholder={label}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => onCommit(draft.trim())}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                setDraft(value);
+                setOther(false);
+              } else if (e.key === "Enter") {
+                e.currentTarget.blur();
+              }
+            }}
+            style={{
+              width: 200,
+              height: 30,
+              boxSizing: "border-box",
+              fontFamily: "var(--font-mono, monospace)",
+              fontSize: 12,
+            }}
+          />
+        )}
+      </div>
+    </Field>
+  );
+}
+
+function OrchProfileField({ label, children }: { label: string; children: React.ReactNode }) {
+  return <Field label={label} className="orch-profile-row">{children}</Field>;
+}
+
+/** Whole-number setting that restores its stored value for invalid input. */
+function NumberRow({
+  label,
+  value,
+  min,
+  className,
+  onCommit,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  className?: string;
+  onCommit: (v: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+  const commit = () => {
+    const n = Number(draft.trim());
+    if (!draft.trim() || !Number.isFinite(n)) {
+      setDraft(String(value));
+      return;
+    }
+    const clamped = Math.max(min, Math.round(n));
+    setDraft(String(clamped));
+    onCommit(clamped);
+  };
+  return (
+    <Field label={label} className={className}>
+      <input
+        className="vlx-input"
+        type="text"
+        inputMode="numeric"
+        value={draft}
+        spellCheck={false}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            setDraft(String(value));
+          } else if (e.key === "Enter") {
+            e.currentTarget.blur();
+          }
+        }}
+        style={{
+          width: 96,
+          height: 28,
+          boxSizing: "border-box",
+          fontSize: 12,
+          fontVariantNumeric: "tabular-nums",
+          textAlign: "right",
+        }}
+      />
+    </Field>
+  );
+}
+
+const ADD_PROFILE_VALUE = "__add_profile__";
+
+/** Settings for reusable worker profiles and backend-enforced limits. */
+export function OrchestrationPanel() {
+  const t = useT();
+  const profiles = useTermStore((s) => s.orchestrationProfiles);
+  const setProfile = useTermStore((s) => s.setOrchestrationProfile);
+  const limits = useTermStore((s) => s.orchestration);
+  const setLimits = useTermStore((s) => s.setOrchestrationLimits);
+  const [selected, setSelected] = useState("");
+  const [nameDraft, setNameDraft] = useState("");
+  const [nameEditor, setNameEditor] = useState<"new" | "rename" | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const [patternDraft, setPatternDraft] = useState(limits.worktreeCopyPatterns.join("\n"));
+  useEffect(
+    () => setPatternDraft(limits.worktreeCopyPatterns.join("\n")),
+    [limits.worktreeCopyPatterns],
+  );
+
+  const names = Object.keys(profiles).sort();
+  const active = names.includes(selected) ? selected : (names[0] ?? "");
+  const profileSelectValue = active || ADD_PROFILE_VALUE;
+  const cfg = profiles[active] ?? {};
+  const kind = cfg.agent ?? "claude";
+  const hasLaunchConfig = (LAUNCH_CONFIG_KINDS as string[]).includes(kind);
+
+  const editNewProfile = () => {
+    setNameDraft("");
+    setNameError(null);
+    setNameEditor("new");
+  };
+
+  const editProfileName = () => {
+    setNameDraft(active);
+    setNameError(null);
+    setNameEditor("rename");
+  };
+
+  const cancelNameEdit = () => {
+    setNameDraft("");
+    setNameError(null);
+    setNameEditor(null);
+  };
+
+  const commitNameEdit = () => {
+    const name = nameDraft.trim();
+    if (!name) {
+      cancelNameEdit();
+      return;
+    }
+    if (profiles[name] && name !== active) {
+      setNameError(t("settings.scConflict", name));
+      return;
+    }
+    if (nameEditor === "new") {
+      setProfile(name, {});
+    } else if (active && name !== active) {
+      setProfile(active, null);
+      setProfile(name, profiles[active] ?? {});
+    }
+    setSelected(name);
+    cancelNameEdit();
+  };
+
+  useEffect(() => {
+    if (nameEditor) nameInputRef.current?.focus();
+  }, [nameEditor]);
+
+  return (
+    <div className="settings-orchestration">
+      <SectionTitle>{t("settings.orchProfilesTitle")}</SectionTitle>
+      <p className="orch-panel-hint orch-profile-intro">{t("settings.orchProfilesHint")}</p>
+      <div className="orch-profile-editor">
+        <Field label={t("settings.orchProfile")} className="orch-profile-selector-field">
+          <div className="orch-control-group">
+            <ValueSelect
+              width={180}
+              value={profileSelectValue}
+              options={[
+                ...names.map((n) => ({ value: n, label: n })),
+                {
+                  value: ADD_PROFILE_VALUE,
+                  label: t("settings.orchAddNew"),
+                  icon: <Icons.plus size={13} />,
+                },
+              ]}
+              onChange={(value) => {
+                if (value === ADD_PROFILE_VALUE) {
+                  editNewProfile();
+                } else {
+                  setSelected(value);
+                  cancelNameEdit();
+                }
+              }}
+              ariaLabel={t("settings.orchProfile")}
+            />
+            {names.length > 0 && (
+              <div className="orch-profile-actions">
+                <button className="vlx-btn" onClick={editProfileName}>
+                  {t("common.rename")}
+                </button>
+                <button className="vlx-btn" onClick={() => setProfile(active, null)}>
+                  {t("settings.orchDelete")}
+                </button>
+              </div>
+            )}
+          </div>
+        </Field>
+
+        {names.length === 0 && (
+          <p className="orch-empty-state">{t("settings.orchNoProfiles")}</p>
+        )}
+
+        {nameEditor && (
+          <div className="orch-name-editor">
+            <div className="orch-name-editor-label">
+              {nameEditor === "new" ? t("settings.orchAddNew") : t("common.rename")}
+            </div>
+            <div className="orch-name-editor-controls">
+              <input
+                ref={nameInputRef}
+                className="vlx-input"
+                type="text"
+                value={nameDraft}
+                spellCheck={false}
+                placeholder={t("settings.orchNewProfile")}
+                aria-label={t("settings.orchNewProfile")}
+                onChange={(e) => {
+                  setNameDraft(e.target.value);
+                  setNameError(null);
+                }}
+                onBlur={(e) => {
+                  if (
+                    !e.relatedTarget ||
+                    !(e.relatedTarget as HTMLElement).closest(".orch-name-editor")
+                  ) {
+                    if (!nameDraft.trim()) cancelNameEdit();
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.stopPropagation();
+                    cancelNameEdit();
+                  } else if (e.key === "Enter") {
+                    commitNameEdit();
+                  }
+                }}
+                style={{ width: 200, height: 28, boxSizing: "border-box", fontSize: 12 }}
+              />
+              <button
+                className="vlx-btn vlx-btn-primary"
+                disabled={!nameDraft.trim()}
+                onClick={commitNameEdit}
+              >
+                {nameEditor === "new" ? t("common.create") : t("common.save")}
+              </button>
+              <button className="vlx-btn" onClick={cancelNameEdit}>
+                {t("common.cancel")}
+              </button>
+            </div>
+            {nameError && <div className="orch-name-editor-error">{nameError}</div>}
+          </div>
+        )}
+
+        {names.length > 0 && (
+          <>
+            <div className="orch-description-block">
+              <label htmlFor={`orch-description-${active}`}>
+                {t("settings.orchDescription")}
+              </label>
+              <textarea
+                id={`orch-description-${active}`}
+                key={`description-${active}`}
+                className="orch-description-input"
+                defaultValue={cfg.description ?? ""}
+                rows={2}
+                placeholder={t("settings.orchDescriptionPlaceholder")}
+                onBlur={(e) =>
+                  setProfile(active, { description: e.currentTarget.value.trim() || undefined })
+                }
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.stopPropagation();
+                    e.currentTarget.value = cfg.description ?? "";
+                    e.currentTarget.blur();
+                  }
+                }}
+              />
+            </div>
+            <div className="orch-profile-grid">
+              <OrchProfileField label={t("resume.agentType")}>
+                <AgentSelect
+                  value={kind as SessionKind}
+                  onChange={(v) => setProfile(active, { agent: v })}
+                />
+              </OrchProfileField>
+
+              {hasLaunchConfig && (
+                <>
+                  <LaunchValueField
+                    key={`model-${active}-${kind}`}
+                    label={t("settings.orchModel")}
+                    value={cfg.model ?? ""}
+                    options={MODEL_OPTIONS[kind] ?? []}
+                    onCommit={(v) => setProfile(active, { model: v })}
+                  />
+                  <LaunchValueField
+                    key={`effort-${active}-${kind}`}
+                    label={t("settings.orchEffort")}
+                    value={cfg.effort ?? ""}
+                    options={EFFORT_OPTIONS[kind] ?? []}
+                    onCommit={(v) => setProfile(active, { effort: v })}
+                  />
+                </>
+              )}
+
+              <OrchProfileField label={t("settings.orchWorktree")}>
+                <Seg<"on" | "off">
+                  value={cfg.worktree ? "on" : "off"}
+                  options={[
+                    ["on", t("common.on")],
+                    ["off", t("common.off")],
+                  ]}
+                  onChange={(v) => setProfile(active, { worktree: v === "on" })}
+                />
+              </OrchProfileField>
+
+              <OrchProfileField label={t("settings.orchPermissionMode")}>
+                <ValueSelect
+                  width={200}
+                  value={cfg.permissionMode ?? "inherit"}
+                  options={[
+                    { value: "inherit", label: t("settings.orchPermissionInherit") },
+                    { value: "default", label: t("settings.orchPermissionDefault") },
+                    { value: "skip", label: t("settings.orchPermissionSkip") },
+                  ]}
+                  onChange={(v) =>
+                    setProfile(active, {
+                      permissionMode:
+                        v === "skip" || v === "inherit" ? v : "default",
+                    })
+                  }
+                  ariaLabel={t("settings.orchPermissionMode")}
+                />
+              </OrchProfileField>
+              {cfg.permissionMode === "skip" && (
+                <p
+                  className="orch-panel-hint"
+                  style={{ margin: "6px 0 4px", color: "var(--warning, #c9a227)" }}
+                >
+                  {t("settings.orchPermissionSkipWarning")}
+                </p>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      <SectionTitle>{t("settings.orchLimitsTitle")}</SectionTitle>
+      <div className="orch-limit-grid">
+        <NumberRow
+          className="orch-limit-row"
+          label={t("settings.orchMaxDescendants")}
+          value={limits.maxDescendants}
+          min={1}
+          onCommit={(v) => setLimits({ maxDescendants: v })}
+        />
+        <NumberRow
+          className="orch-limit-row"
+          label={t("settings.orchMaxParallel")}
+          value={limits.maxParallel}
+          min={1}
+          onCommit={(v) => setLimits({ maxParallel: v })}
+        />
+        <NumberRow
+          className="orch-limit-row"
+          label={t("settings.orchMaxDepth")}
+          value={limits.maxDepth}
+          min={1}
+          onCommit={(v) => setLimits({ maxDepth: v })}
+        />
+        <NumberRow
+          className="orch-limit-row"
+          label={t("settings.orchConfirmAbove")}
+          value={limits.requireConfirmationAbove}
+          min={1}
+          onCommit={(v) => setLimits({ requireConfirmationAbove: v })}
+        />
+        <NumberRow
+          className="orch-limit-row orch-limit-row-wide"
+          label={t("settings.orchTimeout")}
+          value={limits.defaultTimeoutSecs}
+          min={1}
+          onCommit={(v) => setLimits({ defaultTimeoutSecs: v })}
+        />
+      </div>
+      <Field
+        label={t("settings.orchAutoApprove")}
+        className="orch-limit-row orch-limit-row-wide"
+      >
+        <Seg<"on" | "off">
+          value={limits.autoApprove ? "on" : "off"}
+          options={[
+            ["on", t("common.on")],
+            ["off", t("common.off")],
+          ]}
+          onChange={(v) => setLimits({ autoApprove: v === "on" })}
+        />
+      </Field>
+      <Field
+        label={t("settings.orchAutoApproveRetire")}
+        className="orch-limit-row orch-limit-row-wide"
+      >
+        <Seg<"on" | "off">
+          value={limits.autoApproveRetire ? "on" : "off"}
+          options={[
+            ["on", t("common.on")],
+            ["off", t("common.off")],
+          ]}
+          onChange={(v) => setLimits({ autoApproveRetire: v === "on" })}
+        />
+      </Field>
+      <div className="orch-panel-help">
+        <p className="orch-panel-hint">{t("settings.orchAutoApproveHint")}</p>
+        <p className="orch-panel-hint">{t("settings.orchAutoApproveRetireHint")}</p>
+        <p className="orch-panel-hint">{t("settings.orchConfirmAboveHint")}</p>
+        <p className="orch-panel-hint">{t("settings.orchLimitsHint")}</p>
+      </div>
+
+      <SectionTitle>{t("settings.orchCopyPatterns")}</SectionTitle>
+      <textarea
+        value={patternDraft}
+        rows={4}
+        placeholder={"docs/plans/**\n.env.local"}
+        spellCheck={false}
+        onChange={(e) => setPatternDraft(e.target.value)}
+        onBlur={() =>
+          setLimits({
+            worktreeCopyPatterns: patternDraft
+              .split("\n")
+              .map((p) => p.trim())
+              .filter(Boolean),
+          })
+        }
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            setPatternDraft(limits.worktreeCopyPatterns.join("\n"));
+          }
+        }}
+        className="orch-patterns-input"
+      />
+      <p className="orch-panel-hint">{t("settings.orchCopyPatternsHint")}</p>
+
+    </div>
   );
 }
 

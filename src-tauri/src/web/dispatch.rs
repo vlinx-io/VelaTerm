@@ -241,6 +241,10 @@ pub fn dispatch(
         "agent_locate_bin" => to_value(crate::agent::install::locate_installed_bin(&req_str(
             args, "agent",
         )?)),
+        // Probes the installed agents, so callers must ask once and store the result.
+        "orchestration_default_profiles" => {
+            Ok(crate::agent::orchestration::resolved_default_profiles_json())
+        }
 
         // ── Tree management orchestrated by command_core ──
         "list_tree" => to_value(core::list_tree(app)?),
@@ -291,6 +295,8 @@ pub fn dispatch(
             opt_str(args, "permissionMode").as_deref(),
             opt_str(args, "agentSessionId").as_deref(),
             opt_str(args, "worktreeBaseRef").as_deref(),
+            opt_str(args, "model").as_deref(),
+            opt_str(args, "effort").as_deref(),
         )?),
         "persist_session" => to_value(core::persist_session(
             app,
@@ -305,6 +311,30 @@ pub fn dispatch(
             opt_str(args, "parentSessionId").as_deref(),
         )?),
         "fork_session" => to_value(core::fork_session(app, &req_str(args, "sessionId")?)?),
+        // Deliver a spawn outcome to a parked `vagent spawn` request; false when it already timed out.
+        "spawn_result" => to_value(crate::agent::ctl::resolve_spawn(
+            &req_str(args, "requestId")?,
+            crate::agent::ctl::SpawnOutcome {
+                session_id: opt_str(args, "sessionId"),
+                error: opt_str(args, "error"),
+                worktree_error: opt_str(args, "worktreeError"),
+                awaiting_confirmation: args
+                    .get("awaitingConfirmation")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            },
+        )),
+        // Answer a parked `vagent retire` card; false when it already timed out and destroyed nothing.
+        "retire_result" => to_value(crate::agent::ctl::resolve_retire(
+            &req_str(args, "requestId")?,
+            crate::agent::ctl::RetireDecision {
+                approved: args
+                    .get("approved")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                error: opt_str(args, "error"),
+            },
+        )),
         "update_session" => {
             core::update_session(
                 app,
@@ -603,10 +633,15 @@ pub fn dispatch(
                 .ok_or("Missing pid")? as u32;
             to_value(crate::procstat::subtree_stats(pid))
         }
-        "create_worktree" => to_value(git::worktree_add(
-            &req_str(args, "repoRoot")?,
-            &req_str(args, "name")?,
-        )?),
+        "create_worktree" => {
+            let repo_root = req_str(args, "repoRoot")?;
+            let info = git::worktree_add(&repo_root, &req_str(args, "name")?)?;
+            let patterns = crate::agent::orchestration::load(app)
+                .limits
+                .worktree_copy_patterns;
+            let _ = git::copy_into_worktree(&repo_root, &info.path, &patterns);
+            to_value(info)
+        }
         "list_worktrees" => to_value(git::worktree_list(&req_str(args, "repoRoot")?)?),
         "worktrees_in_subtree" => to_value(core::worktrees_in_subtree(
             app,

@@ -99,6 +99,46 @@ const fr: typeof en = {
   "settings.agentPathPlaceholder": "ex. ~/.local/bin/claude — vide = recherche dans le PATH", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "Si défini, les sessions de ce type se lancent via ce chemin complet au lieu de chercher la commande dans le PATH. Utile quand l'agent est installé mais absent du PATH du shell. Rempli automatiquement après une installation en un clic si l'emplacement est détecté.", // Agent executable path hint
+  "settings.catOrchestration": "Orchestration",
+  "settings.orchProfilesTitle": "Profils de worker",
+  "settings.orchProfile": "Profil",
+  "settings.orchDescription": "Description",
+  "settings.orchDescriptionPlaceholder": "Décrivez quand utiliser ce profil.",
+  "settings.orchNewProfile": "Nom du nouveau profil",
+  "settings.orchAdd": "Ajouter",
+  "settings.orchAddNew": "Ajouter un profil",
+  "settings.orchDelete": "Supprimer",
+  "settings.orchNoProfiles":
+    "Aucun profil pour l'instant. Créez-en un pour le réutiliser à chaque spawn.",
+  "settings.orchProfilesHint":
+    "Les profils indiquent à un agent principal quelle configuration de worker convient à chaque tâche. Décrivez quand utiliser chaque profil, puis choisissez son agent, son modèle, son effort et son worktree.",
+  "settings.orchModel": "Modèle",
+  "settings.orchEffort": "Effort",
+  "settings.orchWorktree": "Worktree dédié",
+  "settings.orchPermissionMode": "Mode d'autorisation",
+  "settings.orchPermissionDefault": "Par défaut",
+  "settings.orchPermissionSkip": "Ignorer les confirmations",
+  "settings.orchPermissionInherit": "Hériter du parent",
+  "settings.orchPermissionSkipWarning":
+    "Ce worker s'exécute sans confirmation dans son worktree.",
+  "settings.orchLimitsTitle": "Limites",
+  "settings.orchMaxDescendants": "Descendants max.",
+  "settings.orchMaxParallel": "Parallélisme max.",
+  "settings.orchMaxDepth": "Profondeur max.",
+  "settings.orchConfirmAbove": "Confirmer au-delà de",
+  "settings.orchTimeout": "Délai par défaut (secondes)",
+  "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
+  "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
+  "settings.orchAutoApproveRetire": "Approuver le retrait automatiquement",
+  "settings.orchAutoApproveRetireHint":
+    "Archive un worker stabilisé sans carte de confirmation, y compris un nettoyage de worktree vérifié. Un retrait qui reprend un nettoyage non vérifié demande toujours.",
+  "settings.orchConfirmAboveHint":
+    "La carte de confirmation apparaît si un spawn ferait dépasser cette valeur au nombre de sessions descendantes actives, même si la confirmation des spawns est désactivée. Les sessions descendantes actives démarrent, travaillent ou attendent une demande d'autorisation.",
+  "settings.orchLimitsHint":
+    "Descendants max. compte chaque session descendante conservée, y compris les sessions terminées, qui gardent leur place jusqu'à leur archivage ou leur suppression. Parallélisme max. compte les sessions descendantes qui démarrent, travaillent ou attendent une demande d'autorisation.",
+  "settings.orchCopyPatterns": "Motifs de copie vers le worktree",
+  "settings.orchCopyPatternsHint":
+    "Un glob par ligne. Les fichiers non suivis ou ignorés qui correspondent sont copiés depuis la racine du dépôt vers chaque nouveau worktree. Les sorties de build comme node_modules ne sont jamais copiées, les workers compilent donc toujours à froid.",
   "settings.appearance": "Apparence", // Appearance
   "settings.accent": "Accent", // Accent
   "settings.accentAuto": "Suivre le thème", // Follow theme
@@ -141,10 +181,32 @@ const fr: typeof en = {
   "spawn.fromSession": "From", // From
   "spawn.promptLabel": "Prompt", // Prompt
   "spawn.agentLabel": "Agent", // Agent
+  "spawn.modelLabel": "Modèle", // Model
+  "spawn.effortLabel": "Effort", // Effort
+  "spawn.optionDefault": "par défaut", // default
+  "spawn.optionOther": "Autre...", // Other...
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
+  "retire.title": "Retirer cette session ?",
+  "retire.session": "Session",
+  "retire.actionArchive": "Archiver la session. Aucun worktree n'est supprimé.",
+  "retire.actionCleanup":
+    "Supprimer les worktrees ci-dessous, puis archiver la session.",
+  "retire.descendants": (n: number) =>
+    `Inclut ${n} session${n === 1 ? "" : "s"} descendante${n === 1 ? "" : "s"}.`,
+  "retire.irreversible": "Cette action est irréversible",
+  "retire.worktreeCount": (n: number) =>
+    `${n} worktree${n === 1 ? "" : "s"} et ${n === 1 ? "sa branche" : "leurs branches"} seront supprimés.`,
+  "retire.pathLabel": "Chemin",
+  "retire.branchLabel": "Branche",
+  "retire.branchUnknown": "inconnue",
+  "retire.resumed": "Le dossier a déjà disparu ; seule la branche reste.",
+  "retire.keep": "Conserver",
+  "retire.approve": "Retirer",
+  "retire.remaining": (n: number) => `${n} autre(s) en attente`,
+  "retire.notifyTitle": "Retrait en attente de confirmation", // Retire awaiting confirmation
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "Voir les modifications…",
@@ -374,6 +436,12 @@ const fr: typeof en = {
   "tree.killProcess": "Tuer le processus", // Kill Process
   "tree.archiveSession": "Archiver la session", // Archive Session
   "tree.archiveGroup": "Archiver le groupe", // Archive Group
+  "tree.archiveBlockedTitle": "Impossible d'archiver la session", // Cannot Archive Session
+  "tree.archiveBlockedBody": "L'archivage a été refusé. Une session archivée sort du périmètre de nettoyage, donc son worktree et sa branche resteraient orphelins.", // Archiving was refused. An archived session leaves the worker cleanup scope, so its worktree and branch would be stranded.
+  "tree.archiveConfirmTitle": "Archiver et supprimer les worktrees ?", // Archive and delete worktrees?
+  "tree.archiveConfirmBody": (n: number) =>
+    `L'archivage supprime ${n} worktree(s) de worker et leurs branches. Cette action est irréversible. Le travail est déjà sur la branche parente.`,
+  "tree.archiveConfirmAction": "Archiver", // Archive
   // Temporary (draft) sessions
   "tree.scratchTag": "temp", // scratch
   "tree.persistSession": "Convertir en session permanente…", // Make Permanent Session…
@@ -552,6 +620,7 @@ const fr: typeof en = {
   "archive.empty2":
     "Faites un clic droit sur une session dans la barre latérale et choisissez « Archiver la session » pour la ranger ici.", // Right-click a session in the sidebar…
   "archive.restore": "Restaurer en session normale", // Restore to normal session
+  "archive.retiredNote": "Un worker retiré ne peut pas reprendre à l'identique, car le retrait a déjà supprimé son worktree et sa branche.", // A retired worker cannot resume exactly, because retire already deleted its worktree and branch.
   "archive.export": "Exporter le contexte complet en Markdown", // Export full context as Markdown
   "archive.deleteForever": "Supprimer définitivement (avec l'enregistrement)", // Delete permanently (with recording)
   "archive.pickOne": "Sélectionnez une session archivée à gauche pour voir sa transcription", // Select an archived session on the left…

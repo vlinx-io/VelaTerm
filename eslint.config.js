@@ -49,7 +49,14 @@ const restrictedSyntax = [
 
 export default [
   {
-    ignores: ["dist/**", "node_modules/**", "src-tauri/**", "electron-poc/**"],
+    // Ignore nested session worktrees, which contain duplicate source trees.
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      "src-tauri/**",
+      "electron-poc/**",
+      ".vlx-worktrees/**",
+    ],
   },
   {
     files: ["src/**/*.{ts,tsx}"],

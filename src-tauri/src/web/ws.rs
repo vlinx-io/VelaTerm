@@ -192,15 +192,7 @@ async fn handle_socket(
     // Sessions with status/exit forwarding already registered, preventing duplicates.
     let mut listened: HashSet<String> = HashSet::new();
 
-    // Register session-independent global forwarding for spawn, document-open, tree, and clone events.
-    for name in [
-        "spawn://request",
-        "view://request",
-        crate::host::TREE_CHANGED,
-        crate::git::CLONE_PROGRESS_EVENT,
-    ] {
-        event_ids.push(listen_forward(&ctx.app, name, out_tx.clone()));
-    }
+    event_ids.extend(register_global_forwards(&ctx.app, out_tx.clone()));
 
     // Process the plaintext application frame retained during first-frame inspection.
     if let Some(first) = pending_first.take() {
@@ -476,6 +468,23 @@ fn listen_forward(app: &AppCtx, name: &str, out_tx: mpsc::UnboundedSender<Messag
     })
 }
 
+fn register_global_forwards(
+    app: &AppCtx,
+    out_tx: mpsc::UnboundedSender<Message>,
+) -> Vec<ListenerId> {
+    [
+        "spawn://request",
+        "view://request",
+        "retire://request",
+        "retire://cancel",
+        crate::host::TREE_CHANGED,
+        crate::git::CLONE_PROGRESS_EVENT,
+    ]
+    .into_iter()
+    .map(|name| listen_forward(app, name, out_tx.clone()))
+    .collect()
+}
+
 /// WS-side PTY spawn-or-attach. Builds a sink that wraps bytes in binary frames for the outbound channel,
 /// mirrors the reconnect/remote logic of `pty_spawn`, then calls `PtyManager::spawn`, which attaches and replays
 /// when the session already exists. `conn_source` identifies this connection and becomes sizing owner for a new
@@ -520,8 +529,15 @@ fn web_pty_spawn(
         let in_db = session.is_some();
         let resume = session.as_ref().and_then(|s| s.agent_session_id.clone());
         let created_at = session.as_ref().map(|s| s.created_at).unwrap_or(0);
-        // Merge custom launch arguments with the agent-specific permission-mode flag, matching desktop behavior.
+        // Merge custom launch arguments with model/effort and permission-mode flags, matching desktop behavior.
         let args = repo::get_agent_args(&conn, sid)?;
+        let (model, effort) = repo::get_model_effort(&conn, sid)?;
+        let args = crate::agent::inject::merge_model_effort_flags(
+            kind,
+            model.as_deref(),
+            effort.as_deref(),
+            args.as_deref(),
+        );
         let perm = repo::get_permission_mode(&conn, sid)?;
         let args =
             crate::agent::inject::merge_permission_flag(kind, perm.as_deref(), args.as_deref());
@@ -671,5 +687,31 @@ mod tests {
             json!("Web server not started"),
             "the Electron loopback lane must keep the full management plane"
         );
+    }
+
+    #[test]
+    fn global_forwarding_delivers_retire_lifecycle_events() {
+        let ctx = test_ctx(ServeMode::LoopbackHttp);
+        let (out_tx, mut out_rx) = mpsc::unbounded_channel();
+        let listener_ids = register_global_forwards(&ctx.app, out_tx);
+
+        for event_name in ["retire://request", "retire://cancel"] {
+            let payload = json!({"requestId": "retire-test"});
+            ctx.app.emit(event_name, payload.clone());
+            let message = out_rx
+                .try_recv()
+                .unwrap_or_else(|_| panic!("expected {event_name} to reach the WebSocket"));
+            let Message::Text(text) = message else {
+                panic!("expected a text event frame");
+            };
+            let frame: Value = serde_json::from_str(&text).expect("event frame must be JSON");
+            assert_eq!(frame["t"], json!("event"));
+            assert_eq!(frame["name"], json!(event_name));
+            assert_eq!(frame["payload"], payload);
+        }
+
+        for listener_id in listener_ids {
+            ctx.app.unlisten(listener_id);
+        }
     }
 }

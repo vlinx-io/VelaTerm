@@ -5,7 +5,7 @@ description: >-
   Only use when the user explicitly invokes /vspawn-tree or $vspawn-tree; never auto-trigger. This is a real session run by its
   own process in the vlx-term left-panel tree — not an in-process sub-agent, and not a background Task. Available only
   inside vlx-term-hosted sessions.
-argument-hint: "[--claude|--codex] <task>"
+argument-hint: "[--claude|--codex] [--model <model>] [--effort <level>] [--name <name>] <task>"
 disable-model-invocation: true
 allowed-tools: Bash(vspawn-tree:*)
 ---
@@ -49,13 +49,18 @@ Detect "specifying claude / codex" from the user input (or a leading `--claude` 
 flag, and **don't** write it into the prompt. The default follows the current session type. (This command always
 opens a worktree, so there's nothing to detect there.)
 
+Also detect launch configuration: naming a model ("use fable", "with opus") → add `--model <model>`; naming a
+reasoning effort ("high effort", "xhigh") → add `--effort <level>`; asking for a session name → add
+`--name <name>`. These persist on the child session and map to agent-specific launch flags; do not write them
+into the prompt. Defaults keep the agent's own model/effort.
+
 ## Step 3: Run the command (always opens a worktree)
 
 Pass the prompt you expanded in Step 1 **as a single argument** (escaping any quotes inside it correctly), and run
 `vspawn-tree` from PATH:
 
 ```bash
-vspawn-tree [--claude|--codex] "<expanded self-contained prompt>"
+vspawn-tree [--claude|--codex] [--model <model>] [--effort <level>] [--name <name>] "<expanded self-contained prompt>"
 ```
 
 After it succeeds, give the user a one-line summary: "Spawned a child session in vlx-term (dedicated worktree):

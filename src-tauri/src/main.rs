@@ -40,6 +40,7 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("--spawn") => velaterm_lib::run_spawn(&args),
         Some("--view") => velaterm_lib::run_view(&args),
+        Some("--agent-ctl") => velaterm_lib::run_agent_ctl(&args),
         _ => {}
     }
     // Raise the process's open-file soft limit on paths that can launch PTY sessions: --serve and the

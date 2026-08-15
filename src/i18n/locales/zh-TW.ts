@@ -97,6 +97,45 @@ const zhTW: typeof en = {
   "settings.agentPathPlaceholder": "如 ~/.local/bin/claude——留空則從 PATH 尋找", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "設定後，該類型工作階段一律按這條完整路徑啟動，不再從 PATH 尋找命令。適用於「已安裝但不在 shell PATH 上」的情況。一鍵安裝成功且能偵測到安裝位置時會自動填入。", // Agent executable path hint
+  "settings.catOrchestration": "編排",
+  "settings.orchProfilesTitle": "Worker 設定檔",
+  "settings.orchProfile": "設定檔",
+  "settings.orchDescription": "說明",
+  "settings.orchDescriptionPlaceholder": "說明何時應使用此設定檔。",
+  "settings.orchNewProfile": "新設定檔名稱",
+  "settings.orchAdd": "新增",
+  "settings.orchAddNew": "新增設定檔",
+  "settings.orchDelete": "刪除",
+  "settings.orchNoProfiles": "尚無設定檔。新建一個即可在每次派生時重複使用。",
+  "settings.orchProfilesHint":
+    "設定檔告訴主控智能體每項任務適合哪套 worker 設定. 請說明每個設定檔的使用條件, 然後選擇智能體, 模型, 推理強度和 worktree.",
+  "settings.orchModel": "模型",
+  "settings.orchEffort": "推理強度",
+  "settings.orchWorktree": "獨立 worktree",
+  "settings.orchPermissionMode": "權限模式",
+  "settings.orchPermissionDefault": "預設",
+  "settings.orchPermissionSkip": "略過確認",
+  "settings.orchPermissionInherit": "繼承父工作階段",
+  "settings.orchPermissionSkipWarning":
+    "此工作程序在自己的 worktree 中執行時不會要求確認.",
+  "settings.orchLimitsTitle": "限制",
+  "settings.orchMaxDescendants": "子孫工作階段上限",
+  "settings.orchMaxParallel": "並行上限",
+  "settings.orchMaxDepth": "最大深度",
+  "settings.orchConfirmAbove": "超過此數需確認",
+  "settings.orchTimeout": "預設逾時（秒）",
+  "settings.orchAutoApprove": "自動核准 /orch 衍生",
+  "settings.orchAutoApproveHint": "啟動 /orch 子工作階段時略過確認卡片。達到確認閾值時仍需要審核。",
+  "settings.orchAutoApproveRetire": "自動核准退役",
+  "settings.orchAutoApproveRetireHint":
+    "不顯示確認卡片即可封存已穩定的 worker, 包括已驗證的 worktree 清理。恢復未驗證清理的退役一律會詢問。",
+  "settings.orchConfirmAboveHint":
+    "若本次派生會讓活動中的後代工作階段數超過此值, 即使關閉派生確認, 確認卡片仍會出現。活動中的後代工作階段正在啟動, 正在工作或正在等待權限請求。",
+  "settings.orchLimitsHint":
+    "後代工作階段上限會統計所有保留的後代工作階段, 已結束的工作階段會一直占用名額, 直到封存或刪除。並行上限只統計正在啟動, 正在工作或正在等待權限請求的後代工作階段。",
+  "settings.orchCopyPatterns": "worktree 複製規則",
+  "settings.orchCopyPatternsHint":
+    "每行一個 glob。符合的未追蹤或被忽略的檔案會從儲存庫根目錄複製到每個新建 worktree。node_modules 等建置產物永遠不會複製，因此 worker 仍需從零建置。",
   "settings.appearance": "外觀", // Appearance
   "settings.accent": "強調色", // Accent
   "settings.accentAuto": "跟隨明暗", // Follow theme
@@ -139,10 +178,29 @@ const zhTW: typeof en = {
   "spawn.fromSession": "來自", // From
   "spawn.promptLabel": "提示詞", // Prompt
   "spawn.agentLabel": "智能體", // Agent
+  "spawn.modelLabel": "模型", // Model
+  "spawn.effortLabel": "推理強度", // Effort
+  "spawn.optionDefault": "預設", // default
+  "spawn.optionOther": "其他...", // Other...
   "spawn.worktreeLabel": "獨立 git worktree", // Separate git worktree
   "spawn.launch": "啟動", // Launch
   "spawn.remaining": (n: number) => `還有 ${n} 個待確認`, // ${n} more pending
   "spawn.notifyTitle": "派生會話待確認", // Spawn session awaiting confirmation
+  "retire.title": "退役此工作階段？",
+  "retire.session": "工作階段",
+  "retire.actionArchive": "封存此工作階段。不會刪除任何 worktree。",
+  "retire.actionCleanup": "刪除下列 worktree，然後封存此工作階段。",
+  "retire.descendants": (n: number) => `包含 ${n} 個子孫工作階段。`,
+  "retire.irreversible": "此操作無法復原",
+  "retire.worktreeCount": (n: number) => `將刪除 ${n} 個 worktree 及其分支。`,
+  "retire.pathLabel": "路徑",
+  "retire.branchLabel": "分支",
+  "retire.branchUnknown": "未知",
+  "retire.resumed": "目錄已不存在，僅剩分支。",
+  "retire.keep": "保留",
+  "retire.approve": "退役",
+  "retire.remaining": (n: number) => `還有 ${n} 個待處理`,
+  "retire.notifyTitle": "退役待確認", // Retire awaiting confirmation
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "查看變更…",
@@ -368,6 +426,12 @@ const zhTW: typeof en = {
   "tree.killProcess": "結束處理程序", // Kill Process
   "tree.archiveSession": "封存會話", // Archive Session
   "tree.archiveGroup": "封存分組", // Archive Group
+  "tree.archiveBlockedTitle": "無法封存工作階段", // Cannot Archive Session
+  "tree.archiveBlockedBody": "封存已被拒絕。封存後的工作階段會離開清理範圍，其工作樹與分支將被遺留。", // Archiving was refused. An archived session leaves the worker cleanup scope, so its worktree and branch would be stranded.
+  "tree.archiveConfirmTitle": "封存並刪除 worktree？", // Archive and delete worktrees?
+  "tree.archiveConfirmBody": (n: number) =>
+    `封存會刪除 ${n} 個 worker worktree 及其分支。此操作無法復原。相關工作已經在父分支上。`,
+  "tree.archiveConfirmAction": "封存", // Archive
   // Temporary (draft) sessions
   "tree.scratchTag": "臨時", // scratch
   "tree.persistSession": "轉為永久會話…", // Make Permanent Session…
@@ -543,6 +607,7 @@ const zhTW: typeof en = {
   "archive.empty1": "暫無封存會話。", // No archived sessions.
   "archive.empty2": "在左欄會話上按右鍵「封存會話」即可把它收進這裡。", // Right-click a session in the sidebar…
   "archive.restore": "恢復為正常會話", // Restore to normal session
+  "archive.retiredNote": "已退役的工作階段無法原樣恢復，因為退役時已刪除其工作樹與分支。", // A retired worker cannot resume exactly, because retire already deleted its worktree and branch.
   "archive.export": "匯出完整上下文為 Markdown", // Export full context as Markdown
   "archive.deleteForever": "徹底刪除（連帶錄製）", // Delete permanently (with recording)
   "archive.pickOne": "選擇左側一個封存會話查看其對話記錄", // Select an archived session on the left…

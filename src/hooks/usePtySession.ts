@@ -221,6 +221,12 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       cursorInactiveStyle: "outline",
       // Use bright colors for clearer bold text.
       drawBoldTextInBrightColors: true,
+      // Canvas/WebGL draw box-drawing and block characters as cell-filling custom glyphs. With
+      // lineHeight above 1.0 the raw font glyphs leave gaps, shattering TUI tables and borders;
+      // the DOM renderer cannot do this, which is why it is no longer the default renderer.
+      customGlyphs: true,
+      // Rescale wide glyphs that would overflow their cells instead of clipping them.
+      rescaleOverlappingGlyphs: true,
       // Override OSC 8 links because xterm's confirm/window.open flow fails under Tauri.
       linkHandler: terminalLinkHandler,
       theme: XTERM_THEME[resolveTheme(useTermStore.getState().theme)],
@@ -284,10 +290,11 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
     // renderer addons so ImageAddon observes renderer switches; terminal disposal releases it.
     term.loadAddon(new ImageAddon());
 
-    // Renderer setting applies to new terminals: DOM is the stable default but may reflow heavily;
-    // Canvas avoids DOM cost without GPU-context loss; WebGL is sharp/fast but advanced because hidden
-    // Tauri views can corrupt glyph atlases or lose contexts. Failure falls back to DOM. Load after
-    // open() and ImageAddon.
+    // Renderer setting applies to new terminals: Canvas is the default because it renders custom
+    // glyphs (seamless TUI tables) without GPU-context loss; DOM is the no-surprises fallback but
+    // cannot draw custom glyphs and may reflow heavily; WebGL is sharp/fast but advanced because
+    // hidden Tauri views can corrupt glyph atlases or lose contexts. Failure falls back to DOM.
+    // Load after open() and ImageAddon.
     const renderer = useTermStore.getState().termRenderer;
     if (renderer === "canvas") {
       try {

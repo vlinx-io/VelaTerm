@@ -1,6 +1,7 @@
 //! Inspect repository state through the system Git CLI without depending on libgit2.
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Read;
 use std::process::Stdio;
@@ -353,6 +354,175 @@ pub fn worktree_add(repo_root: &str, name: &str) -> Result<WorktreeInfo, String>
         branch,
         base_ref,
     })
+}
+
+/// Directory names excluded from worktree copy candidates.
+const COPY_SKIP_DIRS: [&str; 6] = [
+    ".git",
+    ".vlx-worktrees",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+];
+
+/// Copy limits prevent broad patterns from filling the disk or stalling worktree creation.
+const COPY_MAX_FILE_BYTES: u64 = 5 * 1024 * 1024;
+const COPY_MAX_FILES: usize = 500;
+
+/// Match a repository-relative path against a glob pattern.
+fn glob_match(pattern: &str, path: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let s: Vec<char> = path.chars().collect();
+    fn walk(p: &[char], pi: usize, s: &[char], si: usize) -> bool {
+        if pi == p.len() {
+            return si == s.len();
+        }
+        match p[pi] {
+            '*' => {
+                let double = p.get(pi + 1) == Some(&'*');
+                let next = if double { pi + 2 } else { pi + 1 };
+                let mut i = si;
+                loop {
+                    if walk(p, next, s, i) {
+                        return true;
+                    }
+                    if i == s.len() || (!double && s[i] == '/') {
+                        return false;
+                    }
+                    i += 1;
+                }
+            }
+            '?' => si < s.len() && s[si] != '/' && walk(p, pi + 1, s, si + 1),
+            c => si < s.len() && s[si] == c && walk(p, pi + 1, s, si + 1),
+        }
+    }
+    walk(&p, 0, &s, 0)
+}
+
+/// Return the literal root prefix of a glob pattern.
+fn pattern_root(pattern: &str) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    let segments: Vec<&str> = pattern.split('/').collect();
+    for (i, seg) in segments.iter().enumerate() {
+        let last = i + 1 == segments.len();
+        if last || seg.contains(['*', '?']) {
+            break;
+        }
+        parts.push(seg);
+    }
+    parts.join("/")
+}
+
+/// Collect matching repository-relative files under `root` within the copy limits.
+fn copy_candidates(root: &std::path::Path, patterns: &[String]) -> Vec<String> {
+    let skipped = |rel: &str| rel.split('/').any(|s| COPY_SKIP_DIRS.contains(&s));
+    let mut found: std::collections::BTreeSet<String> = Default::default();
+    for pattern in patterns {
+        let pattern = pattern.trim();
+        if pattern.is_empty() || pattern.starts_with('/') || pattern.contains("..") {
+            continue;
+        }
+        let base = pattern_root(pattern);
+        if skipped(&base) {
+            continue;
+        }
+        let start = root.join(&base);
+        let mut stack = vec![start];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
+                let Ok(rel) = path.strip_prefix(root) else {
+                    continue;
+                };
+                let rel = rel.to_string_lossy().replace('\\', "/");
+                let Ok(meta) = entry.metadata() else {
+                    continue;
+                };
+                if meta.is_dir() {
+                    if !COPY_SKIP_DIRS.contains(&name.as_str()) {
+                        stack.push(path);
+                    }
+                } else if meta.is_file()
+                    && meta.len() <= COPY_MAX_FILE_BYTES
+                    && glob_match(pattern, &rel)
+                {
+                    found.insert(rel);
+                }
+            }
+        }
+    }
+    found.into_iter().take(COPY_MAX_FILES).collect()
+}
+
+/// Remove paths Git already tracks from a copy candidate list.
+fn drop_tracked(root: &str, candidates: Vec<String>) -> Vec<String> {
+    if candidates.is_empty() {
+        return candidates;
+    }
+    let mut args: Vec<String> = vec!["ls-files".into(), "-z".into(), "--".into()];
+    args.extend(candidates.iter().cloned());
+    let Ok(out) = crate::host::command("git")
+        .arg("-C")
+        .arg(root)
+        .args(&args)
+        .output()
+    else {
+        return candidates;
+    };
+    if !out.status.success() {
+        return candidates;
+    }
+    let tracked: std::collections::HashSet<String> = String::from_utf8_lossy(&out.stdout)
+        .split('\0')
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    candidates
+        .into_iter()
+        .filter(|c| !tracked.contains(c))
+        .collect()
+}
+
+/// Copy matching untracked or ignored files into a new worktree.
+pub fn copy_into_worktree(
+    repo_root: &str,
+    worktree_path: &str,
+    patterns: &[String],
+) -> Result<Vec<String>, String> {
+    if patterns.is_empty() {
+        return Ok(Vec::new());
+    }
+    let top = run_git(repo_root, &["rev-parse", "--show-toplevel"])
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| repo_root.to_string());
+    let src_root = std::path::Path::new(&top);
+    let dst_root = std::path::Path::new(worktree_path);
+    if !dst_root.is_dir() {
+        return Err(format!("Worktree directory does not exist: {worktree_path}"));
+    }
+    let candidates = drop_tracked(&top, copy_candidates(src_root, patterns));
+
+    let mut copied = Vec::new();
+    for rel in candidates {
+        let dst = dst_root.join(&rel);
+        if dst.exists() {
+            continue;
+        }
+        if let Some(parent) = dst.parent() {
+            if std::fs::create_dir_all(parent).is_err() {
+                continue;
+            }
+        }
+        if std::fs::copy(src_root.join(&rel), &dst).is_ok() {
+            copied.push(rel);
+        }
+    }
+    Ok(copied)
 }
 
 /// Derive a clone directory from the last URL/SCP-style path segment, removing `.git`; return None
@@ -965,6 +1135,58 @@ pub fn commit_all(path: &str, message: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Drop registrations whose worktree directory is gone. Git refuses to delete a branch that a stale
+/// registration still claims, so a resumed cleanup must prune before it deletes the branch.
+pub fn worktree_prune(repo: &str) -> Result<(), String> {
+    let out = crate::host::command("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["worktree", "prune"])
+        .output()
+        .map_err(|e| format!("Failed to run git worktree prune: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(format!("Failed to prune worktrees: {err}"));
+    }
+    Ok(())
+}
+
+/// Report whether a local branch exists.
+#[cfg(test)]
+pub fn branch_exists(repo: &str, branch: &str) -> bool {
+    branch_exists_checked(repo, branch).unwrap_or(false)
+}
+
+fn branch_exists_checked(repo: &str, branch: &str) -> Result<bool, String> {
+    let out = crate::host::command("git")
+        .arg("-C")
+        .arg(repo)
+        .args([
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ])
+        .output()
+        .map_err(|error| format!("Failed to check branch: {error}"))?;
+    if out.status.success() {
+        return Ok(true);
+    }
+    if out.status.code() == Some(1) {
+        return Ok(false);
+    }
+    let error = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    Err(format!("Failed to check branch: {error}"))
+}
+
+/// Delete a branch, treating an already-absent branch as success so a resumed cleanup is idempotent.
+pub fn branch_delete_if_present(repo: &str, branch: &str) -> Result<(), String> {
+    if !branch_exists_checked(repo, branch)? {
+        return Ok(());
+    }
+    branch_delete(repo, branch)
+}
+
 /// Force-delete a local branch when cleaning up a merged child session.
 pub fn branch_delete(repo: &str, branch: &str) -> Result<(), String> {
     let out = crate::host::command("git")
@@ -1172,6 +1394,67 @@ fn land_diff_stat(wt_path: &str, base: &str, branch: &str) -> String {
     stat.unwrap_or_else(committed)
 }
 
+/// Return the patch between a baseline ref and a worktree branch.
+pub fn branch_diff_patch(wt_path: &str, base: &str, branch: &str) -> Result<String, String> {
+    if wt_path.trim().is_empty() || base.trim().is_empty() || branch.trim().is_empty() {
+        return Err("Missing worktree path, base ref, or branch".into());
+    }
+    let range = format!("{base}..{branch}");
+    run_git(
+        wt_path,
+        &["diff", "--no-ext-diff", "--no-color", &range, "--"],
+    )
+    .ok_or_else(|| format!("Cannot read diff for {range}"))
+}
+
+/// One commit that a worktree branch adds on top of its baseline.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchCommit {
+    pub sha: String,
+    pub short_sha: String,
+    pub subject: String,
+}
+
+/// List the commits a branch adds on top of a baseline ref, newest first. The list stops at `limit`
+/// entries; the returned count reports every commit in the range.
+pub fn branch_commits(
+    wt_path: &str,
+    base: &str,
+    branch: &str,
+    limit: usize,
+) -> Result<(Vec<BranchCommit>, usize), String> {
+    if wt_path.trim().is_empty() || base.trim().is_empty() || branch.trim().is_empty() {
+        return Err("Missing worktree path, base ref, or branch".into());
+    }
+    let range = format!("{base}..{branch}");
+    let out = run_git(
+        wt_path,
+        &["log", "--no-color", "--format=%H%x1f%h%x1f%s", &range],
+    )
+    .ok_or_else(|| format!("Cannot read commits for {range}"))?;
+    let mut commits = Vec::new();
+    let mut total = 0;
+    for line in out.lines().filter(|l| !l.trim().is_empty()) {
+        total += 1;
+        if commits.len() >= limit {
+            continue;
+        }
+        let mut parts = line.split('\u{1f}');
+        let (Some(sha), Some(short_sha), Some(subject)) =
+            (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        commits.push(BranchCommit {
+            sha: sha.to_string(),
+            short_sha: short_sha.to_string(),
+            subject: subject.to_string(),
+        });
+    }
+    Ok((commits, total))
+}
+
 /// Run landing preflight; return Err for non-Git worktrees or unresolved branches.
 pub fn land_targets(base_ref: Option<&str>, wt_path: &str) -> Result<LandTargets, String> {
     if wt_path.trim().is_empty() {
@@ -1270,7 +1553,7 @@ pub fn branch_list(cwd: &str) -> Result<BranchList, String> {
 }
 
 /// Test whether one commit is already an ancestor of another.
-fn is_ancestor(dir: &str, ancestor: &str, descendant: &str) -> bool {
+pub fn is_ancestor(dir: &str, ancestor: &str, descendant: &str) -> bool {
     crate::host::command("git")
         .arg("-C")
         .arg(dir)
@@ -1481,6 +1764,185 @@ pub fn merge_branches_apply(
     Err(format!("Merge failed: {err}"))
 }
 
+#[derive(Debug, Clone)]
+pub struct AgentLandSnapshot {
+    pub source_head: String,
+    pub source_tree: String,
+    pub diff_fingerprint: String,
+    pub target_before: String,
+    pub commits_ahead: u64,
+    pub target_dirty: bool,
+}
+
+pub fn agent_land_snapshot(
+    cwd: &str,
+    source: &str,
+    target: &str,
+) -> Result<AgentLandSnapshot, String> {
+    if cwd.trim().is_empty() {
+        return Err("No working directory".into());
+    }
+    if source == target {
+        return Err("Source and target are the same branch.".into());
+    }
+    let r = resolve_merge(cwd, source, target);
+    if !r.found {
+        return Err(format!("Branch '{source}' or '{target}' no longer exists."));
+    }
+    r.target_dir.as_ref().ok_or_else(|| {
+        format!(
+            "Target branch '{target}' isn't checked out in any worktree. Check it out first, then retry."
+        )
+    })?;
+    if r
+        .source_dir
+        .as_deref()
+        .map(worktree_has_changes)
+        .unwrap_or(false)
+    {
+        return Err(format!("Source branch '{source}' has uncommitted changes."));
+    }
+    let target_dir = r.target_dir.as_deref().unwrap();
+    let target_dirty = worktree_has_changes(target_dir);
+
+    let source_head = run_git(cwd, &["rev-parse", &r.source_full])
+        .ok_or_else(|| format!("Failed to read source branch '{source}'."))?;
+    let source_tree = run_git(cwd, &["rev-parse", &format!("{}^{{tree}}", r.source_full)])
+        .ok_or_else(|| format!("Failed to read source tree for '{source}'."))?;
+    let target_before = run_git(cwd, &["rev-parse", &r.target_full])
+        .ok_or_else(|| format!("Failed to read target branch '{target}'."))?;
+    let commits_ahead = run_git(cwd, &["rev-list", "--count", &r.source_full, "--not", &r.target_full])
+        .and_then(|value| value.parse().ok())
+        .ok_or_else(|| format!("Failed to count commits ahead for '{source}'."))?;
+    let merge_base = run_git(cwd, &["merge-base", &r.source_full, &r.target_full])
+        .ok_or_else(|| format!("Failed to find a merge base for '{source}' and '{target}'."))?;
+    let patch = crate::host::command("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(["diff", "--binary", "--full-index", &merge_base, &r.source_full])
+        .output()
+        .map_err(|e| format!("Failed to fingerprint worker changes: {e}"))?;
+    if !patch.status.success() {
+        return Err("Failed to fingerprint worker changes.".into());
+    }
+    let diff_fingerprint = format!("{:x}", Sha256::digest(&patch.stdout));
+
+    Ok(AgentLandSnapshot {
+        source_head,
+        source_tree,
+        diff_fingerprint,
+        target_before,
+        commits_ahead,
+        target_dirty,
+    })
+}
+
+pub fn agent_land_stage(cwd: &str, source: &str, target: &str) -> Result<MergeOutcome, String> {
+    let r = resolve_merge(cwd, source, target);
+    if !r.found {
+        return Err(format!("Branch '{source}' or '{target}' no longer exists."));
+    }
+    let target_dir = r.target_dir.ok_or_else(|| {
+        format!(
+            "Target branch '{target}' isn't checked out in any worktree. Check it out first, then retry."
+        )
+    })?;
+
+    let out = crate::host::command("git")
+        .arg("-C")
+        .arg(&target_dir)
+        .args(["merge", "--squash", source])
+        .output()
+        .map_err(|e| format!("Failed to run git merge --squash: {e}"))?;
+    if !out.status.success() {
+        let conflicts: Vec<String> =
+            run_git(&target_dir, &["diff", "--name-only", "--diff-filter=U"])
+                .map(|value| value.lines().map(str::to_string).collect())
+                .unwrap_or_default();
+        if !conflicts.is_empty() {
+            let _ = crate::host::command("git")
+                .arg("-C")
+                .arg(&target_dir)
+                .args(["reset", "--merge", "HEAD"])
+                .output();
+            return Ok(MergeOutcome {
+                merged: false,
+                conflict: true,
+                conflicts,
+                message: "Squash application conflicted and the target was restored.".into(),
+            });
+        }
+        let error = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(format!("Squash merge failed: {error}"));
+    }
+
+    Ok(MergeOutcome {
+        merged: true,
+        conflict: false,
+        conflicts: vec![],
+        message: format!("Staged the net change from {source} on {target}."),
+    })
+}
+
+pub fn agent_land_index_tree(cwd: &str, target: &str) -> Result<String, String> {
+    let r = resolve_merge(cwd, target, target);
+    let target_dir = r.target_dir.ok_or_else(|| {
+        format!("Target branch '{target}' isn't checked out in any worktree.")
+    })?;
+    run_git(&target_dir, &["write-tree"])
+        .ok_or_else(|| format!("Failed to read the staged tree for '{target}'."))
+}
+
+pub fn agent_land_commit(cwd: &str, target: &str, commit_message: &str) -> Result<String, String> {
+    let r = resolve_merge(cwd, target, target);
+    let target_dir = r.target_dir.ok_or_else(|| {
+        format!("Target branch '{target}' isn't checked out in any worktree.")
+    })?;
+    let commit = crate::host::command("git")
+        .arg("-C")
+        .arg(&target_dir)
+        .args(["commit", "-m", commit_message])
+        .output()
+        .map_err(|e| format!("Failed to commit squashed changes: {e}"))?;
+    if !commit.status.success() {
+        let _ = crate::host::command("git")
+            .arg("-C")
+            .arg(&target_dir)
+            .args(["reset", "--merge", "HEAD"])
+            .output();
+        let error = String::from_utf8_lossy(&commit.stderr).trim().to_string();
+        return Err(format!("Failed to commit squashed changes: {error}"));
+    }
+    run_git(&target_dir, &["rev-parse", "HEAD"])
+        .ok_or_else(|| format!("Failed to read the new commit on '{target}'."))
+}
+
+pub fn branch_head(cwd: &str, branch: &str) -> Option<String> {
+    run_git(cwd, &["rev-parse", &format!("refs/heads/{branch}")])
+}
+
+pub fn commit_tree(cwd: &str, commit: &str) -> Option<String> {
+    run_git(cwd, &["rev-parse", &format!("{commit}^{{tree}}")])
+}
+
+pub fn reset_branch_worktree(cwd: &str, branch: &str) -> Result<(), String> {
+    let r = resolve_merge(cwd, branch, branch);
+    let target_dir = r.target_dir.ok_or_else(|| {
+        format!("Target branch '{branch}' isn't checked out in any worktree.")
+    })?;
+    let output = crate::host::command("git")
+        .arg("-C")
+        .arg(&target_dir)
+        .args(["reset", "--merge", "HEAD"])
+        .output()
+        .map_err(|e| format!("Failed to restore target branch '{branch}': {e}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!("Failed to restore target branch '{branch}'."))
+    }
+}
+
 // ─────────────────────────── Change viewer (diff) ───────────────────────────
 // Show staged, unstaged, and untracked worktree changes against HEAD. The frontend lists files and
 // renders HEAD versus worktree content in CodeMirror MergeView.
@@ -1565,6 +2027,15 @@ fn repo_top(cwd: &str) -> String {
     run_git(cwd, &["rev-parse", "--show-toplevel"])
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| cwd.to_string())
+}
+
+pub fn repository_root(cwd: &str) -> Option<String> {
+    let common = run_git(cwd, &["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+    let common_path = std::path::Path::new(&common);
+    if common_path.file_name().and_then(|name| name.to_str()) == Some(".git") {
+        return common_path.parent().map(|path| path.to_string_lossy().to_string());
+    }
+    run_git(cwd, &["rev-parse", "--show-toplevel"])
 }
 
 /// Map porcelain XY codes to display status.
@@ -1758,8 +2229,95 @@ mod merge_tests {
         dir
     }
 
-    /// file_diff_at with the precomputed effective path returns exactly what file_diff returns —
-    /// the pass-through contract the web dispatch remote lane relies on after gating that path.
+    #[test]
+    fn branch_delete_if_present_reports_an_unavailable_repository() {
+        let missing = std::env::temp_dir().join(format!("vlx-missing-{}", Uuid::new_v4()));
+        let error = branch_delete_if_present(missing.to_string_lossy().as_ref(), "worker")
+            .expect_err("an unavailable repository is not an absent branch");
+        assert!(error.contains("check branch"));
+    }
+
+    #[test]
+    fn glob_match_separator_rules() {
+        assert!(glob_match("docs/plans/**", "docs/plans/a.md"));
+        assert!(glob_match("docs/plans/**", "docs/plans/archive/b.md"));
+        assert!(!glob_match("docs/plans/**", "docs/other/a.md"));
+        assert!(glob_match(".env*", ".env"));
+        assert!(glob_match(".env*", ".env.local"));
+        assert!(!glob_match(".env*", "sub/.env"));
+        assert!(glob_match("**/*.env", "sub/deep/x.env"));
+        assert!(glob_match("a?c.txt", "abc.txt"));
+        assert!(!glob_match("a?c.txt", "a/c.txt"));
+        assert!(glob_match("exact.md", "exact.md"));
+        assert!(!glob_match("exact.md", "exact.md.bak"));
+    }
+
+    #[test]
+    fn pattern_root_takes_literal_prefix() {
+        assert_eq!(pattern_root("docs/plans/**"), "docs/plans");
+        assert_eq!(pattern_root(".env*"), "");
+        assert_eq!(pattern_root("**/*.env"), "");
+        assert_eq!(pattern_root("docs/plans/archive/note.md"), "docs/plans/archive");
+    }
+
+    #[test]
+    fn copy_into_worktree_moves_untracked_matches_only() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+
+        std::fs::create_dir_all(repo.join("docs/plans/archive")).unwrap();
+        std::fs::write(repo.join("docs/plans/current.md"), "plan\n").unwrap();
+        std::fs::write(repo.join("docs/plans/archive/old.md"), "old\n").unwrap();
+        std::fs::write(repo.join(".env.local"), "SECRET=1\n").unwrap();
+        std::fs::create_dir_all(repo.join("docs/tracked")).unwrap();
+        std::fs::write(repo.join("docs/tracked/t.md"), "tracked\n").unwrap();
+        git(&repo, &["add", "docs/tracked/t.md"]);
+        git(&repo, &["commit", "-q", "-m", "add tracked doc"]);
+        std::fs::create_dir_all(repo.join("docs/plans/node_modules")).unwrap();
+        std::fs::write(repo.join("docs/plans/node_modules/junk.md"), "junk\n").unwrap();
+
+        let wt = worktree_add(&repo_str, "copy test").expect("creating the worktree should succeed");
+        let dst = std::path::Path::new(&wt.path);
+        std::fs::create_dir_all(dst.join("docs/plans")).unwrap();
+        std::fs::write(dst.join("docs/plans/current.md"), "worktree version\n").unwrap();
+
+        let patterns = vec![
+            "docs/**".to_string(),
+            ".env*".to_string(),
+            "node_modules/**".to_string(),
+        ];
+        let copied = copy_into_worktree(&repo_str, &wt.path, &patterns)
+            .expect("copying into an existing worktree should succeed");
+
+        assert!(copied.contains(&"docs/plans/archive/old.md".to_string()));
+        assert!(copied.contains(&".env.local".to_string()));
+        assert!(
+            !copied.contains(&"docs/tracked/t.md".to_string()),
+            "tracked files must not be copied"
+        );
+        assert!(
+            !copied.contains(&"docs/plans/node_modules/junk.md".to_string()),
+            "build directories must be skipped even inside a matching tree"
+        );
+        assert!(
+            !copied.contains(&"docs/plans/current.md".to_string()),
+            "an existing worktree file must not be overwritten"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dst.join("docs/plans/current.md")).unwrap(),
+            "worktree version\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dst.join("docs/plans/archive/old.md")).unwrap(),
+            "old\n"
+        );
+
+        assert!(copy_into_worktree(&repo_str, &wt.path, &[]).unwrap().is_empty());
+        assert!(copy_into_worktree(&repo_str, "/no/such/worktree", &patterns).is_err());
+
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
     #[test]
     fn file_diff_at_matches_file_diff_on_the_precomputed_path() {
         let dir = init_repo();
@@ -1772,16 +2330,13 @@ mod merge_tests {
         assert_eq!(direct.modified, via_path.modified);
         assert_eq!(via_path.original, "hello\n");
         assert_eq!(via_path.modified, "hello\nworld\n");
-        // Discrimination check: file_diff_at must read the CALLER-supplied work_path, not
-        // recompute it internally — pass a decoy file and expect its content back. This is the
-        // check/use property the remote ACL relies on (gate the path once, read the same path).
+
         std::fs::write(dir.join("b.txt"), "decoy\n").unwrap();
         let via_decoy = file_diff_at(&cwd, "a.txt", &dir.join("b.txt")).unwrap();
         assert_eq!(
             via_decoy.modified, "decoy\n",
             "file_diff_at must read the caller-provided worktree path"
         );
-        // Empty arguments stay rejected on both entry points.
         assert!(file_diff_at("", "a.txt", &work_path).is_err());
         assert!(file_diff_at(&cwd, " ", &work_path).is_err());
         let _ = std::fs::remove_dir_all(&dir);

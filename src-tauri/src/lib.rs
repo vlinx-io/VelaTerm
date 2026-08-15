@@ -237,6 +237,12 @@ pub fn run_view(args: &[String]) -> ! {
     agent::cli_client::run_view(args)
 }
 
+/// Hidden `--agent-ctl` entry used by the PATH `vagent` shim. POST one agent-control operation to
+/// `/agent/<op>`, print the JSON response, and never launch the GUI.
+pub fn run_agent_ctl(args: &[String]) -> ! {
+    agent::ctl_client::run_agent_ctl(args)
+}
+
 /// Build-time Git commit, or unknown, used by --version and SSH remote version pinning.
 pub const GIT_COMMIT: &str = match option_env!("VLX_GIT_COMMIT") {
     Some(c) => c,

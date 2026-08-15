@@ -99,6 +99,45 @@ const vi: typeof en = {
   "settings.agentPathPlaceholder": "vd. ~/.local/bin/claude — để trống = tìm trong PATH",
   "settings.agentPathHint":
     "Khi được đặt, phiên loại này sẽ khởi chạy bằng đường dẫn đầy đủ thay vì tìm lệnh trong PATH. Hữu ích khi tác nhân đã được cài nhưng không có trong PATH của shell. Tự động điền sau khi cài đặt một lần thành công nếu xác định được vị trí.",
+  "settings.catOrchestration": "Điều phối",
+  "settings.orchProfilesTitle": "Hồ sơ worker",
+  "settings.orchProfile": "Hồ sơ",
+  "settings.orchDescription": "Mô tả",
+  "settings.orchDescriptionPlaceholder": "Mô tả khi nào nên sử dụng hồ sơ này.",
+  "settings.orchNewProfile": "Tên hồ sơ mới",
+  "settings.orchAdd": "Thêm",
+  "settings.orchAddNew": "Thêm mới",
+  "settings.orchDelete": "Xóa",
+  "settings.orchNoProfiles": "Chưa có hồ sơ nào. Hãy tạo một hồ sơ để dùng lại cho mọi lần spawn.",
+  "settings.orchProfilesHint":
+    "Hồ sơ cho tác nhân dẫn dắt biết cấu hình worker nào phù hợp với từng tác vụ. Mô tả khi nào dùng từng hồ sơ, sau đó chọn tác nhân, mô hình, mức suy luận và worktree.",
+  "settings.orchModel": "Mô hình",
+  "settings.orchEffort": "Mức suy luận",
+  "settings.orchWorktree": "Worktree riêng",
+  "settings.orchPermissionMode": "Chế độ quyền",
+  "settings.orchPermissionDefault": "Mặc định",
+  "settings.orchPermissionSkip": "Bỏ qua xác nhận",
+  "settings.orchPermissionInherit": "Kế thừa từ phiên cha",
+  "settings.orchPermissionSkipWarning":
+    "Worker này chạy mà không cần xác nhận trong worktree của nó.",
+  "settings.orchLimitsTitle": "Giới hạn",
+  "settings.orchMaxDescendants": "Số phiên con cháu tối đa",
+  "settings.orchMaxParallel": "Số chạy song song tối đa",
+  "settings.orchMaxDepth": "Độ sâu tối đa",
+  "settings.orchConfirmAbove": "Xác nhận khi vượt",
+  "settings.orchTimeout": "Thời gian chờ mặc định (giây)",
+  "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
+  "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
+  "settings.orchAutoApproveRetire": "Tự động chấp thuận việc cho nghỉ",
+  "settings.orchAutoApproveRetireHint":
+    "Lưu trữ một worker đã ổn định mà không cần thẻ xác nhận, bao gồm cả việc dọn dẹp worktree đã xác minh. Lần cho nghỉ tiếp tục một lần dọn dẹp chưa xác minh thì luôn hỏi.",
+  "settings.orchConfirmAboveHint":
+    "Thẻ xác nhận sẽ xuất hiện khi một lần spawn làm số phiên hậu duệ đang hoạt động vượt quá giá trị này, ngay cả khi đã tắt xác nhận spawn. Phiên hậu duệ đang hoạt động là phiên đang khởi động, đang làm việc hoặc đang chờ yêu cầu quyền.",
+  "settings.orchLimitsHint":
+    "Số phiên hậu duệ tối đa đếm mọi phiên hậu duệ còn được giữ lại, kể cả phiên đã kết thúc, cho đến khi phiên đó được lưu trữ hoặc xóa. Số chạy song song tối đa chỉ đếm các phiên hậu duệ đang khởi động, đang làm việc hoặc đang chờ yêu cầu quyền.",
+  "settings.orchCopyPatterns": "Mẫu sao chép vào worktree",
+  "settings.orchCopyPatternsHint":
+    "Mỗi dòng một glob. Các tệp chưa theo dõi hoặc bị bỏ qua khớp mẫu sẽ được sao chép từ thư mục gốc của kho vào mỗi worktree mới. Kết quả build như node_modules không bao giờ được sao chép, nên worker vẫn phải build lại từ đầu.",
   "settings.appearance": "Giao diện",
   "settings.accent": "Màu nhấn",
   "settings.accentAuto": "Theo chủ đề",
@@ -141,10 +180,31 @@ const vi: typeof en = {
   "spawn.fromSession": "Từ",
   "spawn.promptLabel": "Lời nhắc",
   "spawn.agentLabel": "Tác nhân",
+  "spawn.modelLabel": "Mô hình", // Model
+  "spawn.effortLabel": "Mức suy luận", // Effort
+  "spawn.optionDefault": "mặc định", // default
+  "spawn.optionOther": "Khác...", // Other...
   "spawn.worktreeLabel": "Git worktree riêng",
   "spawn.launch": "Khởi chạy",
   "spawn.remaining": (n: number) => `Còn ${n} yêu cầu đang chờ`,
   "spawn.notifyTitle": "Phiên được tạo đang chờ xác nhận",
+  "retire.title": "Cho phiên này nghỉ?",
+  "retire.session": "Phiên",
+  "retire.actionArchive": "Lưu trữ phiên. Không xóa worktree nào.",
+  "retire.actionCleanup":
+    "Xóa các worktree bên dưới, rồi lưu trữ phiên.",
+  "retire.descendants": (n: number) => `Bao gồm ${n} phiên hậu duệ.`,
+  "retire.irreversible": "Thao tác này không thể hoàn tác",
+  "retire.worktreeCount": (n: number) =>
+    `Sẽ xóa ${n} worktree và nhánh của chúng.`,
+  "retire.pathLabel": "Đường dẫn",
+  "retire.branchLabel": "Nhánh",
+  "retire.branchUnknown": "không rõ",
+  "retire.resumed": "Thư mục đã không còn; chỉ còn lại nhánh.",
+  "retire.keep": "Giữ lại",
+  "retire.approve": "Cho nghỉ",
+  "retire.remaining": (n: number) => `còn ${n} đang chờ`,
+  "retire.notifyTitle": "Yêu cầu cho nghỉ đang chờ xác nhận", // Retire awaiting confirmation
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "Xem thay đổi…",
@@ -368,6 +428,12 @@ const vi: typeof en = {
   "tree.killProcess": "Dừng tiến trình",
   "tree.archiveSession": "Lưu trữ phiên",
   "tree.archiveGroup": "Lưu trữ nhóm",
+  "tree.archiveBlockedTitle": "Không thể lưu trữ phiên",
+  "tree.archiveBlockedBody": "Lưu trữ đã bị từ chối. Phiên đã lưu trữ nằm ngoài phạm vi dọn dẹp, nên worktree và nhánh của nó sẽ bị bỏ lại.",
+  "tree.archiveConfirmTitle": "Lưu trữ và xóa worktree?", // Archive and delete worktrees?
+  "tree.archiveConfirmBody": (n: number) =>
+    `Lưu trữ sẽ xóa ${n} worktree của worker và các nhánh của chúng. Không thể hoàn tác. Công việc đã nằm trên nhánh cha.`,
+  "tree.archiveConfirmAction": "Lưu trữ", // Archive
   "tree.scratchTag": "nháp",
   "tree.persistSession": "Chuyển thành phiên lâu dài…",
   "tree.persistDoc": "Lưu vào ổ đĩa…",
@@ -535,6 +601,7 @@ const vi: typeof en = {
   "archive.empty2":
     "Nhấp chuột phải vào một phiên trong thanh bên và chọn “Lưu trữ phiên” để đưa vào đây.",
   "archive.restore": "Khôi phục thành phiên thường",
+  "archive.retiredNote": "Worker đã ngừng hoạt động không thể tiếp tục y như cũ, vì thao tác ngừng đã xóa worktree và nhánh của nó.",
   "archive.export": "Xuất toàn bộ ngữ cảnh dưới dạng Markdown",
   "archive.deleteForever": "Xóa vĩnh viễn (kèm bản ghi)",
   "archive.pickOne": "Chọn một phiên đã lưu trữ bên trái để xem bản ghi hội thoại",

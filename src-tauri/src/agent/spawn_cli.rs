@@ -18,6 +18,7 @@ const SHIMS: &[(&str, &str)] = &[
     ("vspawn", "--spawn"),
     ("vspawn-tree", "--spawn --worktree"),
     ("vopen", "--view"),
+    ("vagent", "--agent-ctl"),
 ];
 
 #[cfg(feature = "gui")]
@@ -43,6 +44,10 @@ const SKILLS: &[(&str, &str)] = &[
         include_str!("../../../skills/vspawn-tree/SKILL.md"),
     ),
     ("vopen", include_str!("../../../skills/vopen/SKILL.md")),
+    (
+        "orch",
+        include_str!("../../../skills/orch/SKILL.md"),
+    ),
 ];
 
 /// Bin directory prepended to session PATH: `<data_dir>/bin`.
@@ -480,6 +485,27 @@ mod tests {
         assert!(!rendered.contains("argument-hint:"));
         assert!(!rendered.contains("disable-model-invocation:"));
         assert!(!rendered.contains("allowed-tools:"));
+    }
+
+    /// The orch skill ships in the bundle, keeps its vagent tool restriction on the Claude
+    /// side, and loses the Claude-only frontmatter in the Codex rendering.
+    #[test]
+    fn orch_skill_bundled_and_filtered_for_codex() {
+        let (_, content) = SKILLS
+            .iter()
+            .find(|(name, _)| *name == "orch")
+            .expect("orch should be in the skill bundle");
+        assert!(content.contains("allowed-tools: Bash(vagent:*)"));
+        assert!(content.contains("disable-model-invocation: true"));
+        let rendered = codex_skill_content(content);
+        assert!(rendered.contains("name: orch"));
+        assert!(rendered.contains("# /orch"));
+        assert!(rendered.contains("Read every profile description before routing work"));
+        assert!(rendered.contains("explicit user profile request is authoritative"));
+        assert!(rendered.contains("Ask the user when multiple profiles match equally"));
+        assert!(rendered.contains("generic fallback only when no profile matches"));
+        assert!(!rendered.contains("allowed-tools:"));
+        assert!(!rendered.contains("disable-model-invocation:"));
     }
 
     #[cfg(feature = "gui")]

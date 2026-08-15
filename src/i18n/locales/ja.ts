@@ -98,6 +98,45 @@ const ja: typeof en = {
   "settings.agentPathPlaceholder": "例: ~/.local/bin/claude — 空欄なら PATH から検索", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "設定すると、このタイプのセッションは PATH でコマンドを探す代わりに、この完全パスで起動します。インストール済みなのにシェルの PATH に無い場合に便利です。ワンクリックインストール成功後、場所を検出できた場合は自動で入力されます。", // Agent executable path hint
+  "settings.catOrchestration": "オーケストレーション",
+  "settings.orchProfilesTitle": "ワーカープロファイル",
+  "settings.orchProfile": "プロファイル",
+  "settings.orchDescription": "説明",
+  "settings.orchDescriptionPlaceholder": "このプロファイルを使用する場面を説明してください。",
+  "settings.orchNewProfile": "新しいプロファイル名",
+  "settings.orchAdd": "追加",
+  "settings.orchAddNew": "新規追加",
+  "settings.orchDelete": "削除",
+  "settings.orchNoProfiles": "プロファイルがありません。作成すると、すべての spawn で再利用できます。",
+  "settings.orchProfilesHint":
+    "プロファイルは各タスクに適したワーカー設定をリードエージェントに示します. 各プロファイルを使う条件を説明し, エージェント, モデル, 推論レベル, worktree を選択します.",
+  "settings.orchModel": "モデル",
+  "settings.orchEffort": "推論レベル",
+  "settings.orchWorktree": "専用 worktree",
+  "settings.orchPermissionMode": "権限モード",
+  "settings.orchPermissionDefault": "デフォルト",
+  "settings.orchPermissionSkip": "確認をスキップ",
+  "settings.orchPermissionInherit": "親から継承",
+  "settings.orchPermissionSkipWarning":
+    "このワーカーは worktree 内で確認なしに実行されます.",
+  "settings.orchLimitsTitle": "上限",
+  "settings.orchMaxDescendants": "子孫セッションの最大数",
+  "settings.orchMaxParallel": "並列実行の最大数",
+  "settings.orchMaxDepth": "最大深さ",
+  "settings.orchConfirmAbove": "確認が必要になる数",
+  "settings.orchTimeout": "既定のタイムアウト（秒）",
+  "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
+  "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
+  "settings.orchAutoApproveRetire": "リタイアを自動承認",
+  "settings.orchAutoApproveRetireHint":
+    "停止済みのワーカーを確認カードなしでアーカイブします。検証済みの worktree クリーンアップも含みます。未検証のクリーンアップを再開するリタイアは必ず確認します。",
+  "settings.orchConfirmAboveHint":
+    "spawn によってアクティブな子孫セッション数がこの値を超える場合、spawn の確認がオフでも確認カードを表示します。アクティブな子孫セッションは、起動中、作業中、または権限確認待ちです。",
+  "settings.orchLimitsHint":
+    "子孫セッションの最大数は、保持しているすべての子孫セッションを数え、終了したセッションもアーカイブまたは削除するまで枠を占有します。並列実行の最大数は、起動中、作業中、または権限確認待ちの子孫セッションを数えます。",
+  "settings.orchCopyPatterns": "worktree へのコピーパターン",
+  "settings.orchCopyPatternsHint":
+    "1 行に 1 つの glob を書きます。一致する未追跡ファイルや無視されたファイルは、リポジトリのルートから新しい worktree へコピーされます。node_modules などのビルド成果物はコピーされないため、ワーカーは毎回ビルドが必要です。",
   "settings.appearance": "外観", // Appearance
   "settings.accent": "アクセント", // Accent
   "settings.accentAuto": "テーマに従う", // Follow theme
@@ -140,10 +179,31 @@ const ja: typeof en = {
   "spawn.fromSession": "From", // From
   "spawn.promptLabel": "Prompt", // Prompt
   "spawn.agentLabel": "Agent", // Agent
+  "spawn.modelLabel": "モデル", // Model
+  "spawn.effortLabel": "推論レベル", // Effort
+  "spawn.optionDefault": "デフォルト", // default
+  "spawn.optionOther": "その他...", // Other...
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
+  "retire.title": "このセッションをリタイアしますか？",
+  "retire.session": "セッション",
+  "retire.actionArchive": "セッションをアーカイブします。worktree は削除しません。",
+  "retire.actionCleanup":
+    "下記の worktree を削除してから、セッションをアーカイブします。",
+  "retire.descendants": (n: number) => `子孫セッション ${n} 件を含みます。`,
+  "retire.irreversible": "この操作は取り消せません",
+  "retire.worktreeCount": (n: number) =>
+    `worktree ${n} 件とそのブランチを削除します。`,
+  "retire.pathLabel": "パス",
+  "retire.branchLabel": "ブランチ",
+  "retire.branchUnknown": "不明",
+  "retire.resumed": "ディレクトリは既にありません。ブランチのみ残っています。",
+  "retire.keep": "保持",
+  "retire.approve": "リタイア",
+  "retire.remaining": (n: number) => `他に ${n} 件保留中`,
+  "retire.notifyTitle": "リタイアの確認待ちです", // Retire awaiting confirmation
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "変更を表示…",
@@ -372,6 +432,12 @@ const ja: typeof en = {
   "tree.killProcess": "プロセスを終了", // Kill Process
   "tree.archiveSession": "セッションをアーカイブ", // Archive Session
   "tree.archiveGroup": "グループをアーカイブ", // Archive Group
+  "tree.archiveBlockedTitle": "セッションをアーカイブできません", // Cannot Archive Session
+  "tree.archiveBlockedBody": "アーカイブは拒否されました。アーカイブしたセッションはクリーンアップの対象外になるため、ワークツリーとブランチが取り残されます。", // Archiving was refused. An archived session leaves the worker cleanup scope, so its worktree and branch would be stranded.
+  "tree.archiveConfirmTitle": "アーカイブして worktree を削除しますか?", // Archive and delete worktrees?
+  "tree.archiveConfirmBody": (n: number) =>
+    `アーカイブすると worker の worktree ${n} 件とそのブランチを削除します。元に戻せません。作業内容はすでに親ブランチにあります。`,
+  "tree.archiveConfirmAction": "アーカイブ", // Archive
   // Temporary (draft) sessions
   "tree.scratchTag": "一時", // scratch
   "tree.persistSession": "永続セッションに変換…", // Make Permanent Session…
@@ -549,6 +615,7 @@ const ja: typeof en = {
   "archive.empty2":
     "サイドバーのセッションを右クリックして「セッションをアーカイブ」を選ぶとここに収納されます。", // Right-click a session in the sidebar…
   "archive.restore": "通常のセッションに戻す", // Restore to normal session
+  "archive.retiredNote": "リタイアしたワーカーは同じ状態では再開できません。リタイア時にワークツリーとブランチを削除済みだからです。", // A retired worker cannot resume exactly, because retire already deleted its worktree and branch.
   "archive.export": "完全なコンテキストを Markdown でエクスポート", // Export full context as Markdown
   "archive.deleteForever": "完全に削除（録画も含む）", // Delete permanently (with recording)
   "archive.pickOne": "左側のアーカイブ済みセッションを選んで会話履歴を表示", // Select an archived session on the left…

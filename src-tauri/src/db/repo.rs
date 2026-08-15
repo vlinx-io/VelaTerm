@@ -121,6 +121,9 @@ fn map_session(row: &Row) -> rusqlite::Result<Session> {
         worktree_base_ref: row.get(20)?,
         // Append the emoji marker at index 21.
         mark: row.get(21)?,
+        // Append model/effort at indices 22/23.
+        model: row.get(22)?,
+        effort: row.get(23)?,
     })
 }
 
@@ -128,7 +131,7 @@ fn map_session(row: &Row) -> rusqlite::Result<Session> {
 const SESSION_COLUMNS: &str = "id, project_id, group_id, name, shell, cwd, env_json, init_cmd, \
      hotkey, sort_order, created_at, kind, agent_session_id, \
      parent_session_id, collapsed, worktree_path, archived_at, browser_url, agent_args, \
-     permission_mode, worktree_base_ref, mark";
+     permission_mode, worktree_base_ref, mark, model, effort";
 
 /// Import an existing directory as a project, using its directory name.
 pub fn import_project(conn: &Connection, root_path: &str) -> Result<Project, String> {
@@ -282,6 +285,8 @@ pub fn create_session(
         None,
         None,
         None,
+        None,
+        None,
     )
 }
 
@@ -302,6 +307,8 @@ pub fn create_session_full(
     agent_args: Option<&str>,
     permission_mode: Option<&str>,
     worktree_base_ref: Option<&str>,
+    model: Option<&str>,
+    effort: Option<&str>,
 ) -> Result<Session, String> {
     let session = Session {
         id: new_id(),
@@ -332,14 +339,16 @@ pub fn create_session_full(
         archived_at: None,
         browser_url: None,
         mark: None,
+        model: model.map(|s| s.to_string()).filter(|s| !s.is_empty()),
+        effort: effort.map(|s| s.to_string()).filter(|s| !s.is_empty()),
         sort_order: now_millis(),
         created_at: now_secs(),
     };
 
     conn.execute(
         "INSERT INTO sessions
-           (id, project_id, group_id, name, kind, shell, cwd, env_json, init_cmd, hotkey, parent_session_id, collapsed, worktree_path, sort_order, created_at, agent_args, permission_mode, worktree_base_ref)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+           (id, project_id, group_id, name, kind, shell, cwd, env_json, init_cmd, hotkey, parent_session_id, collapsed, worktree_path, sort_order, created_at, agent_args, permission_mode, worktree_base_ref, model, effort)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
         params![
             session.id,
             session.project_id,
@@ -359,6 +368,8 @@ pub fn create_session_full(
             session.agent_args,
             session.permission_mode,
             session.worktree_base_ref,
+            session.model,
+            session.effort,
         ],
     )
     .map_err(|e| format!("Failed to write session: {e}"))?;
@@ -405,6 +416,8 @@ pub fn persist_session(
         archived_at: None,
         browser_url: None,
         mark: None,
+        model: None,
+        effort: None,
         sort_order: now_millis(),
         created_at: now_secs(),
     };
@@ -468,6 +481,26 @@ pub fn get_agent_args(conn: &Connection, id: &str) -> Result<Option<String>, Str
     .optional()
     .map(|opt| opt.flatten())
     .map_err(|e| format!("Failed to read agent args: {e}"))
+}
+
+/// Model/effort pair read together at launch.
+pub type ModelEffort = (Option<String>, Option<String>);
+
+/// Read model/effort for launch translation; (None, None) when the session or values are absent.
+pub fn get_model_effort(conn: &Connection, id: &str) -> Result<ModelEffort, String> {
+    conn.query_row(
+        "SELECT model, effort FROM sessions WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+            ))
+        },
+    )
+    .optional()
+    .map(|opt| opt.unwrap_or((None, None)))
+    .map_err(|e| format!("Failed to read model/effort: {e}"))
 }
 
 /// Read permission mode for inject::permission_flag, returning Ok(None) when absent or unset.
@@ -768,9 +801,11 @@ pub fn fork_session(conn: &Connection, source_id: &str) -> Result<Session, Strin
         cwd: source.cwd.clone(),
         env_json: source.env_json.clone(),
         init_cmd: source.init_cmd.clone(),
-        // A fork is a parallel conversation in the same lineage, so copy launch arguments/permissions.
+        // A fork is a parallel conversation in the same lineage, so copy the launch configuration.
         agent_args: source.agent_args.clone(),
         permission_mode: source.permission_mode.clone(),
+        model: source.model.clone(),
+        effort: source.effort.clone(),
         hotkey: None,
         agent_session_id: Some(anchor.clone()),
         parent_session_id: source.parent_session_id.clone(),
@@ -789,8 +824,8 @@ pub fn fork_session(conn: &Connection, source_id: &str) -> Result<Session, Strin
         "INSERT INTO sessions
            (id, project_id, group_id, name, kind, shell, cwd, env_json, init_cmd, hotkey,
             agent_session_id, parent_session_id, collapsed, worktree_path,
-            fork_pending, sort_order, created_at, agent_args, permission_mode, mark)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, 1, ?14, ?15, ?16, ?17, ?18)",
+            fork_pending, sort_order, created_at, agent_args, permission_mode, mark, model, effort)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, 1, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
         params![
             session.id,
             session.project_id,
@@ -810,11 +845,70 @@ pub fn fork_session(conn: &Connection, source_id: &str) -> Result<Session, Strin
             session.agent_args,
             session.permission_mode,
             session.mark,
+            session.model,
+            session.effort,
         ],
     )
     .map_err(|e| format!("Failed to write forked session: {e}"))?;
 
     Ok(session)
+}
+
+/// Live (non-archived) descendants of a session, breadth-first, for agent-control scope checks and
+/// name resolution. The root itself is not included.
+pub fn live_descendants(conn: &Connection, root_id: &str) -> Result<Vec<Session>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {SESSION_COLUMNS} FROM sessions \
+             WHERE archived_at IS NULL AND parent_session_id IS NOT NULL"
+        ))
+        .map_err(|e| format!("Failed to query descendants: {e}"))?;
+    let all: Vec<Session> = stmt
+        .query_map([], map_session)
+        .map_err(|e| format!("Failed to query descendants: {e}"))?
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("Failed to read descendants: {e}"))?;
+
+    let mut result = Vec::new();
+    let mut frontier = std::collections::VecDeque::from([root_id.to_string()]);
+    let mut remaining = all;
+    while let Some(parent) = frontier.pop_front() {
+        let (children, rest): (Vec<_>, Vec<_>) = remaining
+            .into_iter()
+            .partition(|s| s.parent_session_id.as_deref() == Some(parent.as_str()));
+        remaining = rest;
+        for child in children {
+            frontier.push_back(child.id.clone());
+            result.push(child);
+        }
+    }
+    Ok(result)
+}
+
+/// Return a session's generation and stop safely if its parent chain contains a cycle.
+pub fn session_depth(conn: &Connection, id: &str) -> Result<u32, String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut cur = id.to_string();
+    let mut depth = 0u32;
+    while seen.insert(cur.clone()) {
+        let parent: Option<String> = conn
+            .query_row(
+                "SELECT parent_session_id FROM sessions WHERE id = ?1",
+                params![cur],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|e| format!("Failed to read session depth: {e}"))?
+            .flatten();
+        match parent {
+            Some(p) => {
+                cur = p;
+                depth += 1;
+            }
+            None => return Ok(depth),
+        }
+    }
+    Err(format!("session ancestry of {id} contains a cycle"))
 }
 
 /// Read a remembered agent session ID for resume, returning Ok(None) when absent/unset.
@@ -877,6 +971,40 @@ pub fn worktree_paths_in_subtree(conn: &Connection, id: &str) -> Result<Vec<Stri
     Ok(out)
 }
 
+/// Whether a live group or a live session outside `exclude_session_ids` binds the same worktree
+/// directory as `session_id`, meaning the directory outlives those sessions.
+pub fn worktree_binding_is_shared(
+    conn: &Connection,
+    session_id: &str,
+    exclude_session_ids: &[String],
+) -> Result<bool, String> {
+    let exclusion = if exclude_session_ids.is_empty() {
+        String::new()
+    } else {
+        let placeholders: Vec<String> = (0..exclude_session_ids.len())
+            .map(|i| format!("?{}", i + 2))
+            .collect();
+        format!(" AND other.id NOT IN ({})", placeholders.join(","))
+    };
+    let sql = format!(
+        "SELECT EXISTS(
+           SELECT 1 FROM sessions other JOIN sessions self ON other.worktree_path = self.worktree_path
+           WHERE self.id = ?1 AND other.archived_at IS NULL{exclusion}
+         ) OR EXISTS(
+           SELECT 1 FROM groups g JOIN sessions self ON g.worktree_path = self.worktree_path
+           WHERE self.id = ?1 AND g.deleted_at IS NULL
+         )"
+    );
+    let mut p: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(exclude_session_ids.len() + 1);
+    p.push(&session_id);
+    for id in exclude_session_ids {
+        p.push(id as &dyn rusqlite::ToSql);
+    }
+    conn.query_row(&sql, p.as_slice(), |row| row.get::<_, i64>(0))
+        .map(|shared| shared != 0)
+        .map_err(|e| format!("Failed to check worktree bindings: {e}"))
+}
+
 /// Rename a node.
 pub fn rename_node(conn: &Connection, kind: NodeKind, id: &str, name: &str) -> Result<(), String> {
     let table = match kind {
@@ -925,6 +1053,117 @@ pub fn clear_node_worktree(conn: &Connection, kind: NodeKind, id: &str) -> Resul
     };
     conn.execute(sql, params![id])
         .map_err(|e| format!("Failed to clear worktree binding: {e}"))?;
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentLanding {
+    pub session_id: String,
+    pub parent_session_id: String,
+    pub source_branch: String,
+    pub source_head: String,
+    pub source_tree: String,
+    pub diff_fingerprint: String,
+    pub target_branch: String,
+    pub target_before: String,
+    pub result_tree: Option<String>,
+    pub target_commit: Option<String>,
+    pub commit_message: String,
+}
+
+pub fn get_agent_landing(conn: &Connection, session_id: &str) -> Result<Option<AgentLanding>, String> {
+    conn.query_row(
+        "SELECT session_id, parent_session_id, source_branch, source_head, source_tree, \
+                diff_fingerprint, target_branch, target_before, result_tree, target_commit, \
+                commit_message FROM agent_landings WHERE session_id = ?1",
+        params![session_id],
+        |row| {
+            Ok(AgentLanding {
+                session_id: row.get(0)?,
+                parent_session_id: row.get(1)?,
+                source_branch: row.get(2)?,
+                source_head: row.get(3)?,
+                source_tree: row.get(4)?,
+                diff_fingerprint: row.get(5)?,
+                target_branch: row.get(6)?,
+                target_before: row.get(7)?,
+                result_tree: row.get(8)?,
+                target_commit: row.get(9)?,
+                commit_message: row.get(10)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| format!("Failed to read agent landing: {e}"))
+}
+
+pub fn begin_agent_landing(conn: &Connection, landing: &AgentLanding) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO agent_landings (
+           session_id, parent_session_id, source_branch, source_head, source_tree,
+           diff_fingerprint, target_branch, target_before, result_tree, target_commit,
+           commit_message, landed_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, ?9, NULL)
+         ON CONFLICT(session_id) DO UPDATE SET
+           parent_session_id = excluded.parent_session_id,
+           source_branch = excluded.source_branch,
+           source_head = excluded.source_head,
+           source_tree = excluded.source_tree,
+           diff_fingerprint = excluded.diff_fingerprint,
+           target_branch = excluded.target_branch,
+           target_before = excluded.target_before,
+           result_tree = NULL,
+           target_commit = NULL,
+           commit_message = excluded.commit_message,
+           landed_at = NULL",
+        params![
+            landing.session_id,
+            landing.parent_session_id,
+            landing.source_branch,
+            landing.source_head,
+            landing.source_tree,
+            landing.diff_fingerprint,
+            landing.target_branch,
+            landing.target_before,
+            landing.commit_message,
+        ],
+    )
+    .map_err(|e| format!("Failed to record pending agent landing: {e}"))?;
+    Ok(())
+}
+
+pub fn set_agent_landing_result_tree(
+    conn: &Connection,
+    session_id: &str,
+    result_tree: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE agent_landings SET result_tree = ?1 WHERE session_id = ?2",
+        params![result_tree, session_id],
+    )
+    .map_err(|e| format!("Failed to record agent landing tree: {e}"))?;
+    Ok(())
+}
+
+pub fn complete_agent_landing(
+    conn: &Connection,
+    session_id: &str,
+    target_commit: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE agent_landings SET target_commit = ?1, landed_at = ?2 WHERE session_id = ?3",
+        params![target_commit, now_secs(), session_id],
+    )
+    .map_err(|e| format!("Failed to complete agent landing record: {e}"))?;
+    Ok(())
+}
+
+pub fn delete_agent_landing(conn: &Connection, session_id: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM agent_landings WHERE session_id = ?1",
+        params![session_id],
+    )
+    .map_err(|e| format!("Failed to clear agent landing record: {e}"))?;
     Ok(())
 }
 
@@ -1510,8 +1749,10 @@ pub fn get_session(conn: &Connection, id: &str) -> Result<Option<Session>, Strin
 
 /// Archive or restore an **entire session subtree** by setting or clearing archived_at.
 ///
-/// Subtree semantics prevent children becoming invisible orphans. Only flags change; data and
-/// recordings remain, allowing exact agent resume after restoration.
+/// Subtree semantics prevent children from becoming invisible orphans. This database operation
+/// changes only archive flags. Higher-level archive commands can first remove verified worker
+/// worktrees, branches, and stored bindings. Recordings remain, but a cleaned worker cannot resume
+/// exactly after restoration.
 ///
 /// Restoration also revives tombstoned project/group ancestors so the session has a visible location.
 /// Archived children detached from a deleted live parent restore under their nearest live group.
@@ -1575,6 +1816,16 @@ fn restore_container_chain(conn: &Connection, id: &str) -> Result<(), String> {
 /// archived roots; restoring any one revives the group. Parent sessions already use subtree archiving.
 ///
 /// Empty groups contain nothing restorable and are deleted permanently.
+/// Live root sessions of a group subtree. Archiving a group hides each root with its descendants, so
+/// a caller that must settle the subtree first checks these ids.
+pub fn group_root_sessions(conn: &Connection, group_id: &str) -> Result<Vec<String>, String> {
+    Ok(load_group_subtree_sessions(conn, group_id)?
+        .into_iter()
+        .filter(|s| s.parent.is_none() && !s.archived)
+        .map(|s| s.id)
+        .collect())
+}
+
 pub fn archive_group(conn: &Connection, group_id: &str) -> Result<(), String> {
     let ids: Vec<String> = load_group_subtree_sessions(conn, group_id)?
         .into_iter()
@@ -2577,6 +2828,8 @@ mod tests {
             Some("--model opus"),
             Some("skip"),
             None,
+            None,
+            None,
         )
         .unwrap();
         assert_eq!(s.agent_args.as_deref(), Some("--model opus"));
@@ -2653,5 +2906,150 @@ mod tests {
         let f = fork_session(&conn, &s.id).unwrap();
         assert_eq!(f.agent_args.as_deref(), Some("--model sonnet"));
         assert_eq!(f.permission_mode.as_deref(), Some("skip"));
+    }
+
+    /// live_descendants returns children and grandchildren of the root only, skipping archived
+    /// sessions and unrelated siblings, in breadth-first order.
+    #[test]
+    fn live_descendants_scopes_and_skips_archived() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        let mk = |name: &str, parent: Option<&str>| {
+            create_session(
+                &conn,
+                &project.id,
+                None,
+                name,
+                SessionKind::Claude,
+                None,
+                None,
+                None,
+                parent,
+                None,
+            )
+            .unwrap()
+        };
+        let root = mk("root", None);
+        let child_a = mk("child-a", Some(&root.id));
+        let child_b = mk("child-b", Some(&root.id));
+        let grandchild = mk("grandchild", Some(&child_a.id));
+        let archived = mk("archived", Some(&root.id));
+        let other = mk("other-root", None);
+        let _outside = mk("outside", Some(&other.id));
+        set_archived(&conn, &archived.id, true).unwrap();
+
+        let got = live_descendants(&conn, &root.id).unwrap();
+        let ids: Vec<&str> = got.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, vec![&child_a.id, &child_b.id, &grandchild.id]);
+    }
+
+    #[test]
+    fn session_depth_counts_generations_and_detects_cycles() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        let mk = |name: &str, parent: Option<&str>| {
+            create_session(
+                &conn,
+                &project.id,
+                None,
+                name,
+                SessionKind::Claude,
+                None,
+                None,
+                None,
+                parent,
+                None,
+            )
+            .unwrap()
+        };
+        let root = mk("root", None);
+        let child = mk("child", Some(&root.id));
+        let grandchild = mk("grandchild", Some(&child.id));
+
+        assert_eq!(session_depth(&conn, &root.id).unwrap(), 0);
+        assert_eq!(session_depth(&conn, &child.id).unwrap(), 1);
+        assert_eq!(session_depth(&conn, &grandchild.id).unwrap(), 2);
+        assert_eq!(session_depth(&conn, "no-such-session").unwrap(), 0);
+
+        conn.execute(
+            "UPDATE sessions SET parent_session_id = ?1 WHERE id = ?2",
+            params![grandchild.id, root.id],
+        )
+        .unwrap();
+        assert!(session_depth(&conn, &child.id).is_err());
+    }
+
+    /// Model/effort round-trip through creation, tree reads, the launch-path reader, and fork;
+    /// empty strings normalize to None.
+    #[test]
+    fn model_effort_roundtrip_create_read_fork() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+
+        let s = create_session_full(
+            &conn,
+            &project.id,
+            None,
+            "c",
+            SessionKind::Claude,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("fable"),
+            Some("high"),
+        )
+        .unwrap();
+        assert_eq!(s.model.as_deref(), Some("fable"));
+        assert_eq!(s.effort.as_deref(), Some("high"));
+
+        // The tree read used at startup returns the persisted values.
+        let got = list_tree(&conn)
+            .unwrap()
+            .sessions
+            .into_iter()
+            .find(|x| x.id == s.id)
+            .unwrap();
+        assert_eq!(got.model.as_deref(), Some("fable"));
+        assert_eq!(got.effort.as_deref(), Some("high"));
+
+        // The launch path reads both values in one query.
+        assert_eq!(
+            get_model_effort(&conn, &s.id).unwrap(),
+            (Some("fable".to_string()), Some("high".to_string()))
+        );
+
+        // Fork copies the structured settings with the rest of the launch configuration.
+        set_agent_session_id(&conn, &s.id, "conv-2", SessionKind::Claude).unwrap();
+        let f = fork_session(&conn, &s.id).unwrap();
+        assert_eq!(f.model.as_deref(), Some("fable"));
+        assert_eq!(f.effort.as_deref(), Some("high"));
+
+        // Empty strings normalize to None; the legacy wrapper and missing sessions read as unset.
+        let e = create_session_full(
+            &conn,
+            &project.id,
+            None,
+            "e",
+            SessionKind::Codex,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(""),
+            Some(""),
+        )
+        .unwrap();
+        assert_eq!(e.model, None);
+        assert_eq!(e.effort, None);
+        assert_eq!(get_model_effort(&conn, "missing").unwrap(), (None, None));
     }
 }

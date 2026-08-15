@@ -186,6 +186,18 @@ export function ArchivePanel() {
           </button>
         </div>
 
+        <div
+          style={{
+            padding: "8px 16px",
+            borderBottom: "1px solid var(--border)",
+            fontSize: 12,
+            color: "var(--text-muted)",
+            lineHeight: 1.5,
+          }}
+        >
+          {t("archive.retiredNote")}
+        </div>
+
         {/* Search mode uses the two-pane console; browsing mode uses a list and full-content viewer. */}
         {searching ? (
           <SearchConsole

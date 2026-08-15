@@ -40,6 +40,9 @@ import { MARK_LABEL_KEYS, NODE_MARKS, normalizeMark } from "../marks";
 import { type TreeNodeRef } from "./LeftSidebar/ProjectTree";
 import { kindIconEl } from "./sessionViewers/sessionMeta";
 import {
+  ArchiveBlocked,
+  archiveErrorText,
+  ConfirmArchive,
   ConfirmDelete,
   DeleteWorktree,
   NewAgentSession,
@@ -48,6 +51,7 @@ import {
   ResumeSession,
   SessionInfo,
 } from "./sessionMenuDialogs";
+import { archivedWorktreePaths } from "./archivePlan";
 import { kindLabel, supportsAgentArgs } from "./sessionMenuShared";
 
 /** Number of direct agent shortcuts on the first New Session menu level. */
@@ -109,6 +113,13 @@ export type Dialog =
   | { type: "editSession"; id: string; initial: Record<string, string> }
   | { type: "sessionInfo"; id: string; advanced?: boolean }
   | { type: "groupInfo"; id: string }
+  | { type: "archiveBlocked"; message: string }
+  | {
+      type: "confirmArchive";
+      target: "sessions" | "group";
+      ids: string[];
+      worktreePaths: string[];
+    }
   | { type: "confirmDelete"; node: TreeNodeRef; worktreePaths: string[] }
   | { type: "confirmDeleteMany"; nodes: SelNode[] }
   | {
@@ -183,6 +194,8 @@ export function useSessionMenu(): SessionMenu {
   const moveNode = useTermStore((s) => s.moveNode);
   const moveMany = useTermStore((s) => s.moveMany);
   const archiveSession = useTermStore((s) => s.archiveSession);
+  const archiveMany = useTermStore((s) => s.archiveMany);
+  const archiveGroup = useTermStore((s) => s.archiveGroup);
   const setNodeMark = useTermStore((s) => s.setNodeMark);
   const clearNodeWorktree = useTermStore((s) => s.clearNodeWorktree);
   const forkSession = useTermStore((s) => s.forkSession);
@@ -883,7 +896,25 @@ export function useSessionMenu(): SessionMenu {
       });
     }
     items.push(
-      { label: t("tree.archiveSession"), onClick: () => void archiveSession(node.id) },
+      {
+        label: t("tree.archiveSession"),
+        onClick: () => {
+          // Archiving retires every worker worktree in the subtree, which cannot be undone.
+          const worktreePaths = archivedWorktreePaths(sessions, groups, [node.id]);
+          if (worktreePaths.length > 0) {
+            setDialog({
+              type: "confirmArchive",
+              target: "sessions",
+              ids: [node.id],
+              worktreePaths,
+            });
+            return;
+          }
+          void archiveSession(node.id).catch((e: unknown) =>
+            setDialog({ type: "archiveBlocked", message: archiveErrorText(e) }),
+          );
+        },
+      },
       remove,
     );
     return items;
@@ -1131,6 +1162,28 @@ export function useSessionMenu(): SessionMenu {
       )}
       {dialog?.type === "groupInfo" && (
         <GroupInfo id={dialog.id} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.type === "archiveBlocked" && (
+        <ArchiveBlocked message={dialog.message} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.type === "confirmArchive" && (
+        <ConfirmArchive
+          worktreePaths={dialog.worktreePaths}
+          onCancel={() => setDialog(null)}
+          onConfirm={() => {
+            const { target, ids } = dialog;
+            setDialog(null);
+            const done =
+              target === "group"
+                ? archiveGroup(ids[0])
+                : ids.length > 1
+                  ? archiveMany(ids)
+                  : archiveSession(ids[0]);
+            void done.catch((e: unknown) =>
+              setDialog({ type: "archiveBlocked", message: archiveErrorText(e) }),
+            );
+          }}
+        />
       )}
       {dialog?.type === "confirmDelete" && (
         <ConfirmDelete

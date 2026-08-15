@@ -7,8 +7,10 @@ import { setBrowserUrl } from "../ipc/browser";
 import {
   createWorktree,
   getSessionCwd,
+  orchestrationDefaultProfiles,
   ptyKill,
   ptyWrite,
+  spawnResult,
   type ShellOption,
 } from "../ipc/commands";
 import { pushSetting } from "../ipc/settingsSync";
@@ -72,8 +74,10 @@ import { effectiveStatus, matchesAgentState } from "../types";
 import {
   CLEAN_IMAGES_KEY,
   NOTIFY_KEY,
+  ORCH_RESOLVED_KEY,
   RECORD_SESSIONS_KEY,
   SOUND_KEY,
+  hasBuiltinOrchestrationProfiles,
   loadCleanPastedImages,
   loadNotifyEnabled,
   loadRecordSessions,
@@ -83,6 +87,8 @@ import {
   visualOf,
   type AgentDefaultConfig,
   type ImagePasteMode,
+  type OrchestrationLimits,
+  type OrchestrationProfile,
   type PersistedSettings,
   type TermRenderer,
 } from "./settings";
@@ -90,7 +96,13 @@ import { docKindOf, makeDocTab, type DocTab } from "./docTab";
 
 // Re-export the public API after moving implementations to settings/docTab, preserving existing import paths.
 export { DEFAULT_MAX_LIVE_TABS } from "./settings";
-export type { AgentDefaultConfig, ImagePasteMode, TermRenderer } from "./settings";
+export type {
+  AgentDefaultConfig,
+  ImagePasteMode,
+  OrchestrationLimits,
+  OrchestrationProfile,
+  TermRenderer,
+} from "./settings";
 export { docKindOf } from "./docTab";
 export type { DocKind, DocTab } from "./docTab";
 
@@ -846,6 +858,8 @@ interface TermStore {
   agentDefaults: Record<string, AgentDefaultConfig>;
   /** Whether spawning a child requires confirmation. */
   spawnConfirm: boolean;
+  orchestrationProfiles: Record<string, OrchestrationProfile>;
+  orchestration: OrchestrationLimits;
   /** Default state of the quit dialog's "save workspace" checkbox, remembered from the last exit. */
   saveWorkspaceOnQuit: boolean;
   /** Usage auto-refresh interval in seconds; zero disables it. */
@@ -916,11 +930,14 @@ interface TermStore {
   clearNodeWorktree: (kind: NodeKind, id: string) => Promise<void>;
   deleteNode: (kind: NodeKind, id: string) => Promise<void>;
   deleteMany: (nodes: SelNode[]) => Promise<void>;
-  /** Archives a session without deleting data, closing any visible/background tab first. */
+  /** Archives a session without deleting data, closing any visible/background tab first. Rejects with the
+   *  backend reason when the archive would strand a worker worktree. */
   archiveSession: (id: SessionId) => Promise<void>;
-  /** Archives many sessions, then reloads and reconciles once to avoid concurrent tree-refresh races. */
+  /** Archives many sessions, then reloads and reconciles once to avoid concurrent tree-refresh races.
+   *  Archives every session it can and rejects afterwards with the refusals, one per line. */
   archiveMany: (ids: SessionId[]) => Promise<void>;
-  /** Archives an entire group and keeps a hidden tombstone that returns when any child is restored. */
+  /** Archives an entire group and keeps a hidden tombstone that returns when any child is restored.
+   *  Rejects with the backend reason when a session in the group still holds a worker worktree. */
   archiveGroup: (id: string) => Promise<void>;
   /** Restores an archived session to the normal tree. */
   restoreSession: (id: SessionId) => Promise<void>;
@@ -1153,6 +1170,10 @@ interface TermStore {
   resetShortcuts: () => void;
   /** Merges and persists an agent-type default patch, removing empty/default values. */
   setAgentDefault: (kind: string, patch: Partial<AgentDefaultConfig>) => void;
+  setOrchestrationProfile: (name: string, patch: Partial<OrchestrationProfile> | null) => void;
+  setOrchestrationLimits: (patch: Partial<OrchestrationLimits>) => void;
+  /** Replaces untouched built-in profiles with host-resolved defaults, once per installation. */
+  resolveDefaultOrchestrationProfiles: () => Promise<void>;
   /** Applies current theme and visual settings to `documentElement` on mount. */
   applyAppearance: () => void;
   /** Reloads preferences from local storage after startup reconciliation rewrites the cache from backend
@@ -1262,6 +1283,8 @@ function persistAndApplyVisual(getState: () => TermStore) {
     shortcutOverrides: s.shortcutOverrides,
     agentDefaults: s.agentDefaults,
     spawnConfirm: s.spawnConfirm,
+    orchestrationProfiles: s.orchestrationProfiles,
+    orchestration: s.orchestration,
     saveWorkspaceOnQuit: s.saveWorkspaceOnQuit,
     usageRefreshSec: s.usageRefreshSec,
     imagePasteMode: s.imagePasteMode,
@@ -1716,12 +1739,16 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
 
   handleSpawnRequest: async (req) => {
-    // Queue for review when spawn confirmation is enabled; otherwise execute immediately.
-    if (!get().spawnConfirm) {
+    // The backend threshold always wins over orchestration auto-approval.
+    if (req.forceConfirm !== true && (req.autoApprove === true || !get().spawnConfirm)) {
       await get().executeSpawn(req);
       return;
     }
     set((s) => ({ pendingSpawns: [...s.pendingSpawns, req] }));
+    // Return a progress result while the confirmation card is open.
+    if (req.requestId) {
+      void spawnResult(req.requestId, { awaitingConfirmation: true }).catch(() => {});
+    }
     // A spawn-confirmation card always notifies when notifications are enabled, even in a focused window,
     // because the nonmodal card is easy to miss. Dock badges derive reactively from queue length elsewhere.
     const s = get();
@@ -1745,7 +1772,12 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
 
   cancelSpawn: () => {
-    // Cancel by removing the first request without creating a session.
+    // Cancel by removing the first request without creating a session, telling any parked
+    // vagent spawn caller so it does not sit out its full timeout.
+    const head = get().pendingSpawns[0];
+    if (head?.requestId) {
+      void spawnResult(head.requestId, { error: "cancelled by user" }).catch(() => {});
+    }
     set((s) => ({ pendingSpawns: s.pendingSpawns.slice(1) }));
   },
 
@@ -1755,9 +1787,21 @@ export const useTermStore = create<TermStore>((set, get) => ({
   closeChanges: () => set({ changesCwd: null }),
 
   executeSpawn: async (req) => {
+    // Answer a parked vagent spawn caller; fire-and-forget for plain vspawn requests.
+    const report = (result: {
+      sessionId?: string;
+      error?: string;
+      worktreeError?: string;
+    }) => {
+      if (req.requestId) void spawnResult(req.requestId, result).catch(() => {});
+    };
     const state = get();
     const parent = state.sessions.find((s) => s.id === req.parentSessionId);
-    if (!parent) return; // Ignore a deleted or unknown parent session.
+    if (!parent) {
+      // Ignore a deleted or unknown parent session.
+      report({ error: "parent session no longer exists" });
+      return;
+    }
     const project = state.projects.find((p) => p.id === parent.projectId);
     // Child kind preference: request, parent agent kind, then Claude.
     const fallbackKind =
@@ -1785,35 +1829,67 @@ export const useTermStore = create<TermStore>((set, get) => ({
                         ? "zoo"
                       : "claude";
     const kind = ((req.kind ?? null) || fallbackKind) as Session["kind"];
-    const name = req.prompt.trim().slice(0, 24) || t("store.subtask");
+    const name =
+      req.name?.trim() || req.prompt.trim().slice(0, 24) || t("store.subtask");
 
     // By default, create an isolated worktree in the parent's repository.
     const repoRoot = parent.cwd || project?.rootPath || null;
     let cwd: string | null = parent.cwd ?? project?.rootPath ?? null;
     let worktreePath: string | null = null;
     let worktreeBaseRef: string | null = null;
+    let worktreeError: string | undefined;
     if (req.worktree !== false && repoRoot) {
       try {
         const wt = await createWorktree(repoRoot, name);
         cwd = wt.path;
         worktreePath = wt.path;
         worktreeBaseRef = wt.baseRef || null;
-      } catch {
+      } catch (e) {
         // Worktree failure falls back to the parent directory without blocking the spawn.
+        worktreeError = e instanceof Error ? e.message : String(e);
+        console.warn("vspawn: worktree creation failed, using parent directory", e);
       }
     }
 
-    const created = await get().addSession({
-      projectId: parent.projectId,
-      groupId: parent.groupId ?? null,
-      name,
-      kind,
-      cwd,
-      parentSessionId: parent.id,
-      worktreePath,
-      worktreeBaseRef,
-    });
-    if (!created) return;
+    // Explicit request values win; otherwise apply per-agent defaults, matching manual creation.
+    // `inherit` carries the parent's abstract mode across agent types, then uses the child agent default.
+    const defaults = state.agentDefaults[kind];
+    const agentArgs = req.agentArgs?.trim() || defaults?.args || null;
+    const requestedPermissionMode = req.permissionMode?.trim();
+    const parentPermissionMode =
+      parent.permissionMode && parent.permissionMode !== "inherit"
+        ? parent.permissionMode
+        : null;
+    const permissionMode =
+      requestedPermissionMode && requestedPermissionMode !== "inherit"
+        ? requestedPermissionMode
+        : parentPermissionMode || defaults?.permissionMode || null;
+
+    let created: Session | null = null;
+    try {
+      created = await get().addSession({
+        projectId: parent.projectId,
+        groupId: parent.groupId ?? null,
+        name,
+        kind,
+        cwd,
+        parentSessionId: parent.id,
+        worktreePath,
+        worktreeBaseRef,
+        agentArgs,
+        permissionMode,
+        model: req.model?.trim() || null,
+        effort: req.effort?.trim() || null,
+      });
+    } catch (e) {
+      report({ error: e instanceof Error ? e.message : String(e) });
+      throw e;
+    }
+    if (!created) {
+      report({ error: "session creation failed" });
+      return;
+    }
+    report({ sessionId: created.id, worktreeError });
 
     // Store the prompt for `usePtySession` to inject as a positional launch argument, avoiding a timed later write.
     set((s) => ({
@@ -1884,12 +1960,17 @@ export const useTermStore = create<TermStore>((set, get) => ({
   archiveMany: async (ids) => {
     // Archive sequentially, then reload/reconcile/save once. Concurrent refreshes can destabilize virtualized
     // rows and trigger React's maximum-update-depth failure.
+    const refused: string[] = [];
     for (const id of ids) {
-      await tree.setSessionArchived(id, true).catch(() => {});
+      await tree.setSessionArchived(id, true).catch((e: unknown) => {
+        refused.push(e instanceof Error ? e.message : String(e));
+      });
     }
     await get().loadTree();
     set((state) => ({ ...reconcileTabs(state), selection: [], selectionAnchor: null }));
     saveLayoutTick();
+    // A refusal protects a worktree, so the caller must show it instead of reporting a silent archive.
+    if (refused.length > 0) throw new Error(refused.join("\n"));
   },
 
   archiveGroup: async (id) => {
@@ -3464,6 +3545,52 @@ export const useTermStore = create<TermStore>((set, get) => ({
       else delete next[kind];
       return { agentDefaults: next };
     });
+    persistAndApplyVisual(get);
+  },
+  setOrchestrationProfile: (name, patch) => {
+    const key = name.trim();
+    if (!key) return;
+    set((s) => {
+      const next = { ...s.orchestrationProfiles };
+      if (patch === null) delete next[key];
+      else {
+        const current = next[key];
+        next[key] = {
+          ...current,
+          ...patch,
+          permissionMode: patch.permissionMode ?? current?.permissionMode ?? "inherit",
+        };
+      }
+      return { orchestrationProfiles: next };
+    });
+    persistAndApplyVisual(get);
+  },
+  setOrchestrationLimits: (patch) => {
+    set((s) => ({ orchestration: { ...s.orchestration, ...patch } }));
+    persistAndApplyVisual(get);
+  },
+  resolveDefaultOrchestrationProfiles: async () => {
+    if (localStorage.getItem(ORCH_RESOLVED_KEY) === "1") return;
+    if (!hasBuiltinOrchestrationProfiles(get().orchestrationProfiles)) {
+      localStorage.setItem(ORCH_RESOLVED_KEY, "1");
+      return;
+    }
+    // A failed probe leaves the marker unset so the next launch retries.
+    const resolved = await orchestrationDefaultProfiles().catch(() => null);
+    if (!resolved || Object.keys(resolved).length === 0) return;
+    localStorage.setItem(ORCH_RESOLVED_KEY, "1");
+    if (!hasBuiltinOrchestrationProfiles(get().orchestrationProfiles)) return;
+    set((s) => ({
+      orchestrationProfiles: {
+        ...s.orchestrationProfiles,
+        ...Object.fromEntries(
+          Object.entries(resolved).map(([name, profile]) => [
+            name,
+            { ...profile, permissionMode: profile.permissionMode ?? "inherit" },
+          ]),
+        ),
+      },
+    }));
     persistAndApplyVisual(get);
   },
   applyAppearance: () => {

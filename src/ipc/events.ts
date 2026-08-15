@@ -84,6 +84,22 @@ export interface SpawnRequest {
   prompt: string;
   kind?: "claude" | "codex" | "opencode" | "copilot" | "cursor" | "antigravity" | "cline" | "pi" | "crush" | "kiro" | "grok" | "zoo" | "terminal" | null;
   worktree?: boolean | null;
+  /** Structured model selection; empty inherits the agent default. */
+  model?: string | null;
+  /** Structured effort selection; handled like `model`. */
+  effort?: string | null;
+  /** Child session name; empty derives one from the prompt. */
+  name?: string | null;
+  /** Raw launch arguments; empty applies the per-agent defaults. */
+  agentArgs?: string | null;
+  permissionMode?: "default" | "skip" | "inherit" | null;
+  /** Whether `/orch` may launch this child without the confirmation card. */
+  autoApprove?: boolean | null;
+  /** Correlation id from `vagent spawn`; when set, the store reports the outcome via spawn_result. */
+  requestId?: string | null;
+  forceConfirm?: boolean | null;
+  /** Advisory warnings for model or effort values outside this build's curated lists. */
+  launchWarnings?: string[];
 }
 
 /** Listen for child-task requests as a global event registered once on mount. */
@@ -91,6 +107,48 @@ export function onSpawnRequest(
   cb: (req: SpawnRequest) => void,
 ): Promise<UnlistenFn> {
   return listen<SpawnRequest>("spawn://request", (payload) => cb(payload));
+}
+
+/** One worktree a retire plan deletes; `resumed` rows keep only a branch and may not know its name. */
+export interface RetireWorktree {
+  id: string;
+  name: string;
+  path: string;
+  branch?: string | null;
+  targetCommit?: string | null;
+  resumed?: boolean;
+}
+
+/**
+ * Retire confirmation request from `vagent retire --confirm`, relayed by backend `/retire`. The backend
+ * deletes nothing until the `retire_result` command answers this `requestId`.
+ */
+export interface RetireRequest {
+  requestId: string;
+  sessionId: string;
+  name: string;
+  action: "archive" | "cleanup-and-archive";
+  descendantCount: number;
+  worktrees: RetireWorktree[];
+}
+
+/** Listen for retire confirmation requests as a global event registered once on mount. */
+export function onRetireRequest(
+  cb: (req: RetireRequest) => void,
+): Promise<UnlistenFn> {
+  return listen<RetireRequest>("retire://request", (payload) => cb(payload));
+}
+
+/**
+ * Withdrawal of one retire card whose backend request already timed out. Answering a withdrawn card
+ * retires nothing, so the card must close itself instead of accepting an approval that does nothing.
+ */
+export function onRetireCancel(
+  cb: (requestId: string) => void,
+): Promise<UnlistenFn> {
+  return listen<{ requestId: string }>("retire://cancel", (payload) =>
+    cb(payload.requestId),
+  );
 }
 
 /**

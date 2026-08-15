@@ -135,11 +135,15 @@ pub fn create_session(
     permission_mode: Option<&str>,
     agent_session_id: Option<&str>,
     worktree_base_ref: Option<&str>,
+    model: Option<&str>,
+    effort: Option<&str>,
 ) -> Result<Session, String> {
     // Normalize empty strings consistently across transports.
     let agent_args = empty_to_none(agent_args);
     let permission_mode = empty_to_none(permission_mode);
     let worktree_base_ref = empty_to_none(worktree_base_ref);
+    let model = empty_to_none(model);
+    let effort = empty_to_none(effort);
     let session = {
         let conn = ctx.db().conn.lock().unwrap();
         let mut session = repo::create_session_full(
@@ -156,6 +160,8 @@ pub fn create_session(
             agent_args,
             permission_mode,
             worktree_base_ref,
+            model,
+            effort,
         )?;
         let seeded_agent_id = agent_session_id
             .map(|s| s.trim().to_string())
@@ -310,8 +316,12 @@ pub fn delete_node(ctx: &AppCtx, kind: NodeKind, id: &str) -> Result<(), String>
     Ok(())
 }
 
-/// Archives or restores a session through soft hiding without deleting data.
+/// Archives a session subtree after worktree cleanup, or restores its archive flags.
 pub fn set_session_archived(ctx: &AppCtx, id: &str, archived: bool) -> Result<(), String> {
+    // Archiving hides the subtree from the orchestration worktree scans, so settle it first.
+    if archived {
+        crate::agent::ctl::prepare_archive(ctx, id)?;
+    }
     {
         let conn = ctx.db().conn.lock().unwrap();
         repo::set_archived(&conn, id, archived)?;
@@ -323,6 +333,14 @@ pub fn set_session_archived(ctx: &AppCtx, id: &str, archived: bool) -> Result<()
 /// Archives an entire group: archive its sessions and retain the group as a hidden soft-deletion tombstone. Restoring
 /// any session restores the group. See `repo::archive_group`.
 pub fn archive_group(ctx: &AppCtx, id: &str) -> Result<(), String> {
+    // A group archive hides the same sessions as Archive Session, so it needs the same worktree guard.
+    let roots = {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::group_root_sessions(&conn, id)?
+    };
+    for root in &roots {
+        crate::agent::ctl::prepare_archive(ctx, root)?;
+    }
     {
         let conn = ctx.db().conn.lock().unwrap();
         repo::archive_group(&conn, id)?;

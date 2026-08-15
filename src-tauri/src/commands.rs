@@ -146,6 +146,14 @@ pub fn pty_spawn(
         let fork = repo::get_fork_pending(&conn, &session_id)?;
         // Append configured custom arguments unchanged on every launch and resume.
         let args = repo::get_agent_args(&conn, &session_id)?;
+        // Prepend model/effort flags so an explicit user flag wins as the later occurrence.
+        let (model, effort) = repo::get_model_effort(&conn, &session_id)?;
+        let args = crate::agent::inject::merge_model_effort_flags(
+            kind,
+            model.as_deref(),
+            effort.as_deref(),
+            args.as_deref(),
+        );
         // Map permission mode to agent-specific flags and prepend them to custom arguments.
         let perm = repo::get_permission_mode(&conn, &session_id)?;
         let args =

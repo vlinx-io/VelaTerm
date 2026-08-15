@@ -370,6 +370,91 @@ pub fn merge_permission_flag(
     }
 }
 
+/// Model values accepted by each agent's launch flags.
+pub fn known_models(kind: SessionKind) -> Option<&'static [&'static str]> {
+    match kind {
+        SessionKind::Claude => Some(&["fable", "opus", "sonnet", "haiku"]),
+        SessionKind::Codex => Some(&[
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+        ]),
+        _ => None,
+    }
+}
+
+/// Effort values accepted by each agent's launch flags.
+pub fn known_efforts(kind: SessionKind) -> Option<&'static [&'static str]> {
+    match kind {
+        SessionKind::Claude => Some(&["low", "medium", "high", "xhigh", "max"]),
+        SessionKind::Codex => Some(&["low", "medium", "high", "xhigh", "max"]),
+        _ => None,
+    }
+}
+
+/// Validates a model/effort value for unquoted command-line insertion: nonempty after trimming,
+/// only alphanumerics plus `- _ . :`. Invalid values are dropped rather than quoted so a bad
+/// setting can never alter the launch command.
+fn valid_launch_value(value: &str) -> Option<&str> {
+    let value = value.trim();
+    if !value.is_empty()
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'))
+    {
+        Some(value)
+    } else {
+        None
+    }
+}
+
+/// Maps model/effort to agent flags: Claude `--model <m> --effort <e>`, Codex
+/// `-m <m> -c model_reasoning_effort=<e>`. Other agents get none rather than guessed syntax.
+/// Either setting may appear alone; invalid values are dropped (see `valid_launch_value`).
+pub fn model_effort_flags(
+    kind: SessionKind,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Option<String> {
+    let model = model.and_then(valid_launch_value);
+    let effort = effort.and_then(valid_launch_value);
+    let (model_flag, effort_flag) = match kind {
+        SessionKind::Claude => (
+            model.map(|m| format!("--model {m}")),
+            effort.map(|e| format!("--effort {e}")),
+        ),
+        SessionKind::Codex => (
+            model.map(|m| format!("-m {m}")),
+            effort.map(|e| format!("-c model_reasoning_effort={e}")),
+        ),
+        _ => (None, None),
+    };
+    match (model_flag, effort_flag) {
+        (Some(m), Some(e)) => Some(format!("{m} {e}")),
+        (Some(m), None) => Some(m),
+        (None, Some(e)) => Some(e),
+        (None, None) => None,
+    }
+}
+
+/// Prepends translated model/effort flags to custom arguments so an explicit user flag wins as the
+/// later occurrence. Applied before `merge_permission_flag`. Returns `None` when both are empty.
+pub fn merge_model_effort_flags(
+    kind: SessionKind,
+    model: Option<&str>,
+    effort: Option<&str>,
+    extra_args: Option<&str>,
+) -> Option<String> {
+    let flags = model_effort_flags(kind, model, effort);
+    let user = extra_args.map(str::trim).filter(|s| !s.is_empty());
+    match (flags, user) {
+        (Some(f), Some(a)) => Some(format!("{f} {a}")),
+        (Some(f), None) => Some(f),
+        (None, Some(a)) => Some(a.to_string()),
+        (None, None) => None,
+    }
+}
+
 /// Validates a nonempty resume session ID containing only `[0-9a-zA-Z_-]`, which includes UUIDs.
 ///
 /// The value is inserted unquoted into commands such as `claude --resume <id>`, so rejecting spaces,
@@ -1590,6 +1675,63 @@ mod tests {
         assert_eq!(
             merge_permission_flag(SessionKind::Opencode, Some("skip"), Some("--foo")),
             Some("--foo".to_string())
+        );
+    }
+
+    #[test]
+    fn model_effort_flags_map_per_agent() {
+        // Claude uses its native --model/--effort flags.
+        assert_eq!(
+            model_effort_flags(SessionKind::Claude, Some("fable"), Some("high")),
+            Some("--model fable --effort high".to_string())
+        );
+        // Either setting works alone.
+        assert_eq!(
+            model_effort_flags(SessionKind::Claude, Some("opus-5"), None),
+            Some("--model opus-5".to_string())
+        );
+        assert_eq!(
+            model_effort_flags(SessionKind::Claude, None, Some("xhigh")),
+            Some("--effort xhigh".to_string())
+        );
+        // Codex uses -m and the reasoning-effort config override.
+        assert_eq!(
+            model_effort_flags(SessionKind::Codex, Some("gpt-5.6-luna"), Some("xhigh")),
+            Some("-m gpt-5.6-luna -c model_reasoning_effort=xhigh".to_string())
+        );
+        // Agents without a verified mapping receive no flags.
+        assert_eq!(
+            model_effort_flags(SessionKind::Copilot, Some("gpt-5"), Some("high")),
+            None
+        );
+        // Values with shell metacharacters or whitespace are dropped, never quoted.
+        assert_eq!(
+            model_effort_flags(SessionKind::Claude, Some("opus; rm -rf /"), Some("high$(x)")),
+            None
+        );
+        assert_eq!(model_effort_flags(SessionKind::Claude, None, None), None);
+    }
+
+    #[test]
+    fn merge_model_effort_flags_precede_user_args() {
+        // Translated flags come first so an explicit user --model wins as the later occurrence.
+        assert_eq!(
+            merge_model_effort_flags(
+                SessionKind::Claude,
+                Some("fable"),
+                Some("high"),
+                Some("--model sonnet")
+            ),
+            Some("--model fable --effort high --model sonnet".to_string())
+        );
+        // User arguments pass through untouched for unmapped agents.
+        assert_eq!(
+            merge_model_effort_flags(SessionKind::Copilot, Some("gpt-5"), None, Some("--foo")),
+            Some("--foo".to_string())
+        );
+        assert_eq!(
+            merge_model_effort_flags(SessionKind::Claude, None, None, None),
+            None
         );
     }
 

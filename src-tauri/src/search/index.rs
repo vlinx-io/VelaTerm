@@ -517,6 +517,8 @@ mod tests {
             archived_at: None,
             browser_url: None,
             mark: None,
+            model: None,
+            effort: None,
             sort_order: 0,
             created_at: 0,
         }

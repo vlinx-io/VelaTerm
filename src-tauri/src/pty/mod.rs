@@ -39,6 +39,9 @@ pub enum StatusSignal {
         /// disables screen/busy overrides for that session.
         #[serde(default)]
         authoritative: bool,
+        /// True when terminal silence inferred this state instead of an agent lifecycle event.
+        #[serde(default, skip_serializing_if = "is_false")]
+        inferred: bool,
     },
     /// Agent kind set by typed spawn or detected from the process tree. Codex additionally reports whether
     /// lifecycle hooks are available so the frontend can select hook-only or legacy status semantics before the
@@ -75,6 +78,10 @@ pub enum StatusSignal {
         rows: u16,
         owner: Option<String>,
     },
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl StatusSignal {
