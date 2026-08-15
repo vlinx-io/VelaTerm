@@ -56,6 +56,7 @@ vagent cancel <id|name> | --all
 vagent diff <id|name>
 vagent land <id|name> --message "<conventional-subject>"
 vagent cleanup [--confirm]
+vagent retire <id|name> [--confirm]
 ```
 
 `spawn` blocks until the child exists (respecting the confirmation card) and returns its session
@@ -82,6 +83,10 @@ choice; an explicit flag still overrides the profile.
 `cleanup --confirm` removes only verified landed worktrees and their disposable branches. A running
 child, an uncommitted worktree, or an unverified landing is blocked.
 
+`retire` previews one settled direct child subtree. `retire --confirm` stops its settled processes,
+removes verified landed worktrees and branches, and archives the subtree. The archived sessions no
+longer count against `maxDescendants`. Dirty or unlanded worktrees block retirement.
+
 `land` requires a Lead-written Conventional Commit subject. It applies the direct child's net
 change to the parent's current branch as one commit. Temporary worker commits do not enter the
 parent history.
@@ -100,11 +105,11 @@ Settings ▸ Orchestration is one place for everything a lead agent needs:
   the parent's abstract permission level to the child agent's closest equivalent. New and built-in profiles use
   `inherit`. Four profiles ship by
   default: `database`, `frontend`, `quick-edits`, and `tests`. Add, edit, and delete them freely.
-- **Limits**, enforced by the app on every spawn rather than by prompt text: `maxChildren` live
-  children per lead, `maxParallel` children working at once, `maxDepth` for child-of-child nesting,
+- **Limits**, enforced by the app on every spawn rather than by prompt text: `maxDescendants` retained
+  descendants per lead, `maxParallel` active descendants, `maxDepth` for child-of-child nesting,
   the child count above which the confirmation card appears even when confirmation is off, and the
   default `vagent wait` timeout. A spawn that would cross a limit fails with a message naming the
-  limit and the current count, so the agent waits and retries instead of failing blind.
+  limit and the current count. The lead waits for parallel capacity or retires a settled child.
 - **Worktree copy patterns**: globs such as `docs/plans/**` for untracked or ignored files copied
   from the repository root into each new worktree, so a worker can see local-only notes. Build
   output such as `node_modules` is never copied, and workers still build from scratch.
