@@ -186,6 +186,7 @@ pub fn handle(op: &str, body: &str, app: &AppCtx) -> (u16, String) {
         "spawn-status" => op_spawn_status(app, &parent, &parsed),
         "config" => op_config(app, &parent),
         "cleanup" => op_cleanup(app, &parent, &parsed),
+        "retire" => op_retire(app, &parent, &parsed),
         _ => err(404, "unknown operation"),
     }
 }
@@ -593,6 +594,78 @@ fn op_config(app: &AppCtx, parent: &str) -> (u16, String) {
     }))
 }
 
+struct VerifiedCleanup {
+    path: String,
+    branch: String,
+    target_commit: String,
+    repo_root: String,
+}
+
+enum CleanupCheck {
+    Blocked(String),
+    Failed(String),
+}
+
+/// Verify that one worker worktree still matches its completed landing record.
+fn verify_cleanup(
+    app: &AppCtx,
+    expected_parent: &str,
+    session: &Session,
+    path: &str,
+) -> Result<VerifiedCleanup, CleanupCheck> {
+    if crate::git::worktree_has_changes(path) {
+        return Err(CleanupCheck::Blocked(
+            "worktree has uncommitted changes".to_string(),
+        ));
+    }
+    let landing = match app.db().conn.lock() {
+        Ok(conn) => crate::db::repo::get_agent_landing(&conn, &session.id)
+            .map_err(CleanupCheck::Failed)?
+            .ok_or_else(|| CleanupCheck::Blocked("worktree has no verified landing".to_string()))?,
+        Err(_) => {
+            return Err(CleanupCheck::Failed(
+                "database lock is unavailable".to_string(),
+            ))
+        }
+    };
+    let target_commit = landing
+        .target_commit
+        .clone()
+        .ok_or_else(|| CleanupCheck::Blocked("worktree has no verified landing".to_string()))?;
+    let targets = crate::git::land_targets(session.worktree_base_ref.as_deref(), path)
+        .map_err(CleanupCheck::Blocked)?;
+    let snapshot = crate::git::agent_land_snapshot(path, &targets.branch, &targets.base_branch)
+        .map_err(CleanupCheck::Blocked)?;
+    if landing.parent_session_id != expected_parent
+        || landing.source_branch != targets.branch
+        || landing.source_tree != snapshot.source_tree
+        || landing.diff_fingerprint != snapshot.diff_fingerprint
+        || landing.target_branch != targets.base_branch
+    {
+        return Err(CleanupCheck::Blocked(
+            "worker changed after its verified landing".to_string(),
+        ));
+    }
+    if !crate::git::is_ancestor(
+        path,
+        &target_commit,
+        &format!("refs/heads/{}", targets.base_branch),
+    ) {
+        return Err(CleanupCheck::Blocked(
+            "verified landing commit is not on the target branch".to_string(),
+        ));
+    }
+    let repo_root = crate::git::repository_root(path).ok_or_else(|| {
+        CleanupCheck::Blocked("worktree repository root is unavailable".to_string())
+    })?;
+    Ok(VerifiedCleanup {
+        path: path.to_string(),
+        branch: targets.branch,
+        target_commit,
+        repo_root,
+    })
+}
+
 /// List verified landed worktrees, or remove each worktree and branch when `confirm` is set.
 fn op_cleanup(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
     let sessions = match descendants(app, parent) {
@@ -610,91 +683,38 @@ fn op_cleanup(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
         let Some(path) = s.worktree_path.clone().filter(|p| !p.trim().is_empty()) else {
             continue;
         };
-        let row = |reason: &str| {
-            json!({ "id": s.id, "name": s.name, "path": path, "reason": reason })
-        };
+        let row =
+            |reason: &str| json!({ "id": s.id, "name": s.name, "path": path, "reason": reason });
         let state = state_of(app, &s.id);
         if state == "working" || state == "starting" || app.pty().is_running(&s.id) {
             blocked.push(row("session is still running"));
             continue;
         }
-        if crate::git::worktree_has_changes(&path) {
-            blocked.push(row("worktree has uncommitted changes"));
-            continue;
-        }
-        let landing = match app.db().conn.lock() {
-            Ok(conn) => match crate::db::repo::get_agent_landing(&conn, &s.id) {
-                Ok(Some(landing)) => landing,
-                Ok(None) => {
-                    blocked.push(row("worktree has no verified landing"));
-                    continue;
-                }
-                Err(error) => {
-                    failed.push(row(&error));
-                    continue;
-                }
-            },
-            Err(_) => {
-                failed.push(row("database lock is unavailable"));
+        let verified = match verify_cleanup(app, parent, &s, &path) {
+            Ok(verified) => verified,
+            Err(CleanupCheck::Blocked(reason)) => {
+                blocked.push(row(&reason));
                 continue;
             }
-        };
-        let Some(target_commit) = landing.target_commit.as_deref() else {
-            blocked.push(row("worktree has no verified landing"));
-            continue;
-        };
-        let targets = match crate::git::land_targets(s.worktree_base_ref.as_deref(), &path) {
-            Ok(targets) => targets,
-            Err(error) => {
-                blocked.push(row(&error));
+            Err(CleanupCheck::Failed(reason)) => {
+                failed.push(row(&reason));
                 continue;
             }
-        };
-        let snapshot = match crate::git::agent_land_snapshot(
-            &path,
-            &targets.branch,
-            &targets.base_branch,
-        ) {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                blocked.push(row(&error));
-                continue;
-            }
-        };
-        if landing.parent_session_id != parent
-            || landing.source_branch != targets.branch
-            || landing.source_tree != snapshot.source_tree
-            || landing.diff_fingerprint != snapshot.diff_fingerprint
-            || landing.target_branch != targets.base_branch
-        {
-            blocked.push(row("worker changed after its verified landing"));
-            continue;
-        }
-        if !crate::git::is_ancestor(
-            &path,
-            target_commit,
-            &format!("refs/heads/{}", targets.base_branch),
-        ) {
-            blocked.push(row("verified landing commit is not on the target branch"));
-            continue;
-        }
-        let Some(repo_root) = crate::git::repository_root(&path) else {
-            blocked.push(row("worktree repository root is unavailable"));
-            continue;
         };
         if !confirm {
             candidates.push(json!({
                 "id": s.id,
                 "name": s.name,
-                "path": path,
-                "branch": targets.branch,
-                "targetCommit": target_commit,
+                "path": verified.path,
+                "branch": verified.branch,
+                "targetCommit": verified.target_commit,
             }));
             continue;
         }
-        match crate::git::worktree_remove(&path, false) {
+        match crate::git::worktree_remove(&verified.path, false) {
             Ok(()) => {
-                if let Err(error) = crate::git::branch_delete(&repo_root, &targets.branch) {
+                if let Err(error) = crate::git::branch_delete(&verified.repo_root, &verified.branch)
+                {
                     failed.push(row(&error));
                     continue;
                 }
@@ -705,7 +725,7 @@ fn op_cleanup(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
                         &s.id,
                     );
                 }
-                removed.push(json!({ "id": s.id, "name": s.name, "path": path }));
+                removed.push(json!({ "id": s.id, "name": s.name, "path": verified.path }));
             }
             Err(e) => failed.push(row(&e)),
         }
@@ -715,6 +735,152 @@ fn op_cleanup(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
     } else {
         ok(json!({ "candidates": candidates, "blocked": blocked }))
     }
+}
+
+type RetireWorktree = (String, String, VerifiedCleanup);
+
+fn verify_retire_worktrees(
+    app: &AppCtx,
+    subtree: &[Session],
+) -> Result<Vec<RetireWorktree>, (u16, String)> {
+    let mut verified_worktrees = Vec::new();
+    for worker in subtree {
+        let Some(path) = worker
+            .worktree_path
+            .as_deref()
+            .filter(|path| !path.trim().is_empty())
+        else {
+            continue;
+        };
+        let Some(expected_parent) = worker.parent_session_id.as_deref() else {
+            return Err(err(409, "worker worktree has no parent session"));
+        };
+        match verify_cleanup(app, expected_parent, worker, path) {
+            Ok(verified) => {
+                verified_worktrees.push((worker.id.clone(), worker.name.clone(), verified))
+            }
+            Err(CleanupCheck::Blocked(reason)) => {
+                return Err((
+                    409,
+                    json!({
+                        "error": "worker subtree is not safe to retire",
+                        "blocked": {
+                            "id": worker.id,
+                            "name": worker.name,
+                            "path": path,
+                            "reason": reason,
+                        },
+                    })
+                    .to_string(),
+                ))
+            }
+            Err(CleanupCheck::Failed(reason)) => return Err(err(500, &reason)),
+        }
+    }
+    Ok(verified_worktrees)
+}
+
+/// Preview or retire one settled direct child subtree, cleaning only verified landed worktrees.
+fn op_retire(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
+    let session = match resolve_target(app, parent, req) {
+        Ok(session) => session,
+        Err(response) => return response,
+    };
+    if session.parent_session_id.as_deref() != Some(parent) {
+        return err(409, "retire requires a direct child session");
+    }
+
+    let mut subtree = match descendants(app, &session.id) {
+        Ok(descendants) => descendants,
+        Err(error) => return err(500, &error),
+    };
+    subtree.insert(0, session.clone());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0);
+    for worker in &subtree {
+        let state = state_of(app, &worker.id);
+        let fresh_not_started =
+            state == "not-started" && now - worker.created_at < SPAWN_DEFAULT_TIMEOUT_SECS;
+        if matches!(state.as_str(), "working" | "starting" | "asking") || fresh_not_started {
+            return (
+                409,
+                json!({
+                    "error": "worker subtree is not settled",
+                    "blocked": { "id": worker.id, "name": worker.name, "state": state },
+                })
+                .to_string(),
+            );
+        }
+    }
+
+    let confirm = req.get("confirm").and_then(Value::as_bool) == Some(true);
+    let mut verified_worktrees = match verify_retire_worktrees(app, &subtree) {
+        Ok(verified) => verified,
+        Err(response) => return response,
+    };
+
+    let worktree_rows: Vec<Value> = verified_worktrees
+        .iter()
+        .map(|(id, name, verified)| {
+            json!({
+                "id": id,
+                "name": name,
+                "path": verified.path,
+                "branch": verified.branch,
+                "targetCommit": verified.target_commit,
+            })
+        })
+        .collect();
+    let action = if verified_worktrees.is_empty() {
+        "archive"
+    } else {
+        "cleanup-and-archive"
+    };
+    let candidate = json!({
+        "id": session.id,
+        "name": session.name,
+        "action": action,
+        "descendantCount": subtree.len() - 1,
+        "worktrees": worktree_rows,
+    });
+    if !confirm {
+        return ok(json!({ "candidate": candidate }));
+    }
+
+    for worker in subtree.iter().rev() {
+        if let Err(error) = app.pty().kill(&worker.id) {
+            return err(500, &error);
+        }
+    }
+    verified_worktrees = match verify_retire_worktrees(app, &subtree) {
+        Ok(verified) => verified,
+        Err(response) => return response,
+    };
+
+    for (id, _, verified) in verified_worktrees.into_iter().rev() {
+        if let Err(error) = crate::git::worktree_remove(&verified.path, false) {
+            return err(500, &error);
+        }
+        if let Err(error) = crate::git::branch_delete(&verified.repo_root, &verified.branch) {
+            return err(500, &error);
+        }
+        let db = app.db();
+        let conn = match db.conn.lock() {
+            Ok(conn) => conn,
+            Err(_) => return err(500, "database lock is unavailable"),
+        };
+        if let Err(error) =
+            crate::db::repo::clear_node_worktree(&conn, crate::models::NodeKind::Session, &id)
+        {
+            return err(500, &error);
+        }
+    }
+    if let Err(error) = crate::command_core::set_session_archived(app, &session.id, true) {
+        return err(500, &error);
+    }
+    ok(json!({ "retired": candidate }))
 }
 
 fn op_diff(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
@@ -1440,6 +1606,7 @@ mod tests {
         let root = seed(&app, "root", None);
         let child = seed(&app, "worker", Some(&root.id));
         let _dup = seed(&app, "worker", Some(&root.id));
+        let grandchild = seed(&app, "nested-worker", Some(&child.id));
         let outsider = seed(&app, "outsider", None);
 
         assert_eq!(resolve_named(&app, &root.id, &child.id).unwrap().id, child.id);
@@ -1454,6 +1621,14 @@ mod tests {
         );
         assert_eq!(handle("diff", &request, &app).0, 404);
         assert_eq!(handle("land", &request, &app).0, 404);
+
+        let nested_request = format!(
+            r#"{{"parentSessionId":"{}","target":"{}"}}"#,
+            root.id, grandchild.id
+        );
+        let (status, body) = handle("retire", &nested_request, &app);
+        assert_eq!(status, 409);
+        assert!(body.contains("direct child"));
     }
 
     #[test]
@@ -1628,6 +1803,78 @@ mod tests {
                 .any(|branch| branch.name == worktree.branch),
             "verified cleanup must delete the disposable worker branch"
         );
+
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn retire_cleans_a_verified_landed_worktree_before_archiving() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "retire worker").unwrap();
+        std::fs::write(
+            std::path::Path::new(&worktree.path).join("worker.txt"),
+            "retired worker change\n",
+        )
+        .unwrap();
+        git(std::path::Path::new(&worktree.path), &["add", "-A"]);
+        git(
+            std::path::Path::new(&worktree.path),
+            &["commit", "-q", "-m", "worker change"],
+        );
+
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let child = seed_worktree(&app, &root, "worker", &worktree);
+        let (status, _) = handle(
+            "land",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"worker","message":"fix(orchestration): Land retired worker"}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 200);
+        {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET created_at = 0 WHERE id = ?1",
+                rusqlite::params![child.id],
+            )
+            .unwrap();
+        }
+
+        let preview_request = format!(r#"{{"parentSessionId":"{}","target":"worker"}}"#, root.id);
+        let (status, body) = handle("retire", &preview_request, &app);
+        assert_eq!(status, 200);
+        let preview: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(preview["candidate"]["action"], "cleanup-and-archive");
+        assert_eq!(preview["candidate"]["worktrees"][0]["path"], worktree.path);
+        assert!(std::path::Path::new(&worktree.path).is_dir());
+        assert_eq!(session_by_id(&app, &child.id).unwrap().archived_at, None);
+
+        let (status, body) = handle(
+            "retire",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"worker","confirm":true}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 200);
+        let retired: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(retired["retired"]["action"], "cleanup-and-archive");
+        assert!(!std::path::Path::new(&worktree.path).exists());
+        assert!(session_by_id(&app, &child.id)
+            .unwrap()
+            .archived_at
+            .is_some());
+        assert!(!crate::git::branch_list(&repo_str)
+            .unwrap()
+            .branches
+            .iter()
+            .any(|branch| branch.name == worktree.branch));
 
         std::fs::remove_dir_all(&repo).unwrap();
     }
@@ -1929,7 +2176,7 @@ mod tests {
         assert_eq!(v["current"], 2);
         assert_eq!(
             v["error"],
-            "max_descendants limit reached (2 of 2 retained descendants). Waiting does not free a slot; archive or remove a finished session."
+            "max_descendants limit reached (2 of 2 retained descendants). Waiting does not free a slot; retire a settled child session."
         );
 
         let (status, body) = handle(
@@ -1953,6 +2200,90 @@ mod tests {
         assert_eq!(status, 200);
         let v: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["pending"], true);
+    }
+
+    #[test]
+    fn retire_archives_a_settled_worker_and_frees_its_descendant_slot() {
+        let app = headless_app();
+        set_settings(&app, r#"{"orchestration":{"maxDescendants":1}}"#);
+        let root = seed(&app, "root", None);
+        let child = seed(&app, "worker", Some(&root.id));
+        {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET created_at = 0 WHERE id = ?1",
+                rusqlite::params![child.id],
+            )
+            .unwrap();
+        }
+
+        let (status, body) = handle(
+            "spawn",
+            &format!(r#"{{"parentSessionId":"{}","prompt":"work"}}"#, root.id),
+            &app,
+        );
+        assert_eq!(status, 429);
+        assert_eq!(
+            serde_json::from_str::<Value>(&body).unwrap()["limit"],
+            "max_descendants"
+        );
+
+        let request = format!(r#"{{"parentSessionId":"{}","target":"worker"}}"#, root.id);
+        let (status, body) = handle("retire", &request, &app);
+        assert_eq!(status, 200);
+        let preview: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(preview["candidate"]["id"], child.id);
+        assert_eq!(preview["candidate"]["action"], "archive");
+        assert_eq!(session_by_id(&app, &child.id).unwrap().archived_at, None);
+
+        let (status, body) = handle(
+            "retire",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"worker","confirm":true}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 200);
+        let retired: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(retired["retired"]["id"], child.id);
+        assert!(session_by_id(&app, &child.id)
+            .unwrap()
+            .archived_at
+            .is_some());
+
+        let (status, body) = handle(
+            "spawn",
+            &format!(
+                r#"{{"parentSessionId":"{}","prompt":"replacement","timeoutSecs":0}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(
+            serde_json::from_str::<Value>(&body).unwrap()["pending"],
+            true
+        );
+    }
+
+    #[test]
+    fn retire_rejects_a_child_inside_the_spawn_grace_period() {
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let child = seed(&app, "worker", Some(&root.id));
+
+        let (status, body) = handle(
+            "retire",
+            &format!(r#"{{"parentSessionId":"{}","target":"worker"}}"#, root.id),
+            &app,
+        );
+        assert_eq!(status, 409);
+        let blocked: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(blocked["blocked"]["id"], child.id);
+        assert_eq!(blocked["blocked"]["state"], "not-started");
+        assert_eq!(session_by_id(&app, &child.id).unwrap().archived_at, None);
     }
 
     #[test]
@@ -2244,6 +2575,15 @@ mod tests {
         let clean_session = mk("clean-worker", &clean.path);
         mk("dirty-worker", &dirty.path);
         seed(&app, "no-worktree", Some(&root.id));
+        {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET created_at = 0 WHERE id = ?1",
+                rusqlite::params![clean_session.id],
+            )
+            .unwrap();
+        }
 
         let body = format!(r#"{{"parentSessionId":"{}"}}"#, root.id);
         let (status, out) = handle("cleanup", &body, &app);
@@ -2279,6 +2619,25 @@ mod tests {
 
         let stored = session_by_id(&app, &clean_session.id).unwrap();
         assert_eq!(stored.worktree_path, Some(clean.path.clone()));
+
+        let (status, out) = handle(
+            "retire",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"clean-worker"}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 409);
+        let blocked: Value = serde_json::from_str(&out).unwrap();
+        assert!(blocked["blocked"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("verified landing"));
+        assert_eq!(
+            session_by_id(&app, &clean_session.id).unwrap().archived_at,
+            None
+        );
 
         crate::git::worktree_remove(&clean.path, true).unwrap();
         crate::git::branch_delete(&repo_str, &clean.branch).unwrap();

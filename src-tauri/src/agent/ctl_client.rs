@@ -23,6 +23,7 @@ const USAGE: &str = "usage:
   vagent diff   <id|name>
   vagent land   <id|name> --message <conventional-subject>
   vagent cleanup [--confirm]
+  vagent retire <id|name> [--confirm]
 
 All output is JSON. Sessions are addressed by id or unique name and must be
 descendants of the current session. wait blocks until the target is no longer
@@ -45,9 +46,9 @@ assistant reply exists.
 
 config prints the available profiles, their routing descriptions, the spawn
 limits, and the current child counts. A profile supplies the agent, model,
-effort, and worktree choice; an explicit flag overrides the profile. spawn returns 429 when a limit is reached,
-so wait for a child to finish and try again. cancel --all interrupts every
-running descendant.
+effort, and worktree choice; an explicit flag overrides the profile. spawn returns 429 when a limit is reached.
+Waiting can free a parallel slot. Retiring a settled child frees descendant slots. cancel --all interrupts
+every running descendant.
 
 Unknown model and effort values are advisory warnings on the confirmation card. The installed CLI
 is authoritative, so newer values remain launchable. Use --allow-unknown-launch-values to suppress
@@ -61,6 +62,10 @@ child agent default when the parent has no stored level.
 cleanup lists finished child worktrees with a verified landing record.
 --confirm removes each verified worktree and its disposable branch. A running
 child, an uncommitted worktree, or an unverified landing is never touched.
+
+retire previews one settled direct child subtree. --confirm terminates its
+settled processes, removes verified landed worktrees and branches, and archives
+the subtree. Dirty or unlanded worktrees block retirement.
 
 land requires a Conventional Commit subject through --message. It applies the
 worker's net change to the immediate parent's current branch as one commit.";
@@ -232,19 +237,18 @@ fn parse_ctl_args(rest: &[String]) -> CtlParse {
                 body.insert("confirm".into(), serde_json::json!(true));
             }
         }
-        "status" | "diff" | "land" => {
+        "status" | "diff" | "land" | "retire" => {
             let [target] = words.as_slice() else {
-                return CtlParse::Err(format!(
-                    "vagent: {op} needs exactly one <id|name>"
-                ));
+                return CtlParse::Err(format!("vagent: {op} needs exactly one <id|name>"));
             };
             body.insert("target".into(), serde_json::json!(target));
-            if op == "land" {
-                if !body.contains_key("message") {
-                    return CtlParse::Err(
-                        "vagent: land requires --message <conventional-subject>".to_string(),
-                    );
-                }
+            if op == "retire" && confirm {
+                body.insert("confirm".into(), serde_json::json!(true));
+            }
+            if op == "land" && !body.contains_key("message") {
+                return CtlParse::Err(
+                    "vagent: land requires --message <conventional-subject>".to_string(),
+                );
             }
         }
         "cancel" => {
@@ -429,6 +433,15 @@ mod tests {
     fn parse_target_subcommands() {
         let c = ok(&["status", "critical-auth"]);
         assert_eq!(c.body["target"], "critical-auth");
+
+        let c = ok(&["retire", "critical-auth"]);
+        assert_eq!(c.op, "retire");
+        assert_eq!(c.body["target"], "critical-auth");
+        assert!(!c.body.contains_key("confirm"));
+
+        let c = ok(&["retire", "critical-auth", "--confirm"]);
+        assert_eq!(c.body["target"], "critical-auth");
+        assert_eq!(c.body["confirm"], true);
 
         let c = ok(&["wait", "a", "b", "--any", "--timeout", "30"]);
         assert_eq!(c.body["targets"], serde_json::json!(["a", "b"]));

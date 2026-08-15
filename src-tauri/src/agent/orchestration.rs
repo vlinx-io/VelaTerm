@@ -338,7 +338,7 @@ pub fn check_limits(
     if descendants >= limits.max_descendants {
         return Some(LimitRejection {
             message: format!(
-                "max_descendants limit reached ({descendants} of {} retained descendants). Waiting does not free a slot; archive or remove a finished session.",
+                "max_descendants limit reached ({descendants} of {} retained descendants). Waiting does not free a slot; retire a settled child session.",
                 limits.max_descendants
             ),
             limit: "max_descendants",
@@ -614,7 +614,7 @@ mod tests {
         assert_eq!(r.to_json()["current"], 10);
         assert_eq!(
             r.to_json()["error"],
-            "max_descendants limit reached (10 of 10 retained descendants). Waiting does not free a slot; archive or remove a finished session."
+            "max_descendants limit reached (10 of 10 retained descendants). Waiting does not free a slot; retire a settled child session."
         );
 
         let r = check_limits(&limits, 1, 5, 4).unwrap();

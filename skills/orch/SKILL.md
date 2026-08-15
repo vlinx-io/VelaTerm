@@ -44,6 +44,7 @@ vagent cancel --all                      # interrupts every running descendant
 vagent diff <id|name>                    # branch diff and commit list against its recorded base
 vagent land <id|name> --message "<conventional-subject>"  # squash into the parent
 vagent cleanup [--confirm]               # preview or remove verified worktrees and branches
+vagent retire <id|name> [--confirm]      # preview or finish the child lifecycle
 ```
 
 For Codex children, use the current ChatGPT model identifiers `gpt-5.6-sol`, `gpt-5.6-terra`,
@@ -68,6 +69,9 @@ Known behavior:
   landing after a crash. The worker can rewrite its branch when the net change stays the same.
 - `cleanup` only accepts a clean worker whose fingerprint and target commit still verify. With
   `--confirm`, it removes the worktree and deletes the disposable worker branch.
+- `retire` accepts one settled direct child subtree. Its preview reports `archive` or
+  `cleanup-and-archive`. With `--confirm`, it stops settled processes, cleans verified worktrees,
+  and archives the subtree. Dirty or unlanded worktrees block retirement.
 - `wait` returns a `blocked` array naming children stopped at a permission prompt. Those settled
   without finishing. Tell the user immediately, by session name, then wait again.
 - `wait` returns a `failed` array with each errored session's name and provider text. Report every
@@ -99,13 +103,13 @@ Run `vagent config` first. It returns what the user configured in Settings > Orc
 - `profiles`: named description/agent/model/effort/worktree bundles, for example `database`,
   `frontend`, `quick-edits`, and `tests`. Read every profile description before routing work. A profile launch
   applies its settings without repeating launch flags. Explicit flags override profile values.
-- `limits`: `maxChildren`, `maxParallel`, `maxDepth`, `requireConfirmationAbove`,
+- `limits`: `maxDescendants`, `maxParallel`, `maxDepth`, `requireConfirmationAbove`,
   `defaultTimeoutSecs`, and `worktreeCopyPatterns`.
-- `counts`: your current live children, how many are `working`, and your own depth.
+- `counts`: your retained descendants, active descendants, and your own depth.
 
 The limits are enforced by the backend on every spawn, not by this text. A spawn that would cross
 one fails with HTTP 429 and a structured body naming `limit`, `limitValue`, and `current`. Nothing
-is queued: `vagent wait` for a slot, then spawn again.
+is queued. `vagent wait` can free a parallel slot. `vagent retire` frees descendant slots.
 
 ## Delegate by profile
 
@@ -206,14 +210,15 @@ cannot discover, the definition of done, and the path to the plan document. Do n
     with the Lead's reviewed message. Do not cherry-pick a worker's temporary commits.
 14. **Land through each parent.** A nested worker lands into its immediate parent. The top Lead then
     lands its complete net change into the branch that started the orchestration.
-15. **Preview cleanup before deletion.** After integration and validation, run `vagent cleanup` without
-    `--confirm`. Record each candidate's child name, worktree path, branch, and target commit. Show
-    the user the exact deletion list. Report each blocked worktree and its reason.
-16. **Require confirmation before cleanup.** Ask the user to confirm the exact cleanup list. Run
-    `vagent cleanup --confirm` only after confirmation. It removes each verified worktree and branch.
-17. **Verify cleanup.** Re-run `git worktree list` and `git branch --list`. Report what remains.
-18. **Give the final report.** State what each worker did, what landed, what cleanup the user
-    approved, which worktrees and branches were removed, and what remains.
+15. **Preview retirement.** Retire each direct child after integration, validation, and final review.
+    Run `vagent retire <id|name>` first. Report every blocked worker and its reason.
+16. **Confirm retirement safely.** If the action is `archive`, run `vagent retire <id|name> --confirm`.
+    If the action is `cleanup-and-archive`, show the exact worktree and branch list to the user first.
+    Run the confirmed command only after the user approves that deletion list.
+17. **Verify retirement.** Check `vagent list`, `git worktree list`, and `git branch --list`.
+    Confirm that the retired subtree no longer consumes a descendant slot.
+18. **Give the final report.** State what each worker did, what landed, and what retired.
+    Include approved cleanup, removed worktrees and branches, and anything that remains.
 
 ## Tell the user not to type into worker panes
 
