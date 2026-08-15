@@ -9,6 +9,8 @@
 //! the frontend creates the session and reports back through the `spawn_result` dispatch command,
 //! and the parked handler answers the CLI with the real session id.
 //! `spawn` resolves profiles and enforces limits from `agent::orchestration`.
+//! Registry entries record the parent session id, and `spawn-status` requires the same
+//! `parentSessionId` that opened the request; a mismatch answers 404 as if the id were unknown.
 
 use std::collections::HashMap;
 use std::sync::mpsc;
@@ -36,14 +38,17 @@ pub struct SpawnOutcome {
     pub awaiting_confirmation: bool,
 }
 
-/// One open spawn request and its result channel.
-type OpenSpawn = (Instant, mpsc::Sender<SpawnOutcome>);
+/// One open spawn request: its start time, originating parent session id, and result channel.
+type OpenSpawn = (Instant, String, mpsc::Sender<SpawnOutcome>);
 
 /// Open spawn requests by correlation id. Entries remain while confirmation is pending.
 static SPAWN_WAITERS: LazyLock<Mutex<HashMap<String, OpenSpawn>>> = LazyLock::new(Default::default);
 
+/// One stored final outcome: its arrival time and the parent id that may collect it.
+type StoredOutcome = (Instant, String, SpawnOutcome);
+
 /// Final outcomes for requests whose handlers already returned `pending`.
-static SPAWN_OUTCOMES: LazyLock<Mutex<HashMap<String, (Instant, SpawnOutcome)>>> =
+static SPAWN_OUTCOMES: LazyLock<Mutex<HashMap<String, StoredOutcome>>> =
     LazyLock::new(Default::default);
 
 /// Retention limits for pending requests and stored outcomes.
@@ -51,13 +56,16 @@ const OUTCOME_TTL: Duration = Duration::from_secs(3600);
 const OUTCOME_CAP: usize = 128;
 const DIFF_PATCH_MAX_BYTES: usize = 256 * 1024;
 
-/// Register a spawn correlation id and return the receiver its outcome arrives on.
-pub fn register_spawn_waiter(request_id: &str) -> mpsc::Receiver<SpawnOutcome> {
+/// Default answer timeout for `spawn`; a not-started child holds a parallel slot for this same window.
+const SPAWN_DEFAULT_TIMEOUT_SECS: i64 = 120;
+
+/// Register a spawn correlation id for `parent` and return the receiver its outcome arrives on.
+pub fn register_spawn_waiter(request_id: &str, parent: &str) -> mpsc::Receiver<SpawnOutcome> {
     let (tx, rx) = mpsc::channel();
     let now = Instant::now();
     let mut map = SPAWN_WAITERS.lock().unwrap();
-    map.retain(|_, (at, _)| now.duration_since(*at) < OUTCOME_TTL);
-    map.insert(request_id.to_string(), (now, tx));
+    map.retain(|_, (at, _, _)| now.duration_since(*at) < OUTCOME_TTL);
+    map.insert(request_id.to_string(), (now, parent.to_string(), tx));
     rx
 }
 
@@ -68,42 +76,47 @@ pub fn resolve_spawn(request_id: &str, outcome: SpawnOutcome) -> bool {
             .lock()
             .unwrap()
             .get(request_id)
-            .map(|(_, tx)| tx.clone());
+            .map(|(_, _, tx)| tx.clone());
         return match waiter {
             Some(tx) => tx.send(outcome).is_ok(),
             None => false,
         };
     }
-    store_outcome(request_id, outcome.clone());
     let waiter = SPAWN_WAITERS.lock().unwrap().remove(request_id);
     match waiter {
-        Some((_, tx)) => tx.send(outcome).is_ok(),
+        Some((_, parent, tx)) => {
+            store_outcome(request_id, &parent, outcome.clone());
+            tx.send(outcome).is_ok()
+        }
         None => false,
     }
 }
 
-fn store_outcome(request_id: &str, outcome: SpawnOutcome) {
+fn store_outcome(request_id: &str, parent: &str, outcome: SpawnOutcome) {
     let now = Instant::now();
     let mut map = SPAWN_OUTCOMES.lock().unwrap();
-    map.retain(|_, (at, _)| now.duration_since(*at) < OUTCOME_TTL);
+    map.retain(|_, (at, _, _)| now.duration_since(*at) < OUTCOME_TTL);
     if map.len() >= OUTCOME_CAP {
         if let Some(oldest) = map
             .iter()
-            .min_by_key(|(_, (at, _))| *at)
+            .min_by_key(|(_, (at, _, _))| *at)
             .map(|(id, _)| id.clone())
         {
             map.remove(&oldest);
         }
     }
-    map.insert(request_id.to_string(), (now, outcome));
+    map.insert(request_id.to_string(), (now, parent.to_string(), outcome));
 }
 
-fn take_outcome(request_id: &str) -> Option<SpawnOutcome> {
-    SPAWN_OUTCOMES
-        .lock()
-        .unwrap()
-        .remove(request_id)
-        .map(|(_, outcome)| outcome)
+/// Remove and return the outcome only when `parent` opened the request.
+fn take_outcome(request_id: &str, parent: &str) -> Option<SpawnOutcome> {
+    let mut map = SPAWN_OUTCOMES.lock().unwrap();
+    match map.get(request_id) {
+        Some((_, owner, _)) if owner == parent => {
+            map.remove(request_id).map(|(_, _, outcome)| outcome)
+        }
+        _ => None,
+    }
 }
 
 
@@ -126,7 +139,7 @@ pub fn handle(op: &str, body: &str, app: &AppCtx) -> (u16, String) {
         "diff" => op_diff(app, &parent, &parsed),
         "merge" => op_merge(app, &parent, &parsed),
         "spawn" => op_spawn(app, &parent, &parsed),
-        "spawn-status" => op_spawn_status(app, &parsed),
+        "spawn-status" => op_spawn_status(app, &parent, &parsed),
         "config" => op_config(app, &parent),
         "cleanup" => op_cleanup(app, &parent, &parsed),
         _ => err(404, "unknown operation"),
@@ -191,12 +204,29 @@ fn op_wait(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
         move |sid| state_of(&app2, sid),
     );
     let blocked = blocked_targets(&ids, &states);
+    let outcomes: Vec<_> = ids
+        .iter()
+        .map(|id| session_by_id(app, id).map(|s| turn_outcome_of(&s)).unwrap_or_default())
+        .collect();
+    let failed = failed_targets(&ids, &outcomes, |id| {
+        session_by_id(app, id)
+            .map(|session| session.name)
+            .unwrap_or_else(|| id.to_string())
+    });
     let rows: Vec<Value> = ids
         .iter()
         .zip(&states)
-        .map(|(id, state)| json!({ "id": id, "state": state }))
+        .zip(&outcomes)
+        .map(|((id, state), outcome)| {
+            json!({
+                "id": id,
+                "state": state,
+                "lastTurnOutcome": outcome.outcome,
+                "lastTurnError": outcome.error.clone(),
+            })
+        })
         .collect();
-    ok(json!({ "timedOut": timed_out, "blocked": blocked, "sessions": rows }))
+    ok(json!({ "timedOut": timed_out, "blocked": blocked, "failed": failed, "sessions": rows }))
 }
 
 fn op_read(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
@@ -211,12 +241,26 @@ fn op_read(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
         Ok(m) => m,
         Err(e) => return err(500, &e),
     };
+    let outcome = turn_outcome_of(&session);
     if req.get("full").and_then(Value::as_bool) == Some(true) {
         let rows: Vec<Value> = messages
             .iter()
             .map(|m| json!({ "role": m.role, "text": m.text, "timestamp": m.timestamp }))
             .collect();
-        return ok(json!({ "id": session.id, "messages": rows }));
+        return ok(json!({
+            "id": session.id,
+            "messages": rows,
+            "lastTurnOutcome": outcome.outcome,
+            "lastTurnError": outcome.error,
+        }));
+    }
+    if outcome.outcome == crate::agent::transcript::TurnOutcome::Error {
+        return ok(json!({
+            "id": session.id,
+            "role": "error",
+            "text": outcome.error.unwrap_or_else(|| "agent turn failed".to_string()),
+            "outcome": outcome.outcome,
+        }));
     }
     match messages.iter().rev().find(|m| m.role == "assistant") {
         Some(m) => ok(json!({
@@ -320,8 +364,8 @@ fn op_spawn(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
     if let Some(rejection) = orchestration::check_limits(
         &config.limits,
         counts.depth,
-        counts.children,
-        counts.working,
+        counts.descendants,
+        counts.active,
     ) {
         return (429, rejection.to_json().to_string());
     }
@@ -335,21 +379,21 @@ fn op_spawn(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
         str_field(req, "permissionMode"),
     );
 
-    // Reject values that the agent would ignore after launch.
-    if !req
+    // Curated launch values are advisory only. Installed CLIs can accept newer values than this build knows.
+    let launch_warnings = if !req
         .get("allowUnknownLaunchValues")
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
         let kind = effective_kind(app, parent, resolved.kind.as_deref());
-        if let Some(rejection) = check_launch_values(
+        launch_value_warnings(
             kind,
             resolved.model.as_deref(),
             resolved.effort.as_deref(),
-        ) {
-            return (400, rejection.to_string());
-        }
-    }
+        )
+    } else {
+        Vec::new()
+    };
 
     let permission_mode = resolved.permission_mode;
     if let Some(mode) = permission_mode.as_deref() {
@@ -368,8 +412,9 @@ fn op_spawn(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
     }
 
     let request_id = uuid::Uuid::new_v4().to_string();
-    let rx = register_spawn_waiter(&request_id);
-    let force_confirm = orchestration::needs_confirmation(&config.limits, counts.children);
+    let rx = register_spawn_waiter(&request_id, parent);
+    let force_confirm = orchestration::needs_confirmation(&config.limits, counts.active)
+        || !launch_warnings.is_empty();
     let spawn_req = crate::agent::server::SpawnRequest {
         parent_session_id: parent.to_string(),
         prompt,
@@ -383,13 +428,14 @@ fn op_spawn(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
         auto_approve: config.limits.auto_approve && !force_confirm,
         request_id: Some(request_id.clone()),
         force_confirm: force_confirm.then_some(true),
+        launch_warnings,
     };
     app.emit("spawn://request", spawn_req);
 
     let timeout = req
         .get("timeoutSecs")
         .and_then(Value::as_u64)
-        .unwrap_or(120);
+        .unwrap_or(SPAWN_DEFAULT_TIMEOUT_SECS as u64);
     match rx.recv_timeout(Duration::from_secs(timeout)) {
         Ok(outcome) if outcome.awaiting_confirmation => ok(json!({
             "pending": true,
@@ -423,15 +469,20 @@ fn spawn_outcome_response(app: &AppCtx, outcome: SpawnOutcome) -> (u16, String) 
     }
 }
 
-/// Collect the result of a spawn that returned `pending`.
-fn op_spawn_status(app: &AppCtx, req: &Value) -> (u16, String) {
+/// Collect the result of a spawn that returned `pending`. A request id opened by a different
+/// parent answers the same 404 as an unknown id, so the response does not reveal that it exists.
+fn op_spawn_status(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
     let Some(request_id) = str_field(req, "requestId") else {
         return err(400, "missing requestId");
     };
-    match take_outcome(&request_id) {
+    match take_outcome(&request_id, parent) {
         Some(outcome) => spawn_outcome_response(app, outcome),
         None => {
-            let known = SPAWN_WAITERS.lock().unwrap().contains_key(&request_id);
+            let known = SPAWN_WAITERS
+                .lock()
+                .unwrap()
+                .get(&request_id)
+                .is_some_and(|(_, owner, _)| owner == parent);
             if known {
                 ok(json!({ "pending": true, "requestId": request_id }))
             } else {
@@ -454,28 +505,30 @@ fn effective_kind(app: &AppCtx, parent: &str, requested: Option<&str>) -> Sessio
     }
 }
 
-/// Check model and effort values against the selected agent's supported values.
-fn check_launch_values(
+/// Warn when a launch value is outside the build's curated list. The installed agent remains authoritative.
+fn launch_value_warnings(
     kind: SessionKind,
     model: Option<&str>,
     effort: Option<&str>,
-) -> Option<Value> {
+) -> Vec<String> {
     let check = |field: &str, value: Option<&str>, known: Option<&'static [&'static str]>| {
         let value = value?;
         let known = known?;
         if known.contains(&value) {
             return None;
         }
-        Some(json!({
-            "error": format!("unknown {field} \"{value}\" for agent \"{}\"", kind.as_str()),
-            "field": field,
-            "value": value,
-            "available": known,
-            "hint": "pass --allow-unknown-launch-values to launch anyway",
-        }))
+        Some(format!(
+            "The {field} \"{value}\" is outside VelaTerm's curated values for {}. Verify that the installed CLI accepts it.",
+            kind.as_str()
+        ))
     };
-    check("model", model, inject::known_models(kind))
-        .or_else(|| check("effort", effort, inject::known_efforts(kind)))
+    [
+        check("model", model, inject::known_models(kind)),
+        check("effort", effort, inject::known_efforts(kind)),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 /// Report effective orchestration settings and current descendant counts.
@@ -489,8 +542,8 @@ fn op_config(app: &AppCtx, parent: &str) -> (u16, String) {
         "profiles": config.profiles_json(),
         "limits": config.limits.to_json(),
         "counts": {
-            "children": counts.children,
-            "working": counts.working,
+            "descendants": counts.descendants,
+            "active": counts.active,
             "depth": counts.depth,
         },
     }))
@@ -714,16 +767,33 @@ fn op_merge(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
 
 /// Live descendant counts and depth used by the spawn guardrails.
 struct SubtreeCounts {
-    children: u32,
-    working: u32,
+    descendants: u32,
+    active: u32,
     depth: u32,
+}
+
+/// Whether a session in `state` holds a parallel slot. "not-started" counts only inside the grace
+/// window, because a spawn returns before its PTY starts; an older not-started session is a
+/// leftover from a restart or a closed pane and must not hold a slot forever. "asking" counts
+/// because the child holds a worktree and resumes as soon as the prompt is answered.
+fn consumes_parallel_slot(state: &str, age_secs: i64) -> bool {
+    match state {
+        "starting" | "working" | "asking" => true,
+        // A negative age comes from a clock change and stays inside the window.
+        "not-started" => age_secs < SPAWN_DEFAULT_TIMEOUT_SECS,
+        _ => false,
+    }
 }
 
 fn subtree_counts(app: &AppCtx, parent: &str) -> Result<SubtreeCounts, String> {
     let sessions = descendants(app, parent)?;
-    let working = sessions
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let active = sessions
         .iter()
-        .filter(|s| state_of(app, &s.id) == "working")
+        .filter(|s| consumes_parallel_slot(&state_of(app, &s.id), now - s.created_at))
         .count();
     let depth = {
         let db = app.db();
@@ -731,8 +801,8 @@ fn subtree_counts(app: &AppCtx, parent: &str) -> Result<SubtreeCounts, String> {
         crate::db::repo::session_depth(&conn, parent)?
     };
     Ok(SubtreeCounts {
-        children: sessions.len() as u32,
-        working: working as u32,
+        descendants: sessions.len() as u32,
+        active: active as u32,
         depth,
     })
 }
@@ -758,6 +828,20 @@ fn blocked_targets<'a>(ids: &'a [String], states: &[String]) -> Vec<&'a String> 
         .zip(states)
         .filter(|(_, state)| state.as_str() == "asking")
         .map(|(id, _)| id)
+        .collect()
+}
+
+fn failed_targets(
+    ids: &[String],
+    outcomes: &[crate::agent::transcript::TurnOutcomeInfo],
+    name_of: impl Fn(&str) -> String,
+) -> Vec<Value> {
+    ids.iter()
+        .zip(outcomes)
+        .filter(|(_, outcome)| outcome.outcome == crate::agent::transcript::TurnOutcome::Error)
+        .map(|(id, outcome)| {
+            json!({ "id": id, "name": name_of(id), "error": outcome.error.clone() })
+        })
         .collect()
 }
 
@@ -833,6 +917,7 @@ fn resolve_named(app: &AppCtx, parent: &str, target: &str) -> Result<Session, (u
 }
 
 fn session_row(app: &AppCtx, s: &Session) -> Value {
+    let outcome = turn_outcome_of(s);
     json!({
         "id": s.id,
         "name": s.name,
@@ -840,9 +925,18 @@ fn session_row(app: &AppCtx, s: &Session) -> Value {
         "model": s.model,
         "effort": s.effort,
         "state": state_of(app, &s.id),
+        "lastTurnOutcome": outcome.outcome,
+        "lastTurnError": outcome.error,
         "worktreePath": s.worktree_path,
         "parentSessionId": s.parent_session_id,
     })
+}
+
+fn turn_outcome_of(s: &Session) -> crate::agent::transcript::TurnOutcomeInfo {
+    s.agent_session_id
+        .as_deref()
+        .map(|id| crate::agent::transcript::last_turn_outcome(s.kind, id))
+        .unwrap_or_default()
 }
 
 fn str_field(v: &Value, key: &str) -> Option<String> {
@@ -988,7 +1082,7 @@ mod tests {
 
     #[test]
     fn spawn_registry_roundtrip_and_timeout() {
-        let rx = register_spawn_waiter("req-1");
+        let rx = register_spawn_waiter("req-1", "parent-1");
         assert!(resolve_spawn(
             "req-1",
             SpawnOutcome {
@@ -1052,6 +1146,29 @@ mod tests {
     }
 
     #[test]
+    fn failed_targets_reports_provider_text_and_excludes_ok_and_unknown() {
+        use crate::agent::transcript::{TurnOutcome, TurnOutcomeInfo};
+
+        let ids: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+        let outcomes = vec![
+            TurnOutcomeInfo {
+                outcome: TurnOutcome::Error,
+                error: Some("provider rejected the model".to_string()),
+            },
+            TurnOutcomeInfo {
+                outcome: TurnOutcome::Ok,
+                error: None,
+            },
+            TurnOutcomeInfo::default(),
+        ];
+        let failed = failed_targets(&ids, &outcomes, |id| format!("worker-{id}"));
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0]["id"], "a");
+        assert_eq!(failed[0]["name"], "worker-a");
+        assert_eq!(failed[0]["error"], "provider rejected the model");
+    }
+
+    #[test]
     fn resolve_scopes_to_descendants_and_reports_ambiguity() {
         let app = headless_app();
         let root = seed(&app, "root", None);
@@ -1085,6 +1202,7 @@ mod tests {
         let v: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["sessions"][0]["id"], child.id.as_str());
         assert_eq!(v["sessions"][0]["state"], "not-started");
+        assert_eq!(v["sessions"][0]["lastTurnOutcome"], "unknown");
 
         let (status, body) = handle(
             "status",
@@ -1094,6 +1212,7 @@ mod tests {
         assert_eq!(status, 200);
         let v: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["kind"], "claude");
+        assert_eq!(v["lastTurnOutcome"], "unknown");
 
         let with_parent = format!(r#"{{"parentSessionId":"{}"}}"#, root.id);
         assert_eq!(handle("bogus", &with_parent, &app).0, 404);
@@ -1336,9 +1455,9 @@ mod tests {
     }
 
     #[test]
-    fn spawn_enforces_children_and_depth_limits() {
+    fn spawn_enforces_descendant_and_depth_limits() {
         let app = headless_app();
-        set_settings(&app, r#"{"orchestration":{"maxChildren":2,"maxDepth":2}}"#);
+        set_settings(&app, r#"{"orchestration":{"maxDescendants":2,"maxDepth":2}}"#);
         let root = seed(&app, "root", None);
         let mid = seed(&app, "mid", Some(&root.id));
         let leaf = seed(&app, "leaf", Some(&mid.id));
@@ -1350,10 +1469,13 @@ mod tests {
         );
         assert_eq!(status, 429);
         let v: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(v["limit"], "max_children");
+        assert_eq!(v["limit"], "max_descendants");
         assert_eq!(v["limitValue"], 2);
         assert_eq!(v["current"], 2);
-        assert_eq!(v["error"], "max_children limit reached (2 of 2 live children)");
+        assert_eq!(
+            v["error"],
+            "max_descendants limit reached (2 of 2 retained descendants). Waiting does not free a slot; archive or remove a finished session."
+        );
 
         let (status, body) = handle(
             "spawn",
@@ -1376,6 +1498,115 @@ mod tests {
         assert_eq!(status, 200);
         let v: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["pending"], true);
+    }
+
+    #[test]
+    fn spawn_counts_a_not_started_child_against_max_parallel() {
+        let app = headless_app();
+        set_settings(&app, r#"{"orchestration":{"maxParallel":1}}"#);
+        let root = seed(&app, "root", None);
+        let _worker = seed(&app, "worker", Some(&root.id));
+
+        let (status, body) = handle(
+            "spawn",
+            &format!(r#"{{"parentSessionId":"{}","prompt":"work"}}"#, root.id),
+            &app,
+        );
+        assert_eq!(status, 429);
+        let v: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["limit"], "max_parallel");
+        assert_eq!(v["limitValue"], 1);
+        assert_eq!(v["current"], 1);
+        assert_eq!(v["error"], "max_parallel limit reached (1 of 1 active children)");
+    }
+
+    #[test]
+    fn consumes_parallel_slot_covers_every_state() {
+        for state in ["starting", "working", "asking"] {
+            assert!(
+                consumes_parallel_slot(state, 10_000),
+                "{state} must hold a slot at any age"
+            );
+        }
+        assert!(consumes_parallel_slot("not-started", 0));
+        assert!(consumes_parallel_slot("not-started", SPAWN_DEFAULT_TIMEOUT_SECS - 1));
+        assert!(
+            consumes_parallel_slot("not-started", -5),
+            "a negative age must stay inside the window"
+        );
+        assert!(!consumes_parallel_slot("not-started", SPAWN_DEFAULT_TIMEOUT_SECS));
+        for state in ["waiting", "exited"] {
+            assert!(!consumes_parallel_slot(state, 0), "{state} must not hold a slot");
+        }
+    }
+
+    #[test]
+    fn an_old_not_started_child_does_not_hold_a_parallel_slot() {
+        let app = headless_app();
+        set_settings(&app, r#"{"orchestration":{"maxParallel":1}}"#);
+        let root = seed(&app, "root", None);
+        let stale = seed(&app, "stale", Some(&root.id));
+        {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET created_at = created_at - 3600 WHERE id = ?1",
+                [stale.id.as_str()],
+            )
+            .unwrap();
+        }
+
+        let (status, body) = handle(
+            "spawn",
+            &format!(
+                r#"{{"parentSessionId":"{}","prompt":"work","timeoutSecs":0}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 200);
+        let v: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["pending"], true);
+    }
+
+    #[test]
+    fn spawn_status_answers_a_foreign_parent_with_the_unknown_id_404() {
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let other = seed(&app, "other", None);
+        let child = seed(&app, "spawned", Some(&root.id));
+        let ask = |parent: &str, request_id: &str| {
+            handle(
+                "spawn-status",
+                &format!(r#"{{"parentSessionId":"{parent}","requestId":"{request_id}"}}"#),
+                &app,
+            )
+        };
+
+        let _rx = register_spawn_waiter("req-scope", &root.id);
+        let (_, unknown_body) = ask(&other.id, "req-nonexistent");
+        let (status, body) = ask(&other.id, "req-scope");
+        assert_eq!(status, 404);
+        assert_eq!(body, unknown_body);
+        let (status, body) = ask(&root.id, "req-scope");
+        assert_eq!(status, 200);
+        let v: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["pending"], true);
+
+        resolve_spawn(
+            "req-scope",
+            SpawnOutcome {
+                session_id: Some(child.id.clone()),
+                ..Default::default()
+            },
+        );
+        let (status, body) = ask(&other.id, "req-scope");
+        assert_eq!(status, 404);
+        assert_eq!(body, unknown_body, "a mismatch must not consume the outcome");
+        let (status, body) = ask(&root.id, "req-scope");
+        assert_eq!(status, 200);
+        let v: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["id"], child.id.as_str());
     }
 
     #[test]
@@ -1451,11 +1682,13 @@ mod tests {
         assert_eq!(v["profiles"]["quick"]["description"], "Use for quick fixes.");
         assert_eq!(v["profiles"]["quick"]["agent"], "codex");
         assert_eq!(v["limits"]["maxParallel"], 2);
-        assert_eq!(v["limits"]["maxChildren"], 10);
+        assert_eq!(v["limits"]["maxDescendants"], 10);
         assert_eq!(v["limits"]["worktreeCopyPatterns"][0], "docs/plans/**");
-        assert_eq!(v["counts"]["children"], 1);
-        assert_eq!(v["counts"]["working"], 0);
+        assert_eq!(v["counts"]["descendants"], 1);
+        assert_eq!(v["counts"]["active"], 1);
         assert_eq!(v["counts"]["depth"], 1);
+        assert_eq!(v["counts"].get("children"), None);
+        assert_eq!(v["counts"].get("working"), None);
     }
 
     #[test]
@@ -1493,7 +1726,9 @@ mod tests {
         assert_eq!(status, 200);
         let v: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["timedOut"], false);
+        assert!(v["failed"].as_array().unwrap().is_empty());
         assert_eq!(v["sessions"][0]["state"], "not-started");
+        assert_eq!(v["sessions"][0]["lastTurnOutcome"], "unknown");
     }
 
     #[test]
@@ -1591,47 +1826,51 @@ mod tests {
     }
 
     #[test]
-    fn launch_value_check_names_the_field_and_the_alternatives() {
-        let v = check_launch_values(SessionKind::Claude, Some("opus-5"), None)
-            .expect("an unknown model must be rejected");
-        assert_eq!(v["field"], "model");
-        assert_eq!(v["value"], "opus-5");
-        assert_eq!(v["available"], json!(["fable", "opus", "sonnet", "haiku"]));
+    fn launch_value_check_warns_without_rejecting_unknown_values() {
+        let warnings = launch_value_warnings(SessionKind::Claude, Some("opus-5"), None);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("opus-5"));
 
-        assert!(check_launch_values(SessionKind::Claude, Some("opus"), Some("high")).is_none());
+        assert!(launch_value_warnings(SessionKind::Claude, Some("opus"), Some("high")).is_empty());
 
-        let v = check_launch_values(SessionKind::Claude, Some("opus"), Some("xhigh"))
-            .expect("an unknown effort must be rejected");
-        assert_eq!(v["field"], "effort");
-        assert!(check_launch_values(
+        let warnings = launch_value_warnings(SessionKind::Claude, Some("opus"), Some("xhigh"));
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("effort"));
+        assert!(launch_value_warnings(
             SessionKind::Codex,
             Some("gpt-5.6-luna"),
             Some("xhigh")
         )
-        .is_none());
-        assert!(check_launch_values(SessionKind::Codex, Some("gpt-5.6-luna"), Some("ultra"))
-            .is_some());
+        .is_empty());
+        assert_eq!(
+            launch_value_warnings(SessionKind::Codex, Some("gpt-5.6-luna"), Some("ultra")).len(),
+            1
+        );
 
-        assert!(check_launch_values(SessionKind::Grok, Some("whatever"), Some("nonsense")).is_none());
-        assert!(check_launch_values(SessionKind::Claude, None, None).is_none());
+        assert!(launch_value_warnings(SessionKind::Grok, Some("whatever"), Some("nonsense")).is_empty());
+        assert!(launch_value_warnings(SessionKind::Claude, None, None).is_empty());
     }
 
     #[test]
-    fn spawn_rejects_an_unknown_model_before_reaching_the_frontend() {
+    fn spawn_warns_about_an_unknown_model_and_reaches_the_confirmation_card() {
         let app = headless_app();
         let root = seed(&app, "lead", None);
+        let emitted = capture_spawns(&app);
 
         let (status, out) = handle(
             "spawn",
             &format!(
-                r#"{{"parentSessionId":"{}","prompt":"work","kind":"claude","model":"opus-5"}}"#,
+                r#"{{"parentSessionId":"{}","prompt":"work","kind":"claude","model":"opus-5","timeoutSecs":0}}"#,
                 root.id
             ),
             &app,
         );
-        assert_eq!(status, 400);
+        assert_eq!(status, 200);
         let v: Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["field"], "model");
+        assert_eq!(v["pending"], true);
+        let request = emitted.lock().unwrap().first().cloned().unwrap();
+        assert_eq!(request["forceConfirm"], true);
+        assert_eq!(request["launchWarnings"].as_array().unwrap().len(), 1);
 
         let (status, out) = handle(
             "spawn",

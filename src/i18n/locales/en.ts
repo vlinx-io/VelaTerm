@@ -118,7 +118,7 @@ const en = {
   "settings.orchPermissionSkipWarning":
     "This worker runs without confirmation inside its worktree.",
   "settings.orchLimitsTitle": "Limits",
-  "settings.orchMaxChildren": "Max children",
+  "settings.orchMaxDescendants": "Max descendants",
   "settings.orchMaxParallel": "Max parallel",
   "settings.orchMaxDepth": "Max depth",
   "settings.orchConfirmAbove": "Confirm above",
@@ -127,9 +127,9 @@ const en = {
   "settings.orchAutoApproveHint":
     "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.",
   "settings.orchConfirmAboveHint":
-    "When a spawn would raise the number of live children above this value, the confirmation card appears even if spawn confirmation is off.",
+    "Show the confirmation card when a spawn would raise active descendant sessions above this value, even if spawn confirmation is off. Active descendant sessions are starting, working, or waiting on a permission prompt.",
   "settings.orchLimitsHint":
-    "The backend enforces these limits on every spawn. A lead agent reads the current values at runtime with `vagent config`.",
+    "Max descendants counts every retained descendant session, and finished sessions keep their slots until you archive or remove them. Max parallel counts descendants that are starting, working, or waiting on a permission prompt.",
   "settings.orchCopyPatterns": "Worktree copy patterns",
   "settings.orchCopyPatternsHint":
     "One glob per line. Untracked or ignored files that match are copied from the repository root into each new worktree. Build outputs such as node_modules are never copied, so workers still build cold.",

@@ -58,11 +58,17 @@ Known behavior:
   card is open or the timeout passed. Keep working and collect the child with
   `vagent spawn-status <requestId>` using the id in that response. Never sit in a loop waiting for a
   card: only the user can answer it.
-- `spawn` returns 400 for a model or effort the chosen agent does not accept, and lists the valid
-  values. Fix the value and retry; the spawn did not happen.
+- Unknown model and effort values produce advisory warnings on the confirmation card. The installed
+  CLI remains authoritative, so newer values stay launchable.
 - `wait` returns a `blocked` array naming children stopped at a permission prompt. Those settled
-  without finishing. Tell the user immediately, by session name, then wait again. An empty `blocked`
-  array means every target finished its turn.
+  without finishing. Tell the user immediately, by session name, then wait again.
+- `wait` returns a `failed` array with each errored session's name and provider text. Report every
+  failed worker immediately and do not spawn dependent work from it. An empty `failed` array means
+  no target's last completed turn reported an error.
+- `status` and each `wait.sessions` row include `lastTurnOutcome` (`ok`, `error`, or `unknown`) and
+  `lastTurnError` when the agent supplied failure text. `unknown` is honest for unsupported transcript
+  formats and must not be treated as success.
+- `read` returns a provider failure as an error-role response when the last turn has no assistant reply.
 - After `cancel` or a finished turn, the state can lag a few seconds; trust `wait`, not an
   immediate `status`.
 - `read` supports Claude, Codex, and Grok children. For other kinds, ask the worker to write its
@@ -164,9 +170,10 @@ cannot discover, the definition of done, and the path to the plan document. Do n
    `vagent config`, and give each child a distinct `--name`. In everything the user reads, refer
    to each worker by that exact session name (for example `phase4-frontend`), never by internal
    aliases such as "Worker A" or "Worker B": the user identifies sessions by the sidebar names.
-9. **Escalate a blocked worker at once.** When `vagent wait` reports a name in `blocked`, tell the
-   user in your next message which session is waiting and for what. Do not wait again on that
-   worker until the user has had a chance to answer; you cannot clear the prompt yourself.
+9. **Escalate a blocked or failed worker at once.** When `vagent wait` reports a name in `blocked`,
+   tell the user in your next message which session is waiting and for what. When it reports a name
+   in `failed`, tell the user the provider error text and stop dependent work. Do not wait again on a
+   blocked worker until the user has had a chance to answer; you cannot clear the prompt yourself.
 10. **Inspect every result** with `vagent read` before using it. If output is incomplete or
     questionable, follow up with `vagent prompt` rather than redoing or silently accepting it.
 11. **Never duplicate delegated work.** If a worker fails or stalls past its deadline, `cancel`,

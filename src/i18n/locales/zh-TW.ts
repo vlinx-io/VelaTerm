@@ -118,15 +118,17 @@ const zhTW: typeof en = {
   "settings.orchPermissionSkipWarning":
     "此工作程序在自己的 worktree 中執行時不會要求確認.",
   "settings.orchLimitsTitle": "限制",
-  "settings.orchMaxChildren": "子工作階段上限",
+  "settings.orchMaxDescendants": "子孫工作階段上限",
   "settings.orchMaxParallel": "並行上限",
   "settings.orchMaxDepth": "最大深度",
   "settings.orchConfirmAbove": "超過此數需確認",
   "settings.orchTimeout": "預設逾時（秒）",
   "settings.orchAutoApprove": "自動核准 /orch 衍生",
   "settings.orchAutoApproveHint": "啟動 /orch 子工作階段時略過確認卡片。達到確認閾值時仍需要審核。",
-  "settings.orchConfirmAboveHint": "若本次派生會讓存活的子工作階段數超過此值，即使關閉派生確認，確認卡片仍會出現。",
-  "settings.orchLimitsHint": "這些限制由後端在每次派生時強制執行。主控智能體於執行時用 `vagent config` 讀取目前的值。",
+  "settings.orchConfirmAboveHint":
+    "若本次派生會讓活動中的後代工作階段數超過此值, 即使關閉派生確認, 確認卡片仍會出現。活動中的後代工作階段正在啟動, 正在工作或正在等待權限請求。",
+  "settings.orchLimitsHint":
+    "後代工作階段上限會統計所有保留的後代工作階段, 已結束的工作階段會一直占用名額, 直到封存或刪除。並行上限只統計正在啟動, 正在工作或正在等待權限請求的後代工作階段。",
   "settings.orchCopyPatterns": "worktree 複製規則",
   "settings.orchCopyPatternsHint":
     "每行一個 glob。符合的未追蹤或被忽略的檔案會從儲存庫根目錄複製到每個新建 worktree。node_modules 等建置產物永遠不會複製，因此 worker 仍需從零建置。",

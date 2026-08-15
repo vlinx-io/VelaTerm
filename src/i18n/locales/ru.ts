@@ -131,7 +131,7 @@ const ru: typeof en = {
   "settings.orchPermissionSkipWarning":
     "Этот worker запускается без подтверждения внутри своего worktree.",
   "settings.orchLimitsTitle": "Ограничения",
-  "settings.orchMaxChildren": "Макс. дочерних",
+  "settings.orchMaxDescendants": "Макс. потомков",
   "settings.orchMaxParallel": "Макс. параллельно",
   "settings.orchMaxDepth": "Макс. глубина",
   "settings.orchConfirmAbove": "Подтверждать свыше",
@@ -139,9 +139,9 @@ const ru: typeof en = {
   "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
   "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
   "settings.orchConfirmAboveHint":
-    "Если после spawn число активных дочерних сессий превысит это значение, карточка подтверждения появится даже при выключенном подтверждении spawn.",
+    "Если после spawn число активных сессий-потомков превысит это значение, карточка подтверждения появится даже при выключенном подтверждении spawn. Активные сессии-потомки запускаются, работают или ждут запроса разрешения.",
   "settings.orchLimitsHint":
-    "Бэкенд применяет эти ограничения при каждом spawn. Ведущий агент читает текущие значения во время работы командой `vagent config`.",
+    "Макс. потомков считает каждую сохранённую сессию-потомка, включая завершённые сессии, которые занимают слот до архивации или удаления. Макс. параллельно считает сессии-потомки, которые запускаются, работают или ждут запроса разрешения.",
   "settings.orchCopyPatterns": "Шаблоны копирования в worktree",
   "settings.orchCopyPatternsHint":
     "По одному glob в строке. Неотслеживаемые или игнорируемые файлы, попавшие под шаблон, копируются из корня репозитория в каждый новый worktree. Результаты сборки, такие как node_modules, не копируются, поэтому воркеры всё равно собирают проект с нуля.",

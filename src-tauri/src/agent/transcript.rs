@@ -35,6 +35,24 @@ pub struct TranscriptMessage {
     pub tools: Vec<String>,
 }
 
+/// Result of the most recent completed agent turn.
+#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnOutcome {
+    Ok,
+    Error,
+    #[default]
+    Unknown,
+}
+
+/// Turn outcome plus provider text when the turn failed.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnOutcomeInfo {
+    pub outcome: TurnOutcome,
+    pub error: Option<String>,
+}
+
 /// Info-panel snapshot of model, context usage, and current tool.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -739,6 +757,115 @@ pub fn source_path(kind: SessionKind, agent_session_id: &str) -> Option<std::pat
     }
 }
 
+/// Reads the last parseable turn outcome without failing when the agent has no supported transcript.
+pub fn last_turn_outcome(kind: SessionKind, agent_session_id: &str) -> TurnOutcomeInfo {
+    let Some(path) = source_path(kind, agent_session_id) else {
+        return TurnOutcomeInfo {
+            outcome: TurnOutcome::Unknown,
+            error: None,
+        };
+    };
+    let Ok(tail) = read_tail(&path, CONTEXT_TAIL_BYTES) else {
+        return TurnOutcomeInfo {
+            outcome: TurnOutcome::Unknown,
+            error: None,
+        };
+    };
+    turn_outcome_from_text(kind, &tail)
+}
+
+/// Parses terminal records from a transcript tail. This helper stays independent from filesystem discovery so
+/// provider formats can be tested with small fixtures.
+fn turn_outcome_from_text(kind: SessionKind, text: &str) -> TurnOutcomeInfo {
+    match kind {
+        SessionKind::Claude => last_claude_turn_outcome(text),
+        SessionKind::Codex => last_codex_turn_outcome(text),
+        _ => TurnOutcomeInfo {
+            outcome: TurnOutcome::Unknown,
+            error: None,
+        },
+    }
+}
+
+fn last_codex_turn_outcome(text: &str) -> TurnOutcomeInfo {
+    let mut found = TurnOutcomeInfo {
+        outcome: TurnOutcome::Unknown,
+        error: None,
+    };
+    for line in text.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        let Some(payload) = v.get("payload") else {
+            continue;
+        };
+        if v.get("type").and_then(Value::as_str) != Some("event_msg")
+            || payload.get("type").and_then(Value::as_str) != Some("task_complete")
+        {
+            continue;
+        }
+        found = match payload.get("error").filter(|value| !value.is_null()) {
+            Some(error) => TurnOutcomeInfo {
+                outcome: TurnOutcome::Error,
+                error: value_text(error),
+            },
+            None => TurnOutcomeInfo {
+                outcome: TurnOutcome::Ok,
+                error: None,
+            },
+        };
+    }
+    found
+}
+
+fn last_claude_turn_outcome(text: &str) -> TurnOutcomeInfo {
+    let mut found = TurnOutcomeInfo {
+        outcome: TurnOutcome::Unknown,
+        error: None,
+    };
+    for line in text.lines() {
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
+        if v.get("type").and_then(Value::as_str) != Some("result") {
+            continue;
+        }
+        let is_error = v.get("is_error").and_then(Value::as_bool) == Some(true)
+            || v.get("subtype")
+                .and_then(Value::as_str)
+                .is_some_and(|subtype| subtype != "success");
+        found = if is_error {
+            let error = ["error", "result", "message"]
+                .iter()
+                .find_map(|key| v.get(*key).and_then(value_text));
+            TurnOutcomeInfo {
+                outcome: TurnOutcome::Error,
+                error,
+            }
+        } else {
+            TurnOutcomeInfo {
+                outcome: TurnOutcome::Ok,
+                error: None,
+            }
+        };
+    }
+    found
+}
+
+fn value_text(value: &Value) -> Option<String> {
+    if let Some(text) = value.as_str().map(str::trim).filter(|text| !text.is_empty()) {
+        return Some(text.to_string());
+    }
+    if let Some(object) = value.as_object() {
+        for key in ["message", "error", "detail", "result"] {
+            if let Some(text) = object.get(key).and_then(value_text) {
+                return Some(text);
+            }
+        }
+    }
+    (!value.is_null()).then(|| value.to_string())
+}
+
 /// Reads and parses an agent transcript by kind. Missing/deleted/unsupported sources return Err so the frontend can
 /// fall back to raw recording playback.
 pub fn read(kind: SessionKind, agent_session_id: &str) -> Result<Vec<TranscriptMessage>, String> {
@@ -1173,6 +1300,46 @@ mod tests {
             "Let me get a feel for the project layout first.\n\nThe configuration lives in application.yml."
         );
         assert_eq!(msgs[1].tools, vec!["shell"]);
+    }
+
+    #[test]
+    fn codex_turn_error_is_visible_without_an_assistant_message() {
+        let text = [
+            r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"run the task"}]}}"#,
+            r#"{"type":"event_msg","payload":{"type":"task_complete","error":{"message":"The 'sol' model is not supported"}}}"#,
+        ]
+        .join("\n");
+        let outcome = turn_outcome_from_text(SessionKind::Codex, &text);
+        assert_eq!(outcome.outcome, TurnOutcome::Error);
+        assert_eq!(
+            outcome.error.as_deref(),
+            Some("The 'sol' model is not supported")
+        );
+    }
+
+    #[test]
+    fn successful_codex_turn_is_ok_and_latest_terminal_record_wins() {
+        let text = [
+            r#"{"type":"event_msg","payload":{"type":"task_complete","error":{"message":"temporary"}}}"#,
+            r#"{"type":"event_msg","payload":{"type":"task_complete","error":null}}"#,
+        ]
+        .join("\n");
+        let outcome = turn_outcome_from_text(SessionKind::Codex, &text);
+        assert_eq!(outcome, TurnOutcomeInfo { outcome: TurnOutcome::Ok, error: None });
+    }
+
+    #[test]
+    fn claude_error_result_is_visible_and_unsupported_kinds_are_unknown() {
+        let error = turn_outcome_from_text(
+            SessionKind::Claude,
+            r#"{"type":"result","subtype":"error_during_execution","is_error":true,"result":"provider failed"}"#,
+        );
+        assert_eq!(error.outcome, TurnOutcome::Error);
+        assert_eq!(error.error.as_deref(), Some("provider failed"));
+
+        let unknown = turn_outcome_from_text(SessionKind::Opencode, "{}\nnot json");
+        assert_eq!(unknown.outcome, TurnOutcome::Unknown);
+        assert_eq!(unknown.error, None);
     }
 
     #[test]

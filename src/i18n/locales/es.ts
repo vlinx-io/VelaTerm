@@ -120,7 +120,7 @@ const es: typeof en = {
   "settings.orchPermissionSkipWarning":
     "Este trabajador se ejecuta sin confirmación dentro de su worktree.",
   "settings.orchLimitsTitle": "Límites",
-  "settings.orchMaxChildren": "Máx. de hijos",
+  "settings.orchMaxDescendants": "Máx. de descendientes",
   "settings.orchMaxParallel": "Máx. en paralelo",
   "settings.orchMaxDepth": "Profundidad máx.",
   "settings.orchConfirmAbove": "Confirmar por encima de",
@@ -128,9 +128,9 @@ const es: typeof en = {
   "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
   "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
   "settings.orchConfirmAboveHint":
-    "Cuando un spawn elevaría el número de hijos activos por encima de este valor, la tarjeta de confirmación aparece aunque la confirmación de spawn esté desactivada.",
+    "La tarjeta de confirmación aparece cuando un spawn elevaría el número de sesiones descendientes activas por encima de este valor, aunque la confirmación de spawn esté desactivada. Las sesiones descendientes activas se están iniciando, están trabajando o esperan una solicitud de permiso.",
   "settings.orchLimitsHint":
-    "El backend aplica estos límites en cada spawn. Un agente líder lee los valores actuales en tiempo de ejecución con `vagent config`.",
+    "Máx. de descendientes cuenta cada sesión descendiente conservada, incluidas las sesiones terminadas, que mantienen su plaza hasta que las archives o elimines. Máx. en paralelo cuenta las sesiones descendientes que se están iniciando, están trabajando o esperan una solicitud de permiso.",
   "settings.orchCopyPatterns": "Patrones de copia al worktree",
   "settings.orchCopyPatternsHint":
     "Un glob por línea. Los archivos sin seguimiento o ignorados que coincidan se copian desde la raíz del repositorio a cada nuevo worktree. Las salidas de compilación como node_modules nunca se copian, por lo que los workers siguen compilando desde cero.",

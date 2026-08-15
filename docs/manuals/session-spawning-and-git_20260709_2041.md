@@ -1,6 +1,7 @@
 # Session Spawning & Git Collaboration
 
 Created: 2026-07-09 20:41
+Updated: 2026-08-14
 
 > Two features that work as a pair: spawning subtasks into independent child sessions with `vspawn` (optionally in isolated git worktrees), and a graphical merge to bring parallel branches back together. Together they make "several agents working the same repo in parallel" an everyday workflow.
 
@@ -33,7 +34,7 @@ agent-specific flags at launch: Claude uses `--model` and `--effort`; Codex uses
 `-c model_reasoning_effort=`. Other agent types currently ignore these settings. When omitted, the
 agent's own defaults apply.
 
-> **Prerequisite for agent skills:** enable **Vela Skills** in Settings ▸ General. This installs `vspawn`, `vspawn-tree`, `vopen`, and `orch` into both `~/.claude/skills/` and the Codex skills directory (`$CODEX_HOME/skills` when set, otherwise `~/.codex/skills`); they're kept up to date automatically on app upgrades. After enabling, start a new Claude or Codex thread so the agent picks them up. Without this, only the terminal-typed `vspawn` / `vspawn-tree` commands work.
+> **Prerequisite for agent skills:** enable **Vela Skills** in Settings ▸ General. This installs `vspawn`, `vspawn-tree`, `vopen`, and `orch` into both `~/.claude/skills/` and the Codex skills directory (`$CODEX_HOME/skills` when set, otherwise `~/.codex/skills`); they're kept up to date automatically on app upgrades. After enabling, start a new Claude or Codex thread so the agent picks them up. Without this, the terminal commands still work, but the conversation skills are unavailable.
 
 ### Supervising children with `vagent`
 
@@ -45,14 +46,29 @@ descendants, addressed by id or unique name:
 vagent spawn --profile <p> --name <n> "<task>"
 vagent spawn --agent <kind> --model <m> --effort <e> --name <n> [--worktree] "<task>"
 vagent config
-vagent list | status | wait | read | prompt | cancel | cleanup
+vagent spawn-status <requestId>
+vagent list
+vagent status <id|name>
+vagent wait <id|name>...
+vagent read <id|name>
+vagent prompt <id|name> "<follow-up>"
+vagent cancel <id|name> | --all
+vagent diff <id|name>
+vagent merge <id|name>
+vagent cleanup [--confirm]
 ```
 
 `spawn` blocks until the child exists (respecting the confirmation card) and returns its session
-id; `wait` blocks while a child is working; `read` returns the child's last assistant reply
-(Claude, Codex, and Grok); `prompt` sends a follow-up into the child's conversation; `cancel`
-interrupts its current turn without closing the session, and `cancel --all` interrupts every
-running descendant.
+id. If the confirmation card remains open, collect the request later with `spawn-status`. Unknown
+model or effort values produce a warning, but the installed CLI remains authoritative and can still
+launch newer values.
+
+`wait` blocks while a child is working. Its result includes `blocked` permission prompts and
+`failed` workers. A failed worker includes its provider error text. `status` and each wait row expose
+the last turn outcome as `ok`, `error`, or `unknown`. `read` returns the child's last assistant reply
+(Claude, Codex, and Grok), or an error-role response when the last turn failed. `prompt` sends a
+follow-up into the child's conversation. `cancel` interrupts its current turn without closing the
+session, and `cancel --all` interrupts every running descendant.
 
 `config` prints the routing profiles, the spawn limits, and the caller's current child counts, all
 from Settings > Orchestration. A lead agent reads each profile description before it routes work.
@@ -67,7 +83,7 @@ changes, is reported as blocked and never touched.
 
 Settings ▸ Orchestration is one place for everything a lead agent needs:
 
-- **Profiles**: named bundles of description, agent, model, effort, and worktree. Three ship by
+- **Profiles**: named bundles of description, agent, model, effort, worktree, and permission mode. Four ship by
   default: `database`, `frontend`, `quick-edits`, and `tests`. Add, edit, and delete them freely.
 - **Limits**, enforced by the app on every spawn rather than by prompt text: `maxChildren` live
   children per lead, `maxParallel` children working at once, `maxDepth` for child-of-child nesting,

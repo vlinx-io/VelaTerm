@@ -71,7 +71,7 @@ impl Profile {
 /// Resource guardrails applied to one lead session's subtree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Limits {
-    pub max_children: u32,
+    pub max_descendants: u32,
     pub max_parallel: u32,
     pub max_depth: u32,
     pub require_confirmation_above: u32,
@@ -83,7 +83,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_children: 10,
+            max_descendants: 10,
             max_parallel: 4,
             max_depth: 2,
             require_confirmation_above: 6,
@@ -98,7 +98,7 @@ impl Limits {
     /// Serialize limits for `vagent config`.
     pub fn to_json(&self) -> Value {
         json!({
-            "maxChildren": self.max_children,
+            "maxDescendants": self.max_descendants,
             "maxParallel": self.max_parallel,
             "maxDepth": self.max_depth,
             "requireConfirmationAbove": self.require_confirmation_above,
@@ -114,8 +114,8 @@ impl Limits {
             return limits;
         };
         let count = |key: &str| obj.get(key).and_then(Value::as_u64);
-        if let Some(n) = count("maxChildren") {
-            limits.max_children = n as u32;
+        if let Some(n) = count("maxDescendants") {
+            limits.max_descendants = n as u32;
         }
         if let Some(n) = count("maxParallel") {
             limits.max_parallel = n as u32;
@@ -313,12 +313,12 @@ impl LimitRejection {
     }
 }
 
-/// Check one prospective spawn against the depth, child, and parallel limits.
+/// Check one prospective spawn against the depth, descendant, and parallel limits.
 pub fn check_limits(
     limits: &Limits,
     parent_depth: u32,
-    children: u32,
-    working: u32,
+    descendants: u32,
+    active: u32,
 ) -> Option<LimitRejection> {
     let new_depth = parent_depth + 1;
     if new_depth > limits.max_depth {
@@ -332,35 +332,35 @@ pub fn check_limits(
             current: new_depth,
         });
     }
-    if children >= limits.max_children {
+    if descendants >= limits.max_descendants {
         return Some(LimitRejection {
             message: format!(
-                "max_children limit reached ({children} of {} live children)",
-                limits.max_children
+                "max_descendants limit reached ({descendants} of {} retained descendants). Waiting does not free a slot; archive or remove a finished session.",
+                limits.max_descendants
             ),
-            limit: "max_children",
-            value: limits.max_children,
-            current: children,
+            limit: "max_descendants",
+            value: limits.max_descendants,
+            current: descendants,
         });
     }
-    if working >= limits.max_parallel {
+    if active >= limits.max_parallel {
         return Some(LimitRejection {
             message: format!(
-                "max_parallel limit reached ({working} of {} children working)",
+                "max_parallel limit reached ({active} of {} active children)",
                 limits.max_parallel
             ),
             limit: "max_parallel",
             value: limits.max_parallel,
-            current: working,
+            current: active,
         });
     }
     None
 }
 
 /// Whether the spawn must show the confirmation card even when the user disabled confirmation.
-/// `children` is the live descendant count before this spawn.
-pub fn needs_confirmation(limits: &Limits, children: u32) -> bool {
-    children + 1 > limits.require_confirmation_above
+/// `active` is the count of descendants that hold a parallel slot before this spawn.
+pub fn needs_confirmation(limits: &Limits, active: u32) -> bool {
+    active + 1 > limits.require_confirmation_above
 }
 
 #[cfg(test)]
@@ -375,7 +375,7 @@ mod tests {
         assert_eq!(parse_config(Some("{}")), default);
         assert_eq!(parse_config(Some(r#"{"theme":"dark"}"#)), default);
 
-        assert_eq!(default.limits.max_children, 10);
+        assert_eq!(default.limits.max_descendants, 10);
         assert_eq!(default.limits.max_parallel, 4);
         assert_eq!(default.limits.max_depth, 2);
         assert_eq!(default.limits.require_confirmation_above, 6);
@@ -419,9 +419,9 @@ mod tests {
     #[test]
     fn limits_fall_back_field_by_field() {
         let c = parse_config(Some(
-            r#"{"orchestration":{"maxChildren":3,"defaultTimeoutSecs":60}}"#,
+            r#"{"orchestration":{"maxDescendants":3,"defaultTimeoutSecs":60}}"#,
         ));
-        assert_eq!(c.limits.max_children, 3);
+        assert_eq!(c.limits.max_descendants, 3);
         assert_eq!(c.limits.default_timeout_secs, 60);
         assert_eq!(c.limits.max_parallel, 4);
         assert_eq!(c.limits.max_depth, 2);
@@ -582,12 +582,12 @@ mod tests {
         );
 
         let r = check_limits(&limits, 1, 10, 0).unwrap();
-        assert_eq!(r.limit, "max_children");
+        assert_eq!(r.limit, "max_descendants");
         assert_eq!(r.to_json()["limitValue"], 10);
         assert_eq!(r.to_json()["current"], 10);
         assert_eq!(
             r.to_json()["error"],
-            "max_children limit reached (10 of 10 live children)"
+            "max_descendants limit reached (10 of 10 retained descendants). Waiting does not free a slot; archive or remove a finished session."
         );
 
         let r = check_limits(&limits, 1, 5, 4).unwrap();
@@ -595,7 +595,7 @@ mod tests {
         assert_eq!(r.to_json()["limitValue"], 4);
         assert_eq!(
             r.to_json()["error"],
-            "max_parallel limit reached (4 of 4 children working)"
+            "max_parallel limit reached (4 of 4 active children)"
         );
     }
 
@@ -616,7 +616,7 @@ mod tests {
     fn config_serializes_as_camel_case() {
         let c = OrchestrationConfig::default();
         let limits = c.limits.to_json();
-        assert_eq!(limits["maxChildren"], 10);
+        assert_eq!(limits["maxDescendants"], 10);
         assert_eq!(limits["requireConfirmationAbove"], 6);
         assert_eq!(limits["autoApprove"], false);
         assert_eq!(limits["defaultTimeoutSecs"], 1800);

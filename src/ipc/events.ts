@@ -98,6 +98,8 @@ export interface SpawnRequest {
   /** Correlation id from `vagent spawn`; when set, the store reports the outcome via spawn_result. */
   requestId?: string | null;
   forceConfirm?: boolean | null;
+  /** Advisory warnings for model or effort values outside this build's curated lists. */
+  launchWarnings?: string[];
 }
 
 /** Listen for child-task requests as a global event registered once on mount. */

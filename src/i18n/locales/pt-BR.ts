@@ -120,7 +120,7 @@ const ptBR: typeof en = {
   "settings.orchPermissionSkipWarning":
     "Este worker é executado sem confirmação dentro de seu worktree.",
   "settings.orchLimitsTitle": "Limites",
-  "settings.orchMaxChildren": "Máx. de filhos",
+  "settings.orchMaxDescendants": "Máx. de descendentes",
   "settings.orchMaxParallel": "Máx. em paralelo",
   "settings.orchMaxDepth": "Profundidade máx.",
   "settings.orchConfirmAbove": "Confirmar acima de",
@@ -128,9 +128,9 @@ const ptBR: typeof en = {
   "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
   "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
   "settings.orchConfirmAboveHint":
-    "Quando um spawn elevaria o número de filhos ativos acima deste valor, o cartão de confirmação aparece mesmo com a confirmação de spawn desligada.",
+    "O cartão de confirmação aparece quando um spawn elevaria o número de sessões descendentes ativas acima deste valor, mesmo com a confirmação de spawn desativada. Sessões descendentes ativas estão iniciando, trabalhando ou aguardando uma solicitação de permissão.",
   "settings.orchLimitsHint":
-    "O backend aplica estes limites em cada spawn. Um agente líder lê os valores atuais em tempo de execução com `vagent config`.",
+    "Máx. de descendentes conta cada sessão descendente retida, incluindo sessões concluídas, que ocupam sua vaga até serem arquivadas ou removidas. Máx. em paralelo conta as sessões descendentes que estão iniciando, trabalhando ou aguardando uma solicitação de permissão.",
   "settings.orchCopyPatterns": "Padrões de cópia para o worktree",
   "settings.orchCopyPatternsHint":
     "Um glob por linha. Arquivos não rastreados ou ignorados que correspondam são copiados da raiz do repositório para cada novo worktree. Saídas de build como node_modules nunca são copiadas, então os workers ainda compilam do zero.",

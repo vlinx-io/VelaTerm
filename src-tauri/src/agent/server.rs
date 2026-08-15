@@ -56,6 +56,10 @@ pub struct SpawnRequest {
     /// Set when the spawn crosses the confirmation threshold.
     #[serde(default)]
     pub force_confirm: Option<bool>,
+    /// Advisory launch-value warnings. Unknown values must remain launchable because installed CLIs can support
+    /// models that this build does not know yet.
+    #[serde(default)]
+    pub launch_warnings: Vec<String>,
 }
 
 /// Request from `view <file|URL>` to open a tab.

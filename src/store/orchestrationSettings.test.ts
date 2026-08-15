@@ -39,7 +39,7 @@ if (!window.matchMedia) {
 }
 
 const DEFAULT_LIMITS = {
-  maxChildren: 10,
+  maxDescendants: 10,
   maxParallel: 4,
   maxDepth: 2,
   requireConfirmationAbove: 6,
@@ -66,7 +66,7 @@ describe("orchestration settings persistence", () => {
       },
     };
     saved.orchestration = {
-      maxChildren: 3,
+      maxDescendants: 3,
       maxParallel: 2,
       maxDepth: 1,
       requireConfirmationAbove: 2,
@@ -128,13 +128,13 @@ describe("orchestration settings persistence", () => {
   it("fills the missing numeric fields of a partial orchestration object", () => {
     localStorage.setItem(
       SETTINGS_KEY,
-      JSON.stringify({ orchestration: { maxChildren: 25, maxDepth: 4 } }),
+      JSON.stringify({ orchestration: { maxDescendants: 25, maxDepth: 4 } }),
     );
 
     const loaded = loadSettings();
     expect(loaded.orchestration).toEqual({
       ...DEFAULT_LIMITS,
-      maxChildren: 25,
+      maxDescendants: 25,
       maxDepth: 4,
     });
     for (const value of Object.values(loaded.orchestration)) {

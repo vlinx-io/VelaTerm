@@ -119,16 +119,17 @@ const ja: typeof en = {
   "settings.orchPermissionSkipWarning":
     "このワーカーは worktree 内で確認なしに実行されます.",
   "settings.orchLimitsTitle": "上限",
-  "settings.orchMaxChildren": "子セッションの最大数",
+  "settings.orchMaxDescendants": "子孫セッションの最大数",
   "settings.orchMaxParallel": "並列実行の最大数",
   "settings.orchMaxDepth": "最大深さ",
   "settings.orchConfirmAbove": "確認が必要になる数",
   "settings.orchTimeout": "既定のタイムアウト（秒）",
   "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
   "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
-  "settings.orchConfirmAboveHint": "spawn によって稼働中の子セッション数がこの値を超える場合、spawn の確認がオフでも確認カードを表示します。",
+  "settings.orchConfirmAboveHint":
+    "spawn によってアクティブな子孫セッション数がこの値を超える場合、spawn の確認がオフでも確認カードを表示します。アクティブな子孫セッションは、起動中、作業中、または権限確認待ちです。",
   "settings.orchLimitsHint":
-    "これらの上限はバックエンドが spawn ごとに強制します。リードエージェントは実行時に `vagent config` で現在の値を読み取ります。",
+    "子孫セッションの最大数は、保持しているすべての子孫セッションを数え、終了したセッションもアーカイブまたは削除するまで枠を占有します。並列実行の最大数は、起動中、作業中、または権限確認待ちの子孫セッションを数えます。",
   "settings.orchCopyPatterns": "worktree へのコピーパターン",
   "settings.orchCopyPatternsHint":
     "1 行に 1 つの glob を書きます。一致する未追跡ファイルや無視されたファイルは、リポジトリのルートから新しい worktree へコピーされます。node_modules などのビルド成果物はコピーされないため、ワーカーは毎回ビルドが必要です。",

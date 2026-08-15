@@ -354,6 +354,28 @@ export function SpawnConfirmModal() {
         </div>
       )}
 
+      {req.launchWarnings && req.launchWarnings.length > 0 && (
+        <div
+          role="alert"
+          style={{
+            marginBottom: 12,
+            padding: "8px 10px",
+            border: "1px solid var(--status-asking)",
+            borderRadius: 5,
+            color: "var(--text-primary)",
+            fontSize: 11,
+            lineHeight: 1.45,
+          }}
+        >
+          <div style={{ color: "var(--status-asking)", fontWeight: 600, marginBottom: 3 }}>
+            {t("status.error")}
+          </div>
+          {req.launchWarnings.map((warning) => (
+            <div key={warning}>{warning}</div>
+          ))}
+        </div>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {/* Editable multiline prompt without autoFocus, preserving terminal focus when the card appears. */}
         <label style={{ display: "block" }}>

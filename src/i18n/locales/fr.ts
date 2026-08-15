@@ -121,7 +121,7 @@ const fr: typeof en = {
   "settings.orchPermissionSkipWarning":
     "Ce worker s'exécute sans confirmation dans son worktree.",
   "settings.orchLimitsTitle": "Limites",
-  "settings.orchMaxChildren": "Enfants max.",
+  "settings.orchMaxDescendants": "Descendants max.",
   "settings.orchMaxParallel": "Parallélisme max.",
   "settings.orchMaxDepth": "Profondeur max.",
   "settings.orchConfirmAbove": "Confirmer au-delà de",
@@ -129,9 +129,9 @@ const fr: typeof en = {
   "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
   "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
   "settings.orchConfirmAboveHint":
-    "Si un spawn portait le nombre d'enfants actifs au-dessus de cette valeur, la carte de confirmation apparaît même lorsque la confirmation de spawn est désactivée.",
+    "La carte de confirmation apparaît si un spawn ferait dépasser cette valeur au nombre de sessions descendantes actives, même si la confirmation des spawns est désactivée. Les sessions descendantes actives démarrent, travaillent ou attendent une demande d'autorisation.",
   "settings.orchLimitsHint":
-    "Le backend applique ces limites à chaque spawn. Un agent principal lit les valeurs actuelles à l'exécution avec `vagent config`.",
+    "Descendants max. compte chaque session descendante conservée, y compris les sessions terminées, qui gardent leur place jusqu'à leur archivage ou leur suppression. Parallélisme max. compte les sessions descendantes qui démarrent, travaillent ou attendent une demande d'autorisation.",
   "settings.orchCopyPatterns": "Motifs de copie vers le worktree",
   "settings.orchCopyPatternsHint":
     "Un glob par ligne. Les fichiers non suivis ou ignorés qui correspondent sont copiés depuis la racine du dépôt vers chaque nouveau worktree. Les sorties de build comme node_modules ne sont jamais copiées, les workers compilent donc toujours à froid.",

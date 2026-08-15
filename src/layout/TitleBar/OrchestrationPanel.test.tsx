@@ -6,7 +6,7 @@ const { state } = vi.hoisted(() => ({
   state: {
     orchestrationProfiles: {} as Record<string, Record<string, unknown>>,
     orchestration: {
-      maxChildren: 10,
+      maxDescendants: 10,
       maxParallel: 4,
       maxDepth: 2,
       requireConfirmationAbove: 6,

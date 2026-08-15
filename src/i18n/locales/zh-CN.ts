@@ -117,15 +117,17 @@ const zhCN: typeof en = {
   "settings.orchPermissionSkipWarning":
     "此工作进程在自己的 worktree 中运行时不会请求确认.",
   "settings.orchLimitsTitle": "限制",
-  "settings.orchMaxChildren": "子会话上限",
+  "settings.orchMaxDescendants": "子孙会话上限",
   "settings.orchMaxParallel": "并行上限",
   "settings.orchMaxDepth": "最大深度",
   "settings.orchConfirmAbove": "超过此数需确认",
   "settings.orchTimeout": "默认超时（秒）",
   "settings.orchAutoApprove": "自动批准 /orch 派生",
   "settings.orchAutoApproveHint": "启动 /orch 子会话时跳过确认卡片。达到确认阈值时仍需要审核。",
-  "settings.orchConfirmAboveHint": "如果本次派生会让存活的子会话数超过该值，即使关闭了派生确认，确认卡片仍会出现。",
-  "settings.orchLimitsHint": "这些限制由后端在每次派生时强制执行。主控智能体在运行时用 `vagent config` 读取当前值。",
+  "settings.orchConfirmAboveHint":
+    "如果本次派生会让活动的后代会话数超过该值, 即使关闭了派生确认, 确认卡片仍会出现。活动的后代会话正在启动, 正在工作或正在等待权限请求。",
+  "settings.orchLimitsHint":
+    "后代会话上限统计所有保留的后代会话, 已结束的会话会一直占用名额, 直到归档或删除。并行上限只统计正在启动, 正在工作或正在等待权限请求的后代会话。",
   "settings.orchCopyPatterns": "worktree 复制规则",
   "settings.orchCopyPatternsHint":
     "每行一个 glob。匹配到的未跟踪或被忽略的文件会从仓库根目录复制到每个新建 worktree。node_modules 等构建产物永远不复制，因此 worker 仍需从零构建。",

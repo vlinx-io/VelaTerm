@@ -121,7 +121,7 @@ const de: typeof en = {
   "settings.orchPermissionSkipWarning":
     "Dieser Worker wird in seinem Worktree ohne Bestätigung ausgeführt.",
   "settings.orchLimitsTitle": "Limits",
-  "settings.orchMaxChildren": "Max. Kindsitzungen",
+  "settings.orchMaxDescendants": "Max. Nachfahren",
   "settings.orchMaxParallel": "Max. parallel",
   "settings.orchMaxDepth": "Max. Tiefe",
   "settings.orchConfirmAbove": "Bestätigen ab",
@@ -129,9 +129,9 @@ const de: typeof en = {
   "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
   "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
   "settings.orchConfirmAboveHint":
-    "Wenn ein Spawn die Zahl der aktiven Kindsitzungen über diesen Wert heben würde, erscheint die Bestätigungskarte auch bei ausgeschalteter Spawn-Bestätigung.",
+    "Die Bestätigungskarte erscheint, wenn ein Spawn die Zahl aktiver Nachkommensitzungen über diesen Wert erhöhen würde, auch wenn Spawn-Bestätigungen deaktiviert sind. Aktive Nachkommensitzungen starten, arbeiten oder warten auf eine Berechtigungsabfrage.",
   "settings.orchLimitsHint":
-    "Das Backend erzwingt diese Limits bei jedem Spawn. Ein Lead-Agent liest die aktuellen Werte zur Laufzeit mit `vagent config`.",
+    "Max. Nachfahren zählt jede aufbewahrte Nachkommensitzung, auch beendete Sitzungen, die ihren Platz bis zum Archivieren oder Entfernen behalten. Max. parallel zählt Nachkommensitzungen, die starten, arbeiten oder auf eine Berechtigungsabfrage warten.",
   "settings.orchCopyPatterns": "Kopiermuster für Worktrees",
   "settings.orchCopyPatternsHint":
     "Ein Glob pro Zeile. Passende nicht versionierte oder ignorierte Dateien werden aus dem Repository-Stammverzeichnis in jeden neuen Worktree kopiert. Build-Ausgaben wie node_modules werden nie kopiert, daher bauen Worker weiterhin von Grund auf.",

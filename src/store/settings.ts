@@ -61,7 +61,8 @@ export interface OrchestrationProfile {
 
 /** Backend-enforced orchestration limits. */
 export interface OrchestrationLimits {
-  maxChildren: number;
+  /** Counts every retained, non-archived descendant session, including finished sessions. */
+  maxDescendants: number;
   maxParallel: number;
   maxDepth: number;
   requireConfirmationAbove: number;
@@ -194,7 +195,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
     },
   },
   orchestration: {
-    maxChildren: 10,
+    maxDescendants: 10,
     maxParallel: 4,
     maxDepth: 2,
     requireConfirmationAbove: 6,
@@ -222,7 +223,7 @@ function mergeOrchestration(stored: Partial<OrchestrationLimits> | undefined): O
   const num = (v: unknown, fallback: number) =>
     typeof v === "number" && Number.isFinite(v) ? v : fallback;
   return {
-    maxChildren: num(s.maxChildren, d.maxChildren),
+    maxDescendants: num(s.maxDescendants, d.maxDescendants),
     maxParallel: num(s.maxParallel, d.maxParallel),
     maxDepth: num(s.maxDepth, d.maxDepth),
     requireConfirmationAbove: num(s.requireConfirmationAbove, d.requireConfirmationAbove),

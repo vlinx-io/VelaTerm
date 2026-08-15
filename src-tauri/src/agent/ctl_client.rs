@@ -38,15 +38,20 @@ wait returns a \"blocked\" array naming targets stopped at a permission prompt.
 Those are settled but not finished: tell the user, because only the user can
 answer the prompt. An empty array means every target finished its turn.
 
+wait also returns a \"failed\" array with session names and provider error text. Do not treat a
+failed target as finished work or use it as a dependency. status and wait session rows include
+lastTurnOutcome (ok, error, or unknown) and lastTurnError. read returns provider error text when no
+assistant reply exists.
+
 config prints the available profiles, their routing descriptions, the spawn
 limits, and the current child counts. A profile supplies the agent, model,
 effort, and worktree choice; an explicit flag overrides the profile. spawn returns 429 when a limit is reached,
 so wait for a child to finish and try again. cancel --all interrupts every
 running descendant.
 
-spawn returns 400 for a model or effort the chosen agent does not accept, and
-names the valid values. Use --allow-unknown-launch-values for a model newer than
-this build.
+Unknown model and effort values are advisory warnings on the confirmation card. The installed CLI
+is authoritative, so newer values remain launchable. Use --allow-unknown-launch-values to suppress
+the warning when the value is already verified.
 
 --permission-mode sets the child's approval behavior: default keeps the agent's
 own confirmations, skip passes its bypass flag. Without the flag the child

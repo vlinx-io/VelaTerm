@@ -120,7 +120,7 @@ const vi: typeof en = {
   "settings.orchPermissionSkipWarning":
     "Worker này chạy mà không cần xác nhận trong worktree của nó.",
   "settings.orchLimitsTitle": "Giới hạn",
-  "settings.orchMaxChildren": "Số phiên con tối đa",
+  "settings.orchMaxDescendants": "Số phiên con cháu tối đa",
   "settings.orchMaxParallel": "Số chạy song song tối đa",
   "settings.orchMaxDepth": "Độ sâu tối đa",
   "settings.orchConfirmAbove": "Xác nhận khi vượt",
@@ -128,9 +128,9 @@ const vi: typeof en = {
   "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
   "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
   "settings.orchConfirmAboveHint":
-    "Khi một lần spawn làm số phiên con đang chạy vượt quá giá trị này, thẻ xác nhận vẫn hiện dù xác nhận spawn đã tắt.",
+    "Thẻ xác nhận sẽ xuất hiện khi một lần spawn làm số phiên hậu duệ đang hoạt động vượt quá giá trị này, ngay cả khi đã tắt xác nhận spawn. Phiên hậu duệ đang hoạt động là phiên đang khởi động, đang làm việc hoặc đang chờ yêu cầu quyền.",
   "settings.orchLimitsHint":
-    "Backend áp dụng các giới hạn này cho mọi lần spawn. Tác nhân dẫn dắt đọc giá trị hiện tại khi chạy bằng `vagent config`.",
+    "Số phiên hậu duệ tối đa đếm mọi phiên hậu duệ còn được giữ lại, kể cả phiên đã kết thúc, cho đến khi phiên đó được lưu trữ hoặc xóa. Số chạy song song tối đa chỉ đếm các phiên hậu duệ đang khởi động, đang làm việc hoặc đang chờ yêu cầu quyền.",
   "settings.orchCopyPatterns": "Mẫu sao chép vào worktree",
   "settings.orchCopyPatternsHint":
     "Mỗi dòng một glob. Các tệp chưa theo dõi hoặc bị bỏ qua khớp mẫu sẽ được sao chép từ thư mục gốc của kho vào mỗi worktree mới. Kết quả build như node_modules không bao giờ được sao chép, nên worker vẫn phải build lại từ đầu.",

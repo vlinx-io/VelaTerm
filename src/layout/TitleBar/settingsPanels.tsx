@@ -908,10 +908,10 @@ export function OrchestrationPanel() {
       <div className="orch-limit-grid">
         <NumberRow
           className="orch-limit-row"
-          label={t("settings.orchMaxChildren")}
-          value={limits.maxChildren}
+          label={t("settings.orchMaxDescendants")}
+          value={limits.maxDescendants}
           min={1}
-          onCommit={(v) => setLimits({ maxChildren: v })}
+          onCommit={(v) => setLimits({ maxDescendants: v })}
         />
         <NumberRow
           className="orch-limit-row"
