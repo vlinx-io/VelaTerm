@@ -139,6 +139,9 @@ const ru: typeof en = {
   "settings.orchTimeout": "Тайм-аут по умолчанию (секунды)",
   "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
   "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
+  "settings.orchAutoApproveRetire": "Автоматически одобрять вывод из работы",
+  "settings.orchAutoApproveRetireHint":
+    "Архивирует завершившего работу воркера без карточки подтверждения, включая проверенную очистку worktree. Вывод, который возобновляет непроверенную очистку, всегда спрашивает.",
   "settings.orchConfirmAboveHint":
     "Если после spawn число активных сессий-потомков превысит это значение, карточка подтверждения появится даже при выключенном подтверждении spawn. Активные сессии-потомки запускаются, работают или ждут запроса разрешения.",
   "settings.orchLimitsHint":
@@ -196,6 +199,23 @@ const ru: typeof en = {
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
+  "retire.title": "Вывести эту сессию из работы?",
+  "retire.session": "Сессия",
+  "retire.actionArchive": "Архивировать сессию. Ни один worktree не удаляется.",
+  "retire.actionCleanup":
+    "Удалить worktree из списка ниже, затем архивировать сессию.",
+  "retire.descendants": (n: number) => `Включает дочерних сессий: ${n}.`,
+  "retire.irreversible": "Это действие нельзя отменить",
+  "retire.worktreeCount": (n: number) =>
+    `Будет удалено worktree: ${n}, вместе с их ветками.`,
+  "retire.pathLabel": "Путь",
+  "retire.branchLabel": "Ветка",
+  "retire.branchUnknown": "неизвестно",
+  "retire.resumed": "Каталог уже удалён; осталась только ветка.",
+  "retire.keep": "Оставить",
+  "retire.approve": "Вывести",
+  "retire.remaining": (n: number) => `ещё ${n} в очереди`,
+  "retire.notifyTitle": "Вывод ожидает подтверждения", // Retire awaiting confirmation
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "Показать изменения…",
@@ -426,6 +446,12 @@ const ru: typeof en = {
   "tree.killProcess": "Завершить процесс", // Kill Process
   "tree.archiveSession": "Архивировать сессию", // Archive Session
   "tree.archiveGroup": "Архивировать группу", // Archive Group
+  "tree.archiveBlockedTitle": "Нельзя архивировать сессию", // Cannot Archive Session
+  "tree.archiveBlockedBody": "Архивация отклонена. Архивная сессия выходит из области очистки, поэтому её worktree и ветка остались бы без присмотра.", // Archiving was refused. An archived session leaves the worker cleanup scope, so its worktree and branch would be stranded.
+  "tree.archiveConfirmTitle": "Архивировать и удалить worktree?", // Archive and delete worktrees?
+  "tree.archiveConfirmBody": (n: number) =>
+    `Архивирование удалит worktree воркеров (${n}) и их ветки. Отменить это нельзя. Работа уже находится в родительской ветке.`,
+  "tree.archiveConfirmAction": "Архивировать", // Archive
   // Temporary (draft) sessions
   "tree.scratchTag": "врем.", // scratch
   "tree.persistSession": "Сделать постоянной сессией…", // Make Permanent Session…
@@ -604,6 +630,7 @@ const ru: typeof en = {
   "archive.empty2":
     "Щёлкните сессию в боковой панели правой кнопкой и выберите «Архивировать сессию», чтобы убрать её сюда.", // Right-click a session in the sidebar…
   "archive.restore": "Восстановить как обычную сессию", // Restore to normal session
+  "archive.retiredNote": "Списанный воркер нельзя возобновить в прежнем виде: списание уже удалило его worktree и ветку.", // A retired worker cannot resume exactly, because retire already deleted its worktree and branch.
   "archive.export": "Экспортировать полный контекст в Markdown", // Export full context as Markdown
   "archive.deleteForever": "Удалить навсегда (вместе с записью)", // Delete permanently (with recording)
   "archive.pickOne": "Выберите архивную сессию слева, чтобы посмотреть стенограмму", // Select an archived session on the left…

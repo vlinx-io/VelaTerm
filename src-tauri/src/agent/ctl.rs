@@ -11,6 +11,7 @@
 //! `spawn` resolves profiles and enforces limits from `agent::orchestration`.
 //! Registry entries record the parent session id, and `spawn-status` requires the same
 //! `parentSessionId` that opened the request; a mismatch answers 404 as if the id were unknown.
+//! `retire --confirm` destroys nothing until the `retire_result` command answers its card.
 
 use std::collections::HashMap;
 use std::sync::mpsc;
@@ -57,8 +58,16 @@ const OUTCOME_CAP: usize = 128;
 const DIFF_PATCH_MAX_BYTES: usize = 256 * 1024;
 const DIFF_COMMIT_MAX: usize = 50;
 
-/// Default answer timeout for `spawn`; a not-started child holds a parallel slot for this same window.
+/// Default answer timeout for `spawn` and for the `retire` card; a not-started child holds a
+/// parallel slot for this same window.
 const SPAWN_DEFAULT_TIMEOUT_SECS: i64 = 120;
+
+/// How long `retire` waits for one killed worker to leave the process table before it continues.
+const RETIRE_EXIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Transcript silence a running worker must show with a current lifecycle completion. This delay
+/// also rejects a fresh transcript write that can race the completion event.
+const SETTLED_QUIET_SECS: u64 = 10;
 
 fn is_conventional_commit_subject(value: &str) -> bool {
     let Some((prefix, subject)) = value.split_once(": ") else {
@@ -150,6 +159,39 @@ fn store_outcome(request_id: &str, parent: &str, outcome: SpawnOutcome) {
         }
     }
     map.insert(request_id.to_string(), (now, parent.to_string(), outcome));
+}
+
+/// Answer reported by the frontend for one correlated retire confirmation card.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetireDecision {
+    /// True only when the user approved the card; anything else leaves the subtree untouched.
+    pub approved: bool,
+    pub error: Option<String>,
+}
+
+type OpenRetire = (Instant, String, mpsc::Sender<RetireDecision>);
+
+static RETIRE_WAITERS: LazyLock<Mutex<HashMap<String, OpenRetire>>> = LazyLock::new(Default::default);
+
+/// Register a retire correlation id for `parent` and return the receiver its answer arrives on.
+pub fn register_retire_waiter(request_id: &str, parent: &str) -> mpsc::Receiver<RetireDecision> {
+    let (tx, rx) = mpsc::channel();
+    let now = Instant::now();
+    let mut map = RETIRE_WAITERS.lock().unwrap();
+    map.retain(|_, (at, _, _)| now.duration_since(*at) < OUTCOME_TTL);
+    map.insert(request_id.to_string(), (now, parent.to_string(), tx));
+    rx
+}
+
+/// Deliver one card answer to its parked handler. An answer that arrives after the handler timed
+/// out is dropped, so a late approval never retires a subtree on its own.
+pub fn resolve_retire(request_id: &str, decision: RetireDecision) -> bool {
+    let waiter = RETIRE_WAITERS.lock().unwrap().remove(request_id);
+    match waiter {
+        Some((_, _, tx)) => tx.send(decision).is_ok(),
+        None => false,
+    }
 }
 
 /// Remove and return the outcome only when `parent` opened the request.
@@ -737,13 +779,73 @@ fn op_cleanup(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
     }
 }
 
-type RetireWorktree = (String, String, VerifiedCleanup);
+/// Cleanup work for one worker of a retiring subtree.
+enum RetireCleanup {
+    /// The worktree is still on disk and matches its verified landing.
+    Verified(VerifiedCleanup),
+    /// A previous attempt already removed the directory, so only the branch and database pointer remain.
+    Resumed { repo_root: String, branch: String },
+}
 
-fn verify_retire_worktrees(
+struct RetirePlan {
+    id: String,
+    name: String,
+    path: String,
+    cleanup: RetireCleanup,
+}
+
+/// Recover the branch and repository root of a missing worktree from its landing record and the
+/// `<repo>/.vlx-worktrees/<leaf>` layout; without that record the directory may only be unreachable.
+fn resume_retire_cleanup(
+    app: &AppCtx,
+    worker: &Session,
+    path: &str,
+) -> Result<RetireCleanup, CleanupCheck> {
+    let branch = match app.db().conn.lock() {
+        Ok(conn) => {
+            crate::db::repo::get_agent_landing(&conn, &worker.id)
+                .map_err(CleanupCheck::Failed)?
+                .ok_or_else(|| {
+                    CleanupCheck::Blocked(
+                        "worktree directory is missing and the worker never landed".to_string(),
+                    )
+                })?
+                .source_branch
+        }
+        Err(_) => {
+            return Err(CleanupCheck::Failed(
+                "database lock is unavailable".to_string(),
+            ))
+        }
+    };
+    let repo_root = std::path::Path::new(path)
+        .parent()
+        .filter(|dir| dir.file_name().and_then(|name| name.to_str()) == Some(".vlx-worktrees"))
+        .and_then(|dir| dir.parent())
+        .and_then(|root| crate::git::repository_root(&root.to_string_lossy()))
+        .ok_or_else(|| {
+            CleanupCheck::Blocked(
+                "worktree directory is missing and the repository root is unavailable".to_string(),
+            )
+        })?;
+    Ok(RetireCleanup::Resumed { repo_root, branch })
+}
+
+/// Worktree cleanup work for a subtree, plus every worker whose worktree bars retirement.
+struct RetireScan {
+    plans: Vec<RetirePlan>,
+    blocked: Vec<Value>,
+}
+
+/// Plan the worktree cleanup for a subtree. `fail_fast` answers on the first blocked worker; the
+/// preview instead collects every blocker so a lead sees the whole list at once.
+fn scan_retire_worktrees(
     app: &AppCtx,
     subtree: &[Session],
-) -> Result<Vec<RetireWorktree>, (u16, String)> {
-    let mut verified_worktrees = Vec::new();
+    fail_fast: bool,
+) -> Result<RetireScan, (u16, String)> {
+    let mut plans = Vec::new();
+    let mut blocked = Vec::new();
     for worker in subtree {
         let Some(path) = worker
             .worktree_path
@@ -755,29 +857,346 @@ fn verify_retire_worktrees(
         let Some(expected_parent) = worker.parent_session_id.as_deref() else {
             return Err(err(409, "worker worktree has no parent session"));
         };
-        match verify_cleanup(app, expected_parent, worker, path) {
-            Ok(verified) => {
-                verified_worktrees.push((worker.id.clone(), worker.name.clone(), verified))
+        let plan = |cleanup| RetirePlan {
+            id: worker.id.clone(),
+            name: worker.name.clone(),
+            path: path.to_string(),
+            cleanup,
+        };
+        // A recorded worktree whose directory is gone means an earlier retire failed partway.
+        // Verification cannot run against a missing directory, so resume instead of blocking forever.
+        if !std::path::Path::new(path).is_dir() {
+            match resume_retire_cleanup(app, worker, path) {
+                Ok(cleanup) => plans.push(plan(cleanup)),
+                Err(CleanupCheck::Blocked(reason)) => {
+                    let row = retire_block_row(worker, None, Some(path), &reason);
+                    if fail_fast {
+                        return Err(retire_blocked(vec![row]));
+                    }
+                    blocked.push(row);
+                }
+                Err(CleanupCheck::Failed(reason)) => return Err(err(500, &reason)),
             }
+            continue;
+        }
+        match verify_cleanup(app, expected_parent, worker, path) {
+            Ok(verified) => plans.push(plan(RetireCleanup::Verified(verified))),
             Err(CleanupCheck::Blocked(reason)) => {
-                return Err((
-                    409,
-                    json!({
-                        "error": "worker subtree is not safe to retire",
-                        "blocked": {
-                            "id": worker.id,
-                            "name": worker.name,
-                            "path": path,
-                            "reason": reason,
-                        },
-                    })
-                    .to_string(),
-                ))
+                let row = retire_block_row(worker, None, Some(path), &reason);
+                if fail_fast {
+                    return Err(retire_blocked(vec![row]));
+                }
+                blocked.push(row);
             }
             Err(CleanupCheck::Failed(reason)) => return Err(err(500, &reason)),
         }
     }
-    Ok(verified_worktrees)
+    Ok(RetireScan { plans, blocked })
+}
+
+/// Describe one worker that bars retirement. `state` names a lifecycle block and `path` a worktree block.
+fn retire_block_row(
+    worker: &Session,
+    state: Option<&str>,
+    path: Option<&str>,
+    reason: &str,
+) -> Value {
+    let mut row = json!({ "id": worker.id, "name": worker.name, "reason": reason });
+    if let Some(state) = state {
+        row["state"] = json!(state);
+    }
+    if let Some(path) = path {
+        row["path"] = json!(path);
+    }
+    row
+}
+
+fn retire_blocked(blocked: Vec<Value>) -> (u16, String) {
+    (
+        409,
+        json!({ "error": "worker subtree is not safe to retire", "blocked": blocked }).to_string(),
+    )
+}
+
+/// Verdict of the settled check for one worker.
+enum Settled {
+    Yes,
+    No(String),
+}
+
+/// Signals the settled check reads for one worker.
+struct SettleSignals {
+    state: String,
+    running: bool,
+    age_secs: i64,
+    tool: Option<String>,
+    /// Seconds since the agent last wrote its own transcript; None when it has no readable one.
+    transcript_quiet_secs: Option<u64>,
+    current_turn_completion: bool,
+}
+
+/// Decide whether `retire` may stop one worker. A running worker needs a lifecycle completion after
+/// its latest input, no active tool, and a quiet transcript of its own.
+fn settle_verdict(signals: &SettleSignals) -> Settled {
+    if matches!(signals.state.as_str(), "working" | "starting" | "asking") {
+        return Settled::No("session has not finished its turn".to_string());
+    }
+    if signals.state == "not-started" && signals.age_secs < SPAWN_DEFAULT_TIMEOUT_SECS {
+        return Settled::No("session is still inside the spawn grace period".to_string());
+    }
+    if !signals.running {
+        return Settled::Yes;
+    }
+    if let Some(tool) = &signals.tool {
+        return Settled::No(format!("the {tool} tool is still running"));
+    }
+    match signals.transcript_quiet_secs {
+        Some(secs) if secs < SETTLED_QUIET_SECS => {
+            Settled::No(format!("the agent wrote its transcript {secs} seconds ago"))
+        }
+        Some(_) | None if signals.current_turn_completion => Settled::Yes,
+        Some(_) | None => Settled::No("session has no current turn-completion signal".to_string()),
+    }
+}
+
+/// Tool last reported by the agent's hooks; a finished turn clears it.
+fn active_tool(app: &AppCtx, sid: &str) -> Option<String> {
+    app.pty()
+        .status_snapshot(sid)
+        .into_iter()
+        .filter(|payload| payload.get("kind").and_then(Value::as_str) == Some("tool"))
+        .find_map(|payload| {
+            payload
+                .get("tool")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+}
+
+/// Seconds since the agent itself last wrote its transcript, independent of VelaTerm's status cache.
+fn transcript_quiet_secs(worker: &Session) -> Option<u64> {
+    let agent_id = worker.agent_session_id.as_deref()?;
+    let path = crate::agent::transcript::source_path(worker.kind, agent_id)?;
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    Some(
+        std::time::SystemTime::now()
+            .duration_since(modified)
+            .map(|quiet| quiet.as_secs())
+            .unwrap_or(0),
+    )
+}
+
+/// Reason one worker is not settled enough to stop, or None when `retire` may kill it.
+fn retire_settle_reason(app: &AppCtx, worker: &Session, now: i64) -> Option<(String, String)> {
+    let signals = SettleSignals {
+        state: state_of(app, &worker.id),
+        running: app.pty().is_running(&worker.id),
+        age_secs: now - worker.created_at,
+        tool: active_tool(app, &worker.id),
+        transcript_quiet_secs: transcript_quiet_secs(worker),
+        current_turn_completion: app.pty().has_current_turn_completion(&worker.id),
+    };
+    match settle_verdict(&signals) {
+        Settled::Yes => None,
+        Settled::No(reason) => Some((signals.state, reason)),
+    }
+}
+
+/// Uncommitted changes a stopped child left in its own directory. A child without a worktree edits a
+/// directory that `retire` never removes, so the change is reported instead of blocking the archive.
+fn retire_dirty_directories(subtree: &[Session]) -> Vec<Value> {
+    subtree
+        .iter()
+        .filter(|worker| {
+            worker
+                .worktree_path
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or("")
+                .is_empty()
+        })
+        .filter_map(|worker| {
+            let path = worker
+                .cwd
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())?;
+            crate::git::worktree_has_changes(path).then(|| {
+                json!({
+                    "id": worker.id,
+                    "name": worker.name,
+                    "path": path,
+                    "reason": "session directory has uncommitted changes",
+                })
+            })
+        })
+        .collect()
+}
+
+/// Describe one planned or completed worker cleanup for the preview and the confirm response.
+fn retire_plan_row(plan: &RetirePlan) -> Value {
+    match &plan.cleanup {
+        RetireCleanup::Verified(verified) => json!({
+            "id": plan.id,
+            "name": plan.name,
+            "path": verified.path,
+            "branch": verified.branch,
+            "targetCommit": verified.target_commit,
+        }),
+        RetireCleanup::Resumed { branch, .. } => json!({
+            "id": plan.id,
+            "name": plan.name,
+            "path": plan.path,
+            "branch": branch,
+            "resumed": true,
+        }),
+    }
+}
+
+/// Remove one worker's worktree and branch, then clear its database pointer. The pointer is cleared
+/// last so a failed branch delete leaves a resumable record rather than an invisible leak.
+fn retire_one(app: &AppCtx, plan: &RetirePlan) -> Result<(), String> {
+    match &plan.cleanup {
+        RetireCleanup::Verified(verified) => {
+            crate::git::worktree_remove(&verified.path, false)?;
+            crate::git::branch_delete(&verified.repo_root, &verified.branch)?;
+        }
+        RetireCleanup::Resumed { repo_root, branch } => {
+            crate::git::worktree_prune(repo_root)?;
+            crate::git::branch_delete_if_present(repo_root, branch)?;
+        }
+    }
+    let db = app.db();
+    let conn = db
+        .conn
+        .lock()
+        .map_err(|_| "database lock is unavailable".to_string())?;
+    crate::db::repo::clear_node_worktree(&conn, crate::models::NodeKind::Session, &plan.id)
+}
+
+/// Clean the verified worker worktrees of a subtree, or block its archive with the failing reason.
+/// An archived session leaves the live tree that `cleanup` and `retire` scan.
+pub(crate) fn prepare_archive(app: &AppCtx, session_id: &str) -> Result<(), String> {
+    let Some(root) = session_by_id(app, session_id) else {
+        return Ok(());
+    };
+    let mut subtree = vec![root];
+    subtree.extend(descendants(app, session_id)?);
+    let subtree_ids: Vec<String> = subtree.iter().map(|worker| worker.id.clone()).collect();
+
+    let mut owned = Vec::new();
+    for worker in &subtree {
+        let holds_worktree = worker
+            .worktree_path
+            .as_deref()
+            .is_some_and(|path| !path.trim().is_empty());
+        // Only an orchestration worker owns its worktree. A top-level session or a worktree that
+        // another live node still binds, such as a group workspace, survives this archive untouched.
+        if !holds_worktree || worker.parent_session_id.is_none() {
+            continue;
+        }
+        let shared = {
+            let db = app.db();
+            let conn = db
+                .conn
+                .lock()
+                .map_err(|_| "database lock is unavailable".to_string())?;
+            crate::db::repo::worktree_binding_is_shared(&conn, &worker.id, &subtree_ids)?
+        };
+        if shared {
+            continue;
+        }
+        // Removing a directory under a live agent process would corrupt its work in progress.
+        if app.pty().is_running(&worker.id) {
+            return Err(format!(
+                "\"{}\" is still running. Stop the session before you archive it.",
+                worker.name
+            ));
+        }
+        owned.push(worker.clone());
+    }
+    for owner in &owned {
+        let owner_path = owner
+            .worktree_path
+            .as_deref()
+            .ok_or_else(|| format!("cannot verify the worktree used by \"{}\"", owner.name))?;
+        let owner_path = std::path::Path::new(owner_path);
+        match std::fs::metadata(owner_path) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(_) => {
+                return Err(format!(
+                    "cannot verify the worktree used by \"{}\"",
+                    owner.name
+                ))
+            }
+        }
+        let owner_path = owner_path
+            .canonicalize()
+            .map_err(|_| format!("cannot verify the worktree used by \"{}\"", owner.name))?;
+        for worker in &subtree {
+            if worker.id == owner.id || !app.pty().is_running(&worker.id) {
+                continue;
+            }
+            let working_directory = app
+                .pty()
+                .cwd(&worker.id)
+                .or_else(|| worker.cwd.clone())
+                .ok_or_else(|| {
+                    format!(
+                        "cannot verify the working directory of \"{}\" while it is running",
+                        worker.name
+                    )
+                })?;
+            let working_directory = std::path::Path::new(&working_directory)
+                .canonicalize()
+                .map_err(|_| {
+                    format!(
+                        "cannot verify the working directory of \"{}\" while it is running",
+                        worker.name
+                    )
+                })?;
+            if working_directory.starts_with(&owner_path) {
+                return Err(format!(
+                    "\"{}\" is still running inside \"{}\". Stop the session before you archive it.",
+                    worker.name, owner.name
+                ));
+            }
+        }
+    }
+    if owned.is_empty() {
+        return Ok(());
+    }
+
+    // The archive dialog shows one message, so collect every blocker instead of the first one.
+    let scan = scan_retire_worktrees(app, &owned, false).map_err(|(_, body)| {
+        let parsed: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+        parsed["error"]
+            .as_str()
+            .unwrap_or("the worktree check failed")
+            .to_string()
+    })?;
+    if !scan.blocked.is_empty() {
+        return Err(blocked_archive_message(&scan.blocked));
+    }
+    for plan in scan.plans.iter().rev() {
+        retire_one(app, plan)?;
+    }
+    Ok(())
+}
+
+/// Join every worktree blocker into the single message the archive dialog shows.
+fn blocked_archive_message(blocked: &[Value]) -> String {
+    let rows: Vec<String> = blocked
+        .iter()
+        .map(|row| {
+            let name = row["name"].as_str().unwrap_or("a worker");
+            let reason = row["reason"].as_str().unwrap_or("the worktree check failed");
+            format!("\"{name}\" still holds a worktree: {reason}")
+        })
+        .collect();
+    format!("{}. Land or retire the worker first.", rows.join("; "))
 }
 
 /// Preview or retire one settled direct child subtree, cleaning only verified landed worktrees.
@@ -795,45 +1214,35 @@ fn op_retire(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
         Err(error) => return err(500, &error),
     };
     subtree.insert(0, session.clone());
+    let confirm = req.get("confirm").and_then(Value::as_bool) == Some(true);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs() as i64)
         .unwrap_or(0);
+    let mut blocked = Vec::new();
     for worker in &subtree {
-        let state = state_of(app, &worker.id);
-        let fresh_not_started =
-            state == "not-started" && now - worker.created_at < SPAWN_DEFAULT_TIMEOUT_SECS;
-        if matches!(state.as_str(), "working" | "starting" | "asking") || fresh_not_started {
-            return (
-                409,
-                json!({
-                    "error": "worker subtree is not settled",
-                    "blocked": { "id": worker.id, "name": worker.name, "state": state },
-                })
-                .to_string(),
-            );
+        let Some((state, reason)) = retire_settle_reason(app, worker, now) else {
+            continue;
+        };
+        let row = retire_block_row(worker, Some(&state), None, &reason);
+        if confirm {
+            return retire_blocked(vec![row]);
         }
+        blocked.push(row);
     }
 
-    let confirm = req.get("confirm").and_then(Value::as_bool) == Some(true);
-    let mut verified_worktrees = match verify_retire_worktrees(app, &subtree) {
-        Ok(verified) => verified,
+    let scan = match scan_retire_worktrees(app, &subtree, confirm) {
+        Ok(scan) => scan,
         Err(response) => return response,
     };
+    let mut plans = scan.plans;
+    blocked.extend(scan.blocked);
+    if !blocked.is_empty() {
+        return retire_blocked(blocked);
+    }
 
-    let worktree_rows: Vec<Value> = verified_worktrees
-        .iter()
-        .map(|(id, name, verified)| {
-            json!({
-                "id": id,
-                "name": name,
-                "path": verified.path,
-                "branch": verified.branch,
-                "targetCommit": verified.target_commit,
-            })
-        })
-        .collect();
-    let action = if verified_worktrees.is_empty() {
+    let worktree_rows: Vec<Value> = plans.iter().map(retire_plan_row).collect();
+    let action = if plans.is_empty() {
         "archive"
     } else {
         "cleanup-and-archive"
@@ -843,44 +1252,172 @@ fn op_retire(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
         "name": session.name,
         "action": action,
         "descendantCount": subtree.len() - 1,
-        "worktrees": worktree_rows,
+        "worktrees": worktree_rows.clone(),
     });
     if !confirm {
         return ok(json!({ "candidate": candidate }));
     }
 
+    if let Some(response) = confirm_retire(
+        app,
+        parent,
+        &session,
+        action,
+        &subtree,
+        &worktree_rows,
+        req,
+    ) {
+        return response;
+    }
+
+    let Some(current_session) = session_by_id(app, &session.id) else {
+        return err(409, "retire target changed after confirmation");
+    };
+    if current_session.parent_session_id.as_deref() != Some(parent) {
+        return err(409, "retire target changed after confirmation");
+    }
+    let mut current_subtree = match descendants(app, &current_session.id) {
+        Ok(descendants) => descendants,
+        Err(error) => return err(500, &error),
+    };
+    current_subtree.insert(0, current_session);
+    let current_now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0);
+    for worker in &current_subtree {
+        let Some((state, reason)) = retire_settle_reason(app, worker, current_now) else {
+            continue;
+        };
+        return retire_blocked(vec![retire_block_row(worker, Some(&state), None, &reason)]);
+    }
+    let current_scan = match scan_retire_worktrees(app, &current_subtree, true) {
+        Ok(scan) => scan,
+        Err(response) => return response,
+    };
+    let current_worktree_rows: Vec<Value> =
+        current_scan.plans.iter().map(retire_plan_row).collect();
+    let approved_ids: Vec<&str> = subtree.iter().map(|worker| worker.id.as_str()).collect();
+    let current_ids: Vec<&str> = current_subtree
+        .iter()
+        .map(|worker| worker.id.as_str())
+        .collect();
+    if current_ids != approved_ids || current_worktree_rows != worktree_rows {
+        return err(
+            409,
+            "retire plan changed after confirmation; review it again",
+        );
+    }
+    subtree = current_subtree;
+
+    // Wait for each agent to exit so the re-verification below sees the settled worktree instead of
+    // racing a shutdown write, which would fail the removal partway through the subtree.
+    let mut exit_blocked = Vec::new();
     for worker in subtree.iter().rev() {
-        if let Err(error) = app.pty().kill(&worker.id) {
-            return err(500, &error);
+        if !app.pty().kill_and_wait(&worker.id, RETIRE_EXIT_TIMEOUT) {
+            exit_blocked.push(retire_block_row(
+                worker,
+                Some("stopping"),
+                None,
+                "the process tree did not exit before the retire timeout",
+            ));
         }
     }
-    verified_worktrees = match verify_retire_worktrees(app, &subtree) {
-        Ok(verified) => verified,
+    if !exit_blocked.is_empty() {
+        return retire_blocked(exit_blocked);
+    }
+    let dirty = retire_dirty_directories(&subtree);
+    plans = match scan_retire_worktrees(app, &subtree, true) {
+        Ok(scan) => scan.plans,
         Err(response) => return response,
     };
 
-    for (id, _, verified) in verified_worktrees.into_iter().rev() {
-        if let Err(error) = crate::git::worktree_remove(&verified.path, false) {
-            return err(500, &error);
+    // Each worker is independent, so one git failure records that worker and leaves the rest to
+    // finish. Archiving is skipped while anything failed, keeping the subtree visible to a retry.
+    let (mut removed, mut failed) = (Vec::new(), Vec::new());
+    for plan in plans.iter().rev() {
+        match retire_one(app, plan) {
+            Ok(()) => removed.push(retire_plan_row(plan)),
+            Err(error) => {
+                let mut row = retire_plan_row(plan);
+                row["error"] = json!(error);
+                failed.push(row);
+            }
         }
-        if let Err(error) = crate::git::branch_delete(&verified.repo_root, &verified.branch) {
-            return err(500, &error);
-        }
-        let db = app.db();
-        let conn = match db.conn.lock() {
-            Ok(conn) => conn,
-            Err(_) => return err(500, "database lock is unavailable"),
-        };
-        if let Err(error) =
-            crate::db::repo::clear_node_worktree(&conn, crate::models::NodeKind::Session, &id)
-        {
-            return err(500, &error);
-        }
+    }
+    if !failed.is_empty() {
+        return (
+            500,
+            json!({
+                "error": "retire could not clean every worktree; run it again after resolving the failures",
+                "removed": removed,
+                "failed": failed,
+                "dirty": dirty,
+            })
+            .to_string(),
+        );
     }
     if let Err(error) = crate::command_core::set_session_archived(app, &session.id, true) {
         return err(500, &error);
     }
-    ok(json!({ "retired": candidate }))
+    ok(json!({ "retired": candidate, "removed": removed, "dirty": dirty }))
+}
+
+/// Ask the frontend to confirm one retire and return the response when it must not proceed.
+/// A `resumed` row deletes a branch no verification covers, so that plan always shows the card.
+fn confirm_retire(
+    app: &AppCtx,
+    parent: &str,
+    session: &Session,
+    action: &str,
+    subtree: &[Session],
+    worktree_rows: &[Value],
+    req: &Value,
+) -> Option<(u16, String)> {
+    let limits = orchestration::load(app).limits;
+    let force_confirm = worktree_rows
+        .iter()
+        .any(|row| row.get("resumed").and_then(Value::as_bool) == Some(true));
+    if limits.auto_approve_retire && !force_confirm {
+        return None;
+    }
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let rx = register_retire_waiter(&request_id, parent);
+    app.emit(
+        "retire://request",
+        json!({
+            "requestId": request_id,
+            "sessionId": session.id,
+            "name": session.name,
+            "action": action,
+            "descendantCount": subtree.len() - 1,
+            "worktrees": worktree_rows,
+        }),
+    );
+    let timeout = req
+        .get("timeoutSecs")
+        .and_then(Value::as_u64)
+        .unwrap_or(SPAWN_DEFAULT_TIMEOUT_SECS as u64);
+    match rx.recv_timeout(Duration::from_secs(timeout)) {
+        Ok(decision) if decision.approved => None,
+        Ok(decision) => Some(err(
+            409,
+            decision
+                .error
+                .as_deref()
+                .unwrap_or("retire was not confirmed"),
+        )),
+        // The handler is gone once it times out, so the card must withdraw itself; an answer to a
+        // dropped receiver retires nothing and would look like a silent approval.
+        Err(_) => {
+            app.emit("retire://cancel", json!({ "requestId": request_id }));
+            Some(ok(json!({
+                "pending": true,
+                "requestId": request_id,
+                "awaitingConfirmation": true,
+            })))
+        }
+    }
 }
 
 fn op_diff(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
@@ -1333,10 +1870,7 @@ fn resolve_named(app: &AppCtx, parent: &str, target: &str) -> Result<Session, (u
     }
     let by_name: Vec<&Session> = sessions.iter().filter(|s| s.name == target).collect();
     match by_name.as_slice() {
-        [] => Err(err(
-            404,
-            &format!("no live child session matches \"{target}\""),
-        )),
+        [] => Err(archived_or_unknown(app, parent, target)),
         [one] => Ok((*one).clone()),
         many => {
             let ids: Vec<&str> = many.iter().map(|s| s.id.as_str()).collect();
@@ -1345,6 +1879,57 @@ fn resolve_named(app: &AppCtx, parent: &str, target: &str) -> Result<Session, (u
                 &format!("name \"{target}\" is ambiguous; use an id: {}", ids.join(", ")),
             ))
         }
+    }
+}
+
+/// Archived descendants of `parent`, most recently archived first. Archiving marks whole subtrees,
+/// so the walk follows archived parents as well as live ones.
+fn archived_descendants(app: &AppCtx, parent: &str) -> Vec<Session> {
+    let db = app.db();
+    let Ok(conn) = db.conn.lock() else {
+        return Vec::new();
+    };
+    let mut remaining = match crate::db::repo::list_all_sessions(&conn) {
+        Ok(sessions) => sessions,
+        Err(_) => return Vec::new(),
+    };
+    drop(conn);
+    let mut frontier = vec![parent.to_string()];
+    let mut found = Vec::new();
+    while let Some(id) = frontier.pop() {
+        let (children, rest): (Vec<Session>, Vec<Session>) = remaining
+            .into_iter()
+            .partition(|s| s.parent_session_id.as_deref() == Some(id.as_str()));
+        remaining = rest;
+        for child in children {
+            frontier.push(child.id.clone());
+            found.push(child);
+        }
+    }
+    found.retain(|s| s.archived_at.is_some());
+    found.sort_by_key(|s| std::cmp::Reverse(s.archived_at));
+    found
+}
+
+/// Answer a name that no live child matches. A retired worker gets its own 409 so a lead can tell
+/// "already done" from a typo.
+fn archived_or_unknown(app: &AppCtx, parent: &str, target: &str) -> (u16, String) {
+    let archived = archived_descendants(app, parent)
+        .into_iter()
+        .find(|s| s.id == target || s.name == target);
+    match archived {
+        Some(session) => (
+            409,
+            json!({
+                "error": format!("\"{target}\" is archived; it was retired already"),
+                "reason": "archived",
+                "id": session.id,
+                "name": session.name,
+                "archivedAt": session.archived_at,
+            })
+            .to_string(),
+        ),
+        None => err(404, &format!("no live child session matches \"{target}\"")),
     }
 }
 
@@ -1510,6 +2095,31 @@ mod tests {
             }
         });
         seen
+    }
+
+    /// Record every `retire://request` payload and answer its card, standing in for the frontend.
+    fn answer_retires(
+        app: &AppCtx,
+        approved: bool,
+    ) -> (Arc<Mutex<Vec<Value>>>, crate::host::ListenerId) {
+        let seen: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&seen);
+        let listener = app.listen("retire://request", move |payload| {
+            let Ok(request) = serde_json::from_str::<Value>(payload) else {
+                return;
+            };
+            if let Some(request_id) = request["requestId"].as_str() {
+                resolve_retire(
+                    request_id,
+                    RetireDecision {
+                        approved,
+                        error: (!approved).then(|| "the user declined the retire".to_string()),
+                    },
+                );
+            }
+            sink.lock().unwrap().push(request);
+        });
+        (seen, listener)
     }
 
     #[test]
@@ -1854,6 +2464,7 @@ mod tests {
         assert!(std::path::Path::new(&worktree.path).is_dir());
         assert_eq!(session_by_id(&app, &child.id).unwrap().archived_at, None);
 
+        let (cards, _listener) = answer_retires(&app, true);
         let (status, body) = handle(
             "retire",
             &format!(
@@ -1865,6 +2476,12 @@ mod tests {
         assert_eq!(status, 200);
         let retired: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(retired["retired"]["action"], "cleanup-and-archive");
+        let card = cards.lock().unwrap().first().cloned().unwrap();
+        assert_eq!(card["sessionId"], child.id);
+        assert_eq!(card["name"], "worker");
+        assert_eq!(card["action"], "cleanup-and-archive");
+        assert_eq!(card["descendantCount"], 0);
+        assert_eq!(card["worktrees"][0]["path"], worktree.path);
         assert!(!std::path::Path::new(&worktree.path).exists());
         assert!(session_by_id(&app, &child.id)
             .unwrap()
@@ -1875,6 +2492,557 @@ mod tests {
             .branches
             .iter()
             .any(|branch| branch.name == worktree.branch));
+
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    /// A retire that fails between removing the worktree and deleting the branch must stay
+    /// recoverable: the next attempt resumes the cleanup instead of blocking on the missing path.
+    #[test]
+    fn retire_resumes_after_a_partly_finished_cleanup() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "resume worker").unwrap();
+        std::fs::write(
+            std::path::Path::new(&worktree.path).join("worker.txt"),
+            "resumed worker change\n",
+        )
+        .unwrap();
+        git(std::path::Path::new(&worktree.path), &["add", "-A"]);
+        git(
+            std::path::Path::new(&worktree.path),
+            &["commit", "-q", "-m", "worker change"],
+        );
+
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let child = seed_worktree(&app, &root, "worker", &worktree);
+        let (status, _) = handle(
+            "land",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"worker","message":"fix(orchestration): Land resumed worker"}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 200);
+        {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET created_at = 0 WHERE id = ?1",
+                rusqlite::params![child.id],
+            )
+            .unwrap();
+        }
+
+        // Leave the state a failed branch delete produces: directory gone, branch and pointer kept.
+        std::fs::remove_dir_all(&worktree.path).unwrap();
+        assert!(session_by_id(&app, &child.id).unwrap().worktree_path.is_some());
+
+        let (status, body) = handle(
+            "retire",
+            &format!(r#"{{"parentSessionId":"{}","target":"worker"}}"#, root.id),
+            &app,
+        );
+        assert_eq!(status, 200, "a missing worktree must not block retirement");
+        let preview: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(preview["candidate"]["action"], "cleanup-and-archive");
+        assert_eq!(preview["candidate"]["worktrees"][0]["resumed"], true);
+        assert_eq!(
+            preview["candidate"]["worktrees"][0]["branch"],
+            worktree.branch
+        );
+
+        let (_cards, _listener) = answer_retires(&app, true);
+        let (status, _) = handle(
+            "retire",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"worker","confirm":true}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 200);
+        assert!(!crate::git::branch_exists(&repo_str, &worktree.branch));
+        let child = session_by_id(&app, &child.id).unwrap();
+        assert_eq!(child.worktree_path, None);
+        assert!(child.archived_at.is_some());
+
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn retire_blocks_resumed_cleanup_when_the_repository_is_unavailable() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "missing repository").unwrap();
+        std::fs::write(
+            std::path::Path::new(&worktree.path).join("worker.txt"),
+            "resumed worker change\n",
+        )
+        .unwrap();
+        git(std::path::Path::new(&worktree.path), &["add", "-A"]);
+        git(
+            std::path::Path::new(&worktree.path),
+            &["commit", "-q", "-m", "worker change"],
+        );
+
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let child = seed_worktree(&app, &root, "worker", &worktree);
+        let (status, _) = handle(
+            "land",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"worker","message":"fix(orchestration): Land resumed worker"}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 200);
+        {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET created_at = 0 WHERE id = ?1",
+                rusqlite::params![child.id],
+            )
+            .unwrap();
+        }
+        std::fs::remove_dir_all(&repo).unwrap();
+
+        let (status, body) = handle(
+            "retire",
+            &format!(r#"{{"parentSessionId":"{}","target":"worker"}}"#, root.id),
+            &app,
+        );
+        assert_eq!(status, 409);
+        let response: Value = serde_json::from_str(&body).unwrap();
+        assert!(response["blocked"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("repository root"));
+        let stored = session_by_id(&app, &child.id).unwrap();
+        assert_eq!(stored.worktree_path, Some(worktree.path));
+        assert_eq!(stored.archived_at, None);
+    }
+
+    /// `autoApproveRetire` covers a cleanup whose worktrees all verify, because their content is
+    /// already on the parent branch. A resumed row has no such proof and still needs the card.
+    #[test]
+    fn auto_approve_covers_a_verified_cleanup_but_not_a_resumed_one() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let app = headless_app();
+        set_settings(&app, r#"{"orchestration":{"autoApproveRetire":true}}"#);
+        let root = seed(&app, "root", None);
+
+        let mut children = Vec::new();
+        for name in ["verified", "resumed"] {
+            let worktree = crate::git::worktree_add(&repo_str, name).unwrap();
+            std::fs::write(
+                std::path::Path::new(&worktree.path).join("worker.txt"),
+                format!("{name} worker change\n"),
+            )
+            .unwrap();
+            git(std::path::Path::new(&worktree.path), &["add", "-A"]);
+            git(
+                std::path::Path::new(&worktree.path),
+                &["commit", "-q", "-m", "worker change"],
+            );
+            let child = seed_worktree(&app, &root, name, &worktree);
+            let (status, _) = handle(
+                "land",
+                &format!(
+                    r#"{{"parentSessionId":"{}","target":"{name}","message":"fix(orchestration): Land {name} worker"}}"#,
+                    root.id
+                ),
+                &app,
+            );
+            assert_eq!(status, 200);
+            {
+                let db = app.db();
+                let conn = db.conn.lock().unwrap();
+                conn.execute(
+                    "UPDATE sessions SET created_at = 0 WHERE id = ?1",
+                    rusqlite::params![child.id],
+                )
+                .unwrap();
+            }
+            children.push((child, worktree));
+        }
+
+        // No listener answers a card here, so a card would leave the request pending instead.
+        let (status, body) = handle(
+            "retire",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"verified","confirm":true,"timeoutSecs":0}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 200);
+        let answer: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(answer["pending"], Value::Null, "a verified plan must not ask");
+        assert!(!std::path::Path::new(&children[0].1.path).exists());
+        assert!(session_by_id(&app, &children[0].0.id)
+            .unwrap()
+            .archived_at
+            .is_some());
+
+        std::fs::remove_dir_all(&children[1].1.path).unwrap();
+        let (status, body) = handle(
+            "retire",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"resumed","confirm":true,"timeoutSecs":0}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 200);
+        let answer: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(answer["pending"], true, "a resumed plan must still ask");
+        assert_eq!(
+            session_by_id(&app, &children[1].0.id).unwrap().archived_at,
+            None
+        );
+
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    /// An unreachable worktree looks exactly like a deleted one, so a worker that never landed must
+    /// block instead of resuming; clearing its pointer would strand the directory and its branch.
+    #[test]
+    fn retire_blocks_a_missing_worktree_that_never_landed() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "unreachable worker").unwrap();
+
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let child = seed_worktree(&app, &root, "worker", &worktree);
+        {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET created_at = 0 WHERE id = ?1",
+                rusqlite::params![child.id],
+            )
+            .unwrap();
+        }
+        std::fs::remove_dir_all(&worktree.path).unwrap();
+
+        let (status, body) = handle(
+            "retire",
+            &format!(r#"{{"parentSessionId":"{}","target":"worker"}}"#, root.id),
+            &app,
+        );
+        assert_eq!(status, 409);
+        let preview: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            preview["blocked"][0]["reason"],
+            "worktree directory is missing and the worker never landed"
+        );
+        let stored = session_by_id(&app, &child.id).unwrap();
+        assert_eq!(stored.worktree_path, Some(worktree.path.clone()));
+        assert_eq!(stored.archived_at, None);
+
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    /// The tree's Archive Session action must not hide a worker that still holds an unverified
+    /// worktree, because `cleanup` and `retire` never see an archived session again.
+    #[test]
+    fn archive_refuses_a_worker_holding_an_unlanded_worktree() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "archive worker").unwrap();
+        std::fs::write(
+            std::path::Path::new(&worktree.path).join("worker.txt"),
+            "unlanded worker change\n",
+        )
+        .unwrap();
+        git(std::path::Path::new(&worktree.path), &["add", "-A"]);
+        git(
+            std::path::Path::new(&worktree.path),
+            &["commit", "-q", "-m", "worker change"],
+        );
+
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let child = seed_worktree(&app, &root, "worker", &worktree);
+
+        let error = crate::command_core::set_session_archived(&app, &child.id, true).unwrap_err();
+        assert!(
+            error.contains("no verified landing"),
+            "the refusal must name the blocking reason: {error}"
+        );
+        assert!(std::path::Path::new(&worktree.path).is_dir());
+        let stored = session_by_id(&app, &child.id).unwrap();
+        assert_eq!(stored.archived_at, None);
+        assert_eq!(stored.worktree_path, Some(worktree.path.clone()));
+
+        // Archiving the parent hides the whole subtree, so the same refusal must protect the worker.
+        assert!(crate::command_core::set_session_archived(&app, &root.id, true).is_err());
+        assert_eq!(session_by_id(&app, &root.id).unwrap().archived_at, None);
+
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn archive_cleans_a_verified_landed_worktree() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "archive landed").unwrap();
+        std::fs::write(
+            std::path::Path::new(&worktree.path).join("worker.txt"),
+            "landed worker change\n",
+        )
+        .unwrap();
+        git(std::path::Path::new(&worktree.path), &["add", "-A"]);
+        git(
+            std::path::Path::new(&worktree.path),
+            &["commit", "-q", "-m", "worker change"],
+        );
+
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let child = seed_worktree(&app, &root, "worker", &worktree);
+        let (status, _) = handle(
+            "land",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"worker","message":"fix(orchestration): Land archived worker"}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 200);
+
+        crate::command_core::set_session_archived(&app, &child.id, true).unwrap();
+        assert!(!std::path::Path::new(&worktree.path).exists());
+        assert!(!crate::git::branch_exists(&repo_str, &worktree.branch));
+        let child = session_by_id(&app, &child.id).unwrap();
+        assert_eq!(child.worktree_path, None);
+        assert!(child.archived_at.is_some());
+
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn archive_keeps_a_worktree_used_by_a_running_descendant() {
+        use crate::agent::server::HookEndpoint;
+
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "running descendant").unwrap();
+        std::fs::write(
+            std::path::Path::new(&worktree.path).join("worker.txt"),
+            "landed worker change\n",
+        )
+        .unwrap();
+        git(std::path::Path::new(&worktree.path), &["add", "-A"]);
+        git(
+            std::path::Path::new(&worktree.path),
+            &["commit", "-q", "-m", "worker change"],
+        );
+
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let child = seed_worktree(&app, &root, "worker", &worktree);
+        let (status, _) = handle(
+            "land",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"worker","message":"fix(orchestration): Land archived worker"}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 200);
+        let nested = {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            crate::db::repo::create_session_full(
+                &conn,
+                &root.project_id,
+                None,
+                "nested",
+                SessionKind::Terminal,
+                Some("/bin/sh"),
+                Some(&worktree.path),
+                None,
+                Some(&child.id),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+        };
+        app.pty()
+            .spawn(
+                app.clone(),
+                nested.id.clone(),
+                SessionKind::Terminal,
+                Some("/bin/sh".to_string()),
+                Some(worktree.path.clone()),
+                None,
+                80,
+                24,
+                HookEndpoint {
+                    port: 0,
+                    token: "test".to_string(),
+                },
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+                "test",
+                false,
+                Box::new(|_| true),
+            )
+            .unwrap();
+
+        let result = crate::command_core::set_session_archived(&app, &child.id, true);
+        let path_exists = std::path::Path::new(&worktree.path).is_dir();
+        let archived_at = session_by_id(&app, &child.id).unwrap().archived_at;
+        app.pty().kill(&nested.id).unwrap();
+        if path_exists {
+            crate::git::worktree_remove(&worktree.path, true).unwrap();
+        }
+        std::fs::remove_dir_all(&repo).unwrap();
+
+        let error = result.expect_err("a running descendant must block worktree removal");
+        assert!(error.contains("nested"));
+        assert!(error.contains("still running"));
+        assert!(path_exists);
+        assert_eq!(archived_at, None);
+    }
+
+    /// A group workspace is shared with other live nodes, so archiving one session inside it must
+    /// leave the directory and the branch alone.
+    #[test]
+    fn archive_keeps_a_shared_group_worktree() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "shared group").unwrap();
+
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let child = seed_worktree(&app, &root, "member", &worktree);
+        {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            let project =
+                crate::db::repo::import_project(&conn, std::env::temp_dir().to_str().unwrap())
+                    .unwrap();
+            crate::db::repo::create_group_full(
+                &conn,
+                &project.id,
+                None,
+                "workspace",
+                Some(&worktree.path),
+                Some(&worktree.base_ref),
+            )
+            .unwrap();
+        }
+
+        crate::command_core::set_session_archived(&app, &child.id, true).unwrap();
+        assert!(std::path::Path::new(&worktree.path).is_dir());
+        assert!(crate::git::branch_exists(&repo_str, &worktree.branch));
+        let child = session_by_id(&app, &child.id).unwrap();
+        assert_eq!(child.worktree_path, Some(worktree.path.clone()));
+        assert!(child.archived_at.is_some());
+
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn archive_allows_a_subtree_without_worktrees() {
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let child = seed(&app, "worker", Some(&root.id));
+
+        crate::command_core::set_session_archived(&app, &root.id, true).unwrap();
+        assert!(session_by_id(&app, &root.id).unwrap().archived_at.is_some());
+        assert!(session_by_id(&app, &child.id).unwrap().archived_at.is_some());
+    }
+
+    /// The tree's Archive Group action hides every session of the group, so it must pass the same
+    /// worktree guard as Archive Session.
+    #[test]
+    fn archive_group_runs_the_same_worktree_guard() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "group worker").unwrap();
+        std::fs::write(
+            std::path::Path::new(&worktree.path).join("worker.txt"),
+            "group worker change\n",
+        )
+        .unwrap();
+        git(std::path::Path::new(&worktree.path), &["add", "-A"]);
+        git(
+            std::path::Path::new(&worktree.path),
+            &["commit", "-q", "-m", "worker change"],
+        );
+
+        let app = headless_app();
+        let (group_id, root) = {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            let project =
+                crate::db::repo::import_project(&conn, std::env::temp_dir().to_str().unwrap())
+                    .unwrap();
+            let group =
+                crate::db::repo::create_group_full(&conn, &project.id, None, "run", None, None)
+                    .unwrap();
+            let root = crate::db::repo::create_session(
+                &conn,
+                &project.id,
+                Some(&group.id),
+                "lead",
+                SessionKind::Claude,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            (group.id, root)
+        };
+        let child = seed_worktree(&app, &root, "worker", &worktree);
+
+        let error = crate::command_core::archive_group(&app, &group_id).unwrap_err();
+        assert!(
+            error.contains("no verified landing"),
+            "the group refusal must name the blocking reason: {error}"
+        );
+        assert!(std::path::Path::new(&worktree.path).is_dir());
+        assert_eq!(session_by_id(&app, &root.id).unwrap().archived_at, None);
+
+        let (status, _) = handle(
+            "land",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"worker","message":"fix(orchestration): Land group worker"}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 200);
+
+        crate::command_core::archive_group(&app, &group_id).unwrap();
+        assert!(!std::path::Path::new(&worktree.path).exists());
+        assert!(!crate::git::branch_exists(&repo_str, &worktree.branch));
+        assert!(session_by_id(&app, &child.id)
+            .unwrap()
+            .archived_at
+            .is_some());
+        assert!(session_by_id(&app, &root.id).unwrap().archived_at.is_some());
 
         std::fs::remove_dir_all(&repo).unwrap();
     }
@@ -2205,7 +3373,10 @@ mod tests {
     #[test]
     fn retire_archives_a_settled_worker_and_frees_its_descendant_slot() {
         let app = headless_app();
-        set_settings(&app, r#"{"orchestration":{"maxDescendants":1}}"#);
+        set_settings(
+            &app,
+            r#"{"orchestration":{"maxDescendants":1,"autoApproveRetire":true}}"#,
+        );
         let root = seed(&app, "root", None);
         let child = seed(&app, "worker", Some(&root.id));
         {
@@ -2281,9 +3452,538 @@ mod tests {
         );
         assert_eq!(status, 409);
         let blocked: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(blocked["blocked"]["id"], child.id);
-        assert_eq!(blocked["blocked"]["state"], "not-started");
+        assert_eq!(blocked["blocked"][0]["id"], child.id);
+        assert_eq!(blocked["blocked"][0]["state"], "not-started");
+        assert!(blocked["blocked"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("grace period"));
         assert_eq!(session_by_id(&app, &child.id).unwrap().archived_at, None);
+    }
+
+    /// The preview promises the complete blocker list, while a confirmed retire still stops at the first.
+    #[test]
+    fn retire_preview_reports_every_blocked_worker() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "unlanded worker").unwrap();
+
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let child = seed_worktree(&app, &root, "worker", &worktree);
+        let nested = seed(&app, "nested", Some(&child.id));
+        {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET created_at = 0 WHERE id = ?1",
+                rusqlite::params![child.id],
+            )
+            .unwrap();
+        }
+
+        let (status, body) = handle(
+            "retire",
+            &format!(r#"{{"parentSessionId":"{}","target":"worker"}}"#, root.id),
+            &app,
+        );
+        assert_eq!(status, 409);
+        let preview: Value = serde_json::from_str(&body).unwrap();
+        let blocked = preview["blocked"].as_array().unwrap();
+        assert_eq!(blocked.len(), 2, "the preview must report both blockers");
+        assert!(blocked
+            .iter()
+            .any(|row| row["id"] == nested.id.as_str() && row["state"] == "not-started"));
+        assert!(blocked.iter().any(|row| row["id"] == child.id.as_str()
+            && row["reason"]
+                .as_str()
+                .unwrap()
+                .contains("verified landing")));
+
+        let (status, body) = handle(
+            "retire",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"worker","confirm":true}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 409);
+        let confirmed: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(confirmed["blocked"].as_array().unwrap().len(), 1);
+        assert_eq!(confirmed["blocked"][0]["id"], nested.id);
+        assert!(std::path::Path::new(&worktree.path).is_dir());
+
+        crate::git::worktree_remove(&worktree.path, true).unwrap();
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    /// A cached status can lag a child's new turn, so a running worker needs its own corroboration.
+    #[test]
+    fn settle_verdict_needs_more_than_a_cached_status() {
+        let signals =
+            |state: &str, running: bool, tool: Option<&str>, quiet: Option<u64>, completed: bool| {
+            SettleSignals {
+                state: state.to_string(),
+                running,
+                age_secs: 10_000,
+                tool: tool.map(str::to_string),
+                transcript_quiet_secs: quiet,
+                current_turn_completion: completed,
+            }
+        };
+        let reason = |verdict: Settled| match verdict {
+            Settled::No(reason) => reason,
+            Settled::Yes => "settled".to_string(),
+        };
+
+        for state in ["working", "starting", "asking"] {
+            assert_eq!(
+                reason(settle_verdict(&signals(
+                    state,
+                    true,
+                    None,
+                    Some(9_000),
+                    true
+                ))),
+                "session has not finished its turn"
+            );
+        }
+        assert_eq!(
+            reason(settle_verdict(&signals(
+                "exited",
+                false,
+                None,
+                Some(0),
+                false
+            ))),
+            "settled",
+            "a stopped process cannot start a turn"
+        );
+        assert_eq!(
+            reason(settle_verdict(&signals(
+                "waiting",
+                true,
+                Some("Edit"),
+                Some(9_000),
+                true
+            ))),
+            "the Edit tool is still running"
+        );
+        assert!(
+            reason(settle_verdict(&signals(
+                "waiting",
+                true,
+                None,
+                Some(0),
+                true
+            )))
+                .contains("wrote its transcript"),
+            "a fresh transcript write outranks a settled status"
+        );
+        assert_eq!(
+            reason(settle_verdict(&signals(
+                "waiting",
+                true,
+                None,
+                Some(SETTLED_QUIET_SECS),
+                true
+            ))),
+            "settled",
+            "a current completion signal and quiet transcript prove the turn ended"
+        );
+        assert!(
+            reason(settle_verdict(&signals(
+                "waiting",
+                true,
+                None,
+                None,
+                false
+            )))
+            .contains("completion signal"),
+            "a stale waiting state cannot authorize a kill"
+        );
+
+        let fresh = SettleSignals {
+            state: "not-started".to_string(),
+            running: false,
+            age_secs: SPAWN_DEFAULT_TIMEOUT_SECS - 1,
+            tool: None,
+            transcript_quiet_secs: None,
+            current_turn_completion: false,
+        };
+        assert!(reason(settle_verdict(&fresh)).contains("grace period"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retire_refuses_a_low_cpu_turn_started_after_cached_waiting() {
+        use crate::agent::server::HookEndpoint;
+        use crate::pty::{AgentState, StatusSignal};
+
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let child = seed(&app, "worker", Some(&root.id));
+        {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET created_at = 0 WHERE id = ?1",
+                rusqlite::params![child.id],
+            )
+            .unwrap();
+        }
+        app.pty()
+            .spawn(
+                app.clone(),
+                child.id.clone(),
+                SessionKind::Terminal,
+                Some("/bin/sh".to_string()),
+                None,
+                None,
+                80,
+                24,
+                HookEndpoint {
+                    port: 0,
+                    token: "test".to_string(),
+                },
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+                "test",
+                false,
+                Box::new(|_| true),
+            )
+            .unwrap();
+        app.emit(
+            &StatusSignal::event_name(&child.id),
+            StatusSignal::State {
+                state: AgentState::Waiting,
+                silent: false,
+                authoritative: true,
+                inferred: false,
+            },
+        );
+        app.pty().write(&child.id, "sleep 5\n").unwrap();
+
+        let (status, body) = handle(
+            "retire",
+            &format!(r#"{{"parentSessionId":"{}","target":"worker"}}"#, root.id),
+            &app,
+        );
+        app.pty().kill(&child.id).unwrap();
+
+        assert_eq!(status, 409, "new input invalidates an older waiting state");
+        assert!(body.contains("completion signal"));
+        assert_eq!(session_by_id(&app, &child.id).unwrap().archived_at, None);
+    }
+
+    /// Retiring a child without a worktree leaves its directory in place, so a leftover change is reported.
+    #[test]
+    fn retire_reports_a_dirty_directory_for_a_child_without_a_worktree() {
+        let repo = init_repo();
+        std::fs::write(repo.join("uncommitted.txt"), "work in progress\n").unwrap();
+
+        let app = headless_app();
+        set_settings(&app, r#"{"orchestration":{"autoApproveRetire":true}}"#);
+        let root = seed(&app, "root", None);
+        let child = {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            let project =
+                crate::db::repo::import_project(&conn, std::env::temp_dir().to_str().unwrap())
+                    .unwrap();
+            crate::db::repo::create_session_full(
+                &conn,
+                &project.id,
+                None,
+                "worker",
+                SessionKind::Claude,
+                None,
+                Some(repo.to_string_lossy().as_ref()),
+                None,
+                Some(root.id.as_str()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap()
+        };
+        {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET created_at = 0 WHERE id = ?1",
+                rusqlite::params![child.id],
+            )
+            .unwrap();
+        }
+
+        let (status, body) = handle(
+            "retire",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"worker","confirm":true}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 200);
+        let retired: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(retired["dirty"][0]["id"], child.id);
+        assert_eq!(retired["dirty"][0]["path"], repo.to_string_lossy().as_ref());
+        assert!(
+            session_by_id(&app, &child.id).unwrap().archived_at.is_some(),
+            "a dirty directory reports without blocking the archive"
+        );
+
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    /// A confirmed retire destroys nothing until the card is answered.
+    #[test]
+    fn retire_waits_for_its_confirmation_card() {
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let child = seed(&app, "worker", Some(&root.id));
+        {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET created_at = 0 WHERE id = ?1",
+                rusqlite::params![child.id],
+            )
+            .unwrap();
+        }
+        let confirm_request = format!(
+            r#"{{"parentSessionId":"{}","target":"worker","confirm":true,"timeoutSecs":0}}"#,
+            root.id
+        );
+
+        let withdrawn: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = Arc::clone(&withdrawn);
+        let cancels = app.listen("retire://cancel", move |payload| {
+            if let Ok(v) = serde_json::from_str::<Value>(payload) {
+                sink.lock().unwrap().push(v);
+            }
+        });
+
+        let (status, body) = handle("retire", &confirm_request, &app);
+        assert_eq!(status, 200);
+        let pending: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(pending["pending"], true);
+        assert_eq!(pending["awaitingConfirmation"], true);
+        assert!(pending["requestId"].as_str().is_some());
+        assert_eq!(
+            session_by_id(&app, &child.id).unwrap().archived_at,
+            None,
+            "an unanswered card must not archive anything"
+        );
+        // The parked handler is gone, so its card has to withdraw instead of waiting for an answer.
+        assert_eq!(
+            withdrawn.lock().unwrap().first().map(|v| v["requestId"].clone()),
+            Some(pending["requestId"].clone())
+        );
+        app.unlisten(cancels);
+
+        let (declined, listener) = answer_retires(&app, false);
+        let (status, body) = handle("retire", &confirm_request, &app);
+        assert_eq!(status, 409);
+        assert!(body.contains("declined"));
+        assert_eq!(session_by_id(&app, &child.id).unwrap().archived_at, None);
+        assert_eq!(declined.lock().unwrap().len(), 1);
+
+        app.unlisten(listener);
+        let (approved, _listener) = answer_retires(&app, true);
+        let (status, _) = handle("retire", &confirm_request, &app);
+        assert_eq!(status, 200);
+        assert!(session_by_id(&app, &child.id).unwrap().archived_at.is_some());
+        let card = approved.lock().unwrap().first().cloned().unwrap();
+        assert_eq!(card["sessionId"], child.id);
+        assert_eq!(card["action"], "archive");
+        assert_eq!(card["worktrees"], json!([]));
+    }
+
+    #[test]
+    fn retire_rechecks_the_subtree_after_confirmation() {
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let child = seed(&app, "worker", Some(&root.id));
+        {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET created_at = 0 WHERE id = ?1",
+                rusqlite::params![child.id],
+            )
+            .unwrap();
+        }
+
+        let listener_app = app.clone();
+        let child_id = child.id.clone();
+        let created: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let created_sink = Arc::clone(&created);
+        let _listener = app.listen("retire://request", move |payload| {
+            let request: Value = serde_json::from_str(payload).unwrap();
+            let late_child = seed(&listener_app, "late-worker", Some(&child_id));
+            *created_sink.lock().unwrap() = Some(late_child.id);
+            resolve_retire(
+                request["requestId"].as_str().unwrap(),
+                RetireDecision {
+                    approved: true,
+                    error: None,
+                },
+            );
+        });
+
+        let (status, body) = handle(
+            "retire",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"worker","confirm":true}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 409, "a changed subtree needs a new retire check");
+        let response: Value = serde_json::from_str(&body).unwrap();
+        let late_id = created.lock().unwrap().clone().unwrap();
+        assert_eq!(response["blocked"][0]["id"], late_id);
+        assert_eq!(session_by_id(&app, &child.id).unwrap().archived_at, None);
+        assert_eq!(session_by_id(&app, &late_id).unwrap().archived_at, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn retire_does_not_archive_before_the_process_tree_exits() {
+        use crate::agent::server::HookEndpoint;
+        use crate::pty::{AgentState, StatusSignal};
+
+        let app = headless_app();
+        set_settings(&app, r#"{"orchestration":{"autoApproveRetire":true}}"#);
+        let root = seed(&app, "root", None);
+        let child = seed(&app, "worker", Some(&root.id));
+        {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET created_at = 0 WHERE id = ?1",
+                rusqlite::params![child.id],
+            )
+            .unwrap();
+        }
+        app.pty()
+            .spawn(
+                app.clone(),
+                child.id.clone(),
+                SessionKind::Terminal,
+                Some("/bin/sh".to_string()),
+                None,
+                None,
+                80,
+                24,
+                HookEndpoint {
+                    port: 0,
+                    token: "test".to_string(),
+                },
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+                "test",
+                false,
+                Box::new(|_| true),
+            )
+            .unwrap();
+        app.pty()
+            .write(
+                &child.id,
+                "trap '' HUP TERM; sh -c 'trap \"\" HUP TERM; sleep 5' & wait\n",
+            )
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while app
+            .pty()
+            .pid(&child.id)
+            .map(crate::procstat::subtree_pids)
+            .is_some_and(|pids| pids.len() < 2)
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        app.emit(
+            &StatusSignal::event_name(&child.id),
+            StatusSignal::State {
+                state: AgentState::Waiting,
+                silent: false,
+                authoritative: true,
+                inferred: false,
+            },
+        );
+
+        let (status, body) = handle(
+            "retire",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"worker","confirm":true}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 409, "retire must report an exit timeout");
+        assert!(body.contains("did not exit"));
+        assert_eq!(session_by_id(&app, &child.id).unwrap().archived_at, None);
+    }
+
+    /// A retired worker answers differently from an unknown name, so a lead can tell them apart.
+    #[test]
+    fn a_retired_worker_answers_409_instead_of_the_unknown_name_404() {
+        let app = headless_app();
+        set_settings(&app, r#"{"orchestration":{"autoApproveRetire":true}}"#);
+        let root = seed(&app, "root", None);
+        let child = seed(&app, "worker", Some(&root.id));
+        {
+            let db = app.db();
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE sessions SET created_at = 0 WHERE id = ?1",
+                rusqlite::params![child.id],
+            )
+            .unwrap();
+        }
+        let request = format!(r#"{{"parentSessionId":"{}","target":"worker"}}"#, root.id);
+
+        let (status, _) = handle(
+            "retire",
+            &format!(
+                r#"{{"parentSessionId":"{}","target":"worker","confirm":true}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 200);
+
+        for op in ["retire", "read", "status"] {
+            let (status, body) = handle(op, &request, &app);
+            assert_eq!(status, 409, "{op} must not answer 404 for a retired worker");
+            let answer: Value = serde_json::from_str(&body).unwrap();
+            assert_eq!(answer["reason"], "archived");
+            assert_eq!(answer["id"], child.id);
+            assert_eq!(answer["name"], "worker");
+        }
+
+        let (status, body) = handle(
+            "status",
+            &format!(r#"{{"parentSessionId":"{}","target":"typo"}}"#, root.id),
+            &app,
+        );
+        assert_eq!(status, 404);
+        assert!(body.contains("no live child session"));
     }
 
     #[test]
@@ -2469,6 +4169,7 @@ mod tests {
         assert_eq!(v["profiles"]["quick"]["agent"], "codex");
         assert_eq!(v["limits"]["maxParallel"], 2);
         assert_eq!(v["limits"]["maxDescendants"], 10);
+        assert_eq!(v["limits"]["autoApproveRetire"], false);
         assert_eq!(v["limits"]["worktreeCopyPatterns"][0], "docs/plans/**");
         assert_eq!(v["counts"]["descendants"], 1);
         assert_eq!(v["counts"]["active"], 1);
@@ -2630,7 +4331,7 @@ mod tests {
         );
         assert_eq!(status, 409);
         let blocked: Value = serde_json::from_str(&out).unwrap();
-        assert!(blocked["blocked"]["reason"]
+        assert!(blocked["blocked"][0]["reason"]
             .as_str()
             .unwrap()
             .contains("verified landing"));
@@ -2654,7 +4355,9 @@ mod tests {
 
         assert!(launch_value_warnings(SessionKind::Claude, Some("opus"), Some("high")).is_empty());
 
-        let warnings = launch_value_warnings(SessionKind::Claude, Some("opus"), Some("xhigh"));
+        assert!(launch_value_warnings(SessionKind::Claude, Some("opus"), Some("xhigh")).is_empty());
+
+        let warnings = launch_value_warnings(SessionKind::Claude, Some("opus"), Some("ultra"));
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("effort"));
         assert!(launch_value_warnings(
@@ -2868,6 +4571,15 @@ mod tests {
                 "EFFORT_OPTIONS for {agent} must match known_efforts"
             );
         }
+    }
+
+    /// `claude --effort` accepts these five levels; a stale list forces the confirmation card.
+    #[test]
+    fn claude_launch_values_use_current_cli_efforts() {
+        assert_eq!(
+            inject::known_efforts(SessionKind::Claude).unwrap(),
+            &["low", "medium", "high", "xhigh", "max"]
+        );
     }
 
     #[test]

@@ -45,7 +45,7 @@ export const MODEL_OPTIONS: Record<string, string[]> = {
 };
 export const EFFORT_OPTIONS: Record<string, string[]> = {
   claude: ["low", "medium", "high", "xhigh", "max"],
-  codex: ["minimal", "low", "medium", "high", "xhigh"],
+  codex: ["low", "medium", "high", "xhigh", "max"],
 };
 
 /** Sentinel dropdown value that switches a launch-value field into free-text mode. */

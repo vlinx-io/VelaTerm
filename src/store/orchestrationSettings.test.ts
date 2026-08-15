@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../ipc/commands", () => ({
   createWorktree: vi.fn().mockResolvedValue(undefined),
   getSessionCwd: vi.fn().mockResolvedValue(null),
+  orchestrationDefaultProfiles: vi.fn().mockResolvedValue({}),
   ptyKill: vi.fn().mockResolvedValue(undefined),
   ptyWrite: vi.fn().mockResolvedValue(undefined),
   spawnResult: vi.fn().mockResolvedValue(true),
@@ -22,7 +23,8 @@ vi.mock("../notify", () => ({
   requestEffectiveNotifyPermission: vi.fn().mockResolvedValue("granted"),
 }));
 
-import { SETTINGS_KEY, loadSettings, saveSettings } from "./settings";
+import { orchestrationDefaultProfiles } from "../ipc/commands";
+import { ORCH_RESOLVED_KEY, SETTINGS_KEY, loadSettings, saveSettings } from "./settings";
 import { useTermStore } from "./termStore";
 
 if (!window.matchMedia) {
@@ -44,6 +46,7 @@ const DEFAULT_LIMITS = {
   maxDepth: 2,
   requireConfirmationAbove: 6,
   autoApprove: false,
+  autoApproveRetire: false,
   defaultTimeoutSecs: 1800,
   worktreeCopyPatterns: ["docs/plans/**"],
 };
@@ -71,6 +74,7 @@ describe("orchestration settings persistence", () => {
       maxDepth: 1,
       requireConfirmationAbove: 2,
       autoApprove: false,
+      autoApproveRetire: false,
       defaultTimeoutSecs: 600,
       worktreeCopyPatterns: ["docs/plans/**", ".env.local"],
     };
@@ -97,7 +101,7 @@ describe("orchestration settings persistence", () => {
       description:
         "Use for database schemas, migrations, queries, indexes, persistence, and data access.",
       agent: "claude",
-      model: "fable",
+      model: "opus",
       effort: "high",
       worktree: true,
       permissionMode: "inherit",
@@ -273,5 +277,71 @@ describe("forced spawn confirmation", () => {
     });
     expect(executeSpawn).not.toHaveBeenCalled();
     expect(useTermStore.getState().pendingSpawns).toHaveLength(1);
+  });
+});
+
+describe("first-run default profiles", () => {
+  const CODEX_DEFAULTS = {
+    database: {
+      description:
+        "Use for database schemas, migrations, queries, indexes, persistence, and data access.",
+      agent: "codex",
+      model: "gpt-5.6-sol",
+      effort: "high",
+      worktree: true,
+      permissionMode: "inherit" as const,
+    },
+  };
+
+  beforeEach(() => {
+    vi.mocked(orchestrationDefaultProfiles).mockReset();
+    vi.mocked(orchestrationDefaultProfiles).mockResolvedValue(CODEX_DEFAULTS);
+    useTermStore.setState({
+      orchestrationProfiles: loadSettings().orchestrationProfiles,
+    });
+  });
+
+  it("applies the resolved profiles once and keeps the untouched ones", async () => {
+    await useTermStore.getState().resolveDefaultOrchestrationProfiles();
+    const profiles = useTermStore.getState().orchestrationProfiles;
+    expect(profiles.database).toEqual(CODEX_DEFAULTS.database);
+    expect(profiles.tests.model).toBe("gpt-5.6-luna");
+    expect(profiles.frontend.agent).toBe("claude");
+    expect(loadSettings().orchestrationProfiles.database.model).toBe("gpt-5.6-sol");
+    expect(localStorage.getItem(ORCH_RESOLVED_KEY)).toBe("1");
+
+    await useTermStore.getState().resolveDefaultOrchestrationProfiles();
+    expect(orchestrationDefaultProfiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves an installation still holding the superseded fable default", async () => {
+    const stale = loadSettings().orchestrationProfiles;
+    stale.database = { ...stale.database, model: "fable" };
+    useTermStore.setState({ orchestrationProfiles: stale });
+
+    await useTermStore.getState().resolveDefaultOrchestrationProfiles();
+    expect(useTermStore.getState().orchestrationProfiles.database).toEqual(CODEX_DEFAULTS.database);
+  });
+
+  it("leaves edited profiles alone without asking the backend", async () => {
+    useTermStore.getState().setOrchestrationProfile("database", { model: "sonnet" });
+    await useTermStore.getState().resolveDefaultOrchestrationProfiles();
+    expect(orchestrationDefaultProfiles).not.toHaveBeenCalled();
+    expect(useTermStore.getState().orchestrationProfiles.database.model).toBe("sonnet");
+    expect(localStorage.getItem(ORCH_RESOLVED_KEY)).toBe("1");
+  });
+
+  it("retries on the next launch when the probe fails or returns nothing", async () => {
+    vi.mocked(orchestrationDefaultProfiles).mockRejectedValueOnce(new Error("backend down"));
+    await useTermStore.getState().resolveDefaultOrchestrationProfiles();
+    expect(localStorage.getItem(ORCH_RESOLVED_KEY)).toBeNull();
+    expect(useTermStore.getState().orchestrationProfiles.database.agent).toBe("claude");
+
+    vi.mocked(orchestrationDefaultProfiles).mockResolvedValueOnce({});
+    await useTermStore.getState().resolveDefaultOrchestrationProfiles();
+    expect(localStorage.getItem(ORCH_RESOLVED_KEY)).toBeNull();
+
+    await useTermStore.getState().resolveDefaultOrchestrationProfiles();
+    expect(useTermStore.getState().orchestrationProfiles.database).toEqual(CODEX_DEFAULTS.database);
   });
 });

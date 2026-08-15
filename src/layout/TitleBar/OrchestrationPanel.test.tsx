@@ -1,5 +1,5 @@
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { state } = vi.hoisted(() => ({
@@ -11,6 +11,7 @@ const { state } = vi.hoisted(() => ({
       maxDepth: 2,
       requireConfirmationAbove: 6,
       autoApprove: false,
+      autoApproveRetire: false,
       defaultTimeoutSecs: 1800,
       worktreeCopyPatterns: ["docs/plans/**"],
     },
@@ -189,16 +190,31 @@ describe("OrchestrationPanel profile creation", () => {
   });
 });
 
+/** The settings row holding one labelled control; the panel has several identical on/off toggles. */
+function fieldRow(label: string): HTMLElement {
+  const row = screen.getByText(label).parentElement;
+  if (!row) throw new Error(`no field row for ${label}`);
+  return row;
+}
+
 describe("OrchestrationPanel limits", () => {
   it("shows auto-approval disabled by default and persists changes", () => {
     state.orchestrationProfiles = {};
     render(<OrchestrationPanel />);
-    const control = screen.getByRole("button", { name: "common.off" });
-    fireEvent.click(control);
+    const row = fieldRow("settings.orchAutoApprove");
+    fireEvent.click(within(row).getByRole("button", { name: "common.off" }));
 
-    const on = screen.getByRole("button", { name: "common.on" });
-    fireEvent.click(on);
+    fireEvent.click(within(row).getByRole("button", { name: "common.on" }));
     expect(state.setOrchestrationLimits).toHaveBeenCalledWith({ autoApprove: true });
+  });
+
+  it("persists retire auto-approval from its own toggle", () => {
+    state.orchestrationProfiles = {};
+    render(<OrchestrationPanel />);
+    const row = fieldRow("settings.orchAutoApproveRetire");
+
+    fireEvent.click(within(row).getByRole("button", { name: "common.on" }));
+    expect(state.setOrchestrationLimits).toHaveBeenCalledWith({ autoApproveRetire: true });
   });
 
   it("restores the stored value instead of persisting a non-numeric entry", () => {

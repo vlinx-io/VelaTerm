@@ -1135,6 +1135,58 @@ pub fn commit_all(path: &str, message: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Drop registrations whose worktree directory is gone. Git refuses to delete a branch that a stale
+/// registration still claims, so a resumed cleanup must prune before it deletes the branch.
+pub fn worktree_prune(repo: &str) -> Result<(), String> {
+    let out = crate::host::command("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["worktree", "prune"])
+        .output()
+        .map_err(|e| format!("Failed to run git worktree prune: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(format!("Failed to prune worktrees: {err}"));
+    }
+    Ok(())
+}
+
+/// Report whether a local branch exists.
+#[cfg(test)]
+pub fn branch_exists(repo: &str, branch: &str) -> bool {
+    branch_exists_checked(repo, branch).unwrap_or(false)
+}
+
+fn branch_exists_checked(repo: &str, branch: &str) -> Result<bool, String> {
+    let out = crate::host::command("git")
+        .arg("-C")
+        .arg(repo)
+        .args([
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ])
+        .output()
+        .map_err(|error| format!("Failed to check branch: {error}"))?;
+    if out.status.success() {
+        return Ok(true);
+    }
+    if out.status.code() == Some(1) {
+        return Ok(false);
+    }
+    let error = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    Err(format!("Failed to check branch: {error}"))
+}
+
+/// Delete a branch, treating an already-absent branch as success so a resumed cleanup is idempotent.
+pub fn branch_delete_if_present(repo: &str, branch: &str) -> Result<(), String> {
+    if !branch_exists_checked(repo, branch)? {
+        return Ok(());
+    }
+    branch_delete(repo, branch)
+}
+
 /// Force-delete a local branch when cleaning up a merged child session.
 pub fn branch_delete(repo: &str, branch: &str) -> Result<(), String> {
     let out = crate::host::command("git")
@@ -2175,6 +2227,14 @@ mod merge_tests {
         git(&dir, &["commit", "-q", "-m", "init"]);
         git(&dir, &["branch", "-M", "main"]);
         dir
+    }
+
+    #[test]
+    fn branch_delete_if_present_reports_an_unavailable_repository() {
+        let missing = std::env::temp_dir().join(format!("vlx-missing-{}", Uuid::new_v4()));
+        let error = branch_delete_if_present(missing.to_string_lossy().as_ref(), "worker")
+            .expect_err("an unavailable repository is not an absent branch");
+        assert!(error.contains("check branch"));
     }
 
     #[test]

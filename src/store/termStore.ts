@@ -7,6 +7,7 @@ import { setBrowserUrl } from "../ipc/browser";
 import {
   createWorktree,
   getSessionCwd,
+  orchestrationDefaultProfiles,
   ptyKill,
   ptyWrite,
   spawnResult,
@@ -73,8 +74,10 @@ import { effectiveStatus, matchesAgentState } from "../types";
 import {
   CLEAN_IMAGES_KEY,
   NOTIFY_KEY,
+  ORCH_RESOLVED_KEY,
   RECORD_SESSIONS_KEY,
   SOUND_KEY,
+  hasBuiltinOrchestrationProfiles,
   loadCleanPastedImages,
   loadNotifyEnabled,
   loadRecordSessions,
@@ -927,11 +930,14 @@ interface TermStore {
   clearNodeWorktree: (kind: NodeKind, id: string) => Promise<void>;
   deleteNode: (kind: NodeKind, id: string) => Promise<void>;
   deleteMany: (nodes: SelNode[]) => Promise<void>;
-  /** Archives a session without deleting data, closing any visible/background tab first. */
+  /** Archives a session without deleting data, closing any visible/background tab first. Rejects with the
+   *  backend reason when the archive would strand a worker worktree. */
   archiveSession: (id: SessionId) => Promise<void>;
-  /** Archives many sessions, then reloads and reconciles once to avoid concurrent tree-refresh races. */
+  /** Archives many sessions, then reloads and reconciles once to avoid concurrent tree-refresh races.
+   *  Archives every session it can and rejects afterwards with the refusals, one per line. */
   archiveMany: (ids: SessionId[]) => Promise<void>;
-  /** Archives an entire group and keeps a hidden tombstone that returns when any child is restored. */
+  /** Archives an entire group and keeps a hidden tombstone that returns when any child is restored.
+   *  Rejects with the backend reason when a session in the group still holds a worker worktree. */
   archiveGroup: (id: string) => Promise<void>;
   /** Restores an archived session to the normal tree. */
   restoreSession: (id: SessionId) => Promise<void>;
@@ -1166,6 +1172,8 @@ interface TermStore {
   setAgentDefault: (kind: string, patch: Partial<AgentDefaultConfig>) => void;
   setOrchestrationProfile: (name: string, patch: Partial<OrchestrationProfile> | null) => void;
   setOrchestrationLimits: (patch: Partial<OrchestrationLimits>) => void;
+  /** Replaces untouched built-in profiles with host-resolved defaults, once per installation. */
+  resolveDefaultOrchestrationProfiles: () => Promise<void>;
   /** Applies current theme and visual settings to `documentElement` on mount. */
   applyAppearance: () => void;
   /** Reloads preferences from local storage after startup reconciliation rewrites the cache from backend
@@ -1952,12 +1960,17 @@ export const useTermStore = create<TermStore>((set, get) => ({
   archiveMany: async (ids) => {
     // Archive sequentially, then reload/reconcile/save once. Concurrent refreshes can destabilize virtualized
     // rows and trigger React's maximum-update-depth failure.
+    const refused: string[] = [];
     for (const id of ids) {
-      await tree.setSessionArchived(id, true).catch(() => {});
+      await tree.setSessionArchived(id, true).catch((e: unknown) => {
+        refused.push(e instanceof Error ? e.message : String(e));
+      });
     }
     await get().loadTree();
     set((state) => ({ ...reconcileTabs(state), selection: [], selectionAnchor: null }));
     saveLayoutTick();
+    // A refusal protects a worktree, so the caller must show it instead of reporting a silent archive.
+    if (refused.length > 0) throw new Error(refused.join("\n"));
   },
 
   archiveGroup: async (id) => {
@@ -3554,6 +3567,30 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
   setOrchestrationLimits: (patch) => {
     set((s) => ({ orchestration: { ...s.orchestration, ...patch } }));
+    persistAndApplyVisual(get);
+  },
+  resolveDefaultOrchestrationProfiles: async () => {
+    if (localStorage.getItem(ORCH_RESOLVED_KEY) === "1") return;
+    if (!hasBuiltinOrchestrationProfiles(get().orchestrationProfiles)) {
+      localStorage.setItem(ORCH_RESOLVED_KEY, "1");
+      return;
+    }
+    // A failed probe leaves the marker unset so the next launch retries.
+    const resolved = await orchestrationDefaultProfiles().catch(() => null);
+    if (!resolved || Object.keys(resolved).length === 0) return;
+    localStorage.setItem(ORCH_RESOLVED_KEY, "1");
+    if (!hasBuiltinOrchestrationProfiles(get().orchestrationProfiles)) return;
+    set((s) => ({
+      orchestrationProfiles: {
+        ...s.orchestrationProfiles,
+        ...Object.fromEntries(
+          Object.entries(resolved).map(([name, profile]) => [
+            name,
+            { ...profile, permissionMode: profile.permissionMode ?? "inherit" },
+          ]),
+        ),
+      },
+    }));
     persistAndApplyVisual(get);
   },
   applyAppearance: () => {

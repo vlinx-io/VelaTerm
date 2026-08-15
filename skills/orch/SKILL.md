@@ -16,8 +16,10 @@ allowed-tools: Bash(vagent:*) Bash(git:*)
 
 The user **explicitly invoked `/orch`** to make this session the **lead agent** for the task
 below. You may autonomously spawn, inspect, wait on, read, prompt, and cancel **your own child
-sessions** with `vagent`. No per-action approval is needed beyond VelaTerm's own spawn confirmation
-card, which the user may have enabled.
+sessions** with `vagent`. Read-only and reversible actions need no approval. Two actions do need it:
+a spawn can open VelaTerm's confirmation card, and every `retire --confirm` opens a retirement card
+unless the user enabled `autoApproveRetire`. Retirement also needs your own check with the user
+first, described in step 16.
 
 User input:
 
@@ -71,7 +73,25 @@ Known behavior:
   `--confirm`, it removes the worktree and deletes the disposable worker branch.
 - `retire` accepts one settled direct child subtree. Its preview reports `archive` or
   `cleanup-and-archive`. With `--confirm`, it stops settled processes, cleans verified worktrees,
-  and archives the subtree. Dirty or unlanded worktrees block retirement.
+  and archives the subtree. The dirty-or-unlanded guard blocks worktree children only; a child
+  without a worktree is never blocked by it.
+- A blocked preview returns HTTP 409 with a `blocked` array that names every worker and its reason.
+  Report the complete list. A blocked `retire --confirm` stops at the first worker instead.
+- `retire` also refuses a running child that still runs a tool, wrote its transcript seconds ago, or
+  keeps its process tree busy, even when `status` reports `waiting`. The state cache lags a new turn.
+  Wait, then run it again.
+- A child killed in the middle of a tool call can leave a stale tool entry behind. `retire` then
+  reports that the tool is still running until the child's shell exits. Close the shell and retry.
+- `retire --confirm` opens a retirement confirmation card in VelaTerm. `{"pending":true}` with
+  `awaitingConfirmation` means nobody answered the card in time and nothing was retired. The card
+  then closes itself. Tell the user, then run the command again to open a fresh card.
+- After a successful retire, the same name returns HTTP 409 with `"reason":"archived"`. That means
+  the work is already done. An unknown name still returns 404, which means a typo or a wrong target.
+- `retire --confirm` also returns a `dirty` array for a child without a worktree whose directory
+  still holds uncommitted changes after the child stopped. The archive proceeds; report the paths.
+- A partly finished `retire --confirm` returns a `failed` array and does not archive. Each remaining
+  worker keeps its record, so running the same command again resumes the cleanup. A preview row
+  marked `resumed` means an earlier attempt already removed that worktree directory.
 - `wait` returns a `blocked` array naming children stopped at a permission prompt. Those settled
   without finishing. Tell the user immediately, by session name, then wait again.
 - `wait` returns a `failed` array with each errored session's name and provider text. Report every
@@ -104,7 +124,9 @@ Run `vagent config` first. It returns what the user configured in Settings > Orc
   `frontend`, `quick-edits`, and `tests`. Read every profile description before routing work. A profile launch
   applies its settings without repeating launch flags. Explicit flags override profile values.
 - `limits`: `maxDescendants`, `maxParallel`, `maxDepth`, `requireConfirmationAbove`,
-  `defaultTimeoutSecs`, and `worktreeCopyPatterns`.
+  `defaultTimeoutSecs`, `worktreeCopyPatterns`, and `autoApproveRetire`. `autoApproveRetire`
+  defaults to false. When it is true, a retire skips its card for a plain `archive` and for a
+  `cleanup-and-archive` whose worktrees all verify. A plan with a `resumed` row still opens one.
 - `counts`: your retained descendants, active descendants, and your own depth.
 
 The limits are enforced by the backend on every spawn, not by this text. A spawn that would cross
@@ -211,10 +233,16 @@ cannot discover, the definition of done, and the path to the plan document. Do n
 14. **Land through each parent.** A nested worker lands into its immediate parent. The top Lead then
     lands its complete net change into the branch that started the orchestration.
 15. **Preview retirement.** Retire each direct child after integration, validation, and final review.
-    Run `vagent retire <id|name>` first. Report every blocked worker and its reason.
+    Run `vagent retire <id|name>` first. Report every blocked worker and its reason from the
+    `blocked` array.
+    For several landed workers, prefer the batched route: run `vagent cleanup` once, show the
+    complete worktree and branch list to the user, and run `vagent cleanup --confirm` after they
+    approve. Every worker then previews as a plain `archive`, so each retire deletes nothing.
 16. **Confirm retirement safely.** If the action is `archive`, run `vagent retire <id|name> --confirm`.
     If the action is `cleanup-and-archive`, show the exact worktree and branch list to the user first.
-    Run the confirmed command only after the user approves that deletion list.
+    Run the confirmed command only after the user approves that deletion list. VelaTerm opens its own
+    retirement card unless the user enabled `autoApproveRetire`; only the user can answer it, and a
+    `{"pending":true}` response means the card expired unanswered and nothing was retired.
 17. **Verify retirement.** Check `vagent list`, `git worktree list`, and `git branch --list`.
     Confirm that the retired subtree no longer consumes a descendant slot.
 18. **Give the final report.** State what each worker did, what landed, and what retired.

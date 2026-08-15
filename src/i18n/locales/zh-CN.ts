@@ -125,6 +125,9 @@ const zhCN: typeof en = {
   "settings.orchTimeout": "默认超时（秒）",
   "settings.orchAutoApprove": "自动批准 /orch 派生",
   "settings.orchAutoApproveHint": "启动 /orch 子会话时跳过确认卡片。达到确认阈值时仍需要审核。",
+  "settings.orchAutoApproveRetire": "自动批准退役",
+  "settings.orchAutoApproveRetireHint":
+    "无需确认卡片即可归档已稳定的 worker, 包括已验证的 worktree 清理。恢复未验证清理的退役始终会询问。",
   "settings.orchConfirmAboveHint":
     "如果本次派生会让活动的后代会话数超过该值, 即使关闭了派生确认, 确认卡片仍会出现。活动的后代会话正在启动, 正在工作或正在等待权限请求。",
   "settings.orchLimitsHint":
@@ -182,6 +185,21 @@ const zhCN: typeof en = {
   "spawn.launch": "启动",
   "spawn.remaining": (n: number) => `还有 ${n} 个待确认`,
   "spawn.notifyTitle": "派生会话待确认",
+  "retire.title": "退役此会话？",
+  "retire.session": "会话",
+  "retire.actionArchive": "归档该会话。不会删除任何 worktree。",
+  "retire.actionCleanup": "删除下列 worktree，然后归档该会话。",
+  "retire.descendants": (n: number) => `包含 ${n} 个子孙会话。`,
+  "retire.irreversible": "此操作无法撤销",
+  "retire.worktreeCount": (n: number) => `将删除 ${n} 个 worktree 及其分支。`,
+  "retire.pathLabel": "路径",
+  "retire.branchLabel": "分支",
+  "retire.branchUnknown": "未知",
+  "retire.resumed": "目录已不存在，仅剩分支。",
+  "retire.keep": "保留",
+  "retire.approve": "退役",
+  "retire.remaining": (n: number) => `还有 ${n} 个待处理`,
+  "retire.notifyTitle": "退役待确认", // Retire awaiting confirmation
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "查看改动…",
@@ -407,6 +425,12 @@ const zhCN: typeof en = {
   "tree.killProcess": "结束进程",
   "tree.archiveSession": "归档会话",
   "tree.archiveGroup": "归档分组",
+  "tree.archiveBlockedTitle": "无法归档会话",
+  "tree.archiveBlockedBody": "归档被拒绝。归档后的会话会离开清理范围，其工作树和分支将被遗留。",
+  "tree.archiveConfirmTitle": "归档并删除 worktree？", // Archive and delete worktrees?
+  "tree.archiveConfirmBody": (n: number) =>
+    `归档会删除 ${n} 个 worker worktree 及其分支。此操作无法撤销。相关工作已经在父分支上。`,
+  "tree.archiveConfirmAction": "归档", // Archive
   // Temporary (draft) sessions
   "tree.scratchTag": "临时",
   "tree.persistSession": "转为永久会话…",
@@ -582,6 +606,7 @@ const zhCN: typeof en = {
   "archive.empty1": "暂无归档会话。",
   "archive.empty2": "在左栏会话上右键「归档会话」即可把它收进这里。",
   "archive.restore": "恢复为正常会话",
+  "archive.retiredNote": "已退役的工作会话无法原样恢复，因为退役时已删除其工作树和分支。",
   "archive.export": "导出完整上下文为 Markdown",
   "archive.deleteForever": "彻底删除（连带录制）",
   "archive.pickOne": "选择左侧一个归档会话查看其对话记录",

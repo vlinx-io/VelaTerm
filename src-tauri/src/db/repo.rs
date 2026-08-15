@@ -971,6 +971,40 @@ pub fn worktree_paths_in_subtree(conn: &Connection, id: &str) -> Result<Vec<Stri
     Ok(out)
 }
 
+/// Whether a live group or a live session outside `exclude_session_ids` binds the same worktree
+/// directory as `session_id`, meaning the directory outlives those sessions.
+pub fn worktree_binding_is_shared(
+    conn: &Connection,
+    session_id: &str,
+    exclude_session_ids: &[String],
+) -> Result<bool, String> {
+    let exclusion = if exclude_session_ids.is_empty() {
+        String::new()
+    } else {
+        let placeholders: Vec<String> = (0..exclude_session_ids.len())
+            .map(|i| format!("?{}", i + 2))
+            .collect();
+        format!(" AND other.id NOT IN ({})", placeholders.join(","))
+    };
+    let sql = format!(
+        "SELECT EXISTS(
+           SELECT 1 FROM sessions other JOIN sessions self ON other.worktree_path = self.worktree_path
+           WHERE self.id = ?1 AND other.archived_at IS NULL{exclusion}
+         ) OR EXISTS(
+           SELECT 1 FROM groups g JOIN sessions self ON g.worktree_path = self.worktree_path
+           WHERE self.id = ?1 AND g.deleted_at IS NULL
+         )"
+    );
+    let mut p: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(exclude_session_ids.len() + 1);
+    p.push(&session_id);
+    for id in exclude_session_ids {
+        p.push(id as &dyn rusqlite::ToSql);
+    }
+    conn.query_row(&sql, p.as_slice(), |row| row.get::<_, i64>(0))
+        .map(|shared| shared != 0)
+        .map_err(|e| format!("Failed to check worktree bindings: {e}"))
+}
+
 /// Rename a node.
 pub fn rename_node(conn: &Connection, kind: NodeKind, id: &str, name: &str) -> Result<(), String> {
     let table = match kind {
@@ -1715,8 +1749,10 @@ pub fn get_session(conn: &Connection, id: &str) -> Result<Option<Session>, Strin
 
 /// Archive or restore an **entire session subtree** by setting or clearing archived_at.
 ///
-/// Subtree semantics prevent children becoming invisible orphans. Only flags change; data and
-/// recordings remain, allowing exact agent resume after restoration.
+/// Subtree semantics prevent children from becoming invisible orphans. This database operation
+/// changes only archive flags. Higher-level archive commands can first remove verified worker
+/// worktrees, branches, and stored bindings. Recordings remain, but a cleaned worker cannot resume
+/// exactly after restoration.
 ///
 /// Restoration also revives tombstoned project/group ancestors so the session has a visible location.
 /// Archived children detached from a deleted live parent restore under their nearest live group.
@@ -1780,6 +1816,16 @@ fn restore_container_chain(conn: &Connection, id: &str) -> Result<(), String> {
 /// archived roots; restoring any one revives the group. Parent sessions already use subtree archiving.
 ///
 /// Empty groups contain nothing restorable and are deleted permanently.
+/// Live root sessions of a group subtree. Archiving a group hides each root with its descendants, so
+/// a caller that must settle the subtree first checks these ids.
+pub fn group_root_sessions(conn: &Connection, group_id: &str) -> Result<Vec<String>, String> {
+    Ok(load_group_subtree_sessions(conn, group_id)?
+        .into_iter()
+        .filter(|s| s.parent.is_none() && !s.archived)
+        .map(|s| s.id)
+        .collect())
+}
+
 pub fn archive_group(conn: &Connection, group_id: &str) -> Result<(), String> {
     let ids: Vec<String> = load_group_subtree_sessions(conn, group_id)?
         .into_iter()

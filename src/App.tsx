@@ -8,6 +8,7 @@ import { MergeModal } from "./components/MergeModal";
 import { ChangesModal } from "./components/diff/ChangesModal";
 import { NotifyGuideModal } from "./components/NotifyGuideModal";
 import { QuitConfirmModal } from "./components/QuitConfirmModal";
+import { RetireConfirmModal } from "./components/RetireConfirmModal";
 import { SpawnConfirmModal } from "./components/SpawnConfirmModal";
 import { UpdateModal } from "./components/UpdateModal";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -91,7 +92,7 @@ function App() {
       .catch(() => {});
     // Reconcile cross-shell preferences with the shared backend as authority, applying differences once
     // and seeding missing backend keys from local values. Enable outbound sync only afterward.
-    void reconcileSettings().then((changed) => {
+    void reconcileSettings().then(({ changed, backendReached }) => {
       if (changed.has("vlx-lang")) setLang(loadLangChoice());
       if (
         changed.has("vlx-theme") ||
@@ -101,6 +102,8 @@ function App() {
       ) {
         useTermStore.getState().hydrateSettingsFromCache();
       }
+      // Resolving writes the whole settings blob, so an unverified cache must not reach the backend.
+      if (backendReached) void useTermStore.getState().resolveDefaultOrchestrationProfiles();
     });
     const unwatch = watchSystemTheme(() => {
       if (useTermStore.getState().theme === "system") applyAppearance();
@@ -225,6 +228,7 @@ function App() {
       <CloneProjectModal />
       <SaveAsModal />
       <SpawnConfirmModal />
+      <RetireConfirmModal />
       <QuitConfirmModal />
       <MergeModal />
       <ChangesModal />

@@ -109,6 +109,48 @@ export function onSpawnRequest(
   return listen<SpawnRequest>("spawn://request", (payload) => cb(payload));
 }
 
+/** One worktree a retire plan deletes; `resumed` rows keep only a branch and may not know its name. */
+export interface RetireWorktree {
+  id: string;
+  name: string;
+  path: string;
+  branch?: string | null;
+  targetCommit?: string | null;
+  resumed?: boolean;
+}
+
+/**
+ * Retire confirmation request from `vagent retire --confirm`, relayed by backend `/retire`. The backend
+ * deletes nothing until the `retire_result` command answers this `requestId`.
+ */
+export interface RetireRequest {
+  requestId: string;
+  sessionId: string;
+  name: string;
+  action: "archive" | "cleanup-and-archive";
+  descendantCount: number;
+  worktrees: RetireWorktree[];
+}
+
+/** Listen for retire confirmation requests as a global event registered once on mount. */
+export function onRetireRequest(
+  cb: (req: RetireRequest) => void,
+): Promise<UnlistenFn> {
+  return listen<RetireRequest>("retire://request", (payload) => cb(payload));
+}
+
+/**
+ * Withdrawal of one retire card whose backend request already timed out. Answering a withdrawn card
+ * retires nothing, so the card must close itself instead of accepting an approval that does nothing.
+ */
+export function onRetireCancel(
+  cb: (requestId: string) => void,
+): Promise<UnlistenFn> {
+  return listen<{ requestId: string }>("retire://cancel", (payload) =>
+    cb(payload.requestId),
+  );
+}
+
 /**
  * Open-document-tab request from a session's `view <file>` command, relayed by backend `/view`. Matches Rust
  * `ViewRequest` one-to-one in camelCase. path is already a canonical absolute path; when `isUrl` is true, it is

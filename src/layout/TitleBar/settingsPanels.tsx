@@ -959,8 +959,22 @@ export function OrchestrationPanel() {
           onChange={(v) => setLimits({ autoApprove: v === "on" })}
         />
       </Field>
+      <Field
+        label={t("settings.orchAutoApproveRetire")}
+        className="orch-limit-row orch-limit-row-wide"
+      >
+        <Seg<"on" | "off">
+          value={limits.autoApproveRetire ? "on" : "off"}
+          options={[
+            ["on", t("common.on")],
+            ["off", t("common.off")],
+          ]}
+          onChange={(v) => setLimits({ autoApproveRetire: v === "on" })}
+        />
+      </Field>
       <div className="orch-panel-help">
         <p className="orch-panel-hint">{t("settings.orchAutoApproveHint")}</p>
+        <p className="orch-panel-hint">{t("settings.orchAutoApproveRetireHint")}</p>
         <p className="orch-panel-hint">{t("settings.orchConfirmAboveHint")}</p>
         <p className="orch-panel-hint">{t("settings.orchLimitsHint")}</p>
       </div>

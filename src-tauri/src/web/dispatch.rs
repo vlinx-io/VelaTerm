@@ -241,6 +241,10 @@ pub fn dispatch(
         "agent_locate_bin" => to_value(crate::agent::install::locate_installed_bin(&req_str(
             args, "agent",
         )?)),
+        // Probes the installed agents, so callers must ask once and store the result.
+        "orchestration_default_profiles" => {
+            Ok(crate::agent::orchestration::resolved_default_profiles_json())
+        }
 
         // ── Tree management orchestrated by command_core ──
         "list_tree" => to_value(core::list_tree(app)?),
@@ -318,6 +322,17 @@ pub fn dispatch(
                     .get("awaitingConfirmation")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+            },
+        )),
+        // Answer a parked `vagent retire` card; false when it already timed out and destroyed nothing.
+        "retire_result" => to_value(crate::agent::ctl::resolve_retire(
+            &req_str(args, "requestId")?,
+            crate::agent::ctl::RetireDecision {
+                approved: args
+                    .get("approved")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                error: opt_str(args, "error"),
             },
         )),
         "update_session" => {

@@ -316,8 +316,12 @@ pub fn delete_node(ctx: &AppCtx, kind: NodeKind, id: &str) -> Result<(), String>
     Ok(())
 }
 
-/// Archives or restores a session through soft hiding without deleting data.
+/// Archives a session subtree after worktree cleanup, or restores its archive flags.
 pub fn set_session_archived(ctx: &AppCtx, id: &str, archived: bool) -> Result<(), String> {
+    // Archiving hides the subtree from the orchestration worktree scans, so settle it first.
+    if archived {
+        crate::agent::ctl::prepare_archive(ctx, id)?;
+    }
     {
         let conn = ctx.db().conn.lock().unwrap();
         repo::set_archived(&conn, id, archived)?;
@@ -329,6 +333,14 @@ pub fn set_session_archived(ctx: &AppCtx, id: &str, archived: bool) -> Result<()
 /// Archives an entire group: archive its sessions and retain the group as a hidden soft-deletion tombstone. Restoring
 /// any session restores the group. See `repo::archive_group`.
 pub fn archive_group(ctx: &AppCtx, id: &str) -> Result<(), String> {
+    // A group archive hides the same sessions as Archive Session, so it needs the same worktree guard.
+    let roots = {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::group_root_sessions(&conn, id)?
+    };
+    for root in &roots {
+        crate::agent::ctl::prepare_archive(ctx, root)?;
+    }
     {
         let conn = ctx.db().conn.lock().unwrap();
         repo::archive_group(&conn, id)?;

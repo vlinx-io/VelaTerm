@@ -68,6 +68,8 @@ export interface OrchestrationLimits {
   requireConfirmationAbove: number;
   /** Whether `/orch` child sessions skip the launch confirmation card below the threshold. */
   autoApprove: boolean;
+  /** Whether `vagent retire` skips its card; a plan that deletes worktrees always shows it. */
+  autoApproveRetire: boolean;
   defaultTimeoutSecs: number;
   worktreeCopyPatterns: string[];
 }
@@ -85,6 +87,9 @@ export type ImagePasteMode = "upload" | "agent";
 
 /** Persisted Vlinx appearance settings for accent, density, splits, separators, navigation, and Inspector. */
 export const SETTINGS_KEY = "vlx-settings";
+
+/** Marker for the agent probe that resolves the built-in orchestration profiles, which must run only once. */
+export const ORCH_RESOLVED_KEY = "vlx-orch-defaults-resolved";
 export interface PersistedSettings {
   accent: AccentChoice;
   density: Density;
@@ -165,7 +170,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
       description:
         "Use for database schemas, migrations, queries, indexes, persistence, and data access.",
       agent: "claude",
-      model: "fable",
+      model: "opus",
       effort: "high",
       worktree: true,
       permissionMode: "inherit",
@@ -203,6 +208,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
     maxDepth: 2,
     requireConfirmationAbove: 6,
     autoApprove: false,
+    autoApproveRetire: false,
     defaultTimeoutSecs: 1800,
     worktreeCopyPatterns: ["docs/plans/**"],
   },
@@ -231,6 +237,8 @@ function mergeOrchestration(stored: Partial<OrchestrationLimits> | undefined): O
     maxDepth: num(s.maxDepth, d.maxDepth),
     requireConfirmationAbove: num(s.requireConfirmationAbove, d.requireConfirmationAbove),
     autoApprove: typeof s.autoApprove === "boolean" ? s.autoApprove : d.autoApprove,
+    autoApproveRetire:
+      typeof s.autoApproveRetire === "boolean" ? s.autoApproveRetire : d.autoApproveRetire,
     defaultTimeoutSecs: num(s.defaultTimeoutSecs, d.defaultTimeoutSecs),
     worktreeCopyPatterns: Array.isArray(s.worktreeCopyPatterns)
       ? s.worktreeCopyPatterns.filter((p): p is string => typeof p === "string")
@@ -260,6 +268,44 @@ function mergeOrchestrationProfiles(stored: unknown): Record<string, Orchestrati
         ],
       ];
     }),
+  );
+}
+
+/** Profile sets shipped by earlier versions, marking an installation that never edited its profiles. */
+const SUPERSEDED_PROFILE_DEFAULTS: Record<string, OrchestrationProfile>[] = [
+  {
+    ...SETTINGS_DEFAULTS.orchestrationProfiles,
+    database: { ...SETTINGS_DEFAULTS.orchestrationProfiles.database, model: "fable" },
+  },
+];
+
+function sameProfileSet(
+  a: Record<string, OrchestrationProfile>,
+  b: Record<string, OrchestrationProfile>,
+): boolean {
+  const names = Object.keys(a);
+  if (names.length !== Object.keys(b).length) return false;
+  return names.every((name) => {
+    const x = a[name];
+    const y = b[name];
+    return (
+      y !== undefined &&
+      x.description === y.description &&
+      x.agent === y.agent &&
+      x.model === y.model &&
+      x.effort === y.effort &&
+      x.worktree === y.worktree &&
+      x.permissionMode === y.permissionMode
+    );
+  });
+}
+
+/** Whether the profiles still match a shipped default set, meaning the user has never edited them. */
+export function hasBuiltinOrchestrationProfiles(
+  profiles: Record<string, OrchestrationProfile>,
+): boolean {
+  return [SETTINGS_DEFAULTS.orchestrationProfiles, ...SUPERSEDED_PROFILE_DEFAULTS].some((set) =>
+    sameProfileSet(set, profiles),
   );
 }
 

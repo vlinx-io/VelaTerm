@@ -365,8 +365,65 @@ fn npm_bin_candidate(prefix: &std::path::Path, bin: &str, win: bool) -> std::pat
     }
 }
 
-/// Query `npm prefix -g`. Unix runs `$SHELL -lc`, falling back through zsh/bash/sh, so GUI launches load
-/// profile-managed npm and the correct nvm/fnm prefix. Windows uses cmd /C. Any failure returns None.
+/// Whether an agent binary exists at a known location or on PATH, at the cost of a shell subprocess.
+pub fn agent_available(agent: &str) -> bool {
+    if locate_installed_bin(agent).is_some() {
+        return true;
+    }
+    match install_recipe(agent) {
+        Some(recipe) => bin_on_path(&recipe.bin),
+        None => false,
+    }
+}
+
+/// Whether a shell resolves a command name. A login shell skips `~/.zshrc`, where nvm and Homebrew often
+/// extend PATH, so an interactive retry follows.
+fn bin_on_path(bin: &str) -> bool {
+    if !valid_probe_name(bin) {
+        return false;
+    }
+    if cfg!(target_os = "windows") {
+        return crate::host::command("cmd")
+            .args(["/C", "where", bin])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+    }
+    let shell = login_shell();
+    let probe = format!("command -v {bin}");
+    ["-lc", "-lic"].iter().any(|flags| {
+        crate::host::command(&shell)
+            .args([flags, probe.as_str()])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    })
+}
+
+/// Whether a name can enter a shell command unquoted: ASCII alphanumerics plus `-`, `_`, and `.`.
+fn valid_probe_name(bin: &str) -> bool {
+    !bin.is_empty()
+        && bin
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// Interactive login shell used for PATH-accurate probes: `$SHELL`, then zsh/bash, then sh.
+fn login_shell() -> String {
+    std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            ["/bin/zsh", "/bin/bash"]
+                .iter()
+                .find(|p| std::path::Path::new(p).exists())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_else(|| "/bin/sh".to_string())
+}
+
+/// Query `npm prefix -g` through a login shell so GUI launches load the profile-managed nvm/fnm prefix.
+/// Any failure returns None.
 fn npm_global_prefix() -> Option<std::path::PathBuf> {
     let out = if cfg!(target_os = "windows") {
         crate::host::command("cmd")
@@ -374,17 +431,7 @@ fn npm_global_prefix() -> Option<std::path::PathBuf> {
             .output()
             .ok()?
     } else {
-        let shell = std::env::var("SHELL")
-            .ok()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| {
-                ["/bin/zsh", "/bin/bash"]
-                    .iter()
-                    .find(|p| std::path::Path::new(p).exists())
-                    .map(|s| s.to_string())
-            })
-            .unwrap_or_else(|| "/bin/sh".to_string());
-        crate::host::command(shell)
+        crate::host::command(login_shell())
             .args(["-lc", "npm prefix -g"])
             .output()
             .ok()?
@@ -463,6 +510,21 @@ mod tests {
     fn unknown_agent_has_no_recipe() {
         assert!(install_recipe("terminal").is_none());
         assert!(install_recipe("").is_none());
+        assert!(!agent_available("terminal"));
+    }
+
+    #[test]
+    fn probe_names_reject_shell_metacharacters() {
+        for bin in ["claude", "cursor-agent", "kiro-cli", "gpt.5"] {
+            assert!(valid_probe_name(bin), "{bin} is a plain command name");
+        }
+        for bin in ["", "a b", "a;b", "a$(id)", "a`id`", "a|b", "a/b", "a&b", "a'b"] {
+            assert!(!valid_probe_name(bin), "{bin:?} must never reach a shell");
+        }
+        for agent in ["claude", "codex", "cursor", "copilot", "opencode", "kiro", "zoo"] {
+            let recipe = install_recipe(agent).unwrap();
+            assert!(valid_probe_name(&recipe.bin), "{agent} has an unprobeable bin");
+        }
     }
 
     #[test]

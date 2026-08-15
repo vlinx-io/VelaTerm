@@ -18,6 +18,8 @@ import {
 } from "../../types";
 import { MARK_LABEL_KEYS, NODE_MARKS, normalizeMark } from "../../marks";
 import { useSessionMenu } from "../sessionMenu";
+import { archivedGroupWorktreePaths, archivedWorktreePaths } from "../archivePlan";
+import { archiveErrorText } from "../sessionMenuDialogs";
 import { GlobalSearch } from "../GlobalSearch/GlobalSearch";
 import { ArchivePanel } from "./ArchivePanel";
 import {
@@ -548,10 +550,17 @@ export function LeftSidebar() {
         items.push({
           label: t("tree.archiveSelected"),
           onClick: () => {
-            // archiveMany processes sequentially and reloads once. Concurrent per-session archiveSession
-            // calls caused loadTree races and React #185. archiveMany also clears selection.
-            void archiveMany(
-              selection.filter((s) => s.kind === "session").map((s) => s.id),
+            const ids = selection.filter((s) => s.kind === "session").map((s) => s.id);
+            const tree = useTermStore.getState();
+            const worktreePaths = archivedWorktreePaths(tree.sessions, tree.groups, ids);
+            if (worktreePaths.length > 0) {
+              openDialog({ type: "confirmArchive", target: "sessions", ids, worktreePaths });
+              return;
+            }
+            // archiveMany processes sequentially, reloads once, and clears the selection. Concurrent
+            // archiveSession calls raced loadTree and hit React #185.
+            void archiveMany(ids).catch((e: unknown) =>
+              openDialog({ type: "archiveBlocked", message: archiveErrorText(e) }),
             );
           },
         });
@@ -628,7 +637,29 @@ export function LeftSidebar() {
           : []),
         buildMarkItem("group", node.id),
         rename,
-        { label: t("tree.archiveGroup"), onClick: () => void archiveGroup(node.id) },
+        {
+          label: t("tree.archiveGroup"),
+          onClick: () => {
+            const tree = useTermStore.getState();
+            const worktreePaths = archivedGroupWorktreePaths(
+              tree.sessions,
+              tree.groups,
+              node.id,
+            );
+            if (worktreePaths.length > 0) {
+              openDialog({
+                type: "confirmArchive",
+                target: "group",
+                ids: [node.id],
+                worktreePaths,
+              });
+              return;
+            }
+            void archiveGroup(node.id).catch((e: unknown) =>
+              openDialog({ type: "archiveBlocked", message: archiveErrorText(e) }),
+            );
+          },
+        },
         {
           label: t("tree.deleteGroup"),
           danger: true,

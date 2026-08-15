@@ -127,6 +127,9 @@ const en = {
   "settings.orchAutoApprove": "Auto-approve /orch spawns",
   "settings.orchAutoApproveHint":
     "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.",
+  "settings.orchAutoApproveRetire": "Auto-approve retire",
+  "settings.orchAutoApproveRetireHint":
+    "Archive a settled worker without the confirmation card, including a verified worktree cleanup. A retire that resumes an unverified cleanup always asks.",
   "settings.orchConfirmAboveHint":
     "Show the confirmation card when a spawn would raise active descendant sessions above this value, even if spawn confirmation is off. Active descendant sessions are starting, working, or waiting on a permission prompt.",
   "settings.orchLimitsHint":
@@ -184,6 +187,24 @@ const en = {
   "spawn.launch": "Launch",
   "spawn.remaining": (n: number) => `${n} more pending`,
   "spawn.notifyTitle": "Spawn session awaiting confirmation",
+  "retire.title": "Retire this session?",
+  "retire.session": "Session",
+  "retire.actionArchive": "Archive the session. No worktree is deleted.",
+  "retire.actionCleanup":
+    "Delete the worktrees below, then archive the session.",
+  "retire.descendants": (n: number) =>
+    `Includes ${n} descendant session${n === 1 ? "" : "s"}.`,
+  "retire.irreversible": "This cannot be undone",
+  "retire.worktreeCount": (n: number) =>
+    `${n} worktree${n === 1 ? "" : "s"} and ${n === 1 ? "its branch" : "their branches"} will be deleted.`,
+  "retire.pathLabel": "Path",
+  "retire.branchLabel": "Branch",
+  "retire.branchUnknown": "unknown",
+  "retire.resumed": "Directory already gone; only the branch remains.",
+  "retire.keep": "Keep",
+  "retire.approve": "Retire",
+  "retire.remaining": (n: number) => `${n} more pending`,
+  "retire.notifyTitle": "Retire awaiting confirmation",
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "View changes…",
@@ -413,6 +434,12 @@ const en = {
   "tree.killProcess": "Kill Process",
   "tree.archiveSession": "Archive Session",
   "tree.archiveGroup": "Archive Group",
+  "tree.archiveBlockedTitle": "Cannot Archive Session",
+  "tree.archiveBlockedBody": "Archiving was refused. An archived session leaves the worker cleanup scope, so its worktree and branch would be stranded.",
+  "tree.archiveConfirmTitle": "Archive and delete worktrees?",
+  "tree.archiveConfirmBody": (n: number) =>
+    `Archiving deletes ${n} worker ${n === 1 ? "worktree" : "worktrees"} and ${n === 1 ? "its branch" : "their branches"}. This cannot be undone. The work is already on the parent branch.`,
+  "tree.archiveConfirmAction": "Archive",
   // Temporary (draft) sessions
   "tree.scratchTag": "scratch",
   "tree.persistSession": "Make Permanent Session…",
@@ -593,6 +620,7 @@ const en = {
   "archive.empty2":
     'Right-click a session in the sidebar and choose "Archive Session" to put it here.',
   "archive.restore": "Restore to normal session",
+  "archive.retiredNote": "A retired worker cannot resume exactly, because retire already deleted its worktree and branch.",
   "archive.export": "Export full context as Markdown",
   "archive.deleteForever": "Delete permanently (with recording)",
   "archive.pickOne": "Select an archived session on the left to view its transcript",

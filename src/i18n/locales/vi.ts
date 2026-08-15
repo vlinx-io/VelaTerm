@@ -128,6 +128,9 @@ const vi: typeof en = {
   "settings.orchTimeout": "Thời gian chờ mặc định (giây)",
   "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
   "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
+  "settings.orchAutoApproveRetire": "Tự động chấp thuận việc cho nghỉ",
+  "settings.orchAutoApproveRetireHint":
+    "Lưu trữ một worker đã ổn định mà không cần thẻ xác nhận, bao gồm cả việc dọn dẹp worktree đã xác minh. Lần cho nghỉ tiếp tục một lần dọn dẹp chưa xác minh thì luôn hỏi.",
   "settings.orchConfirmAboveHint":
     "Thẻ xác nhận sẽ xuất hiện khi một lần spawn làm số phiên hậu duệ đang hoạt động vượt quá giá trị này, ngay cả khi đã tắt xác nhận spawn. Phiên hậu duệ đang hoạt động là phiên đang khởi động, đang làm việc hoặc đang chờ yêu cầu quyền.",
   "settings.orchLimitsHint":
@@ -185,6 +188,23 @@ const vi: typeof en = {
   "spawn.launch": "Khởi chạy",
   "spawn.remaining": (n: number) => `Còn ${n} yêu cầu đang chờ`,
   "spawn.notifyTitle": "Phiên được tạo đang chờ xác nhận",
+  "retire.title": "Cho phiên này nghỉ?",
+  "retire.session": "Phiên",
+  "retire.actionArchive": "Lưu trữ phiên. Không xóa worktree nào.",
+  "retire.actionCleanup":
+    "Xóa các worktree bên dưới, rồi lưu trữ phiên.",
+  "retire.descendants": (n: number) => `Bao gồm ${n} phiên hậu duệ.`,
+  "retire.irreversible": "Thao tác này không thể hoàn tác",
+  "retire.worktreeCount": (n: number) =>
+    `Sẽ xóa ${n} worktree và nhánh của chúng.`,
+  "retire.pathLabel": "Đường dẫn",
+  "retire.branchLabel": "Nhánh",
+  "retire.branchUnknown": "không rõ",
+  "retire.resumed": "Thư mục đã không còn; chỉ còn lại nhánh.",
+  "retire.keep": "Giữ lại",
+  "retire.approve": "Cho nghỉ",
+  "retire.remaining": (n: number) => `còn ${n} đang chờ`,
+  "retire.notifyTitle": "Yêu cầu cho nghỉ đang chờ xác nhận", // Retire awaiting confirmation
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "Xem thay đổi…",
@@ -408,6 +428,12 @@ const vi: typeof en = {
   "tree.killProcess": "Dừng tiến trình",
   "tree.archiveSession": "Lưu trữ phiên",
   "tree.archiveGroup": "Lưu trữ nhóm",
+  "tree.archiveBlockedTitle": "Không thể lưu trữ phiên",
+  "tree.archiveBlockedBody": "Lưu trữ đã bị từ chối. Phiên đã lưu trữ nằm ngoài phạm vi dọn dẹp, nên worktree và nhánh của nó sẽ bị bỏ lại.",
+  "tree.archiveConfirmTitle": "Lưu trữ và xóa worktree?", // Archive and delete worktrees?
+  "tree.archiveConfirmBody": (n: number) =>
+    `Lưu trữ sẽ xóa ${n} worktree của worker và các nhánh của chúng. Không thể hoàn tác. Công việc đã nằm trên nhánh cha.`,
+  "tree.archiveConfirmAction": "Lưu trữ", // Archive
   "tree.scratchTag": "nháp",
   "tree.persistSession": "Chuyển thành phiên lâu dài…",
   "tree.persistDoc": "Lưu vào ổ đĩa…",
@@ -575,6 +601,7 @@ const vi: typeof en = {
   "archive.empty2":
     "Nhấp chuột phải vào một phiên trong thanh bên và chọn “Lưu trữ phiên” để đưa vào đây.",
   "archive.restore": "Khôi phục thành phiên thường",
+  "archive.retiredNote": "Worker đã ngừng hoạt động không thể tiếp tục y như cũ, vì thao tác ngừng đã xóa worktree và nhánh của nó.",
   "archive.export": "Xuất toàn bộ ngữ cảnh dưới dạng Markdown",
   "archive.deleteForever": "Xóa vĩnh viễn (kèm bản ghi)",
   "archive.pickOne": "Chọn một phiên đã lưu trữ bên trái để xem bản ghi hội thoại",

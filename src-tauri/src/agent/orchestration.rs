@@ -2,6 +2,7 @@
 //! Settings are optional and invalid values fall back to defaults.
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use serde_json::{json, Map, Value};
 
@@ -9,6 +10,8 @@ use crate::host::AppCtx;
 
 /// Frontend settings blob holding both `orchestrationProfiles` and `orchestration`.
 const VLX_SETTINGS_KEY: &str = "vlx-settings";
+/// Agent, model, and effort that replace Claude in the default profiles when Claude is not installed.
+const CLAUDE_FALLBACK: (&str, &str, &str) = ("codex", "gpt-5.6-sol", "high");
 
 /// One reusable routing choice. Each field is individually optional; an unset field means the
 /// caller's explicit flag or the frontend's per-agent default applies.
@@ -79,6 +82,9 @@ pub struct Limits {
     pub max_depth: u32,
     pub require_confirmation_above: u32,
     pub auto_approve: bool,
+    /// Whether a plain `retire --confirm` may skip its confirmation card. A retire that also removes
+    /// worktrees always shows the card.
+    pub auto_approve_retire: bool,
     pub default_timeout_secs: u64,
     pub worktree_copy_patterns: Vec<String>,
 }
@@ -91,6 +97,7 @@ impl Default for Limits {
             max_depth: 2,
             require_confirmation_above: 6,
             auto_approve: false,
+            auto_approve_retire: false,
             default_timeout_secs: 1800,
             worktree_copy_patterns: vec!["docs/plans/**".to_string()],
         }
@@ -106,6 +113,7 @@ impl Limits {
             "maxDepth": self.max_depth,
             "requireConfirmationAbove": self.require_confirmation_above,
             "autoApprove": self.auto_approve,
+            "autoApproveRetire": self.auto_approve_retire,
             "defaultTimeoutSecs": self.default_timeout_secs,
             "worktreeCopyPatterns": self.worktree_copy_patterns,
         })
@@ -131,6 +139,9 @@ impl Limits {
         }
         if let Some(v) = obj.get("autoApprove").and_then(Value::as_bool) {
             limits.auto_approve = v;
+        }
+        if let Some(v) = obj.get("autoApproveRetire").and_then(Value::as_bool) {
+            limits.auto_approve_retire = v;
         }
         if let Some(n) = count("defaultTimeoutSecs") {
             limits.default_timeout_secs = n;
@@ -197,7 +208,7 @@ fn default_profiles() -> HashMap<String, Profile> {
             mk(
                 "Use for database schemas, migrations, queries, indexes, persistence, and data access.",
                 "claude",
-                "fable",
+                "opus",
                 "high",
             ),
         ),
@@ -231,10 +242,50 @@ fn default_profiles() -> HashMap<String, Profile> {
     ])
 }
 
-/// Parse stored settings and apply field-level defaults.
-pub fn parse_config(settings_json: Option<&str>) -> OrchestrationConfig {
+/// Default profiles with every Claude entry rewritten to `CLAUDE_FALLBACK` when Claude is absent.
+fn default_profiles_for(claude_available: bool) -> HashMap<String, Profile> {
+    let mut profiles = default_profiles();
+    if claude_available {
+        return profiles;
+    }
+    let (agent, model, effort) = CLAUDE_FALLBACK;
+    for profile in profiles.values_mut() {
+        if profile.agent.as_deref() == Some("claude") {
+            profile.agent = Some(agent.to_string());
+            profile.model = Some(model.to_string());
+            profile.effort = Some(effort.to_string());
+        }
+    }
+    profiles
+}
+
+/// Default profiles resolved against the installed agents, detected once per process.
+fn resolved_default_profiles() -> HashMap<String, Profile> {
+    static CLAUDE_AVAILABLE: OnceLock<bool> = OnceLock::new();
+    let available =
+        *CLAUDE_AVAILABLE.get_or_init(|| crate::agent::install::agent_available("claude"));
+    default_profiles_for(available)
+}
+
+/// Resolved default profiles as the camelCase map the frontend stores in `orchestrationProfiles`.
+pub fn resolved_default_profiles_json() -> Value {
+    let mut map = Map::new();
+    for (name, profile) in resolved_default_profiles() {
+        map.insert(name, profile.to_json());
+    }
+    Value::Object(map)
+}
+
+/// Parse stored settings, calling `defaults` only when the blob holds no profile map.
+pub fn parse_config_with(
+    settings_json: Option<&str>,
+    defaults: fn() -> HashMap<String, Profile>,
+) -> OrchestrationConfig {
     let Some(parsed) = settings_json.and_then(|s| serde_json::from_str::<Value>(s).ok()) else {
-        return OrchestrationConfig::default();
+        return OrchestrationConfig {
+            profiles: defaults(),
+            limits: Limits::default(),
+        };
     };
     let profiles = match parsed
         .get("orchestrationProfiles")
@@ -244,7 +295,7 @@ pub fn parse_config(settings_json: Option<&str>) -> OrchestrationConfig {
             .iter()
             .filter_map(|(name, v)| Some((name.clone(), Profile::from_json(v)?)))
             .collect(),
-        None => default_profiles(),
+        None => defaults(),
     };
     let limits = match parsed.get("orchestration") {
         Some(v) => Limits::from_json(v),
@@ -262,7 +313,7 @@ pub fn load(app: &AppCtx) -> OrchestrationConfig {
         .ok()
         .and_then(|conn| crate::db::repo::get_app_settings(&conn).ok())
         .and_then(|mut settings| settings.remove(VLX_SETTINGS_KEY));
-    parse_config(stored.as_deref())
+    parse_config_with(stored.as_deref(), resolved_default_profiles)
 }
 
 /// Spawn options after profile resolution.
@@ -370,6 +421,10 @@ pub fn needs_confirmation(limits: &Limits, active: u32) -> bool {
 mod tests {
     use super::*;
 
+    fn parse_config(settings_json: Option<&str>) -> OrchestrationConfig {
+        parse_config_with(settings_json, default_profiles)
+    }
+
     #[test]
     fn missing_or_invalid_settings_yield_defaults() {
         let default = OrchestrationConfig::default();
@@ -396,7 +451,7 @@ mod tests {
                         .into()
                 ),
                 agent: Some("claude".into()),
-                model: Some("fable".into()),
+                model: Some("opus".into()),
                 effort: Some("high".into()),
                 worktree: Some(true),
                 permission_mode: Some("inherit".into()),
@@ -417,6 +472,34 @@ mod tests {
                 permission_mode: Some("inherit".into()),
             }
         );
+    }
+
+    #[test]
+    fn absent_claude_moves_the_claude_profiles_to_codex() {
+        let base = default_profiles();
+        assert_eq!(default_profiles_for(true), base);
+
+        let fallback = default_profiles_for(false);
+        for name in ["database", "frontend"] {
+            let profile = &fallback[name];
+            assert_eq!(profile.agent.as_deref(), Some("codex"));
+            assert_eq!(profile.model.as_deref(), Some("gpt-5.6-sol"));
+            assert_eq!(profile.effort.as_deref(), Some("high"));
+            assert_eq!(profile.description, base[name].description);
+            assert_eq!(profile.worktree, base[name].worktree);
+        }
+        for name in ["quick-edits", "tests"] {
+            assert_eq!(fallback[name], base[name]);
+        }
+    }
+
+    #[test]
+    fn stored_profiles_skip_the_installed_agent_check() {
+        let stored = parse_config_with(
+            Some(r#"{"orchestrationProfiles":{"deep":{"agent":"claude"}}}"#),
+            || panic!("stored profiles must not trigger agent detection"),
+        );
+        assert_eq!(stored.profile_names(), vec!["deep"]);
     }
 
     #[test]

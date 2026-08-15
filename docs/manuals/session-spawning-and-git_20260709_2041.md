@@ -87,6 +87,11 @@ child, an uncommitted worktree, or an unverified landing is blocked.
 removes verified landed worktrees and branches, and archives the subtree. The archived sessions no
 longer count against `maxDescendants`. Dirty or unlanded worktrees block retirement.
 
+"Archive Session" in the tree menu runs the same worktree check. It cleans a verified landed
+worktree and its branch, and it refuses an archive that would strand an unverified worktree.
+A worker cannot resume exactly after archive cleanup deletes its worktree, branch, and stored
+worktree binding.
+
 `land` requires a Lead-written Conventional Commit subject. It applies the direct child's net
 change to the parent's current branch as one commit. Temporary worker commits do not enter the
 parent history.

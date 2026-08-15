@@ -663,16 +663,19 @@ fn handle(url: &str, expected_token: &str) -> Option<(String, Option<StatusSigna
             state: AgentState::Working,
             silent: false,
             authoritative: false,
+            inferred: false,
         }),
         "asking" => Some(StatusSignal::State {
             state: AgentState::Asking,
             silent: false,
             authoritative: false,
+            inferred: false,
         }),
         "waiting" => Some(StatusSignal::State {
             state: AgentState::Waiting,
             silent: false,
             authoritative: false,
+            inferred: false,
         }),
         // Codex lifecycle hooks cover a full turn, unlike legacy waiting-only notify. Any such event
         // lets the frontend lock authoritative mode and prevents screen/busy heuristics overriding Stop.
@@ -680,6 +683,7 @@ fn handle(url: &str, expected_token: &str) -> Option<(String, Option<StatusSigna
             state: AgentState::Working,
             silent: false,
             authoritative: true,
+            inferred: false,
         }),
         // Mid-turn working from PreToolUse. It carries the same state as `codex_working` but is subject
         // to `CodexTurnGuard`, which discards it when it arrives after the turn already ended.
@@ -687,16 +691,19 @@ fn handle(url: &str, expected_token: &str) -> Option<(String, Option<StatusSigna
             state: AgentState::Working,
             silent: false,
             authoritative: true,
+            inferred: false,
         }),
         "codex_asking" => Some(StatusSignal::State {
             state: AgentState::Asking,
             silent: false,
             authoritative: true,
+            inferred: false,
         }),
         "codex_waiting" => Some(StatusSignal::State {
             state: AgentState::Waiting,
             silent: false,
             authoritative: true,
+            inferred: false,
         }),
         "codex_ready" => Some(StatusSignal::HookReady),
         // Kimi Code hooks cover the full lifecycle; distinct event names lock authoritative mode.
@@ -704,21 +711,25 @@ fn handle(url: &str, expected_token: &str) -> Option<(String, Option<StatusSigna
             state: AgentState::Working,
             silent: false,
             authoritative: true,
+            inferred: false,
         }),
         "kimi_asking" => Some(StatusSignal::State {
             state: AgentState::Asking,
             silent: false,
             authoritative: true,
+            inferred: false,
         }),
         "kimi_waiting" => Some(StatusSignal::State {
             state: AgentState::Waiting,
             silent: false,
             authoritative: true,
+            inferred: false,
         }),
         "kimi_idle" => Some(StatusSignal::State {
             state: AgentState::Waiting,
             silent: true,
             authoritative: true,
+            inferred: false,
         }),
         // Kiro hooks cover prompt submission, both tool phases, and turn end. There is no permission-request
         // hook, so Kiro never reports asking; the status dot stays working while it waits for approval.
@@ -726,11 +737,13 @@ fn handle(url: &str, expected_token: &str) -> Option<(String, Option<StatusSigna
             state: AgentState::Working,
             silent: false,
             authoritative: true,
+            inferred: false,
         }),
         "kiro_waiting" => Some(StatusSignal::State {
             state: AgentState::Waiting,
             silent: false,
             authoritative: true,
+            inferred: false,
         }),
         // Claude idle_prompt corrects status to waiting without notification. It means the agent has
         // been idle awaiting input, not that it just finished a reply.
@@ -738,6 +751,7 @@ fn handle(url: &str, expected_token: &str) -> Option<(String, Option<StatusSigna
             state: AgentState::Waiting,
             silent: true,
             authoritative: false,
+            inferred: false,
         }),
         // notfound reports an agent missing from PATH so the frontend can show installation guidance.
         "notfound" => Some(StatusSignal::AgentMissing),
@@ -879,6 +893,7 @@ mod tests {
                     state,
                     silent,
                     authoritative,
+                    ..
                 }) => {
                     assert_eq!(state, expected);
                     assert!(!silent);

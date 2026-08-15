@@ -99,6 +99,7 @@ pub struct PtyManager {
     /// markers. `AppCtx::emit` caches the latest `pty://status/*` payload by kind and attach replays it in
     /// `SNAPSHOT_KINDS` order.
     status_cache: Arc<Mutex<HashMap<String, HashMap<String, serde_json::Value>>>>,
+    input_revisions: Arc<Mutex<HashMap<String, u64>>>,
     /// Reservation set for sessions that passed the absence check but have not yet entered `sessions`.
     ///
     /// PTY creation separates the absence check from insertion, so concurrent clients could launch duplicate
@@ -136,24 +137,48 @@ impl PtyManager {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             status_cache: Arc::new(Mutex::new(HashMap::new())),
+            input_revisions: Arc::new(Mutex::new(HashMap::new())),
             spawning: Mutex::new(HashSet::new()),
         }
     }
 
     /// Caches the latest status signal for a session when `AppCtx::emit` sends it.
     pub fn cache_status(&self, sid: &str, payload: &serde_json::Value) {
+        if payload
+            .get("_replay")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+        {
+            return;
+        }
         let Some(kind) = payload.get("kind").and_then(serde_json::Value::as_str) else {
             return;
         };
         if !SNAPSHOT_KINDS.contains(&kind) {
             return;
         }
+        let mut cached_payload = payload.clone();
+        if kind == "state" {
+            let input_revision = self
+                .input_revisions
+                .lock()
+                .unwrap()
+                .get(sid)
+                .copied()
+                .unwrap_or(0);
+            if let Some(object) = cached_payload.as_object_mut() {
+                object.insert(
+                    "_inputRevision".to_string(),
+                    serde_json::Value::from(input_revision),
+                );
+            }
+        }
         self.status_cache
             .lock()
             .unwrap()
             .entry(sid.to_string())
             .or_default()
-            .insert(kind.to_string(), payload.clone());
+            .insert(kind.to_string(), cached_payload);
     }
 
     /// Returns a session's cached status snapshot in replay order.
@@ -165,6 +190,12 @@ impl PtyManager {
         SNAPSHOT_KINDS
             .iter()
             .filter_map(|k| kinds.get(*k).cloned())
+            .map(|mut payload| {
+                if let Some(object) = payload.as_object_mut() {
+                    object.remove("_inputRevision");
+                }
+                payload
+            })
             .collect()
     }
 
@@ -182,6 +213,27 @@ impl PtyManager {
                 .as_str()?
                 .to_string(),
         )
+    }
+
+    /// Returns whether the cached waiting state followed the latest PTY input and came from a lifecycle event.
+    pub fn has_current_turn_completion(&self, sid: &str) -> bool {
+        let input_revision = self
+            .input_revisions
+            .lock()
+            .unwrap()
+            .get(sid)
+            .copied()
+            .unwrap_or(0);
+        let cache = self.status_cache.lock().unwrap();
+        let Some(state) = cache.get(sid).and_then(|kinds| kinds.get("state")) else {
+            return false;
+        };
+        state.get("state").and_then(serde_json::Value::as_str) == Some("waiting")
+            && state.get("inferred").and_then(serde_json::Value::as_bool) != Some(true)
+            && state
+                .get("_inputRevision")
+                .and_then(serde_json::Value::as_u64)
+                == Some(input_revision)
     }
 
     /// Returns whether the manager still owns a PTY session.
@@ -259,6 +311,7 @@ impl PtyManager {
                         {
                             if let Some(obj) = payload.as_object_mut() {
                                 obj.insert("silent".to_string(), serde_json::Value::Bool(true));
+                                obj.insert("_replay".to_string(), serde_json::Value::Bool(true));
                             }
                         }
                         app.emit(&event, payload);
@@ -817,6 +870,7 @@ impl PtyManager {
         let sessions_for_read = Arc::clone(&self.sessions);
         // Clear cached state at session end so a reused ID cannot receive stale values.
         let status_cache_for_read = Arc::clone(&self.status_cache);
+        let input_revisions_for_read = Arc::clone(&self.input_revisions);
         // The reader shares output state for replay buffering, mode tracking, and fan-out.
         let stream_for_read = Arc::clone(&stream);
         let id_for_read = id.clone();
@@ -889,6 +943,10 @@ impl PtyManager {
             // natural exit requires this path to prevent backend handle leaks.
             sessions_for_read.lock().unwrap().remove(&id_for_read);
             status_cache_for_read.lock().unwrap().remove(&id_for_read);
+            input_revisions_for_read
+                .lock()
+                .unwrap()
+                .remove(&id_for_read);
             // Emit `pty://exit` for natural exit and `pty://killed` for intentional termination. Other attached
             // clients use the latter to close their views instead of leaving a frozen terminal.
             if !intentional_reader.load(Ordering::SeqCst) {
@@ -1177,7 +1235,11 @@ impl PtyManager {
             std::sync::mpsc::TrySendError::Disconnected(_) => {
                 format!("Session {id} is shutting down")
             }
-        })
+        })?;
+        let mut revisions = self.input_revisions.lock().unwrap();
+        let revision = revisions.entry(id.to_string()).or_default();
+        *revision = revision.saturating_add(1);
+        Ok(())
     }
 
     /// Resizes a PTY under a single-owner model; all other clients mirror that size.
@@ -1256,6 +1318,13 @@ impl PtyManager {
         process_cwd(pid)
     }
 
+    /// Shell PID of a live PTY, or None once it exited.
+    #[cfg(test)]
+    pub fn pid(&self, id: &str) -> Option<u32> {
+        let pid = self.sessions.lock().unwrap().get(id)?.pid;
+        (pid != 0).then_some(pid)
+    }
+
     /// Terminates and removes a session. Marks it intentional before EOF so the reader suppresses natural-exit events.
     pub fn kill(&self, id: &str) -> Result<(), String> {
         if let Some(mut session) = self.sessions.lock().unwrap().remove(id) {
@@ -1263,7 +1332,34 @@ impl PtyManager {
             let _ = session.killer.kill();
         }
         self.status_cache.lock().unwrap().remove(id);
+        self.input_revisions.lock().unwrap().remove(id);
         Ok(())
+    }
+
+    /// Kills the PTY and waits for its process tree to exit, returning false on timeout.
+    /// The agent that writes files is a descendant, so the tree is collected before the kill.
+    pub fn kill_and_wait(&self, id: &str, timeout: Duration) -> bool {
+        let mut pending = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(id)
+            .map(|session| session.pid)
+            .filter(|pid| *pid != 0)
+            .map(crate::procstat::subtree_pids)
+            .unwrap_or_default();
+        let _ = self.kill(id);
+        let deadline = Instant::now() + timeout;
+        loop {
+            pending = crate::procstat::running_pids(&pending);
+            if pending.is_empty() {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
     }
 
     /// Terminates all sessions during headless shutdown, marking each intentional before killing its child.
@@ -1274,6 +1370,7 @@ impl PtyManager {
             let _ = session.killer.kill();
         }
         self.status_cache.lock().unwrap().clear();
+        self.input_revisions.lock().unwrap().clear();
     }
 
     /// Detaches one output subscriber without killing the session. Spawn-or-attach is unified in `spawn`.
@@ -1570,6 +1667,7 @@ fn spawn_idle_heal(
                     state: AgentState::Waiting,
                     silent: true,
                     authoritative: true,
+                    inferred: true,
                 },
             );
         }
@@ -2006,6 +2104,21 @@ mod tests {
                 json!({"kind": "state", "state": "waiting"}),
             ]
         );
+        assert!(mgr.has_current_turn_completion("s1"));
+        mgr.input_revisions.lock().unwrap().insert("s1".to_string(), 1);
+        assert!(!mgr.has_current_turn_completion("s1"));
+        mgr.cache_status(
+            "s1",
+            &json!({"kind": "state", "state": "waiting", "_replay": true}),
+        );
+        assert!(!mgr.has_current_turn_completion("s1"));
+        mgr.cache_status("s1", &json!({"kind": "state", "state": "waiting"}));
+        assert!(mgr.has_current_turn_completion("s1"));
+        mgr.cache_status(
+            "s1",
+            &json!({"kind": "state", "state": "waiting", "inferred": true}),
+        );
+        assert!(!mgr.has_current_turn_completion("s1"));
 
         // Sessions remain isolated.
         assert!(mgr.status_snapshot("s2").is_empty());

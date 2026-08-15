@@ -386,7 +386,7 @@ pub fn known_models(kind: SessionKind) -> Option<&'static [&'static str]> {
 /// Effort values accepted by each agent's launch flags.
 pub fn known_efforts(kind: SessionKind) -> Option<&'static [&'static str]> {
     match kind {
-        SessionKind::Claude => Some(&["low", "medium", "high"]),
+        SessionKind::Claude => Some(&["low", "medium", "high", "xhigh", "max"]),
         SessionKind::Codex => Some(&["low", "medium", "high", "xhigh", "max"]),
         _ => None,
     }

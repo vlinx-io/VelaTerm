@@ -128,6 +128,9 @@ const ptBR: typeof en = {
   "settings.orchTimeout": "Tempo limite padrão (segundos)",
   "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
   "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
+  "settings.orchAutoApproveRetire": "Aprovar a retirada automaticamente",
+  "settings.orchAutoApproveRetireHint":
+    "Arquiva um worker estável sem o cartão de confirmação, incluindo uma limpeza de worktree verificada. Uma retirada que retoma uma limpeza não verificada sempre pergunta.",
   "settings.orchConfirmAboveHint":
     "O cartão de confirmação aparece quando um spawn elevaria o número de sessões descendentes ativas acima deste valor, mesmo com a confirmação de spawn desativada. Sessões descendentes ativas estão iniciando, trabalhando ou aguardando uma solicitação de permissão.",
   "settings.orchLimitsHint":
@@ -185,6 +188,24 @@ const ptBR: typeof en = {
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
+  "retire.title": "Retirar esta sessão?",
+  "retire.session": "Sessão",
+  "retire.actionArchive": "Arquivar a sessão. Nenhum worktree é apagado.",
+  "retire.actionCleanup":
+    "Apagar os worktrees abaixo e depois arquivar a sessão.",
+  "retire.descendants": (n: number) =>
+    `Inclui ${n} sessão${n === 1 ? "" : "es"} descendente${n === 1 ? "" : "s"}.`,
+  "retire.irreversible": "Isto não pode ser desfeito",
+  "retire.worktreeCount": (n: number) =>
+    `${n} worktree${n === 1 ? "" : "s"} e ${n === 1 ? "seu branch" : "seus branches"} serão apagados.`,
+  "retire.pathLabel": "Caminho",
+  "retire.branchLabel": "Branch",
+  "retire.branchUnknown": "desconhecido",
+  "retire.resumed": "O diretório já não existe; resta apenas o branch.",
+  "retire.keep": "Manter",
+  "retire.approve": "Retirar",
+  "retire.remaining": (n: number) => `mais ${n} pendente(s)`,
+  "retire.notifyTitle": "Retirada aguardando confirmação", // Retire awaiting confirmation
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "Ver alterações…",
@@ -414,6 +435,12 @@ const ptBR: typeof en = {
   "tree.killProcess": "Encerrar processo", // Kill Process
   "tree.archiveSession": "Arquivar sessão", // Archive Session
   "tree.archiveGroup": "Arquivar grupo", // Archive Group
+  "tree.archiveBlockedTitle": "Não é possível arquivar a sessão", // Cannot Archive Session
+  "tree.archiveBlockedBody": "O arquivamento foi recusado. Uma sessão arquivada sai do escopo de limpeza, então sua worktree e seu branch ficariam abandonados.", // Archiving was refused. An archived session leaves the worker cleanup scope, so its worktree and branch would be stranded.
+  "tree.archiveConfirmTitle": "Arquivar e apagar worktrees?", // Archive and delete worktrees?
+  "tree.archiveConfirmBody": (n: number) =>
+    `Arquivar apaga ${n} worktree(s) de worker e seus branches. Isso não pode ser desfeito. O trabalho já está no branch pai.`,
+  "tree.archiveConfirmAction": "Arquivar", // Archive
   // Temporary (draft) sessions
   "tree.scratchTag": "temp", // scratch
   "tree.persistSession": "Tornar sessão permanente…", // Make Permanent Session…
@@ -592,6 +619,7 @@ const ptBR: typeof en = {
   "archive.empty2":
     "Clique com o botão direito em uma sessão na barra lateral e escolha \"Arquivar sessão\" para guardá-la aqui.", // Right-click a session in the sidebar…
   "archive.restore": "Restaurar como sessão normal", // Restore to normal session
+  "archive.retiredNote": "Um worker aposentado não pode retomar de forma exata, porque a aposentadoria já apagou sua worktree e seu branch.", // A retired worker cannot resume exactly, because retire already deleted its worktree and branch.
   "archive.export": "Exportar contexto completo como Markdown", // Export full context as Markdown
   "archive.deleteForever": "Excluir permanentemente (com a gravação)", // Delete permanently (with recording)
   "archive.pickOne": "Selecione uma sessão arquivada à esquerda para ver a transcrição", // Select an archived session on the left…

@@ -129,6 +129,9 @@ const de: typeof en = {
   "settings.orchTimeout": "Standard-Timeout (Sekunden)",
   "settings.orchAutoApprove": "Auto-approve /orch spawns", // Auto-approve /orch spawns
   "settings.orchAutoApproveHint": "Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.", // Launch /orch child sessions without the confirmation card. The confirmation threshold still requires review.
+  "settings.orchAutoApproveRetire": "Stilllegen automatisch genehmigen",
+  "settings.orchAutoApproveRetireHint":
+    "Einen abgeschlossenen Worker ohne Bestätigungskarte archivieren, einschließlich einer verifizierten Worktree-Bereinigung. Ein Stilllegen, das eine unverifizierte Bereinigung fortsetzt, fragt immer nach.",
   "settings.orchConfirmAboveHint":
     "Die Bestätigungskarte erscheint, wenn ein Spawn die Zahl aktiver Nachkommensitzungen über diesen Wert erhöhen würde, auch wenn Spawn-Bestätigungen deaktiviert sind. Aktive Nachkommensitzungen starten, arbeiten oder warten auf eine Berechtigungsabfrage.",
   "settings.orchLimitsHint":
@@ -186,6 +189,24 @@ const de: typeof en = {
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
+  "retire.title": "Diese Sitzung stilllegen?",
+  "retire.session": "Sitzung",
+  "retire.actionArchive": "Die Sitzung archivieren. Kein Worktree wird gelöscht.",
+  "retire.actionCleanup":
+    "Die unten aufgeführten Worktrees löschen, dann die Sitzung archivieren.",
+  "retire.descendants": (n: number) =>
+    `Enthält ${n} Nachkommensitzung${n === 1 ? "" : "en"}.`,
+  "retire.irreversible": "Das kann nicht rückgängig gemacht werden",
+  "retire.worktreeCount": (n: number) =>
+    `${n} Worktree${n === 1 ? "" : "s"} und ${n === 1 ? "dessen Branch" : "deren Branches"} werden gelöscht.`,
+  "retire.pathLabel": "Pfad",
+  "retire.branchLabel": "Branch",
+  "retire.branchUnknown": "unbekannt",
+  "retire.resumed": "Verzeichnis fehlt bereits; nur der Branch bleibt.",
+  "retire.keep": "Behalten",
+  "retire.approve": "Stilllegen",
+  "retire.remaining": (n: number) => `${n} weitere ausstehend`,
+  "retire.notifyTitle": "Stilllegung wartet auf Bestätigung", // Retire awaiting confirmation
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "Änderungen anzeigen…",
@@ -415,6 +436,12 @@ const de: typeof en = {
   "tree.killProcess": "Prozess beenden", // Kill Process
   "tree.archiveSession": "Sitzung archivieren", // Archive Session
   "tree.archiveGroup": "Gruppe archivieren", // Archive Group
+  "tree.archiveBlockedTitle": "Sitzung kann nicht archiviert werden", // Cannot Archive Session
+  "tree.archiveBlockedBody": "Das Archivieren wurde abgelehnt. Eine archivierte Sitzung verlässt den Bereinigungsbereich, daher blieben ihr Worktree und ihr Branch zurück.", // Archiving was refused. An archived session leaves the worker cleanup scope, so its worktree and branch would be stranded.
+  "tree.archiveConfirmTitle": "Archivieren und Worktrees löschen?", // Archive and delete worktrees?
+  "tree.archiveConfirmBody": (n: number) =>
+    `Das Archivieren löscht ${n} Worker-Worktree(s) und die zugehörigen Branches. Das lässt sich nicht rückgängig machen. Die Arbeit liegt bereits im übergeordneten Branch.`,
+  "tree.archiveConfirmAction": "Archivieren", // Archive
   // Temporary (draft) sessions
   "tree.scratchTag": "temp", // scratch
   "tree.persistSession": "In dauerhafte Sitzung umwandeln…", // Make Permanent Session…
@@ -593,6 +620,7 @@ const de: typeof en = {
   "archive.empty2":
     "Rechtsklick auf eine Sitzung in der Seitenleiste und „Sitzung archivieren“ wählen, um sie hier abzulegen.", // Right-click a session in the sidebar…
   "archive.restore": "Als normale Sitzung wiederherstellen", // Restore to normal session
+  "archive.retiredNote": "Ein stillgelegter Worker kann nicht exakt fortgesetzt werden, denn das Stilllegen hat seinen Worktree und seinen Branch bereits gelöscht.", // A retired worker cannot resume exactly, because retire already deleted its worktree and branch.
   "archive.export": "Vollständigen Kontext als Markdown exportieren", // Export full context as Markdown
   "archive.deleteForever": "Endgültig löschen (samt Aufzeichnung)", // Delete permanently (with recording)
   "archive.pickOne": "Links eine archivierte Sitzung wählen, um das Transkript zu sehen", // Select an archived session on the left…
