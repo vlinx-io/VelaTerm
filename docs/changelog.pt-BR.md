@@ -1,4 +1,4 @@
-## Não lançado
+## v0.1.101 — 2026-08-15
 
 ### Acesso remoto
 

@@ -1,13 +1,13 @@
 # Changelog
 
-> Created: 2026-07-09 16:10 · Updated: 2026-08-14
+> Created: 2026-07-09 16:10 · Updated: 2026-08-15
 
 All notable changes to VelaTerm are documented here, newest first.
 v0.1.91 is the first public release; earlier version numbers were internal iterations and are not covered.
 
 ---
 
-## Unreleased
+## v0.1.101 — 2026-08-15
 
 ### Remote access
 
