@@ -946,7 +946,10 @@ export function OrchestrationPanel() {
           onCommit={(v) => setLimits({ defaultTimeoutSecs: v })}
         />
       </div>
-      <Field label={t("settings.orchAutoApprove")}>
+      <Field
+        label={t("settings.orchAutoApprove")}
+        className="orch-limit-row orch-limit-row-wide"
+      >
         <Seg<"on" | "off">
           value={limits.autoApprove ? "on" : "off"}
           options={[
