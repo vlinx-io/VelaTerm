@@ -116,6 +116,7 @@ const ko: typeof en = {
   "settings.orchPermissionMode": "권한 모드",
   "settings.orchPermissionDefault": "기본값",
   "settings.orchPermissionSkip": "확인 건너뛰기",
+  "settings.orchPermissionInherit": "상위 세션에서 상속",
   "settings.orchPermissionSkipWarning":
     "이 작업자는 worktree 안에서 확인 없이 실행됩니다.",
   "settings.orchLimitsTitle": "제한",

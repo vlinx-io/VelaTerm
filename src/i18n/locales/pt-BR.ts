@@ -117,6 +117,7 @@ const ptBR: typeof en = {
   "settings.orchPermissionMode": "Modo de permissão",
   "settings.orchPermissionDefault": "Padrão",
   "settings.orchPermissionSkip": "Ignorar confirmações",
+  "settings.orchPermissionInherit": "Herdar do pai",
   "settings.orchPermissionSkipWarning":
     "Este worker é executado sem confirmação dentro de seu worktree.",
   "settings.orchLimitsTitle": "Limites",

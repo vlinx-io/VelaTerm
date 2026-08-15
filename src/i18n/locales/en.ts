@@ -115,6 +115,7 @@ const en = {
   "settings.orchPermissionMode": "Permission mode",
   "settings.orchPermissionDefault": "Default",
   "settings.orchPermissionSkip": "Skip confirmations",
+  "settings.orchPermissionInherit": "Inherit from parent",
   "settings.orchPermissionSkipWarning":
     "This worker runs without confirmation inside its worktree.",
   "settings.orchLimitsTitle": "Limits",

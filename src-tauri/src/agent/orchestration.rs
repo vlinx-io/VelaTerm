@@ -62,8 +62,11 @@ impl Profile {
             model: text("model"),
             effort: text("effort"),
             worktree: obj.get("worktree").and_then(Value::as_bool),
-            permission_mode: text("permissionMode")
-                .filter(|mode| matches!(mode.as_str(), "default" | "skip")),
+            permission_mode: Some(
+                text("permissionMode")
+                    .filter(|mode| matches!(mode.as_str(), "default" | "skip" | "inherit"))
+                    .unwrap_or_else(|| "inherit".to_string()),
+            ),
         })
     }
 }
@@ -186,7 +189,7 @@ fn default_profiles() -> HashMap<String, Profile> {
         model: Some(model.to_string()),
         effort: Some(effort.to_string()),
         worktree: Some(true),
-        permission_mode: Some("default".to_string()),
+        permission_mode: Some("inherit".to_string()),
     };
     HashMap::from([
         (
@@ -396,7 +399,7 @@ mod tests {
                 model: Some("fable".into()),
                 effort: Some("high".into()),
                 worktree: Some(true),
-                permission_mode: Some("default".into()),
+                permission_mode: Some("inherit".into()),
             }
         );
         assert_eq!(default.profiles["frontend"].model.as_deref(), Some("opus"));
@@ -411,7 +414,7 @@ mod tests {
                 model: Some("gpt-5.6-luna".into()),
                 effort: Some("xhigh".into()),
                 worktree: Some(true),
-                permission_mode: Some("default".into()),
+                permission_mode: Some("inherit".into()),
             }
         );
     }
@@ -455,6 +458,7 @@ mod tests {
             Profile {
                 description: Some("Use for quick fixes.".into()),
                 agent: Some("claude".into()),
+                permission_mode: Some("inherit".into()),
                 ..Default::default()
             }
         );
@@ -463,13 +467,20 @@ mod tests {
             Profile {
                 model: Some("fable".into()),
                 worktree: Some(false),
+                permission_mode: Some("inherit".into()),
                 ..Default::default()
             }
         );
         assert_eq!(c.limits, Limits::default());
         let c = parse_config(Some(r#"{"orchestrationProfiles":{"bad":7,"ok":{}}}"#));
         assert_eq!(c.profile_names(), vec!["ok"]);
-        assert_eq!(c.profiles["ok"], Profile::default());
+        assert_eq!(
+            c.profiles["ok"],
+            Profile {
+                permission_mode: Some("inherit".into()),
+                ..Default::default()
+            }
+        );
     }
 
     #[test]
@@ -568,6 +579,22 @@ mod tests {
     }
 
     #[test]
+    fn inherit_permission_mode_survives_profile_resolution() {
+        let config = parse_config(Some(
+            r#"{"orchestrationProfiles":{"child":{"permissionMode":"inherit"}}}"#,
+        ));
+        let profiled = resolve_spawn(
+            config.profiles.get("child"),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert_eq!(profiled.permission_mode.as_deref(), Some("inherit"));
+    }
+
+    #[test]
     fn limits_reject_at_the_boundary_in_order() {
         let limits = Limits::default();
         assert_eq!(check_limits(&limits, 1, 9, 3), None);
@@ -629,7 +656,7 @@ mod tests {
         );
         assert_eq!(profiles["tests"]["agent"], "codex");
         assert_eq!(profiles["tests"]["worktree"], true);
-        assert_eq!(profiles["tests"]["permissionMode"], "default");
+        assert_eq!(profiles["tests"]["permissionMode"], "inherit");
         let partial = Profile {
             description: Some("Use for review.".into()),
             agent: Some("claude".into()),

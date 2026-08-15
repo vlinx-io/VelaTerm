@@ -43,7 +43,8 @@ pub struct SpawnRequest {
     /// Raw launch arguments; when omitted the frontend applies the per-agent defaults.
     #[serde(default)]
     pub agent_args: Option<String>,
-    /// Permission mode for the child. An omitted value inherits the parent's mode.
+    /// Permission mode for the child. `inherit` and an omitted value use the parent's abstract level,
+    /// then the child agent's configured or native default when the parent has no stored level.
     #[serde(default)]
     pub permission_mode: Option<String>,
     /// Whether `/orch` may launch the child without the confirmation card.

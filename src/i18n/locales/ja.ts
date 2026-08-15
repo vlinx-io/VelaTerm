@@ -116,6 +116,7 @@ const ja: typeof en = {
   "settings.orchPermissionMode": "権限モード",
   "settings.orchPermissionDefault": "デフォルト",
   "settings.orchPermissionSkip": "確認をスキップ",
+  "settings.orchPermissionInherit": "親から継承",
   "settings.orchPermissionSkipWarning":
     "このワーカーは worktree 内で確認なしに実行されます.",
   "settings.orchLimitsTitle": "上限",

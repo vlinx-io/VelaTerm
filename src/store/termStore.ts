@@ -1775,15 +1775,18 @@ export const useTermStore = create<TermStore>((set, get) => ({
     }
 
     // Explicit request values win; otherwise apply per-agent defaults, matching manual creation.
-    // Permission mode additionally inherits from the parent so a lead running with skipped
-    // confirmations gets workers that do the same instead of stalling on every approval.
+    // `inherit` carries the parent's abstract mode across agent types, then uses the child agent default.
     const defaults = state.agentDefaults[kind];
     const agentArgs = req.agentArgs?.trim() || defaults?.args || null;
+    const requestedPermissionMode = req.permissionMode?.trim();
+    const parentPermissionMode =
+      parent.permissionMode && parent.permissionMode !== "inherit"
+        ? parent.permissionMode
+        : null;
     const permissionMode =
-      req.permissionMode?.trim() ||
-      parent.permissionMode ||
-      defaults?.permissionMode ||
-      null;
+      requestedPermissionMode && requestedPermissionMode !== "inherit"
+        ? requestedPermissionMode
+        : parentPermissionMode || defaults?.permissionMode || null;
 
     let created: Session | null = null;
     try {
@@ -3446,7 +3449,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
         next[key] = {
           ...current,
           ...patch,
-          permissionMode: patch.permissionMode ?? current?.permissionMode ?? "default",
+          permissionMode: patch.permissionMode ?? current?.permissionMode ?? "inherit",
         };
       }
       return { orchestrationProfiles: next };

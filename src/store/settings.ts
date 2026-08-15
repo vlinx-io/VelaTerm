@@ -56,7 +56,7 @@ export interface OrchestrationProfile {
   model?: string;
   effort?: string;
   worktree?: boolean;
-  permissionMode: "default" | "skip";
+  permissionMode: "default" | "skip" | "inherit";
 }
 
 /** Backend-enforced orchestration limits. */
@@ -165,7 +165,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
       model: "fable",
       effort: "high",
       worktree: true,
-      permissionMode: "default",
+      permissionMode: "inherit",
     },
     frontend: {
       description:
@@ -174,7 +174,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
       model: "opus",
       effort: "high",
       worktree: true,
-      permissionMode: "default",
+      permissionMode: "inherit",
     },
     "quick-edits": {
       description:
@@ -183,7 +183,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
       model: "gpt-5.6-luna",
       effort: "xhigh",
       worktree: true,
-      permissionMode: "default",
+      permissionMode: "inherit",
     },
     tests: {
       description: "Use for focused unit, integration, regression, and end-to-end tests.",
@@ -191,7 +191,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
       model: "gpt-5.6-luna",
       effort: "xhigh",
       worktree: true,
-      permissionMode: "default",
+      permissionMode: "inherit",
     },
   },
   orchestration: {
@@ -235,7 +235,7 @@ function mergeOrchestration(stored: Partial<OrchestrationLimits> | undefined): O
   };
 }
 
-/** Normalize stored profiles and migrate older entries to the default permission mode. */
+/** Normalize stored profiles and migrate missing or invalid permission modes to inherit. */
 function mergeOrchestrationProfiles(stored: unknown): Record<string, OrchestrationProfile> {
   if (!stored || typeof stored !== "object" || Array.isArray(stored)) {
     return { ...SETTINGS_DEFAULTS.orchestrationProfiles };
@@ -249,7 +249,10 @@ function mergeOrchestrationProfiles(stored: unknown): Record<string, Orchestrati
           name,
           {
             ...profile,
-            permissionMode: profile.permissionMode === "skip" ? "skip" : "default",
+            permissionMode:
+              profile.permissionMode === "skip" || profile.permissionMode === "inherit"
+                ? profile.permissionMode
+                : "inherit",
           },
         ],
       ];

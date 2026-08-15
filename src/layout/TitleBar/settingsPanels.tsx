@@ -880,13 +880,17 @@ export function OrchestrationPanel() {
               <OrchProfileField label={t("settings.orchPermissionMode")}>
                 <ValueSelect
                   width={200}
-                  value={cfg.permissionMode ?? "default"}
+                  value={cfg.permissionMode ?? "inherit"}
                   options={[
+                    { value: "inherit", label: t("settings.orchPermissionInherit") },
                     { value: "default", label: t("settings.orchPermissionDefault") },
                     { value: "skip", label: t("settings.orchPermissionSkip") },
                   ]}
                   onChange={(v) =>
-                    setProfile(active, { permissionMode: v === "skip" ? "skip" : "default" })
+                    setProfile(active, {
+                      permissionMode:
+                        v === "skip" || v === "inherit" ? v : "default",
+                    })
                   }
                   ariaLabel={t("settings.orchPermissionMode")}
                 />

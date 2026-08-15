@@ -75,6 +75,9 @@ from Settings > Orchestration. A lead agent reads each profile description befor
 `--profile database` then launches a child with that profile's agent, model, effort, and worktree
 choice; an explicit flag still overrides the profile.
 
+`diff` returns the branch patch, the diff summary, and the commits the branch adds over its base as
+`commits`, `commitCount`, and `commitsTruncated`.
+
 `cleanup` lists the worktrees of children that have finished and hold no uncommitted changes;
 `cleanup --confirm` removes only verified landed worktrees and their disposable branches. A running
 child, an uncommitted worktree, or an unverified landing is blocked.
@@ -93,7 +96,9 @@ landing retries and cleanup safe after a crash. Nested workers use the same boun
 
 Settings ▸ Orchestration is one place for everything a lead agent needs:
 
-- **Profiles**: named bundles of description, agent, model, effort, worktree, and permission mode. Four ship by
+- **Profiles**: named bundles of description, agent, model, effort, worktree, and permission mode. `inherit` maps
+  the parent's abstract permission level to the child agent's closest equivalent. New and built-in profiles use
+  `inherit`. Four profiles ship by
   default: `database`, `frontend`, `quick-edits`, and `tests`. Add, edit, and delete them freely.
 - **Limits**, enforced by the app on every spawn rather than by prompt text: `maxChildren` live
   children per lead, `maxParallel` children working at once, `maxDepth` for child-of-child nesting,

@@ -75,7 +75,7 @@ The Orchestration category controls worker routing for `vagent` and `/orch`.
 
 ### Worker profiles
 
-Each profile contains a description, agent type, model, reasoning effort, worktree choice, and permission mode. The default profiles are `database`, `frontend`, `quick-edits`, and `tests`. A lead agent reads the descriptions with `vagent config`, then uses `vagent spawn --profile <name>` to route work. Explicit spawn flags override profile values.
+Each profile contains a description, agent type, model, reasoning effort, worktree choice, and permission mode. Permission mode can use the child default, skip confirmations, or inherit the parent's abstract level through the child agent's equivalent. New and built-in profiles use `inherit`. The default profiles are `database`, `frontend`, `quick-edits`, and `tests`. A lead agent reads the descriptions with `vagent config`, then uses `vagent spawn --profile <name>` to route work. Explicit spawn flags override profile values.
 
 ### Limits
 

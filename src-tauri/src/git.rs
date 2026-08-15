@@ -1345,6 +1345,54 @@ pub fn branch_diff_patch(wt_path: &str, base: &str, branch: &str) -> Result<Stri
     .ok_or_else(|| format!("Cannot read diff for {range}"))
 }
 
+/// One commit that a worktree branch adds on top of its baseline.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchCommit {
+    pub sha: String,
+    pub short_sha: String,
+    pub subject: String,
+}
+
+/// List the commits a branch adds on top of a baseline ref, newest first. The list stops at `limit`
+/// entries; the returned count reports every commit in the range.
+pub fn branch_commits(
+    wt_path: &str,
+    base: &str,
+    branch: &str,
+    limit: usize,
+) -> Result<(Vec<BranchCommit>, usize), String> {
+    if wt_path.trim().is_empty() || base.trim().is_empty() || branch.trim().is_empty() {
+        return Err("Missing worktree path, base ref, or branch".into());
+    }
+    let range = format!("{base}..{branch}");
+    let out = run_git(
+        wt_path,
+        &["log", "--no-color", "--format=%H%x1f%h%x1f%s", &range],
+    )
+    .ok_or_else(|| format!("Cannot read commits for {range}"))?;
+    let mut commits = Vec::new();
+    let mut total = 0;
+    for line in out.lines().filter(|l| !l.trim().is_empty()) {
+        total += 1;
+        if commits.len() >= limit {
+            continue;
+        }
+        let mut parts = line.split('\u{1f}');
+        let (Some(sha), Some(short_sha), Some(subject)) =
+            (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        commits.push(BranchCommit {
+            sha: sha.to_string(),
+            short_sha: short_sha.to_string(),
+            subject: subject.to_string(),
+        });
+    }
+    Ok((commits, total))
+}
+
 /// Run landing preflight; return Err for non-Git worktrees or unresolved branches.
 pub fn land_targets(base_ref: Option<&str>, wt_path: &str) -> Result<LandTargets, String> {
     if wt_path.trim().is_empty() {

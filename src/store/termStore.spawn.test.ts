@@ -153,6 +153,40 @@ describe("executeSpawn launch configuration", () => {
     );
   });
 
+  it("maps inherit from a Claude parent to a different child agent", async () => {
+    useTermStore.setState({
+      sessions: [{ ...parent, permissionMode: "skip" }],
+      agentDefaults: { codex: { permissionMode: "default" } },
+    });
+    await useTermStore.getState().executeSpawn({
+      parentSessionId: "parent-1",
+      prompt: "task",
+      kind: "codex",
+      worktree: false,
+      permissionMode: "inherit",
+    });
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "codex", permissionMode: "skip" }),
+    );
+  });
+
+  it("maps inherit from a Codex parent to a Claude child", async () => {
+    useTermStore.setState({
+      sessions: [{ ...parent, kind: "codex", permissionMode: "skip" }],
+      agentDefaults: { claude: { permissionMode: "default" } },
+    });
+    await useTermStore.getState().executeSpawn({
+      parentSessionId: "parent-1",
+      prompt: "task",
+      kind: "claude",
+      worktree: false,
+      permissionMode: "inherit",
+    });
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "claude", permissionMode: "skip" }),
+    );
+  });
+
   it("releases a parked vagent spawn caller as soon as the card is queued", async () => {
     useTermStore.setState({ spawnConfirm: true, notifyEnabled: false });
     await useTermStore.getState().handleSpawnRequest({

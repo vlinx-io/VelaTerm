@@ -117,6 +117,7 @@ const vi: typeof en = {
   "settings.orchPermissionMode": "Chế độ quyền",
   "settings.orchPermissionDefault": "Mặc định",
   "settings.orchPermissionSkip": "Bỏ qua xác nhận",
+  "settings.orchPermissionInherit": "Kế thừa từ phiên cha",
   "settings.orchPermissionSkipWarning":
     "Worker này chạy mà không cần xác nhận trong worktree của nó.",
   "settings.orchLimitsTitle": "Giới hạn",

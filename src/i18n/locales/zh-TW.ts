@@ -115,6 +115,7 @@ const zhTW: typeof en = {
   "settings.orchPermissionMode": "權限模式",
   "settings.orchPermissionDefault": "預設",
   "settings.orchPermissionSkip": "略過確認",
+  "settings.orchPermissionInherit": "繼承父工作階段",
   "settings.orchPermissionSkipWarning":
     "此工作程序在自己的 worktree 中執行時不會要求確認.",
   "settings.orchLimitsTitle": "限制",

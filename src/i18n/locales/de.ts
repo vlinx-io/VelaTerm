@@ -118,6 +118,7 @@ const de: typeof en = {
   "settings.orchPermissionMode": "Berechtigungsmodus",
   "settings.orchPermissionDefault": "Standard",
   "settings.orchPermissionSkip": "Bestätigungen überspringen",
+  "settings.orchPermissionInherit": "Vom Elternteil übernehmen",
   "settings.orchPermissionSkipWarning":
     "Dieser Worker wird in seinem Worktree ohne Bestätigung ausgeführt.",
   "settings.orchLimitsTitle": "Limits",

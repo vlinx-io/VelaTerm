@@ -117,6 +117,7 @@ const es: typeof en = {
   "settings.orchPermissionMode": "Modo de permisos",
   "settings.orchPermissionDefault": "Predeterminado",
   "settings.orchPermissionSkip": "Omitir confirmaciones",
+  "settings.orchPermissionInherit": "Heredar del padre",
   "settings.orchPermissionSkipWarning":
     "Este trabajador se ejecuta sin confirmación dentro de su worktree.",
   "settings.orchLimitsTitle": "Límites",

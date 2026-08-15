@@ -32,7 +32,7 @@ descendants.
 vagent config                            # profiles, limits, and your current child counts
 vagent spawn --profile <p> --name <n> "<self-contained task>"
 vagent spawn --agent <kind> --model <m> --effort <e> --name <n> [--worktree] \
-             [--permission-mode default|skip] "<task>"
+             [--permission-mode default|skip|inherit] "<task>"
 vagent spawn-status <requestId>          # collect a spawn that answered {"pending":true}
 vagent list                              # children with {id,name,kind,model,effort,state}
 vagent status <id|name>                  # one child's row
@@ -41,7 +41,7 @@ vagent read <id|name> [--full]           # last assistant message (or whole conv
 vagent prompt <id|name> "<follow-up>"    # sends into the child's conversation
 vagent cancel <id|name>                  # interrupts the current turn; session stays alive
 vagent cancel --all                      # interrupts every running descendant
-vagent diff <id|name>                    # worktree branch diff against its recorded base
+vagent diff <id|name>                    # branch diff and commit list against its recorded base
 vagent land <id|name> --message "<conventional-subject>"  # squash into the parent
 vagent cleanup [--confirm]               # preview or remove verified worktrees and branches
 ```
@@ -81,6 +81,13 @@ Known behavior:
   immediate `status`.
 - `read` supports Claude, Codex, and Grok children. For other kinds, ask the worker to write its
   summary to a file and read that.
+- `diff` also returns `commits`, `commitCount`, and `commitsTruncated` for the child branch. Use the
+  commit list to review what the child did before you land it.
+- `merge` squashes the child branch into one commit and cherry-picks that commit onto the base
+  branch. The base branch gains one commit for each child and no merge commit. `--message` supplies
+  the squashed commit message and is required when the branch holds more than one commit. A message
+  that names the child branch is refused. A rewritten branch keeps its previous tip under
+  `refs/vlx/presquash/<branch>`, returned as `backupRef`.
 
 Never poll with a shell loop (`until ...; do sleep N; done`) or a background job. `vagent wait`
 already blocks, and its `blocked` array carries the one case a loop was covering.
@@ -126,9 +133,12 @@ not exist, so the first build in a worker is slow. Untracked files matching the 
 Tell each worker to validate only what it changed, and run the full suites yourself after
 integration.
 
-A fresh worktree also has no permission configuration. Pass `--permission-mode` on every worktree
-spawn instead of relying on inheritance: an unset mode on you is inherited as an unset mode on the
-worker, and the worker then stalls on approvals in a pane nobody is watching.
+A fresh worktree also has no session-local permission configuration. Use a profile permission mode or
+pass `--permission-mode` on every worktree spawn. `inherit` maps the lead's abstract permission level
+to the child agent's equivalent. It uses the child agent's configured or native default when the lead
+has no stored level. Never select `skip` unless the user selected it in the profile or requested it.
+
+## Land one commit for each child
 
 ## Cross-review critical work
 
@@ -165,6 +175,10 @@ cannot discover, the definition of done, and the path to the plan document. Do n
    this one: include the goal, exact file paths, constraints it cannot discover, and the definition
    of done. Point at documents by path instead of pasting them. Instruct code workers to run the
    tests for what they changed and finish with a short summary, naming their branch and commit.
+   A worker may make several commits on its own branch, but it must leave nothing uncommitted.
+   Tell each worker to keep its branch name, its session name, and the orchestration run out of every
+   commit message. Each work item lands on the base branch as exactly one commit. Ask the user before
+   you land any work item as more than one commit.
 5. **Spawn now, read later.** Start the independent items before you continue your own survey. Then
    do your remaining reading while they work.
 6. **Isolate file editors.** Use `--worktree` for any item that edits files; never let two workers

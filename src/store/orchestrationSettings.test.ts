@@ -100,7 +100,7 @@ describe("orchestration settings persistence", () => {
       model: "fable",
       effort: "high",
       worktree: true,
-      permissionMode: "default",
+      permissionMode: "inherit",
     });
     expect(loaded.orchestrationProfiles.frontend.description).toBe(
       "Use for UI components, routes, styling, responsive behavior, and browser interactions.",
@@ -116,11 +116,11 @@ describe("orchestration settings persistence", () => {
       model: "gpt-5.6-luna",
       effort: "xhigh",
       worktree: true,
-      permissionMode: "default",
+      permissionMode: "inherit",
     });
     expect(
       Object.values(loaded.orchestrationProfiles).every(
-        (profile) => profile.permissionMode === "default",
+        (profile) => profile.permissionMode === "inherit",
       ),
     ).toBe(true);
   });
@@ -147,7 +147,7 @@ describe("orchestration settings persistence", () => {
     expect(Object.keys(loadSettings().orchestrationProfiles)).toHaveLength(4);
   });
 
-  it("normalizes missing and invalid profile permission modes to default", () => {
+  it("preserves inherit and normalizes missing and invalid profile permission modes", () => {
     localStorage.setItem(
       SETTINGS_KEY,
       JSON.stringify({
@@ -155,14 +155,16 @@ describe("orchestration settings persistence", () => {
           missing: { agent: "claude" },
           invalid: { agent: "codex", permissionMode: "yolo" },
           skipped: { agent: "codex", permissionMode: "skip" },
+          inherited: { agent: "claude", permissionMode: "inherit" },
         },
       }),
     );
 
     expect(loadSettings().orchestrationProfiles).toEqual({
-      missing: { agent: "claude", permissionMode: "default" },
-      invalid: { agent: "codex", permissionMode: "default" },
+      missing: { agent: "claude", permissionMode: "inherit" },
+      invalid: { agent: "codex", permissionMode: "inherit" },
       skipped: { agent: "codex", permissionMode: "skip" },
+      inherited: { agent: "claude", permissionMode: "inherit" },
     });
   });
 });
@@ -200,7 +202,7 @@ describe("orchestration store setters", () => {
     useTermStore.getState().setOrchestrationProfile("docs", { agent: "codex" });
     expect(useTermStore.getState().orchestrationProfiles.docs).toEqual({
       agent: "codex",
-      permissionMode: "default",
+      permissionMode: "inherit",
     });
 
     useTermStore.getState().setOrchestrationProfile("database", null);

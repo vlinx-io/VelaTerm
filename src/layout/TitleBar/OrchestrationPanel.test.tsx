@@ -70,6 +70,21 @@ describe("OrchestrationPanel launch values", () => {
     });
   });
 
+  it("offers the parent permission mode for cross-agent workers", () => {
+    state.orchestrationProfiles = {
+      critical: { agent: "codex", permissionMode: "default" },
+    };
+    render(<OrchestrationPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: "settings.orchPermissionMode" }));
+    const inheritOptions = screen.getAllByText("settings.orchPermissionInherit");
+    fireEvent.click(inheritOptions[inheritOptions.length - 1]);
+
+    expect(state.setOrchestrationProfile).toHaveBeenCalledWith("critical", {
+      permissionMode: "inherit",
+    });
+  });
+
   it("warns when the selected profile skips confirmations", () => {
     state.orchestrationProfiles = {
       critical: { agent: "claude", permissionMode: "skip" },

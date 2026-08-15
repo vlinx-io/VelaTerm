@@ -11,7 +11,7 @@ const ENV_SID: &str = "VLX_SESSION_ID";
 const ENV_TOKEN: &str = "VLX_TOKEN";
 
 const USAGE: &str = "usage:
-  vagent spawn  [--profile <p>] [--agent <kind>] [--model <m>] [--effort <e>] [--name <n>] [--agent-args \"<raw>\"] [--permission-mode default|skip] [--worktree|--no-worktree] [--allow-unknown-launch-values] [--timeout <secs>] <task...>
+  vagent spawn  [--profile <p>] [--agent <kind>] [--model <m>] [--effort <e>] [--name <n>] [--agent-args \"<raw>\"] [--permission-mode default|skip|inherit] [--worktree|--no-worktree] [--allow-unknown-launch-values] [--timeout <secs>] <task...>
   vagent spawn-status <requestId>
   vagent list
   vagent config
@@ -53,11 +53,10 @@ Unknown model and effort values are advisory warnings on the confirmation card. 
 is authoritative, so newer values remain launchable. Use --allow-unknown-launch-values to suppress
 the warning when the value is already verified.
 
---permission-mode sets the child's approval behavior: default keeps the agent's
-own confirmations, skip passes its bypass flag. Without the flag the child
-inherits the parent's mode, which is nothing when the parent has none. Set it
-explicitly for a worker in its own worktree; otherwise the worker stalls on
-approvals with nobody watching its pane.
+--permission-mode sets the child's approval behavior. default keeps the child
+agent's confirmations. skip passes the child agent's bypass equivalent. inherit
+maps the parent's abstract level to the child agent's equivalent, then uses the
+child agent default when the parent has no stored level.
 
 cleanup lists finished child worktrees with a verified landing record.
 --confirm removes each verified worktree and its disposable branch. A running

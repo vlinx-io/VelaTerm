@@ -128,6 +128,7 @@ const ru: typeof en = {
   "settings.orchPermissionMode": "Режим разрешений",
   "settings.orchPermissionDefault": "По умолчанию",
   "settings.orchPermissionSkip": "Пропускать подтверждения",
+  "settings.orchPermissionInherit": "Наследовать от родителя",
   "settings.orchPermissionSkipWarning":
     "Этот worker запускается без подтверждения внутри своего worktree.",
   "settings.orchLimitsTitle": "Ограничения",

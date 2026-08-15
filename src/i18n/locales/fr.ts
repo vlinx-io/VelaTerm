@@ -118,6 +118,7 @@ const fr: typeof en = {
   "settings.orchPermissionMode": "Mode d'autorisation",
   "settings.orchPermissionDefault": "Par défaut",
   "settings.orchPermissionSkip": "Ignorer les confirmations",
+  "settings.orchPermissionInherit": "Hériter du parent",
   "settings.orchPermissionSkipWarning":
     "Ce worker s'exécute sans confirmation dans son worktree.",
   "settings.orchLimitsTitle": "Limites",

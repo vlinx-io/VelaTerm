@@ -55,6 +55,7 @@ static SPAWN_OUTCOMES: LazyLock<Mutex<HashMap<String, StoredOutcome>>> =
 const OUTCOME_TTL: Duration = Duration::from_secs(3600);
 const OUTCOME_CAP: usize = 128;
 const DIFF_PATCH_MAX_BYTES: usize = 256 * 1024;
+const DIFF_COMMIT_MAX: usize = 50;
 
 /// Default answer timeout for `spawn`; a not-started child holds a parallel slot for this same window.
 const SPAWN_DEFAULT_TIMEOUT_SECS: i64 = 120;
@@ -536,7 +537,7 @@ fn op_spawn_status(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
 }
 
 /// Permission modes accepted for child sessions.
-const PERMISSION_MODES: [&str; 2] = ["default", "skip"];
+const PERMISSION_MODES: [&str; 3] = ["default", "skip", "inherit"];
 
 /// Resolve the agent kind used for launch-value validation.
 fn effective_kind(app: &AppCtx, parent: &str, requested: Option<&str>) -> SessionKind {
@@ -737,6 +738,10 @@ fn op_diff(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
         Err(error) => return err(500, &error),
     };
     let (patch, truncated) = cap_patch(patch);
+    let (commits, commit_count) =
+        crate::git::branch_commits(path, &targets.base_ref, &targets.branch, DIFF_COMMIT_MAX)
+            .unwrap_or_default();
+    let commits_truncated = commit_count > commits.len();
     ok(json!({
         "id": session.id,
         "name": session.name,
@@ -747,6 +752,9 @@ fn op_diff(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
         "patch": patch,
         "truncated": truncated,
         "hasUncommitted": targets.has_uncommitted,
+        "commits": commits,
+        "commitCount": commit_count,
+        "commitsTruncated": commits_truncated,
     }))
 }
 
@@ -972,7 +980,7 @@ fn op_land(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
         return (
             409,
             json!({
-                "error": "merge conflict",
+                "error": "cherry-pick conflict",
                 "source": targets.branch,
                 "target": targets.base_branch,
                 "conflicts": outcome.conflicts,
@@ -1512,6 +1520,9 @@ mod tests {
         assert!(patch.contains("+worker change"));
         assert_eq!(diff["truncated"], false);
         assert_eq!(diff["hasUncommitted"], false);
+        assert_eq!(diff["commitCount"], 1);
+        assert_eq!(diff["commitsTruncated"], false);
+        assert_eq!(diff["commits"][0]["subject"], "worker change");
 
         let before_count = git(&repo, &["rev-list", "--count", "main"])
             .parse::<u64>()
@@ -1762,7 +1773,7 @@ mod tests {
         let (status, body) = handle("land", &request, &app);
         assert_eq!(status, 409);
         let conflict: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(conflict["error"], "merge conflict");
+        assert_eq!(conflict["error"], "cherry-pick conflict");
         assert_eq!(conflict["source"], worktree.branch);
         assert_eq!(conflict["target"], "main");
         assert!(conflict["conflicts"]
@@ -2441,6 +2452,17 @@ mod tests {
         );
         assert_eq!(status, 200);
         assert!(emitted.lock().unwrap()[1]["permissionMode"].is_null());
+
+        let (status, _) = handle(
+            "spawn",
+            &format!(
+                r#"{{"parentSessionId":"{}","prompt":"work","permissionMode":"inherit","timeoutSecs":0}}"#,
+                root.id
+            ),
+            &app,
+        );
+        assert_eq!(status, 200);
+        assert_eq!(emitted.lock().unwrap()[2]["permissionMode"], "inherit");
 
         let (status, out) = handle(
             "spawn",

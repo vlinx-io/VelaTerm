@@ -114,6 +114,7 @@ const zhCN: typeof en = {
   "settings.orchPermissionMode": "权限模式",
   "settings.orchPermissionDefault": "默认",
   "settings.orchPermissionSkip": "跳过确认",
+  "settings.orchPermissionInherit": "继承父会话",
   "settings.orchPermissionSkipWarning":
     "此工作进程在自己的 worktree 中运行时不会请求确认.",
   "settings.orchLimitsTitle": "限制",
