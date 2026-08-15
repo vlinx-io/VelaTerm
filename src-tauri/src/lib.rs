@@ -54,6 +54,21 @@ use std::path::{Path, PathBuf};
 #[cfg(feature = "gui")]
 pub(crate) struct PendingOpenProject(pub std::sync::Mutex<Option<String>>);
 
+/// Quit-confirmation handshake state shared by the run-loop and the `confirm_quit`/`cancel_quit` commands.
+///
+/// The frontend owns the confirmation dialog so it can offer the "save workspace" checkbox and localized copy,
+/// neither of which a native message dialog supports. `pending` guards against duplicate prompts, and
+/// `confirmed` lets the run-loop distinguish an approved exit from a fresh user request.
+#[cfg(feature = "gui")]
+#[derive(Default)]
+pub(crate) struct QuitState {
+    pub confirmed: std::sync::atomic::AtomicBool,
+    pub pending: std::sync::atomic::AtomicBool,
+    /// Set once the frontend reports that it displayed the dialog. A frozen or crashed webview never acknowledges,
+    /// so the watchdog falls back to the native dialog and the application stays quittable.
+    pub acked: std::sync::atomic::AtomicBool,
+}
+
 /// Brief `vela` CLI help invoked through a hidden shim argument so normal GUI startup stays quiet.
 pub fn print_vela_help() {
     println!("usage: vela <project-path>\n\nOpen a project in VelaTerm, or switch to it if it is already open.");
@@ -402,6 +417,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
         .manage(PtyManager::new())
         .manage(WebServer::new())
         .manage(browser::BrowserManager::new())
+        .manage(QuitState::default())
         .manage(PendingOpenProject(std::sync::Mutex::new(
             initial_open_project.map(|p| p.to_string_lossy().into_owned()),
         )))
@@ -668,6 +684,24 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             let hooks = HookServer::start(AppCtx::Tauri(app.handle().clone()))?;
             app.manage(hooks);
 
+            // Auto-start LAN remote access when the persisted enabled flag is set, restoring the state
+            // from before the last quit (GitHub issue #15). On a thread because start() synchronously
+            // preflights the port bind. Failures (e.g. port in use) are recorded on the WebServer and
+            // shown in the remote-access panel — never fatal for app startup.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    match command_core::web_server_autostart(&AppCtx::Tauri(handle)) {
+                        Ok(Some(status)) => println!(
+                            "remote access auto-started on port {}",
+                            status.port.unwrap_or(0)
+                        ),
+                        Ok(None) => {}
+                        Err(e) => eprintln!("remote access auto-start failed: {e}"),
+                    }
+                });
+            }
+
             // Install macOS session-aware notification click handling; unsupported builds skip it.
             #[cfg(target_os = "macos")]
             notify_native::install(app.handle().clone());
@@ -797,6 +831,9 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             // dispatch command automatically covers desktop too.
             commands::desktop_call,
             commands::take_open_project_request,
+            commands::quit_prompt_ack,
+            commands::confirm_quit,
+            commands::cancel_quit,
             commands::vela_command_status,
             commands::install_vela_command,
             commands::uninstall_vela_command,
@@ -847,46 +884,41 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
         .build(tauri_context())
         .expect("error while building tauri application")
         .run({
-            use std::sync::{
-                atomic::{AtomicBool, Ordering},
-                Arc,
-            };
-            let quit_confirmed = Arc::new(AtomicBool::new(false));
-            let quit_confirmation_pending = Arc::new(AtomicBool::new(false));
+            use std::sync::atomic::Ordering;
             move |app, event| {
-                // Confirm user-triggered exits natively. Programmatic exit/restart with a code already
-                // belongs to a confirmed workflow and must not prompt again.
+                // Confirm user-triggered exits in the frontend so the dialog can carry localized copy and the
+                // "save workspace" checkbox. Programmatic exit/restart with a code already belongs to a confirmed
+                // workflow and must not prompt again.
                 let request_quit_confirmation = |app: &tauri::AppHandle| {
-                    if quit_confirmed.load(Ordering::SeqCst)
-                        || quit_confirmation_pending.swap(true, Ordering::SeqCst)
+                    let st = app.state::<QuitState>();
+                    if st.confirmed.load(Ordering::SeqCst) || st.pending.swap(true, Ordering::SeqCst)
                     {
                         return;
                     }
-                    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+                    st.acked.store(false, Ordering::SeqCst);
+                    use tauri::Emitter;
+                    if app.emit("app://quit-requested", ()).is_err() {
+                        native_quit_confirmation(app);
+                        return;
+                    }
+                    // A webview that never acknowledges within the grace period would leave the application
+                    // unquittable, so fall back to the native dialog.
                     let app = app.clone();
-                    let confirmed = quit_confirmed.clone();
-                    let pending = quit_confirmation_pending.clone();
-                    app.clone()
-                        .dialog()
-                        .message("Any running terminal and agent sessions will be stopped.")
-                        .title("Quit VelaTerm?")
-                        .kind(MessageDialogKind::Info)
-                        .buttons(MessageDialogButtons::OkCancelCustom(
-                            "Quit".to_string(),
-                            "Cancel".to_string(),
-                        ))
-                        .show(move |should_quit| {
-                            pending.store(false, Ordering::SeqCst);
-                            if should_quit {
-                                confirmed.store(true, Ordering::SeqCst);
-                                app.exit(0);
-                            }
-                        });
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_secs(5));
+                        let st = app.state::<QuitState>();
+                        if st.pending.load(Ordering::SeqCst)
+                            && !st.acked.load(Ordering::SeqCst)
+                            && !st.confirmed.load(Ordering::SeqCst)
+                        {
+                            native_quit_confirmation(&app);
+                        }
+                    });
                 };
 
                 match &event {
                     tauri::RunEvent::ExitRequested { code: None, api, .. }
-                        if !quit_confirmed.load(Ordering::SeqCst) =>
+                        if !app.state::<QuitState>().confirmed.load(Ordering::SeqCst) =>
                     {
                         api.prevent_exit();
                         request_quit_confirmation(app);
@@ -898,7 +930,9 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                         label,
                         event: tauri::WindowEvent::CloseRequested { api, .. },
                         ..
-                    } if label == "main" && !quit_confirmed.load(Ordering::SeqCst) => {
+                    } if label == "main"
+                        && !app.state::<QuitState>().confirmed.load(Ordering::SeqCst) =>
+                    {
                         api.prevent_close();
                         request_quit_confirmation(app);
                     }
@@ -919,6 +953,33 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                         }
                     }
                 }
+            }
+        });
+}
+
+/// Degraded quit confirmation used when the webview cannot present the frontend dialog. A native message dialog
+/// supports neither a checkbox nor translated copy, so it only offers plain quit/cancel and never saves the
+/// workspace. Copy stays English to match the other native dialogs.
+#[cfg(feature = "gui")]
+fn native_quit_confirmation(app: &tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let app = app.clone();
+    app.clone()
+        .dialog()
+        .message("Any running terminal and agent sessions will be stopped.")
+        .title("Quit VelaTerm?")
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Quit".to_string(),
+            "Cancel".to_string(),
+        ))
+        .show(move |should_quit| {
+            let st = app.state::<QuitState>();
+            st.pending.store(false, Ordering::SeqCst);
+            if should_quit {
+                st.confirmed.store(true, Ordering::SeqCst);
+                app.exit(0);
             }
         });
 }
@@ -956,6 +1017,10 @@ struct ServeArgs {
     /// certificates cannot work. It is CLI-only, rejected by production identifiers, and loses to
     /// `--local-http` when both are supplied.
     lan_http: bool,
+    /// `--print-pairing`: print the full pairing URL including the long-lived `#pair` token fragment even
+    /// when stdout is not a terminal. Without it, non-TTY runs (systemd/journald) get only the token-less
+    /// base URL so the credential does not persist in service logs.
+    print_pairing: bool,
 }
 
 /// Recommended headless password environment variable, avoiding exposure in process arguments.
@@ -971,6 +1036,7 @@ fn parse_serve_args(args: &[String], env_password: Option<String>) -> Result<Ser
     let mut data_dir: Option<String> = None;
     let mut local_http = false;
     let mut lan_http = false;
+    let mut print_pairing = false;
 
     let mut it = args.iter().skip(2); // Skip executable name and --serve.
     while let Some(arg) = it.next() {
@@ -993,6 +1059,9 @@ fn parse_serve_args(args: &[String], env_password: Option<String>) -> Result<Ser
             "--lan-http" => {
                 lan_http = true;
             }
+            "--print-pairing" => {
+                print_pairing = true;
+            }
             other => return Err(format!("unknown argument: {other}")),
         }
     }
@@ -1010,7 +1079,16 @@ fn parse_serve_args(args: &[String], env_password: Option<String>) -> Result<Ser
         data_dir,
         local_http,
         lan_http,
+        print_pairing,
     })
+}
+
+/// Whether `--serve` may print the full pairing URL including the long-lived `#pair` token fragment:
+/// explicitly requested via `--print-pairing`, or stdout is an interactive terminal (a human who needs
+/// the link). Non-TTY stdout without the flag — systemd, pipes — must not receive the credential, since
+/// journald and log files would persist it.
+fn should_print_pairing(flag: bool, is_tty: bool) -> bool {
+    flag || is_tty
 }
 
 /// Headless data directory: explicit --data-dir wins; otherwise use platform data directory plus
@@ -1039,7 +1117,7 @@ pub fn run_serve(args: &[String]) {
         Err(e) => {
             eprintln!("vlx-term --serve failed to start: {e}");
             eprintln!(
-                "usage: vlx-term --serve [--port 8799] [--password <password>] [--data-dir <dir>] [--local-http] [--lan-http]"
+                "usage: vlx-term --serve [--port 8799] [--password <password>] [--data-dir <dir>] [--local-http] [--lan-http] [--print-pairing]"
             );
             std::process::exit(1);
         }
@@ -1100,20 +1178,34 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
              For production use the default TLS mode, or HTTPS with certificate pinning (see architecture §20)."
         ));
     }
-    let status = web.start(ctx.clone(), &args.password, Some(args.port), mode)?;
+    let status = web.start(
+        ctx.clone(),
+        crate::web::StartAuth::Password(args.password.clone()),
+        Some(args.port),
+        mode,
+    )?;
 
     println!("vlx-term headless server started");
     println!("  data dir: {}", data_dir.display());
 
     // Print a fully usable preferred URL first. LAN TLS requires the complete #pair fragment with
-    // token/public key; plaintext modes can use their bare URL.
+    // token/public key; plaintext modes can use their bare URL. The fragment carries the long-lived
+    // pairing token, so it is only printed to an interactive terminal or on explicit --print-pairing —
+    // never into journald/service logs, where it would persist (GitHub issue #24).
     let primary = if matches!(mode, crate::web::ServeMode::LanTls) {
-        match web.create_pairing(None, false) {
-            Ok(info) => Some(info.url),
-            Err(e) => {
-                eprintln!("  failed to create pairing link: {e}");
-                None
+        if should_print_pairing(args.print_pairing, std::io::IsTerminal::is_terminal(&std::io::stdout())) {
+            match web.create_pairing(None, false) {
+                Ok(info) => Some(info.url),
+                Err(e) => {
+                    eprintln!("  failed to create pairing link: {e}");
+                    None
+                }
             }
+        } else {
+            println!(
+                "  pairing link withheld (stdout is not a terminal): run with --print-pairing to print it, or create a pairing link from the app"
+            );
+            status.urls.first().cloned()
         }
     } else {
         status.urls.first().cloned()
@@ -1123,7 +1215,9 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
     }
     // Print other interface URLs without repeating the long pairing fragment; users can append it.
     if status.urls.len() > 1 {
-        if matches!(mode, crate::web::ServeMode::LanTls) {
+        if matches!(mode, crate::web::ServeMode::LanTls)
+            && primary.as_deref().is_some_and(|u| u.contains("#pair="))
+        {
             println!("  other addresses (swap host, keep the #pair=… part):");
         } else {
             println!("  other addresses:");
@@ -1136,6 +1230,19 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
     if let Some(fp) = &status.fingerprint {
         println!("  certificate fingerprint (SHA-256): {fp}");
     }
+    // Auto-start the secondary LAN remote instance (ctx.remote_web()) when persisted settings enable it,
+    // e.g. remote access turned on from the Electron shell before a sidecar restart. Runs after the
+    // primary CLI-configured server so a port conflict deterministically hits this secondary instance,
+    // where it is logged and nonfatal — the CLI server semantics stay untouched.
+    match command_core::web_server_autostart(&ctx) {
+        Ok(Some(remote)) => println!(
+            "  remote access auto-started on port {}",
+            remote.port.unwrap_or(0)
+        ),
+        Ok(None) => {}
+        Err(e) => eprintln!("  remote access auto-start failed: {e}"),
+    }
+
     println!("  press Ctrl+C (or send SIGTERM) to quit");
 
     // Wait for cross-platform Ctrl+C and Unix SIGTERM used by systemd stop.
@@ -1237,8 +1344,29 @@ mod tests {
                 data_dir: Some("/tmp/x".into()),
                 local_http: false,
                 lan_http: false,
+                print_pairing: false,
             }
         );
+    }
+
+    #[test]
+    fn parse_serve_args_print_pairing_flag() {
+        // --print-pairing opts in to printing the full pairing URL on non-TTY stdout.
+        let got = parse_serve_args(&argv(&["--print-pairing", "--password", "pw"]), None)
+            .expect("parsing should succeed");
+        assert!(got.print_pairing);
+        // Omitting the flag leaves it false.
+        let got = parse_serve_args(&argv(&["--password", "pw"]), None).expect("parsing should succeed");
+        assert!(!got.print_pairing);
+    }
+
+    #[test]
+    fn should_print_pairing_truth_table() {
+        // The explicit flag always wins; otherwise only an interactive terminal receives the fragment.
+        assert!(should_print_pairing(true, true));
+        assert!(should_print_pairing(true, false));
+        assert!(should_print_pairing(false, true));
+        assert!(!should_print_pairing(false, false));
     }
 
     #[test]
@@ -1297,6 +1425,7 @@ mod tests {
             data_dir: Some("/tmp/custom".into()),
             local_http: false,
             lan_http: false,
+            print_pairing: false,
         };
         assert_eq!(
             serve_data_dir(&args, "io.vlinx.vlxterm").unwrap(),

@@ -5,6 +5,13 @@ use sha2::{Digest, Sha256};
 
 /// Ensure a self-signed TLS certificate exists in the data directory, reading an existing one or generating it.
 /// Return (cert_pem, key_pem) bytes.
+///
+/// Accepted gap (reviewed, deliberate): the SAN list is frozen at first generation — an existing
+/// certificate is reused as-is, so an IP that appears later (e.g. a VPN interface selected live in
+/// the remote-access panel) is not covered by its SANs. Regenerating would fix the SANs but change
+/// the fingerprint, breaking every client that pinned it during pairing; and browsers warn on a
+/// self-signed certificate regardless of SAN accuracy, so the practical cost of the stale list is
+/// nil while the cost of rotation is a re-pair of every device.
 pub fn ensure_cert(data_dir: &Path, lan_ips: &[String]) -> Result<(Vec<u8>, Vec<u8>), String> {
     let tls_dir = data_dir.join("tls");
     let cert_path = tls_dir.join("cert.pem");

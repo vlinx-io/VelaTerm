@@ -191,6 +191,8 @@ const ja: typeof en = {
   "changes.loading": "読み込み中…",
   "changes.loadingDiff": "差分を読み込み中…",
   "changes.noChanges": "変更なし",
+  "changes.refresh": "更新",
+  "changes.notRepo": "Git リポジトリではありません",
   "changes.selectFile": "ファイルを選択してください",
   "changes.binary": "バイナリファイル — 行差分は表示できません",
   "tree.merge": "Merge…", // TODO translate
@@ -318,6 +320,11 @@ const ja: typeof en = {
   "remote.start": "サーバーを開始", // Start Server
   "remote.portLabel": "ポート", // Port
   "remote.portInvalid": "ポートは 1〜65535 の範囲で指定してください", // Port must be between 1 and 65535
+  "remote.ipLabel": "IP アドレス", // IP address
+  "remote.ipAuto": "自動（最初の LAN アドレス）", // Automatic (first LAN address)
+  "remote.ipVpn": "VPN", // VPN
+  "remote.qrHint":
+    "スマートフォンでスキャンすると、選択したアドレスでペアリングリンクを開けます。", // Scan with your phone to open the pairing link on the selected address.
   "remote.fingerprintLabel": "証明書フィンガープリント (SHA-256)", // Certificate fingerprint (SHA-256)
   "remote.fingerprintHint":
     "初回接続時、ブラウザは証明書が信頼されていないと警告します（自己署名証明書では正常です）。このフィンガープリントを照合し、この端末への接続であることを確認してください。", // On first connect, browsers warn the certificate is untrusted…
@@ -336,6 +343,9 @@ const ja: typeof en = {
   "remote.deviceBlockHint":
     "ブロックした端末は切断され、再接続できません（再度ペアリングリンクが必要）。他の端末には影響しません。", // Block hint
   "remote.devicesEmpty": "ペアリング済みの端末はありません", // No paired devices yet
+  "remote.autoRestartHint":
+    "リモートアクセスはアプリの再起動時に自動的に再開されます。「サーバーを停止」で無効になります。", // Remote access restarts automatically when the app is reopened. Stop Server turns this off.
+  "remote.autostartFailed": "自動起動に失敗しました:", // Automatic start failed:
 
   // ── Remote connection panel ──
   "connect.title": "リモートサーバーに接続", // Connect to Remote Server
@@ -643,6 +653,14 @@ const ja: typeof en = {
   "browser.addressPlaceholder": "URL または検索語を入力", // Enter URL or search terms
   "browser.quickAccess": "クイックアクセス", // Quick access
   "browser.loading": "読み込み中…", // Loading…
+  // Application-exit confirmation and dormant restored sessions.
+  "quit.title": "VelaTerm を終了しますか？",  // Quit VelaTerm?
+  "quit.body": "実行中のターミナルとエージェントのセッションはすべて停止します。",  // Any running terminal and agent sessions will be stopped.
+  "quit.saveWorkspace": "ワークスペースを保存",  // Save workspace
+  "quit.saveWorkspaceHint": "次回、同じタブと分割を復元します。ターミナルは復元されますが再起動はされません。",  // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
+  "quit.confirm": "終了",  // Quit
+  "dormant.body": "保存したワークスペースから復元しました。プロセスはまだ起動していません。",  // Restored from your saved workspace. No process is running yet.
+  "dormant.start": "起動",  // Start
   "overlimit.title": (max) => `バックグラウンド常駐が上限を超えています（最大 ${max} 件）`, // Background keep-alive over limit ({max})
   "overlimit.body": "All background tabs are working or awaiting your reply. Choose one to end:", // All background tabs are working or awaiting your reply. Choose one to end:
   "overlimit.kill": "End Selected", // End Selected
@@ -813,6 +831,7 @@ const ja: typeof en = {
   "login.passwordPlaceholder": "アクセスパスワード", // Access password
   "login.connect": "接続", // Connect
   "login.wrongPassword": "パスワードが違います", // Wrong password
+  "login.rateLimited": "試行回数が多すぎます。1分ほど待ってから再度お試しください。", // Too many attempts. Please wait a minute and try again.
   "login.failed": "ログインに失敗しました。もう一度お試しください", // Login failed, please try again
   "login.pairingRequired": "このサーバーはペアリングリンクが必要です。デスクトップアプリの「リモートアクセス」で生成したリンクを開いてください。", // This server requires a pairing link
   "login.authFailed": "パスワードが違うか、ペアリングリンクの有効期限が切れています。新しいペアリングリンクで再接続してください。", // Wrong password or pairing link expired
@@ -857,6 +876,9 @@ const ja: typeof en = {
   "transport.wsDisconnected": "WebSocket が切断されました", // WebSocket disconnected
   "transport.wsConnectFailed": "WebSocket 接続に失敗しました", // WebSocket connection failed
   "transport.cmdFailed": "コマンドが失敗しました", // Command failed
+  "transport.remoteCmdForbidden": (cmd: string) => `このコマンドはリモートクライアントでは利用できません: ${cmd}`, // Command not available to remote clients
+  "transport.remoteSettingForbidden": (key: string) => `この設定キーはリモートクライアントからは書き込めません: ${key}`, // Settings key not writable by remote clients
+  "transport.remotePathForbidden": (path: string) => `リモートクライアントはアプリのデータディレクトリ内のファイルにアクセスできません: ${path}`, // Remote clients cannot access files in the app data directory
 
   // ── Crepe (built-in WYSIWYG editor UI) ──
   "crepe.placeholder": "本文を入力するか、/ で挿入メニューを開きます", // Type text, or press / for the insert menu

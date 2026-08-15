@@ -86,8 +86,12 @@ futures-util = "0.3"
 # Embed compressed ../dist assets in release binaries for offline use and transparent decompression, while
 # debug reads disk. Shared by vela-server and desktop --serve, substantially reducing frontend-heavy size.
 rust-embed = { version = "8", features = ["compression"] }
-# Salted SHA-256 login password hashing without plaintext persistence.
+# SHA-256 for the self-signed-certificate fingerprint (tls.rs) and server-binary manifest verification
+# (server_supply.rs); login hashing moved to Argon2id below.
 sha2 = "0.10"
+# Memory-hard Argon2id password hashing so the remote-access password persists only as a PHC verifier
+# string (never plaintext) across restarts. Pure Rust, builds in headless --no-default-features too.
+argon2 = "0.5"
 # Enumerate LAN address candidates for remote access, ordering VPN/tunnel point-to-point interfaces last.
 if-addrs = "0.13"
 # Parse user-entered remote addresses into url::Url for Tauri WebviewUrl::External.

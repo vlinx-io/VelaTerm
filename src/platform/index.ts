@@ -28,6 +28,7 @@ export type {
   Platform,
   PlatformEnv,
   PlatformKind,
+  QuitCapability,
   SaveFileOptions,
   TransportCapability,
   UnlistenFn,

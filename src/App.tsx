@@ -7,6 +7,7 @@ import { Splitter } from "./components/Splitter";
 import { MergeModal } from "./components/MergeModal";
 import { ChangesModal } from "./components/diff/ChangesModal";
 import { NotifyGuideModal } from "./components/NotifyGuideModal";
+import { QuitConfirmModal } from "./components/QuitConfirmModal";
 import { SpawnConfirmModal } from "./components/SpawnConfirmModal";
 import { UpdateModal } from "./components/UpdateModal";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -224,6 +225,7 @@ function App() {
       <CloneProjectModal />
       <SaveAsModal />
       <SpawnConfirmModal />
+      <QuitConfirmModal />
       <MergeModal />
       <ChangesModal />
       <NotifyGuideModal />

@@ -191,6 +191,8 @@ const en = {
   "changes.loading": "Loading…",
   "changes.loadingDiff": "Loading diff…",
   "changes.noChanges": "No changes",
+  "changes.refresh": "Refresh",
+  "changes.notRepo": "Not a git repository",
   "changes.selectFile": "Select a file to view",
   "changes.binary": "Binary file — line diff unavailable",
   "tree.merge": "Merge…",
@@ -318,6 +320,11 @@ const en = {
   "remote.start": "Start Server",
   "remote.portLabel": "Port",
   "remote.portInvalid": "Port must be between 1 and 65535",
+  "remote.ipLabel": "IP address",
+  "remote.ipAuto": "Automatic (first LAN address)",
+  "remote.ipVpn": "VPN",
+  "remote.qrHint":
+    "Scan with your phone to open the pairing link on the selected address.",
   "remote.fingerprintLabel": "Certificate fingerprint (SHA-256)",
   "remote.fingerprintHint":
     "On first connect, browsers warn the certificate is untrusted — normal for a self-signed certificate. Match this fingerprint to confirm you're connecting to this machine.",
@@ -336,6 +343,9 @@ const en = {
   "remote.deviceBlockHint":
     "Blocked devices are disconnected and can't reconnect (they'd need a new pairing link). Other devices are unaffected.",
   "remote.devicesEmpty": "No paired devices yet",
+  "remote.autoRestartHint":
+    "Remote access restarts automatically when the app is reopened. Stop Server turns this off.",
+  "remote.autostartFailed": "Automatic start failed:",
 
   // ── Remote connection panel ──
   "connect.title": "Connect to Remote Server",
@@ -652,6 +662,14 @@ const en = {
   "browser.addressPlaceholder": "Enter URL or search terms",
   "browser.quickAccess": "Quick access",
   "browser.loading": "Loading…",
+  // Application-exit confirmation and dormant restored sessions.
+  "quit.title": "Quit VelaTerm?",
+  "quit.body": "Any running terminal and agent sessions will be stopped.",
+  "quit.saveWorkspace": "Save workspace",
+  "quit.saveWorkspaceHint": "Reopen the same tabs and splits next time. Terminals are restored but not restarted.",
+  "quit.confirm": "Quit",
+  "dormant.body": "Restored from your saved workspace. No process is running yet.",
+  "dormant.start": "Start",
   "overlimit.title": (max: number) => `Background keep-alive over limit (${max})`,
   "overlimit.body": "All background tabs are working or awaiting your reply. Choose one to end:",
   "overlimit.kill": "End Selected",
@@ -847,6 +865,7 @@ const en = {
   "login.passwordPlaceholder": "Access password",
   "login.connect": "Connect",
   "login.wrongPassword": "Wrong password",
+  "login.rateLimited": "Too many attempts. Please wait a minute and try again.",
   "login.failed": "Login failed, please try again",
   "login.pairingRequired": "This server requires a pairing link. Open the pairing link from the desktop app's Remote Access panel.",
   "login.authFailed": "Wrong password, or the pairing link has expired. Please reconnect with a new pairing link.",
@@ -892,6 +911,9 @@ const en = {
   "transport.wsDisconnected": "WebSocket disconnected",
   "transport.wsConnectFailed": "WebSocket connection failed",
   "transport.cmdFailed": "Command failed",
+  "transport.remoteCmdForbidden": (cmd: string) => `Command not available to remote clients: ${cmd}`,
+  "transport.remoteSettingForbidden": (key: string) => `Settings key not writable by remote clients: ${key}`,
+  "transport.remotePathForbidden": (path: string) => `Remote clients cannot access files in the app data directory: ${path}`,
 
   // ── Crepe (built-in WYSIWYG editor UI) ──
   "crepe.placeholder": "Type text, or press / for the insert menu",

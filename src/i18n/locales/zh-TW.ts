@@ -190,6 +190,8 @@ const zhTW: typeof en = {
   "changes.loading": "載入中…",
   "changes.loadingDiff": "載入 diff…",
   "changes.noChanges": "沒有變更",
+  "changes.refresh": "重新整理",
+  "changes.notRepo": "不是 git 儲存庫",
   "changes.selectFile": "選擇檔案查看",
   "changes.binary": "二進位檔案，無法逐行 diff",
   "tree.merge": "合併…",
@@ -315,6 +317,11 @@ const zhTW: typeof en = {
   "remote.start": "啟動服務", // Start Server
   "remote.portLabel": "連接埠", // Port
   "remote.portInvalid": "連接埠必須是 1 到 65535 之間的數字", // Port must be between 1 and 65535
+  "remote.ipLabel": "IP 位址", // IP address
+  "remote.ipAuto": "自動（第一個區域網路位址）", // Automatic (first LAN address)
+  "remote.ipVpn": "VPN", // VPN
+  "remote.qrHint":
+    "用手機掃描即可在所選位址上開啟配對連結。", // Scan with your phone to open the pairing link on the selected address.
   "remote.fingerprintLabel": "憑證指紋（SHA-256）", // Certificate fingerprint (SHA-256)
   "remote.fingerprintHint":
     "首次連線時瀏覽器會提示憑證不受信任，這是自簽憑證的正常現象；核對此指紋可確認連線的是本機。", // On first connect, browsers warn the certificate is untrusted…
@@ -333,6 +340,9 @@ const zhTW: typeof en = {
   "remote.deviceBlockHint":
     "被禁裝置會被中斷且無法重連（需重新用配對連結），其他裝置不受影響。", // Block hint
   "remote.devicesEmpty": "尚無已配對裝置", // No paired devices yet
+  "remote.autoRestartHint":
+    "重新開啟應用程式時遠端存取會自動恢復，「停止伺服器」可關閉此功能。", // Remote access restarts automatically when the app is reopened. Stop Server turns this off.
+  "remote.autostartFailed": "自動啟動失敗：", // Automatic start failed:
 
   // ── Remote connection panel ──
   "connect.title": "連線到遠端服務", // Connect to Remote Server
@@ -637,6 +647,14 @@ const zhTW: typeof en = {
   "browser.addressPlaceholder": "輸入網址或搜尋字詞", // Enter URL or search terms
   "browser.quickAccess": "快速存取", // Quick access
   "browser.loading": "載入中…", // Loading…
+  // Application-exit confirmation and dormant restored sessions.
+  "quit.title": "結束 VelaTerm？",  // Quit VelaTerm?
+  "quit.body": "正在執行的終端機和 agent 工作階段都會被停止。",  // Any running terminal and agent sessions will be stopped.
+  "quit.saveWorkspace": "儲存工作區",  // Save workspace
+  "quit.saveWorkspaceHint": "下次開啟時還原相同的分頁和分割。終端機會還原出來，但不會自動重新啟動。",  // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
+  "quit.confirm": "結束",  // Quit
+  "dormant.body": "已從儲存的工作區還原，程序尚未啟動。",  // Restored from your saved workspace. No process is running yet.
+  "dormant.start": "啟動",  // Start
   "overlimit.title": (max) => `背景保活已超上限（${max} 個）`, // Background keep-alive over limit ({max})
   "overlimit.body": "所有背景分頁都在工作或等你回覆，請選擇要結束的分頁：", // All background tabs are working or awaiting your reply. Choose one to end:
   "overlimit.kill": "結束選取", // End Selected
@@ -804,6 +822,7 @@ const zhTW: typeof en = {
   "login.passwordPlaceholder": "存取密碼", // Access password
   "login.connect": "連線", // Connect
   "login.wrongPassword": "密碼錯誤", // Wrong password
+  "login.rateLimited": "嘗試次數過多，請稍候一分鐘後再試。", // Too many attempts. Please wait a minute and try again.
   "login.failed": "登入失敗，請重試", // Login failed, please try again
   "login.pairingRequired": "此服務要求使用配對連結存取。請用桌面端「遠端存取」產生的配對連結開啟。", // This server requires a pairing link
   "login.authFailed": "密碼錯誤，或配對連結已失效，請用新的配對連結重新連線。", // Wrong password or pairing link expired
@@ -848,6 +867,9 @@ const zhTW: typeof en = {
   "transport.wsDisconnected": "WebSocket 已斷線", // WebSocket disconnected
   "transport.wsConnectFailed": "WebSocket 連線失敗", // WebSocket connection failed
   "transport.cmdFailed": "命令失敗", // Command failed
+  "transport.remoteCmdForbidden": (cmd: string) => `遠端用戶端無法使用此命令：${cmd}`, // Command not available to remote clients
+  "transport.remoteSettingForbidden": (key: string) => `遠端用戶端無法寫入此設定鍵：${key}`, // Settings key not writable by remote clients
+  "transport.remotePathForbidden": (path: string) => `遠端用戶端無法存取應用程式資料目錄中的檔案：${path}`, // Remote clients cannot access files in the app data directory
 
   // ── Crepe (built-in WYSIWYG editor UI) ──
   "crepe.placeholder": "輸入內文，或鍵入 / 開啟插入選單", // Type text, or press / for the insert menu

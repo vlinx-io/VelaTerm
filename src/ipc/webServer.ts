@@ -12,6 +12,15 @@ export interface WebServerStatus {
   urls: string[];
   /** Server self-signed certificate SHA-256 fingerprint (uppercase colon-separated hexadecimal) for verification; null when stopped. */
   fingerprint: string | null;
+  /** Error message of the most recent failed auto-start (e.g. port in use); null after any successful start. */
+  autostartError: string | null;
+  /** Last persisted port from app settings, used to prefill the port field after a restart. */
+  savedPort: number | null;
+  /** Whether the persisted enabled flag will auto-start the service on the next launch. */
+  autoStart: boolean;
+  /** URL scheme of the running service ("https" for LAN TLS, "http" for the plaintext modes); null when
+   * stopped. Explicit so URL synthesis for late-appearing interfaces never guesses from the URL list. */
+  scheme: string | null;
 }
 
 /**
@@ -40,6 +49,21 @@ export function webServerStop(): Promise<void> {
 /** Query current status. */
 export function webServerStatus(): Promise<WebServerStatus> {
   return invoke<WebServerStatus>("web_server_status");
+}
+
+/** Selectable network interface matching Rust `NetworkInterface` in camelCase. */
+export interface NetworkInterface {
+  /** OS-reported interface name (e.g. `en0`, `utun3`, `tailscale0`), shown for recognition. */
+  name: string;
+  /** IPv4 address; feeds `webPairingCreate`'s address argument. */
+  ip: string;
+  /** Point-to-point interface without a broadcast address, usually a VPN/tunnel; marked in the selector. */
+  vpn: boolean;
+}
+
+/** List interface candidates for the IP selector, filtered identically to the status URL list. */
+export function networkInterfacesList(): Promise<NetworkInterface[]> {
+  return invoke<NetworkInterface[]>("network_interfaces_list");
 }
 
 /** Pairing result: browser URL containing token/server public key in the URL fragment, plus the device token. */

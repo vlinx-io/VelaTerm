@@ -727,10 +727,43 @@ pub fn export_session_context(
 // Remote-access web service. WS/headless dispatch toggles LAN remote mode through `ctx.remote_web()`. Desktop
 // Tauri commands access the same managed WebServer directly. LAN remote mode uses 0.0.0.0 with self-signed TLS,
 // independently of Electron sidecar's persistent plaintext loopback instance.
+//
+// The run state persists in app_settings so a restart can restore it (GitHub issue #15): enabled flag, port,
+// mode, and an Argon2id PHC hash of the password — never the plaintext. Persistence lives only here in the
+// core; the transport adapters (commands.rs / dispatch.rs) stay thin.
+
+/// app_settings key: "1" while remote access should auto-start on launch, "0" after a manual stop.
+const REMOTE_ENABLED_KEY: &str = "remoteAccess.enabled";
+/// app_settings key: last successfully used listening port (decimal string).
+const REMOTE_PORT_KEY: &str = "remoteAccess.port";
+/// app_settings key: "1" when the last start used plaintext LAN HTTP mode (dev only), otherwise "0".
+const REMOTE_LAN_HTTP_KEY: &str = "remoteAccess.lanHttp";
+/// app_settings key: Argon2id PHC verifier of the access password; the only password-derived value on disk.
+const REMOTE_PASSWORD_HASH_KEY: &str = "remoteAccess.passwordHash";
+
+/// Persist remote-access settings; failures are logged and never abort the running service.
+fn persist_remote_settings(ctx: &AppCtx, entries: std::collections::HashMap<String, String>) {
+    if let Err(e) = set_app_settings(ctx, entries) {
+        eprintln!("failed to persist remote-access settings: {e}");
+    }
+}
+
+/// Shared production guard: plaintext LAN mode exists only for development mobile-device tests.
+fn lan_http_guard(ctx: &AppCtx, lan_http: bool) -> Result<(), String> {
+    if lan_http && crate::web::is_production_identifier(&app_identifier(ctx)) {
+        return Err(
+            "LAN plaintext mode is only available in dev builds, not in release builds (use HTTPS with certificate fingerprint pinning on production devices; see architecture §20)."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
 
 /// Starts LAN remote access with password login and session gating. `lan_http=false` binds 0.0.0.0 with TLS;
 /// `lan_http=true` provides plaintext for native mobile shells that cannot bypass self-signed certificates in RN
 /// WebView (architecture section 20). Runtime stops any old instance before starting so changes take effect.
+/// After a successful start, the enabled flag, port, mode, and password hash persist so the next launch
+/// auto-starts the same configuration.
 pub fn web_server_start(
     ctx: &AppCtx,
     password: &str,
@@ -742,26 +775,346 @@ pub fn web_server_start(
     } else {
         crate::web::ServeMode::LanTls
     };
-    // Production forbids plaintext LAN binding. It exists only for development mobile-device tests; production
-    // uses HTTPS with certificate pinning. The GUI hides this mode, and this guard blocks programmatic calls.
-    if matches!(mode, crate::web::ServeMode::LanHttp)
-        && crate::web::is_production_identifier(&app_identifier(ctx))
-    {
-        return Err(
-            "LAN plaintext mode is only available in dev builds, not in release builds (use HTTPS with certificate fingerprint pinning on production devices; see architecture §20)."
-                .to_string(),
-        );
+    // Production forbids plaintext LAN binding. The GUI hides this mode, and this guard blocks programmatic calls.
+    lan_http_guard(ctx, lan_http)?;
+    if password.trim().is_empty() {
+        return Err("Please set an access password first".into());
     }
-    ctx.remote_web().start(ctx.clone(), password, port, mode)
+    // Hash here in the core so the same PHC string both starts the server and gets persisted for auto-start.
+    let phc = crate::web::hash_password(password)?;
+    let status = ctx.remote_web().start(
+        ctx.clone(),
+        crate::web::StartAuth::PasswordHash(phc.clone()),
+        port,
+        mode,
+    )?;
+    persist_remote_settings(
+        ctx,
+        std::collections::HashMap::from([
+            (REMOTE_ENABLED_KEY.to_string(), "1".to_string()),
+            (
+                REMOTE_PORT_KEY.to_string(),
+                status.port.map(|p| p.to_string()).unwrap_or_default(),
+            ),
+            (
+                REMOTE_LAN_HTTP_KEY.to_string(),
+                if lan_http { "1" } else { "0" }.to_string(),
+            ),
+            (REMOTE_PASSWORD_HASH_KEY.to_string(), phc),
+        ]),
+    );
+    Ok(status)
 }
 
-/// Stops LAN remote access.
+/// Stops LAN remote access and disables auto-start. Port and password hash stay persisted for prefill;
+/// stop-then-start deliberately requires retyping the password (which overwrites the hash).
 pub fn web_server_stop(ctx: &AppCtx) -> Result<(), String> {
     ctx.remote_web().stop();
+    persist_remote_settings(
+        ctx,
+        std::collections::HashMap::from([(REMOTE_ENABLED_KEY.to_string(), "0".to_string())]),
+    );
     Ok(())
 }
 
-/// Returns LAN remote status, port, access URL, and certificate fingerprint.
+/// Returns LAN remote status, port, access URL, and certificate fingerprint, merged with the persisted
+/// saved port and auto-start flag so the panel can prefill and explain itself after a restart.
 pub fn web_server_status(ctx: &AppCtx) -> crate::web::WebServerStatus {
-    ctx.remote_web().status()
+    let mut status = ctx.remote_web().status();
+    if let Ok(settings) = get_app_settings(ctx) {
+        status.saved_port = settings.get(REMOTE_PORT_KEY).and_then(|p| p.parse().ok());
+        status.auto_start = settings
+            .get(REMOTE_ENABLED_KEY)
+            .map(|v| v == "1")
+            .unwrap_or(false);
+    }
+    status
+}
+
+/// Pure decision helper for auto-start: Some((port, lan_http, phc)) only when the persisted enabled flag
+/// is set, a non-empty password hash exists, and the port parses. A corrupt port aborts auto-start rather
+/// than binding an unintended port.
+fn autostart_config(
+    settings: &std::collections::HashMap<String, String>,
+) -> Option<(u16, bool, String)> {
+    if settings.get(REMOTE_ENABLED_KEY).map(String::as_str) != Some("1") {
+        return None;
+    }
+    let phc = settings
+        .get(REMOTE_PASSWORD_HASH_KEY)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())?;
+    let port: u16 = settings.get(REMOTE_PORT_KEY)?.trim().parse().ok()?;
+    if port == 0 {
+        return None;
+    }
+    let lan_http = settings.get(REMOTE_LAN_HTTP_KEY).map(String::as_str) == Some("1");
+    Some((port, lan_http, phc))
+}
+
+/// Auto-starts LAN remote access on launch when the persisted enabled flag is set. Returns Ok(None) when
+/// nothing is configured. Errors (port in use, production guard on a persisted dev mode) are recorded on
+/// the WebServer so the panel can display them — callers only log; auto-start is never fatal.
+pub fn web_server_autostart(
+    ctx: &AppCtx,
+) -> Result<Option<crate::web::WebServerStatus>, String> {
+    // Never replace a running instance: a very early manual start would otherwise be stopped and
+    // re-bound with the persisted (possibly older) configuration by the auto-start thread.
+    if ctx.remote_web().status().running {
+        return Ok(None);
+    }
+    // A settings-read failure is an auto-start failure like any other: record it so the panel can show
+    // why nothing started, instead of logging it into the void.
+    let settings = match get_app_settings(ctx) {
+        Ok(s) => s,
+        Err(e) => {
+            ctx.remote_web().set_autostart_error(Some(e.clone()));
+            return Err(e);
+        }
+    };
+    let Some((port, lan_http, phc)) = autostart_config(&settings) else {
+        return Ok(None);
+    };
+    // Re-apply the production guard: a persisted dev-only plaintext mode must never silently bind a
+    // release build; it surfaces as a visible auto-start error instead.
+    if let Err(e) = lan_http_guard(ctx, lan_http) {
+        ctx.remote_web().set_autostart_error(Some(e.clone()));
+        return Err(e);
+    }
+    let mode = if lan_http {
+        crate::web::ServeMode::LanHttp
+    } else {
+        crate::web::ServeMode::LanTls
+    };
+    match ctx.remote_web().start(
+        ctx.clone(),
+        crate::web::StartAuth::PasswordHash(phc),
+        Some(port),
+        mode,
+    ) {
+        Ok(status) => Ok(Some(status)),
+        Err(e) => {
+            ctx.remote_web().set_autostart_error(Some(e.clone()));
+            Err(e)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        autostart_config, get_app_settings, set_app_settings, web_server_autostart,
+        web_server_status, web_server_stop,
+    };
+    use std::collections::HashMap;
+
+    /// Builds a headless AppCtx over a fresh SQLite db inside `dir` (mirrors web::tests).
+    fn headless_ctx(dir: &std::path::Path) -> crate::host::AppCtx {
+        std::fs::create_dir_all(dir).unwrap();
+        let db = crate::db::Db::open(&dir.join("t.db")).unwrap();
+        let host = std::sync::Arc::new(crate::host::HeadlessHost::new(dir.to_path_buf(), db));
+        crate::host::AppCtx::Headless(host)
+    }
+
+    fn seed_remote_settings(ctx: &crate::host::AppCtx, lan_http: &str) {
+        set_app_settings(
+            ctx,
+            HashMap::from([
+                ("remoteAccess.enabled".to_string(), "1".to_string()),
+                ("remoteAccess.port".to_string(), "9123".to_string()),
+                ("remoteAccess.lanHttp".to_string(), lan_http.to_string()),
+                (
+                    "remoteAccess.passwordHash".to_string(),
+                    "$argon2id$fake".to_string(),
+                ),
+            ]),
+        )
+        .unwrap();
+    }
+
+    /// Acceptance criterion 5: a manual stop persists enabled=0 while keeping port and password hash
+    /// for prefill, and status() merges the persisted values for the panel. No server is ever bound.
+    #[test]
+    fn web_server_stop_disables_autostart_and_status_merges_settings() {
+        let tmp = std::env::temp_dir().join(format!("vlx-cc-stop-{}", std::process::id()));
+        let ctx = headless_ctx(&tmp);
+        seed_remote_settings(&ctx, "0");
+
+        // status() merges the persisted port and enabled flag even though nothing is running.
+        let status = web_server_status(&ctx);
+        assert!(!status.running);
+        assert_eq!(status.saved_port, Some(9123));
+        assert!(status.auto_start);
+
+        // Stop on a non-running server is a no-op for the service but must persist enabled=0.
+        web_server_stop(&ctx).unwrap();
+        let settings = get_app_settings(&ctx).unwrap();
+        assert_eq!(settings.get("remoteAccess.enabled").map(String::as_str), Some("0"));
+        // Port and hash stay for prefill (doc contract on web_server_stop).
+        assert_eq!(settings.get("remoteAccess.port").map(String::as_str), Some("9123"));
+        assert_eq!(
+            settings.get("remoteAccess.passwordHash").map(String::as_str),
+            Some("$argon2id$fake")
+        );
+        assert!(!web_server_status(&ctx).auto_start);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A persisted dev-only plaintext LAN mode must never silently bind in a release build: auto-start
+    /// fails, no server runs, and the guard message surfaces via status().autostart_error (panel path).
+    #[test]
+    fn autostart_reapplies_production_guard_and_surfaces_error() {
+        let tmp = std::env::temp_dir()
+            .join(format!("vlx-cc-guard-{}", std::process::id()))
+            .join("io.vlinx.vlxterm.release");
+        let ctx = headless_ctx(&tmp);
+        seed_remote_settings(&ctx, "1");
+
+        let Err(err) = web_server_autostart(&ctx) else {
+            panic!("production guard must reject lanHttp=1");
+        };
+        assert!(err.contains("LAN plaintext mode"), "unexpected error: {err}");
+        assert!(!ctx.remote_web().status().running, "no server may bind");
+        let status = web_server_status(&ctx);
+        assert_eq!(status.autostart_error.as_deref(), Some(err.as_str()));
+        let _ = std::fs::remove_dir_all(tmp.parent().unwrap());
+    }
+
+    /// A running instance is never replaced by auto-start: a very early manual start (loopback here, so
+    /// no 0.0.0.0 bind) survives, auto-start returns Ok(None), and the running config stays untouched.
+    #[test]
+    fn autostart_skips_when_an_instance_is_already_running() {
+        let tmp = std::env::temp_dir().join(format!(
+            "vlx-cc-skip-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        let ctx = headless_ctx(&tmp);
+        // Persisted settings that would auto-start on port 9123.
+        seed_remote_settings(&ctx, "0");
+
+        // Simulate the early manual start on a free loopback port (retry against port theft).
+        let mut port = 0;
+        let mut started = Err("never attempted".to_string());
+        for _ in 0..5 {
+            port = std::net::TcpListener::bind(("127.0.0.1", 0))
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            started = ctx.remote_web().start(
+                ctx.clone(),
+                crate::web::StartAuth::Password("manual-pw".into()),
+                Some(port),
+                crate::web::ServeMode::LoopbackHttp,
+            );
+            if started.is_ok() {
+                break;
+            }
+        }
+        started.expect("failed to start the loopback web server after retries");
+
+        let result = web_server_autostart(&ctx).expect("skip must not be an error");
+        assert!(result.is_none(), "auto-start must skip while an instance runs");
+        let status = ctx.remote_web().status();
+        assert!(status.running);
+        assert_eq!(status.port, Some(port), "the manual instance must keep its port");
+
+        ctx.remote_web().stop();
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A manual stop retires a stale auto-start error so the panel reflects the current state.
+    #[test]
+    fn manual_stop_clears_stale_autostart_error() {
+        let tmp = std::env::temp_dir().join(format!(
+            "vlx-cc-clear-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        let ctx = headless_ctx(&tmp);
+        ctx.remote_web()
+            .set_autostart_error(Some("port in use".into()));
+        assert_eq!(
+            web_server_status(&ctx).autostart_error.as_deref(),
+            Some("port in use")
+        );
+        web_server_stop(&ctx).unwrap();
+        assert!(
+            web_server_status(&ctx).autostart_error.is_none(),
+            "a manual stop must clear the stale autostart error"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    fn settings(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn autostart_config_requires_enabled_hash_and_valid_port() {
+        // Complete configuration yields the start parameters.
+        let full = settings(&[
+            ("remoteAccess.enabled", "1"),
+            ("remoteAccess.port", "9123"),
+            ("remoteAccess.lanHttp", "0"),
+            ("remoteAccess.passwordHash", "$argon2id$fake"),
+        ]);
+        assert_eq!(
+            autostart_config(&full),
+            Some((9123, false, "$argon2id$fake".to_string()))
+        );
+
+        // Missing keys entirely.
+        assert_eq!(autostart_config(&HashMap::new()), None);
+
+        // Disabled flag wins over everything else.
+        let mut disabled = full.clone();
+        disabled.insert("remoteAccess.enabled".into(), "0".into());
+        assert_eq!(autostart_config(&disabled), None);
+
+        // Empty hash means no credential to start with.
+        let mut no_hash = full.clone();
+        no_hash.insert("remoteAccess.passwordHash".into(), "  ".into());
+        assert_eq!(autostart_config(&no_hash), None);
+
+        // Invalid or zero port aborts auto-start instead of binding an unintended port.
+        for bad in ["", "abc", "0", "70000"] {
+            let mut bad_port = full.clone();
+            bad_port.insert("remoteAccess.port".into(), bad.into());
+            assert_eq!(autostart_config(&bad_port), None, "port {bad:?}");
+        }
+
+        // lanHttp missing defaults to TLS mode; "1" selects plaintext LAN.
+        let mut no_mode = full.clone();
+        no_mode.remove("remoteAccess.lanHttp");
+        assert!(matches!(autostart_config(&no_mode), Some((_, false, _))));
+        let mut lan = full;
+        lan.insert("remoteAccess.lanHttp".into(), "1".into());
+        assert!(matches!(autostart_config(&lan), Some((_, true, _))));
+    }
+}
+
+/// Generates a browser pairing link with the shared token and server public key in the URL fragment.
+/// `address` chooses the interface IP; `rotate` replaces the token, invalidates old links, and clears devices.
+pub fn web_pairing_create(
+    ctx: &AppCtx,
+    address: Option<String>,
+    rotate: bool,
+) -> Result<crate::web::PairingInfo, String> {
+    ctx.remote_web().create_pairing(address, rotate)
+}
+
+/// Lists paired devices that have actually connected for the management panel.
+pub fn web_devices_list(ctx: &AppCtx) -> Vec<crate::web::DeviceEntry> {
+    ctx.remote_web().list_devices()
+}
+
+/// Removes a device registration display entry. Shared links can still reconnect; rotate to revoke all.
+/// Errors when the revocation cannot be persisted, because it would be undone by the next restart.
+pub fn web_device_revoke(ctx: &AppCtx, device_id: &str) -> Result<bool, String> {
+    ctx.remote_web().revoke_device(device_id)
 }

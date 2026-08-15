@@ -521,17 +521,24 @@ fn sanitize_ext(ext: &str) -> String {
 /// always use forward slashes across platforms.
 pub fn save_doc_image(doc_path: &str, bytes: &[u8], ext: &str) -> Result<String, String> {
     let safe_ext = sanitize_ext(ext);
+    let assets = doc_assets_dir(doc_path)?;
+    std::fs::create_dir_all(&assets).map_err(|e| format!("failed to create assets dir: {e}"))?;
+    let name = format!("{}.{}", uuid::Uuid::new_v4(), safe_ext);
+    std::fs::write(assets.join(&name), bytes).map_err(|e| format!("failed to write image: {e}"))?;
+    Ok(format!("assets/{name}"))
+}
+
+/// The effective directory [`save_doc_image`] writes into: `<docPath parent>/assets`. Exposed so
+/// callers that enforce access control (the remote data-dir ACL in web dispatch) can gate the path
+/// actually written, not just the document path itself.
+pub fn doc_assets_dir(doc_path: &str) -> Result<std::path::PathBuf, String> {
     let parent = std::path::Path::new(doc_path)
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .ok_or_else(|| {
             "document path has no parent directory, cannot locate assets dir".to_string()
         })?;
-    let assets = parent.join("assets");
-    std::fs::create_dir_all(&assets).map_err(|e| format!("failed to create assets dir: {e}"))?;
-    let name = format!("{}.{}", uuid::Uuid::new_v4(), safe_ext);
-    std::fs::write(assets.join(&name), bytes).map_err(|e| format!("failed to write image: {e}"))?;
-    Ok(format!("assets/{name}"))
+    Ok(parent.join("assets"))
 }
 
 #[cfg(test)]

@@ -140,6 +140,15 @@ function pickEvictTab(
 /** Local-storage key for frontend-only tab, split, and activation layout. */
 const LAYOUT_KEY = "vlx-layout";
 
+/**
+ * Local-storage key for a workspace explicitly saved from the quit dialog.
+ *
+ * Kept separate from `LAYOUT_KEY` on purpose: that key is rewritten continuously by the debounced autosave, so a
+ * snapshot stored there could be overwritten by ordinary activity before the next launch reads it. This key is
+ * written only on exit and consumed once at startup.
+ */
+const WORKSPACE_KEY = "vlx-workspace";
+
 /** Local-storage key for desktop sidebar tree views ("avatars"). */
 const SIDEBAR_VIEWS_KEY = "vlx-sidebar-tree-views";
 
@@ -422,16 +431,17 @@ interface PersistedLayout {
  */
 let layoutRestored = false;
 
-/** Debounces layout writes to local storage. */
-let saveLayoutTimer: ReturnType<typeof setTimeout> | undefined;
-function saveLayoutTick() {
-  clearTimeout(saveLayoutTimer);
-  saveLayoutTimer = setTimeout(() => {
+/**
+ * Snapshot the current tabs, split trees, and active state.
+ *
+ * `keepEphemeral` decides whether `eph-` split leaves survive. Dropping them is right for the routine desktop
+ * write, whose processes die with the application, but an explicitly saved workspace keeps them so restored
+ * split layouts stay intact.
+ */
+function buildLayout(keepEphemeral: boolean): PersistedLayout {
+  {
     const s = useTermStore.getState();
     const ephemeralIds = new Set(Object.keys(s.ephemeralSessions));
-    // Desktop shells remove ephemeral pane leaves because their processes die with the app. Browser/remote
-    // mode preserves them and their metadata because closing a page only detaches from shared server sessions.
-    const keepEphemeral = platform.env.isBrowser;
     const stripEphemeral = (t0: PaneNode): PaneNode | null => {
       let t: PaneNode | null = t0;
       for (const sid of collectSessionIds(t0)) {
@@ -479,7 +489,7 @@ function saveLayoutTick() {
       (keepEphemeral || !ephemeralIds.has(s.activeSessionId))
         ? s.activeSessionId
         : null;
-    const layout: PersistedLayout = {
+    return {
       openTabs,
       paneTrees,
       activeTabId: s.activeTabId,
@@ -488,8 +498,21 @@ function saveLayoutTick() {
       liveTabs,
       ephemeralSessions: keepEphemeral ? usedEphemeral : undefined,
     };
+  }
+}
+
+/** Debounces routine layout writes to local storage. */
+let saveLayoutTimer: ReturnType<typeof setTimeout> | undefined;
+function saveLayoutTick() {
+  clearTimeout(saveLayoutTimer);
+  saveLayoutTimer = setTimeout(() => {
+    // Desktop shells remove ephemeral pane leaves because their processes die with the app. Browser/remote
+    // mode preserves them and their metadata because closing a page only detaches from shared server sessions.
     try {
-      localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+      localStorage.setItem(
+        LAYOUT_KEY,
+        JSON.stringify(buildLayout(platform.env.isBrowser)),
+      );
     } catch {
       /* Ignore unavailable or full local storage. */
     }
@@ -665,6 +688,12 @@ interface TermStore {
   epochs: Record<SessionId, number>;
   /** Ephemeral split sessions that are neither persisted nor listed in the sidebar. */
   ephemeralSessions: Record<SessionId, Session>;
+  /**
+   * Sessions restored from a saved workspace that have no process yet. `CenterPane` renders a placeholder
+   * instead of mounting `TerminalView`, because mounting a terminal always spawns a PTY; restoring a whole
+   * workspace would otherwise launch every shell at once. `wakeSession` clears the flag on demand.
+   */
+  dormantSessions: Record<SessionId, true>;
   /** Initial prompt pending for a spawned child, consumed by `usePtySession` after startup. */
   pendingPrompts: Record<SessionId, string>;
   /** FIFO spawn-confirmation queue processed one item at a time by `SpawnConfirmModal`. */
@@ -828,6 +857,8 @@ interface TermStore {
   spawnConfirm: boolean;
   orchestrationProfiles: Record<string, OrchestrationProfile>;
   orchestration: OrchestrationLimits;
+  /** Default state of the quit dialog's "save workspace" checkbox, remembered from the last exit. */
+  saveWorkspaceOnQuit: boolean;
   /** Usage auto-refresh interval in seconds; zero disables it. */
   usageRefreshSec: number;
   /** Image-paste mode, configurable only in the local desktop app. */
@@ -1014,6 +1045,13 @@ interface TermStore {
    */
   applyScreenDetection: (id: SessionId, screen: ScreenDetection) => void;
   restartSession: (id: SessionId) => Promise<void>;
+  /** Start a dormant restored session, mounting its terminal and spawning the process. */
+  wakeSession: (id: SessionId) => void;
+  /**
+   * Write the current tabs, split trees, and active state so the next launch can restore them. Called from the
+   * quit dialog when the user opts in, and deliberately synchronous so the snapshot lands before the process exits.
+   */
+  saveWorkspaceSnapshot: () => void;
 
   // Notification navigation.
   /** Records window focus changes. */
@@ -1096,6 +1134,8 @@ interface TermStore {
   setSingleTabMode: (v: boolean) => void;
   /** Toggles confirmation before spawning child sessions. */
   setSpawnConfirm: (v: boolean) => void;
+  /** Remembers the quit dialog's "save workspace" choice as the default for the next exit. */
+  setSaveWorkspaceOnQuit: (v: boolean) => void;
   /** Sets persisted image-paste mode for subsequent local desktop pastes. */
   setImagePasteMode: (v: ImagePasteMode) => void;
   /** Sets persisted usage-refresh interval in seconds; zero disables it. */
@@ -1237,6 +1277,7 @@ function persistAndApplyVisual(getState: () => TermStore) {
     spawnConfirm: s.spawnConfirm,
     orchestrationProfiles: s.orchestrationProfiles,
     orchestration: s.orchestration,
+    saveWorkspaceOnQuit: s.saveWorkspaceOnQuit,
     usageRefreshSec: s.usageRefreshSec,
     imagePasteMode: s.imagePasteMode,
   };
@@ -1393,6 +1434,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
   treeLoaded: false,
   runtimes: {},
   epochs: {},
+  dormantSessions: {},
   ephemeralSessions: {},
   pendingPrompts: {},
   pendingSpawns: [],
@@ -1464,9 +1506,24 @@ export const useTermStore = create<TermStore>((set, get) => ({
         // Restore layout from local storage on the first load only.
         layoutRestored = true;
         // Browser/remote mode restores the complete layout because server sessions survive page closure.
-        // Desktop processes die with the app and therefore start with a clean layout.
+        // Desktop processes die with the app, so it starts clean unless the user saved a workspace on exit.
+        // A saved workspace is consumed immediately: the checkbox is answered per exit, not remembered.
+        let dormant = false;
+        let raw: string | null = null;
         try {
-          const raw = platform.env.isBrowser ? localStorage.getItem(LAYOUT_KEY) : null;
+          raw = localStorage.getItem(WORKSPACE_KEY);
+          if (raw) {
+            localStorage.removeItem(WORKSPACE_KEY);
+            // Restored desktop sessions have no process behind them, so mount placeholders rather than
+            // spawning every shell at once.
+            dormant = !platform.env.isBrowser;
+          } else if (platform.env.isBrowser) {
+            raw = localStorage.getItem(LAYOUT_KEY);
+          }
+        } catch {
+          /* Ignore unavailable local storage. */
+        }
+        try {
           if (raw) {
             const saved: PersistedLayout = JSON.parse(raw);
             // Restore ephemeral metadata before reconciliation so valid split leaves survive, with idle runtimes for rendering.
@@ -1493,6 +1550,18 @@ export const useTermStore = create<TermStore>((set, get) => ({
             });
             // Restore visible tabs, background tabs, and split trees intact.
             layoutPatch = { ...reconciled, ephemeralSessions: restoredEph };
+            if (dormant) {
+              // Mark every surviving leaf dormant. Reconciliation has already dropped leaves whose sessions no
+              // longer exist, so this covers exactly what will be rendered.
+              const dormantSessions: Record<SessionId, true> = {};
+              const trees = reconciled.paneTrees ?? {};
+              for (const tabId of Object.keys(trees)) {
+                for (const sid of collectSessionIds(trees[tabId])) {
+                  dormantSessions[sid] = true;
+                }
+              }
+              layoutPatch = { ...layoutPatch, dormantSessions };
+            }
           }
         } catch {
           /* Invalid or obsolete layout data falls back to a clean start. */
@@ -2024,6 +2093,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
 
   openSession: (id, opts) => {
+    // Explicitly opening a session always starts it, so drop any leftover dormant mark from a restored
+    // workspace whose pane was closed before it was ever woken. Non-dormant sessions are unaffected.
+    get().wakeSession(id);
     set((state) => {
       // Opening/focusing no longer clears notifications immediately; `useNotifications` waits two seconds.
       const notifications = state.notifications;
@@ -3050,6 +3122,26 @@ export const useTermStore = create<TermStore>((set, get) => ({
     }));
   },
 
+  wakeSession: (id) =>
+    set((state) => {
+      if (!(id in state.dormantSessions)) return {};
+      const rest = { ...state.dormantSessions };
+      delete rest[id];
+      // Bump the epoch so CenterPane remounts this leaf as a real terminal, which spawns the process.
+      return {
+        dormantSessions: rest,
+        epochs: { ...state.epochs, [id]: (state.epochs[id] ?? 0) + 1 },
+      };
+    }),
+
+  saveWorkspaceSnapshot: () => {
+    try {
+      localStorage.setItem(WORKSPACE_KEY, JSON.stringify(buildLayout(true)));
+    } catch {
+      /* Ignore unavailable or full local storage; the exit must not be blocked by a failed save. */
+    }
+  },
+
   toggleLeft: () => set((s) => ({ leftCollapsed: !s.leftCollapsed })),
   toggleRight: () => set((s) => ({ rightCollapsed: !s.rightCollapsed })),
   resizeLeft: (deltaX) =>
@@ -3362,6 +3454,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
   setSpawnConfirm: (v) => {
     set({ spawnConfirm: v });
+    persistAndApplyVisual(get);
+  },
+  setSaveWorkspaceOnQuit: (v) => {
+    set({ saveWorkspaceOnQuit: v });
     persistAndApplyVisual(get);
   },
   setImagePasteMode: (v) => {

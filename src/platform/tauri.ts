@@ -34,6 +34,7 @@ import type {
   NotifyCapability,
   OpenerCapability,
   Platform,
+  QuitCapability,
   TransportCapability,
   UnlistenFn,
   VelaCommandCapability,
@@ -158,6 +159,30 @@ const windowCap: WindowCapability = {
   },
 };
 
+const quit: QuitCapability = {
+  async onRequested(cb): Promise<UnlistenFn | null> {
+    // Only the main Tauri window owns the application lifetime. Remote windows and browsers exit with their tab.
+    if (!env.isTauri) return null;
+    const { listen } = await import("@tauri-apps/api/event");
+    return listen("app://quit-requested", () => cb());
+  },
+  async ack() {
+    if (!env.isTauri) return;
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("quit_prompt_ack");
+  },
+  async confirm() {
+    if (!env.isTauri) return;
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("confirm_quit");
+  },
+  async cancel() {
+    if (!env.isTauri) return;
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("cancel_quit");
+  },
+};
+
 const velaCommand: VelaCommandCapability = {
   async status() {
     if (!env.isTauri) return { installed: false, path: null, conflict: null };
@@ -221,6 +246,7 @@ export const tauriPlatform: Platform = {
   badge,
   clipboard,
   window: windowCap,
+  quit,
   velaCommand,
   notify,
   browser,

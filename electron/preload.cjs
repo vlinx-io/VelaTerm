@@ -48,6 +48,22 @@ contextBridge.exposeInMainWorld("vlxNative", {
     ipcRenderer.on("vlx:project:openRequest", handler);
     return () => ipcRenderer.removeListener("vlx:project:openRequest", handler);
   },
+  /**
+   * Application-exit confirmation handshake. The main process sends 'vlx:quit:requested' instead of showing a
+   * native dialog, so the renderer can present a localized dialog carrying the "save workspace" checkbox.
+   * `ack` stops the main-process watchdog; `confirm`/`cancel` report the user's decision.
+   */
+  quit: {
+    onRequested: (cb) => {
+      const handler = () => cb();
+      ipcRenderer.on("vlx:quit:requested", handler);
+      return () => ipcRenderer.removeListener("vlx:quit:requested", handler);
+    },
+    ack: () => ipcRenderer.invoke("vlx:quit:ack"),
+    confirm: () => ipcRenderer.invoke("vlx:quit:confirm"),
+    cancel: () => ipcRenderer.invoke("vlx:quit:cancel"),
+  },
+
   /** Explicitly install/uninstall the `vela` shell command, as in VS Code (shared by macOS settings and the native menu). */
   velaCommand: {
     status: () => ipcRenderer.invoke("vlx:velaCommand:status"),

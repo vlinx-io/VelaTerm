@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{RawQuery, State};
+use axum::extract::{ConnectInfo, RawQuery, State};
 use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use futures_util::stream::{SplitSink, SplitStream};
@@ -27,7 +27,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use super::dispatch::dispatch;
+use super::dispatch::{dispatch, CallOrigin};
 use super::e2ee::{self, Cipher};
 use super::{Ctx, ServeMode};
 use crate::db::repo;
@@ -43,6 +43,7 @@ use crate::pty::session::OutputSink;
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     State(ctx): State<Ctx>,
+    ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
     RawQuery(query): RawQuery,
     headers: HeaderMap,
 ) -> impl IntoResponse {
@@ -63,7 +64,7 @@ pub async fn ws_handler(
             (true, true) => "valid",
         },
     );
-    ws.on_upgrade(move |socket| handle_socket(socket, ctx, query_authed, auth_fp))
+    ws.on_upgrade(move |socket| handle_socket(socket, ctx, query_authed, auth_fp, addr.ip()))
 }
 
 /// Extracts the `token` value from a raw query string such as `a=b&token=xxx&c=d`.
@@ -89,7 +90,13 @@ const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3
 /// this 2.5-interval timeout reclaims half-open connections caused by NAT or sleep.
 const LIVENESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(75);
 
-async fn handle_socket(socket: WebSocket, ctx: Ctx, token_authed: bool, auth_fp: String) {
+async fn handle_socket(
+    socket: WebSocket,
+    ctx: Ctx,
+    token_authed: bool,
+    auth_fp: String,
+    ip: std::net::IpAddr,
+) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
     // ---- E2EE negotiation prelude: inspect the first frame ----
@@ -102,7 +109,7 @@ async fn handle_socket(socket: WebSocket, ctx: Ctx, token_authed: bool, auth_fp:
     match ws_rx.next().await {
         Some(Ok(Message::Text(first))) => {
             if let Some(client_pub) = e2ee::parse_hello(&first) {
-                match handshake(&ctx, &mut ws_tx, &mut ws_rx, &client_pub).await {
+                match handshake(&ctx, &mut ws_tx, &mut ws_rx, &client_pub, ip).await {
                     Some((c, did)) => {
                         cipher = Some(c);
                         device_id = did;
@@ -279,11 +286,17 @@ async fn handle_socket(socket: WebSocket, ctx: Ctx, token_authed: bool, auth_fp:
 /// await encrypted `e2ee_auth`, validate it, then return encrypted `e2ee_authenticated`. Success returns a
 /// [`Cipher`]; decryption/authentication failure or disconnect returns None and ends the connection. Both a
 /// valid device token **and** the correct password are required.
+///
+/// This surface is reachable unauthenticated on 0.0.0.0, so it is hardened against Argon2 DoS: a rate-limited
+/// IP is rejected before any credential work, the memory-hard password verify only runs for holders of the
+/// current pairing token (constant-time check first), and it executes on the blocking pool behind the
+/// process-wide semaphore. Every failed handshake — wrong token or wrong password — counts as a failure.
 async fn handshake(
     ctx: &Ctx,
     ws_tx: &mut SplitSink<WebSocket, Message>,
     ws_rx: &mut SplitStream<WebSocket>,
     client_pub_b64: &str,
+    ip: std::net::IpAddr,
 ) -> Option<(Cipher, Option<String>)> {
     let cipher = ctx.e2ee_keys.derive(client_pub_b64).ok()?;
     // Send ready in plaintext so the client knows the shared key is available for encrypted authentication.
@@ -299,11 +312,27 @@ async fn handshake(
     let (token, password, device_id, device_name) = cipher
         .decrypt_text(&auth_raw)
         .and_then(|p| e2ee::parse_auth(&p))?;
+    // Rate limit before any credential verification; the explicit encrypted reason lets clients distinguish
+    // throttling from a wrong password.
+    // The RAII guard covers the whole credential check; a cancelled handshake future (client
+    // disconnect during the Argon2 await) releases the reservation on drop instead of leaking it.
+    let Some(attempt) = ctx.limiter.allow(ip) else {
+        if let Some(ct) = cipher.encrypt_text(&e2ee::err_msg("rate_limited")) {
+            let _ = ws_tx.send(Message::Text(ct)).await;
+        }
+        return None;
+    };
     let token_ok = ctx.auth.validate_pairing_token(&token);
-    let pw_ok = password
-        .as_deref()
-        .map(|p| ctx.auth.verify_password(p))
-        .unwrap_or(false);
+    // Only a holder of the current pairing token may trigger the expensive Argon2 verify; the token check
+    // is constant-time and cheap, so unauthenticated strangers cost the server nothing memory-hard.
+    let pw_ok = if token_ok {
+        match password.as_deref() {
+            Some(p) => ctx.auth.verify_password_async(p).await,
+            None => false,
+        }
+    } else {
+        false
+    };
     // Reject revoked devices even with a valid pairing token and password, blocking reconnect and re-pairing.
     // Without a self-reported device_id, device-level revocation is unavailable, matching registry placeholder behavior.
     let blocked = device_id
@@ -311,6 +340,7 @@ async fn handshake(
         .map(|id| ctx.auth.is_blocked(id))
         .unwrap_or(false);
     if token_ok && pw_ok && !blocked {
+        attempt.success();
         // After both credentials pass and the device is not revoked, register its self-reported display identity.
         ctx.auth
             .register_device(device_id.as_deref(), device_name.as_deref());
@@ -319,6 +349,7 @@ async fn handshake(
         // Return device_id so the main loop can detect revocation during later heartbeats.
         Some((cipher, device_id))
     } else {
+        attempt.failure();
         // Return an encrypted error, proving key exchange succeeded but identity failed, then close.
         if let Some(ct) = cipher.encrypt_text(&e2ee::err_msg("unauthorized")) {
             let _ = ws_tx.send(Message::Text(ct)).await;
@@ -350,9 +381,12 @@ fn handle_text(
                 .unwrap_or("")
                 .to_string();
             let args = msg.get("args").cloned().unwrap_or(Value::Null);
+            // The caller's trust classification follows this instance's serve mode: Electron's loopback
+            // sidecar clients are local; LAN-exposed instances serve remote paired devices.
+            let origin = CallOrigin::for_serve_mode(ctx.mode);
             if matches!(cmd.as_str(), "pty_write" | "pty_resize") {
                 // Keep frequent, lightweight keyboard and resize operations synchronous in the read loop for responsiveness.
-                let reply = match dispatch(&ctx.app, &cmd, &args, conn_source) {
+                let reply = match dispatch(&ctx.app, &cmd, &args, conn_source, origin) {
                     Ok(result) => json!({"t":"reply","id":id,"ok":true,"result":result}),
                     Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}),
                 };
@@ -365,7 +399,7 @@ fn handle_text(
                 let out_tx = out_tx.clone();
                 let conn_source = conn_source.to_string();
                 tokio::task::spawn_blocking(move || {
-                    let reply = match dispatch(&ctx.app, &cmd, &args, &conn_source) {
+                    let reply = match dispatch(&ctx.app, &cmd, &args, &conn_source, origin) {
                         Ok(result) => json!({"t":"reply","id":id,"ok":true,"result":result}),
                         Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}),
                     };
@@ -567,4 +601,82 @@ fn web_pty_spawn(
         attach_only,
         sink,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::host::HeadlessHost;
+    use std::sync::Arc;
+
+    /// Minimal Ctx around an isolated headless host — no socket is ever bound (tests must never bind
+    /// 0.0.0.0); the WebServer inside stays stopped, matching the dispatch test fixture.
+    fn test_ctx(mode: ServeMode) -> Ctx {
+        let data_dir = std::env::temp_dir().join(format!("vlx-ws-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&data_dir).expect("failed to create the temporary directory");
+        let db = crate::db::Db::open(&data_dir.join("test.db"))
+            .expect("failed to open the test database");
+        let app = AppCtx::Headless(Arc::new(HeadlessHost::new(data_dir.clone(), db)));
+        Ctx {
+            app,
+            // The verifier PHC is never exercised here; handle_text runs after authentication.
+            auth: Arc::new(
+                super::super::auth::AuthState::load_or_create("unused-phc", &data_dir)
+                    .expect("failed to open the test pairing store"),
+            ),
+            e2ee_keys: Arc::new(e2ee::ServerKeys::load_or_create(&data_dir)
+                .expect("failed to create test server keys")),
+            mode,
+            limiter: Arc::new(super::super::rate_limit::LoginRateLimiter::new()),
+        }
+    }
+
+    /// Send one invoke frame through handle_text and await the reply. Non-PTY commands answer from
+    /// spawn_blocking, so the reply arrives asynchronously on the outbound channel.
+    async fn invoke_reply(ctx: &Ctx, cmd: &str) -> Value {
+        let (out_tx, mut out_rx) = mpsc::unbounded_channel();
+        let mut pty_subs = HashMap::new();
+        let mut listened = HashSet::new();
+        let mut event_ids = Vec::new();
+        let frame = json!({"t": "invoke", "id": 1, "cmd": cmd, "args": {}}).to_string();
+        handle_text(
+            ctx,
+            &frame,
+            "ws-test",
+            &out_tx,
+            &mut pty_subs,
+            &mut listened,
+            &mut event_ids,
+        );
+        match out_rx.recv().await.expect("expected a reply frame") {
+            Message::Text(t) => serde_json::from_str(&t).expect("reply must be JSON"),
+            other => panic!("expected a text reply, got: {other:?}"),
+        }
+    }
+
+    /// The seam the dispatch tests cannot see: handle_text itself derives the origin from the serve mode.
+    /// If it regressed to a hard-coded CallOrigin::Local, every dispatch-level gating test would stay
+    /// green while remote WS clients regained the management plane. LanHttp must yield the gating error;
+    /// LoopbackHttp (Electron sidecar) must pass the gate and fail only with the server's own
+    /// not-started error.
+    #[tokio::test]
+    async fn handle_text_gates_management_commands_by_serve_mode() {
+        let remote = test_ctx(ServeMode::LanHttp);
+        let reply = invoke_reply(&remote, "web_pairing_create").await;
+        assert_eq!(reply["ok"], json!(false));
+        assert_eq!(
+            reply["error"],
+            json!("remote_cmd_forbidden:web_pairing_create"),
+            "a LAN-exposed instance must gate management commands in handle_text"
+        );
+
+        let local = test_ctx(ServeMode::LoopbackHttp);
+        let reply = invoke_reply(&local, "web_pairing_create").await;
+        assert_eq!(reply["ok"], json!(false));
+        assert_eq!(
+            reply["error"],
+            json!("Web server not started"),
+            "the Electron loopback lane must keep the full management plane"
+        );
+    }
 }

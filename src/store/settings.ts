@@ -126,6 +126,8 @@ export interface PersistedSettings {
   /** Whether to confirm derived sessions before launch. Enabled lets users review/edit vspawn prompts;
    * disabled immediately creates and starts the session. */
   spawnConfirm: boolean;
+  /** Default state of the quit dialog's "save workspace" checkbox, remembered from the last exit. */
+  saveWorkspaceOnQuit: boolean;
   /** Usage auto-refresh interval in seconds; zero disables it. Applies to Claude and Codex in Info. */
   usageRefreshSec: number;
   /** Image paste mode: upload writes a file path, while agent lets the agent read the clipboard and show
@@ -155,6 +157,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   shortcutOverrides: {},
   agentDefaults: {},
   spawnConfirm: true,
+  saveWorkspaceOnQuit: false,
   usageRefreshSec: 300,
   imagePasteMode: "upload",
   orchestrationProfiles: {

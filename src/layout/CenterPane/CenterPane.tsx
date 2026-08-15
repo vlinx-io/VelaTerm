@@ -15,6 +15,7 @@ import {
   type Rect,
 } from "./paneTree";
 import { BrowserView } from "./browser/BrowserView";
+import { DormantPane } from "./DormantPane";
 import { LiveTabsOverLimitDialog } from "./LiveTabsOverLimitDialog";
 import { SearchBar } from "./SearchBar";
 import { TabBar } from "./TabBar";
@@ -119,6 +120,7 @@ export function CenterPane() {
   const activeTabId = useTermStore((s) => s.activeTabId);
   const activeSessionId = useTermStore((s) => s.activeSessionId);
   const epochs = useTermStore((s) => s.epochs);
+  const dormantSessions = useTermStore((s) => s.dormantSessions);
   const searchOpen = useTermStore((s) => s.searchOpen);
   const focusPane = useTermStore((s) => s.focusPane);
   const closePane = useTermStore((s) => s.closePane);
@@ -204,6 +206,18 @@ export function CenterPane() {
           const epoch = epochs[id] ?? 0;
           const info = visibleBySession.get(id);
           const visible = !!info;
+          // A dormant leaf must not mount TerminalView, because mounting spawns the process.
+          if (dormantSessions[id]) {
+            return (
+              <DormantPane
+                key={`${id}:${epoch}`}
+                session={session}
+                area={info ? rectToStyle(info.rect) : FULL}
+                hidden={!visible}
+                onActivate={info ? () => handleActivate(info.paneId, id) : undefined}
+              />
+            );
+          }
           return (
             <TerminalView
               key={`${id}:${epoch}`}

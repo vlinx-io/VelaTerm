@@ -96,7 +96,9 @@ export function getClientSource(): string | null {
  * - Typing hot paths (pty_write/pty_resize) avoid spawn_blocking thread hops on every keystroke.
  * - Main-thread window/native child-view operations (open_remote_window, open_devtools, browser_*) must execute
  *   on the window host thread.
- * - Remote-host management commands hold WebServer runtime state and are not in dispatch.
+ * - Remote-host management commands (web_pairing_create/web_devices_list/web_device_revoke) stay native
+ *   direct commands on the desktop; matching dispatch arms exist for the Electron loopback sidecar, and
+ *   remote WS clients are rejected there by the backend's origin gate.
  * - Remote fingerprint probe/trust commands pair with open_remote_window and exist only as native commands.
  * Everything else uses desktop_call, whose single backend entry moves blocking data operations off the UI thread.
  */

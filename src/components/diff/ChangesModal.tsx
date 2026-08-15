@@ -16,19 +16,15 @@ import {
   type FileDiff,
 } from "../../ipc/commands";
 import { useTermStore } from "../../store/termStore";
+import { STATUS_META } from "./changeStatus";
 import { languageExtensionFor, vlxCmHighlighting } from "./codeMirrorTheme";
 
-/** Map status to a badge letter and color. */
-const STATUS_META: Record<string, { letter: string; color: string }> = {
-  added: { letter: "A", color: "var(--green, #3fb950)" },
-  modified: { letter: "M", color: "var(--yellow, #d29922)" },
-  deleted: { letter: "D", color: "var(--danger, #e05252)" },
-  untracked: { letter: "U", color: "var(--text-muted)" },
-  renamed: { letter: "R", color: "var(--cyan, #4aa)" },
-};
-
-/** Render a single-file diff by loading both texts into a read-only MergeView, adding language support transparently once loaded. */
-function DiffView({ cwd, path }: { cwd: string; path: string }) {
+/**
+ * Render a single-file diff by loading both texts into a read-only MergeView, adding language support
+ * transparently once loaded. `tick` is the modal's refresh counter: it carries no data, it only forces
+ * the open diff to reload so it cannot disagree with the refreshed line counts beside it.
+ */
+function DiffView({ cwd, path, tick }: { cwd: string; path: string; tick: number }) {
   const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const [diff, setDiff] = useState<FileDiff | null>(null);
@@ -48,7 +44,7 @@ function DiffView({ cwd, path }: { cwd: string; path: string }) {
     return () => {
       alive = false;
     };
-  }, [cwd, path]);
+  }, [cwd, path, tick]);
 
   useEffect(() => {
     const el = ref.current;
@@ -112,18 +108,26 @@ export function ChangesModal() {
   const [files, setFiles] = useState<ChangedFile[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [err, setErr] = useState("");
+  const [tick, setTick] = useState(0);
 
+  // Opening a different directory resets the list; a manual refresh keeps the current selection instead.
   useEffect(() => {
-    if (!cwd) return;
     setFiles(null);
     setSelected(null);
     setErr("");
+  }, [cwd]);
+
+  useEffect(() => {
+    if (!cwd) return;
     let alive = true;
     void gitChangedFiles(cwd)
       .then((fs) => {
         if (!alive) return;
         setFiles(fs);
-        setSelected(fs[0]?.path ?? null);
+        setSelected((cur) =>
+          cur && fs.some((f) => f.path === cur) ? cur : (fs[0]?.path ?? null),
+        );
+        setErr("");
       })
       .catch((e) => {
         if (alive) setErr(String(e));
@@ -131,7 +135,7 @@ export function ChangesModal() {
     return () => {
       alive = false;
     };
-  }, [cwd]);
+  }, [cwd, tick]);
 
   // Suspend native browser views while the modal is visible so they cannot cover it (architecture document §17).
   useSuspendNativeViews(Boolean(cwd));
@@ -180,9 +184,14 @@ export function ChangesModal() {
           <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)" }}>
             {t("changes.title")}
           </div>
-          <button className="vlx-btn" onClick={close}>
-            {t("common.close")}
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="vlx-btn" onClick={() => setTick((n) => n + 1)}>
+              {t("changes.refresh")}
+            </button>
+            <button className="vlx-btn" onClick={close}>
+              {t("common.close")}
+            </button>
+          </div>
         </div>
 
         {/* Body: file list on the left, diff on the right. */}
@@ -284,7 +293,7 @@ export function ChangesModal() {
 
           <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
             {selected ? (
-              <DiffView cwd={cwd} path={selected} />
+              <DiffView cwd={cwd} path={selected} tick={tick} />
             ) : (
               <div style={{ padding: 16, fontSize: 12.5, color: "var(--text-muted)" }}>
                 {t("changes.selectFile")}

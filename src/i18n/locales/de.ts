@@ -193,6 +193,8 @@ const de: typeof en = {
   "changes.loading": "Wird geladen…",
   "changes.loadingDiff": "Diff wird geladen…",
   "changes.noChanges": "Keine Änderungen",
+  "changes.refresh": "Aktualisieren",
+  "changes.notRepo": "Kein Git-Repository",
   "changes.selectFile": "Datei zum Anzeigen auswählen",
   "changes.binary": "Binärdatei – Zeilen-Diff nicht verfügbar",
   "tree.merge": "Merge…", // TODO translate
@@ -320,6 +322,11 @@ const de: typeof en = {
   "remote.start": "Server starten", // Start Server
   "remote.portLabel": "Port", // Port
   "remote.portInvalid": "Port muss zwischen 1 und 65535 liegen", // Port must be between 1 and 65535
+  "remote.ipLabel": "IP-Adresse", // IP address
+  "remote.ipAuto": "Automatisch (erste LAN-Adresse)", // Automatic (first LAN address)
+  "remote.ipVpn": "VPN", // VPN
+  "remote.qrHint":
+    "Mit dem Handy scannen, um den Pairing-Link auf der gewählten Adresse zu öffnen.", // Scan with your phone to open the pairing link on the selected address.
   "remote.fingerprintLabel": "Zertifikat-Fingerabdruck (SHA-256)", // Certificate fingerprint (SHA-256)
   "remote.fingerprintHint":
     "Beim ersten Verbinden warnen Browser, dass das Zertifikat nicht vertrauenswürdig ist – bei einem selbstsignierten Zertifikat normal. Vergleichen Sie diesen Fingerabdruck, um sicherzugehen, dass es dieser Rechner ist.", // On first connect, browsers warn the certificate is untrusted…
@@ -338,6 +345,9 @@ const de: typeof en = {
   "remote.deviceBlockHint":
     "Gesperrte Geräte werden getrennt und können sich nicht erneut verbinden (ein neuer Kopplungslink ist nötig). Andere Geräte sind nicht betroffen.", // Block hint
   "remote.devicesEmpty": "Keine gekoppelten Geräte", // No paired devices yet
+  "remote.autoRestartHint":
+    "Der Fernzugriff startet beim erneuten Öffnen der App automatisch. „Server stoppen“ schaltet das ab.", // Remote access restarts automatically when the app is reopened. Stop Server turns this off.
+  "remote.autostartFailed": "Automatischer Start fehlgeschlagen:", // Automatic start failed:
 
   // ── Remote connection panel ──
   "connect.title": "Mit Remote-Server verbinden", // Connect to Remote Server
@@ -648,6 +658,14 @@ const de: typeof en = {
   "browser.addressPlaceholder": "URL oder Suchbegriffe eingeben", // Enter URL or search terms
   "browser.quickAccess": "Schnellzugriff", // Quick access
   "browser.loading": "Lädt…", // Loading…
+  // Application-exit confirmation and dormant restored sessions.
+  "quit.title": "VelaTerm beenden?",  // Quit VelaTerm?
+  "quit.body": "Alle laufenden Terminal- und Agent-Sitzungen werden beendet.",  // Any running terminal and agent sessions will be stopped.
+  "quit.saveWorkspace": "Arbeitsbereich speichern",  // Save workspace
+  "quit.saveWorkspaceHint": "Beim nächsten Start dieselben Tabs und Teilungen öffnen. Terminals werden wiederhergestellt, aber nicht neu gestartet.",  // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
+  "quit.confirm": "Beenden",  // Quit
+  "dormant.body": "Aus dem gespeicherten Arbeitsbereich wiederhergestellt. Es läuft noch kein Prozess.",  // Restored from your saved workspace. No process is running yet.
+  "dormant.start": "Starten",  // Start
   "overlimit.title": (max) => `Hintergrund-Limit überschritten (${max})`, // Background keep-alive over limit ({max})
   "overlimit.body": "All background tabs are working or awaiting your reply. Choose one to end:", // All background tabs are working or awaiting your reply. Choose one to end:
   "overlimit.kill": "End Selected", // End Selected
@@ -823,6 +841,7 @@ const de: typeof en = {
   "login.passwordPlaceholder": "Zugangspasswort", // Access password
   "login.connect": "Verbinden", // Connect
   "login.wrongPassword": "Falsches Passwort", // Wrong password
+  "login.rateLimited": "Zu viele Versuche. Bitte eine Minute warten und erneut versuchen.", // Too many attempts. Please wait a minute and try again.
   "login.failed": "Anmeldung fehlgeschlagen, bitte erneut versuchen", // Login failed, please try again
   "login.pairingRequired": "Dieser Server erfordert einen Kopplungslink. Öffnen Sie den im Fernzugriff-Bereich der Desktop-App erzeugten Link.", // This server requires a pairing link
   "login.authFailed": "Falsches Passwort oder der Kopplungslink ist abgelaufen. Bitte verbinden Sie sich mit einem neuen Kopplungslink erneut.", // Wrong password or pairing link expired
@@ -868,6 +887,9 @@ const de: typeof en = {
   "transport.wsDisconnected": "WebSocket getrennt", // WebSocket disconnected
   "transport.wsConnectFailed": "WebSocket-Verbindung fehlgeschlagen", // WebSocket connection failed
   "transport.cmdFailed": "Befehl fehlgeschlagen", // Command failed
+  "transport.remoteCmdForbidden": (cmd: string) => `Befehl für Remote-Clients nicht verfügbar: ${cmd}`, // Command not available to remote clients
+  "transport.remoteSettingForbidden": (key: string) => `Einstellungsschlüssel für Remote-Clients nicht schreibbar: ${key}`, // Settings key not writable by remote clients
+  "transport.remotePathForbidden": (path: string) => `Remote-Clients können nicht auf Dateien im App-Datenverzeichnis zugreifen: ${path}`, // Remote clients cannot access files in the app data directory
 
   // ── Crepe（WYSIWYG-Editor）──
   "crepe.placeholder": "Text eingeben oder / für das Einfügemenü drücken", // Type text, or press / for the insert menu

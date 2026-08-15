@@ -522,6 +522,24 @@ export function LeftSidebar() {
             clearSelection();
           },
         });
+        // Refresh Status re-checks each selected session against this pane's status filter, mirroring the
+        // single-session item. It appears only when the pane the menu was opened from filters by status.
+        const statusView = sidebarTreeViews.find(
+          (v) => v.id === (menu?.viewId ?? effectiveActiveViewId),
+        );
+        if (statusView?.statusFilter) {
+          items.push({
+            label: t("tree.refreshStatusMatch"),
+            icon: <Icons.restart size={14} />,
+            onClick: () => {
+              const st = useTermStore.getState();
+              selection
+                .filter((s) => s.kind === "session")
+                .forEach((s) => st.refreshSidebarTreeViewStatusMatch(statusView.id, s.id));
+              clearSelection();
+            },
+          });
+        }
         // Offer Move Selected To only when every selected session belongs to one project.
         const moveItem = buildMoveToMany(
           selection.filter((s) => s.kind === "session").map((s) => s.id),

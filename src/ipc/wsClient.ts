@@ -36,6 +36,7 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import nacl from "tweetnacl";
 
 import { t } from "../i18n";
+import { handshakeFailureReason, mapBackendError, type HandshakeFailure } from "./backendError";
 import { recordRequestError } from "./reqLog";
 import type { PtySpawnArgs, PtySpawnResult } from "./transport";
 
@@ -225,8 +226,9 @@ class WsClient {
   private reconnectAttempts = 0;
   /** Pending reconnect timer; ensures that only one retry is scheduled at a time. */
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Credential-expiry callbacks; LoginGate returns to login after an /api/me 401. */
-  private readonly authLostCbs = new Set<() => void>();
+  /** Credential-expiry callbacks; LoginGate returns to login after an /api/me 401. The optional
+   *  reason distinguishes a server-side login rate limit from failed credentials on the E2EE path. */
+  private readonly authLostCbs = new Set<(reason?: HandshakeFailure) => void>();
   /** Connection-state callbacks used to show or hide the disconnect banner. */
   private readonly connStateCbs = new Set<(state: ConnState, attempts: number) => void>();
   /** Time of the latest inbound message, including heartbeats, for idle detection. */
@@ -332,9 +334,17 @@ class WsClient {
     return bytesToB64(frame);
   }
 
-  /** Decrypt an inbound base64 text frame; return null on failure. */
+  /** Decrypt an inbound base64 text frame; return null on failure — including malformed base64,
+   *  where atob throws: an invalid frame must degrade to the caller's null path (failHandshake
+   *  during the handshake, frame discard afterwards) instead of throwing out of onMessage. */
   private decryptText(b64: string): string | null {
-    const bytes = this.decryptBytes(b64ToBytes(b64));
+    let frame: Uint8Array;
+    try {
+      frame = b64ToBytes(b64);
+    } catch {
+      return null;
+    }
+    const bytes = this.decryptBytes(frame);
     return bytes ? textDecoder.decode(bytes) : null;
   }
 
@@ -488,11 +498,13 @@ class WsClient {
     this.pendingConnect = null;
   }
 
-  /** On E2EE decryption/auth failure, close the connection and send LoginGate back to login. */
-  private failHandshake() {
+  /** On E2EE decryption/auth failure, close the connection and send LoginGate back to login.
+   *  `reason` carries the server's handshake error code so the UI can show a rate-limit message
+   *  instead of misreporting throttling as a wrong password. */
+  private failHandshake(reason?: HandshakeFailure) {
     this.pendingConnect?.reject(new TransportError(t("transport.wsConnectFailed")));
     this.pendingConnect = null;
-    for (const cb of this.authLostCbs) cb();
+    for (const cb of this.authLostCbs) cb(reason);
     this.ws?.close();
   }
 
@@ -579,7 +591,7 @@ class WsClient {
           this.failHandshake();
           return;
         }
-        let m: { type?: string };
+        let m: { type?: string; code?: string };
         try {
           m = JSON.parse(plain);
         } catch {
@@ -589,8 +601,10 @@ class WsClient {
           this.e2eeReady = true;
           if (this.ws) this.goOnline(this.ws);
         } else {
-          // e2ee_error means an invalid device token or password; return to login.
-          this.failHandshake();
+          // e2ee_error distinguishes server-side login throttling (code "rate_limited", sent
+          // before any credential work) from an invalid device token or password; forward the
+          // reason so LoginGate can show a rate-limit message instead of "wrong password".
+          this.failHandshake(handshakeFailureReason(m));
         }
       }
       return;
@@ -633,7 +647,9 @@ class WsClient {
       if (!p) return;
       this.pending.delete(msg.id as number);
       if (msg.ok) p.resolve(msg.result);
-      else p.reject(new Error(String(msg.error ?? t("transport.cmdFailed"))));
+      // Stable backend gating codes (remote_*_forbidden) are localized here, at the single point
+      // where every backend error enters the UI; other errors pass through unchanged.
+      else p.reject(new Error(mapBackendError(String(msg.error ?? t("transport.cmdFailed")))));
     } else if (msg.t === "event") {
       const subs = this.events.get(msg.name as string);
       if (subs) for (const cb of subs) cb(msg.payload);
@@ -739,8 +755,9 @@ class WsClient {
     this.reattachStartCbs.delete(sid);
   }
 
-  /** Register an auth-expiry callback for /api/me 401 responses; returns an unsubscribe function. */
-  onAuthLost(cb: () => void): () => void {
+  /** Register an auth-expiry callback for /api/me 401 responses and E2EE handshake failures; the
+   *  optional reason reports server-side rate limiting. Returns an unsubscribe function. */
+  onAuthLost(cb: (reason?: HandshakeFailure) => void): () => void {
     this.authLostCbs.add(cb);
     return () => {
       this.authLostCbs.delete(cb);

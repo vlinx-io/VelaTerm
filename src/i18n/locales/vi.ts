@@ -192,6 +192,8 @@ const vi: typeof en = {
   "changes.loading": "Đang tải…",
   "changes.loadingDiff": "Đang tải khác biệt…",
   "changes.noChanges": "Không có thay đổi",
+  "changes.refresh": "Làm mới",
+  "changes.notRepo": "Không phải kho git",
   "changes.selectFile": "Chọn tệp để xem",
   "changes.binary": "Tệp nhị phân — không thể xem khác biệt theo dòng",
   "tree.merge": "Hợp nhất…",
@@ -317,6 +319,11 @@ const vi: typeof en = {
   "remote.start": "Khởi động máy chủ",
   "remote.portLabel": "Cổng",
   "remote.portInvalid": "Cổng phải nằm trong khoảng 1 đến 65535",
+  "remote.ipLabel": "Địa chỉ IP", // IP address
+  "remote.ipAuto": "Tự động (địa chỉ LAN đầu tiên)", // Automatic (first LAN address)
+  "remote.ipVpn": "VPN", // VPN
+  "remote.qrHint":
+    "Quét bằng điện thoại để mở liên kết ghép nối trên địa chỉ đã chọn.", // Scan with your phone to open the pairing link on the selected address.
   "remote.fingerprintLabel": "Dấu vân tay chứng chỉ (SHA-256)",
   "remote.fingerprintHint":
     "Ở lần kết nối đầu tiên, trình duyệt cảnh báo chứng chỉ không đáng tin cậy — điều này bình thường với chứng chỉ tự ký. Đối chiếu dấu vân tay để xác nhận bạn đang kết nối tới máy này.",
@@ -333,6 +340,9 @@ const vi: typeof en = {
   "remote.deviceBlockHint":
     "Thiết bị bị chặn sẽ mất kết nối và không thể kết nối lại (cần liên kết ghép đôi mới). Các thiết bị khác không bị ảnh hưởng.",
   "remote.devicesEmpty": "Chưa có thiết bị ghép đôi",
+  "remote.autoRestartHint":
+    "Truy cập từ xa sẽ tự khởi động lại khi mở lại ứng dụng. \"Dừng máy chủ\" sẽ tắt tính năng này.", // Remote access restarts automatically when the app is reopened. Stop Server turns this off.
+  "remote.autostartFailed": "Tự động khởi động thất bại:", // Automatic start failed:
   "connect.title": "Kết nối máy chủ từ xa",
   "connect.pairingPlaceholder": "Dán liên kết ghép đôi",
   "connect.confirmConnect": "Dấu vân tay khớp, kết nối",
@@ -629,6 +639,14 @@ const vi: typeof en = {
   "browser.addressPlaceholder": "Nhập URL hoặc từ khóa tìm kiếm",
   "browser.quickAccess": "Truy cập nhanh",
   "browser.loading": "Đang tải…",
+  // Application-exit confirmation and dormant restored sessions.
+  "quit.title": "Thoát VelaTerm?",  // Quit VelaTerm?
+  "quit.body": "Mọi phiên terminal và agent đang chạy sẽ bị dừng.",  // Any running terminal and agent sessions will be stopped.
+  "quit.saveWorkspace": "Lưu không gian làm việc",  // Save workspace
+  "quit.saveWorkspaceHint": "Lần sau mở lại đúng các thẻ và khung chia này. Terminal được khôi phục nhưng không tự khởi động lại.",  // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
+  "quit.confirm": "Thoát",  // Quit
+  "dormant.body": "Đã khôi phục từ không gian làm việc đã lưu. Chưa có tiến trình nào chạy.",  // Restored from your saved workspace. No process is running yet.
+  "dormant.start": "Khởi động",  // Start
   "overlimit.title": (max: number) => `Số thẻ duy trì nền vượt giới hạn (${max})`,
   "overlimit.body": "Tất cả thẻ nền đang làm việc hoặc chờ bạn trả lời. Chọn một thẻ để kết thúc:",
   "overlimit.kill": "Kết thúc mục đã chọn",
@@ -813,6 +831,7 @@ const vi: typeof en = {
   "login.passwordPlaceholder": "Mật khẩu truy cập",
   "login.connect": "Kết nối",
   "login.wrongPassword": "Sai mật khẩu",
+  "login.rateLimited": "Quá nhiều lần thử. Vui lòng đợi một phút rồi thử lại.", // Too many attempts. Please wait a minute and try again.
   "login.failed": "Đăng nhập thất bại, vui lòng thử lại",
   "login.pairingRequired": "Máy chủ này yêu cầu liên kết ghép đôi. Hãy mở liên kết từ bảng Truy cập từ xa của ứng dụng máy tính.",
   "login.authFailed": "Sai mật khẩu hoặc liên kết ghép đôi đã hết hạn. Hãy kết nối lại bằng liên kết mới.",
@@ -855,6 +874,9 @@ const vi: typeof en = {
   "transport.wsDisconnected": "WebSocket đã ngắt kết nối",
   "transport.wsConnectFailed": "Kết nối WebSocket thất bại",
   "transport.cmdFailed": "Lệnh thất bại",
+  "transport.remoteCmdForbidden": (cmd: string) => `Lệnh không khả dụng cho máy khách từ xa: ${cmd}`, // Command not available to remote clients
+  "transport.remoteSettingForbidden": (key: string) => `Khóa cài đặt không thể ghi bởi máy khách từ xa: ${key}`, // Settings key not writable by remote clients
+  "transport.remotePathForbidden": (path: string) => `Máy khách từ xa không thể truy cập tệp trong thư mục dữ liệu của ứng dụng: ${path}`, // Remote clients cannot access files in the app data directory
 
   // Trình soạn thảo WYSIWYG
   "crepe.placeholder": "Nhập văn bản hoặc nhấn / để mở menu chèn",

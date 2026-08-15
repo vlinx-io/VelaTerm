@@ -37,10 +37,12 @@ const state = {
   password: "",
   /** Whether an intentional shutdown is in progress; do not restart the sidecar during shutdown. */
   quitting: false,
-  /** Whether the user confirmed shutdown in the native dialog; subsequent before-quit/close events proceed immediately. */
+  /** Whether the user confirmed shutdown; subsequent before-quit/close events proceed immediately. */
   quitConfirmed: false,
-  /** Whether the native quit dialog is already open, preventing duplicates from repeated menu or close-button clicks. */
+  /** Whether a quit dialog is already open, preventing duplicates from repeated menu or close-button clicks. */
   quitConfirmationPending: false,
+  /** Whether the renderer reported that its quit dialog is on screen; an unacknowledged prompt falls back to the native dialog. */
+  quitPromptAcked: false,
   /** Whether the main UI started successfully; after this point, quitting requires confirmation even during sidecar recovery. */
   quitConfirmationEnabled: false,
   /** Whether readiness was reached at least once. Only an unexpected exit after readiness counts as a restartable crash; initial failures are reported by startSidecar. */
@@ -345,6 +347,27 @@ async function requestQuitConfirmation() {
     return;
   }
   state.quitConfirmationPending = true;
+  state.quitPromptAcked = false;
+  // The renderer owns the dialog so it can offer the "save workspace" checkbox and localized copy, neither of
+  // which showMessageBox supports.
+  if (state.win && !state.win.isDestroyed()) {
+    state.win.webContents.send("vlx:quit:requested");
+    // A frozen or crashed renderer never acknowledges, which would leave the application unquittable.
+    setTimeout(() => {
+      if (state.quitConfirmationPending && !state.quitPromptAcked && !state.quitConfirmed) {
+        void nativeQuitConfirmation();
+      }
+    }, 5000);
+    return;
+  }
+  await nativeQuitConfirmation();
+}
+
+/**
+ * Degraded confirmation used when the renderer is unavailable. A native message box supports neither a checkbox
+ * nor translated copy, so it only offers plain quit/cancel and never saves the workspace.
+ */
+async function nativeQuitConfirmation() {
   try {
     const result = await dialog.showMessageBox(
       state.win && !state.win.isDestroyed() ? state.win : undefined,
@@ -677,6 +700,19 @@ function buildMenu() {
 // ─────────────────────────── Native-capability IPC (preload bridge backend) ───────────────────────────
 
 function registerNativeIpc() {
+  // Quit-confirmation handshake; see requestQuitConfirmation.
+  ipcMain.handle("vlx:quit:ack", () => {
+    state.quitPromptAcked = true;
+  });
+  ipcMain.handle("vlx:quit:confirm", () => {
+    state.quitConfirmationPending = false;
+    state.quitConfirmed = true;
+    app.quit();
+  });
+  ipcMain.handle("vlx:quit:cancel", () => {
+    state.quitConfirmationPending = false;
+    state.quitPromptAcked = false;
+  });
   ipcMain.handle("vlx:velaCommand:status", () => velaCommandStatus());
   ipcMain.handle("vlx:velaCommand:install", () => installVelaCommand());
   ipcMain.handle("vlx:velaCommand:uninstall", () => uninstallVelaCommand());

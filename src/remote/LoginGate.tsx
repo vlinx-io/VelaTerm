@@ -70,8 +70,16 @@ export function LoginGate({ children }: { children: ReactNode }) {
   // silently relogin and reconnect, unless the password is rejected. Without a password, return to login.
   useEffect(() => {
     if (isTauri) return;
-    return wsClient.onAuthLost(() => {
+    return wsClient.onAuthLost((reason) => {
       if (wsClient.isPairingMode()) {
+        // Server-side login throttling is temporary, not a credential failure: return to the
+        // password form with the rate-limit message (the same key the HTTP 429 path uses below)
+        // instead of the terminal "link expired" guidance.
+        if (reason === "rate_limited") {
+          setError(t("login.rateLimited"));
+          setPhase("need-login");
+          return;
+        }
         setPhase("auth-failed");
         return;
       }
@@ -90,8 +98,14 @@ export function LoginGate({ children }: { children: ReactNode }) {
               setPhase("ready");
               return;
             }
-            // Explicit rejection usually means the server restarted with another password; stop retrying.
-            reloginRejected.current = true;
+            if (r.status === 429) {
+              // Rate limiting is temporary, not a credential failure: show the rate-limit message
+              // and do NOT latch reloginRejected, so a later attempt can succeed after it expires.
+              setError(t("login.rateLimited"));
+            } else {
+              // Explicit rejection usually means the server restarted with another password; stop retrying.
+              reloginRejected.current = true;
+            }
           } catch {
             /* Let reconnect backoff handle network failure; recovery will invoke onAuthLost again. */
           } finally {
@@ -257,6 +271,9 @@ export function LoginGate({ children }: { children: ReactNode }) {
           reloginRejected.current = false;
           setPhase("ready");
         } else setError(t("login.failed"));
+      } else if (r.status === 429) {
+        // Rate-limited by the backend after repeated failures; "wrong password" would mislead here.
+        setError(t("login.rateLimited"));
       } else setError(t("login.wrongPassword"));
     } catch {
       setError(t("login.failed"));

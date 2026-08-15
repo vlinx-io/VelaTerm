@@ -254,8 +254,13 @@ mod tests {
 
         let web = crate::web::WebServer::new();
         let port = free_port();
-        web.start(ctx, "pw", Some(port), crate::web::ServeMode::LanTls)
-            .expect("the web service should start");
+        web.start(
+            ctx,
+            crate::web::StartAuth::Password("pw".into()),
+            Some(port),
+            crate::web::ServeMode::LanTls,
+        )
+        .expect("the web service should start");
 
         // Wait for the background service thread to finish binding after start's preflight.
         for _ in 0..50 {

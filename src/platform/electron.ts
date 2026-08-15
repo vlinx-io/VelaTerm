@@ -29,6 +29,7 @@ import type {
   NotifyCapability,
   OpenerCapability,
   Platform,
+  QuitCapability,
   SaveFileOptions,
   TransportCapability,
   UnlistenFn,
@@ -49,6 +50,12 @@ interface VlxNativeBridge {
   onFocusChanged(cb: (focused: boolean) => void): () => void;
   takeOpenProjectRequest(): Promise<string | null>;
   onOpenProjectRequest(cb: () => void): () => void;
+  quit?: {
+    onRequested(cb: () => void): () => void;
+    ack(): Promise<void>;
+    confirm(): Promise<void>;
+    cancel(): Promise<void>;
+  };
   velaCommand?: {
     status(): Promise<VelaCommandStatus>;
     install(): Promise<VelaCommandStatus>;
@@ -159,6 +166,21 @@ const windowCap: WindowCapability = {
   },
 };
 
+const quit: QuitCapability = {
+  async onRequested(cb): Promise<UnlistenFn | null> {
+    return bridge()?.quit?.onRequested(cb) ?? null;
+  },
+  async ack() {
+    await bridge()?.quit?.ack();
+  },
+  async confirm() {
+    await bridge()?.quit?.confirm();
+  },
+  async cancel() {
+    await bridge()?.quit?.cancel();
+  },
+};
+
 const velaCommand: VelaCommandCapability = {
   async status() {
     return (await bridge()?.velaCommand?.status()) ?? { installed: false, path: null, conflict: null };
@@ -234,6 +256,7 @@ export const electronPlatform: Platform = {
   badge,
   clipboard,
   window: windowCap,
+  quit,
   velaCommand,
   notify,
   browser,

@@ -117,6 +117,26 @@ export interface WindowCapability {
   onOpenProjectRequest(cb: () => void): Promise<UnlistenFn>;
 }
 
+/**
+ * Application-exit confirmation capability.
+ *
+ * Both desktop shells intercept a user-triggered exit and hand the decision to the frontend, because a native
+ * message dialog supports neither the "save workspace" checkbox nor translated copy. The flow is: shell fires
+ * `onRequested` → the frontend calls `ack()` right away so the shell's watchdog stops → the user decides →
+ * the frontend calls `confirm()` or `cancel()`. Browsers have no application exit, so `onRequested` returns null
+ * and the remaining methods no-op.
+ */
+export interface QuitCapability {
+  /** Subscribe to exit requests; returns an unsubscribe function, or null where there is no application exit. */
+  onRequested(cb: () => void): Promise<UnlistenFn | null>;
+  /** Report that the dialog is on screen, so the shell does not fall back to its native dialog. */
+  ack(): Promise<void>;
+  /** Approve the exit. Callers must finish persisting workspace state before calling this. */
+  confirm(): Promise<void>;
+  /** Dismiss the request, leaving the application running and able to prompt again later. */
+  cancel(): Promise<void>;
+}
+
 /** Resolution status of the `vela` command on PATH. */
 export interface VelaCommandStatus {
   installed: boolean;
@@ -218,6 +238,8 @@ export interface Platform {
   clipboard: ClipboardCapability;
   /** Current window. */
   window: WindowCapability;
+  /** Application-exit confirmation handshake. */
+  quit: QuitCapability;
   /** Install/uninstall the `vela` shell command. */
   velaCommand: VelaCommandCapability;
   /** System notifications. */

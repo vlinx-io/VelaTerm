@@ -192,6 +192,8 @@ const es: typeof en = {
   "changes.loading": "Cargando…",
   "changes.loadingDiff": "Cargando diff…",
   "changes.noChanges": "Sin cambios",
+  "changes.refresh": "Actualizar",
+  "changes.notRepo": "No es un repositorio git",
   "changes.selectFile": "Selecciona un archivo",
   "changes.binary": "Archivo binario: diff por línea no disponible",
   "tree.merge": "Merge…", // TODO translate
@@ -319,6 +321,11 @@ const es: typeof en = {
   "remote.start": "Iniciar servidor", // Start Server
   "remote.portLabel": "Puerto", // Port
   "remote.portInvalid": "El puerto debe estar entre 1 y 65535", // Port must be between 1 and 65535
+  "remote.ipLabel": "Dirección IP", // IP address
+  "remote.ipAuto": "Automática (primera dirección LAN)", // Automatic (first LAN address)
+  "remote.ipVpn": "VPN", // VPN
+  "remote.qrHint":
+    "Escanea con tu teléfono para abrir el enlace de emparejamiento en la dirección seleccionada.", // Scan with your phone to open the pairing link on the selected address.
   "remote.fingerprintLabel": "Huella del certificado (SHA-256)", // Certificate fingerprint (SHA-256)
   "remote.fingerprintHint":
     "En la primera conexión, los navegadores advierten de que el certificado no es de confianza: es normal en un certificado autofirmado. Compara esta huella para confirmar que es este equipo.", // On first connect, browsers warn the certificate is untrusted…
@@ -337,6 +344,9 @@ const es: typeof en = {
   "remote.deviceBlockHint":
     "Los dispositivos bloqueados se desconectan y no pueden volver a conectarse (necesitan un nuevo enlace de emparejamiento). Los demás dispositivos no se ven afectados.", // Block hint
   "remote.devicesEmpty": "No hay dispositivos emparejados", // No paired devices yet
+  "remote.autoRestartHint":
+    "El acceso remoto se reinicia automáticamente al volver a abrir la aplicación. «Detener servidor» lo desactiva.", // Remote access restarts automatically when the app is reopened. Stop Server turns this off.
+  "remote.autostartFailed": "Error en el inicio automático:", // Automatic start failed:
 
   // ── Remote connection panel ──
   "connect.title": "Conectar a servidor remoto", // Connect to Remote Server
@@ -647,6 +657,14 @@ const es: typeof en = {
   "browser.addressPlaceholder": "Introduce una URL o términos de búsqueda", // Enter URL or search terms
   "browser.quickAccess": "Acceso rápido", // Quick access
   "browser.loading": "Cargando…", // Loading…
+  // Application-exit confirmation and dormant restored sessions.
+  "quit.title": "¿Salir de VelaTerm?",  // Quit VelaTerm?
+  "quit.body": "Se detendrán todas las sesiones de terminal y de agente en ejecución.",  // Any running terminal and agent sessions will be stopped.
+  "quit.saveWorkspace": "Guardar espacio de trabajo",  // Save workspace
+  "quit.saveWorkspaceHint": "Abrir las mismas pestañas y divisiones la próxima vez. Las terminales se restauran, pero no se reinician.",  // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
+  "quit.confirm": "Salir",  // Quit
+  "dormant.body": "Restaurado desde el espacio de trabajo guardado. Todavía no hay ningún proceso en ejecución.",  // Restored from your saved workspace. No process is running yet.
+  "dormant.start": "Iniciar",  // Start
   "overlimit.title": (max) => `Límite de segundo plano superado (${max})`, // Background keep-alive over limit ({max})
   "overlimit.body": "All background tabs are working or awaiting your reply. Choose one to end:", // All background tabs are working or awaiting your reply. Choose one to end:
   "overlimit.kill": "End Selected", // End Selected
@@ -822,6 +840,7 @@ const es: typeof en = {
   "login.passwordPlaceholder": "Contraseña de acceso", // Access password
   "login.connect": "Conectar", // Connect
   "login.wrongPassword": "Contraseña incorrecta", // Wrong password
+  "login.rateLimited": "Demasiados intentos. Espera un minuto y vuelve a intentarlo.", // Too many attempts. Please wait a minute and try again.
   "login.failed": "Error de inicio de sesión, inténtalo de nuevo", // Login failed, please try again
   "login.pairingRequired": "Este servidor requiere un enlace de emparejamiento. Abre el enlace generado en el panel de Acceso remoto de la app de escritorio.", // This server requires a pairing link
   "login.authFailed": "Contraseña incorrecta o el enlace de emparejamiento ha caducado. Vuelve a conectarte con un nuevo enlace de emparejamiento.", // Wrong password or pairing link expired
@@ -867,6 +886,9 @@ const es: typeof en = {
   "transport.wsDisconnected": "WebSocket desconectado", // WebSocket disconnected
   "transport.wsConnectFailed": "Fallo de conexión WebSocket", // WebSocket connection failed
   "transport.cmdFailed": "El comando falló", // Command failed
+  "transport.remoteCmdForbidden": (cmd: string) => `Comando no disponible para clientes remotos: ${cmd}`, // Command not available to remote clients
+  "transport.remoteSettingForbidden": (key: string) => `Clave de configuración no modificable por clientes remotos: ${key}`, // Settings key not writable by remote clients
+  "transport.remotePathForbidden": (path: string) => `Los clientes remotos no pueden acceder a archivos del directorio de datos de la aplicación: ${path}`, // Remote clients cannot access files in the app data directory
 
   // ── Crepe（editor WYSIWYG）──
   "crepe.placeholder": "Escribe texto, o pulsa / para el menú de inserción", // Type text, or press / for the insert menu

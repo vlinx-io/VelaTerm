@@ -19,13 +19,42 @@ use crate::files;
 use crate::host::AppCtx;
 use crate::models::SessionKind;
 use crate::pty::manager::{PtyManager, SpawnResult};
-use crate::web::{DeviceEntry, PairingInfo, WebServer};
+use crate::web::{DeviceEntry, PairingInfo};
 
 /// Take and clear an unconsumed `vela <path>` request. The frontend checks after installing its
 /// listener; second-instance events use the same wake-only event plus queued payload to avoid races.
 #[tauri::command]
 pub fn take_open_project_request(pending: State<crate::PendingOpenProject>) -> Option<String> {
     pending.0.lock().unwrap().take()
+}
+
+/// Quit-confirmation handshake. The run-loop emits `app://quit-requested` instead of showing a native dialog;
+/// the frontend acknowledges immediately, then reports the user's decision. These are pure in-memory flag
+/// updates plus the exit call, so a synchronous command is correct here.
+///
+/// Acknowledge that the frontend dialog is on screen, cancelling the native-dialog watchdog.
+#[tauri::command]
+pub fn quit_prompt_ack(state: State<crate::QuitState>) {
+    state
+        .acked
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// The user approved the exit. Any workspace snapshot has already been written by the frontend.
+#[tauri::command]
+pub fn confirm_quit(app: AppHandle, state: State<crate::QuitState>) {
+    use std::sync::atomic::Ordering;
+    state.pending.store(false, Ordering::SeqCst);
+    state.confirmed.store(true, Ordering::SeqCst);
+    app.exit(0);
+}
+
+/// The user dismissed the dialog. Clearing `pending` lets a later quit request prompt again.
+#[tauri::command]
+pub fn cancel_quit(state: State<crate::QuitState>) {
+    use std::sync::atomic::Ordering;
+    state.pending.store(false, Ordering::SeqCst);
+    state.acked.store(false, Ordering::SeqCst);
 }
 
 /// VS Code-style shell command management. Native macOS settings/menu actions query, install, or
@@ -67,6 +96,8 @@ pub async fn desktop_call(
             &cmd,
             &args,
             crate::pty::manager::DESKTOP_SOURCE,
+            // The desktop shell is the machine owner's own UI: always a local, fully trusted origin.
+            crate::web::dispatch::CallOrigin::Local,
         )
     })
     .await
@@ -399,23 +430,24 @@ pub fn save_doc_image(doc_path: String, bytes: Vec<u8>, ext: String) -> Result<S
 /// `address` chooses the interface IP; rotate replaces the token, invalidates old links, and clears devices.
 #[tauri::command]
 pub fn web_pairing_create(
-    state: State<WebServer>,
+    app: AppHandle,
     address: Option<String>,
     rotate: Option<bool>,
 ) -> Result<PairingInfo, String> {
-    state.create_pairing(address, rotate.unwrap_or(false))
+    crate::command_core::web_pairing_create(&AppCtx::Tauri(app), address, rotate.unwrap_or(false))
 }
 
 /// List paired devices that have actually connected for the management panel.
 #[tauri::command]
-pub fn web_devices_list(state: State<WebServer>) -> Vec<DeviceEntry> {
-    state.list_devices()
+pub fn web_devices_list(app: AppHandle) -> Vec<DeviceEntry> {
+    crate::command_core::web_devices_list(&AppCtx::Tauri(app))
 }
 
 /// Remove a device registration display entry. Shared links can still reconnect; rotate to revoke all.
+/// Errors when the revocation cannot be persisted (it would silently return after the next restart).
 #[tauri::command]
-pub fn web_device_revoke(state: State<WebServer>, device_id: String) -> bool {
-    state.revoke_device(&device_id)
+pub fn web_device_revoke(app: AppHandle, device_id: String) -> Result<bool, String> {
+    crate::command_core::web_device_revoke(&AppCtx::Tauri(app), &device_id)
 }
 
 // ─────────────────────────── Remote connection window ───────────────────────────

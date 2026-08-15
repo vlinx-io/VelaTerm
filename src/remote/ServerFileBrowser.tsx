@@ -318,10 +318,14 @@ function Row({
   const pad = 8 + depth * 13;
   if (node.isDir) {
     const sel = browser.selectedDir === node.path;
-    // Search forces expansion so matching descendants are visible; clearing restores user expansion state.
-    const open = filter ? true : !!node.open;
+    // A node matching the query itself is shown for its own sake: its whole subtree stays browsable and
+    // keeps normal expand/collapse. A node shown only because a descendant matches is forced open and
+    // pruned to the matching branches. Clearing the query restores plain user expansion state everywhere.
+    const selfMatch = filter !== "" && node.name.toLowerCase().includes(filter);
+    const childFilter = selfMatch ? "" : filter;
+    const open = childFilter ? true : !!node.open;
     let kids = (node.children || []).filter((c) => showHidden || !c.isHidden);
-    if (filter) kids = kids.filter((c) => nodeMatches(c, filter));
+    if (childFilter) kids = kids.filter((c) => nodeMatches(c, childFilter));
     return (
       <div>
         <div
@@ -347,7 +351,7 @@ function Row({
               depth={depth + 1}
               browser={browser}
               showHidden={showHidden}
-              filter={filter}
+              filter={childFilter}
               onFileClick={onFileClick}
               selectedName={selectedName}
             />

@@ -158,8 +158,12 @@ impl GitStatus {
     }
 }
 
-/// Run Git in a directory and return trimmed stdout on success.
-fn run_git(path: &str, args: &[&str]) -> Option<String> {
+/// Run Git in a directory and return stdout with only the trailing newline removed.
+///
+/// Use this for column-sensitive output. `git status --porcelain` encodes the index state in
+/// column 0, so an unstaged-only change starts with a space (` M README.md`); trimming the whole
+/// output eats that space on the first line, shifting every column after it.
+fn run_git_raw(path: &str, args: &[&str]) -> Option<String> {
     let output = crate::host::command("git")
         .arg("-C")
         .arg(path)
@@ -169,7 +173,13 @@ fn run_git(path: &str, args: &[&str]) -> Option<String> {
     if !output.status.success() {
         return None;
     }
-    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    let text = String::from_utf8_lossy(&output.stdout);
+    Some(text.trim_end_matches(['\n', '\r']).to_string())
+}
+
+/// Run Git in a directory and return trimmed stdout on success.
+fn run_git(path: &str, args: &[&str]) -> Option<String> {
+    run_git_raw(path, args).map(|s| s.trim().to_string())
 }
 
 /// Inspect Git state; return is_repo=false for non-repositories or unavailable Git.
@@ -196,7 +206,7 @@ pub fn status(path: &str) -> GitStatus {
 
     // Parse porcelain output into staged, unstaged, and untracked counts.
     let (mut staged, mut unstaged, mut untracked) = (0, 0, 0);
-    if let Some(porcelain) = run_git(path, &["status", "--porcelain"]) {
+    if let Some(porcelain) = run_git_raw(path, &["status", "--porcelain"]) {
         for line in porcelain.lines() {
             let bytes = line.as_bytes();
             if bytes.len() < 2 {
@@ -2022,7 +2032,7 @@ pub fn changed_files(cwd: &str) -> Result<Vec<ChangedFile>, String> {
         }
     }
     // Porcelain supplies XY in columns 0-1 and path from column 3, including untracked files.
-    let porcelain = run_git(cwd, &["status", "--porcelain"]).unwrap_or_default();
+    let porcelain = run_git_raw(cwd, &["status", "--porcelain"]).unwrap_or_default();
     let mut files: Vec<ChangedFile> = Vec::new();
     for line in porcelain.lines() {
         if line.len() < 4 {
@@ -2074,18 +2084,35 @@ fn git_show_bytes(cwd: &str, spec: &str) -> Option<Vec<u8>> {
     Some(out.stdout)
 }
 
+/// The filesystem path `file_diff` reads for the worktree side: `repo_top(cwd)` joined with `path`.
+/// Callers that enforce access control (the remote data-dir ACL in web dispatch) must gate THIS path,
+/// not the raw arguments: `Path::join` replaces the base entirely for an absolute `path`, and
+/// `repo_top` falls back to `cwd` outside a repository, so the effective target is caller-chosen.
+pub fn file_diff_worktree_path(cwd: &str, path: &str) -> std::path::PathBuf {
+    std::path::Path::new(&repo_top(cwd)).join(path)
+}
+
 /// Return HEAD/worktree text for one file. Added/untracked has no original; deleted has no modified.
 /// If either side is binary/oversized, set binary and leave both strings empty.
 pub fn file_diff(cwd: &str, path: &str) -> Result<FileDiff, String> {
     if cwd.trim().is_empty() || path.trim().is_empty() {
         return Err("Missing working directory or path".into());
     }
-    let top = repo_top(cwd);
+    file_diff_at(cwd, path, &file_diff_worktree_path(cwd, path))
+}
+
+/// [`file_diff`] with a caller-supplied effective worktree path. Callers that enforce access control
+/// (the remote data-dir ACL in web dispatch) compute the path ONCE via [`file_diff_worktree_path`],
+/// gate it, and pass the SAME value here — so the checked path and the read path cannot diverge, and
+/// the `repo_top` git subprocess runs once instead of twice.
+pub fn file_diff_at(cwd: &str, path: &str, work_path: &std::path::Path) -> Result<FileDiff, String> {
+    if cwd.trim().is_empty() || path.trim().is_empty() {
+        return Err("Missing working directory or path".into());
+    }
     // HEAD side via `git show HEAD:<path>`; added/untracked files have no object.
     let original_bytes = git_show_bytes(cwd, &format!("HEAD:{path}"));
-    // Worktree side reads the repository file; deleted files are absent.
-    let work_path = std::path::Path::new(&top).join(path);
-    let modified_bytes = std::fs::read(&work_path).ok();
+    // Worktree side reads the caller-resolved repository file; deleted files are absent.
+    let modified_bytes = std::fs::read(work_path).ok();
 
     let orig_bin = original_bytes
         .as_deref()
@@ -2229,6 +2256,30 @@ mod merge_tests {
         assert!(copy_into_worktree(&repo_str, "/no/such/worktree", &patterns).is_err());
 
         std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn file_diff_at_matches_file_diff_on_the_precomputed_path() {
+        let dir = init_repo();
+        std::fs::write(dir.join("a.txt"), "hello\nworld\n").unwrap();
+        let cwd = dir.to_string_lossy().to_string();
+        let work_path = file_diff_worktree_path(&cwd, "a.txt");
+        let direct = file_diff(&cwd, "a.txt").unwrap();
+        let via_path = file_diff_at(&cwd, "a.txt", &work_path).unwrap();
+        assert_eq!(direct.original, via_path.original);
+        assert_eq!(direct.modified, via_path.modified);
+        assert_eq!(via_path.original, "hello\n");
+        assert_eq!(via_path.modified, "hello\nworld\n");
+
+        std::fs::write(dir.join("b.txt"), "decoy\n").unwrap();
+        let via_decoy = file_diff_at(&cwd, "a.txt", &dir.join("b.txt")).unwrap();
+        assert_eq!(
+            via_decoy.modified, "decoy\n",
+            "file_diff_at must read the caller-provided worktree path"
+        );
+        assert!(file_diff_at("", "a.txt", &work_path).is_err());
+        assert!(file_diff_at(&cwd, " ", &work_path).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Derive default clone directory names from common repository URL forms.
@@ -2567,6 +2618,94 @@ mod merge_tests {
 
         let _ = worktree_remove(&wt.path, true);
         let _ = branch_delete(&repo_str, &wt.branch);
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+}
+
+#[cfg(test)]
+mod porcelain_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// Run a Git command in a directory and assert success.
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let out = crate::host::command("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// Temporary repository with a committed a.txt on main.
+    fn init_repo() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("vlx-porcelain-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir, &["init", "-q"]);
+        git(&dir, &["config", "user.email", "t@example.com"]);
+        git(&dir, &["config", "user.name", "tester"]);
+        git(&dir, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(dir.join("a.txt"), "hello\n").unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-q", "-m", "init"]);
+        git(&dir, &["branch", "-M", "main"]);
+        dir
+    }
+
+    /// An unstaged-only change puts a space in column 0 of the first porcelain line. Reading that
+    /// output through a whole-output trim used to eat the space, so the first file lost the first
+    /// character of its path and its line counts no longer matched.
+    #[test]
+    fn unstaged_first_line_keeps_its_full_path() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        std::fs::write(repo.join("a.txt"), "hello\nworld\n").unwrap();
+
+        let files = changed_files(&repo_str).expect("listing changes should succeed");
+        assert_eq!(files.len(), 1, "only a.txt changed: {files:?}");
+        assert_eq!(files[0].path, "a.txt");
+        assert_eq!(files[0].status, "modified");
+        assert_eq!((files[0].additions, files[0].deletions), (1, 0));
+
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// The same column shift used to move the first unstaged file into the staged count.
+    #[test]
+    fn unstaged_first_line_counts_as_unstaged() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        std::fs::write(repo.join("a.txt"), "hello\nworld\n").unwrap();
+
+        let st = status(&repo_str);
+        assert!(st.is_repo);
+        assert_eq!(st.unstaged, 1, "the edit is unstaged: {st:?}");
+        assert_eq!(st.staged, 0, "nothing was added to the index: {st:?}");
+
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    /// Staged and untracked entries keep working alongside the unstaged first line.
+    #[test]
+    fn mixed_states_all_report_full_paths() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        std::fs::write(repo.join("a.txt"), "hello\nworld\n").unwrap();
+        std::fs::write(repo.join("b.txt"), "staged\n").unwrap();
+        git(&repo, &["add", "b.txt"]);
+        std::fs::write(repo.join("c.txt"), "untracked\n").unwrap();
+
+        let files = changed_files(&repo_str).expect("listing changes should succeed");
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["a.txt", "b.txt", "c.txt"], "{files:?}");
+        assert_eq!(files[1].status, "added");
+        assert_eq!(files[2].status, "untracked");
+
         let _ = std::fs::remove_dir_all(&repo);
     }
 }

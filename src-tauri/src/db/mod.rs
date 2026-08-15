@@ -16,6 +16,17 @@ impl Db {
     /// Open or create the database and initialize its schema.
     pub fn open(path: &std::path::Path) -> Result<Self, String> {
         let conn = Connection::open(path).map_err(|e| format!("Failed to open database: {e}"))?;
+        // Restrict the database to the owner: app_settings contains the remote-access Argon2id password
+        // verifier (an offline-bruteforce target) and possibly a plaintext gitea.token fallback. SQLite's
+        // WAL/SHM side files inherit the main database file's permissions, so 0600 here covers them too.
+        // Failure is logged, never fatal: a read-only filesystem must not block startup.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+                eprintln!("failed to restrict database file permissions: {e}");
+            }
+        }
         // Connection PRAGMAs are ordered deliberately. busy_timeout waits up to five seconds on locks so
         // multiple processes sharing a development database queue writes rather than immediately returning
         // SQLITE_BUSY. WAL allows concurrent readers and a serialized writer and requires local storage;
@@ -258,6 +269,25 @@ mod tests {
         migrate(&conn).unwrap();
         migrate(&conn).unwrap();
         assert!(column_exists(&conn, "sessions", "parent_session_id"));
+    }
+
+    /// The database file is owner-only after open: app_settings holds the remote-access password
+    /// verifier (and possibly a plaintext gitea.token fallback), so group/world access is a leak.
+    #[cfg(unix)]
+    #[test]
+    fn opened_database_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "vlx-db-perm-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.db");
+        let _db = Db::open(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Cross-shell application preferences round-trip exactly and use last-write-wins updates per key.

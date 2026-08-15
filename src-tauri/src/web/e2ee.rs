@@ -60,13 +60,10 @@ impl ServerKeys {
         }
         let secret = SecretKey::generate(&mut OsRng);
         let public_b64 = B64.encode(secret.public_key().as_bytes());
-        std::fs::write(&path, B64.encode(secret.to_bytes()))
+        // Create the key file owner-only from the start; chmod-after-write would leave a window in which
+        // the private key exists with default umask permissions.
+        super::write_owner_only(&path, B64.encode(secret.to_bytes()).as_bytes())
             .map_err(|e| format!("failed to write E2EE key: {e}"))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-        }
         Ok(Self { secret, public_b64 })
     }
 

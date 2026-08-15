@@ -203,6 +203,8 @@ const ru: typeof en = {
   "changes.loading": "Загрузка…",
   "changes.loadingDiff": "Загрузка diff…",
   "changes.noChanges": "Нет изменений",
+  "changes.refresh": "Обновить",
+  "changes.notRepo": "Не git-репозиторий",
   "changes.selectFile": "Выберите файл",
   "changes.binary": "Двоичный файл — построчный diff недоступен",
   "tree.merge": "Merge…", // TODO translate
@@ -330,6 +332,11 @@ const ru: typeof en = {
   "remote.start": "Запустить сервер", // Start Server
   "remote.portLabel": "Порт", // Port
   "remote.portInvalid": "Порт должен быть от 1 до 65535", // Port must be between 1 and 65535
+  "remote.ipLabel": "IP-адрес", // IP address
+  "remote.ipAuto": "Автоматически (первый LAN-адрес)", // Automatic (first LAN address)
+  "remote.ipVpn": "VPN", // VPN
+  "remote.qrHint":
+    "Отсканируйте телефоном, чтобы открыть ссылку для сопряжения по выбранному адресу.", // Scan with your phone to open the pairing link on the selected address.
   "remote.fingerprintLabel": "Отпечаток сертификата (SHA-256)", // Certificate fingerprint (SHA-256)
   "remote.fingerprintHint":
     "При первом подключении браузеры предупреждают, что сертификат не доверенный — это нормально для самоподписанного сертификата. Сравните этот отпечаток, чтобы убедиться, что это ваш компьютер.", // On first connect, browsers warn the certificate is untrusted…
@@ -348,6 +355,9 @@ const ru: typeof en = {
   "remote.deviceBlockHint":
     "Заблокированные устройства отключаются и не могут переподключиться (нужна новая ссылка сопряжения). Другие устройства не затрагиваются.", // Block hint
   "remote.devicesEmpty": "Нет сопряжённых устройств", // No paired devices yet
+  "remote.autoRestartHint":
+    "Удалённый доступ автоматически возобновляется при повторном открытии приложения. «Остановить сервер» отключает это.", // Remote access restarts automatically when the app is reopened. Stop Server turns this off.
+  "remote.autostartFailed": "Сбой автоматического запуска:", // Automatic start failed:
 
   // ── Remote connection panel ──
   "connect.title": "Подключиться к удалённому серверу", // Connect to Remote Server
@@ -664,6 +674,14 @@ const ru: typeof en = {
   "browser.addressPlaceholder": "Введите URL или поисковый запрос", // Enter URL or search terms
   "browser.quickAccess": "Быстрый доступ", // Quick access
   "browser.loading": "Загрузка…", // Loading…
+  // Application-exit confirmation and dormant restored sessions.
+  "quit.title": "Закрыть VelaTerm?",  // Quit VelaTerm?
+  "quit.body": "Все запущенные сеансы терминала и агента будут остановлены.",  // Any running terminal and agent sessions will be stopped.
+  "quit.saveWorkspace": "Сохранить рабочее пространство",  // Save workspace
+  "quit.saveWorkspaceHint": "В следующий раз откроются те же вкладки и разделения. Терминалы восстанавливаются, но не запускаются заново.",  // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
+  "quit.confirm": "Закрыть",  // Quit
+  "dormant.body": "Восстановлено из сохранённого рабочего пространства. Процесс ещё не запущен.",  // Restored from your saved workspace. No process is running yet.
+  "dormant.start": "Запустить",  // Start
   "overlimit.title": (max) => `Превышен лимит фоновых вкладок (${max})`, // Background keep-alive over limit ({max})
   "overlimit.body": "All background tabs are working or awaiting your reply. Choose one to end:", // All background tabs are working or awaiting your reply. Choose one to end:
   "overlimit.kill": "End Selected", // End Selected
@@ -840,6 +858,7 @@ const ru: typeof en = {
   "login.passwordPlaceholder": "Пароль доступа", // Access password
   "login.connect": "Подключиться", // Connect
   "login.wrongPassword": "Неверный пароль", // Wrong password
+  "login.rateLimited": "Слишком много попыток. Подождите минуту и попробуйте снова.", // Too many attempts. Please wait a minute and try again.
   "login.failed": "Не удалось войти, попробуйте ещё раз", // Login failed, please try again
   "login.pairingRequired": "Этот сервер требует ссылку для сопряжения. Откройте ссылку, созданную в панели «Удалённый доступ» настольного приложения.", // This server requires a pairing link
   "login.authFailed": "Неверный пароль или ссылка для сопряжения устарела. Подключитесь снова по новой ссылке.", // Wrong password or pairing link expired
@@ -885,6 +904,9 @@ const ru: typeof en = {
   "transport.wsDisconnected": "WebSocket отключён", // WebSocket disconnected
   "transport.wsConnectFailed": "Не удалось подключиться по WebSocket", // WebSocket connection failed
   "transport.cmdFailed": "Команда не выполнена", // Command failed
+  "transport.remoteCmdForbidden": (cmd: string) => `Команда недоступна для удалённых клиентов: ${cmd}`, // Command not available to remote clients
+  "transport.remoteSettingForbidden": (key: string) => `Ключ настроек недоступен для записи удалёнными клиентами: ${key}`, // Settings key not writable by remote clients
+  "transport.remotePathForbidden": (path: string) => `Удалённые клиенты не могут обращаться к файлам в каталоге данных приложения: ${path}`, // Remote clients cannot access files in the app data directory
 
   // ── Crepe（WYSIWYG-редактор）──
   "crepe.placeholder": "Введите текст или нажмите / для меню вставки", // Type text, or press / for the insert menu
