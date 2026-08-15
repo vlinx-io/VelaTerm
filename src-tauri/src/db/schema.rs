@@ -71,6 +71,21 @@ CREATE INDEX IF NOT EXISTS idx_groups_parent ON groups(parent_group_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_group ON sessions(group_id);
 
+CREATE TABLE IF NOT EXISTS agent_landings (
+  session_id       TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  source_branch    TEXT NOT NULL,
+  source_head      TEXT NOT NULL,
+  source_tree      TEXT NOT NULL,
+  diff_fingerprint TEXT NOT NULL,
+  target_branch    TEXT NOT NULL,
+  target_before    TEXT NOT NULL,
+  result_tree      TEXT,
+  target_commit    TEXT,
+  commit_message   TEXT NOT NULL,
+  landed_at        INTEGER
+);
+
 -- Application preferences shared across shells: theme, language, appearance, shortcuts, sound, and more.
 -- Keys match frontend localStorage (`vlx-theme`, `vlx-lang`, `vlx-sound`, `vlx-notify`, `vlx-settings`),
 -- and values store the original localStorage strings. The frontend writes both its local cache and this

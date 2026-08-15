@@ -42,8 +42,8 @@ vagent prompt <id|name> "<follow-up>"    # sends into the child's conversation
 vagent cancel <id|name>                  # interrupts the current turn; session stays alive
 vagent cancel --all                      # interrupts every running descendant
 vagent diff <id|name>                    # worktree branch diff against its recorded base
-vagent merge <id|name> [--delete-worktree]  # merge; use deletion only after confirmation
-vagent cleanup [--confirm]               # preview or remove clean finished child worktrees
+vagent land <id|name> --message "<conventional-subject>"  # squash into the parent
+vagent cleanup [--confirm]               # preview or remove verified worktrees and branches
 ```
 
 For Codex children, use the current ChatGPT model identifiers `gpt-5.6-sol`, `gpt-5.6-terra`,
@@ -60,6 +60,14 @@ Known behavior:
   card: only the user can answer it.
 - Unknown model and effort values produce advisory warnings on the confirmation card. The installed
   CLI remains authoritative, so newer values stay launchable.
+- `land` applies a direct child's net change to the parent's current branch as one commit. The Lead
+  supplies the reviewed Conventional Commit subject. The worker's temporary commits stay private.
+- `land` requires a clean worker with at least one commit ahead of its base. It does not rebase the
+  worker. A conflict restores the parent and returns the conflicting paths.
+- A successful landing stores its change fingerprint and target commit. A retry detects the same
+  landing after a crash. The worker can rewrite its branch when the net change stays the same.
+- `cleanup` only accepts a clean worker whose fingerprint and target commit still verify. With
+  `--confirm`, it removes the worktree and deletes the disposable worker branch.
 - `wait` returns a `blocked` array naming children stopped at a permission prompt. Those settled
   without finishing. Tell the user immediately, by session name, then wait again.
 - `wait` returns a `failed` array with each errored session's name and provider text. Report every
@@ -130,7 +138,7 @@ Use this review pattern for critical work:
 2. Review the result with Sol at xhigh effort. Use `vagent read` and `vagent diff`.
 3. Spawn an Opus 5 reviewer with high effort. Name the worker branch in the review task.
 4. Reconcile both reviews. Send required fixes through `vagent prompt`.
-5. Run `vagent merge` only after the worker completes the fixes and validation.
+5. Run `vagent land` with a Lead-written Conventional Commit subject after the worker validates.
 
 ## Spawn before you survey
 
@@ -180,21 +188,17 @@ cannot discover, the definition of done, and the path to the plan document. Do n
     read what it did, and either re-prompt it or spawn a replacement, never both.
 12. **Report failures.** Tell the user what failed and what you did about it; do not substitute
     lower-quality work without saying so.
-13. **Integrate only after validation.** Merge worktree branches through VelaTerm's merge tooling or
-    your own git commands. Run the full test suites on the integrated result before cleanup.
-14. **Preview cleanup before deletion.** After integration and validation, run `vagent cleanup` without
-    `--confirm`. Record each candidate's child name, worktree path, and branch. Check each branch
-    against its base branch. Show the user the exact deletion list and report branches that need
-    separate discard confirmation. Report running or dirty worktrees separately because cleanup
-    blocks them.
-15. **Require confirmation before cleanup.** Ask the user to confirm the exact cleanup list. Run
-    `vagent cleanup --confirm` only after confirmation. This removes clean finished worktrees, but it
-    does not remove branches.
-16. **Delete branches safely.** After cleanup succeeds, delete each associated local branch with
-    `git branch -d <branch>` only when it is merged into its base branch. Keep unmerged branches and
-    report them unless the user explicitly confirms that they can be discarded. Never use `git branch -D`
-    automatically. Re-run `git worktree list` and `git branch --list`, then report what remains.
-17. **Give the final report.** State what each worker did, what was merged, what cleanup the user
+13. **Integrate only after validation.** Require the worker to commit all changes. Run `vagent land`
+    with the Lead's reviewed message. Do not cherry-pick a worker's temporary commits.
+14. **Land through each parent.** A nested worker lands into its immediate parent. The top Lead then
+    lands its complete net change into the branch that started the orchestration.
+15. **Preview cleanup before deletion.** After integration and validation, run `vagent cleanup` without
+    `--confirm`. Record each candidate's child name, worktree path, branch, and target commit. Show
+    the user the exact deletion list. Report each blocked worktree and its reason.
+16. **Require confirmation before cleanup.** Ask the user to confirm the exact cleanup list. Run
+    `vagent cleanup --confirm` only after confirmation. It removes each verified worktree and branch.
+17. **Verify cleanup.** Re-run `git worktree list` and `git branch --list`. Report what remains.
+18. **Give the final report.** State what each worker did, what landed, what cleanup the user
     approved, which worktrees and branches were removed, and what remains.
 
 ## Tell the user not to type into worker panes

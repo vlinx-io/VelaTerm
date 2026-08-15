@@ -21,7 +21,7 @@ const USAGE: &str = "usage:
   vagent prompt <id|name> <text...>
   vagent cancel <id|name>|--all
   vagent diff   <id|name>
-  vagent merge  <id|name> [--delete-worktree]
+  vagent land   <id|name> --message <conventional-subject>
   vagent cleanup [--confirm]
 
 All output is JSON. Sessions are addressed by id or unique name and must be
@@ -59,9 +59,12 @@ inherits the parent's mode, which is nothing when the parent has none. Set it
 explicitly for a worker in its own worktree; otherwise the worker stalls on
 approvals with nobody watching its pane.
 
-cleanup lists the worktrees of finished children that hold no uncommitted
-changes; --confirm removes those worktrees. A running child, or one whose
-worktree has uncommitted changes, is reported as blocked and never touched.";
+cleanup lists finished child worktrees with a verified landing record.
+--confirm removes each verified worktree and its disposable branch. A running
+child, an uncommitted worktree, or an unverified landing is never touched.
+
+land requires a Conventional Commit subject through --message. It applies the
+worker's net change to the immediate parent's current branch as one commit.";
 
 /// `vlx-term --agent-ctl ...` entry point behind the `vagent` shim.
 pub fn run_agent_ctl(args: &[String]) -> ! {
@@ -132,7 +135,6 @@ fn parse_ctl_args(rest: &[String]) -> CtlParse {
     let mut all = false;
     let mut full = false;
     let mut confirm = false;
-    let mut delete_worktree = false;
     let mut worktree: Option<bool> = None;
     let mut i = 0;
     // Reads a value-taking option's required value; accepts values beginning with `-`.
@@ -152,6 +154,7 @@ fn parse_ctl_args(rest: &[String]) -> CtlParse {
             ("--agent-args", "agentArgs"),
             ("--profile", "profile"),
             ("--permission-mode", "permissionMode"),
+            ("--message", "message"),
         ];
         if let Some((_, key)) = string_flags.iter().find(|(f, _)| *f == a) {
             match take_value(rest, &mut i, a) {
@@ -179,7 +182,6 @@ fn parse_ctl_args(rest: &[String]) -> CtlParse {
                 "--all" => all = true,
                 "--full" => full = true,
                 "--confirm" => confirm = true,
-                "--delete-worktree" => delete_worktree = true,
                 "--force" => {
                     body.insert("force".into(), serde_json::json!(true));
                 }
@@ -231,15 +233,19 @@ fn parse_ctl_args(rest: &[String]) -> CtlParse {
                 body.insert("confirm".into(), serde_json::json!(true));
             }
         }
-        "status" | "diff" | "merge" => {
+        "status" | "diff" | "land" => {
             let [target] = words.as_slice() else {
                 return CtlParse::Err(format!(
                     "vagent: {op} needs exactly one <id|name>"
                 ));
             };
             body.insert("target".into(), serde_json::json!(target));
-            if op == "merge" && delete_worktree {
-                body.insert("deleteWorktree".into(), serde_json::json!(true));
+            if op == "land" {
+                if !body.contains_key("message") {
+                    return CtlParse::Err(
+                        "vagent: land requires --message <conventional-subject>".to_string(),
+                    );
+                }
             }
         }
         "cancel" => {
@@ -446,10 +452,19 @@ mod tests {
         assert_eq!(c.op, "diff");
         assert_eq!(c.body["target"], "worker");
 
-        let c = ok(&["merge", "worker", "--delete-worktree"]);
-        assert_eq!(c.op, "merge");
+        let c = ok(&[
+            "land",
+            "worker",
+            "--message",
+            "fix(orchestration): Clarify worker limits",
+        ]);
+        assert_eq!(c.op, "land");
         assert_eq!(c.body["target"], "worker");
-        assert_eq!(c.body["deleteWorktree"], true);
+        assert_eq!(
+            c.body["message"],
+            "fix(orchestration): Clarify worker limits"
+        );
+        assert!(!c.body.contains_key("deleteWorktree"));
     }
 
     #[test]
@@ -460,7 +475,8 @@ mod tests {
         assert!(matches!(parse(&["status"]), CtlParse::Err(_)));
         assert!(matches!(parse(&["status", "a", "b"]), CtlParse::Err(_)));
         assert!(matches!(parse(&["diff"]), CtlParse::Err(_)));
-        assert!(matches!(parse(&["merge", "a", "b"]), CtlParse::Err(_)));
+        assert!(matches!(parse(&["land", "worker"]), CtlParse::Err(_)));
+        assert!(matches!(parse(&["land", "a", "b"]), CtlParse::Err(_)));
         assert!(matches!(parse(&["prompt", "only-target"]), CtlParse::Err(_)));
         assert!(matches!(
             parse(&["wait", "a", "--any", "--all"]),
@@ -473,12 +489,12 @@ mod tests {
     #[test]
     fn server_error_envelope_preserves_context_and_body_type() {
         let json_body = server_error_envelope(
-            "merge",
+            "land",
             409,
             r#"{"error":"merge conflict","conflicts":["a.txt"]}"#,
         );
         let json_value: serde_json::Value = serde_json::from_str(&json_body).unwrap();
-        assert_eq!(json_value["op"], "merge");
+        assert_eq!(json_value["op"], "land");
         assert_eq!(json_value["status"], 409);
         assert_eq!(json_value["error"]["error"], "merge conflict");
         assert_eq!(json_value["error"]["conflicts"][0], "a.txt");

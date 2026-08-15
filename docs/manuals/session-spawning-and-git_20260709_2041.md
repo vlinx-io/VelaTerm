@@ -54,7 +54,7 @@ vagent read <id|name>
 vagent prompt <id|name> "<follow-up>"
 vagent cancel <id|name> | --all
 vagent diff <id|name>
-vagent merge <id|name>
+vagent land <id|name> --message "<conventional-subject>"
 vagent cleanup [--confirm]
 ```
 
@@ -76,8 +76,18 @@ from Settings > Orchestration. A lead agent reads each profile description befor
 choice; an explicit flag still overrides the profile.
 
 `cleanup` lists the worktrees of children that have finished and hold no uncommitted changes;
-`cleanup --confirm` removes exactly those. A running child, or one whose worktree has uncommitted
-changes, is reported as blocked and never touched.
+`cleanup --confirm` removes only verified landed worktrees and their disposable branches. A running
+child, an uncommitted worktree, or an unverified landing is blocked.
+
+`land` requires a Lead-written Conventional Commit subject. It applies the direct child's net
+change to the parent's current branch as one commit. Temporary worker commits do not enter the
+parent history.
+
+The worker must have a clean worktree and at least one commit ahead of its base. Landing does not
+rebase the worker. A conflict restores the parent and reports the conflicting paths.
+
+VelaTerm stores the worker change fingerprint and the resulting parent commit. This record makes
+landing retries and cleanup safe after a crash. Nested workers use the same boundary at each level.
 
 ### Orchestration settings
 

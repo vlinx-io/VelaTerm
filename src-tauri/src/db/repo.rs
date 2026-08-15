@@ -1022,6 +1022,117 @@ pub fn clear_node_worktree(conn: &Connection, kind: NodeKind, id: &str) -> Resul
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+pub struct AgentLanding {
+    pub session_id: String,
+    pub parent_session_id: String,
+    pub source_branch: String,
+    pub source_head: String,
+    pub source_tree: String,
+    pub diff_fingerprint: String,
+    pub target_branch: String,
+    pub target_before: String,
+    pub result_tree: Option<String>,
+    pub target_commit: Option<String>,
+    pub commit_message: String,
+}
+
+pub fn get_agent_landing(conn: &Connection, session_id: &str) -> Result<Option<AgentLanding>, String> {
+    conn.query_row(
+        "SELECT session_id, parent_session_id, source_branch, source_head, source_tree, \
+                diff_fingerprint, target_branch, target_before, result_tree, target_commit, \
+                commit_message FROM agent_landings WHERE session_id = ?1",
+        params![session_id],
+        |row| {
+            Ok(AgentLanding {
+                session_id: row.get(0)?,
+                parent_session_id: row.get(1)?,
+                source_branch: row.get(2)?,
+                source_head: row.get(3)?,
+                source_tree: row.get(4)?,
+                diff_fingerprint: row.get(5)?,
+                target_branch: row.get(6)?,
+                target_before: row.get(7)?,
+                result_tree: row.get(8)?,
+                target_commit: row.get(9)?,
+                commit_message: row.get(10)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| format!("Failed to read agent landing: {e}"))
+}
+
+pub fn begin_agent_landing(conn: &Connection, landing: &AgentLanding) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO agent_landings (
+           session_id, parent_session_id, source_branch, source_head, source_tree,
+           diff_fingerprint, target_branch, target_before, result_tree, target_commit,
+           commit_message, landed_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, ?9, NULL)
+         ON CONFLICT(session_id) DO UPDATE SET
+           parent_session_id = excluded.parent_session_id,
+           source_branch = excluded.source_branch,
+           source_head = excluded.source_head,
+           source_tree = excluded.source_tree,
+           diff_fingerprint = excluded.diff_fingerprint,
+           target_branch = excluded.target_branch,
+           target_before = excluded.target_before,
+           result_tree = NULL,
+           target_commit = NULL,
+           commit_message = excluded.commit_message,
+           landed_at = NULL",
+        params![
+            landing.session_id,
+            landing.parent_session_id,
+            landing.source_branch,
+            landing.source_head,
+            landing.source_tree,
+            landing.diff_fingerprint,
+            landing.target_branch,
+            landing.target_before,
+            landing.commit_message,
+        ],
+    )
+    .map_err(|e| format!("Failed to record pending agent landing: {e}"))?;
+    Ok(())
+}
+
+pub fn set_agent_landing_result_tree(
+    conn: &Connection,
+    session_id: &str,
+    result_tree: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE agent_landings SET result_tree = ?1 WHERE session_id = ?2",
+        params![result_tree, session_id],
+    )
+    .map_err(|e| format!("Failed to record agent landing tree: {e}"))?;
+    Ok(())
+}
+
+pub fn complete_agent_landing(
+    conn: &Connection,
+    session_id: &str,
+    target_commit: &str,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE agent_landings SET target_commit = ?1, landed_at = ?2 WHERE session_id = ?3",
+        params![target_commit, now_secs(), session_id],
+    )
+    .map_err(|e| format!("Failed to complete agent landing record: {e}"))?;
+    Ok(())
+}
+
+pub fn delete_agent_landing(conn: &Connection, session_id: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM agent_landings WHERE session_id = ?1",
+        params![session_id],
+    )
+    .map_err(|e| format!("Failed to clear agent landing record: {e}"))?;
+    Ok(())
+}
+
 /// Minimal session row loaded for archive-preserving deletion decisions.
 #[derive(Clone)]
 struct SessRow {

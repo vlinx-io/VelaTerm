@@ -59,6 +59,49 @@ const DIFF_PATCH_MAX_BYTES: usize = 256 * 1024;
 /// Default answer timeout for `spawn`; a not-started child holds a parallel slot for this same window.
 const SPAWN_DEFAULT_TIMEOUT_SECS: i64 = 120;
 
+fn is_conventional_commit_subject(value: &str) -> bool {
+    let Some((prefix, subject)) = value.split_once(": ") else {
+        return false;
+    };
+    if subject.is_empty() || subject.trim() != subject {
+        return false;
+    }
+    let prefix = prefix.strip_suffix('!').unwrap_or(prefix);
+    let kind = match prefix.split_once('(') {
+        Some((kind, scope)) => {
+            let Some(scope) = scope.strip_suffix(')') else {
+                return false;
+            };
+            if scope.is_empty()
+                || !scope.as_bytes()[0].is_ascii_alphanumeric()
+                || !scope.chars().all(|character| {
+                    character.is_ascii_lowercase()
+                        || character.is_ascii_digit()
+                        || matches!(character, '.' | '_' | '-')
+                })
+            {
+                return false;
+            }
+            kind
+        }
+        None => prefix,
+    };
+    matches!(
+        kind,
+        "build"
+            | "chore"
+            | "ci"
+            | "docs"
+            | "feat"
+            | "fix"
+            | "perf"
+            | "refactor"
+            | "revert"
+            | "style"
+            | "test"
+    )
+}
+
 /// Register a spawn correlation id for `parent` and return the receiver its outcome arrives on.
 pub fn register_spawn_waiter(request_id: &str, parent: &str) -> mpsc::Receiver<SpawnOutcome> {
     let (tx, rx) = mpsc::channel();
@@ -137,7 +180,7 @@ pub fn handle(op: &str, body: &str, app: &AppCtx) -> (u16, String) {
         "prompt" => op_prompt(app, &parent, &parsed),
         "cancel" => op_cancel(app, &parent, &parsed),
         "diff" => op_diff(app, &parent, &parsed),
-        "merge" => op_merge(app, &parent, &parsed),
+        "land" => op_land(app, &parent, &parsed),
         "spawn" => op_spawn(app, &parent, &parsed),
         "spawn-status" => op_spawn_status(app, &parent, &parsed),
         "config" => op_config(app, &parent),
@@ -549,7 +592,7 @@ fn op_config(app: &AppCtx, parent: &str) -> (u16, String) {
     }))
 }
 
-/// List clean worktrees for finished children, or remove them when `confirm` is set.
+/// List verified landed worktrees, or remove each worktree and branch when `confirm` is set.
 fn op_cleanup(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
     let sessions = match descendants(app, parent) {
         Ok(s) => s,
@@ -560,6 +603,9 @@ fn op_cleanup(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
     let (mut candidates, mut blocked, mut removed, mut failed) =
         (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for s in sessions {
+        if s.parent_session_id.as_deref() != Some(parent) {
+            continue;
+        }
         let Some(path) = s.worktree_path.clone().filter(|p| !p.trim().is_empty()) else {
             continue;
         };
@@ -575,17 +621,82 @@ fn op_cleanup(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
             blocked.push(row("worktree has uncommitted changes"));
             continue;
         }
+        let landing = match app.db().conn.lock() {
+            Ok(conn) => match crate::db::repo::get_agent_landing(&conn, &s.id) {
+                Ok(Some(landing)) => landing,
+                Ok(None) => {
+                    blocked.push(row("worktree has no verified landing"));
+                    continue;
+                }
+                Err(error) => {
+                    failed.push(row(&error));
+                    continue;
+                }
+            },
+            Err(_) => {
+                failed.push(row("database lock is unavailable"));
+                continue;
+            }
+        };
+        let Some(target_commit) = landing.target_commit.as_deref() else {
+            blocked.push(row("worktree has no verified landing"));
+            continue;
+        };
+        let targets = match crate::git::land_targets(s.worktree_base_ref.as_deref(), &path) {
+            Ok(targets) => targets,
+            Err(error) => {
+                blocked.push(row(&error));
+                continue;
+            }
+        };
+        let snapshot = match crate::git::agent_land_snapshot(
+            &path,
+            &targets.branch,
+            &targets.base_branch,
+        ) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                blocked.push(row(&error));
+                continue;
+            }
+        };
+        if landing.parent_session_id != parent
+            || landing.source_branch != targets.branch
+            || landing.source_tree != snapshot.source_tree
+            || landing.diff_fingerprint != snapshot.diff_fingerprint
+            || landing.target_branch != targets.base_branch
+        {
+            blocked.push(row("worker changed after its verified landing"));
+            continue;
+        }
+        if !crate::git::is_ancestor(
+            &path,
+            target_commit,
+            &format!("refs/heads/{}", targets.base_branch),
+        ) {
+            blocked.push(row("verified landing commit is not on the target branch"));
+            continue;
+        }
+        let Some(repo_root) = crate::git::repository_root(&path) else {
+            blocked.push(row("worktree repository root is unavailable"));
+            continue;
+        };
         if !confirm {
             candidates.push(json!({
                 "id": s.id,
                 "name": s.name,
                 "path": path,
-                "branch": crate::git::worktree_branch(&path),
+                "branch": targets.branch,
+                "targetCommit": target_commit,
             }));
             continue;
         }
         match crate::git::worktree_remove(&path, false) {
             Ok(()) => {
+                if let Err(error) = crate::git::branch_delete(&repo_root, &targets.branch) {
+                    failed.push(row(&error));
+                    continue;
+                }
                 if let Ok(conn) = app.db().conn.lock() {
                     let _ = crate::db::repo::clear_node_worktree(
                         &conn,
@@ -651,11 +762,14 @@ fn cap_patch(mut patch: String) -> (String, bool) {
     (patch, true)
 }
 
-fn op_merge(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
+fn op_land(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
     let session = match resolve_target(app, parent, req) {
         Ok(session) => session,
         Err(response) => return response,
     };
+    if session.parent_session_id.as_deref() != Some(parent) {
+        return err(409, "land requires a direct child session");
+    }
     let Some(path) = session
         .worktree_path
         .as_deref()
@@ -679,43 +793,182 @@ fn op_merge(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
             .to_string(),
         );
     }
-
-    let preview =
-        match crate::git::merge_branches_preview(path, &targets.branch, &targets.base_branch) {
-            Ok(preview) => preview,
-            Err(error) => return err(500, &error),
-        };
-    if preview.source_dirty {
-        return (
-            409,
-            json!({
-                "error": "worktree has uncommitted changes",
-                "id": session.id,
-                "name": session.name,
-                "branch": targets.branch,
-            })
-            .to_string(),
-        );
-    }
-    if !preview.available {
-        return (
-            409,
-            json!({
-                "error": "merge is unavailable",
-                "reason": preview.reason,
-                "source": targets.branch,
-                "target": targets.base_branch,
-            })
-            .to_string(),
+    let Some(message) = req.get("message").and_then(Value::as_str).map(str::trim) else {
+        return err(400, "land requires a Conventional Commit message");
+    };
+    if message.contains(['\r', '\n'])
+        || message.len() > 100
+        || !message.is_ascii()
+        || !is_conventional_commit_subject(message)
+    {
+        return err(
+            400,
+            "land message must be one Conventional Commit subject of at most 100 characters",
         );
     }
 
-    let outcome =
-        match crate::git::merge_branches_apply(path, &targets.branch, &targets.base_branch, None) {
-            Ok(outcome) => outcome,
+    let mut snapshot = match crate::git::agent_land_snapshot(
+        path,
+        &targets.branch,
+        &targets.base_branch,
+    ) {
+        Ok(snapshot) => snapshot,
+        Err(error) => return err(409, &error),
+    };
+    if snapshot.commits_ahead == 0 {
+        return err(409, "worker branch has no commits ahead of its target");
+    }
+
+    let prior = match app.db().conn.lock() {
+        Ok(conn) => match crate::db::repo::get_agent_landing(&conn, &session.id) {
+            Ok(value) => value,
             Err(error) => return err(500, &error),
-        };
+        },
+        Err(_) => return err(500, "database lock is unavailable"),
+    };
+    if let Some(landing) = prior.as_ref() {
+        let same_work = landing.parent_session_id == parent
+            && landing.source_branch == targets.branch
+            && landing.diff_fingerprint == snapshot.diff_fingerprint
+            && landing.target_branch == targets.base_branch;
+        if let Some(target_commit) = landing.target_commit.as_deref() {
+            if same_work
+                && crate::git::is_ancestor(
+                    path,
+                    target_commit,
+                    &format!("refs/heads/{}", targets.base_branch),
+                )
+            {
+                return ok(json!({
+                    "id": session.id,
+                    "name": session.name,
+                    "source": targets.branch,
+                    "target": targets.base_branch,
+                    "targetCommit": target_commit,
+                    "landed": true,
+                    "alreadyLanded": true,
+                }));
+            }
+            if same_work {
+                return err(409, "the recorded landing commit is not on the target branch");
+            }
+        } else if !same_work && snapshot.target_dirty {
+            return err(409, "a different pending landing left changes in the target worktree");
+        } else if same_work {
+            let current_head = crate::git::branch_head(path, &targets.base_branch).unwrap_or_default();
+            if current_head != landing.target_before {
+                let recovered = landing
+                    .result_tree
+                    .as_deref()
+                    .and_then(|tree| crate::git::commit_tree(path, &current_head).map(|head_tree| head_tree == tree))
+                    == Some(true);
+                if !recovered {
+                    return err(409, "the target changed during landing recovery");
+                }
+                if let Ok(conn) = app.db().conn.lock() {
+                    if let Err(error) = crate::db::repo::complete_agent_landing(
+                        &conn,
+                        &session.id,
+                        &current_head,
+                    ) {
+                        return err(500, &error);
+                    }
+                }
+                return ok(json!({
+                    "id": session.id,
+                    "name": session.name,
+                    "source": targets.branch,
+                    "target": targets.base_branch,
+                    "targetCommit": current_head,
+                    "landed": true,
+                    "alreadyLanded": true,
+                }));
+            }
+            if snapshot.target_dirty {
+                if let Some(result_tree) = landing.result_tree.as_deref() {
+                    let index_tree = match crate::git::agent_land_index_tree(path, &targets.base_branch) {
+                        Ok(tree) => tree,
+                        Err(error) => return err(500, &error),
+                    };
+                    if index_tree != result_tree {
+                        return err(409, "the target index does not match the pending landing");
+                    }
+                    let target_commit = match crate::git::agent_land_commit(
+                        path,
+                        &targets.base_branch,
+                        &landing.commit_message,
+                    ) {
+                        Ok(commit) => commit,
+                        Err(error) => return err(500, &error),
+                    };
+                    if let Ok(conn) = app.db().conn.lock() {
+                        if let Err(error) = crate::db::repo::complete_agent_landing(
+                            &conn,
+                            &session.id,
+                            &target_commit,
+                        ) {
+                            return err(500, &error);
+                        }
+                    }
+                    return ok(json!({
+                        "id": session.id,
+                        "name": session.name,
+                        "source": targets.branch,
+                        "target": targets.base_branch,
+                        "targetCommit": target_commit,
+                        "landed": true,
+                        "alreadyLanded": false,
+                        "recovered": true,
+                    }));
+                }
+                if let Err(error) = crate::git::reset_branch_worktree(path, &targets.base_branch) {
+                    return err(500, &error);
+                }
+                snapshot = match crate::git::agent_land_snapshot(
+                    path,
+                    &targets.branch,
+                    &targets.base_branch,
+                ) {
+                    Ok(snapshot) => snapshot,
+                    Err(error) => return err(409, &error),
+                };
+            }
+        }
+    }
+    if snapshot.target_dirty {
+        return err(409, "target branch has uncommitted changes");
+    }
+
+    let pending = crate::db::repo::AgentLanding {
+        session_id: session.id.clone(),
+        parent_session_id: parent.to_string(),
+        source_branch: targets.branch.clone(),
+        source_head: snapshot.source_head.clone(),
+        source_tree: snapshot.source_tree.clone(),
+        diff_fingerprint: snapshot.diff_fingerprint.clone(),
+        target_branch: targets.base_branch.clone(),
+        target_before: snapshot.target_before.clone(),
+        result_tree: None,
+        target_commit: None,
+        commit_message: message.to_string(),
+    };
+    match app.db().conn.lock() {
+        Ok(conn) => {
+            if let Err(error) = crate::db::repo::begin_agent_landing(&conn, &pending) {
+                return err(500, &error);
+            }
+        }
+        Err(_) => return err(500, "database lock is unavailable"),
+    }
+
+    let outcome = match crate::git::agent_land_stage(path, &targets.branch, &targets.base_branch) {
+        Ok(outcome) => outcome,
+        Err(error) => return err(500, &error),
+    };
     if outcome.conflict {
+        if let Ok(conn) = app.db().conn.lock() {
+            let _ = crate::db::repo::delete_agent_landing(&conn, &session.id);
+        }
         return (
             409,
             json!({
@@ -728,27 +981,31 @@ fn op_merge(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
         );
     }
 
-    let delete_worktree = req.get("deleteWorktree").and_then(Value::as_bool) == Some(true);
-    if delete_worktree {
-        if let Err(error) = crate::git::worktree_remove(path, false) {
-            return (
-                500,
-                json!({
-                    "error": error,
-                    "merged": true,
-                    "source": targets.branch,
-                    "target": targets.base_branch,
-                    "worktreeDeleted": false,
-                })
-                .to_string(),
-            );
+    let result_tree = match crate::git::agent_land_index_tree(path, &targets.base_branch) {
+        Ok(tree) => tree,
+        Err(error) => return err(500, &error),
+    };
+    if let Ok(conn) = app.db().conn.lock() {
+        if let Err(error) =
+            crate::db::repo::set_agent_landing_result_tree(&conn, &session.id, &result_tree)
+        {
+            return err(500, &error);
         }
-        if let Ok(conn) = app.db().conn.lock() {
-            let _ = crate::db::repo::clear_node_worktree(
-                &conn,
-                crate::models::NodeKind::Session,
-                &session.id,
-            );
+    }
+    let target_tree = crate::git::commit_tree(path, &snapshot.target_before).unwrap_or_default();
+    let (target_commit, empty) = if result_tree == target_tree {
+        (snapshot.target_before.clone(), true)
+    } else {
+        match crate::git::agent_land_commit(path, &targets.base_branch, message) {
+            Ok(commit) => (commit, false),
+            Err(error) => return err(500, &error),
+        }
+    };
+    if let Ok(conn) = app.db().conn.lock() {
+        if let Err(error) =
+            crate::db::repo::complete_agent_landing(&conn, &session.id, &target_commit)
+        {
+            return err(500, &error);
         }
     }
 
@@ -757,9 +1014,10 @@ fn op_merge(app: &AppCtx, parent: &str, req: &Value) -> (u16, String) {
         "name": session.name,
         "source": targets.branch,
         "target": targets.base_branch,
-        "merged": outcome.merged,
-        "message": outcome.message,
-        "worktreeDeleted": delete_worktree,
+        "targetCommit": target_commit,
+        "landed": true,
+        "alreadyLanded": false,
+        "empty": empty,
     }))
 }
 
@@ -1187,7 +1445,7 @@ mod tests {
             root.id, outsider.id
         );
         assert_eq!(handle("diff", &request, &app).0, 404);
-        assert_eq!(handle("merge", &request, &app).0, 404);
+        assert_eq!(handle("land", &request, &app).0, 404);
     }
 
     #[test]
@@ -1221,7 +1479,7 @@ mod tests {
     }
 
     #[test]
-    fn diff_and_merge_round_trip_removes_the_worktree() {
+    fn diff_land_and_cleanup_round_trip_preserves_one_parent_commit() {
         let repo = init_repo();
         let repo_str = repo.to_string_lossy().to_string();
         let worktree = crate::git::worktree_add(&repo_str, "round trip").unwrap();
@@ -1255,21 +1513,204 @@ mod tests {
         assert_eq!(diff["truncated"], false);
         assert_eq!(diff["hasUncommitted"], false);
 
-        let merge_request = format!(
-            r#"{{"parentSessionId":"{}","target":"worker","deleteWorktree":true}}"#,
+        let before_count = git(&repo, &["rev-list", "--count", "main"])
+            .parse::<u64>()
+            .unwrap();
+        std::fs::write(
+            std::path::Path::new(&worktree.path).join("second.txt"),
+            "second worker change\n",
+        )
+        .unwrap();
+        git(std::path::Path::new(&worktree.path), &["add", "-A"]);
+        git(
+            std::path::Path::new(&worktree.path),
+            &["commit", "-q", "-m", "second worker change"],
+        );
+
+        let land_request = format!(
+            r#"{{"parentSessionId":"{}","target":"worker","message":"fix(orchestration): Land worker changes"}}"#,
             root.id
         );
-        let (status, body) = handle("merge", &merge_request, &app);
+        let (status, body) = handle("land", &land_request, &app);
         assert_eq!(status, 200);
-        let merged: Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(merged["merged"], true);
-        assert_eq!(merged["source"], worktree.branch);
-        assert_eq!(merged["target"], "main");
-        assert_eq!(merged["worktreeDeleted"], true);
+        let landed: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(landed["landed"], true);
+        assert_eq!(landed["alreadyLanded"], false);
+        assert_eq!(landed["source"], worktree.branch);
+        assert_eq!(landed["target"], "main");
         assert!(repo.join("worker.txt").is_file());
+        assert!(std::path::Path::new(&worktree.path).exists());
+        assert_eq!(
+            session_by_id(&app, &child.id).unwrap().worktree_path,
+            Some(worktree.path.clone())
+        );
+        assert_eq!(
+            git(&repo, &["rev-list", "--count", "main"])
+                .parse::<u64>()
+                .unwrap(),
+            before_count + 1
+        );
+        assert_eq!(
+            git(&repo, &["log", "-1", "--format=%s", "main"]),
+            "fix(orchestration): Land worker changes"
+        );
+        assert_eq!(
+            git(&repo, &["rev-list", "--parents", "-n", "1", "main"])
+                .split_whitespace()
+                .count(),
+            2,
+            "the squashed commit must have one parent"
+        );
+        let landing = {
+            let conn = app.db().conn.lock().unwrap();
+            conn.query_row(
+                "SELECT diff_fingerprint, target_commit FROM agent_landings WHERE session_id = ?1",
+                rusqlite::params![child.id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(landing.0.len(), 64);
+        assert_eq!(landing.1, git(&repo, &["rev-parse", "main"]));
+
+        let worker_head = git(&repo, &["rev-parse", &worktree.branch]);
+        git(
+            std::path::Path::new(&worktree.path),
+            &["commit", "--amend", "-q", "-m", "rewritten worker history"],
+        );
+        assert_ne!(git(&repo, &["rev-parse", &worktree.branch]), worker_head);
+        {
+            let conn = app.db().conn.lock().unwrap();
+            conn.execute(
+                "UPDATE agent_landings SET target_commit = NULL, landed_at = NULL WHERE session_id = ?1",
+                rusqlite::params![child.id],
+            )
+            .unwrap();
+        }
+
+        let (status, body) = handle("land", &land_request, &app);
+        assert_eq!(status, 200);
+        let repeated: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(repeated["alreadyLanded"], true);
+        assert_eq!(
+            git(&repo, &["rev-list", "--count", "main"])
+                .parse::<u64>()
+                .unwrap(),
+            before_count + 1
+        );
+
+        let cleanup_request = format!(
+            r#"{{"parentSessionId":"{}","confirm":true}}"#,
+            root.id
+        );
+        let (status, body) = handle("cleanup", &cleanup_request, &app);
+        assert_eq!(status, 200);
+        let cleanup: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(cleanup["removed"][0]["id"], child.id);
         assert!(!std::path::Path::new(&worktree.path).exists());
         assert_eq!(session_by_id(&app, &child.id).unwrap().worktree_path, None);
+        assert!(
+            !crate::git::branch_list(&repo_str)
+                .unwrap()
+                .branches
+                .iter()
+                .any(|branch| branch.name == worktree.branch),
+            "verified cleanup must delete the disposable worker branch"
+        );
 
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn land_requires_a_conventional_commit_message() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "message check").unwrap();
+        std::fs::write(
+            std::path::Path::new(&worktree.path).join("worker.txt"),
+            "worker change\n",
+        )
+        .unwrap();
+        git(std::path::Path::new(&worktree.path), &["add", "-A"]);
+        git(
+            std::path::Path::new(&worktree.path),
+            &["commit", "-q", "-m", "worker change"],
+        );
+
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        seed_worktree(&app, &root, "worker", &worktree);
+
+        for message in [None, Some("Clean up worker changes")] {
+            let request = match message {
+                Some(message) => format!(
+                    r#"{{"parentSessionId":"{}","target":"worker","message":"{}"}}"#,
+                    root.id, message
+                ),
+                None => format!(r#"{{"parentSessionId":"{}","target":"worker"}}"#, root.id),
+            };
+            let (status, body) = handle("land", &request, &app);
+            assert_eq!(status, 400);
+            assert!(body.contains("Conventional Commit"));
+        }
+
+        crate::git::worktree_remove(&worktree.path, true).unwrap();
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn land_refuses_a_branch_without_commits_ahead_of_its_base() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "empty worker").unwrap();
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        seed_worktree(&app, &root, "worker", &worktree);
+        let request = format!(
+            r#"{{"parentSessionId":"{}","target":"worker","message":"chore(orchestration): Land empty worker"}}"#,
+            root.id
+        );
+
+        let (status, body) = handle("land", &request, &app);
+        assert_eq!(status, 409);
+        assert!(body.contains("no commits ahead"));
+
+        crate::git::worktree_remove(&worktree.path, true).unwrap();
+        crate::git::branch_delete(&repo_str, &worktree.branch).unwrap();
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    #[test]
+    fn land_requires_the_worker_to_be_a_direct_child() {
+        let repo = init_repo();
+        let repo_str = repo.to_string_lossy().to_string();
+        let worktree = crate::git::worktree_add(&repo_str, "nested worker").unwrap();
+        std::fs::write(
+            std::path::Path::new(&worktree.path).join("worker.txt"),
+            "nested change\n",
+        )
+        .unwrap();
+        git(std::path::Path::new(&worktree.path), &["add", "-A"]);
+        git(
+            std::path::Path::new(&worktree.path),
+            &["commit", "-q", "-m", "nested change"],
+        );
+
+        let app = headless_app();
+        let root = seed(&app, "root", None);
+        let middle = seed(&app, "middle", Some(&root.id));
+        let worker = seed_worktree(&app, &middle, "worker", &worktree);
+        let request = format!(
+            r#"{{"parentSessionId":"{}","target":"{}","message":"fix(orchestration): Land nested worker"}}"#,
+            root.id, worker.id
+        );
+
+        let (status, body) = handle("land", &request, &app);
+        assert_eq!(status, 409);
+        assert!(body.contains("direct child"));
+
+        crate::git::worktree_remove(&worktree.path, true).unwrap();
+        crate::git::branch_delete(&repo_str, &worktree.branch).unwrap();
         std::fs::remove_dir_all(&repo).unwrap();
     }
 
@@ -1299,7 +1740,7 @@ mod tests {
     }
 
     #[test]
-    fn merge_conflict_reports_files_and_preserves_branch_heads() {
+    fn land_conflict_reports_files_and_preserves_branch_heads() {
         let repo = init_repo();
         let repo_str = repo.to_string_lossy().to_string();
         let worktree = crate::git::worktree_add(&repo_str, "conflict").unwrap();
@@ -1314,8 +1755,11 @@ mod tests {
         let app = headless_app();
         let root = seed(&app, "root", None);
         seed_worktree(&app, &root, "worker", &worktree);
-        let request = format!(r#"{{"parentSessionId":"{}","target":"worker"}}"#, root.id);
-        let (status, body) = handle("merge", &request, &app);
+        let request = format!(
+            r#"{{"parentSessionId":"{}","target":"worker","message":"fix(orchestration): Merge worker changes"}}"#,
+            root.id
+        );
+        let (status, body) = handle("land", &request, &app);
         assert_eq!(status, 409);
         let conflict: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(conflict["error"], "merge conflict");
@@ -1329,13 +1773,13 @@ mod tests {
         assert_eq!(git(&repo, &["rev-parse", &worktree.branch]), source_head);
         assert_eq!(git(&repo, &["rev-parse", "main"]), target_head);
 
-        git(&repo, &["merge", "--abort"]);
+        git(&repo, &["reset", "--merge", "HEAD"]);
         crate::git::worktree_remove(&worktree.path, true).unwrap();
         std::fs::remove_dir_all(&repo).unwrap();
     }
 
     #[test]
-    fn merge_refuses_uncommitted_worker_changes() {
+    fn land_refuses_uncommitted_worker_changes() {
         let repo = init_repo();
         let repo_str = repo.to_string_lossy().to_string();
         let worktree = crate::git::worktree_add(&repo_str, "dirty").unwrap();
@@ -1351,7 +1795,7 @@ mod tests {
         let root = seed(&app, "root", None);
         seed_worktree(&app, &root, "worker", &worktree);
         let request = format!(r#"{{"parentSessionId":"{}","target":"worker"}}"#, root.id);
-        let (status, body) = handle("merge", &request, &app);
+        let (status, body) = handle("land", &request, &app);
         assert_eq!(status, 409);
         let refused: Value = serde_json::from_str(&body).unwrap();
         assert_eq!(refused["error"], "worktree has uncommitted changes");
@@ -1732,7 +2176,7 @@ mod tests {
     }
 
     #[test]
-    fn handle_cleanup_offers_then_removes_clean_worktrees() {
+    fn cleanup_refuses_clean_but_unlanded_worktrees() {
         let repo = std::env::temp_dir().join(format!("vlx-cleanup-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&repo).unwrap();
         let repo_str = repo.to_string_lossy().to_string();
@@ -1794,10 +2238,14 @@ mod tests {
         let (status, out) = handle("cleanup", &body, &app);
         assert_eq!(status, 200);
         let v: Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["candidates"].as_array().unwrap().len(), 1);
-        assert_eq!(v["candidates"][0]["name"], "clean-worker");
-        assert_eq!(v["blocked"].as_array().unwrap().len(), 1);
-        assert_eq!(v["blocked"][0]["name"], "dirty-worker");
+        assert!(v["candidates"].as_array().unwrap().is_empty());
+        assert_eq!(v["blocked"].as_array().unwrap().len(), 2);
+        assert!(v["blocked"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["name"] == "clean-worker"
+                && row["reason"].as_str().unwrap().contains("verified landing")));
         assert!(
             std::path::Path::new(&clean.path).is_dir(),
             "a dry run must not remove anything"
@@ -1810,18 +2258,21 @@ mod tests {
         );
         assert_eq!(status, 200);
         let v: Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["removed"].as_array().unwrap().len(), 1);
-        assert_eq!(v["removed"][0]["name"], "clean-worker");
+        assert!(v["removed"].as_array().unwrap().is_empty());
         assert!(v["failed"].as_array().unwrap().is_empty());
-        assert!(!std::path::Path::new(&clean.path).exists());
+        assert!(std::path::Path::new(&clean.path).exists());
         assert!(
             std::path::Path::new(&dirty.path).is_dir(),
             "a worktree with uncommitted changes must survive"
         );
 
         let stored = session_by_id(&app, &clean_session.id).unwrap();
-        assert_eq!(stored.worktree_path, None);
+        assert_eq!(stored.worktree_path, Some(clean.path.clone()));
 
+        crate::git::worktree_remove(&clean.path, true).unwrap();
+        crate::git::branch_delete(&repo_str, &clean.branch).unwrap();
+        crate::git::worktree_remove(&dirty.path, true).unwrap();
+        crate::git::branch_delete(&repo_str, &dirty.branch).unwrap();
         std::fs::remove_dir_all(&repo).unwrap();
     }
 

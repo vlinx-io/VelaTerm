@@ -1,6 +1,7 @@
 //! Inspect repository state through the system Git CLI without depending on libgit2.
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::Read;
 use std::process::Stdio;
@@ -1442,7 +1443,7 @@ pub fn branch_list(cwd: &str) -> Result<BranchList, String> {
 }
 
 /// Test whether one commit is already an ancestor of another.
-fn is_ancestor(dir: &str, ancestor: &str, descendant: &str) -> bool {
+pub fn is_ancestor(dir: &str, ancestor: &str, descendant: &str) -> bool {
     crate::host::command("git")
         .arg("-C")
         .arg(dir)
@@ -1653,6 +1654,185 @@ pub fn merge_branches_apply(
     Err(format!("Merge failed: {err}"))
 }
 
+#[derive(Debug, Clone)]
+pub struct AgentLandSnapshot {
+    pub source_head: String,
+    pub source_tree: String,
+    pub diff_fingerprint: String,
+    pub target_before: String,
+    pub commits_ahead: u64,
+    pub target_dirty: bool,
+}
+
+pub fn agent_land_snapshot(
+    cwd: &str,
+    source: &str,
+    target: &str,
+) -> Result<AgentLandSnapshot, String> {
+    if cwd.trim().is_empty() {
+        return Err("No working directory".into());
+    }
+    if source == target {
+        return Err("Source and target are the same branch.".into());
+    }
+    let r = resolve_merge(cwd, source, target);
+    if !r.found {
+        return Err(format!("Branch '{source}' or '{target}' no longer exists."));
+    }
+    r.target_dir.as_ref().ok_or_else(|| {
+        format!(
+            "Target branch '{target}' isn't checked out in any worktree. Check it out first, then retry."
+        )
+    })?;
+    if r
+        .source_dir
+        .as_deref()
+        .map(worktree_has_changes)
+        .unwrap_or(false)
+    {
+        return Err(format!("Source branch '{source}' has uncommitted changes."));
+    }
+    let target_dir = r.target_dir.as_deref().unwrap();
+    let target_dirty = worktree_has_changes(target_dir);
+
+    let source_head = run_git(cwd, &["rev-parse", &r.source_full])
+        .ok_or_else(|| format!("Failed to read source branch '{source}'."))?;
+    let source_tree = run_git(cwd, &["rev-parse", &format!("{}^{{tree}}", r.source_full)])
+        .ok_or_else(|| format!("Failed to read source tree for '{source}'."))?;
+    let target_before = run_git(cwd, &["rev-parse", &r.target_full])
+        .ok_or_else(|| format!("Failed to read target branch '{target}'."))?;
+    let commits_ahead = run_git(cwd, &["rev-list", "--count", &r.source_full, "--not", &r.target_full])
+        .and_then(|value| value.parse().ok())
+        .ok_or_else(|| format!("Failed to count commits ahead for '{source}'."))?;
+    let merge_base = run_git(cwd, &["merge-base", &r.source_full, &r.target_full])
+        .ok_or_else(|| format!("Failed to find a merge base for '{source}' and '{target}'."))?;
+    let patch = crate::host::command("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(["diff", "--binary", "--full-index", &merge_base, &r.source_full])
+        .output()
+        .map_err(|e| format!("Failed to fingerprint worker changes: {e}"))?;
+    if !patch.status.success() {
+        return Err("Failed to fingerprint worker changes.".into());
+    }
+    let diff_fingerprint = format!("{:x}", Sha256::digest(&patch.stdout));
+
+    Ok(AgentLandSnapshot {
+        source_head,
+        source_tree,
+        diff_fingerprint,
+        target_before,
+        commits_ahead,
+        target_dirty,
+    })
+}
+
+pub fn agent_land_stage(cwd: &str, source: &str, target: &str) -> Result<MergeOutcome, String> {
+    let r = resolve_merge(cwd, source, target);
+    if !r.found {
+        return Err(format!("Branch '{source}' or '{target}' no longer exists."));
+    }
+    let target_dir = r.target_dir.ok_or_else(|| {
+        format!(
+            "Target branch '{target}' isn't checked out in any worktree. Check it out first, then retry."
+        )
+    })?;
+
+    let out = crate::host::command("git")
+        .arg("-C")
+        .arg(&target_dir)
+        .args(["merge", "--squash", source])
+        .output()
+        .map_err(|e| format!("Failed to run git merge --squash: {e}"))?;
+    if !out.status.success() {
+        let conflicts: Vec<String> =
+            run_git(&target_dir, &["diff", "--name-only", "--diff-filter=U"])
+                .map(|value| value.lines().map(str::to_string).collect())
+                .unwrap_or_default();
+        if !conflicts.is_empty() {
+            let _ = crate::host::command("git")
+                .arg("-C")
+                .arg(&target_dir)
+                .args(["reset", "--merge", "HEAD"])
+                .output();
+            return Ok(MergeOutcome {
+                merged: false,
+                conflict: true,
+                conflicts,
+                message: "Squash application conflicted and the target was restored.".into(),
+            });
+        }
+        let error = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(format!("Squash merge failed: {error}"));
+    }
+
+    Ok(MergeOutcome {
+        merged: true,
+        conflict: false,
+        conflicts: vec![],
+        message: format!("Staged the net change from {source} on {target}."),
+    })
+}
+
+pub fn agent_land_index_tree(cwd: &str, target: &str) -> Result<String, String> {
+    let r = resolve_merge(cwd, target, target);
+    let target_dir = r.target_dir.ok_or_else(|| {
+        format!("Target branch '{target}' isn't checked out in any worktree.")
+    })?;
+    run_git(&target_dir, &["write-tree"])
+        .ok_or_else(|| format!("Failed to read the staged tree for '{target}'."))
+}
+
+pub fn agent_land_commit(cwd: &str, target: &str, commit_message: &str) -> Result<String, String> {
+    let r = resolve_merge(cwd, target, target);
+    let target_dir = r.target_dir.ok_or_else(|| {
+        format!("Target branch '{target}' isn't checked out in any worktree.")
+    })?;
+    let commit = crate::host::command("git")
+        .arg("-C")
+        .arg(&target_dir)
+        .args(["commit", "-m", commit_message])
+        .output()
+        .map_err(|e| format!("Failed to commit squashed changes: {e}"))?;
+    if !commit.status.success() {
+        let _ = crate::host::command("git")
+            .arg("-C")
+            .arg(&target_dir)
+            .args(["reset", "--merge", "HEAD"])
+            .output();
+        let error = String::from_utf8_lossy(&commit.stderr).trim().to_string();
+        return Err(format!("Failed to commit squashed changes: {error}"));
+    }
+    run_git(&target_dir, &["rev-parse", "HEAD"])
+        .ok_or_else(|| format!("Failed to read the new commit on '{target}'."))
+}
+
+pub fn branch_head(cwd: &str, branch: &str) -> Option<String> {
+    run_git(cwd, &["rev-parse", &format!("refs/heads/{branch}")])
+}
+
+pub fn commit_tree(cwd: &str, commit: &str) -> Option<String> {
+    run_git(cwd, &["rev-parse", &format!("{commit}^{{tree}}")])
+}
+
+pub fn reset_branch_worktree(cwd: &str, branch: &str) -> Result<(), String> {
+    let r = resolve_merge(cwd, branch, branch);
+    let target_dir = r.target_dir.ok_or_else(|| {
+        format!("Target branch '{branch}' isn't checked out in any worktree.")
+    })?;
+    let output = crate::host::command("git")
+        .arg("-C")
+        .arg(&target_dir)
+        .args(["reset", "--merge", "HEAD"])
+        .output()
+        .map_err(|e| format!("Failed to restore target branch '{branch}': {e}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!("Failed to restore target branch '{branch}'."))
+    }
+}
+
 // ─────────────────────────── Change viewer (diff) ───────────────────────────
 // Show staged, unstaged, and untracked worktree changes against HEAD. The frontend lists files and
 // renders HEAD versus worktree content in CodeMirror MergeView.
@@ -1737,6 +1917,15 @@ fn repo_top(cwd: &str) -> String {
     run_git(cwd, &["rev-parse", "--show-toplevel"])
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| cwd.to_string())
+}
+
+pub fn repository_root(cwd: &str) -> Option<String> {
+    let common = run_git(cwd, &["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+    let common_path = std::path::Path::new(&common);
+    if common_path.file_name().and_then(|name| name.to_str()) == Some(".git") {
+        return common_path.parent().map(|path| path.to_string_lossy().to_string());
+    }
+    run_git(cwd, &["rev-parse", "--show-toplevel"])
 }
 
 /// Map porcelain XY codes to display status.
