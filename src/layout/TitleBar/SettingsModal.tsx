@@ -896,6 +896,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     onChange={setTermRenderer}
                   />
                 </Field>
+                <div
+                  style={{
+                    marginTop: 4,
+                    fontSize: 11,
+                    lineHeight: 1.5,
+                    color: "var(--text-dim)",
+                  }}
+                >
+                  {t("settings.rendererHint")}
+                </div>
                 <Field label={t("settings.redrawOnReveal")}>
                   <Seg<"on" | "off">
                     value={redrawOnReveal ? "on" : "off"}

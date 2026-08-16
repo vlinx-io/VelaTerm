@@ -7,7 +7,11 @@
 //! Higher layers depend only on this module, allowing the same React code to run on desktop and browser.
 
 import { Channel, invoke as tauriInvoke } from "@tauri-apps/api/core";
-import { listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
+import {
+  emit as tauriEmit,
+  listen as tauriListen,
+  type UnlistenFn,
+} from "@tauri-apps/api/event";
 
 import { t } from "../i18n";
 import { recordRequestError } from "./reqLog";
@@ -160,6 +164,31 @@ export function listen<T>(
   return isTauri
     ? tauriListen<T>(name, (e) => cb(e.payload))
     : wsClient.listen<T>(name, cb);
+}
+
+// Local host event bus for remote-connection windows.
+//
+// A remote-connection window routes normal transport over WebSocket (isTauri is false), but it is
+// physically a Tauri WebView, and host-side events such as SSH tunnel state exist only on the
+// local Tauri bus. These helpers are the sole sanctioned access to that bus outside src/platform.
+
+/** Listens on the local Tauri event bus; resolves to null outside a Tauri-hosted window. */
+export function listenLocalHostEvent<T>(
+  name: string,
+  cb: (payload: T) => void,
+): Promise<UnlistenFn | null> {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+    return Promise.resolve(null);
+  }
+  return tauriListen<T>(name, (e) => cb(e.payload));
+}
+
+/** Emits on the local Tauri event bus; a no-op outside a Tauri-hosted window. */
+export function emitLocalHostEvent(name: string, payload: unknown): Promise<void> {
+  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+    return Promise.resolve();
+  }
+  return tauriEmit(name, payload);
 }
 
 // PTY output streams.

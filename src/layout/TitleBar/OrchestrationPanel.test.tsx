@@ -86,13 +86,27 @@ describe("OrchestrationPanel launch values", () => {
     });
   });
 
-  it("warns when the selected profile skips confirmations", () => {
+  it("warns when the selected profile skips confirmations inside a worktree", () => {
+    state.orchestrationProfiles = {
+      critical: { agent: "claude", permissionMode: "skip", worktree: true },
+    };
+    render(<OrchestrationPanel />);
+
+    expect(screen.getByText("settings.orchPermissionSkipWarning")).toBeTruthy();
+  });
+
+  it("warns harder when a skip profile has no worktree to contain the worker", () => {
+    // An unset worktree resolves to off for vagent spawns, so the worker edits the
+    // parent's directory without confirmations.
     state.orchestrationProfiles = {
       critical: { agent: "claude", permissionMode: "skip" },
     };
     render(<OrchestrationPanel />);
 
-    expect(screen.getByText("settings.orchPermissionSkipWarning")).toBeTruthy();
+    expect(
+      screen.getByText("settings.orchPermissionSkipNoWorktreeWarning"),
+    ).toBeTruthy();
+    expect(screen.queryByText("settings.orchPermissionSkipWarning")).toBeNull();
   });
 
   it("does not warn when the selected profile uses default permissions", () => {

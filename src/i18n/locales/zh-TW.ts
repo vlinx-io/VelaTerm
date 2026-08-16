@@ -103,7 +103,6 @@ const zhTW: typeof en = {
   "settings.orchDescription": "說明",
   "settings.orchDescriptionPlaceholder": "說明何時應使用此設定檔。",
   "settings.orchNewProfile": "新設定檔名稱",
-  "settings.orchAdd": "新增",
   "settings.orchAddNew": "新增設定檔",
   "settings.orchDelete": "刪除",
   "settings.orchNoProfiles": "尚無設定檔。新建一個即可在每次派生時重複使用。",
@@ -118,6 +117,8 @@ const zhTW: typeof en = {
   "settings.orchPermissionInherit": "繼承父工作階段",
   "settings.orchPermissionSkipWarning":
     "此工作程序在自己的 worktree 中執行時不會要求確認.",
+  "settings.orchPermissionSkipNoWorktreeWarning": "該 worker 將直接在父目錄中免確認執行。請開啟獨立 worktree 加以隔離。",
+  "settings.orchAgentUnsetHint": "尚未儲存代理；worker 將使用父工作階段的代理。選擇一個以明確指定。",
   "settings.orchLimitsTitle": "限制",
   "settings.orchMaxDescendants": "子孫工作階段上限",
   "settings.orchMaxParallel": "並行上限",
@@ -184,12 +185,17 @@ const zhTW: typeof en = {
   "spawn.optionOther": "其他...", // Other...
   "spawn.worktreeLabel": "獨立 git worktree", // Separate git worktree
   "spawn.launch": "啟動", // Launch
+  "spawn.launchWarningsTitle": "請檢查啟動值",
+  "spawn.launchWarning": (field: string, value: string, kind: string) =>
+    `${field}「${value}」不在 VelaTerm 為 ${kind} 維護的值清單內。請確認已安裝的 CLI 接受該值。`,
   "spawn.remaining": (n: number) => `還有 ${n} 個待確認`, // ${n} more pending
   "spawn.notifyTitle": "派生會話待確認", // Spawn session awaiting confirmation
   "retire.title": "退役此工作階段？",
   "retire.session": "工作階段",
   "retire.actionArchive": "封存此工作階段。不會刪除任何 worktree。",
   "retire.actionCleanup": "刪除下列 worktree，然後封存此工作階段。",
+  "retire.actionDiscard": "捨棄該 worker worktree 中未提交的變更。",
+  "retire.discardWarning": "該 worktree 中所有未提交的變更都會被刪除。已提交的工作保留。",
   "retire.descendants": (n: number) => `包含 ${n} 個子孫工作階段。`,
   "retire.irreversible": "此操作無法復原",
   "retire.worktreeCount": (n: number) => `將刪除 ${n} 個 worktree 及其分支。`,
@@ -260,6 +266,8 @@ const zhTW: typeof en = {
   "gitea.test": "測試連線",
   "gitea.saved": "已儲存。",
   "settings.renderer": "終端算繪器", // Terminal renderer
+  "settings.rendererHint":
+    "DOM（預設）在任何環境下都可用，但行高大於 1 時 TUI 邊框會出現縫隙。Canvas 可無縫繪製這些邊框。WebGL 最快，但可能遺失 GPU 內容。",
   "settings.redrawOnReveal": "切回分頁時重繪", // Redraw on tab switch
   "settings.catAdvanced": "進階", // Advanced
   "settings.outputScheduler": "前台優先輸出", // Foreground-priority output
@@ -430,8 +438,22 @@ const zhTW: typeof en = {
   "tree.archiveBlockedBody": "封存已被拒絕。封存後的工作階段會離開清理範圍，其工作樹與分支將被遺留。", // Archiving was refused. An archived session leaves the worker cleanup scope, so its worktree and branch would be stranded.
   "tree.archiveConfirmTitle": "封存並刪除 worktree？", // Archive and delete worktrees?
   "tree.archiveConfirmBody": (n: number) =>
-    `封存會刪除 ${n} 個 worker worktree 及其分支。此操作無法復原。相關工作已經在父分支上。`,
+    `封存會刪除 ${n} 個 worker worktree 及其分支。此操作無法復原。只有經驗證已合入父分支的工作才能封存；其他情況會阻止封存。`,
   "tree.archiveConfirmAction": "封存", // Archive
+  "archive.blockedRow": (name: string, reason: string) =>
+    `「${name}」仍持有 worktree：${reason}`,
+  "archive.blockedSuffix": "請先對該 worker 執行 land 或 retire。",
+  "archive.reason.uncommittedChanges": "worktree 存在未提交的變更",
+  "archive.reason.noVerifiedLanding": "worktree 沒有已驗證的合入紀錄",
+  "archive.reason.workerChangedAfterLanding": "worker 在已驗證合入之後發生了變化",
+  "archive.reason.landingNotOnTarget": "已驗證的合入提交不在目標分支上",
+  "archive.reason.repoRootUnavailable": "無法存取 worktree 的存放庫根目錄",
+  "archive.reason.missingNeverLanded": "worktree 目錄缺失且該 worker 從未合入",
+  "archive.reason.missingUnverifiedLanding": "worktree 目錄缺失且其合入從未通過驗證",
+  "archive.reason.missingDifferentParent": "worktree 目錄缺失且其合入屬於另一個父工作階段",
+  "archive.reason.missingRepoRootUnavailable": "worktree 目錄缺失且無法存取存放庫根目錄",
+  "archive.reason.missingLandingNotOnTarget": "worktree 目錄缺失且其合入提交不在目標分支上",
+  "archive.reason.branchMovedAfterLanding": "worker 分支在已驗證合入之後發生了移動",
   // Temporary (draft) sessions
   "tree.scratchTag": "臨時", // scratch
   "tree.persistSession": "轉為永久會話…", // Make Permanent Session…

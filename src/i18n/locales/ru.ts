@@ -115,7 +115,6 @@ const ru: typeof en = {
   "settings.orchDescription": "Описание",
   "settings.orchDescriptionPlaceholder": "Опишите, когда следует использовать этот профиль.",
   "settings.orchNewProfile": "Имя нового профиля",
-  "settings.orchAdd": "Добавить",
   "settings.orchAddNew": "Добавить новый",
   "settings.orchDelete": "Удалить",
   "settings.orchNoProfiles":
@@ -131,6 +130,10 @@ const ru: typeof en = {
   "settings.orchPermissionInherit": "Наследовать от родителя",
   "settings.orchPermissionSkipWarning":
     "Этот worker запускается без подтверждения внутри своего worktree.",
+  "settings.orchPermissionSkipNoWorktreeWarning":
+    "Этот воркер работает без подтверждений прямо в родительском каталоге. Включите отдельный worktree, чтобы изолировать его.",
+  "settings.orchAgentUnsetHint":
+    "Агент ещё не сохранён; воркеры используют агента родительского сеанса. Выберите агента, чтобы задать его явно.",
   "settings.orchLimitsTitle": "Ограничения",
   "settings.orchMaxDescendants": "Макс. потомков",
   "settings.orchMaxParallel": "Макс. параллельно",
@@ -197,6 +200,9 @@ const ru: typeof en = {
   "spawn.optionOther": "Другое...", // Other...
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
   "spawn.launch": "Launch", // Launch
+  "spawn.launchWarningsTitle": "Проверьте параметры запуска",
+  "spawn.launchWarning": (field: string, value: string, kind: string) =>
+    `Значение ${field} "${value}" вне куратируемых VelaTerm значений для ${kind}. Проверьте, что установленный CLI его принимает.`,
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
   "retire.title": "Вывести эту сессию из работы?",
@@ -204,6 +210,10 @@ const ru: typeof en = {
   "retire.actionArchive": "Архивировать сессию. Ни один worktree не удаляется.",
   "retire.actionCleanup":
     "Удалить worktree из списка ниже, затем архивировать сессию.",
+  "retire.actionDiscard":
+    "Отбросить незафиксированные изменения в worktree этого воркера.",
+  "retire.discardWarning":
+    "Все незафиксированные изменения в этом worktree будут удалены. Зафиксированная работа сохранится.",
   "retire.descendants": (n: number) => `Включает дочерних сессий: ${n}.`,
   "retire.irreversible": "Это действие нельзя отменить",
   "retire.worktreeCount": (n: number) =>
@@ -277,6 +287,8 @@ const ru: typeof en = {
   "gitea.test": "Test connection", // TODO translate
   "gitea.saved": "Saved.", // TODO translate
   "settings.renderer": "Отрисовщик терминала", // Terminal renderer
+  "settings.rendererHint":
+    "DOM (по умолчанию) работает везде, но при межстрочном интервале больше 1 в рамках TUI появляются разрывы. Canvas рисует эти рамки без разрывов. WebGL самый быстрый, но может терять контекст GPU.",
   "settings.redrawOnReveal": "Перерисовка при возврате к вкладке", // Redraw on tab switch
   "settings.catAdvanced": "Дополнительно", // Advanced
   "settings.outputScheduler": "Приоритет вывода активного терминала", // Foreground-priority output
@@ -450,8 +462,22 @@ const ru: typeof en = {
   "tree.archiveBlockedBody": "Архивация отклонена. Архивная сессия выходит из области очистки, поэтому её worktree и ветка остались бы без присмотра.", // Archiving was refused. An archived session leaves the worker cleanup scope, so its worktree and branch would be stranded.
   "tree.archiveConfirmTitle": "Архивировать и удалить worktree?", // Archive and delete worktrees?
   "tree.archiveConfirmBody": (n: number) =>
-    `Архивирование удалит worktree воркеров (${n}) и их ветки. Отменить это нельзя. Работа уже находится в родительской ветке.`,
+    `Архивирование удалит worktree воркеров (${n}) и их ветки. Отменить это нельзя. Архивировать можно только работу, попадание которой в родительскую ветку подтверждено; всё остальное блокирует архивирование.`,
   "tree.archiveConfirmAction": "Архивировать", // Archive
+  "archive.blockedRow": (name: string, reason: string) =>
+    `"${name}" всё ещё держит worktree: ${reason}`,
+  "archive.blockedSuffix": "Сначала выполните land или retire для воркера.",
+  "archive.reason.uncommittedChanges": "в worktree есть незафиксированные изменения",
+  "archive.reason.noVerifiedLanding": "у worktree нет подтверждённой посадки",
+  "archive.reason.workerChangedAfterLanding": "воркер изменился после подтверждённой посадки",
+  "archive.reason.landingNotOnTarget": "подтверждённый коммит посадки отсутствует в целевой ветке",
+  "archive.reason.repoRootUnavailable": "корень репозитория worktree недоступен",
+  "archive.reason.missingNeverLanded": "каталог worktree отсутствует, и воркер ни разу не выполнял посадку",
+  "archive.reason.missingUnverifiedLanding": "каталог worktree отсутствует, и его посадка не была подтверждена",
+  "archive.reason.missingDifferentParent": "каталог worktree отсутствует, и его посадка принадлежит другому родителю",
+  "archive.reason.missingRepoRootUnavailable": "каталог worktree отсутствует, и корень репозитория недоступен",
+  "archive.reason.missingLandingNotOnTarget": "каталог worktree отсутствует, и его коммит посадки не в целевой ветке",
+  "archive.reason.branchMovedAfterLanding": "ветка воркера сместилась после подтверждённой посадки",
   // Temporary (draft) sessions
   "tree.scratchTag": "врем.", // scratch
   "tree.persistSession": "Сделать постоянной сессией…", // Make Permanent Session…

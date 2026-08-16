@@ -377,6 +377,12 @@ export interface WorktreeInfo {
   baseRef: string;
 }
 
+/** Claims one fanned-out spawn request for this client. Exactly one caller across all connected
+ * clients receives true and may execute or answer the request; everyone else drops it. */
+export function spawnClaim(requestId: string): Promise<boolean> {
+  return invoke<boolean>("spawn_claim", { requestId });
+}
+
 /** Reports a correlated spawn outcome so a parked `vagent spawn` request can answer its caller.
  * Returns false when the waiter already timed out; callers may ignore the result. */
 export function spawnResult(
@@ -445,6 +451,11 @@ export function worktreesInSubtree(sessionId: string): Promise<string[]> {
 /** Removes a worktree directory; force allows removal with local changes. */
 export function removeWorktree(path: string, force: boolean): Promise<void> {
   return invoke("remove_worktree", { path, force });
+}
+
+/** Deletes a local branch; reverses a spawn's fresh worktree branch after session creation fails. */
+export function deleteBranch(repo: string, branch: string): Promise<void> {
+  return invoke("delete_branch", { repo, branch });
 }
 
 // Unified branch merging. The dialog lets users choose and reverse source/target directions.

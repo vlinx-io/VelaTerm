@@ -7,7 +7,7 @@ import type { RetireRequest } from "../ipc/events";
 
 const { commands, events, notify, store } = vi.hoisted(() => ({
   commands: { retireResult: vi.fn().mockResolvedValue(true) },
-  events: { onRetireRequest: vi.fn(), onRetireCancel: vi.fn() },
+  events: { onRetireRequest: vi.fn(), onRetireCancel: vi.fn(), onRetireResolved: vi.fn() },
   notify: { notify: vi.fn().mockResolvedValue(undefined) },
   store: { notifyEnabled: true, soundEnabled: false },
 }));
@@ -30,6 +30,8 @@ import { RetireConfirmModal } from "./RetireConfirmModal";
 let emit: (req: RetireRequest) => void;
 /** Withdraw one request id, as the backend does when its handler times out. */
 let expire: (requestId: string) => void;
+/** Report one request id answered by another client, as the resolved broadcast does. */
+let resolve: (requestId: string) => void;
 
 const CLEANUP: RetireRequest = {
   requestId: "req-1",
@@ -64,6 +66,10 @@ beforeEach(() => {
   });
   events.onRetireCancel.mockImplementation((cb: (requestId: string) => void) => {
     expire = cb;
+    return Promise.resolve(() => {});
+  });
+  events.onRetireResolved.mockImplementation((cb: (requestId: string) => void) => {
+    resolve = cb;
     return Promise.resolve(() => {});
   });
 });
@@ -169,6 +175,13 @@ describe("RetireConfirmModal", () => {
   it("withdraws an expired card so its approval cannot silently do nothing", async () => {
     await open();
     act(() => expire("req-1"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(commands.retireResult).not.toHaveBeenCalled();
+  });
+
+  it("closes a card another client already answered without sending a dead answer", async () => {
+    await open();
+    act(() => resolve("req-1"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(commands.retireResult).not.toHaveBeenCalled();
   });

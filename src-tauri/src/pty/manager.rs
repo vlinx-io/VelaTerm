@@ -1221,6 +1221,17 @@ impl PtyManager {
     /// Briefly lock to clone the sender, then enqueue and return. A dedicated FIFO writer touches the PTY
     /// descriptor without holding the global session lock. A full queue returns an error instead of blocking.
     pub fn write(&self, id: &str, data: &str) -> Result<(), String> {
+        self.write_inner(id, data, true)
+    }
+
+    /// Write a control sequence, such as the ESC an orchestration cancel sends, without bumping
+    /// the input revision. An interrupt ends work rather than starting it, so it must not
+    /// invalidate the turn-completion signal that retire and the settled checks rely on.
+    pub fn write_control(&self, id: &str, data: &str) -> Result<(), String> {
+        self.write_inner(id, data, false)
+    }
+
+    fn write_inner(&self, id: &str, data: &str, bump_revision: bool) -> Result<(), String> {
         let tx = {
             let map = self.sessions.lock().unwrap();
             let session = map
@@ -1236,9 +1247,11 @@ impl PtyManager {
                 format!("Session {id} is shutting down")
             }
         })?;
-        let mut revisions = self.input_revisions.lock().unwrap();
-        let revision = revisions.entry(id.to_string()).or_default();
-        *revision = revision.saturating_add(1);
+        if bump_revision {
+            let mut revisions = self.input_revisions.lock().unwrap();
+            let revision = revisions.entry(id.to_string()).or_default();
+            *revision = revision.saturating_add(1);
+        }
         Ok(())
     }
 

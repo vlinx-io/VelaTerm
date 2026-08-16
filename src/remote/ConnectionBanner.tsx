@@ -11,7 +11,13 @@
 
 import { useEffect, useState } from "react";
 import { useT } from "../i18n";
-import { isTauri, isRemoteWindow, remoteSshSession } from "../ipc/transport";
+import {
+  emitLocalHostEvent,
+  isRemoteWindow,
+  isTauri,
+  listenLocalHostEvent,
+  remoteSshSession,
+} from "../ipc/transport";
 import { wsClient } from "../ipc/wsClient";
 
 /** Failure count before showing the banner; the first may be transient, the second is considered disconnected. */
@@ -42,30 +48,29 @@ export function ConnectionBanner() {
     if (!isRemoteWindow || !remoteSshSession) return;
     let unlisten: (() => void) | undefined;
     let disposed = false;
-    void (async () => {
-      try {
-        const { listen } = await import("@tauri-apps/api/event");
-        const un = await listen<{ session: string; state: string }>(
-          "ssh://tunnel-state",
-          (ev) => {
-            if (ev.payload.session !== remoteSshSession) return;
-            const s = ev.payload.state;
-            if (s === "up") {
-              setTunnel(null);
-              // Replace the old potentially half-open socket immediately after tunnel recovery.
-              wsClient.forceReconnect();
-            } else if (s === "reconnecting" || s === "down") {
-              setTunnel(s);
-            }
-            setRetrying(false);
-          },
-        );
+    void listenLocalHostEvent<{ session: string; state: string }>(
+      "ssh://tunnel-state",
+      (payload) => {
+        if (payload.session !== remoteSshSession) return;
+        const s = payload.state;
+        if (s === "up") {
+          setTunnel(null);
+          // Replace the old potentially half-open socket immediately after tunnel recovery.
+          wsClient.forceReconnect();
+        } else if (s === "reconnecting" || s === "down") {
+          setTunnel(s);
+        }
+        setRetrying(false);
+      },
+    )
+      .then((un) => {
+        if (!un) return;
         if (disposed) un();
         else unlisten = un;
-      } catch {
+      })
+      .catch(() => {
         /* If the event channel is unavailable, retain the basic WebSocket banner. */
-      }
-    })();
+      });
     return () => {
       disposed = true;
       unlisten?.();
@@ -79,14 +84,11 @@ export function ConnectionBanner() {
     setRetrying(true);
     // Ask the host to rebuild an SSH tunnel; healthy tunnels safely ignore the request.
     if (isRemoteWindow && remoteSshSession) {
-      void (async () => {
-        try {
-          const { emit } = await import("@tauri-apps/api/event");
-          await emit("vlx://ssh-reconnect", { session: remoteSshSession });
-        } catch {
-          /* Continue with WebSocket reconnection if emitting fails. */
-        }
-      })();
+      void emitLocalHostEvent("vlx://ssh-reconnect", {
+        session: remoteSshSession,
+      }).catch(() => {
+        /* Continue with WebSocket reconnection if emitting fails. */
+      });
     }
     wsClient.reconnectNow();
   };

@@ -105,7 +105,6 @@ const vi: typeof en = {
   "settings.orchDescription": "Mô tả",
   "settings.orchDescriptionPlaceholder": "Mô tả khi nào nên sử dụng hồ sơ này.",
   "settings.orchNewProfile": "Tên hồ sơ mới",
-  "settings.orchAdd": "Thêm",
   "settings.orchAddNew": "Thêm mới",
   "settings.orchDelete": "Xóa",
   "settings.orchNoProfiles": "Chưa có hồ sơ nào. Hãy tạo một hồ sơ để dùng lại cho mọi lần spawn.",
@@ -120,6 +119,10 @@ const vi: typeof en = {
   "settings.orchPermissionInherit": "Kế thừa từ phiên cha",
   "settings.orchPermissionSkipWarning":
     "Worker này chạy mà không cần xác nhận trong worktree của nó.",
+  "settings.orchPermissionSkipNoWorktreeWarning":
+    "Worker này chạy không cần xác nhận ngay trong thư mục cha. Bật worktree riêng để cô lập nó.",
+  "settings.orchAgentUnsetHint":
+    "Chưa lưu agent nào; worker dùng agent của phiên cha. Hãy chọn một agent để chỉ định rõ.",
   "settings.orchLimitsTitle": "Giới hạn",
   "settings.orchMaxDescendants": "Số phiên con cháu tối đa",
   "settings.orchMaxParallel": "Số chạy song song tối đa",
@@ -186,6 +189,9 @@ const vi: typeof en = {
   "spawn.optionOther": "Khác...", // Other...
   "spawn.worktreeLabel": "Git worktree riêng",
   "spawn.launch": "Khởi chạy",
+  "spawn.launchWarningsTitle": "Kiểm tra giá trị khởi chạy",
+  "spawn.launchWarning": (field: string, value: string, kind: string) =>
+    `Giá trị ${field} "${value}" nằm ngoài các giá trị được VelaTerm quản lý cho ${kind}. Hãy kiểm tra CLI đã cài có chấp nhận không.`,
   "spawn.remaining": (n: number) => `Còn ${n} yêu cầu đang chờ`,
   "spawn.notifyTitle": "Phiên được tạo đang chờ xác nhận",
   "retire.title": "Cho phiên này nghỉ?",
@@ -193,6 +199,10 @@ const vi: typeof en = {
   "retire.actionArchive": "Lưu trữ phiên. Không xóa worktree nào.",
   "retire.actionCleanup":
     "Xóa các worktree bên dưới, rồi lưu trữ phiên.",
+  "retire.actionDiscard":
+    "Loại bỏ các thay đổi chưa commit trong worktree của worker này.",
+  "retire.discardWarning":
+    "Mọi thay đổi chưa commit trong worktree này sẽ bị xóa. Công việc đã commit được giữ lại.",
   "retire.descendants": (n: number) => `Bao gồm ${n} phiên hậu duệ.`,
   "retire.irreversible": "Thao tác này không thể hoàn tác",
   "retire.worktreeCount": (n: number) =>
@@ -266,6 +276,8 @@ const vi: typeof en = {
   "gitea.test": "Kiểm tra kết nối",
   "gitea.saved": "Đã lưu.",
   "settings.renderer": "Bộ kết xuất terminal",
+  "settings.rendererHint":
+    "DOM (mặc định) hoạt động ở mọi nơi nhưng để lộ khe hở trong khung TUI khi chiều cao dòng lớn hơn 1. Canvas vẽ các khung đó liền mạch. WebGL nhanh nhất nhưng có thể mất ngữ cảnh GPU.",
   "settings.redrawOnReveal": "Vẽ lại khi chuyển thẻ",
   "settings.catAdvanced": "Nâng cao",
   "settings.outputScheduler": "Ưu tiên đầu ra tiền cảnh",
@@ -432,8 +444,22 @@ const vi: typeof en = {
   "tree.archiveBlockedBody": "Lưu trữ đã bị từ chối. Phiên đã lưu trữ nằm ngoài phạm vi dọn dẹp, nên worktree và nhánh của nó sẽ bị bỏ lại.",
   "tree.archiveConfirmTitle": "Lưu trữ và xóa worktree?", // Archive and delete worktrees?
   "tree.archiveConfirmBody": (n: number) =>
-    `Lưu trữ sẽ xóa ${n} worktree của worker và các nhánh của chúng. Không thể hoàn tác. Công việc đã nằm trên nhánh cha.`,
+    `Lưu trữ sẽ xóa ${n} worktree của worker và các nhánh của chúng. Không thể hoàn tác. Chỉ công việc đã được xác minh là nằm trên nhánh cha mới có thể lưu trữ; mọi trường hợp khác sẽ chặn việc lưu trữ.`,
   "tree.archiveConfirmAction": "Lưu trữ", // Archive
+  "archive.blockedRow": (name: string, reason: string) =>
+    `"${name}" vẫn đang giữ một worktree: ${reason}`,
+  "archive.blockedSuffix": "Hãy land hoặc retire worker trước.",
+  "archive.reason.uncommittedChanges": "worktree có thay đổi chưa commit",
+  "archive.reason.noVerifiedLanding": "worktree không có lần land đã xác minh",
+  "archive.reason.workerChangedAfterLanding": "worker đã thay đổi sau lần land đã xác minh",
+  "archive.reason.landingNotOnTarget": "commit land đã xác minh không nằm trên nhánh đích",
+  "archive.reason.repoRootUnavailable": "không truy cập được gốc kho của worktree",
+  "archive.reason.missingNeverLanded": "thiếu thư mục worktree và worker chưa từng land",
+  "archive.reason.missingUnverifiedLanding": "thiếu thư mục worktree và lần land của nó chưa được xác minh",
+  "archive.reason.missingDifferentParent": "thiếu thư mục worktree và lần land của nó thuộc về cha khác",
+  "archive.reason.missingRepoRootUnavailable": "thiếu thư mục worktree và không truy cập được gốc kho",
+  "archive.reason.missingLandingNotOnTarget": "thiếu thư mục worktree và commit land của nó không nằm trên nhánh đích",
+  "archive.reason.branchMovedAfterLanding": "nhánh của worker đã di chuyển sau lần land đã xác minh",
   "tree.scratchTag": "nháp",
   "tree.persistSession": "Chuyển thành phiên lâu dài…",
   "tree.persistDoc": "Lưu vào ổ đĩa…",

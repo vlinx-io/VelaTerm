@@ -705,7 +705,9 @@ export function OrchestrationPanel() {
       return;
     }
     if (nameEditor === "new") {
-      setProfile(name, {});
+      // Persist the agent explicitly: a profile without one spawns the parent's agent kind,
+      // while the editor would display Claude, so the display would lie about the spawn.
+      setProfile(name, { agent: "claude" });
     } else if (active && name !== active) {
       setProfile(active, null);
       setProfile(name, profiles[active] ?? {});
@@ -840,12 +842,19 @@ export function OrchestrationPanel() {
               />
             </div>
             <div className="orch-profile-grid">
-              <OrchProfileField label={t("resume.agentType")}>
-                <AgentSelect
-                  value={kind as SessionKind}
-                  onChange={(v) => setProfile(active, { agent: v })}
-                />
-              </OrchProfileField>
+              <div>
+                <OrchProfileField label={t("resume.agentType")}>
+                  <AgentSelect
+                    value={kind as SessionKind}
+                    onChange={(v) => setProfile(active, { agent: v })}
+                  />
+                </OrchProfileField>
+                {!cfg.agent && (
+                  <p className="orch-panel-hint" style={{ margin: "6px 0 4px" }}>
+                    {t("settings.orchAgentUnsetHint")}
+                  </p>
+                )}
+              </div>
 
               {hasLaunchConfig && (
                 <>
@@ -900,7 +909,9 @@ export function OrchestrationPanel() {
                   className="orch-panel-hint"
                   style={{ margin: "6px 0 4px", color: "var(--warning, #c9a227)" }}
                 >
-                  {t("settings.orchPermissionSkipWarning")}
+                  {cfg.worktree
+                    ? t("settings.orchPermissionSkipWarning")
+                    : t("settings.orchPermissionSkipNoWorktreeWarning")}
                 </p>
               )}
             </div>
@@ -983,7 +994,7 @@ export function OrchestrationPanel() {
       <textarea
         value={patternDraft}
         rows={4}
-        placeholder={"docs/plans/**\n.env.local"}
+        placeholder={"docs/plans/**\ndocs/notes/**"}
         spellCheck={false}
         onChange={(e) => setPatternDraft(e.target.value)}
         onBlur={() =>

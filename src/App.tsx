@@ -23,6 +23,7 @@ import { listShells } from "./ipc/commands";
 import {
   onMenuAction,
   onSpawnRequest,
+  onSpawnResolved,
   onTreeChanged,
   onViewRequest,
 } from "./ipc/events";
@@ -109,6 +110,10 @@ function App() {
       if (useTermStore.getState().theme === "system") applyAppearance();
     });
     const unlisten = onSpawnRequest((req) => void handleSpawnRequest(req));
+    // Another client claimed or answered the spawn; drop the local copy of its card.
+    const unlistenSpawnResolved = onSpawnResolved((requestId) =>
+      useTermStore.getState().dismissSpawnRequest(requestId),
+    );
     const consumeOpenProject = () => {
       void platform.window
         .takeOpenProjectRequest()
@@ -177,6 +182,7 @@ function App() {
       unwatch();
       offConnState?.();
       void unlisten.then((fn) => fn());
+      void unlistenSpawnResolved.then((fn) => fn());
       void unlistenOpenProject.then((fn) => fn());
       void unlistenView.then((fn) => fn());
       clearTimeout(treeTimer);

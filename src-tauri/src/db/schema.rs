@@ -71,9 +71,12 @@ CREATE INDEX IF NOT EXISTS idx_groups_parent ON groups(parent_group_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_group ON sessions(group_id);
 
+-- parent_session_id deliberately carries no foreign key: a cascade there would let a parent
+-- deletion erase a surviving worker's landing record, the only proof its branch is safe to
+-- delete. A dangling parent id simply fails the parent-match checks, which is safe.
 CREATE TABLE IF NOT EXISTS agent_landings (
   session_id       TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
-  parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  parent_session_id TEXT NOT NULL,
   source_branch    TEXT NOT NULL,
   source_head      TEXT NOT NULL,
   source_tree      TEXT NOT NULL,

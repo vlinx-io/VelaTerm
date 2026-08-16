@@ -104,7 +104,6 @@ const ja: typeof en = {
   "settings.orchDescription": "説明",
   "settings.orchDescriptionPlaceholder": "このプロファイルを使用する場面を説明してください。",
   "settings.orchNewProfile": "新しいプロファイル名",
-  "settings.orchAdd": "追加",
   "settings.orchAddNew": "新規追加",
   "settings.orchDelete": "削除",
   "settings.orchNoProfiles": "プロファイルがありません。作成すると、すべての spawn で再利用できます。",
@@ -119,6 +118,10 @@ const ja: typeof en = {
   "settings.orchPermissionInherit": "親から継承",
   "settings.orchPermissionSkipWarning":
     "このワーカーは worktree 内で確認なしに実行されます.",
+  "settings.orchPermissionSkipNoWorktreeWarning":
+    "このワーカーは親ディレクトリ内で確認なしに実行されます。専用worktreeを有効にして隔離してください。",
+  "settings.orchAgentUnsetHint":
+    "エージェントが未設定のため、ワーカーは親セッションのエージェントを使用します。明示するには選択してください。",
   "settings.orchLimitsTitle": "上限",
   "settings.orchMaxDescendants": "子孫セッションの最大数",
   "settings.orchMaxParallel": "並列実行の最大数",
@@ -185,6 +188,9 @@ const ja: typeof en = {
   "spawn.optionOther": "その他...", // Other...
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
   "spawn.launch": "Launch", // Launch
+  "spawn.launchWarningsTitle": "起動値を確認してください",
+  "spawn.launchWarning": (field: string, value: string, kind: string) =>
+    `${field}「${value}」は ${kind} 向けにVelaTermが管理する値の範囲外です。インストール済みCLIが受け付けるか確認してください。`,
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
   "retire.title": "このセッションをリタイアしますか？",
@@ -192,6 +198,10 @@ const ja: typeof en = {
   "retire.actionArchive": "セッションをアーカイブします。worktree は削除しません。",
   "retire.actionCleanup":
     "下記の worktree を削除してから、セッションをアーカイブします。",
+  "retire.actionDiscard":
+    "このワーカーのworktreeにある未コミットの変更を破棄します。",
+  "retire.discardWarning":
+    "このworktreeの未コミットの変更はすべて削除されます。コミット済みの作業は残ります。",
   "retire.descendants": (n: number) => `子孫セッション ${n} 件を含みます。`,
   "retire.irreversible": "この操作は取り消せません",
   "retire.worktreeCount": (n: number) =>
@@ -265,6 +275,8 @@ const ja: typeof en = {
   "gitea.test": "Test connection", // TODO translate
   "gitea.saved": "Saved.", // TODO translate
   "settings.renderer": "ターミナルレンダラー", // Terminal renderer
+  "settings.rendererHint":
+    "DOM（デフォルト）はどこでも動作しますが、行の高さが1を超えるとTUIの罫線に隙間が出ます。Canvasは罫線を隙間なく描画します。WebGLは最速ですが、GPUコンテキストを失うことがあります。",
   "settings.redrawOnReveal": "タブ復帰時に再描画", // Redraw on tab switch
   "settings.catAdvanced": "詳細設定", // Advanced
   "settings.outputScheduler": "フォアグラウンド優先出力", // Foreground-priority output
@@ -436,8 +448,22 @@ const ja: typeof en = {
   "tree.archiveBlockedBody": "アーカイブは拒否されました。アーカイブしたセッションはクリーンアップの対象外になるため、ワークツリーとブランチが取り残されます。", // Archiving was refused. An archived session leaves the worker cleanup scope, so its worktree and branch would be stranded.
   "tree.archiveConfirmTitle": "アーカイブして worktree を削除しますか?", // Archive and delete worktrees?
   "tree.archiveConfirmBody": (n: number) =>
-    `アーカイブすると worker の worktree ${n} 件とそのブランチを削除します。元に戻せません。作業内容はすでに親ブランチにあります。`,
+    `アーカイブすると worker の worktree ${n} 件とそのブランチを削除します。元に戻せません。親ブランチへの反映が検証済みの作業のみアーカイブできます。それ以外はアーカイブがブロックされます。`,
   "tree.archiveConfirmAction": "アーカイブ", // Archive
+  "archive.blockedRow": (name: string, reason: string) =>
+    `「${name}」はまだworktreeを保持しています: ${reason}`,
+  "archive.blockedSuffix": "先にワーカーをlandするかretireしてください。",
+  "archive.reason.uncommittedChanges": "worktreeに未コミットの変更があります",
+  "archive.reason.noVerifiedLanding": "worktreeに検証済みのランディングがありません",
+  "archive.reason.workerChangedAfterLanding": "検証済みランディングの後にワーカーが変更されました",
+  "archive.reason.landingNotOnTarget": "検証済みランディングのコミットがターゲットブランチにありません",
+  "archive.reason.repoRootUnavailable": "worktreeのリポジトリルートを利用できません",
+  "archive.reason.missingNeverLanded": "worktreeディレクトリがなく、ワーカーは一度もランディングしていません",
+  "archive.reason.missingUnverifiedLanding": "worktreeディレクトリがなく、そのランディングは検証されていません",
+  "archive.reason.missingDifferentParent": "worktreeディレクトリがなく、そのランディングは別の親に属しています",
+  "archive.reason.missingRepoRootUnavailable": "worktreeディレクトリがなく、リポジトリルートを利用できません",
+  "archive.reason.missingLandingNotOnTarget": "worktreeディレクトリがなく、そのランディングのコミットがターゲットブランチにありません",
+  "archive.reason.branchMovedAfterLanding": "検証済みランディングの後にワーカーのブランチが移動しました",
   // Temporary (draft) sessions
   "tree.scratchTag": "一時", // scratch
   "tree.persistSession": "永続セッションに変換…", // Make Permanent Session…
