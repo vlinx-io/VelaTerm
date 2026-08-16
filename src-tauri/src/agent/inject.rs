@@ -168,14 +168,18 @@ pub fn build_codex_notify(exe_path: &str) -> String {
 /// guards the remaining mid-turn event with `CodexTurnGuard`.
 ///
 /// `SubagentStop` is intentionally omitted because a child agent finishing does not mean the root turn
-/// has ended; registering it would incorrectly mark an active root session as waiting. Every handler has
-/// a five-second timeout, emits no stdout, and exits successfully. Hooks observe state but never make decisions.
+/// has ended; registering it would incorrectly mark an active root session as waiting. Each handler emits
+/// no stdout and exits successfully. SessionEnd uses Codex's three-second maximum. Other handlers use a
+/// five-second timeout. Hooks observe state but never make decisions.
+///
+/// Codex hashes this exact text to derive each hook's trust identity, so any edit invalidates the trust
+/// recorded by `codex_hooks::ensure_session_hook_trust` and requires it to run again.
 pub fn build_codex_hooks() -> String {
     // Values in `-c key=value` are parsed as TOML. JSON arrays happen to be valid TOML, but a JSON
     // object's `:` is not the `=` required by a TOML inline table, so it becomes a plain string and
     // triggers `expected HooksToml`. Generate the inline table explicitly. `serde_json` string escaping
     // is compatible with the TOML basic-string subset used here, including quotes and backslashes.
-    fn handler(state: &str) -> String {
+    fn handler(state: &str, timeout: u8) -> String {
         let command = serde_json::to_string(&format!("\"$VLX_EXE\" --codex-hook {state}"))
             .expect("serializing the static hook command should not fail");
         let command_windows = serde_json::to_string(&format!(
@@ -183,19 +187,30 @@ pub fn build_codex_hooks() -> String {
         ))
         .expect("serializing the static Windows hook command should not fail");
         format!(
-            "{{ type = \"command\", command = {command}, commandWindows = {command_windows}, timeout = 5 }}"
+            "{{ type = \"command\", command = {command}, commandWindows = {command_windows}, timeout = {timeout} }}"
         )
     }
-    let group = |state: &str| format!("[{{ hooks = [{}] }}]", handler(state));
+    let group = |state: &str, timeout| format!("[{{ hooks = [{}] }}]", handler(state, timeout));
     format!(
         "{{ SessionStart = {}, UserPromptSubmit = {}, PreToolUse = {}, PermissionRequest = {}, Stop = {}, SessionEnd = {} }}",
-        group("ready"),
-        group("working"),
-        group("tool"),
-        group("asking"),
-        group("waiting"),
-        group("waiting")
+        group("ready", 5),
+        group("working", 5),
+        group("tool", 5),
+        group("asking", 5),
+        group("waiting", 5),
+        group("waiting", 3)
     )
+}
+
+/// The same hook configuration as `-c key=value` pairs for a direct, shell-free spawn.
+///
+/// PTY launches reference `$VLX_CODEX_HOOKS` and let the shell expand it. A directly spawned child has no
+/// shell, so the TOML must be inlined here for Codex to derive the identical hook hashes.
+pub fn codex_hook_config_overrides() -> Vec<String> {
+    vec![
+        "features.hooks=true".to_string(),
+        format!("hooks={}", build_codex_hooks()),
+    ]
 }
 
 /// Manual Codex configuration snippet for precise state reporting, intended for `~/.codex/config.toml`.
@@ -691,8 +706,8 @@ pub fn prepare_with_args(
 }
 
 /// Production launch entry point. In addition to launch arguments, it explicitly receives whether the
-/// installed Codex supports lifecycle hooks and `--dangerously-bypass-hook-trust`. Older versions receive
-/// only the existing notify integration and retain screen/busy fallbacks, avoiding unsupported CLI options.
+/// installed Codex supports lifecycle hooks. Older versions receive only the existing notify integration
+/// and retain screen/busy fallbacks, avoiding unsupported CLI options.
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_with_args_capabilities(
     kind: SessionKind,
@@ -749,7 +764,7 @@ pub fn prepare_with_args_capabilities(
         SessionKind::Codex => {
             // Codex command shape:
             // `codex [resume <id>] -c notify=<value> -c hooks=<value>
-            //        --dangerously-bypass-hook-trust --no-alt-screen ["$VLX_INIT_PROMPT"]`。
+            //        --no-alt-screen ["$VLX_INIT_PROMPT"]`。
             // `--no-alt-screen` keeps Codex in normal inline terminal history so interrupting or backing
             // out with Esc does not make VelaTerm's xterm viewport jump to the top during an alternate-screen
             // transition. It affects only Codex processes launched by VelaTerm and does not modify the user's
@@ -761,13 +776,10 @@ pub fn prepare_with_args_capabilities(
             let status_args = if codex_hooks_supported {
                 let hooks = value_ref(shell, CODEX_HOOKS_ENV);
                 env.push((CODEX_HOOKS_ENV.to_string(), build_codex_hooks()));
-                // VelaTerm constructs these trusted hooks and injects them only into this process. Bypass
-                // Codex's interactive hook-trust prompt so every managed session does not require a manual
-                // `/hooks` confirmation. This flag affects hook trust only, not approval policy or sandboxing.
-                format!(
-                    "-c notify={notify} -c features.hooks=true -c hooks={hooks} \
-                     --dangerously-bypass-hook-trust --no-alt-screen"
-                )
+                // Codex runs these only when `hooks.state` already records their hashes, so the caller must
+                // run `codex_hooks::ensure_session_hook_trust` before spawning. `--dangerously-bypass-hook-
+                // trust` is not an alternative: it also suppresses the trust check on the user's own hooks.
+                format!("-c notify={notify} -c features.hooks=true -c hooks={hooks} --no-alt-screen")
             } else {
                 // Older Codex versions do not recognize lifecycle hooks or the trust flag. Preserve the
                 // legacy launch options: notify can still report completion, while unavailable phases remain
@@ -1492,6 +1504,9 @@ mod tests {
         );
         assert!(hooks.contains("type = \"command\""));
         assert!(hooks.contains("timeout = 5"));
+        assert!(hooks.contains(
+            "SessionEnd = [{ hooks = [{ type = \"command\", command = \"\\\"$VLX_EXE\\\" --codex-hook waiting\", commandWindows = \"powershell.exe -NoProfile -NonInteractive -Command \\\"& $env:VLX_EXE --codex-hook waiting\\\"\", timeout = 3 }] }]"
+        ));
         assert!(hooks.contains("$VLX_EXE"));
         assert!(hooks.contains("$env:VLX_EXE"));
     }
@@ -1654,7 +1669,7 @@ mod tests {
         );
         assert_launch_inner(
             &a.launch.unwrap(),
-            "codex -c notify=\"$VLX_CODEX_NOTIFY\" -c features.hooks=true -c hooks=\"$VLX_CODEX_HOOKS\" --dangerously-bypass-hook-trust --no-alt-screen",
+            "codex -c notify=\"$VLX_CODEX_NOTIFY\" -c features.hooks=true -c hooks=\"$VLX_CODEX_HOOKS\" --no-alt-screen",
         );
     }
 
@@ -2388,7 +2403,7 @@ mod tests {
         // The `resume <id>` subcommand precedes global `-c` options.
         assert_launch_inner(
             &a.launch.unwrap(),
-            "codex resume 019e8662-62f8-7a01-a144-e26a07a5e5bb -c notify=\"$VLX_CODEX_NOTIFY\" -c features.hooks=true -c hooks=\"$VLX_CODEX_HOOKS\" --dangerously-bypass-hook-trust --no-alt-screen",
+            "codex resume 019e8662-62f8-7a01-a144-e26a07a5e5bb -c notify=\"$VLX_CODEX_NOTIFY\" -c features.hooks=true -c hooks=\"$VLX_CODEX_HOOKS\" --no-alt-screen",
         );
     }
 
@@ -2426,7 +2441,7 @@ mod tests {
         );
         assert_launch_inner(
             &a.launch.unwrap(),
-            "codex fork 019e8662-62f8-7a01-a144-e26a07a5e5bb -c notify=\"$VLX_CODEX_NOTIFY\" -c features.hooks=true -c hooks=\"$VLX_CODEX_HOOKS\" --dangerously-bypass-hook-trust --no-alt-screen",
+            "codex fork 019e8662-62f8-7a01-a144-e26a07a5e5bb -c notify=\"$VLX_CODEX_NOTIFY\" -c features.hooks=true -c hooks=\"$VLX_CODEX_HOOKS\" --no-alt-screen",
         );
     }
 
@@ -2508,7 +2523,7 @@ mod tests {
         );
         assert_launch_inner(
             &a.launch.unwrap(),
-            "codex -c notify=\"$VLX_CODEX_NOTIFY\" -c features.hooks=true -c hooks=\"$VLX_CODEX_HOOKS\" --dangerously-bypass-hook-trust --no-alt-screen \"$VLX_INIT_PROMPT\"",
+            "codex -c notify=\"$VLX_CODEX_NOTIFY\" -c features.hooks=true -c hooks=\"$VLX_CODEX_HOOKS\" --no-alt-screen \"$VLX_INIT_PROMPT\"",
         );
         assert!(a
             .env
@@ -2694,7 +2709,7 @@ mod tests {
         );
         assert_launch_inner(
             &a.launch.unwrap(),
-            "codex -c notify=\"$VLX_CODEX_NOTIFY\" -c features.hooks=true -c hooks=\"$VLX_CODEX_HOOKS\" --dangerously-bypass-hook-trust --no-alt-screen -m gpt-5",
+            "codex -c notify=\"$VLX_CODEX_NOTIFY\" -c features.hooks=true -c hooks=\"$VLX_CODEX_HOOKS\" --no-alt-screen -m gpt-5",
         );
     }
 

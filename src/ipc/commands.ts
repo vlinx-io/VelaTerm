@@ -144,6 +144,70 @@ export function agentLocateBin(agent: string): Promise<string | null> {
   return invoke<string | null>("agent_locate_bin", { agent });
 }
 
+export type CodexHookSource =
+  | "system"
+  | "user"
+  | "project"
+  | "mdm"
+  | "sessionFlags"
+  | "plugin"
+  | "cloudRequirements"
+  | "cloudManagedConfig"
+  | "legacyManagedConfigFile"
+  | "legacyManagedConfigMdm"
+  | "velaterm"
+  | "unknown";
+
+export type CodexHookTrustStatus = "managed" | "untrusted" | "trusted" | "modified";
+
+export interface CodexHook {
+  key: string;
+  eventName: string;
+  handlerType: string;
+  matcher: string | null;
+  command: string | null;
+  timeoutSec: number;
+  statusMessage: string | null;
+  sourcePath: string;
+  source: CodexHookSource;
+  pluginId: string | null;
+  displayOrder: number;
+  enabled: boolean;
+  currentHash: string;
+  trustStatus: CodexHookTrustStatus;
+  isManaged: boolean;
+}
+
+export interface CodexHookListEntry {
+  cwd: string;
+  hooks: CodexHook[];
+  warnings: string[];
+  errors: { message: string; path: string }[];
+}
+
+export interface CodexHooksResponse {
+  data: CodexHookListEntry[];
+}
+
+export interface CodexHooksListArgs {
+  cwds: string[];
+  codexPath?: string;
+}
+
+export interface CodexHookUpdateArgs extends CodexHooksListArgs {
+  key: string;
+  enabled?: boolean;
+  trustedHash?: string;
+}
+
+export function codexHooksList(args: CodexHooksListArgs): Promise<CodexHooksResponse> {
+  return invoke<CodexHooksResponse>("codex_hooks_list", { ...args });
+}
+
+export function codexHookUpdate(args: CodexHookUpdateArgs): Promise<CodexHooksResponse> {
+  return invoke<CodexHooksResponse>("codex_hook_update", { ...args });
+}
+
 /** Bundled/full Git Bash installation state, meaningful only on Windows. */
 export interface GitbashStatus {
   /** Whether any usable bundled-minimal or downloaded-full Git Bash exists. */

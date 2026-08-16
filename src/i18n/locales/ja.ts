@@ -98,6 +98,30 @@ const ja: typeof en = {
   "settings.agentPathPlaceholder": "例: ~/.local/bin/claude — 空欄なら PATH から検索", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "設定すると、このタイプのセッションは PATH でコマンドを探す代わりに、この完全パスで起動します。インストール済みなのにシェルの PATH に無い場合に便利です。ワンクリックインストール成功後、場所を検出できた場合は自動で入力されます。", // Agent executable path hint
+  "settings.codexHooks": "Codex フック",
+  "settings.codexHooksDesc":
+    "Codex のユーザー、プロジェクト、プラグイン、管理対象設定から検出したフックを確認して制御します。",
+  "settings.codexHooksEnabledCount": (enabled: number, total: number) =>
+    `有効 ${enabled} / ${total}`,
+  "settings.codexHooksEmpty": "Codex フックが見つかりません。",
+  "settings.codexHooksTrust": "信頼する",
+  "settings.codexHooksUser": "ユーザー設定",
+  "settings.codexHooksProject": "プロジェクト設定",
+  "settings.codexHooksPlugin": "プラグイン",
+  "settings.codexHooksSession": "セッション",
+  "settings.codexHooksManagedSource": "管理対象設定",
+  "settings.codexHooksManaged": "管理対象",
+  "settings.codexHooksTrusted": "信頼済み",
+  "settings.codexHooksChanged": "変更済み",
+  "settings.codexHooksReview": "確認が必要",
+  "settings.codexHooksDisabled": "無効",
+  "settings.codexHooksHandler": "ハンドラー",
+  "settings.codexHooksCommand": "コマンド",
+  "settings.codexHooksMatcher": "マッチャー",
+  "settings.codexHooksTimeout": "タイムアウト",
+  "settings.codexHooksStatusMessage": "ステータスメッセージ",
+  "settings.codexHooksAll": "すべて",
+  "settings.codexHooksNone": "なし",
   "settings.appearance": "外観", // Appearance
   "settings.accent": "アクセント", // Accent
   "settings.accentAuto": "テーマに従う", // Follow theme

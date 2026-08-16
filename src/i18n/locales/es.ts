@@ -99,6 +99,30 @@ const es: typeof en = {
   "settings.agentPathPlaceholder": "p. ej. ~/.local/bin/claude — vacío = buscar en PATH", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "Si se define, las sesiones de este tipo se inician con esta ruta completa en lugar de buscar el comando en el PATH. Útil cuando el agente está instalado pero no en el PATH del shell. Se rellena automáticamente tras una instalación con un clic si se detecta la ubicación.", // Agent executable path hint
+  "settings.codexHooks": "Hooks de Codex",
+  "settings.codexHooksDesc":
+    "Revisa y controla los hooks de la configuración de usuario, proyecto, plugin y administrada de Codex.",
+  "settings.codexHooksEnabledCount": (enabled: number, total: number) =>
+    `Activos ${enabled} / ${total}`,
+  "settings.codexHooksEmpty": "No se encontraron hooks de Codex.",
+  "settings.codexHooksTrust": "Confiar",
+  "settings.codexHooksUser": "Configuración de usuario",
+  "settings.codexHooksProject": "Configuración del proyecto",
+  "settings.codexHooksPlugin": "Plugin",
+  "settings.codexHooksSession": "Sesión",
+  "settings.codexHooksManagedSource": "Configuración administrada",
+  "settings.codexHooksManaged": "Administrado",
+  "settings.codexHooksTrusted": "Confiable",
+  "settings.codexHooksChanged": "Modificado",
+  "settings.codexHooksReview": "Revisión necesaria",
+  "settings.codexHooksDisabled": "Desactivado",
+  "settings.codexHooksHandler": "Controlador",
+  "settings.codexHooksCommand": "Comando",
+  "settings.codexHooksMatcher": "Filtro",
+  "settings.codexHooksTimeout": "Tiempo límite",
+  "settings.codexHooksStatusMessage": "Mensaje de estado",
+  "settings.codexHooksAll": "Todos",
+  "settings.codexHooksNone": "Ninguno",
   "settings.appearance": "Apariencia", // Appearance
   "settings.accent": "Acento", // Accent
   "settings.accentAuto": "Seguir al tema", // Follow theme

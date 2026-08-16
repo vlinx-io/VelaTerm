@@ -241,6 +241,19 @@ pub fn dispatch(
         "agent_locate_bin" => to_value(crate::agent::install::locate_installed_bin(&req_str(
             args, "agent",
         )?)),
+        "codex_hooks_list" => to_value(core::codex_hooks_list(
+            app,
+            string_array(args, "cwds")?,
+            opt_str(args, "codexPath").as_deref(),
+        )?),
+        "codex_hook_update" => to_value(core::codex_hook_update(
+            app,
+            string_array(args, "cwds")?,
+            opt_str(args, "codexPath").as_deref(),
+            &req_str(args, "key")?,
+            args.get("enabled").and_then(Value::as_bool),
+            opt_str(args, "trustedHash").as_deref(),
+        )?),
 
         // ── Tree management orchestrated by command_core ──
         "list_tree" => to_value(core::list_tree(app)?),
@@ -770,6 +783,22 @@ fn opt_str(args: &Value, key: &str) -> Option<String> {
         Some(Value::String(s)) => Some(s.clone()),
         _ => None,
     }
+}
+
+fn string_array(args: &Value, key: &str) -> Result<Vec<String>, String> {
+    let values = args
+        .get(key)
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("Missing array parameter {key}"))?;
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| format!("Invalid string in parameter {key}"))
+        })
+        .collect()
 }
 
 /// Optional unsigned integer: missing and null both become None.
