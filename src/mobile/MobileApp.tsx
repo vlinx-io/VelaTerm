@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { SpawnConfirmModal } from "../components/SpawnConfirmModal";
 import { useNotifications } from "../hooks/useNotifications";
-import { onSpawnRequest, onTreeChanged } from "../ipc/events";
+import { onSpawnRequest, onSpawnResolved, onTreeChanged } from "../ipc/events";
 import { ConnectionBanner } from "../remote/ConnectionBanner";
 import { useTermStore } from "../store/termStore";
 import { watchSystemTheme } from "../theme";
@@ -42,6 +42,10 @@ function MobileApp() {
     // Handle child-task requests normally. The new session appears in the tree and receives its
     // prompt through usePtySession when opened.
     const unlistenSpawn = onSpawnRequest((req) => void handleSpawnRequest(req));
+    // Another client claimed or answered the spawn; drop the local copy of its card.
+    const unlistenSpawnResolved = onSpawnResolved((requestId) =>
+      useTermStore.getState().dismissSpawnRequest(requestId),
+    );
     // Synchronize the tree across clients: after any successful mutation, the backend broadcasts
     // `tree://changed`; debounce the event before reloading.
     let treeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -52,6 +56,7 @@ function MobileApp() {
     return () => {
       unwatch();
       void unlistenSpawn.then((fn) => fn());
+      void unlistenSpawnResolved.then((fn) => fn());
       clearTimeout(treeTimer);
       void unlistenTree.then((fn) => fn());
     };

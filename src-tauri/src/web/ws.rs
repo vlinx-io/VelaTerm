@@ -474,9 +474,11 @@ fn register_global_forwards(
 ) -> Vec<ListenerId> {
     [
         "spawn://request",
+        "spawn://resolved",
         "view://request",
         "retire://request",
         "retire://cancel",
+        "retire://resolved",
         crate::host::TREE_CHANGED,
         crate::git::CLONE_PROGRESS_EVENT,
     ]
@@ -695,7 +697,12 @@ mod tests {
         let (out_tx, mut out_rx) = mpsc::unbounded_channel();
         let listener_ids = register_global_forwards(&ctx.app, out_tx);
 
-        for event_name in ["retire://request", "retire://cancel"] {
+        for event_name in [
+            "retire://request",
+            "retire://cancel",
+            "retire://resolved",
+            "spawn://resolved",
+        ] {
             let payload = json!({"requestId": "retire-test"});
             ctx.app.emit(event_name, payload.clone());
             let message = out_rx

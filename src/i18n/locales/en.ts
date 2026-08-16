@@ -103,7 +103,6 @@ const en = {
   "settings.orchDescription": "Description",
   "settings.orchDescriptionPlaceholder": "Describe when this profile should be used.",
   "settings.orchNewProfile": "New profile name",
-  "settings.orchAdd": "Add",
   "settings.orchAddNew": "Add New",
   "settings.orchDelete": "Delete",
   "settings.orchNoProfiles": "No profiles yet. Add one to reuse it in every spawn.",
@@ -118,6 +117,10 @@ const en = {
   "settings.orchPermissionInherit": "Inherit from parent",
   "settings.orchPermissionSkipWarning":
     "This worker runs without confirmation inside its worktree.",
+  "settings.orchPermissionSkipNoWorktreeWarning":
+    "This worker runs without confirmation directly in the parent's directory. Turn on Own worktree to contain it.",
+  "settings.orchAgentUnsetHint":
+    "No agent is stored yet, so workers use the parent session's agent. Pick one to make it explicit.",
   "settings.orchLimitsTitle": "Limits",
   "settings.orchMaxDescendants": "Max descendants",
   "settings.orchMaxParallel": "Max parallel",
@@ -185,6 +188,9 @@ const en = {
   "spawn.optionOther": "Other...",
   "spawn.worktreeLabel": "Separate git worktree",
   "spawn.launch": "Launch",
+  "spawn.launchWarningsTitle": "Check launch values",
+  "spawn.launchWarning": (field: string, value: string, kind: string) =>
+    `The ${field} "${value}" is outside VelaTerm's curated values for ${kind}. Verify that the installed CLI accepts it.`,
   "spawn.remaining": (n: number) => `${n} more pending`,
   "spawn.notifyTitle": "Spawn session awaiting confirmation",
   "retire.title": "Retire this session?",
@@ -192,6 +198,10 @@ const en = {
   "retire.actionArchive": "Archive the session. No worktree is deleted.",
   "retire.actionCleanup":
     "Delete the worktrees below, then archive the session.",
+  "retire.actionDiscard":
+    "Discard the uncommitted changes in this worker's worktree.",
+  "retire.discardWarning":
+    "All uncommitted changes in this worktree are deleted. Committed work stays.",
   "retire.descendants": (n: number) =>
     `Includes ${n} descendant session${n === 1 ? "" : "s"}.`,
   "retire.irreversible": "This cannot be undone",
@@ -266,6 +276,8 @@ const en = {
   "gitea.test": "Test connection",
   "gitea.saved": "Saved.",
   "settings.renderer": "Terminal renderer",
+  "settings.rendererHint":
+    "DOM (default) works everywhere but shows gaps in TUI borders at line heights above 1. Canvas draws those borders seamlessly. WebGL is fastest but can lose its GPU context.",
   "settings.redrawOnReveal": "Redraw on tab switch",
   "settings.catAdvanced": "Advanced",
   "settings.outputScheduler": "Foreground-priority output",
@@ -438,8 +450,23 @@ const en = {
   "tree.archiveBlockedBody": "Archiving was refused. An archived session leaves the worker cleanup scope, so its worktree and branch would be stranded.",
   "tree.archiveConfirmTitle": "Archive and delete worktrees?",
   "tree.archiveConfirmBody": (n: number) =>
-    `Archiving deletes ${n} worker ${n === 1 ? "worktree" : "worktrees"} and ${n === 1 ? "its branch" : "their branches"}. This cannot be undone. The work is already on the parent branch.`,
+    `Archiving deletes ${n} worker ${n === 1 ? "worktree" : "worktrees"} and ${n === 1 ? "its branch" : "their branches"}. This cannot be undone. Only work verified as landed on the parent branch can be archived; anything else blocks the archive.`,
   "tree.archiveConfirmAction": "Archive",
+  // ── Archive blockers; codes are pinned by archive_reason_code in agent/ctl.rs ──
+  "archive.blockedRow": (name: string, reason: string) =>
+    `"${name}" still holds a worktree: ${reason}`,
+  "archive.blockedSuffix": "Land or retire the worker first.",
+  "archive.reason.uncommittedChanges": "the worktree has uncommitted changes",
+  "archive.reason.noVerifiedLanding": "the worktree has no verified landing",
+  "archive.reason.workerChangedAfterLanding": "the worker changed after its verified landing",
+  "archive.reason.landingNotOnTarget": "the verified landing commit is not on the target branch",
+  "archive.reason.repoRootUnavailable": "the worktree repository root is unavailable",
+  "archive.reason.missingNeverLanded": "the worktree directory is missing and the worker never landed",
+  "archive.reason.missingUnverifiedLanding": "the worktree directory is missing and its landing was never verified",
+  "archive.reason.missingDifferentParent": "the worktree directory is missing and its landing belongs to a different parent",
+  "archive.reason.missingRepoRootUnavailable": "the worktree directory is missing and the repository root is unavailable",
+  "archive.reason.missingLandingNotOnTarget": "the worktree directory is missing and its landing commit is not on the target branch",
+  "archive.reason.branchMovedAfterLanding": "the worker branch moved after its verified landing",
   // Temporary (draft) sessions
   "tree.scratchTag": "scratch",
   "tree.persistSession": "Make Permanent Session…",

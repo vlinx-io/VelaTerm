@@ -1110,6 +1110,43 @@ pub fn worktree_has_changes(path: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether a directory has staged or unstaged changes to tracked files. Untracked files are
+/// excluded so stray files can neither block a landing nor arm its destructive retry reset.
+pub fn worktree_has_tracked_changes(path: &str) -> bool {
+    run_git(path, &["status", "--porcelain", "--untracked-files=no"])
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+}
+
+/// Discard every uncommitted change in a worktree: reset tracked files to HEAD, then delete
+/// untracked files and directories. Unrecoverable; callers must hold explicit user confirmation.
+pub fn discard_worktree_changes(path: &str) -> Result<(), String> {
+    if !std::path::Path::new(path).is_dir() {
+        return Err(format!("Worktree directory '{path}' does not exist."));
+    }
+    let reset = crate::host::command("git")
+        .arg("-C")
+        .arg(path)
+        .args(["reset", "--hard", "-q"])
+        .output()
+        .map_err(|e| format!("Failed to reset the worktree: {e}"))?;
+    if !reset.status.success() {
+        let error = String::from_utf8_lossy(&reset.stderr).trim().to_string();
+        return Err(format!("Failed to reset the worktree: {error}"));
+    }
+    let clean = crate::host::command("git")
+        .arg("-C")
+        .arg(path)
+        .args(["clean", "-fd", "-q"])
+        .output()
+        .map_err(|e| format!("Failed to remove untracked files: {e}"))?;
+    if !clean.status.success() {
+        let error = String::from_utf8_lossy(&clean.stderr).trim().to_string();
+        return Err(format!("Failed to remove untracked files: {error}"));
+    }
+    Ok(())
+}
+
 /// Commit all changes in a directory so a merge can include a child worktree's uncommitted work.
 pub fn commit_all(path: &str, message: &str) -> Result<(), String> {
     let add = crate::host::command("git")
@@ -1714,6 +1751,10 @@ pub fn merge_branches_apply(
     if source == target {
         return Err("Source and target are the same branch.".into());
     }
+    // A user-driven merge mutates the same target checkout as an agent land; both serialize on
+    // the repository write lock.
+    let lock = repo_write_lock(cwd);
+    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
     let r = resolve_merge(cwd, source, target);
     if !r.found {
         return Err(format!("Branch '{source}' or '{target}' no longer exists."));
@@ -1764,6 +1805,20 @@ pub fn merge_branches_apply(
     Err(format!("Merge failed: {err}"))
 }
 
+/// Registry of per-repository write locks. All worktrees of one repository share one git common
+/// directory, so every land and merge that mutates a checkout serializes on the same lock.
+static REPO_WRITE_LOCKS: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+
+/// The write lock for the repository containing `cwd`. A poisoned inner lock is still safe to
+/// take: every guarded sequence leaves git state consistent on early return.
+pub fn repo_write_lock(cwd: &str) -> Arc<Mutex<()>> {
+    let key = run_git(cwd, &["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .unwrap_or_else(|| cwd.to_string());
+    let registry = REPO_WRITE_LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut map = registry.lock().unwrap_or_else(|e| e.into_inner());
+    Arc::clone(map.entry(key).or_default())
+}
+
 #[derive(Debug, Clone)]
 pub struct AgentLandSnapshot {
     pub source_head: String,
@@ -1803,7 +1858,8 @@ pub fn agent_land_snapshot(
         return Err(format!("Source branch '{source}' has uncommitted changes."));
     }
     let target_dir = r.target_dir.as_deref().unwrap();
-    let target_dirty = worktree_has_changes(target_dir);
+    // Tracked changes only: untracked files must not block a land or arm the retry reset.
+    let target_dirty = worktree_has_tracked_changes(target_dir);
 
     let source_head = run_git(cwd, &["rev-parse", &r.source_full])
         .ok_or_else(|| format!("Failed to read source branch '{source}'."))?;
@@ -1837,7 +1893,14 @@ pub fn agent_land_snapshot(
     })
 }
 
-pub fn agent_land_stage(cwd: &str, source: &str, target: &str) -> Result<MergeOutcome, String> {
+/// Stage the squash of `source_rev` (the snapshotted source head, not the live branch) onto the
+/// target checkout. Any failure restores the target so no staged residue survives an error.
+pub fn agent_land_stage(
+    cwd: &str,
+    source: &str,
+    target: &str,
+    source_rev: &str,
+) -> Result<MergeOutcome, String> {
     let r = resolve_merge(cwd, source, target);
     if !r.found {
         return Err(format!("Branch '{source}' or '{target}' no longer exists."));
@@ -1851,7 +1914,7 @@ pub fn agent_land_stage(cwd: &str, source: &str, target: &str) -> Result<MergeOu
     let out = crate::host::command("git")
         .arg("-C")
         .arg(&target_dir)
-        .args(["merge", "--squash", source])
+        .args(["merge", "--squash", source_rev])
         .output()
         .map_err(|e| format!("Failed to run git merge --squash: {e}"))?;
     if !out.status.success() {
@@ -1859,12 +1922,12 @@ pub fn agent_land_stage(cwd: &str, source: &str, target: &str) -> Result<MergeOu
             run_git(&target_dir, &["diff", "--name-only", "--diff-filter=U"])
                 .map(|value| value.lines().map(str::to_string).collect())
                 .unwrap_or_default();
+        let _ = crate::host::command("git")
+            .arg("-C")
+            .arg(&target_dir)
+            .args(["reset", "--merge", "HEAD"])
+            .output();
         if !conflicts.is_empty() {
-            let _ = crate::host::command("git")
-                .arg("-C")
-                .arg(&target_dir)
-                .args(["reset", "--merge", "HEAD"])
-                .output();
             return Ok(MergeOutcome {
                 merged: false,
                 conflict: true,
@@ -1893,16 +1956,59 @@ pub fn agent_land_index_tree(cwd: &str, target: &str) -> Result<String, String> 
         .ok_or_else(|| format!("Failed to read the staged tree for '{target}'."))
 }
 
+/// Ceiling for the landing commit. With hooks and signing disabled a commit of an already staged
+/// tree finishes in milliseconds; anything longer is a hang that must not pin the request thread.
+const LAND_COMMIT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Run a command, killing it when it exceeds `timeout`. The child's output must fit the OS pipe
+/// buffers, because nothing drains them until the process exits.
+fn output_with_timeout(
+    mut cmd: std::process::Command,
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to start command: {e}"))?;
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return child
+                    .wait_with_output()
+                    .map_err(|e| format!("Failed to read command output: {e}"));
+            }
+            Ok(None) => {
+                if start.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "Command timed out after {} seconds.",
+                        timeout.as_secs()
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(e) => return Err(format!("Failed to wait for command: {e}")),
+        }
+    }
+}
+
+/// Commit the staged squash on the target checkout. Hooks and signing are skipped: a hook can
+/// hang the request thread or rewrite the index after `result_tree` was recorded, and a signing
+/// prompt blocks forever in a headless service.
 pub fn agent_land_commit(cwd: &str, target: &str, commit_message: &str) -> Result<String, String> {
     let r = resolve_merge(cwd, target, target);
     let target_dir = r.target_dir.ok_or_else(|| {
         format!("Target branch '{target}' isn't checked out in any worktree.")
     })?;
-    let commit = crate::host::command("git")
-        .arg("-C")
+    let mut cmd = crate::host::command("git");
+    cmd.arg("-C")
         .arg(&target_dir)
-        .args(["commit", "-m", commit_message])
-        .output()
+        .args(["commit", "--no-verify", "--no-gpg-sign", "-m", commit_message]);
+    let commit = output_with_timeout(cmd, LAND_COMMIT_TIMEOUT)
         .map_err(|e| format!("Failed to commit squashed changes: {e}"))?;
     if !commit.status.success() {
         let _ = crate::host::command("git")
@@ -1915,6 +2021,31 @@ pub fn agent_land_commit(cwd: &str, target: &str, commit_message: &str) -> Resul
     }
     run_git(&target_dir, &["rev-parse", "HEAD"])
         .ok_or_else(|| format!("Failed to read the new commit on '{target}'."))
+}
+
+/// The most recent commit on `branch`, at most `limit` back, whose tree equals `tree`. Landing
+/// recovery uses this to find a completed squash that was never recorded, or one buried by later
+/// commits.
+pub fn find_recent_commit_by_tree(
+    cwd: &str,
+    branch: &str,
+    tree: &str,
+    limit: u32,
+) -> Option<String> {
+    let log = run_git(
+        cwd,
+        &[
+            "log",
+            "-n",
+            &limit.to_string(),
+            "--format=%H %T",
+            &format!("refs/heads/{branch}"),
+        ],
+    )?;
+    log.lines().find_map(|line| {
+        let (commit, line_tree) = line.split_once(' ')?;
+        (line_tree == tree).then(|| commit.to_string())
+    })
 }
 
 pub fn branch_head(cwd: &str, branch: &str) -> Option<String> {

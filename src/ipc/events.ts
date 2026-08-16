@@ -99,7 +99,17 @@ export interface SpawnRequest {
   requestId?: string | null;
   forceConfirm?: boolean | null;
   /** Advisory warnings for model or effort values outside this build's curated lists. */
-  launchWarnings?: string[];
+  launchWarnings?: LaunchWarning[];
+}
+
+/** One advisory launch-value warning, structured so the card can render it in the user's locale. */
+export interface LaunchWarning {
+  /** Which launch value is outside the curated list. */
+  field: "model" | "effort";
+  /** The requested value. */
+  value: string;
+  /** The agent kind whose curated list was checked. */
+  kind: string;
 }
 
 /** Listen for child-task requests as a global event registered once on mount. */
@@ -127,7 +137,7 @@ export interface RetireRequest {
   requestId: string;
   sessionId: string;
   name: string;
-  action: "archive" | "cleanup-and-archive";
+  action: "archive" | "cleanup-and-archive" | "discard-changes";
   descendantCount: number;
   worktrees: RetireWorktree[];
 }
@@ -147,6 +157,24 @@ export function onRetireCancel(
   cb: (requestId: string) => void,
 ): Promise<UnlistenFn> {
   return listen<{ requestId: string }>("retire://cancel", (payload) =>
+    cb(payload.requestId),
+  );
+}
+
+/** One client claimed or answered a spawn request; every other client drops its copy. */
+export function onSpawnResolved(
+  cb: (requestId: string) => void,
+): Promise<UnlistenFn> {
+  return listen<{ requestId: string }>("spawn://resolved", (payload) =>
+    cb(payload.requestId),
+  );
+}
+
+/** One client answered a retire card; every other client closes its copy of the card. */
+export function onRetireResolved(
+  cb: (requestId: string) => void,
+): Promise<UnlistenFn> {
+  return listen<{ requestId: string }>("retire://resolved", (payload) =>
     cb(payload.requestId),
   );
 }

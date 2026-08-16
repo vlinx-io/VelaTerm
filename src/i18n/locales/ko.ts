@@ -104,7 +104,6 @@ const ko: typeof en = {
   "settings.orchDescription": "설명",
   "settings.orchDescriptionPlaceholder": "이 프로필을 사용할 시점을 설명하세요.",
   "settings.orchNewProfile": "새 프로필 이름",
-  "settings.orchAdd": "추가",
   "settings.orchAddNew": "새로 추가",
   "settings.orchDelete": "삭제",
   "settings.orchNoProfiles": "프로필이 없습니다. 하나를 추가하면 모든 spawn에서 재사용할 수 있습니다.",
@@ -119,6 +118,10 @@ const ko: typeof en = {
   "settings.orchPermissionInherit": "상위 세션에서 상속",
   "settings.orchPermissionSkipWarning":
     "이 작업자는 worktree 안에서 확인 없이 실행됩니다.",
+  "settings.orchPermissionSkipNoWorktreeWarning":
+    "이 워커는 상위 디렉터리에서 확인 없이 실행됩니다. 전용 worktree를 켜서 격리하세요.",
+  "settings.orchAgentUnsetHint":
+    "아직 에이전트가 저장되지 않아 워커는 상위 세션의 에이전트를 사용합니다. 명시하려면 하나를 선택하세요.",
   "settings.orchLimitsTitle": "제한",
   "settings.orchMaxDescendants": "최대 하위 세션 수",
   "settings.orchMaxParallel": "최대 병렬 수",
@@ -185,6 +188,9 @@ const ko: typeof en = {
   "spawn.optionOther": "기타...", // Other...
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
   "spawn.launch": "Launch", // Launch
+  "spawn.launchWarningsTitle": "실행 값을 확인하세요",
+  "spawn.launchWarning": (field: string, value: string, kind: string) =>
+    `${field} "${value}" 값은 ${kind}에 대해 VelaTerm이 관리하는 값 밖에 있습니다. 설치된 CLI가 이 값을 허용하는지 확인하세요.`,
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
   "retire.title": "이 세션을 리타이어할까요?",
@@ -192,6 +198,10 @@ const ko: typeof en = {
   "retire.actionArchive": "세션을 보관합니다. worktree는 삭제하지 않습니다.",
   "retire.actionCleanup":
     "아래 worktree를 삭제한 뒤 세션을 보관합니다.",
+  "retire.actionDiscard":
+    "이 워커의 worktree에 있는 커밋되지 않은 변경 사항을 버립니다.",
+  "retire.discardWarning":
+    "이 worktree의 커밋되지 않은 변경 사항이 모두 삭제됩니다. 커밋된 작업은 유지됩니다.",
   "retire.descendants": (n: number) => `하위 세션 ${n}개를 포함합니다.`,
   "retire.irreversible": "이 작업은 되돌릴 수 없습니다",
   "retire.worktreeCount": (n: number) =>
@@ -265,6 +275,8 @@ const ko: typeof en = {
   "gitea.test": "Test connection", // TODO translate
   "gitea.saved": "Saved.", // TODO translate
   "settings.renderer": "터미널 렌더러", // Terminal renderer
+  "settings.rendererHint":
+    "DOM(기본값)은 어디서나 동작하지만 줄 높이가 1을 넘으면 TUI 테두리에 틈이 생깁니다. Canvas는 테두리를 빈틈없이 그립니다. WebGL은 가장 빠르지만 GPU 컨텍스트를 잃을 수 있습니다.",
   "settings.redrawOnReveal": "탭 전환 시 다시 그리기", // Redraw on tab switch
   "settings.catAdvanced": "고급", // Advanced
   "settings.outputScheduler": "포그라운드 우선 출력", // Foreground-priority output
@@ -435,8 +447,22 @@ const ko: typeof en = {
   "tree.archiveBlockedBody": "보관이 거부되었습니다. 보관된 세션은 정리 범위에서 벗어나므로 워크트리와 브랜치가 남겨집니다.", // Archiving was refused. An archived session leaves the worker cleanup scope, so its worktree and branch would be stranded.
   "tree.archiveConfirmTitle": "보관하고 worktree를 삭제할까요?", // Archive and delete worktrees?
   "tree.archiveConfirmBody": (n: number) =>
-    `보관하면 워커 worktree ${n}개와 해당 브랜치를 삭제합니다. 되돌릴 수 없습니다. 작업 내용은 이미 상위 브랜치에 있습니다.`,
+    `보관하면 워커 worktree ${n}개와 해당 브랜치를 삭제합니다. 되돌릴 수 없습니다. 상위 브랜치에 반영된 것으로 검증된 작업만 보관할 수 있습니다. 그 외에는 보관이 차단됩니다.`,
   "tree.archiveConfirmAction": "보관", // Archive
+  "archive.blockedRow": (name: string, reason: string) =>
+    `"${name}"이(가) 아직 worktree를 보유하고 있습니다: ${reason}`,
+  "archive.blockedSuffix": "먼저 워커를 land하거나 retire하세요.",
+  "archive.reason.uncommittedChanges": "worktree에 커밋되지 않은 변경 사항이 있습니다",
+  "archive.reason.noVerifiedLanding": "worktree에 검증된 랜딩이 없습니다",
+  "archive.reason.workerChangedAfterLanding": "검증된 랜딩 이후 워커가 변경되었습니다",
+  "archive.reason.landingNotOnTarget": "검증된 랜딩 커밋이 대상 브랜치에 없습니다",
+  "archive.reason.repoRootUnavailable": "worktree의 저장소 루트를 사용할 수 없습니다",
+  "archive.reason.missingNeverLanded": "worktree 디렉터리가 없고 워커가 랜딩한 적이 없습니다",
+  "archive.reason.missingUnverifiedLanding": "worktree 디렉터리가 없고 해당 랜딩이 검증되지 않았습니다",
+  "archive.reason.missingDifferentParent": "worktree 디렉터리가 없고 해당 랜딩이 다른 부모에 속합니다",
+  "archive.reason.missingRepoRootUnavailable": "worktree 디렉터리가 없고 저장소 루트를 사용할 수 없습니다",
+  "archive.reason.missingLandingNotOnTarget": "worktree 디렉터리가 없고 해당 랜딩 커밋이 대상 브랜치에 없습니다",
+  "archive.reason.branchMovedAfterLanding": "검증된 랜딩 이후 워커 브랜치가 이동했습니다",
   // Temporary (draft) sessions
   "tree.scratchTag": "임시", // scratch
   "tree.persistSession": "영구 세션으로 전환…", // Make Permanent Session…

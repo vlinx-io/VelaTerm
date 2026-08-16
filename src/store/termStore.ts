@@ -6,10 +6,13 @@ import { t } from "../i18n";
 import { setBrowserUrl } from "../ipc/browser";
 import {
   createWorktree,
+  deleteBranch,
   getSessionCwd,
   orchestrationDefaultProfiles,
   ptyKill,
   ptyWrite,
+  removeWorktree,
+  spawnClaim,
   spawnResult,
   type ShellOption,
 } from "../ipc/commands";
@@ -910,6 +913,8 @@ interface TermStore {
   confirmSpawn: (req: SpawnRequest) => Promise<void>;
   /** Cancels the first queued spawn without creating a session. */
   cancelSpawn: () => void;
+  /** Drops a queued spawn request that another client already claimed or answered. */
+  dismissSpawnRequest: (requestId: string) => void;
   /** Opens branch merge for a session or group target. */
   openMerge: (id: SessionId) => void;
   /** Closes branch merge. */
@@ -1741,6 +1746,11 @@ export const useTermStore = create<TermStore>((set, get) => ({
   handleSpawnRequest: async (req) => {
     // The backend threshold always wins over orchestration auto-approval.
     if (req.forceConfirm !== true && (req.autoApprove === true || !get().spawnConfirm)) {
+      // Every connected client receives this request; only the claim winner executes it.
+      if (req.requestId) {
+        const won = await spawnClaim(req.requestId).catch(() => false);
+        if (!won) return;
+      }
       await get().executeSpawn(req);
       return;
     }
@@ -1768,17 +1778,36 @@ export const useTermStore = create<TermStore>((set, get) => ({
   confirmSpawn: async (req) => {
     // Remove the confirmed, possibly edited request before executing it.
     set((s) => ({ pendingSpawns: s.pendingSpawns.slice(1) }));
+    // The card is open on every client; only the first answer counts.
+    if (req.requestId) {
+      const won = await spawnClaim(req.requestId).catch(() => false);
+      if (!won) return;
+    }
     await get().executeSpawn(req);
   },
 
   cancelSpawn: () => {
     // Cancel by removing the first request without creating a session, telling any parked
-    // vagent spawn caller so it does not sit out its full timeout.
+    // vagent spawn caller so it does not sit out its full timeout. A cancel that loses the
+    // claim race stays silent: another client already confirmed or cancelled this request.
     const head = get().pendingSpawns[0];
-    if (head?.requestId) {
-      void spawnResult(head.requestId, { error: "cancelled by user" }).catch(() => {});
-    }
     set((s) => ({ pendingSpawns: s.pendingSpawns.slice(1) }));
+    if (head?.requestId) {
+      const requestId = head.requestId;
+      void spawnClaim(requestId)
+        .then((won) => {
+          if (won) {
+            return spawnResult(requestId, { error: "cancelled by user" }).then(() => {});
+          }
+        })
+        .catch(() => {});
+    }
+  },
+
+  dismissSpawnRequest: (requestId) => {
+    set((s) => ({
+      pendingSpawns: s.pendingSpawns.filter((req) => req.requestId !== requestId),
+    }));
   },
 
   openMerge: (id) => set({ mergeTarget: id }),
@@ -1836,6 +1865,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
     const repoRoot = parent.cwd || project?.rootPath || null;
     let cwd: string | null = parent.cwd ?? project?.rootPath ?? null;
     let worktreePath: string | null = null;
+    let worktreeBranch: string | null = null;
     let worktreeBaseRef: string | null = null;
     let worktreeError: string | undefined;
     if (req.worktree !== false && repoRoot) {
@@ -1843,6 +1873,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
         const wt = await createWorktree(repoRoot, name);
         cwd = wt.path;
         worktreePath = wt.path;
+        worktreeBranch = wt.branch || null;
         worktreeBaseRef = wt.baseRef || null;
       } catch (e) {
         // Worktree failure falls back to the parent directory without blocking the spawn.
@@ -1865,6 +1896,17 @@ export const useTermStore = create<TermStore>((set, get) => ({
         ? requestedPermissionMode
         : parentPermissionMode || defaults?.permissionMode || null;
 
+    // A worktree created for a session that never comes to exist would leak a directory and a
+    // branch; remove both before reporting the failure.
+    const discardWorktree = () => {
+      if (!worktreePath) return;
+      const branch = worktreeBranch;
+      void removeWorktree(worktreePath, true)
+        .then(() => {
+          if (repoRoot && branch) return deleteBranch(repoRoot, branch);
+        })
+        .catch(() => {});
+    };
     let created: Session | null = null;
     try {
       created = await get().addSession({
@@ -1882,10 +1924,12 @@ export const useTermStore = create<TermStore>((set, get) => ({
         effort: req.effort?.trim() || null,
       });
     } catch (e) {
+      discardWorktree();
       report({ error: e instanceof Error ? e.message : String(e) });
       throw e;
     }
     if (!created) {
+      discardWorktree();
       report({ error: "session creation failed" });
       return;
     }

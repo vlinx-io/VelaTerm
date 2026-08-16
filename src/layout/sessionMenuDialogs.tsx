@@ -8,7 +8,7 @@ import { Backdrop } from "../components/Backdrop";
 import Icons from "../components/Icons";
 import { useGitBranchInfo } from "../hooks/useGitBranch";
 import { useSuspendNativeViews } from "../hooks/nativeViewSuspend";
-import { dateLocale, useT } from "../i18n";
+import { dateLocale, t as translate, useT } from "../i18n";
 import {
   type CommitInfo,
   gitRecentCommits,
@@ -205,9 +205,53 @@ export function ConfirmArchive({
   );
 }
 
-/** Message of a rejected archive, which the IPC layer may reject with as a plain string. */
+/** Localization codes the backend may attach to one archive-blocker row; see
+ * `archive_reason_code` in agent/ctl.rs, which pins the mapping on its side. */
+const ARCHIVE_REASON_KEYS = {
+  uncommittedChanges: "archive.reason.uncommittedChanges",
+  noVerifiedLanding: "archive.reason.noVerifiedLanding",
+  workerChangedAfterLanding: "archive.reason.workerChangedAfterLanding",
+  landingNotOnTarget: "archive.reason.landingNotOnTarget",
+  repoRootUnavailable: "archive.reason.repoRootUnavailable",
+  missingNeverLanded: "archive.reason.missingNeverLanded",
+  missingUnverifiedLanding: "archive.reason.missingUnverifiedLanding",
+  missingDifferentParent: "archive.reason.missingDifferentParent",
+  missingRepoRootUnavailable: "archive.reason.missingRepoRootUnavailable",
+  missingLandingNotOnTarget: "archive.reason.missingLandingNotOnTarget",
+  branchMovedAfterLanding: "archive.reason.branchMovedAfterLanding",
+} as const;
+
+/** One blocker row of the backend's `archive_blocked:` envelope. */
+interface ArchiveBlockedRow {
+  name?: string;
+  reason?: string;
+  code?: string | null;
+}
+
+/** Message of a rejected archive. A structured `archive_blocked:` envelope renders in the user's
+ * locale, using the raw backend reason only for rows without a known code; any other rejection
+ * string passes through verbatim. */
 export function archiveErrorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  const marker = "archive_blocked:";
+  const start = message.indexOf(marker);
+  if (start < 0) return message;
+  let rows: ArchiveBlockedRow[];
+  try {
+    rows = JSON.parse(message.slice(start + marker.length)) as ArchiveBlockedRow[];
+  } catch {
+    return message;
+  }
+  if (!Array.isArray(rows) || rows.length === 0) return message;
+  const lines = rows.map((row) => {
+    const name = row.name ?? translate("common.session");
+    const reasonKey = row.code
+      ? ARCHIVE_REASON_KEYS[row.code as keyof typeof ARCHIVE_REASON_KEYS]
+      : undefined;
+    const reason = reasonKey ? translate(reasonKey) : (row.reason ?? "");
+    return translate("archive.blockedRow", name, reason);
+  });
+  return `${lines.join("; ")} ${translate("archive.blockedSuffix")}`;
 }
 
 /** Refusal notice for an archive that would strand a worker worktree, showing the backend reason. */

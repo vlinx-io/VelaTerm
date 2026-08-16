@@ -99,8 +99,9 @@ export interface PersistedSettings {
   inspectorTab: InspectorTab;
   /** Single-tab mode reuses the current tab and keeps the previous tree alive in the background. */
   singleTabMode: boolean;
-  /** Terminal renderer. Canvas is the default and keeps box-drawing glyphs seamless; DOM is the
-   * fallback; WebGL is sharp but many terminals can hit context limits and return blank or misaligned. */
+  /** Terminal renderer. DOM is the default and works everywhere, but cannot draw box-drawing
+   * characters as cell-filling glyphs, so TUI borders show gaps at line heights above 1. Canvas
+   * closes those gaps; WebGL is sharp but can hit context limits and return blank or misaligned. */
   termRenderer: TermRenderer;
   /** Advanced full redraw on tab return, off by default. Enable only to mitigate GPU artifacts or
    * blank frames; normal tab switching redraws only after a size change. */
@@ -149,7 +150,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   navLayout: "tree",
   inspectorTab: "info",
   singleTabMode: true,
-  termRenderer: "canvas",
+  termRenderer: "dom",
   redrawOnReveal: false,
   outputScheduler: true,
   dynamicStatusFilter: true,

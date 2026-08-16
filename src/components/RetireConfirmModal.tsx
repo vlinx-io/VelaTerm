@@ -4,7 +4,12 @@ import { useEffect, useState } from "react";
 import { useT } from "../i18n";
 import { useSuspendNativeViews } from "../hooks/nativeViewSuspend";
 import { retireResult } from "../ipc/commands";
-import { onRetireCancel, onRetireRequest, type RetireRequest } from "../ipc/events";
+import {
+  onRetireCancel,
+  onRetireRequest,
+  onRetireResolved,
+  type RetireRequest,
+} from "../ipc/events";
 import { notify } from "../notify";
 import { useTermStore } from "../store/termStore";
 import { t as translate } from "../i18n";
@@ -16,7 +21,9 @@ function announce(req: RetireRequest) {
   const action =
     req.action === "cleanup-and-archive"
       ? translate("retire.actionCleanup")
-      : translate("retire.actionArchive");
+      : req.action === "discard-changes"
+        ? translate("retire.actionDiscard")
+        : translate("retire.actionArchive");
   void notify(req.sessionId, translate("retire.notifyTitle"), `${req.name}: ${action}`, soundEnabled);
 }
 
@@ -44,6 +51,12 @@ export function RetireConfirmModal() {
     // An expired request destroys nothing, so its card leaves instead of collecting a dead approval.
     register(
       onRetireCancel((requestId) =>
+        setQueue((q) => q.filter((req) => req.requestId !== requestId)),
+      ),
+    );
+    // Another client answered this card; the copy here would collect a dead answer.
+    register(
+      onRetireResolved((requestId) =>
         setQueue((q) => q.filter((req) => req.requestId !== requestId)),
       ),
     );
@@ -114,7 +127,9 @@ export function RetireConfirmModal() {
       <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 12 }}>
         {req.action === "cleanup-and-archive"
           ? t("retire.actionCleanup")
-          : t("retire.actionArchive")}
+          : req.action === "discard-changes"
+            ? t("retire.actionDiscard")
+            : t("retire.actionArchive")}
         {req.descendantCount > 0 && ` ${t("retire.descendants", req.descendantCount)}`}
       </div>
 
@@ -134,7 +149,9 @@ export function RetireConfirmModal() {
           <div style={{ color: "var(--status-asking)", fontWeight: 600, marginBottom: 3 }}>
             {t("retire.irreversible")}
           </div>
-          {t("retire.worktreeCount", worktrees.length)}
+          {req.action === "discard-changes"
+            ? t("retire.discardWarning")
+            : t("retire.worktreeCount", worktrees.length)}
         </div>
       )}
 

@@ -199,6 +199,42 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         [],
     )
     .map_err(|e| format!("Failed to create session parent index: {e}"))?;
+    // Rebuild agent_landings without the parent_session_id foreign key: its cascade let a parent
+    // deletion erase a surviving worker's landing record, the only proof the worker's branch is
+    // safe to delete. SQLite cannot drop one foreign key in place, so the table is rebuilt.
+    let landing_sql: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_landings'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("Failed to inspect agent_landings: {e}"))?;
+    let parent_fk = landing_sql
+        .as_deref()
+        .is_some_and(|sql| sql.contains("parent_session_id TEXT NOT NULL REFERENCES"));
+    if parent_fk {
+        conn.execute_batch(
+            "CREATE TABLE agent_landings_rebuilt (
+               session_id       TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+               parent_session_id TEXT NOT NULL,
+               source_branch    TEXT NOT NULL,
+               source_head      TEXT NOT NULL,
+               source_tree      TEXT NOT NULL,
+               diff_fingerprint TEXT NOT NULL,
+               target_branch    TEXT NOT NULL,
+               target_before    TEXT NOT NULL,
+               result_tree      TEXT,
+               target_commit    TEXT,
+               commit_message   TEXT NOT NULL,
+               landed_at        INTEGER
+             );
+             INSERT INTO agent_landings_rebuilt SELECT * FROM agent_landings;
+             DROP TABLE agent_landings;
+             ALTER TABLE agent_landings_rebuilt RENAME TO agent_landings;",
+        )
+        .map_err(|e| format!("Failed to rebuild agent_landings: {e}"))?;
+    }
     Ok(())
 }
 
@@ -258,6 +294,67 @@ mod tests {
         assert_eq!(idx, 1, "the idx_sessions_parent index should have been created");
 
         // A repeated migration remains error-free.
+        migrate(&conn).unwrap();
+    }
+
+    /// An old agent_landings table cascaded on parent_session_id, so deleting a parent erased a
+    /// surviving worker's landing record. Migration rebuilds the table without that foreign key
+    /// and keeps every row.
+    #[test]
+    fn migrate_rebuilds_agent_landings_without_the_parent_cascade() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        conn.execute_batch(
+            "CREATE TABLE agent_landings (
+               session_id       TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+               parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+               source_branch    TEXT NOT NULL,
+               source_head      TEXT NOT NULL,
+               source_tree      TEXT NOT NULL,
+               diff_fingerprint TEXT NOT NULL,
+               target_branch    TEXT NOT NULL,
+               target_before    TEXT NOT NULL,
+               result_tree      TEXT,
+               target_commit    TEXT,
+               commit_message   TEXT NOT NULL,
+               landed_at        INTEGER
+             );",
+        )
+        .unwrap();
+        conn.execute_batch(schema::SCHEMA).unwrap();
+        conn.execute_batch(
+            "INSERT INTO projects (id, name, root_path, sort_order, collapsed, created_at)
+               VALUES ('p', 'p', '/tmp', 0, 0, 0);
+             INSERT INTO sessions (id, project_id, name, sort_order, created_at)
+               VALUES ('parent', 'p', 'parent', 0, 0);
+             INSERT INTO sessions (id, project_id, name, sort_order, created_at)
+               VALUES ('worker', 'p', 'worker', 0, 0);
+             INSERT INTO agent_landings VALUES
+               ('worker', 'parent', 'vlx/w', 'h', 't', 'fp', 'main', 'b', NULL, 'c', 'feat: x', 1);",
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+
+        let sql: String = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_landings'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            !sql.contains("parent_session_id TEXT NOT NULL REFERENCES"),
+            "the parent cascade must be gone: {sql}"
+        );
+        conn.execute("DELETE FROM sessions WHERE id = 'parent'", [])
+            .unwrap();
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM agent_landings", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1, "the worker's landing row must survive parent deletion");
+
+        // A repeated migration remains error-free and leaves the rebuilt table alone.
         migrate(&conn).unwrap();
     }
 

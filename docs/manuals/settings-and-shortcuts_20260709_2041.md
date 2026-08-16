@@ -34,7 +34,7 @@ Light/dark themes are switched from the title bar, not here (follow-system / dar
 | Item | Description |
 |------|-------------|
 | Terminal font / size | Terminal font and size (⌘+ / ⌘- / ⌘0 adjust on the fly) |
-| Terminal renderer | Rendering backend; keep the default (DOM) |
+| Terminal renderer | Rendering backend. DOM (default) works everywhere but shows gaps in TUI borders at line heights above 1; Canvas draws those borders seamlessly; WebGL is fastest but can lose its GPU context |
 | Redraw on tab switch | Force a full repaint when switching tabs — enable if TUIs occasionally look glitched |
 | Default shell (Windows only) | Default shell for new terminal sessions |
 
@@ -81,12 +81,13 @@ Each profile contains a description, agent type, model, reasoning effort, worktr
 
 | Item | Description |
 |------|-------------|
-| Max children | Maximum live descendants of one lead session (default 10) |
-| Max parallel | Maximum descendants working at the same time (default 4) |
+| Max descendants | Maximum retained descendants of one lead session (default 10). Finished sessions keep their slots until you archive or remove them; restoring an archived subtree consumes slots again |
+| Max parallel | Maximum descendants that are starting, working, or waiting on a permission prompt (default 4) |
 | Max depth | Maximum child-of-child depth (default 2) |
-| Confirm above | Force the spawn card when a spawn would exceed this child count (default 6) |
+| Confirm above | Force the spawn card when a spawn would raise active descendants above this count (default 6) |
 | Default timeout | Default wait timeout in seconds (default 1800) |
 | Auto-approve /orch spawns | Skip the spawn card below the confirmation threshold; the threshold still forces review |
+| Auto-approve retire | Archive a settled worker without the confirmation card. A retire that resumes an unverified cleanup always asks |
 
 The backend enforces these limits on every spawn. A rejected spawn reports the limit and current count to `vagent`.
 

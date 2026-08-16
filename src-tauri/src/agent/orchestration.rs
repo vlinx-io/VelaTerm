@@ -9,7 +9,7 @@ use serde_json::{json, Map, Value};
 use crate::host::AppCtx;
 
 /// Frontend settings blob holding both `orchestrationProfiles` and `orchestration`.
-const VLX_SETTINGS_KEY: &str = "vlx-settings";
+pub const VLX_SETTINGS_KEY: &str = "vlx-settings";
 /// Agent, model, and effort that replace Claude in the default profiles when Claude is not installed.
 const CLAUDE_FALLBACK: (&str, &str, &str) = ("codex", "gpt-5.6-sol", "high");
 
@@ -302,6 +302,17 @@ pub fn parse_config_with(
         None => Limits::default(),
     };
     OrchestrationConfig { profiles, limits }
+}
+
+/// The effective worktree copy patterns a raw `vlx-settings` blob resolves to, defaults applied.
+/// The remote-settings ACL compares stored and incoming blobs through this, so equivalent
+/// representations (missing field versus explicit default) never trip it.
+pub fn worktree_copy_patterns_of(settings_json: Option<&str>) -> Vec<String> {
+    let parsed = settings_json.and_then(|s| serde_json::from_str::<Value>(s).ok());
+    match parsed.as_ref().and_then(|v| v.get("orchestration")) {
+        Some(v) => Limits::from_json(v).worktree_copy_patterns,
+        None => Limits::default().worktree_copy_patterns,
+    }
 }
 
 /// Read settings from the database, falling back to defaults on read errors.

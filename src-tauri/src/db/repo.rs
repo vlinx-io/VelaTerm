@@ -952,7 +952,7 @@ pub fn worktree_paths_in_subtree(conn: &Connection, id: &str) -> Result<Vec<Stri
         .prepare(
             "WITH RECURSIVE descendants(id) AS (
                SELECT ?1
-               UNION ALL
+               UNION
                SELECT s.id FROM sessions s
                  JOIN descendants d ON s.parent_session_id = d.id
              )
@@ -986,10 +986,12 @@ pub fn worktree_binding_is_shared(
             .collect();
         format!(" AND other.id NOT IN ({})", placeholders.join(","))
     };
+    // Archived sessions count as binders: their recorded worktree_path must keep the directory
+    // alive for a later restore, so an archive elsewhere may not delete it from under them.
     let sql = format!(
         "SELECT EXISTS(
            SELECT 1 FROM sessions other JOIN sessions self ON other.worktree_path = self.worktree_path
-           WHERE self.id = ?1 AND other.archived_at IS NULL{exclusion}
+           WHERE self.id = ?1 AND other.id <> self.id{exclusion}
          ) OR EXISTS(
            SELECT 1 FROM groups g JOIN sessions self ON g.worktree_path = self.worktree_path
            WHERE self.id = ?1 AND g.deleted_at IS NULL
@@ -1097,6 +1099,9 @@ pub fn get_agent_landing(conn: &Connection, session_id: &str) -> Result<Option<A
     .map_err(|e| format!("Failed to read agent landing: {e}"))
 }
 
+/// Insert or reset the pending landing row for a session. A verified row for the same work is
+/// never overwritten: destroying that verification would let a later failure orphan a landed
+/// worker. Callers short-circuit verified same-work re-lands before reaching this.
 pub fn begin_agent_landing(conn: &Connection, landing: &AgentLanding) -> Result<(), String> {
     conn.execute(
         "INSERT INTO agent_landings (
@@ -1115,7 +1120,9 @@ pub fn begin_agent_landing(conn: &Connection, landing: &AgentLanding) -> Result<
            result_tree = NULL,
            target_commit = NULL,
            commit_message = excluded.commit_message,
-           landed_at = NULL",
+           landed_at = NULL
+         WHERE agent_landings.target_commit IS NULL
+            OR agent_landings.diff_fingerprint <> excluded.diff_fingerprint",
         params![
             landing.session_id,
             landing.parent_session_id,
@@ -1270,7 +1277,7 @@ fn descendant_group_ids(conn: &Connection, group_id: &str) -> Result<Vec<String>
         .prepare(
             "WITH RECURSIVE gsub(gid) AS (
                SELECT ?1
-               UNION ALL
+               UNION
                SELECT g.id FROM groups g JOIN gsub ON g.parent_group_id = gsub.gid
              )
              SELECT gid FROM gsub",
@@ -1308,13 +1315,13 @@ fn load_group_subtree_sessions(conn: &Connection, group_id: &str) -> Result<Vec<
             "WITH RECURSIVE
                gsub(gid) AS (
                  SELECT ?1
-                 UNION ALL
+                 UNION
                  SELECT g.id FROM groups g JOIN gsub ON g.parent_group_id = gsub.gid
                ),
                ssub(sid) AS (
                  SELECT id FROM sessions
                    WHERE parent_session_id IS NULL AND group_id IN (SELECT gid FROM gsub)
-                 UNION ALL
+                 UNION
                  SELECT s.id FROM sessions s JOIN ssub ON s.parent_session_id = ssub.sid
                )
              SELECT id, parent_session_id, group_id, archived_at FROM sessions
@@ -1355,7 +1362,7 @@ fn load_session_subtree(conn: &Connection, id: &str) -> Result<Vec<SessRow>, Str
         .prepare(
             "WITH RECURSIVE d(id) AS (
                SELECT ?1
-               UNION ALL
+               UNION
                SELECT s.id FROM sessions s JOIN d ON s.parent_session_id = d.id
              )
              SELECT id, parent_session_id, group_id, archived_at FROM sessions
@@ -1638,6 +1645,30 @@ pub fn move_node(
             .map_err(|e| format!("Failed to move group: {e}"))?;
         }
         NodeKind::Session => {
+            // A session must never move under itself or its own descendant: the parent chain
+            // would form a cycle that every subtree walk then revisits forever.
+            if let Some(target_parent) = target_parent_session_id {
+                let mut cursor = Some(target_parent.to_string());
+                let mut hops = 0u32;
+                while let Some(current) = cursor {
+                    if current == id {
+                        return Err("cannot move a session under its own subtree".to_string());
+                    }
+                    hops += 1;
+                    if hops > 10_000 {
+                        return Err("session parent chain is too deep to verify".to_string());
+                    }
+                    cursor = conn
+                        .query_row(
+                            "SELECT parent_session_id FROM sessions WHERE id = ?1",
+                            params![current],
+                            |row| row.get::<_, Option<String>>(0),
+                        )
+                        .optional()
+                        .map_err(|e| format!("Failed to walk session ancestry: {e}"))?
+                        .flatten();
+                }
+            }
             // Session parent modes are exclusive: group/project-root clears parent_session_id;
             // nesting uses the parent's group and session ID.
             conn.execute(
@@ -1762,7 +1793,7 @@ pub fn set_archived(conn: &Connection, id: &str, archived: bool) -> Result<(), S
         "UPDATE sessions SET archived_at = ?1 WHERE id IN (
            WITH RECURSIVE descendants(id) AS (
              SELECT ?2
-             UNION ALL
+             UNION
              SELECT s.id FROM sessions s
                JOIN descendants d ON s.parent_session_id = d.id
            )
@@ -1857,7 +1888,7 @@ pub fn session_ids_in_subtree(conn: &Connection, id: &str) -> Result<Vec<String>
         .prepare(
             "WITH RECURSIVE descendants(id) AS (
                SELECT ?1
-               UNION ALL
+               UNION
                SELECT s.id FROM sessions s
                  JOIN descendants d ON s.parent_session_id = d.id
              )
@@ -3051,5 +3082,185 @@ mod tests {
         assert_eq!(e.model, None);
         assert_eq!(e.effort, None);
         assert_eq!(get_model_effort(&conn, "missing").unwrap(), (None, None));
+    }
+
+    #[test]
+    fn begin_agent_landing_never_resets_a_verified_row_for_the_same_work() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        let parent = create_session(
+            &conn,
+            &project.id,
+            None,
+            "parent",
+            SessionKind::Claude,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let worker = create_session(
+            &conn,
+            &project.id,
+            None,
+            "worker",
+            SessionKind::Claude,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let landing = |fingerprint: &str| AgentLanding {
+            session_id: worker.id.clone(),
+            parent_session_id: parent.id.clone(),
+            source_branch: "vlx/worker".into(),
+            source_head: "a".repeat(40),
+            source_tree: "b".repeat(40),
+            diff_fingerprint: fingerprint.to_string(),
+            target_branch: "main".into(),
+            target_before: "c".repeat(40),
+            result_tree: None,
+            target_commit: None,
+            commit_message: "feat(test): land".into(),
+        };
+
+        begin_agent_landing(&conn, &landing("fp-one")).unwrap();
+        complete_agent_landing(&conn, &worker.id, &"d".repeat(40)).unwrap();
+
+        // A verified row for the same work survives a repeated begin.
+        begin_agent_landing(&conn, &landing("fp-one")).unwrap();
+        let row = get_agent_landing(&conn, &worker.id).unwrap().unwrap();
+        assert_eq!(
+            row.target_commit.as_deref(),
+            Some("d".repeat(40).as_str()),
+            "a verified same-work row must keep its verification"
+        );
+
+        // New work from the same worker supersedes the verified row.
+        begin_agent_landing(&conn, &landing("fp-two")).unwrap();
+        let row = get_agent_landing(&conn, &worker.id).unwrap().unwrap();
+        assert_eq!(row.target_commit, None);
+        assert_eq!(row.diff_fingerprint, "fp-two");
+
+        // A pending row is always reset by a fresh begin.
+        begin_agent_landing(&conn, &landing("fp-three")).unwrap();
+        let row = get_agent_landing(&conn, &worker.id).unwrap().unwrap();
+        assert_eq!(row.diff_fingerprint, "fp-three");
+    }
+
+    fn plain_session(conn: &Connection, project_id: &str, name: &str) -> crate::models::Session {
+        create_session(
+            conn,
+            project_id,
+            None,
+            name,
+            SessionKind::Claude,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn deleting_a_parent_session_keeps_the_workers_landing_row() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        let parent = plain_session(&conn, &project.id, "parent");
+        let worker = plain_session(&conn, &project.id, "worker");
+        let landing = AgentLanding {
+            session_id: worker.id.clone(),
+            parent_session_id: parent.id.clone(),
+            source_branch: "vlx/worker".into(),
+            source_head: "a".repeat(40),
+            source_tree: "b".repeat(40),
+            diff_fingerprint: "fp".into(),
+            target_branch: "main".into(),
+            target_before: "c".repeat(40),
+            result_tree: None,
+            target_commit: None,
+            commit_message: "feat(test): land".into(),
+        };
+        begin_agent_landing(&conn, &landing).unwrap();
+        complete_agent_landing(&conn, &worker.id, &"d".repeat(40)).unwrap();
+
+        delete_node(&conn, NodeKind::Session, &parent.id).unwrap();
+
+        let row = get_agent_landing(&conn, &worker.id)
+            .unwrap()
+            .expect("the surviving worker's landing record must outlive its parent");
+        assert_eq!(row.parent_session_id, parent.id);
+        assert_eq!(row.target_commit.as_deref(), Some("d".repeat(40).as_str()));
+    }
+
+    #[test]
+    fn subtree_walks_terminate_on_a_corrupted_parent_cycle() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        let a = plain_session(&conn, &project.id, "a");
+        let b = plain_session(&conn, &project.id, "b");
+        conn.execute(
+            "UPDATE sessions SET parent_session_id = ?1 WHERE id = ?2",
+            params![b.id, a.id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE sessions SET parent_session_id = ?1 WHERE id = ?2",
+            params![a.id, b.id],
+        )
+        .unwrap();
+
+        let ids = session_ids_in_subtree(&conn, &a.id).unwrap();
+        assert!(ids.contains(&a.id) && ids.contains(&b.id));
+        assert!(worktree_paths_in_subtree(&conn, &a.id).unwrap().is_empty());
+        set_archived(&conn, &a.id, true).unwrap();
+        assert!(is_session_archived(&conn, &b.id).unwrap());
+    }
+
+    #[test]
+    fn move_node_rejects_a_move_under_the_sessions_own_subtree() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        let parent = plain_session(&conn, &project.id, "parent");
+        let child = plain_session(&conn, &project.id, "child");
+        move_node(
+            &conn,
+            NodeKind::Session,
+            &child.id,
+            Some(&project.id),
+            None,
+            Some(&parent.id),
+            0,
+        )
+        .unwrap();
+
+        let error = move_node(
+            &conn,
+            NodeKind::Session,
+            &parent.id,
+            Some(&project.id),
+            None,
+            Some(&child.id),
+            0,
+        )
+        .unwrap_err();
+        assert!(error.contains("own subtree"), "unexpected error: {error}");
+        let error = move_node(
+            &conn,
+            NodeKind::Session,
+            &parent.id,
+            Some(&project.id),
+            None,
+            Some(&parent.id),
+            0,
+        )
+        .unwrap_err();
+        assert!(error.contains("own subtree"), "unexpected error: {error}");
     }
 }

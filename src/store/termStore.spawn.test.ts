@@ -5,9 +5,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../ipc/commands", () => ({
   createWorktree: vi.fn().mockRejectedValue(new Error("not a repo")),
+  deleteBranch: vi.fn().mockResolvedValue(undefined),
   getSessionCwd: vi.fn().mockResolvedValue(null),
   ptyKill: vi.fn().mockResolvedValue(undefined),
   ptyWrite: vi.fn().mockResolvedValue(undefined),
+  removeWorktree: vi.fn().mockResolvedValue(undefined),
+  spawnClaim: vi.fn().mockResolvedValue(true),
   spawnResult: vi.fn().mockResolvedValue(true),
   listShells: vi.fn().mockResolvedValue([]),
 }));
@@ -26,7 +29,7 @@ vi.mock("../notify", () => ({
   requestEffectiveNotifyPermission: vi.fn().mockResolvedValue("granted"),
 }));
 
-import { spawnResult } from "../ipc/commands";
+import { spawnClaim, spawnResult } from "../ipc/commands";
 import { createSession } from "../ipc/tree";
 import { useTermStore } from "./termStore";
 import type { Session } from "../types";
@@ -227,16 +230,59 @@ describe("executeSpawn launch configuration", () => {
     });
   });
 
-  it("reports cancellation for the queue head", () => {
+  it("reports cancellation for the queue head", async () => {
     useTermStore.setState({
       pendingSpawns: [
         { parentSessionId: "parent-1", prompt: "x", requestId: "req-44" },
       ],
     });
     useTermStore.getState().cancelSpawn();
-    expect(spawnResult).toHaveBeenCalledWith("req-44", {
-      error: "cancelled by user",
-    });
     expect(useTermStore.getState().pendingSpawns).toHaveLength(0);
+    await vi.waitFor(() =>
+      expect(spawnResult).toHaveBeenCalledWith("req-44", {
+        error: "cancelled by user",
+      }),
+    );
+  });
+
+  it("stays silent when the cancellation loses the claim to another client", async () => {
+    vi.mocked(spawnResult).mockClear();
+    vi.mocked(spawnClaim).mockClear();
+    vi.mocked(spawnClaim).mockResolvedValueOnce(false);
+    useTermStore.setState({
+      pendingSpawns: [
+        { parentSessionId: "parent-1", prompt: "x", requestId: "req-45" },
+      ],
+    });
+    useTermStore.getState().cancelSpawn();
+    expect(useTermStore.getState().pendingSpawns).toHaveLength(0);
+    await vi.waitFor(() => expect(spawnClaim).toHaveBeenCalledWith("req-45"));
+    expect(spawnResult).not.toHaveBeenCalled();
+  });
+
+  it("drops an auto-approved request another client already claimed", async () => {
+    vi.mocked(spawnClaim).mockResolvedValueOnce(false);
+    await useTermStore.getState().handleSpawnRequest({
+      parentSessionId: "parent-1",
+      prompt: "duplicate fan-out",
+      worktree: false,
+      autoApprove: true,
+      requestId: "req-46",
+    });
+    expect(spawnClaim).toHaveBeenCalledWith("req-46");
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("dismisses a queued card by request id when another client resolves it", () => {
+    useTermStore.setState({
+      pendingSpawns: [
+        { parentSessionId: "parent-1", prompt: "a", requestId: "req-47" },
+        { parentSessionId: "parent-1", prompt: "b", requestId: "req-48" },
+      ],
+    });
+    useTermStore.getState().dismissSpawnRequest("req-47");
+    expect(useTermStore.getState().pendingSpawns.map((r) => r.requestId)).toEqual([
+      "req-48",
+    ]);
   });
 });

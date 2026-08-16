@@ -311,6 +311,16 @@ pub fn dispatch(
             opt_str(args, "parentSessionId").as_deref(),
         )?),
         "fork_session" => to_value(core::fork_session(app, &req_str(args, "sessionId")?)?),
+        // Claim one fanned-out spawn request for this client. Exactly one caller receives true;
+        // the resolved broadcast tells every other client to drop its copy of the request.
+        "spawn_claim" => {
+            let request_id = req_str(args, "requestId")?;
+            let won = crate::agent::ctl::claim_spawn(&request_id);
+            if won {
+                app.emit("spawn://resolved", serde_json::json!({ "requestId": request_id }));
+            }
+            to_value(won)
+        }
         // Deliver a spawn outcome to a parked `vagent spawn` request; false when it already timed out.
         "spawn_result" => to_value(crate::agent::ctl::resolve_spawn(
             &req_str(args, "requestId")?,
@@ -325,16 +335,24 @@ pub fn dispatch(
             },
         )),
         // Answer a parked `vagent retire` card; false when it already timed out and destroyed nothing.
-        "retire_result" => to_value(crate::agent::ctl::resolve_retire(
-            &req_str(args, "requestId")?,
-            crate::agent::ctl::RetireDecision {
-                approved: args
-                    .get("approved")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
-                error: opt_str(args, "error"),
-            },
-        )),
+        // The first accepted answer wins; the resolved broadcast withdraws the card everywhere else.
+        "retire_result" => {
+            let request_id = req_str(args, "requestId")?;
+            let accepted = crate::agent::ctl::resolve_retire(
+                &request_id,
+                crate::agent::ctl::RetireDecision {
+                    approved: args
+                        .get("approved")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false),
+                    error: opt_str(args, "error"),
+                },
+            );
+            if accepted {
+                app.emit("retire://resolved", serde_json::json!({ "requestId": request_id }));
+            }
+            to_value(accepted)
+        }
         "update_session" => {
             core::update_session(
                 app,
@@ -404,6 +422,11 @@ pub fn dispatch(
             )?;
             Ok(Value::Null)
         }
+        // Decision 2026-08-16: archive stays available to remote paired clients. Pairing already
+        // grants session control and a shell; prepare_archive verifies every landing before any
+        // branch delete, so a remote archive can destroy nothing unverified. The same decision
+        // covers spawn_claim / spawn_result / retire_result: paired clients may answer cards,
+        // answers are single-consumption, and a resolved broadcast withdraws stale cards.
         "set_session_archived" => {
             core::set_session_archived(app, &req_str(args, "id")?, req_bool(args, "archived")?)?;
             Ok(Value::Null)
@@ -446,6 +469,22 @@ pub fn dispatch(
             if origin == CallOrigin::Remote {
                 if let Some(key) = entries.keys().find(|k| is_protected_setting(k)) {
                     return Err(format!("remote_setting_forbidden:{key}"));
+                }
+                // `worktreeCopyPatterns` decides which raw untracked bytes `create_worktree` copies
+                // into a new worktree. A remote write of `**` would turn that ungated arm into a
+                // secret-copy primitive, so only the desktop user may change the patterns. The
+                // field lives inside the vlx-settings blob, so it is compared, not key-blocked;
+                // a remote sync that keeps the stored patterns passes untouched.
+                if let Some(blob) = entries.get(crate::agent::orchestration::VLX_SETTINGS_KEY) {
+                    let stored = core::get_app_settings(app)?
+                        .remove(crate::agent::orchestration::VLX_SETTINGS_KEY);
+                    let stored_patterns =
+                        crate::agent::orchestration::worktree_copy_patterns_of(stored.as_deref());
+                    let new_patterns =
+                        crate::agent::orchestration::worktree_copy_patterns_of(Some(blob));
+                    if new_patterns != stored_patterns {
+                        return Err("remote_setting_forbidden:worktreeCopyPatterns".to_string());
+                    }
                 }
             }
             core::set_app_settings(app, entries)?;
@@ -1588,9 +1627,18 @@ mod tests {
         "git_branch_list",
         "git_merge_preview", // diff_stat summary, no raw file bytes
         "git_merge_apply",   // git-mediated mutation, refused outside a repository
-        "create_worktree",   // git-mediated, refused outside a repository
+        // create_worktree is git-mediated and refused outside a repository, and additionally
+        // copies raw untracked bytes matched by `worktreeCopyPatterns` into the new worktree.
+        // That copy is safe to keep ungated ONLY because the patterns are desktop-controlled:
+        // the set_app_settings arm rejects a remote write that changes them. The call-surface
+        // pin (ungated_arms_call_only_their_reviewed_helpers) keeps this reason current.
+        "create_worktree",
         "list_worktrees",
-        "commit_worktree",   // git-mediated mutation, refused outside a repository
+        // commit_worktree and delete_branch are git-mediated mutations at caller-named paths,
+        // refused by git outside a repository; they move no raw bytes of a caller-named file.
+        // Reviewed 2026-08-16 together with create_worktree: a paired remote device is trusted
+        // with a shell by the threat model, so repo-scoped git mutations stay ungated.
+        "commit_worktree",
         "delete_branch",
         // Session-tree metadata arms: `cwd`/`worktreePath` only choose where a PTY spawns; the
         // arms read and write no file content, and a remote paired device is trusted with a
@@ -1850,6 +1898,280 @@ mod tests {
                  remove or fix the entry"
             );
         }
+    }
+
+    /// Every function and method call inside one arm body, macros and keywords excluded.
+    fn called_functions(body: &str) -> std::collections::BTreeSet<String> {
+        const NOISE: &[&str] = &["Some", "Ok", "Err"];
+        let chars: Vec<char> = body.chars().collect();
+        let mut calls = std::collections::BTreeSet::new();
+        for (i, &c) in chars.iter().enumerate() {
+            if c != '(' {
+                continue;
+            }
+            let mut j = i;
+            while j > 0
+                && (chars[j - 1].is_ascii_alphanumeric() || chars[j - 1] == '_' || chars[j - 1] == ':')
+            {
+                j -= 1;
+            }
+            if j == i {
+                continue;
+            }
+            let name: String = chars[j..i].iter().collect();
+            let Some(first) = name.chars().next() else {
+                continue;
+            };
+            if !first.is_ascii_alphabetic() || NOISE.contains(&name.as_str()) {
+                continue;
+            }
+            calls.insert(name);
+        }
+        calls
+    }
+
+    /// The name-only exception pin let `create_worktree` grow a raw-byte copy hook without any
+    /// test turning red: the justification described an arm that no longer existed. This pin
+    /// freezes the call surface of every excepted arm, so behavior added INSIDE an excepted arm
+    /// fails here and forces its UNGATED_JUSTIFIED reason to be re-reviewed. Helper-internal
+    /// changes stay out of reach and remain a review concern.
+    #[test]
+    fn ungated_arms_call_only_their_reviewed_helpers() {
+        const SRC: &str = include_str!("dispatch.rs");
+        let prod = SRC.split("#[cfg(test)]").next().unwrap();
+        let arms = parse_dispatch_arms(prod);
+
+        const PINNED: &[(&str, &[&str])] = &[
+            ("list_dir", &["files::list_dir", "req_str", "to_value"]),
+            ("stat_file", &["files::stat_file", "req_str", "to_value"]),
+            ("get_git_status", &["git::status", "req_str", "to_value"]),
+            ("git_changed_files", &["git::changed_files", "req_str", "to_value"]),
+            ("git_recent_commits", &["git::recent_commits", "req_str", "to_value"]),
+            ("git_branch_list", &["git::branch_list", "req_str", "to_value"]),
+            (
+                "git_merge_preview",
+                &["git::merge_branches_preview", "req_str", "to_value"],
+            ),
+            (
+                "git_merge_apply",
+                &["as_deref", "git::merge_branches_apply", "opt_str", "req_str", "to_value"],
+            ),
+            (
+                "create_worktree",
+                &[
+                    "crate::agent::orchestration::load",
+                    "git::copy_into_worktree",
+                    "git::worktree_add",
+                    "req_str",
+                    "to_value",
+                ],
+            ),
+            ("list_worktrees", &["git::worktree_list", "req_str", "to_value"]),
+            ("commit_worktree", &["git::commit_all", "req_str"]),
+            ("delete_branch", &["git::branch_delete", "req_str"]),
+            (
+                "create_group",
+                &["as_deref", "core::create_group", "opt_str", "req_str", "to_value"],
+            ),
+            (
+                "create_session",
+                &["as_deref", "core::create_session", "opt_str", "req_str", "to_value"],
+            ),
+            (
+                "persist_session",
+                &["as_deref", "core::persist_session", "opt_str", "req_str", "to_value"],
+            ),
+            (
+                "update_session",
+                &["as_deref", "core::update_session", "opt_str", "req_str"],
+            ),
+            ("import_project", &["core::import_project", "req_str", "to_value"]),
+        ];
+
+        for (name, allowed) in PINNED {
+            let (_, body) = arms
+                .iter()
+                .find(|(names, _)| names.iter().any(|n| n == name))
+                .unwrap_or_else(|| panic!("pinned arm `{name}` no longer exists"));
+            let calls = called_functions(body);
+            let expected: std::collections::BTreeSet<String> =
+                allowed.iter().map(|s| s.to_string()).collect();
+            assert_eq!(
+                calls, expected,
+                "arm `{name}` calls different helpers than its reviewed pin — update the pin \
+                 together with its UNGATED_JUSTIFIED justification"
+            );
+        }
+        for name in UNGATED_JUSTIFIED {
+            assert!(
+                PINNED.iter().any(|(n, _)| n == name),
+                "excepted arm `{name}` has no pinned call surface — add one so changes inside \
+                 the arm stay visible"
+            );
+        }
+    }
+
+    /// Collect every payload emitted for `event` so a test can assert on broadcasts.
+    fn collect_events(app: &AppCtx, event: &str) -> std::sync::Arc<std::sync::Mutex<Vec<Value>>> {
+        let seen: std::sync::Arc<std::sync::Mutex<Vec<Value>>> = Default::default();
+        let sink = std::sync::Arc::clone(&seen);
+        app.listen(event, move |payload| {
+            if let Ok(value) = serde_json::from_str::<Value>(payload) {
+                sink.lock().unwrap().push(value);
+            }
+        });
+        seen
+    }
+
+    /// Final-validation scenario: one spawn request fans out to a desktop and a browser client;
+    /// exactly one claim wins, and the resolved broadcast withdraws the other client's copy.
+    #[test]
+    fn spawn_claim_across_two_clients_grants_one_and_broadcasts_resolved() {
+        let app = test_ctx();
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let resolved = collect_events(&app, "spawn://resolved");
+
+        let desktop = dispatch(
+            &app,
+            "spawn_claim",
+            &json!({ "requestId": request_id }),
+            DESKTOP_SOURCE,
+            CallOrigin::Local,
+        )
+        .unwrap();
+        assert_eq!(desktop, json!(true), "the first client must win the claim");
+        let browser = dispatch(
+            &app,
+            "spawn_claim",
+            &json!({ "requestId": request_id }),
+            "ws-1",
+            CallOrigin::Remote,
+        )
+        .unwrap();
+        assert_eq!(browser, json!(false), "the second client must lose the claim");
+
+        let events = resolved.lock().unwrap();
+        assert_eq!(events.len(), 1, "only the winning claim broadcasts resolved");
+        assert_eq!(events[0]["requestId"], request_id.as_str());
+    }
+
+    /// Final-validation scenario: a paired remote client answers a retire card. The first answer
+    /// is delivered exactly once, broadcasts resolved, and a late contradictory answer is dropped.
+    #[test]
+    fn remote_client_answers_a_retire_card_exactly_once() {
+        let app = test_ctx();
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let receiver = crate::agent::ctl::register_retire_waiter(&request_id, "lead-1");
+        let resolved = collect_events(&app, "retire://resolved");
+
+        let accepted = dispatch(
+            &app,
+            "retire_result",
+            &json!({ "requestId": request_id, "approved": true }),
+            "ws-1",
+            CallOrigin::Remote,
+        )
+        .unwrap();
+        assert_eq!(accepted, json!(true));
+        assert!(receiver.try_recv().unwrap().approved);
+
+        let late = dispatch(
+            &app,
+            "retire_result",
+            &json!({ "requestId": request_id, "approved": false, "error": "late decline" }),
+            "ws-2",
+            CallOrigin::Remote,
+        )
+        .unwrap();
+        assert_eq!(late, json!(false), "a second answer must be dropped");
+        assert!(receiver.try_recv().is_err(), "the dropped answer must not be delivered");
+        let events = resolved.lock().unwrap();
+        assert_eq!(events.len(), 1, "only the accepted answer broadcasts resolved");
+        assert_eq!(events[0]["requestId"], request_id.as_str());
+    }
+
+    /// Final-validation scenario: a remote client may create a worktree, and the copy hook moves
+    /// only files matching the desktop-controlled patterns; untracked secrets stay behind.
+    #[test]
+    fn remote_create_worktree_copies_only_configured_patterns() {
+        let app = test_ctx();
+        let repo = std::env::temp_dir().join(format!("vlx-remote-wt-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let out = crate::host::command("git").arg("-C").arg(&repo).args(args).output().unwrap();
+            assert!(out.status.success(), "git {args:?} failed");
+        };
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "t@example.com"]);
+        git(&["config", "user.name", "tester"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        std::fs::write(repo.join("a.txt"), "base\n").unwrap();
+        git(&["add", "-A"]);
+        git(&["commit", "-q", "-m", "init"]);
+        std::fs::create_dir_all(repo.join("docs/plans")).unwrap();
+        std::fs::write(repo.join("docs/plans/note.md"), "plan\n").unwrap();
+        std::fs::write(repo.join(".env.local"), "SECRET=1\n").unwrap();
+
+        let info = dispatch(
+            &app,
+            "create_worktree",
+            &json!({ "repoRoot": repo.to_string_lossy(), "name": "remote worker" }),
+            "ws-1",
+            CallOrigin::Remote,
+        )
+        .expect("a paired remote client may create a worktree");
+        let path = std::path::PathBuf::from(info["path"].as_str().unwrap());
+        assert!(path.join("docs/plans/note.md").is_file(), "configured patterns are copied");
+        assert!(
+            !path.join(".env.local").exists(),
+            "files outside the desktop-controlled patterns must not be copied"
+        );
+
+        crate::git::worktree_remove(path.to_string_lossy().as_ref(), true).unwrap();
+        std::fs::remove_dir_all(&repo).unwrap();
+    }
+
+    /// Remote clients may sync the vlx-settings blob but may not change `worktreeCopyPatterns`:
+    /// the patterns choose which raw untracked bytes create_worktree copies into a new worktree,
+    /// so a remote `**` write would be a secret-copy primitive.
+    #[test]
+    fn remote_settings_write_cannot_change_worktree_copy_patterns() {
+        let app = test_ctx();
+        let write = |blob: &str, origin: CallOrigin| {
+            let source = if origin == CallOrigin::Remote { "ws-1" } else { DESKTOP_SOURCE };
+            dispatch(
+                &app,
+                "set_app_settings",
+                &json!({ "entries": { "vlx-settings": blob } }),
+                source,
+                origin,
+            )
+        };
+
+        write(r#"{"orchestration":{}}"#, CallOrigin::Remote)
+            .expect("a remote sync that keeps the stored patterns must pass");
+        let err = write(
+            r#"{"orchestration":{"worktreeCopyPatterns":["**"]}}"#,
+            CallOrigin::Remote,
+        )
+        .unwrap_err();
+        assert_eq!(err, "remote_setting_forbidden:worktreeCopyPatterns");
+
+        write(
+            r#"{"orchestration":{"worktreeCopyPatterns":["docs/**"]}}"#,
+            CallOrigin::Local,
+        )
+        .expect("local writes stay unrestricted");
+        write(
+            r#"{"orchestration":{"worktreeCopyPatterns":["docs/**"]}}"#,
+            CallOrigin::Remote,
+        )
+        .expect("a remote write matching the locally stored patterns must pass");
+        let err = write(r#"{"orchestration":{}}"#, CallOrigin::Remote).unwrap_err();
+        assert_eq!(
+            err, "remote_setting_forbidden:worktreeCopyPatterns",
+            "a remote write must not reset locally configured patterns to the default"
+        );
     }
 
     /// The serve-mode → origin mapping: Electron's loopback sidecar stays Local (reaching 127.0.0.1

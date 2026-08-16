@@ -105,7 +105,6 @@ const fr: typeof en = {
   "settings.orchDescription": "Description",
   "settings.orchDescriptionPlaceholder": "Décrivez quand utiliser ce profil.",
   "settings.orchNewProfile": "Nom du nouveau profil",
-  "settings.orchAdd": "Ajouter",
   "settings.orchAddNew": "Ajouter un profil",
   "settings.orchDelete": "Supprimer",
   "settings.orchNoProfiles":
@@ -121,6 +120,10 @@ const fr: typeof en = {
   "settings.orchPermissionInherit": "Hériter du parent",
   "settings.orchPermissionSkipWarning":
     "Ce worker s'exécute sans confirmation dans son worktree.",
+  "settings.orchPermissionSkipNoWorktreeWarning":
+    "Ce worker s'exécute sans confirmation directement dans le répertoire parent. Activez un worktree dédié pour le contenir.",
+  "settings.orchAgentUnsetHint":
+    "Aucun agent enregistré ; les workers utilisent l'agent de la session parente. Choisissez-en un pour le rendre explicite.",
   "settings.orchLimitsTitle": "Limites",
   "settings.orchMaxDescendants": "Descendants max.",
   "settings.orchMaxParallel": "Parallélisme max.",
@@ -187,6 +190,9 @@ const fr: typeof en = {
   "spawn.optionOther": "Autre...", // Other...
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
   "spawn.launch": "Launch", // Launch
+  "spawn.launchWarningsTitle": "Vérifier les valeurs de lancement",
+  "spawn.launchWarning": (field: string, value: string, kind: string) =>
+    `La valeur de ${field} "${value}" est hors des valeurs organisées de VelaTerm pour ${kind}. Vérifiez que la CLI installée l'accepte.`,
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
   "retire.title": "Retirer cette session ?",
@@ -194,6 +200,10 @@ const fr: typeof en = {
   "retire.actionArchive": "Archiver la session. Aucun worktree n'est supprimé.",
   "retire.actionCleanup":
     "Supprimer les worktrees ci-dessous, puis archiver la session.",
+  "retire.actionDiscard":
+    "Abandonner les modifications non validées dans le worktree de ce worker.",
+  "retire.discardWarning":
+    "Toutes les modifications non validées de ce worktree sont supprimées. Le travail validé est conservé.",
   "retire.descendants": (n: number) =>
     `Inclut ${n} session${n === 1 ? "" : "s"} descendante${n === 1 ? "" : "s"}.`,
   "retire.irreversible": "Cette action est irréversible",
@@ -268,6 +278,8 @@ const fr: typeof en = {
   "gitea.test": "Test connection", // TODO translate
   "gitea.saved": "Saved.", // TODO translate
   "settings.renderer": "Moteur de rendu du terminal", // Terminal renderer
+  "settings.rendererHint":
+    "DOM (par défaut) fonctionne partout, mais laisse des espaces dans les bordures TUI quand la hauteur de ligne dépasse 1. Canvas dessine ces bordures sans espace. WebGL est le plus rapide mais peut perdre son contexte GPU.",
   "settings.redrawOnReveal": "Redessiner au changement d'onglet", // Redraw on tab switch
   "settings.catAdvanced": "Avancé", // Advanced
   "settings.outputScheduler": "Sortie prioritaire au premier plan", // Foreground-priority output
@@ -440,8 +452,22 @@ const fr: typeof en = {
   "tree.archiveBlockedBody": "L'archivage a été refusé. Une session archivée sort du périmètre de nettoyage, donc son worktree et sa branche resteraient orphelins.", // Archiving was refused. An archived session leaves the worker cleanup scope, so its worktree and branch would be stranded.
   "tree.archiveConfirmTitle": "Archiver et supprimer les worktrees ?", // Archive and delete worktrees?
   "tree.archiveConfirmBody": (n: number) =>
-    `L'archivage supprime ${n} worktree(s) de worker et leurs branches. Cette action est irréversible. Le travail est déjà sur la branche parente.`,
+    `L'archivage supprime ${n} worktree(s) de worker et leurs branches. Cette action est irréversible. Seul le travail dont l'atterrissage sur la branche parente est vérifié peut être archivé ; tout le reste bloque l'archivage.`,
   "tree.archiveConfirmAction": "Archiver", // Archive
+  "archive.blockedRow": (name: string, reason: string) =>
+    `"${name}" détient encore un worktree : ${reason}`,
+  "archive.blockedSuffix": "Faites d'abord atterrir ou retirez le worker.",
+  "archive.reason.uncommittedChanges": "le worktree contient des modifications non validées",
+  "archive.reason.noVerifiedLanding": "le worktree n'a pas d'atterrissage vérifié",
+  "archive.reason.workerChangedAfterLanding": "le worker a changé après son atterrissage vérifié",
+  "archive.reason.landingNotOnTarget": "le commit d'atterrissage vérifié n'est pas sur la branche cible",
+  "archive.reason.repoRootUnavailable": "la racine du dépôt du worktree est indisponible",
+  "archive.reason.missingNeverLanded": "le répertoire du worktree manque et le worker n'a jamais atterri",
+  "archive.reason.missingUnverifiedLanding": "le répertoire du worktree manque et son atterrissage n'a jamais été vérifié",
+  "archive.reason.missingDifferentParent": "le répertoire du worktree manque et son atterrissage appartient à un autre parent",
+  "archive.reason.missingRepoRootUnavailable": "le répertoire du worktree manque et la racine du dépôt est indisponible",
+  "archive.reason.missingLandingNotOnTarget": "le répertoire du worktree manque et son commit d'atterrissage n'est pas sur la branche cible",
+  "archive.reason.branchMovedAfterLanding": "la branche du worker a bougé après son atterrissage vérifié",
   // Temporary (draft) sessions
   "tree.scratchTag": "temp", // scratch
   "tree.persistSession": "Convertir en session permanente…", // Make Permanent Session…

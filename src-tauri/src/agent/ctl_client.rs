@@ -21,8 +21,9 @@ const USAGE: &str = "usage:
   vagent prompt <id|name> <text...>
   vagent cancel <id|name>|--all
   vagent diff   <id|name>
-  vagent land   <id|name> --message <conventional-subject>
+  vagent land   <id|name> --message <conventional-subject> [--reset]
   vagent cleanup [--confirm]
+  vagent cleanup --discard <id|name>
   vagent retire <id|name> [--confirm]
 
 All output is JSON. Sessions are addressed by id or unique name and must be
@@ -62,13 +63,22 @@ child agent default when the parent has no stored level.
 cleanup lists finished child worktrees with a verified landing record.
 --confirm removes each verified worktree and its disposable branch. A running
 child, an uncommitted worktree, or an unverified landing is never touched.
+cleanup --discard <id|name> asks the user to confirm, then discards the
+uncommitted changes a stopped worker left in its worktree. Committed work
+stays. Use it when a killed worker's dirty worktree blocks land or retire.
+
+Restoring an archived worker subtree re-consumes descendant slots against the
+spawn limits.
 
 retire previews one settled direct child subtree. --confirm terminates its
 settled processes, removes verified landed worktrees and branches, and archives
 the subtree. Dirty or unlanded worktrees block retirement.
 
 land requires a Conventional Commit subject through --message. It applies the
-worker's net change to the immediate parent's current branch as one commit.";
+worker's net change to the immediate parent's current branch as one commit.
+--reset discards a stale landing record after an interrupted or wedged land,
+including target changes the interrupted landing staged, then lands fresh. A
+verified landing whose commit is still on the target is never discarded.";
 
 /// `vlx-term --agent-ctl ...` entry point behind the `vagent` shim.
 pub fn run_agent_ctl(args: &[String]) -> ! {
@@ -139,6 +149,7 @@ fn parse_ctl_args(rest: &[String]) -> CtlParse {
     let mut all = false;
     let mut full = false;
     let mut confirm = false;
+    let mut discard = false;
     let mut worktree: Option<bool> = None;
     let mut i = 0;
     // Reads a value-taking option's required value; accepts values beginning with `-`.
@@ -189,6 +200,10 @@ fn parse_ctl_args(rest: &[String]) -> CtlParse {
                 "--force" => {
                     body.insert("force".into(), serde_json::json!(true));
                 }
+                "--reset" => {
+                    body.insert("reset".into(), serde_json::json!(true));
+                }
+                "--discard" => discard = true,
                 "--allow-unknown-launch-values" => {
                     body.insert("allowUnknownLaunchValues".into(), serde_json::json!(true));
                 }
@@ -230,11 +245,21 @@ fn parse_ctl_args(rest: &[String]) -> CtlParse {
             body.insert("requestId".into(), serde_json::json!(request_id));
         }
         "cleanup" => {
-            if !words.is_empty() {
-                return CtlParse::Err("vagent: cleanup takes no target".to_string());
-            }
-            if confirm {
-                body.insert("confirm".into(), serde_json::json!(true));
+            if discard {
+                let [target] = words.as_slice() else {
+                    return CtlParse::Err(
+                        "vagent: cleanup --discard needs exactly one <id|name>".to_string(),
+                    );
+                };
+                body.insert("discard".into(), serde_json::json!(true));
+                body.insert("target".into(), serde_json::json!(target));
+            } else {
+                if !words.is_empty() {
+                    return CtlParse::Err("vagent: cleanup takes no target".to_string());
+                }
+                if confirm {
+                    body.insert("confirm".into(), serde_json::json!(true));
+                }
             }
         }
         "status" | "diff" | "land" | "retire" => {

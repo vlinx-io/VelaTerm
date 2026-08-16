@@ -15,6 +15,19 @@ use uuid::Uuid;
 use crate::host::AppCtx;
 use crate::pty::{AgentState, StatusSignal};
 
+/// One advisory launch-value warning, structured so every client can localize it. The installed
+/// CLI stays authoritative, so a warning never blocks the launch.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchWarning {
+    /// Which launch value is outside the curated list: "model" or "effort".
+    pub field: String,
+    /// The requested value.
+    pub value: String,
+    /// The agent kind whose curated list was checked.
+    pub kind: String,
+}
+
 /// Request to spawn an independent child session, triggered by `vspawn` or Claude's `/vspawn` skill.
 /// `/spawn` parses and emits it so the frontend can create the child, open a worktree, start it,
 /// and submit the prompt.
@@ -60,7 +73,7 @@ pub struct SpawnRequest {
     /// Advisory launch-value warnings. Unknown values must remain launchable because installed CLIs can support
     /// models that this build does not know yet.
     #[serde(default)]
-    pub launch_warnings: Vec<String>,
+    pub launch_warnings: Vec<LaunchWarning>,
 }
 
 /// Request from `view <file|URL>` to open a tab.
@@ -550,9 +563,14 @@ fn parse_spawn(url: &str, body: &str, expected_token: &str) -> Option<SpawnReque
     if token? != expected_token {
         return None;
     }
-    let req: SpawnRequest = serde_json::from_str(body).ok()?;
+    let mut req: SpawnRequest = serde_json::from_str(body).ok()?;
     if req.parent_session_id.trim().is_empty() || req.prompt.trim().is_empty() {
         return None;
+    }
+    // Every request needs a correlation id: the emit fans out to every connected client, and the
+    // id is what lets exactly one of them claim and execute the spawn.
+    if req.request_id.is_none() {
+        req.request_id = Some(uuid::Uuid::new_v4().to_string());
     }
     Some(req)
 }
@@ -1070,6 +1088,17 @@ mod tests {
         assert_eq!(req2.effort, None);
         assert_eq!(req2.name, None);
         assert_eq!(req2.agent_args, None);
+
+        // A request without a correlation id receives one, so multi-client claim deduplication
+        // covers plain vspawn; an existing id is preserved.
+        assert!(req2.request_id.is_some());
+        let req3 = parse_spawn(
+            "/spawn?t=tok",
+            r#"{"parentSessionId":"p","prompt":"x","requestId":"keep-me"}"#,
+            "tok",
+        )
+        .unwrap();
+        assert_eq!(req3.request_id.as_deref(), Some("keep-me"));
 
         // Wrong token/path, empty required fields, or invalid JSON yields None.
         assert!(parse_spawn("/spawn?t=wrong", body, "tok").is_none());

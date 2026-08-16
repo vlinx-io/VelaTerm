@@ -368,10 +368,19 @@ export function SpawnConfirmModal() {
           }}
         >
           <div style={{ color: "var(--status-asking)", fontWeight: 600, marginBottom: 3 }}>
-            {t("status.error")}
+            {t("spawn.launchWarningsTitle")}
           </div>
           {req.launchWarnings.map((warning) => (
-            <div key={warning}>{warning}</div>
+            <div key={`${warning.field}-${warning.value}`}>
+              {t(
+                "spawn.launchWarning",
+                warning.field === "model"
+                  ? t("spawn.modelLabel")
+                  : t("spawn.effortLabel"),
+                warning.value,
+                warning.kind,
+              )}
+            </div>
           ))}
         </div>
       )}

@@ -102,7 +102,6 @@ const zhCN: typeof en = {
   "settings.orchDescription": "描述",
   "settings.orchDescriptionPlaceholder": "说明何时应使用此配置文件。",
   "settings.orchNewProfile": "新配置档名称",
-  "settings.orchAdd": "添加",
   "settings.orchAddNew": "添加新配置",
   "settings.orchDelete": "删除",
   "settings.orchNoProfiles": "还没有配置档。新建一个即可在每次派生时复用。",
@@ -117,6 +116,8 @@ const zhCN: typeof en = {
   "settings.orchPermissionInherit": "继承父会话",
   "settings.orchPermissionSkipWarning":
     "此工作进程在自己的 worktree 中运行时不会请求确认.",
+  "settings.orchPermissionSkipNoWorktreeWarning": "该 worker 将直接在父目录中免确认运行。请开启独立 worktree 加以隔离。",
+  "settings.orchAgentUnsetHint": "尚未保存代理；worker 将使用父会话的代理。选择一个以明确指定。",
   "settings.orchLimitsTitle": "限制",
   "settings.orchMaxDescendants": "子孙会话上限",
   "settings.orchMaxParallel": "并行上限",
@@ -183,12 +184,17 @@ const zhCN: typeof en = {
   "spawn.optionOther": "其他...",
   "spawn.worktreeLabel": "独立 git worktree",
   "spawn.launch": "启动",
+  "spawn.launchWarningsTitle": "请检查启动值",
+  "spawn.launchWarning": (field: string, value: string, kind: string) =>
+    `${field}“${value}”不在 VelaTerm 为 ${kind} 维护的值列表内。请确认已安装的 CLI 接受该值。`,
   "spawn.remaining": (n: number) => `还有 ${n} 个待确认`,
   "spawn.notifyTitle": "派生会话待确认",
   "retire.title": "退役此会话？",
   "retire.session": "会话",
   "retire.actionArchive": "归档该会话。不会删除任何 worktree。",
   "retire.actionCleanup": "删除下列 worktree，然后归档该会话。",
+  "retire.actionDiscard": "丢弃该 worker worktree 中未提交的更改。",
+  "retire.discardWarning": "该 worktree 中所有未提交的更改都会被删除。已提交的工作保留。",
   "retire.descendants": (n: number) => `包含 ${n} 个子孙会话。`,
   "retire.irreversible": "此操作无法撤销",
   "retire.worktreeCount": (n: number) => `将删除 ${n} 个 worktree 及其分支。`,
@@ -259,6 +265,8 @@ const zhCN: typeof en = {
   "gitea.test": "测试连接",
   "gitea.saved": "已保存。",
   "settings.renderer": "终端渲染器",
+  "settings.rendererHint":
+    "DOM（默认）在任何环境下都可用，但行高大于 1 时 TUI 边框会出现缝隙。Canvas 可无缝绘制这些边框。WebGL 最快，但可能丢失 GPU 上下文。",
   "settings.redrawOnReveal": "切回标签时重绘",
   "settings.catAdvanced": "高级",
   "settings.outputScheduler": "前台优先输出",
@@ -429,8 +437,22 @@ const zhCN: typeof en = {
   "tree.archiveBlockedBody": "归档被拒绝。归档后的会话会离开清理范围，其工作树和分支将被遗留。",
   "tree.archiveConfirmTitle": "归档并删除 worktree？", // Archive and delete worktrees?
   "tree.archiveConfirmBody": (n: number) =>
-    `归档会删除 ${n} 个 worker worktree 及其分支。此操作无法撤销。相关工作已经在父分支上。`,
+    `归档会删除 ${n} 个 worker worktree 及其分支。此操作无法撤销。只有经验证已合入父分支的工作才能归档；其他情况会阻止归档。`,
   "tree.archiveConfirmAction": "归档", // Archive
+  "archive.blockedRow": (name: string, reason: string) =>
+    `“${name}”仍持有 worktree：${reason}`,
+  "archive.blockedSuffix": "请先对该 worker 执行 land 或 retire。",
+  "archive.reason.uncommittedChanges": "worktree 存在未提交的更改",
+  "archive.reason.noVerifiedLanding": "worktree 没有已验证的合入记录",
+  "archive.reason.workerChangedAfterLanding": "worker 在已验证合入之后发生了变化",
+  "archive.reason.landingNotOnTarget": "已验证的合入提交不在目标分支上",
+  "archive.reason.repoRootUnavailable": "无法访问 worktree 的仓库根目录",
+  "archive.reason.missingNeverLanded": "worktree 目录缺失且该 worker 从未合入",
+  "archive.reason.missingUnverifiedLanding": "worktree 目录缺失且其合入从未通过验证",
+  "archive.reason.missingDifferentParent": "worktree 目录缺失且其合入属于另一个父会话",
+  "archive.reason.missingRepoRootUnavailable": "worktree 目录缺失且无法访问仓库根目录",
+  "archive.reason.missingLandingNotOnTarget": "worktree 目录缺失且其合入提交不在目标分支上",
+  "archive.reason.branchMovedAfterLanding": "worker 分支在已验证合入之后发生了移动",
   // Temporary (draft) sessions
   "tree.scratchTag": "临时",
   "tree.persistSession": "转为永久会话…",
