@@ -10,6 +10,8 @@ citizens, and lets you take over any session from a browser or another machine.
 [![YouTube](https://img.shields.io/badge/YouTube-@vlinx__soft-FF0000.svg)](https://www.youtube.com/@vlinx_soft)
 [![Discord](https://img.shields.io/badge/Discord-join-5865F2.svg)](https://discord.gg/gaD4NBzggU)
 
+<a href="https://www.youtube.com/watch?v=CuUT6zZ337c"><img src="docs/assets/video-preview.jpg" alt="Watch the demo video" width="100%"></a>
+
 ![VelaTerm main window](docs/assets/manuals/main-ui.png)
 
 ## Why
