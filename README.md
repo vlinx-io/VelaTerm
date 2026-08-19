@@ -12,7 +12,6 @@ citizens, and lets you take over any session from a browser or another machine.
 
 <a href="https://www.youtube.com/watch?v=CuUT6zZ337c"><img src="docs/assets/video-preview.jpg" alt="Watch the demo video" width="100%"></a>
 
-![VelaTerm main window](docs/assets/manuals/main-ui.png)
 
 ## Why
 
