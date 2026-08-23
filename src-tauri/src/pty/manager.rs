@@ -383,6 +383,11 @@ impl PtyManager {
         // rewrite of `PYTHONHOME`, `LD_LIBRARY_PATH`, `PATH`, and friends. Undo it before anything else so
         // the user's shell sees the system environment and later overrides here still win. No-op elsewhere.
         crate::appimage::scrub_pty(&mut cmd);
+        // This process's environment reaches every PTY, so a NO_COLOR inherited from whatever launched the
+        // app — an agent session, a CI shell, a login profile — would silently make every shell and TUI here
+        // render monochrome while the next two lines advertise 24-bit color. Drop it so the environment agrees
+        // with the capability being advertised; per-command opt-out still works from inside the terminal.
+        cmd.env_remove("NO_COLOR");
         // Advertise a color-capable terminal.
         cmd.env("TERM", "xterm-256color");
         // Explicitly advertise true color so applications do not conservatively fall back to 256 colors.
