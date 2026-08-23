@@ -98,6 +98,30 @@ const ko: typeof en = {
   "settings.agentPathPlaceholder": "예: ~/.local/bin/claude — 비워두면 PATH에서 검색", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "설정하면 이 유형의 세션은 PATH에서 명령을 찾는 대신 이 전체 경로로 실행됩니다. 설치되어 있지만 셸 PATH에 없는 경우에 유용합니다. 원클릭 설치 성공 후 위치가 감지되면 자동으로 입력됩니다.", // Agent executable path hint
+  "settings.codexHooks": "Codex 훅",
+  "settings.codexHooksDesc":
+    "Codex 사용자, 프로젝트, 플러그인 및 관리 구성에서 발견된 훅을 검토하고 제어합니다.",
+  "settings.codexHooksEnabledCount": (enabled: number, total: number) =>
+    `활성 ${enabled} / ${total}`,
+  "settings.codexHooksEmpty": "Codex 훅을 찾지 못했습니다.",
+  "settings.codexHooksTrust": "신뢰",
+  "settings.codexHooksUser": "사용자 구성",
+  "settings.codexHooksProject": "프로젝트 구성",
+  "settings.codexHooksPlugin": "플러그인",
+  "settings.codexHooksSession": "세션",
+  "settings.codexHooksManagedSource": "관리 구성",
+  "settings.codexHooksManaged": "관리됨",
+  "settings.codexHooksTrusted": "신뢰됨",
+  "settings.codexHooksChanged": "변경됨",
+  "settings.codexHooksReview": "검토 필요",
+  "settings.codexHooksDisabled": "비활성",
+  "settings.codexHooksHandler": "핸들러",
+  "settings.codexHooksCommand": "명령",
+  "settings.codexHooksMatcher": "매처",
+  "settings.codexHooksTimeout": "시간 제한",
+  "settings.codexHooksStatusMessage": "상태 메시지",
+  "settings.codexHooksAll": "모두",
+  "settings.codexHooksNone": "없음",
   "settings.appearance": "외관", // Appearance
   "settings.accent": "강조색", // Accent
   "settings.accentAuto": "테마 따름", // Follow theme

@@ -793,6 +793,45 @@ pub fn codex_usage(
     crate::agent::transcript::latest_codex_rate_limits()
 }
 
+fn codex_settings_bin(ctx: &AppCtx, requested: Option<&str>) -> Option<String> {
+    let requested = requested
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            path.strip_prefix("~/")
+                .or_else(|| path.strip_prefix("~\\"))
+                .and_then(|rest| {
+                    crate::host::home_dir()
+                        .map(|home| home.join(rest).to_string_lossy().to_string())
+                })
+                .unwrap_or_else(|| path.to_string())
+        });
+    requested
+        .or_else(|| crate::pty::manager::agent_bin_path(ctx, SessionKind::Codex))
+        .or_else(|| crate::agent::install::locate_installed_bin("codex"))
+}
+
+pub fn codex_hooks_list(
+    ctx: &AppCtx,
+    cwds: Vec<String>,
+    codex_path: Option<&str>,
+) -> Result<crate::agent::codex_hooks::CodexHooksResponse, String> {
+    let bin = codex_settings_bin(ctx, codex_path);
+    crate::agent::codex_hooks::list(bin.as_deref(), cwds)
+}
+
+pub fn codex_hook_update(
+    ctx: &AppCtx,
+    cwds: Vec<String>,
+    codex_path: Option<&str>,
+    key: &str,
+    enabled: Option<bool>,
+    trusted_hash: Option<&str>,
+) -> Result<crate::agent::codex_hooks::CodexHooksResponse, String> {
+    let bin = codex_settings_bin(ctx, codex_path);
+    crate::agent::codex_hooks::update(bin.as_deref(), cwds, key, enabled, trusted_hash)
+}
+
 /// Exports complete session context as Markdown. With desktop `dest_path`, writes to disk and returns None; without
 /// it on browser clients, returns Some(content) for a local frontend download.
 pub fn export_session_context(

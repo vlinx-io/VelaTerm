@@ -6,6 +6,8 @@
 pub mod antigravity;
 pub mod cli_client;
 pub mod cline;
+pub mod codex_app_server;
+pub mod codex_hooks;
 pub mod copilot;
 pub mod crush;
 pub mod cursor;

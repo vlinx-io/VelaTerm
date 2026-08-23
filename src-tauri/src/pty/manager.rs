@@ -536,6 +536,16 @@ impl PtyManager {
         };
         let codex_hooks_supported =
             kind != SessionKind::Codex || codex_lifecycle_hooks_supported(bin_path.as_deref());
+        // Codex prompts through `/hooks` for any hook whose hash is not already in `hooks.state`, so this
+        // must complete before the launch below. Failure degrades status reporting only.
+        if kind == SessionKind::Codex && codex_hooks_supported {
+            if let Err(e) = crate::agent::codex_hooks::ensure_session_hook_trust(bin_path.as_deref())
+            {
+                eprintln!(
+                    "failed to record Codex hook trust (Codex may prompt to trust VelaTerm hooks): {e}"
+                );
+            }
+        }
         let should_capture_agent_id = resume_id.is_none() || fork;
         // Only the Windows theme-injection branch mutates this value.
         #[cfg_attr(not(windows), allow(unused_mut))]
@@ -1486,11 +1496,13 @@ fn session_agent_path(app: &AppCtx, id: &str) -> Option<String> {
     Some(expand_home_prefix(trimmed))
 }
 
-/// Detects whether the installed Codex supports the trust flag required for lifecycle-hook injection.
+/// Detects whether the installed Codex is new enough for lifecycle-hook injection.
 ///
-/// Inspects only public `--help` output without starting a session or using the network. Failure means
-/// unsupported and retains notify/screen/busy fallback. Windows `.cmd` wrappers run through cmd.exe; native
-/// executables run directly. Probe each launch so an in-place Codex upgrade takes effect immediately.
+/// `--dangerously-bypass-hook-trust` serves only as the version marker for that capability; VelaTerm records
+/// hook trust explicitly instead of passing the flag, which would also suppress the trust check on the user's
+/// own hooks. Inspects only public `--help` output without starting a session or using the network. Failure
+/// means unsupported and retains notify/screen/busy fallback. Windows `.cmd` wrappers run through cmd.exe;
+/// native executables run directly. Probe each launch so an in-place Codex upgrade takes effect immediately.
 fn codex_lifecycle_hooks_supported(bin_path: Option<&str>) -> bool {
     let program = bin_path.filter(|p| !p.trim().is_empty()).unwrap_or("codex");
     #[cfg(windows)]

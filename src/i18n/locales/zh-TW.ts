@@ -97,6 +97,29 @@ const zhTW: typeof en = {
   "settings.agentPathPlaceholder": "如 ~/.local/bin/claude——留空則從 PATH 尋找", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "設定後，該類型工作階段一律按這條完整路徑啟動，不再從 PATH 尋找命令。適用於「已安裝但不在 shell PATH 上」的情況。一鍵安裝成功且能偵測到安裝位置時會自動填入。", // Agent executable path hint
+  "settings.codexHooks": "Codex Hooks",
+  "settings.codexHooksDesc": "檢視和控制 Codex 使用者、專案、外掛程式和受管理設定中的 Hooks。",
+  "settings.codexHooksEnabledCount": (enabled: number, total: number) =>
+    `已啟用 ${enabled} / ${total}`,
+  "settings.codexHooksEmpty": "找不到 Codex Hook。",
+  "settings.codexHooksTrust": "信任",
+  "settings.codexHooksUser": "使用者設定",
+  "settings.codexHooksProject": "專案設定",
+  "settings.codexHooksPlugin": "外掛程式",
+  "settings.codexHooksSession": "工作階段",
+  "settings.codexHooksManagedSource": "受管理設定",
+  "settings.codexHooksManaged": "受管理",
+  "settings.codexHooksTrusted": "已信任",
+  "settings.codexHooksChanged": "已變更",
+  "settings.codexHooksReview": "需要檢閱",
+  "settings.codexHooksDisabled": "已停用",
+  "settings.codexHooksHandler": "處理器",
+  "settings.codexHooksCommand": "命令",
+  "settings.codexHooksMatcher": "比對器",
+  "settings.codexHooksTimeout": "逾時",
+  "settings.codexHooksStatusMessage": "狀態訊息",
+  "settings.codexHooksAll": "全部",
+  "settings.codexHooksNone": "無",
   "settings.appearance": "外觀", // Appearance
   "settings.accent": "強調色", // Accent
   "settings.accentAuto": "跟隨明暗", // Follow theme

@@ -24,6 +24,7 @@ import { env } from "../../platform";
 import { useTermStore } from "../../store/termStore";
 import type { SessionKind } from "../../types";
 import { kindIconEl } from "../sessionViewers/sessionMeta";
+import { CodexHooksPanel } from "./CodexHooksPanel";
 import { Field, Seg, SectionTitle } from "./settingsParts";
 
 /** i18n label keys for actions with configurable shortcuts. */
@@ -429,6 +430,7 @@ function AgentPathBlock({
 export function AgentsPanel() {
   const t = useT();
   const agentDefaults = useTermStore((s) => s.agentDefaults);
+  const projects = useTermStore((s) => s.projects);
   const setAgentDefault = useTermStore((s) => s.setAgentDefault);
   const [selKind, setSelKind] = useState<SessionKind>("claude");
   const meta = AGENT_DEFAULT_KINDS.find((a) => a.kind === selKind);
@@ -507,6 +509,13 @@ export function AgentsPanel() {
       >
         {t("settings.agentArgsHint")}
       </div>
+
+      {selKind === "codex" && (
+        <CodexHooksPanel
+          cwds={projects.map((project) => project.rootPath)}
+          codexPath={cfg.path ?? ""}
+        />
+      )}
     </>
   );
 }

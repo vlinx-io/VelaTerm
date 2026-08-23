@@ -99,6 +99,30 @@ const de: typeof en = {
   "settings.agentPathPlaceholder": "z. B. ~/.local/bin/claude — leer = über PATH suchen", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "Wenn gesetzt, starten Sitzungen dieses Typs über diesen vollständigen Pfad, statt den Befehl im PATH zu suchen. Nützlich, wenn der Agent installiert ist, aber nicht im PATH der Shell liegt. Wird nach erfolgreicher Ein-Klick-Installation automatisch ausgefüllt, wenn der Ort erkannt wird.", // Agent executable path hint
+  "settings.codexHooks": "Codex-Hooks",
+  "settings.codexHooksDesc":
+    "Prüfen und steuern Sie Hooks aus Ihrer Codex-Benutzer-, Projekt-, Plugin- und verwalteten Konfiguration.",
+  "settings.codexHooksEnabledCount": (enabled: number, total: number) =>
+    `Aktiv ${enabled} / ${total}`,
+  "settings.codexHooksEmpty": "Keine Codex-Hooks gefunden.",
+  "settings.codexHooksTrust": "Vertrauen",
+  "settings.codexHooksUser": "Benutzerkonfiguration",
+  "settings.codexHooksProject": "Projektkonfiguration",
+  "settings.codexHooksPlugin": "Plugin",
+  "settings.codexHooksSession": "Sitzung",
+  "settings.codexHooksManagedSource": "Verwaltete Konfiguration",
+  "settings.codexHooksManaged": "Verwaltet",
+  "settings.codexHooksTrusted": "Vertrauenswürdig",
+  "settings.codexHooksChanged": "Geändert",
+  "settings.codexHooksReview": "Prüfung erforderlich",
+  "settings.codexHooksDisabled": "Deaktiviert",
+  "settings.codexHooksHandler": "Handler",
+  "settings.codexHooksCommand": "Befehl",
+  "settings.codexHooksMatcher": "Filter",
+  "settings.codexHooksTimeout": "Zeitlimit",
+  "settings.codexHooksStatusMessage": "Statusmeldung",
+  "settings.codexHooksAll": "Alle",
+  "settings.codexHooksNone": "Keine",
   "settings.appearance": "Darstellung", // Appearance
   "settings.accent": "Akzent", // Accent
   "settings.accentAuto": "Thema folgen", // Follow theme

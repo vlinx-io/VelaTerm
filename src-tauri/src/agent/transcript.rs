@@ -9,11 +9,8 @@
 //!   records tools. Filter injected environment_context/user_instructions from user messages.
 
 use std::collections::HashSet;
-use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::Stdio;
-use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -503,118 +500,14 @@ pub fn codex_rate_limits(kind: SessionKind, agent_session_id: &str) -> Result<Co
 /// Start a short-lived stdio app-server, initialize, query account/rateLimits/read, then close. Unsupported old CLIs,
 /// logged-out state, or network failure return Err for fallback to rollout.
 pub fn live_codex_rate_limits(bin_path: Option<&str>) -> Result<CodexUsage, String> {
-    let program = bin_path.filter(|p| !p.trim().is_empty()).unwrap_or("codex");
-
-    #[cfg(windows)]
-    let mut command = {
-        let lower = program.to_ascii_lowercase();
-        if lower.ends_with(".cmd") || lower.ends_with(".bat") {
-            let mut cmd = crate::host::command("cmd.exe");
-            cmd.args(["/D", "/C", program, "app-server", "--listen", "stdio://"]);
-            cmd
-        } else {
-            let mut cmd = crate::host::command(program);
-            cmd.args(["app-server", "--listen", "stdio://"]);
-            cmd
-        }
-    };
-    #[cfg(not(windows))]
-    let mut command = {
-        let mut cmd = crate::host::command(program);
-        cmd.args(["app-server", "--listen", "stdio://"]);
-        cmd
-    };
-
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        // Protocol uses stdout only; discard inherited GUI stderr so older CLI diagnostics cannot block a pipe.
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("failed to start Codex app-server: {e}"))?;
-    let mut input = child
-        .stdin
-        .take()
-        .ok_or("Codex app-server stdin unavailable")?;
-    let output = child
-        .stdout
-        .take()
-        .ok_or("Codex app-server stdout unavailable")?;
-
-    let (tx, rx) = mpsc::channel();
-    let reader = std::thread::spawn(move || {
-        for line in BufReader::new(output).lines() {
-            let parsed = line
-                .map_err(|e| format!("failed to read Codex app-server response: {e}"))
-                .and_then(|line| {
-                    serde_json::from_str::<Value>(&line)
-                        .map_err(|e| format!("invalid Codex app-server JSON: {e}"))
-                });
-            if tx.send(parsed).is_err() {
-                break;
-            }
-        }
-    });
-
-    let result = (|| {
-        writeln!(
-            input,
-            r#"{{"method":"initialize","id":0,"params":{{"clientInfo":{{"name":"vlx_term","title":"VelaTerm","version":"{}"}}}}}}"#,
-            env!("CARGO_PKG_VERSION")
-        )
-        .and_then(|_| input.flush())
-        .map_err(|e| format!("failed to initialize Codex app-server: {e}"))?;
-        wait_app_server_response(&rx, 0, Duration::from_secs(4))?;
-
-        writeln!(input, r#"{{"method":"initialized","params":{{}}}}"#)
-            .and_then(|_| {
-                writeln!(
-                    input,
-                    r#"{{"method":"account/rateLimits/read","id":1,"params":null}}"#,
-                )
-            })
-            .and_then(|_| input.flush())
-            .map_err(|e| format!("failed to query Codex rate limits: {e}"))?;
-        let response = wait_app_server_response(&rx, 1, Duration::from_secs(12))?;
-        parse_live_codex_rate_limits(&response)
-            .ok_or_else(|| "Codex app-server returned no primary rate-limit window".to_string())
-    })();
-
-    drop(input);
-    let _ = child.kill();
-    let _ = child.wait();
-    let _ = reader.join();
-    result
-}
-
-/// Waits for a JSON-RPC ID while ignoring preceding app-server notifications.
-fn wait_app_server_response(
-    rx: &Receiver<Result<Value, String>>,
-    id: i64,
-    timeout: Duration,
-) -> Result<Value, String> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        let left = deadline.saturating_duration_since(Instant::now());
-        if left.is_zero() {
-            return Err(format!(
-                "timed out waiting for Codex app-server response {id}"
-            ));
-        }
-        let msg = rx
-            .recv_timeout(left)
-            .map_err(|e| format!("Codex app-server closed before response {id}: {e}"))??;
-        if msg.get("id").and_then(Value::as_i64) != Some(id) {
-            continue;
-        }
-        if let Some(error) = msg.get("error") {
-            return Err(format!("Codex app-server request failed: {error}"));
-        }
-        return msg
-            .get("result")
-            .cloned()
-            .ok_or_else(|| format!("Codex app-server response {id} has no result"));
-    }
+    let mut server = super::codex_app_server::CodexAppServer::start(bin_path, &[])?;
+    let response = server.request(
+        "account/rateLimits/read",
+        Value::Null,
+        Duration::from_secs(12),
+    )?;
+    parse_live_codex_rate_limits(&response)
+        .ok_or_else(|| "Codex app-server returned no primary rate-limit window".to_string())
 }
 
 /// Maps app-server camelCase and rollout snake_case into the existing Info shape. Selects the `codex` bucket from

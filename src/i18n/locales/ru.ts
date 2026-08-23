@@ -109,6 +109,30 @@ const ru: typeof en = {
   "settings.agentPathPlaceholder": "напр. ~/.local/bin/claude — пусто = искать в PATH", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "Если задан, сессии этого типа запускаются по этому полному пути вместо поиска команды в PATH. Полезно, когда агент установлен, но отсутствует в PATH оболочки. Заполняется автоматически после успешной установки в один клик, если место установки удалось определить.", // Agent executable path hint
+  "settings.codexHooks": "Хуки Codex",
+  "settings.codexHooksDesc":
+    "Просматривайте и управляйте хуками из пользовательской, проектной, плагинной и управляемой конфигурации Codex.",
+  "settings.codexHooksEnabledCount": (enabled: number, total: number) =>
+    `Включено ${enabled} / ${total}`,
+  "settings.codexHooksEmpty": "Хуки Codex не найдены.",
+  "settings.codexHooksTrust": "Доверять",
+  "settings.codexHooksUser": "Пользовательская конфигурация",
+  "settings.codexHooksProject": "Конфигурация проекта",
+  "settings.codexHooksPlugin": "Плагин",
+  "settings.codexHooksSession": "Сеанс",
+  "settings.codexHooksManagedSource": "Управляемая конфигурация",
+  "settings.codexHooksManaged": "Управляется",
+  "settings.codexHooksTrusted": "Доверенный",
+  "settings.codexHooksChanged": "Изменен",
+  "settings.codexHooksReview": "Требуется проверка",
+  "settings.codexHooksDisabled": "Отключено",
+  "settings.codexHooksHandler": "Обработчик",
+  "settings.codexHooksCommand": "Команда",
+  "settings.codexHooksMatcher": "Фильтр",
+  "settings.codexHooksTimeout": "Тайм-аут",
+  "settings.codexHooksStatusMessage": "Сообщение статуса",
+  "settings.codexHooksAll": "Все",
+  "settings.codexHooksNone": "Нет",
   "settings.appearance": "Внешний вид", // Appearance
   "settings.accent": "Акцент", // Accent
   "settings.accentAuto": "Как тема", // Follow theme
