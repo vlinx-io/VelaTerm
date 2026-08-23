@@ -1,3 +1,49 @@
+## v0.1.102 — 2026-08-23
+
+### Tác nhân AI
+
+- **Cấu hình sẵn cho tác nhân: chạy song song nhiều CLI tương thích.** Mỗi loại tác nhân trước đây bị gắn cứng vào một tệp thực thi duy nhất, nên một bản fork, một bản dựng nightly hay một CLI khác nói cùng giao thức đều không có đường vào — bạn phải sửa tham số khởi chạy của một loại sẵn có và mất đi bản gốc. Giờ đây mỗi cấu hình sẵn tự khai báo tệp thực thi, biểu tượng và tham số khởi chạy của riêng nó, đồng thời xuất hiện trong menu tạo phiên mới bên cạnh các loại tích hợp. Phiên ghi lại cấu hình sẵn đã tạo ra nó, nên fork một phiên vẫn dùng đúng tệp thực thi đó; và cấu hình sẵn tạo trên máy tính cũng hiện ra ở các trình duyệt đã ghép nối lẫn máy khách từ xa, kèm cả biểu tượng, vì biểu tượng được truyền dưới dạng dữ liệu chứ không phải một đường dẫn trên một máy cụ thể. Các phiên hiện có không bị đụng tới: cơ sở dữ liệu từ phiên bản cũ vẫn khởi động y như trước.
+
+- **Thẻ tác vụ con chọn được mô hình và mức độ suy luận, và một lần trả lời là xong ở mọi nơi.** Khi tác nhân xin tạo một tác vụ con, thẻ xác nhận giờ cho chọn mô hình và — nếu tác nhân hỗ trợ — mức độ suy luận, điền sẵn theo chính tham số khởi chạy của phiên cha, nên trường hợp thường gặp chỉ cần một cú nhấp. Chuyển thẻ sang một tác nhân khác sẽ tính lại cả hai giá trị, nhờ vậy tên mô hình của CLI này không còn lọt vào dòng lệnh của CLI khác. Thẻ hiện ra trên mọi máy khách đang kết nối, và trả lời ở một nơi giờ sẽ đóng nó ở những nơi còn lại; lần trả lời đầu tiên cũng giành lấy tác vụ trên máy chủ, nên xác nhận trên điện thoại và trên máy tính trong cùng một giây chỉ tạo ra một worktree và một phiên con, thay vì hai.
+
+### Không gian làm việc
+
+- **Chế độ phản chiếu: một bố cục dùng chung cho mọi máy khách.** Luồng terminal xưa nay vẫn dùng chung — một PTY, một luồng byte — nhưng cách sắp xếp xung quanh nó chỉ nằm trong bộ nhớ trình duyệt của từng máy khách, nên một trình duyệt mở qua mạng LAN hiển thị tab và khung chia của riêng nó, còn sắp xếp lại ở màn hình này thì màn hình kia không hay biết. Khi bật chế độ phản chiếu, các tab, các khung chia, phiên đang hoạt động, lựa chọn ở thanh bên và các bảng đã thu gọn đều được phát tới mọi máy khách và mọi máy khách đều đi theo. Công tắc nằm ở phía máy chủ, trong bảng truy cập từ xa. Sắp xếp lại ở bên nào cũng có hiệu lực ở bên kia; một phiên rời khỏi bố cục của cửa sổ này thì được tách ra chứ không bị kết thúc, nên việc đi theo máy khác không bao giờ giết tiến trình của ai; và việc áp dụng bố cục của máy khác không cướp bàn phím khỏi người đang gõ tại chỗ. Điện thoại đứng ngoài chuyện này — điều hướng hai cấp trên điện thoại là một kiểu giao diện khác, chép cây khung chia của máy tính sang đó chẳng giúp được gì.
+
+- **Tab Git ở thanh bên phải đã thành một trình khách Git dùng được.** Trước đây nó chỉ liệt kê các tệp đã thay đổi. Giờ nó đưa vào và gỡ khỏi vùng chờ commit từng tệp hoặc cả nhóm, hủy bỏ thay đổi, viết commit (kể cả amend), và hiển thị lịch sử commit kèm danh sách tệp và diff của từng commit — tất cả chia thành các mục có thể gấp lại: đã vào vùng chờ, đã thay đổi, chưa theo dõi và đã commit. Đường dẫn được tính từ gốc kho lưu trữ, nên một phiên mở trong thư mục con sẽ thao tác đúng những tệp mà nó hiển thị, còn HEAD tách rời thì được ghi rõ như vậy thay vì hiện ra một nhánh tên là HEAD.
+
+### Giao diện
+
+- **⌘Q giờ hỏi đúng câu hỏi mà việc đóng cửa sổ vẫn hỏi.** Mục Quit trong menu ứng dụng vốn là mục của hệ thống, nó kết thúc tiến trình ngay lập tức: nhấn ⌘Q sẽ bỏ qua hộp xác nhận “lưu không gian làm việc” mà nút đóng vẫn hiển thị, nên cùng một ý định lại cho ra hai hành vi khác nhau tùy cách bạn diễn đạt. Cả hai lối giờ đều đi qua một hộp xác nhận duy nhất. Nếu cửa sổ hiển thị hộp xác nhận đó đã tải lại hoặc đã sập trong lúc chờ, nhấn ⌘Q lần nữa sẽ hỏi lại và chuyển sang hộp thoại gốc của hệ điều hành, thay vì để ứng dụng rơi vào tình trạng không thoát được.
+
+- **Gợi ý phím tắt hiển thị đúng những phím thực sự hoạt động.** Mặc định khác nhau theo từng nền tảng, còn trình duyệt thì giữ các tổ hợp ⌘/Ctrl kèm chữ cái cho riêng nó — ⌘D lưu dấu trang, ⌘T mở tab mới — nên trên macOS, các phím tắt ⌘ của ứng dụng chẳng bao giờ tới được trang khi mở VelaTerm bằng URL. Tab trình duyệt thông thường giờ dùng tổ hợp Ctrl+Alt trên mọi hệ điều hành, còn ứng dụng máy tính và cửa sổ kết nối từ xa vẫn giữ ⌘. Chú giải và gợi ý trên tab trống hiển thị đúng tổ hợp đang có hiệu lực, kể cả tổ hợp do bạn tự gán lại, thay vì một tổ hợp ⌘ gắn cứng; và terminal chặn đúng những tổ hợp mà ứng dụng đã nhận, nên gán lại một thao tác thì phím cũng đi theo thao tác đó.
+
+- **Danh sách phông chữ có sẵn thêm Nerd Fonts và CJK, còn phông tự nhập mà máy chưa cài thì được báo rõ.** Danh sách có sẵn được bổ sung các họ Nerd Font và CJK thông dụng, còn phông gõ tay giờ được hiển thị lại và kiểm tra: nếu hệ thống không có phông đó, trang cài đặt sẽ nói thẳng, thay vì âm thầm quay về một phông mặc định chẳng giống chút nào với thứ bạn yêu cầu.
+
+- **Các ô nhập trên macOS không còn tự viết hoa hay tự sửa nội dung bạn gõ.** Tính năng tự viết hoa, tự sửa và kiểm tra chính tả của hệ thống áp lên mọi ô nhập trong ứng dụng, kể cả tên phiên và ô nhập lệnh, khiến “npm” biến thành “Npm”. Giờ tất cả đều đã tắt ở mọi nơi.
+
+### Windows
+
+- **Gõ tiếng Trung, tiếng Nhật hay tiếng Hàn lại thấy được chữ đang soạn và cửa sổ gợi ý.** Trước đây cả hai đều vô hình — bạn gõ mù và chỉ thấy kết quả sau khi nhấn Enter. Thủ phạm là hai quy tắc CSS của chính chúng tôi: khung chứa lớp phủ chữ đang soạn co lại còn không có chiều rộng, và độ lệch `right` của lớp phủ nằm trong khung đó cũng tính ra thành không có gì. Cửa sổ gợi ý biến mất theo, vì hệ điều hành định vị nó dựa trên hình chữ nhật của lớp phủ. Lớp phủ giờ được vẽ trở lại và khoác màu của ứng dụng, còn phần tử nhập vô hình đỡ bên dưới nó thì nhả kích thước ngay khi soạn xong, nhờ vậy nhấp và kéo trên vùng đó sẽ tới được terminal chứ không rơi vào một phần tử rỗng vẫn cứ che mất nó như trước.
+
+- **Thanh tiêu đề gốc đi theo cài đặt sáng/tối.** Ứng dụng vẫn dùng thanh tiêu đề của hệ thống, mà Windows thì vẽ nó màu sáng cho tới khi được bảo khác đi, nên phía trên giao diện tối luôn có một dải trắng. Giờ thanh tiêu đề khớp với ứng dụng, kể cả những cửa sổ mở sau như cửa sổ SSH và cửa sổ kết nối từ xa. Chọn “theo hệ thống” sẽ trả quyền quyết định lại cho hệ điều hành thay vì ghim cứng một giá trị.
+
+- **Ô vuông lạ khi khởi động nguội đã hết.** Plugin chống chạy nhiều phiên bản tạo một cửa sổ thông điệp ẩn nhưng chưa bao giờ cho nó độ trong suốt mà chính kiểu dáng của nó hứa hẹn, nên đôi khi Windows kéo cửa sổ kích thước bằng không lên mức tối thiểu và vẽ ra một ô vuông nhỏ trong lúc khởi động. Giờ cửa sổ đó đã thực sự trong suốt; hành vi chống chạy nhiều phiên bản không đổi.
+
+### Hiệu năng
+
+- **Truy cập từ xa tải ít hơn hẳn ở lần vẽ đầu tiên.** Các tài nguyên tĩnh giờ được nén theo yêu cầu và gửi kèm thông tin kiểm chứng bộ nhớ đệm, nên lần truy cập thứ hai chỉ kiểm chứng lại chứ không tải lại từ đầu; còn các gói ngôn ngữ và những bộ dựng hình tùy chọn của terminal chỉ được tải khi có thứ gì đó cần đến, thay vì nằm sẵn trong lần tải đầu. Cộng lại, lượng dữ liệu truyền lần đầu giảm còn khoảng một phần năm so với trước.
+
+### Sửa lỗi
+
+- **Phiên con giờ khởi động giống hệt phiên đã yêu cầu tạo ra nó.** Phiên con không thừa hưởng chế độ quyền lẫn tham số khởi chạy của phiên cha, nên con của một phiên đang chạy ở chế độ bỏ qua xác nhận lại hiện lên và hỏi xác nhận, còn mô hình đã ghim ở phiên cha thì bị bỏ mất. Giờ cả hai đều được thừa hưởng, và khi không có thì lấy mặc định toàn cục của loại tác nhân — đúng những mặc định mà menu “phiên tác nhân mới” vẫn áp dụng.
+
+- **Kết nối lại cửa sổ từ xa không còn báo nhầm “xác thực thất bại”.** Khi cửa sổ kết nối lại, WebSocket mới và WebSocket bị nó thay thế chạy đua với nhau; việc dọn dẹp bên thua lại bị báo thành lỗi xác thực, và biểu ngữ đổ oan cho một cặp ghép nối hoàn toàn hợp lệ là đã bị từ chối.
+
+- **Không còn kéo được một nhóm vào chính cây con của nó.** Thả một nhóm lên một trong các hậu duệ của chính nó sẽ làm cả nhánh đó rời khỏi cây, và các phiên bên trong biến mất khỏi thanh bên cho đến khi cơ sở dữ liệu được sửa bằng tay. Giờ thao tác di chuyển này bị từ chối.
+
+- **Đầu ra của tác nhân giữ nguyên màu khi VelaTerm được khởi chạy từ một công cụ khác.** Terminal thừa hưởng môi trường của thứ đã khởi chạy nó, nên khi mở từ một IDE hay một bộ khung tác nhân có export `NO_COLOR`, `CI` hoặc `FORCE_COLOR=0`, mọi giao diện TUI của tác nhân bên trong VelaTerm đều hiện ra đơn sắc, dù terminal vẫn công bố hỗ trợ màu đầy đủ. Các giá trị thừa hưởng đó giờ bị loại bỏ khi phiên khởi động; còn chính các biến đó nếu bạn export trong hồ sơ shell của mình thì vẫn có hiệu lực, vì hồ sơ ấy chạy bên trong phiên.
+
 ## v0.1.101 — 2026-08-15
 
 ### Truy cập từ xa

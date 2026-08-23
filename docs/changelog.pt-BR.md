@@ -1,3 +1,49 @@
+## v0.1.102 — 2026-08-23
+
+### Agentes de IA
+
+- **Predefinições de agente: várias CLIs compatíveis lado a lado.** Cada tipo de agente estava preso a um único executável, então um fork, uma compilação noturna ou uma segunda CLI que fala o mesmo protocolo não tinham por onde entrar — você editava os argumentos de inicialização de um tipo existente e perdia o original. Uma predefinição agora indica o próprio executável, o próprio ícone e os próprios argumentos de inicialização, e aparece no menu de nova sessão ao lado dos tipos embutidos. As sessões registram qual predefinição as criou, de modo que bifurcar uma mantém o mesmo executável, e uma predefinição criada no desktop aparece também nos navegadores pareados e nos clientes remotos, ícone incluído, porque o ícone viaja como dado e não como um caminho de uma máquina só. As sessões existentes ficam intactas: um banco de dados de uma versão anterior inicia exatamente como antes.
+
+- **O cartão de tarefa filha escolhe o modelo e o nível de esforço, e uma única resposta resolve em toda parte.** Quando um agente pede para criar uma tarefa filha, o cartão de confirmação agora oferece o modelo e — quando o agente aceita — o esforço de raciocínio, já preenchidos a partir dos argumentos de inicialização do próprio pai, para que o caso comum seja um clique só. Trocar o agente no cartão deduz os dois de novo, então o nome de um modelo de uma CLI não consegue mais ir parar na linha de comando de outra. O cartão aparece em todos os clientes conectados, e responder em um agora o dispensa nos outros; a primeira resposta também reivindica a tarefa no servidor, de modo que confirmar no celular e no desktop dentro do mesmo segundo cria um worktree e uma sessão filha, em vez de dois.
+
+### Espaço de trabalho
+
+- **Modo espelho: um mesmo layout em todos os clientes.** O fluxo do terminal sempre foi compartilhado — um PTY, um fluxo de bytes —, mas o arranjo em volta dele vivia apenas no armazenamento do navegador de cada cliente, então um navegador aberto pela LAN mostrava as próprias abas e divisões, e reorganizar uma tela não fazia nada na outra. Com o modo espelho ligado, as abas, as divisões, a sessão ativa, a seleção da barra lateral e os painéis recolhidos são publicados para todos os clientes e seguidos por todos eles. O anfitrião controla a chave no painel de acesso remoto. Reorganizar de qualquer um dos lados vale no outro; uma sessão que sai do layout desta janela é desanexada, não encerrada, então seguir outro cliente nunca termina o processo de ninguém; e aplicar o layout de outro cliente não rouba o teclado de quem está digitando localmente. Os celulares ficam de fora: a navegação de dois níveis do celular é uma interface de outro formato, e copiar nela uma árvore de divisões de desktop não ajuda ninguém.
+
+- **A aba Git da barra lateral direita virou um cliente Git de verdade.** Antes ela só listava os arquivos modificados. Agora ela adiciona à área de preparação arquivos individuais ou grupos inteiros e os remove de lá, descarta alterações, escreve um commit (com a opção de emendar) e mostra o histórico com os arquivos e os diffs de cada commit — agrupados em seções recolhíveis de preparados, modificados, não rastreados e confirmados. Os caminhos são tratados a partir da raiz do repositório, então uma sessão aberta em um subdiretório age sobre os arquivos que diz agir, e um HEAD desanexado é identificado como tal em vez de mostrar um branch chamado HEAD.
+
+### Interface
+
+- **⌘Q agora faz a mesma pergunta que fechar a janela.** O item "Sair" do menu do aplicativo era o do próprio sistema, que encerra o processo na hora: apertar ⌘Q pulava a confirmação de "salvar o espaço de trabalho" que o botão de fechar mostra, então a mesma intenção se comportava de um jeito diferente conforme a forma de expressá-la. Os dois caminhos agora passam por uma única confirmação. Se a janela que a mostra tiver recarregado ou travado nesse meio-tempo, apertar ⌘Q de novo repete a pergunta e recorre a um diálogo nativo, em vez de deixar o aplicativo sem como sair.
+
+- **As dicas de atalho mostram as teclas que realmente funcionam.** Os padrões variam conforme a plataforma, e um navegador reserva para si as combinações de ⌘/Ctrl com letras — ⌘D salva um favorito, ⌘T abre uma aba —, então no macOS os atalhos com ⌘ do próprio aplicativo nunca chegavam à página quando o VelaTerm era aberto como uma URL. Abas comuns de navegador agora usam as combinações com Ctrl+Alt em todos os sistemas operacionais, enquanto o aplicativo de desktop e as janelas de conexão remota mantêm o ⌘. As dicas exibidas ao passar o mouse e a dica da aba vazia mostram a combinação que estiver valendo, inclusive uma que você mesmo tenha reatribuído, em vez de uma combinação com ⌘ fixa no código; e o terminal bloqueia exatamente as combinações que o aplicativo reivindicou, de modo que reatribuir uma ação leva aquela tecla junto.
+
+- **As predefinições de fonte cobrem Nerd Fonts e CJK, e uma fonte personalizada que não esteja instalada avisa.** A lista de predefinições ganhou as famílias Nerd Font e CJK mais comuns, e uma fonte digitada à mão é devolvida na tela e verificada: se o sistema não a tiver, a página de configurações avisa, em vez de cair silenciosamente em um padrão que não se parece em nada com o que você pediu.
+
+- **Os campos de texto no macOS não colocam mais maiúsculas nem corrigem o que você digita.** As maiúsculas automáticas, a autocorreção e o corretor ortográfico do sistema se aplicavam a todos os campos do aplicativo, inclusive nomes de sessão e campos de comando, onde "npm" virava "Npm". Agora estão desligados em toda parte.
+
+### Windows
+
+- **Digitar em chinês, japonês ou coreano volta a mostrar o texto em composição e a janela de candidatos.** Os dois estavam invisíveis — você digitava às cegas e só via o resultado depois de apertar Enter. A culpa era de duas regras CSS nossas: o contêiner que segura a camada de composição encolhia para largura zero, e dentro dele o deslocamento `right` dessa camada não resolvia para nada. A janela de candidatos ia junto, porque o sistema operacional a posiciona a partir do retângulo dessa camada. A camada volta a ser desenhada e adota as cores do tema do aplicativo, e o elemento de entrada invisível sobre o qual ela se apoia libera sua geometria assim que a composição termina, de modo que clicar e arrastar sobre aquele trecho chega ao terminal, e não a um elemento vazio que antes continuava cobrindo-o.
+
+- **A barra de título nativa segue a configuração de tema claro ou escuro.** O aplicativo mantém a barra de título do sistema, e o Windows a pinta em claro enquanto não lhe disserem o contrário, então uma interface escura carregava uma faixa branca em cima. Agora ela combina com o aplicativo, inclusive nas janelas abertas depois, como as de SSH e as de conexão remota. Escolher "seguir o sistema" devolve o controle ao sistema operacional em vez de fixar um valor.
+
+- **Sumiu o quadradinho solto na inicialização a frio.** O plugin de instância única cria uma janela de mensagens oculta e nunca lhe deu a transparência que o próprio estilo prometia, então o Windows às vezes aumentava essa janela de tamanho zero até o mínimo e pintava um quadradinho durante a inicialização. Agora ela é de fato transparente; o comportamento de instância única não mudou.
+
+### Desempenho
+
+- **O acesso remoto carrega bem menos na primeira exibição.** Os recursos estáticos agora são comprimidos sob demanda e servidos com validadores de cache, então uma segunda visita revalida em vez de baixar tudo de novo, e os pacotes de idioma e os renderizadores opcionais do terminal só carregam quando algo precisa deles, em vez de fazerem parte do primeiro envio. Somando tudo, a transferência inicial cai para cerca de um quinto do que era.
+
+### Correções
+
+- **Uma sessão filha agora inicia igual à sessão que a pediu.** As filhas não herdavam nem o modo de permissões do pai nem seus argumentos de inicialização, então a filha de uma sessão que pulava as confirmações vinha pedindo confirmação, e um modelo fixado no pai era descartado. Agora os dois são herdados, com os padrões globais do tipo de agente como reserva — os mesmos que o menu de "nova sessão de agente" aplica.
+
+- **Reconectar uma janela remota não relata mais uma "falha de autenticação" falsa.** Quando a janela reconectava, o novo WebSocket e o que ele substituía corriam um contra o outro; o encerramento do perdedor era relatado como falha de autenticação, e o aviso acusava de rejeição um pareamento perfeitamente válido.
+
+- **Um grupo não pode mais ser arrastado para dentro da própria subárvore.** Soltar um grupo sobre um de seus próprios descendentes desprendia todo aquele ramo da árvore, e as sessões dentro dele sumiam da barra lateral até o banco de dados ser reparado à mão. O movimento agora é recusado.
+
+- **A saída dos agentes mantém as cores quando o VelaTerm é iniciado por outra ferramenta.** Um terminal herda o ambiente de quem o iniciou, então abrir a partir de uma IDE ou de um ambiente de agentes que exporta `NO_COLOR`, `CI` ou `FORCE_COLOR=0` fazia toda TUI de agente ficar monocromática dentro do VelaTerm, mesmo com o terminal anunciando cor completa. Esses valores herdados são descartados quando uma sessão começa; as mesmas variáveis exportadas do seu próprio perfil de shell continuam valendo, porque esse perfil roda dentro da sessão.
+
 ## v0.1.101 — 2026-08-15
 
 ### Acesso remoto

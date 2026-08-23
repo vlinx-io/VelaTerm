@@ -1,9 +1,57 @@
 # Changelog
 
-> Created: 2026-07-09 16:10 · Updated: 2026-08-15
+> Created: 2026-07-09 16:10 · Updated: 2026-08-23
 
 All notable changes to VelaTerm are documented here, newest first.
 v0.1.91 is the first public release; earlier version numbers were internal iterations and are not covered.
+
+---
+
+## v0.1.102 — 2026-08-23
+
+### AI agents
+
+- **Agent presets: run several compatible CLIs side by side.** Every agent kind was hard-wired to one executable, so a fork, a nightly build or a second CLI that speaks the same protocol had no way in — you edited the launch arguments of an existing kind and lost the original. A preset now names its own executable, icon and launch arguments, and appears in the new-session menu next to the built-in kinds. Sessions record which preset created them, so forking one keeps the same executable, and a preset created on the desktop shows up on paired browsers and remote clients as well, icon included, because the icon travels as data rather than as a path on one machine. Existing sessions are untouched: a database from an earlier version starts exactly as it did before.
+
+- **The child-task card picks the model and the effort level, and one answer settles it everywhere.** When an agent asks to spawn a child task, the confirmation card now offers the model and — where the agent supports it — the reasoning effort, prefilled from the parent's own launch arguments so the common case is a single click. Switching the card to a different agent re-derives both, so a model name from one CLI can no longer end up on another's command line. The card appears on every connected client, and answering it on one now dismisses it on the others; the first answer also claims the task on the server, so confirming on a phone and a desktop within the same second creates one worktree and one child session instead of two.
+
+### Workspace
+
+- **Mirror mode: one shared layout across every client.** The terminal stream was always shared — one PTY, one byte stream — but the arrangement around it lived only in each client's browser storage, so a browser opened over the LAN showed its own tabs and splits and rearranging one screen did nothing to the other. With mirror mode on, tabs, splits, the active session, the sidebar selection and the collapsed panels are published to every client and followed by all of them. The host controls the switch from the remote-access panel. Rearranging on either side takes effect on the other; a session that leaves this window's layout is detached rather than killed, so following a peer never ends someone's process; and applying a peer's layout does not steal the keyboard from whoever is typing locally. Phones stay out of it — the two-level phone navigation is a different shape of UI, and copying a desktop split tree onto it helps nobody.
+
+- **The Git tab in the right sidebar became a usable Git client.** It only listed changed files before. It now stages and unstages individual files or whole groups, discards changes, writes a commit (with amend), and shows the commit history with each commit's files and diffs — grouped into staged, changed, untracked and committed sections that fold away. Paths are handled from the repository root, so a session opened in a subdirectory operates on the files it says it does, and a detached HEAD is labelled as such instead of showing a branch called HEAD.
+
+### Interface
+
+- **⌘Q now asks the same question closing the window does.** The Quit item in the application menu was the system's own, which terminates the process outright: pressing ⌘Q skipped the "save workspace" confirmation that the close button shows, so the same intent behaved differently depending on how you expressed it. Both paths now go through one confirmation. If the window that shows it has reloaded or crashed in the meantime, pressing ⌘Q again re-asks and falls back to a native dialog rather than leaving the app unquittable.
+
+- **Shortcut hints show the keys that actually work.** The defaults differ per platform, and a browser reserves ⌘/Ctrl letter combinations for itself — ⌘D bookmarks, ⌘T opens a tab — so on macOS the app's own ⌘ shortcuts never reached the page when VelaTerm was opened as a URL. Plain browser tabs now use the Ctrl+Alt bindings on every operating system, while desktop apps and remote-connection windows keep ⌘. Tooltips and the empty-tab hint render whatever binding is in effect, including one you rebound yourself, instead of a hardcoded ⌘ combination; and the terminal blocks exactly the combinations the app has claimed, so rebinding an action moves that key with it.
+
+- **Font presets cover Nerd Fonts and CJK, and a custom font that is not installed says so.** The preset list gained the common Nerd Font and CJK families, and a font typed in by hand is echoed back and checked: if the system does not have it, the settings page says so instead of silently falling back to a default that looks nothing like what you asked for.
+
+- **Text fields on macOS no longer capitalise or correct what you type.** The system's automatic capitalisation, autocorrect and spellcheck applied to every input in the app, including session names and command fields, where "npm" became "Npm". They are off everywhere now.
+
+### Windows
+
+- **Typing Chinese, Japanese or Korean shows the pre-edit text and the candidate window again.** Both were invisible — you typed blind and only saw the result after pressing Enter. Two of our own CSS rules were responsible: the container holding the pre-edit overlay collapsed to zero width, and the overlay's `right` offset resolved inside it to nothing at all. The candidate window followed, because the operating system positions it from the overlay's rectangle. The overlay is drawn again and themed with the app's colours, and the invisible input element it sits on releases its geometry once composing ends, so clicking and dragging over that patch reaches the terminal rather than an empty element that used to keep covering it.
+
+- **The native title bar follows the light/dark setting.** The app keeps the system title bar, and Windows paints it light until told otherwise, so a dark interface carried a white strip above it. It now matches the app, including windows opened later such as SSH and remote-connection windows. Choosing "follow system" hands control back to the OS instead of pinning a value.
+
+- **The stray square on cold start is gone.** The single-instance plugin creates a hidden message window and never gave it the transparency its own style promised, so Windows occasionally grew the zero-sized window to its minimum and painted a small square during startup. It is properly transparent now; single-instance behaviour is unchanged.
+
+### Performance
+
+- **Remote access loads far less on first paint.** Static assets are now compressed on demand and served with cache validators, so a second visit revalidates instead of re-downloading, and the language packs and the terminal's optional renderers load only when something needs them rather than being part of the first payload. Together the initial transfer drops to roughly a fifth of what it was.
+
+### Fixed
+
+- **A spawned child now starts like the session that asked for it.** Children inherited neither the parent's permission mode nor its launch arguments, so a child of a session running with confirmations skipped came up asking for them, and a model pinned on the parent was dropped. Both are inherited now, falling back to the agent kind's global defaults — the same ones the "new agent session" menu applies.
+
+- **Reconnecting a remote window no longer reports a false "authentication failed".** When the window reconnected, the new WebSocket and the one it replaced raced each other; the loser's teardown was reported as an authentication failure, and the banner accused a perfectly valid pairing of being rejected.
+
+- **A group can no longer be dragged into its own subtree.** Dropping a group onto one of its own descendants detached that whole branch from the tree, and the sessions inside it disappeared from the sidebar until the database was repaired by hand. The move is now rejected.
+
+- **Agent output keeps its colours when VelaTerm is launched from another tool.** A terminal inherits the environment of whatever started it, so launching from an IDE or an agent harness that exports `NO_COLOR`, `CI` or `FORCE_COLOR=0` made every agent TUI render monochrome inside VelaTerm, even though the terminal advertises full colour. Those inherited values are dropped when a session starts; the same variables exported from your own shell profile still apply, because that profile runs inside the session.
 
 ---
 
