@@ -21,14 +21,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
-import { WebglAddon } from "@xterm/addon-webgl";
-import { CanvasAddon } from "@xterm/addon-canvas";
+import type { WebglAddon } from "@xterm/addon-webgl";
+import type { CanvasAddon } from "@xterm/addon-canvas";
+import { loadCanvasCtor, loadWebglCtor, peekWebglCtor } from "../term/rendererAddons";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { ClipboardAddon, type IClipboardProvider } from "@xterm/addon-clipboard";
 import { ImageAddon } from "@xterm/addon-image";
 import type { UnlistenFn } from "../ipc/transport";
 import { terminalLinkHandler, webLinkActivate } from "../terminal/openLink";
+
+import { appAltKeyCodes, IS_PLAIN_BROWSER } from "./shortcutRegistry";
 
 import {
   ptyRedraw,
@@ -176,11 +179,22 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
   useEffect(() => {
     const term = termRef.current;
     if (!term || !term.modes.sendFocusMode) return;
+    // Only the size owner reports focus. Every client watching a shared session has its own window, so
+    // without this gate one TUI receives several contradictory FocusIn/FocusOut streams and blinks between
+    // focused and unfocused as the other windows come and go. Same rule, same reason as terminal-query
+    // replies being answered by the owner alone (communication doc §5.5). Mirror mode makes several
+    // clients watch the same session routinely, which is what turned this from theory into a visible bug.
+    if (sizeMode !== "fit") {
+      // Forget what was last sent so regaining ownership re-reports the real state instead of deduplicating
+      // against a value another window's stream has since overwritten.
+      lastFocusSentRef.current = null;
+      return;
+    }
     const focused = windowFocused && !hidden && isActiveSession;
     if (lastFocusSentRef.current === focused) return;
     lastFocusSentRef.current = focused;
     void ptyWrite(session.id, focused ? "\x1b[I" : "\x1b[O");
-  }, [windowFocused, hidden, isActiveSession, session.id]);
+  }, [windowFocused, hidden, isActiveSession, session.id, sizeMode]);
 
   // When a session becomes visible/active, flush its background backlog immediately in chunks. Chunking
   // preserves xterm's frame slicing and lets keyboard events run between parse batches.
@@ -221,6 +235,15 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       cursorInactiveStyle: "outline",
       // Use bright colors for clearer bold text.
       drawBoldTextInBrightColors: true,
+      // Shrink glyphs that overflow their cell instead of letting them bleed into the neighbouring one.
+      // This targets Nerd Font / CJK fonts whose icons are wider than the measured cell and smear the
+      // next column. IMPORTANT: this option, and xterm's `customGlyphs` (default true, which draws
+      // box-drawing characters as vectors rather than trusting the font), are read **only by the
+      // canvas and webgl renderers**. Under the DOM renderer — the default, and the only usable one on
+      // macOS WKWebView — both are dead settings. Setting it costs nothing and takes effect for users
+      // who switch `termRenderer` to canvas/webgl in Settings, which on Windows/WebView2 is a working
+      // path; do not read these two lines as "the glyph corruption is handled".
+      rescaleOverlappingGlyphs: true,
       // Override OSC 8 links because xterm's confirm/window.open flow fails under Tauri.
       linkHandler: terminalLinkHandler,
       theme: XTERM_THEME[resolveTheme(useTermStore.getState().theme)],
@@ -238,8 +261,12 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
     term.open(container);
 
     // Keep Windows/Linux Ctrl+Alt+letter app shortcuts from reaching xterm as Meta escape sequences,
-    // including edge cases where the global capture handler has no active session.
-    const APP_ALT_KEYS = new Set(["KeyD", "KeyE", "KeyT", "KeyW", "KeyF", "KeyB", "KeyG"]);
+    // including edge cases where the global capture handler has no active session. Plain-browser
+    // clients use the same Ctrl+Alt bindings on every OS (see IS_PLAIN_BROWSER), so block them there
+    // too; desktop macOS keeps Cmd bindings and its Ctrl+Alt stays terminal input.
+    //
+    // The blocked set is derived from the bindings actually in effect, read at keypress time: a user who
+    // rebinds an action to another letter would otherwise leak that combo into the terminal as Meta.
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
       // Legacy terminal input has no encoding for a modified Enter, so xterm emits a bare CR for both
@@ -263,19 +290,29 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       // \x16 and prevents the paste event, breaking both image capture and text paste. Ctrl+Shift+V is
       // already allowed, while macOS uses Cmd+V and keeps Ctrl+V for terminal applications. Use the
       // operator's platform, independent of the remote session host.
-      if (isMac) return true;
-      // Delegate plain Ctrl+V to native browser paste for image support.
-      if (
-        e.ctrlKey &&
-        !e.shiftKey &&
-        !e.altKey &&
-        !e.metaKey &&
-        (e.code === "KeyV" || e.key === "v" || e.key === "V")
-      ) {
-        return false;
+      if (isMac) {
+        // Desktop macOS binds app shortcuts to Cmd, so only plain-browser clients need the
+        // Ctrl+Alt block below; Ctrl+V stays terminal quoted-insert on macOS.
+        if (!IS_PLAIN_BROWSER) return true;
+      } else {
+        // Delegate plain Ctrl+V to native browser paste for image support.
+        if (
+          e.ctrlKey &&
+          !e.shiftKey &&
+          !e.altKey &&
+          !e.metaKey &&
+          (e.code === "KeyV" || e.key === "v" || e.key === "V")
+        ) {
+          return false;
+        }
       }
       // Do not let xterm process app-level Ctrl+Alt+letter shortcuts.
-      if (e.ctrlKey && e.altKey && !e.metaKey && APP_ALT_KEYS.has(e.code)) {
+      if (
+        e.ctrlKey &&
+        e.altKey &&
+        !e.metaKey &&
+        appAltKeyCodes(useTermStore.getState().shortcutOverrides).has(e.code)
+      ) {
         return false;
       }
       return true;
@@ -284,39 +321,54 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
     // renderer addons so ImageAddon observes renderer switches; terminal disposal releases it.
     term.loadAddon(new ImageAddon());
 
-    // Renderer setting applies to new terminals: DOM is the stable default but may reflow heavily;
-    // Canvas avoids DOM cost without GPU-context loss; WebGL is sharp/fast but advanced because hidden
-    // Tauri views can corrupt glyph atlases or lose contexts. Failure falls back to DOM. Load after
-    // open() and ImageAddon.
+    // Renderer setting applies to new terminals: DOM is the default and the only path verified under
+    // Tauri (WKWebView), where canvas mismeasures cell width against the configured font; canvas does
+    // draw custom glyphs (seamless TUI tables) without GPU-context loss, so it stays opt-in; WebGL is
+    // sharp/fast but advanced because hidden Tauri views can corrupt glyph atlases or lose contexts.
+    // Failure falls back to DOM.
+    // Load after open() and ImageAddon.
+    // Non-DOM renderers load their addon on demand (see term/rendererAddons.ts), so attaching is
+    // asynchronous. The terminal renders through DOM until the chunk arrives, which is what it would
+    // have fallen back to anyway had the addon been unavailable.
+    //
+    // The `termRef.current === term` guard is what keeps a late arrival from touching a disposed
+    // terminal: termRef is assigned further down in this same synchronous block, so it is already set
+    // by the time any await resumes, and cleanup clears it.
     const renderer = useTermStore.getState().termRenderer;
     if (renderer === "canvas") {
-      try {
-        const canvas = new CanvasAddon();
-        term.loadAddon(canvas);
-        rendererRef.current = canvas;
-        dlog("canvas renderer attached ->", session.id);
-      } catch (e) {
-        dlog("canvas unavailable, fallback to DOM ->", session.id, e);
-      }
+      void loadCanvasCtor().then((Ctor) => {
+        if (!Ctor || termRef.current !== term) return;
+        try {
+          const canvas = new Ctor();
+          term.loadAddon(canvas);
+          rendererRef.current = canvas;
+          dlog("canvas renderer attached ->", session.id);
+        } catch (e) {
+          dlog("canvas unavailable, fallback to DOM ->", session.id, e);
+        }
+      });
     } else if (renderer === "webgl") {
-      try {
-        const webgl = new WebglAddon();
-        // On WebGL context loss, dispose and clear the addon so xterm falls back to DOM.
-        webgl.onContextLoss(() => {
-          dlog("webgl context lost ->", session.id);
-          try {
-            webgl.dispose();
-          } catch {
-            /* Known to throw during disposal; ignore. */
-          }
-          rendererRef.current = null;
-        });
-        term.loadAddon(webgl);
-        rendererRef.current = webgl;
-        dlog("webgl renderer attached ->", session.id);
-      } catch (e) {
-        dlog("webgl unavailable, fallback to DOM ->", session.id, e);
-      }
+      void loadWebglCtor().then((Ctor) => {
+        if (!Ctor || termRef.current !== term) return;
+        try {
+          const webgl = new Ctor();
+          // On WebGL context loss, dispose and clear the addon so xterm falls back to DOM.
+          webgl.onContextLoss(() => {
+            dlog("webgl context lost ->", session.id);
+            try {
+              webgl.dispose();
+            } catch {
+              /* Known to throw during disposal; ignore. */
+            }
+            rendererRef.current = null;
+          });
+          term.loadAddon(webgl);
+          rendererRef.current = webgl;
+          dlog("webgl renderer attached ->", session.id);
+        } catch (e) {
+          dlog("webgl unavailable, fallback to DOM ->", session.id, e);
+        }
+      });
     }
 
     registerTerminal(session.id, term);
@@ -331,6 +383,21 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
     container.addEventListener("keydown", onUserInputSignal, true);
     container.addEventListener("compositionstart", onUserInputSignal, true);
     container.addEventListener("compositionupdate", onUserInputSignal, true);
+
+    // Release the hidden textarea's geometry once composing ends. While composing, xterm stretches it to
+    // the pre-edit overlay's bounds so the OS anchors its candidate window correctly, but it never shrinks
+    // it again: the invisible element keeps covering as many rows as the pre-edit occupied and wins hit
+    // testing there (the helper layer sits above the rows), so clicks and drag-selection over that patch
+    // stop reaching the terminal. Clearing the inline values restores xterm's 0x0 default from xterm.css
+    // while leaving left/top alone, which is where the next composition wants to start anyway.
+    const onCompositionEndReset = () => {
+      const ta = container.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea");
+      if (!ta) return;
+      ta.style.width = "";
+      ta.style.height = "";
+      ta.style.lineHeight = "";
+    };
+    container.addEventListener("compositionend", onCompositionEndReset, true);
 
     let disposed = false;
     let unlistenExit: UnlistenFn | undefined;
@@ -840,6 +907,7 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       container.removeEventListener("keydown", onUserInputSignal, true);
       container.removeEventListener("compositionstart", onUserInputSignal, true);
       container.removeEventListener("compositionupdate", onUserInputSignal, true);
+      container.removeEventListener("compositionend", onCompositionEndReset, true);
       imeFix?.dispose();
       writeParsedSub.dispose();
       dataSub.dispose();
@@ -946,8 +1014,12 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
             /* Known disposal exception; ignore. */
           }
           rendererRef.current = null;
+          // Reached only after WebGL attached successfully once, so the constructor is already
+          // resolved; a null here means the addon never loaded and DOM stays, matching the catch below.
+          const Ctor = peekWebglCtor();
           try {
-            const next = new WebglAddon();
+            if (!Ctor) throw new Error("webgl addon not loaded");
+            const next = new Ctor();
             next.onContextLoss(() => {
               try {
                 next.dispose();

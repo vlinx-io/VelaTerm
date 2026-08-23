@@ -22,19 +22,22 @@ import { listShells } from "./ipc/commands";
 import {
   onMenuAction,
   onSpawnRequest,
+  onSpawnResolved,
+  onPresetsChanged,
   onTreeChanged,
   onViewRequest,
 } from "./ipc/events";
 import { reconcileSettings } from "./ipc/settingsSync";
-import { isTauri } from "./ipc/transport";
+import { getClientSource, isTauri } from "./ipc/transport";
 import { wsClient } from "./ipc/wsClient";
-import { checkForUpdates } from "./ipc/updater";
+import { checkForUpdates, startUpdateSchedule } from "./ipc/updater";
 import { env, platform } from "./platform";
 import { ConnectionBanner } from "./remote/ConnectionBanner";
 import { CloneProjectModal } from "./remote/CloneProjectModal";
 import { CreateProjectModal } from "./remote/CreateProjectModal";
 import { DirectoryPickerModal } from "./remote/DirectoryPickerModal";
 import { SaveAsModal } from "./remote/SaveAsModal";
+import { startMirrorSync } from "./store/mirrorSync";
 import { useTermStore } from "./store/termStore";
 import { watchSystemTheme } from "./theme";
 
@@ -69,6 +72,8 @@ function App() {
       for (let attempt = 0; ; attempt++) {
         try {
           await loadTree();
+          // Presets only feed the new-session menu, so a failure here must not retry the tree load.
+          void useTermStore.getState().loadAgentPresets();
           return;
         } catch {
           if (attempt >= delays.length) return; // Central handling has already recorded and displayed the error.
@@ -106,6 +111,11 @@ function App() {
       if (useTermStore.getState().theme === "system") applyAppearance();
     });
     const unlisten = onSpawnRequest((req) => void handleSpawnRequest(req));
+    const unlistenResolved = onSpawnResolved((ev) => {
+      // Skip our own echo — we already removed the card locally.
+      if (ev.source === getClientSource()) return;
+      useTermStore.getState().handleSpawnResolved(ev.parentSessionId, ev.prompt);
+    });
     const consumeOpenProject = () => {
       void platform.window
         .takeOpenProjectRequest()
@@ -141,6 +151,11 @@ function App() {
       clearTimeout(treeTimer);
       treeTimer = setTimeout(() => void useTermStore.getState().loadTree(), 300);
     });
+    // Agent presets are edited far less often than the tree and are broadcast separately, so reload the
+    // list directly without debouncing.
+    const unlistenPresets = onPresetsChanged(() => {
+      void useTermStore.getState().loadAgentPresets();
+    });
     // Handle macOS native menu actions, including split accelerators that may be consumed before
     // WKWebView dispatches keydown. Re-dispatch those key equivalents through the shared shortcut
     // matcher so user overrides retain the same semantics as ordinary DOM keyboard events.
@@ -164,22 +179,25 @@ function App() {
         );
       }
     });
-    // After a short startup delay, silently check for desktop updates. New versions light the status bar;
-    // no-update and error results remain quiet.
-    let updTimer: ReturnType<typeof setTimeout> | undefined;
-    if (isTauri) {
-      updTimer = setTimeout(() => void checkForUpdates({ manual: false }), 5000);
-    }
+    // Silently check for desktop updates shortly after startup and periodically thereafter. New versions
+    // light the status bar; no-update and error results remain quiet.
+    const stopUpdateSchedule = startUpdateSchedule();
+    // Mirror mode: follow and publish the shared layout so a remote browser renders this same arrangement.
+    // Phones opt out inside startMirrorSync; when mirror mode is off it only listens for the switch.
+    const stopMirrorSync = startMirrorSync();
     return () => {
       unwatch();
       offConnState?.();
       void unlisten.then((fn) => fn());
+      void unlistenResolved.then((fn) => fn());
       void unlistenOpenProject.then((fn) => fn());
       void unlistenView.then((fn) => fn());
       clearTimeout(treeTimer);
       void unlistenTree.then((fn) => fn());
+      void unlistenPresets.then((fn) => fn());
       void unlistenMenu.then((fn) => fn());
-      clearTimeout(updTimer);
+      stopUpdateSchedule();
+      stopMirrorSync();
     };
     // Run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps

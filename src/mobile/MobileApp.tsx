@@ -11,7 +11,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { SpawnConfirmModal } from "../components/SpawnConfirmModal";
 import { useNotifications } from "../hooks/useNotifications";
-import { onSpawnRequest, onTreeChanged } from "../ipc/events";
+import { onSpawnRequest, onSpawnResolved, onTreeChanged } from "../ipc/events";
+import { getClientSource } from "../ipc/transport";
 import { ConnectionBanner } from "../remote/ConnectionBanner";
 import { useTermStore } from "../store/termStore";
 import { watchSystemTheme } from "../theme";
@@ -42,6 +43,12 @@ function MobileApp() {
     // Handle child-task requests normally. The new session appears in the tree and receives its
     // prompt through usePtySession when opened.
     const unlistenSpawn = onSpawnRequest((req) => void handleSpawnRequest(req));
+    // Another client answering the card must clear it here too. Without this the phone keeps showing a
+    // request the desktop already confirmed, and tapping Confirm launches the same task a second time.
+    const unlistenResolved = onSpawnResolved((ev) => {
+      if (ev.source === getClientSource()) return;
+      useTermStore.getState().handleSpawnResolved(ev.parentSessionId, ev.prompt);
+    });
     // Synchronize the tree across clients: after any successful mutation, the backend broadcasts
     // `tree://changed`; debounce the event before reloading.
     let treeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -52,6 +59,7 @@ function MobileApp() {
     return () => {
       unwatch();
       void unlistenSpawn.then((fn) => fn());
+      void unlistenResolved.then((fn) => fn());
       clearTimeout(treeTimer);
       void unlistenTree.then((fn) => fn());
     };

@@ -87,3 +87,5 @@ Click an action's binding, then press the new combination (must include ⌘/Ctrl
 | Save document | ⌘S | Ctrl+S |
 
 Fixed, non-rebindable keys: ⌘1–9 (switch tabs), ⌘+ / ⌘- / ⌘0 (terminal font size).
+
+When you open VelaTerm in a regular browser (URL remote access), the browser itself consumes ⌘/Ctrl letter combos (⌘D bookmarks, ⌘T opens a tab…), so the Windows / Linux Ctrl+Alt bindings above apply on every OS, and the settings page shows them that way. Desktop apps and remote-connection windows keep the macOS ⌘ bindings.

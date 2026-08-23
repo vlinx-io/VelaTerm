@@ -12,7 +12,6 @@ citizens, and lets you take over any session from a browser or another machine.
 
 <a href="https://www.youtube.com/watch?v=CuUT6zZ337c"><img src="docs/assets/video-preview.jpg" alt="Watch the demo video" width="100%"></a>
 
-
 ## Why
 
 Working with coding agents breaks the assumptions traditional terminals were built on:
@@ -136,12 +135,15 @@ docs/manuals/     user manuals
 
 ## Contributing
 
-Two conventions matter most in this codebase:
+Three conventions matter most in this codebase:
 
 1. **All user-facing strings are English and go through i18n** (`src/i18n/`). English is the key
    source; a missing key fails the type check. This includes strings returned from the Rust backend,
    which surface directly in the UI.
 2. **All code comments are written in English.**
+3. **Please do not run `cargo fmt`.** The Rust sources are hand-formatted and this project does not
+   use rustfmt. Running it rewrites large parts of files a change never touched, which buries the
+   actual diff. Match the style of the surrounding code instead.
 
 Any command touching the network or the filesystem must be asynchronous — synchronous Tauri commands
 run on the main thread and freeze the UI.

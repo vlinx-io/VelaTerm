@@ -5,21 +5,23 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { check, message, relaunch } = vi.hoisted(() => ({
+const { check, message, relaunch, invoke } = vi.hoisted(() => ({
   check: vi.fn(),
   message: vi.fn().mockResolvedValue(undefined),
   relaunch: vi.fn().mockResolvedValue(undefined),
+  invoke: vi.fn().mockResolvedValue("11111111-2222-3333-4444-555555555555"),
 }));
 
 vi.mock("@tauri-apps/plugin-updater", () => ({ check }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ message }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch }));
-vi.mock("./transport", () => ({ isTauri: true }));
+vi.mock("./transport", () => ({ isTauri: true, invoke }));
 
 import {
   checkForUpdates,
   dismissUpdate,
   loadSkippedVersion,
+  startUpdateSchedule,
   useUpdateState,
 } from "./updater";
 
@@ -49,6 +51,7 @@ beforeEach(() => {
   dismissUpdate();
   localStorage.clear();
   vi.clearAllMocks();
+  invoke.mockResolvedValue("11111111-2222-3333-4444-555555555555");
 });
 
 afterEach(() => {
@@ -90,5 +93,86 @@ describe("skipping a version in automatic updates", () => {
 
     expect(result.current.prompt?.version).toBe("0.2.0");
     expect(result.current.modalOpen).toBe(true);
+  });
+});
+
+describe("update-check telemetry", () => {
+  // Each case needs a fresh module instance: the installation identifier is cached for the life of the
+  // process, so a cache warmed by an earlier test would hide both the first read and a read failure.
+  let mod: typeof import("./updater");
+
+  beforeEach(async () => {
+    vi.resetModules();
+    mod = await import("./updater");
+  });
+
+  afterEach(() => mod.dismissUpdate());
+
+  it("sends the installation identifier as a header and reads it only once per process", async () => {
+    check.mockResolvedValue(null);
+
+    await act(() => mod.checkForUpdates({ manual: false }));
+    await act(() => mod.checkForUpdates({ manual: false }));
+
+    expect(check).toHaveBeenCalledWith({
+      headers: { "X-Install-Id": "11111111-2222-3333-4444-555555555555" },
+    });
+    // The identifier never changes, so it is cached rather than re-read on every check.
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("still checks when the identifier is unavailable, just without the header", async () => {
+    invoke.mockRejectedValue(new Error("no database"));
+    check.mockResolvedValue(null);
+
+    await act(() => mod.checkForUpdates({ manual: false }));
+
+    expect(check).toHaveBeenCalledWith(undefined);
+  });
+
+  it("keeps reporting while a prompt is pending, releasing the duplicate handle", async () => {
+    check.mockResolvedValueOnce(fakeUpdate("0.2.0"));
+    await act(() => mod.checkForUpdates({ manual: false }));
+    const duplicate = fakeUpdate("0.2.0");
+    check.mockResolvedValueOnce(duplicate);
+
+    await act(() => mod.checkForUpdates({ manual: false }));
+
+    // Two requests reached the server, and the prompt still holds its original handle.
+    expect(check).toHaveBeenCalledTimes(2);
+    expect(duplicate.close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("the silent check schedule", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("checks shortly after launch and again once six hours of wall-clock time have passed", async () => {
+    check.mockResolvedValue(null);
+    const stop = startUpdateSchedule();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(check).toHaveBeenCalledTimes(1);
+
+    // Five hours of ticks must not trigger a second check.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5 * 60 * 60 * 1000);
+    });
+    expect(check).toHaveBeenCalledTimes(1);
+
+    // Past the six-hour mark the next tick checks again.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(70 * 60 * 1000);
+    });
+    expect(check).toHaveBeenCalledTimes(2);
+
+    stop();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12 * 60 * 60 * 1000);
+    });
+    expect(check).toHaveBeenCalledTimes(2);
   });
 });

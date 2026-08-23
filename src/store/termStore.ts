@@ -9,6 +9,7 @@ import {
   getSessionCwd,
   ptyKill,
   ptyWrite,
+  resolveSpawn,
   type ShellOption,
 } from "../ipc/commands";
 import { pushSetting } from "../ipc/settingsSync";
@@ -16,9 +17,11 @@ import { isTauri } from "../ipc/transport";
 import { env } from "../platform";
 import { genId } from "../genId";
 import type { SpawnRequest, StatusSignal } from "../ipc/events";
+import type { MirrorLayout } from "./mirrorLayout";
 import { notify } from "../notify";
 import type { ScreenDetection } from "../terminal/screenDetect";
 import * as tree from "../ipc/tree";
+import { listAgentPresets } from "../ipc/presets";
 import { platform } from "../platform";
 import {
   collectSessionIds,
@@ -60,6 +63,7 @@ import {
 import { liveTerminalIds } from "../terminal/registry";
 import { checkTabInvariants, DEBUG } from "../debug";
 import type {
+  AgentPreset,
   AgentState,
   Group,
   NodeKind,
@@ -693,6 +697,14 @@ interface TermStore {
   mergeTarget: SessionId | null;
   /** Working directory for the open changes dialog, or `null`. */
   changesCwd: string | null;
+  /** File the changes dialog should select on open, or `null` to select the first one. */
+  changesPath: string | null;
+  /**
+   * Commit the changes dialog should show instead of the worktree, or `null` for uncommitted work.
+   * Set from the Git panel's history so one dialog serves both "what changed since HEAD" and
+   * "what did this commit change".
+   */
+  changesCommit: string | null;
 
   // Center tabs and split panes.
   openTabs: SessionId[]; // Visible tabs, identified by root session ID.
@@ -733,6 +745,23 @@ interface TermStore {
   docTabs: Record<string, DocTab>;
   /** Metadata for `browser-` entries in `openTabs`. */
   browserTabs: Record<string, BrowserTab>;
+
+  // Mirror mode: one shared arrangement across every client of this service (see mirrorSync.ts).
+  /**
+   * Whether clients follow one shared layout. Host-controlled through the remote-access panel and broadcast,
+   * so every client agrees; a remote client reads it but cannot change it.
+   */
+  mirrorEnabled: boolean;
+  /**
+   * The session a peer's layout just activated here, or null. Its terminal view skips its one automatic
+   * focus and clears this, so a peer switching tabs rearranges the window without pulling the keyboard
+   * away from whoever is typing in it.
+   *
+   * A marker rather than a "recently applied" timestamp: a peer dragging a divider publishes a frame every
+   * 150 ms, and any time window would then cover the whole drag, leaving this window's own tab switches
+   * unfocused for as long as the peer keeps moving.
+   */
+  mirrorFocusSessionId: SessionId | null;
 
   // Other UI state.
   leftCollapsed: boolean;
@@ -853,8 +882,13 @@ interface TermStore {
   /** Image-paste mode, configurable only in the local desktop app. */
   imagePasteMode: ImagePasteMode;
 
+  /** Saved agent launch configurations shown in the new-session menu, in menu order. */
+  agentPresets: AgentPreset[];
+
   // Data loading and mutations.
   loadTree: () => Promise<void>;
+  /** Reload the preset list; called at startup and on the cross-client presets-changed broadcast. */
+  loadAgentPresets: () => Promise<void>;
   importProject: () => Promise<void>;
   /** Imports a project selected by the browser directory picker. */
   importProjectPath: (rootPath: string) => Promise<void>;
@@ -896,12 +930,14 @@ interface TermStore {
   confirmSpawn: (req: SpawnRequest) => Promise<void>;
   /** Cancels the first queued spawn without creating a session. */
   cancelSpawn: () => void;
+  /** Removes a spawn card dismissed by another client. */
+  handleSpawnResolved: (parentSessionId: string, prompt: string) => void;
   /** Opens branch merge for a session or group target. */
   openMerge: (id: SessionId) => void;
   /** Closes branch merge. */
   closeMerge: () => void;
   /** Opens the changes dialog for a working directory. */
-  openChanges: (cwd: string) => void;
+  openChanges: (cwd: string, opts?: { path?: string; commit?: string }) => void;
   /** Closes the changes dialog. */
   closeChanges: () => void;
   /** Executes a spawn: creates the child and optional worktree, stores its prompt, and opens it. */
@@ -1055,6 +1091,10 @@ interface TermStore {
   // Layout.
   toggleLeft: () => void;
   toggleRight: () => void;
+  /** Record the host's mirror-mode switch. Turning it off leaves the current arrangement in place. */
+  setMirrorEnabled: (enabled: boolean) => void;
+  /** Adopt an arrangement published by another client. Never spawns or kills anything by itself. */
+  applyMirrorLayout: (layout: MirrorLayout) => void;
   resizeLeft: (deltaX: number) => void;
   resizeRight: (deltaX: number) => void;
   toggleBottom: () => void;
@@ -1425,6 +1465,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
   pendingSpawns: [],
   mergeTarget: null,
   changesCwd: null,
+  changesPath: null,
+  changesCommit: null,
 
   openTabs: [],
   activeTabId: null,
@@ -1440,6 +1482,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
   liveEvictAsk: false,
   docTabs: {},
   browserTabs: {},
+
+  mirrorEnabled: false,
+  mirrorFocusSessionId: null,
 
   leftCollapsed: false,
   rightCollapsed: false,
@@ -1478,6 +1523,14 @@ export const useTermStore = create<TermStore>((set, get) => ({
   shells: [],
 
   ...loadSettings(),
+
+  agentPresets: [],
+
+  loadAgentPresets: async () => {
+    // A preset list that cannot be read must not break session creation, so fall back to none.
+    const list = await listAgentPresets().catch(() => [] as AgentPreset[]);
+    set({ agentPresets: list });
+  },
 
   loadTree: async () => {
     const t = await tree.listTree();
@@ -1739,20 +1792,55 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
 
   confirmSpawn: async (req) => {
+    // Capture the original (unedited) queue head for the claim before removing it.
+    const original = get().pendingSpawns[0];
     // Remove the confirmed, possibly edited request before executing it.
     set((s) => ({ pendingSpawns: s.pendingSpawns.slice(1) }));
+    // Claim the request with the *original* prompt, which is the key other clients hold. The card is on
+    // screen everywhere, so two clients can confirm within the same second; whoever loses the claim must
+    // stop here, or the task runs twice with two worktrees and two agents. A backend that cannot answer
+    // (older build, transport error) falls back to the previous behavior of just executing.
+    if (original) {
+      const won = await resolveSpawn(
+        original.parentSessionId,
+        original.prompt,
+        true,
+      ).catch(() => true);
+      if (!won) return;
+    }
     await get().executeSpawn(req);
   },
 
   cancelSpawn: () => {
+    const first = get().pendingSpawns[0];
     // Cancel by removing the first request without creating a session.
     set((s) => ({ pendingSpawns: s.pendingSpawns.slice(1) }));
+    // Claim it too, so a cancel racing a confirm on another client settles on one answer instead of
+    // dismissing the card here while the other side still spawns.
+    if (first) void resolveSpawn(first.parentSessionId, first.prompt, false);
+  },
+
+  handleSpawnResolved: (parentSessionId, prompt) => {
+    set((s) => {
+      const idx = s.pendingSpawns.findIndex(
+        (r) => r.parentSessionId === parentSessionId && r.prompt === prompt,
+      );
+      if (idx < 0) return s;
+      const next = [...s.pendingSpawns];
+      next.splice(idx, 1);
+      return { pendingSpawns: next };
+    });
   },
 
   openMerge: (id) => set({ mergeTarget: id }),
   closeMerge: () => set({ mergeTarget: null }),
-  openChanges: (cwd) => set({ changesCwd: cwd }),
-  closeChanges: () => set({ changesCwd: null }),
+  openChanges: (cwd, opts) =>
+    set({
+      changesCwd: cwd,
+      changesPath: opts?.path ?? null,
+      changesCommit: opts?.commit ?? null,
+    }),
+  closeChanges: () => set({ changesCwd: null, changesPath: null, changesCommit: null }),
 
   executeSpawn: async (req) => {
     const state = get();
@@ -1803,6 +1891,26 @@ export const useTermStore = create<TermStore>((set, get) => ({
       }
     }
 
+    // A spawned child launches like the session that asked for it: the parent's own permission mode, and
+    // its launch arguments when the child runs the same agent. Both fall back to the kind's global
+    // defaults, which is what the "new agent session" menu applies, so a spawned child is never more
+    // restricted than a hand-created one.
+    const kindDefaults = get().agentDefaults[kind] ?? {};
+    const permissionMode = parent.permissionMode || kindDefaults.permissionMode || null;
+    const inheritedArgs = kind === parent.kind ? parent.agentArgs : null;
+    let agentArgs = (inheritedArgs || kindDefaults.args || "").trim() || "";
+    // Apply model/effort overrides from the spawn confirmation dialog: strip the flag being overridden
+    // so it cannot appear twice, then append the chosen value. Each flag is handled on its own —
+    // stripping both whenever either was chosen would silently drop the parent's model just because
+    // the user picked an effort level.
+    if (req.model) {
+      agentArgs = `${agentArgs.replace(/--model\s+\S+/g, "").trim()} --model ${req.model}`.trim();
+    }
+    if (req.effort) {
+      agentArgs = `${agentArgs.replace(/--effort\s+\S+/g, "").trim()} --effort ${req.effort}`.trim();
+    }
+    const finalArgs = agentArgs || null;
+
     const created = await get().addSession({
       projectId: parent.projectId,
       groupId: parent.groupId ?? null,
@@ -1812,6 +1920,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
       parentSessionId: parent.id,
       worktreePath,
       worktreeBaseRef,
+      agentArgs: finalArgs,
+      permissionMode,
     });
     if (!created) return;
 
@@ -3076,6 +3186,43 @@ export const useTermStore = create<TermStore>((set, get) => ({
 
   toggleLeft: () => set((s) => ({ leftCollapsed: !s.leftCollapsed })),
   toggleRight: () => set((s) => ({ rightCollapsed: !s.rightCollapsed })),
+
+  setMirrorEnabled: (enabled) => set({ mirrorEnabled: enabled }),
+
+  applyMirrorLayout: (layout) => {
+    const c = layout.center;
+    set((s) => ({
+      openTabs: c.openTabs,
+      liveTabs: c.liveTabs,
+      pinnedTabs: c.pinnedTabs,
+      activeTabId: c.activeTabId,
+      lastActiveSessionTabId: c.lastActiveSessionTabId,
+      activeSessionId: c.activeSessionId,
+      focusedPaneId: c.focusedPaneId,
+      paneTrees: c.paneTrees,
+      // Merge rather than replace: the publisher only carries the ephemeral sessions its own trees
+      // reference, and dropping the rest would strand a split this client is still showing.
+      ephemeralSessions: { ...s.ephemeralSessions, ...c.ephemeralSessions },
+      docTabs: { ...s.docTabs, ...c.docTabs },
+      browserTabs: { ...s.browserTabs, ...c.browserTabs },
+      selection: layout.left.selection,
+      inspectTarget: layout.left.inspectTarget,
+      leftCollapsed: layout.left.collapsed,
+      inspectorTab: layout.right.inspectorTab,
+      rightCollapsed: layout.right.collapsed,
+      // Only an activation that actually changes which session is active can steal focus, so repeated
+      // frames from a peer's drag leave an already-consumed marker alone.
+      mirrorFocusSessionId:
+        c.activeSessionId !== s.activeSessionId ? c.activeSessionId : s.mirrorFocusSessionId,
+    }));
+    // A mirrored arrangement counts as the layout for this session. Without this, a first `loadTree`
+    // still in flight would take its restore branch and replace the peer's layout with this client's
+    // stale localStorage copy — and then publish that copy back, rearranging the peer too.
+    layoutRestored = true;
+    // Persist locally too, so reloading this client comes back to the mirrored arrangement rather than
+    // to whatever it had before it started following.
+    saveLayoutTick();
+  },
   resizeLeft: (deltaX) =>
     set((s) => ({ leftWidth: clamp(s.leftWidth + deltaX, LEFT_MIN, LEFT_MAX) })),
   resizeRight: (deltaX) =>

@@ -67,6 +67,28 @@ pub(crate) struct QuitState {
     /// Set once the frontend reports that it displayed the dialog. A frozen or crashed webview never acknowledges,
     /// so the watchdog falls back to the native dialog and the application stays quittable.
     pub acked: std::sync::atomic::AtomicBool,
+    /// Incremented by every quit request. A watchdog fires only while its own epoch is still current, so a
+    /// request that was cancelled and re-issued within the grace period cannot stack a second dialog.
+    pub epoch: std::sync::atomic::AtomicU64,
+}
+
+/// Light/dark preference for native window chrome, mirroring the frontend's theme mode. Windows only.
+///
+/// The app keeps the system title bar, and DWM paints that bar light until told otherwise, so a dark UI
+/// carries a white strip above it. `None` means "follow the OS", which is what the frontend's `system` mode
+/// wants — pinning a value there would freeze the title bar the next time the OS scheme changed. Windows
+/// created after the user picks a mode read this so they open already correct instead of flashing the wrong
+/// chrome. `set_native_theme` never writes this on other platforms, so it stays `None` there.
+#[cfg(feature = "gui")]
+#[derive(Default)]
+pub(crate) struct NativeTheme(pub std::sync::Mutex<Option<tauri::Theme>>);
+
+/// Read the pinned native chrome preference, or `None` while the frontend is still following the OS.
+#[cfg(feature = "gui")]
+pub(crate) fn native_theme(app: &tauri::AppHandle) -> Option<tauri::Theme> {
+    use tauri::Manager;
+    app.try_state::<NativeTheme>()
+        .and_then(|s| *s.0.lock().unwrap())
 }
 
 /// Brief `vela` CLI help invoked through a hidden shim argument so normal GUI startup stays quiet.
@@ -412,6 +434,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
         .manage(WebServer::new())
         .manage(browser::BrowserManager::new())
         .manage(QuitState::default())
+        .manage(NativeTheme::default())
         .manage(PendingOpenProject(std::sync::Mutex::new(
             initial_open_project.map(|p| p.to_string_lossy().into_owned()),
         )))
@@ -471,6 +494,9 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 )
                 .enabled(!cfg!(debug_assertions))
                 .build(app)?;
+                let quit_item = MenuItemBuilder::with_id("quit", format!("Quit {app_name}"))
+                    .accelerator("CmdOrCtrl+Q")
+                    .build(app)?;
                 let app_menu = SubmenuBuilder::new(app, &app_name)
                     .about(Some(about_meta))
                     .item(&check_update_item)
@@ -484,7 +510,10 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                     .hide()
                     .hide_others()
                     .separator()
-                    .quit()
+                    // A custom Quit item instead of the predefined one: the predefined item sends AppKit's
+                    // `terminate:`, which kills the process without producing a Tauri `ExitRequested` event, so
+                    // Cmd+Q used to bypass the confirmation dialog entirely.
+                    .item(&quit_item)
                     .build()?;
                 // Omit native undo/redo so Cmd+Z/Cmd+Shift+Z reach CodeMirror/ProseMirror's JS histories;
                 // NSApplication would otherwise consume them while native WebView undo cannot control those
@@ -533,7 +562,17 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                     match id {
                         // Forward custom application and terminal commands to the frontend.
                         "settings" | "check-update" | "share" | "split-right" | "split-down" => {
-                            let _ = app_handle.emit("menu://action", id);
+                            // Deliver to the focused window only: remote SSH windows listen for
+                            // menu://action natively, and a global emit would make every open window
+                            // react to one menu click (e.g. splitting panes in all of them).
+                            match app_handle.get_focused_window() {
+                                Some(win) => {
+                                    let _ = win.emit("menu://action", id);
+                                }
+                                None => {
+                                    let _ = app_handle.emit("menu://action", id);
+                                }
+                            }
                         }
                         // Like VS Code, install/remove the PATH shim only on explicit user action and
                         // report its exact destination or conflict in a native dialog.
@@ -577,6 +616,10 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                                 })
                                 .kind(kind)
                                 .show(|_| {});
+                        }
+                        // Route Cmd+Q through the same confirmation as a window close.
+                        "quit" => {
+                            request_quit_confirmation(app_handle);
                         }
                         // Open help URLs directly through the Rust-side opener.
                         "visit-website" => {
@@ -818,6 +861,49 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 }
             }
 
+            // Neutralize the single-instance plugin's hidden message window. tauri-plugin-single-instance
+            // 2.4.3 creates it 0x0 with WS_EX_LAYERED, then switches the style to WS_VISIBLE | WS_POPUP,
+            // its comment claiming the LAYERED style keeps it off screen. It never calls
+            // SetLayeredWindowAttributes or UpdateLayeredWindow, though, so the window carries no layer
+            // attributes and is not actually transparent: Windows grows the zero-sized popup to its
+            // minimum and it occasionally paints as a small square during cold start (issue #26 section 7).
+            // Supplying the missing alpha finishes what upstream intended and leaves WS_VISIBLE in place,
+            // which upstream wants for message delivery. The plugin is registered only in release builds,
+            // matching a defect never seen during development. Upstream 2.4.3 is the newest release, so
+            // there is nothing to upgrade to; revisit if a later version sets the attributes itself.
+            #[cfg(all(target_os = "windows", not(debug_assertions)))]
+            {
+                use std::os::windows::ffi::OsStrExt;
+                use windows::core::PCWSTR;
+                use windows::Win32::Foundation::COLORREF;
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    FindWindowW, SetLayeredWindowAttributes, LWA_ALPHA,
+                };
+                // The plugin derives both names from the bundle identifier: `{id}-sic` for the window class
+                // and `{id}-siw` for the window (platform_impl/windows.rs). The `semver` feature would add a
+                // version suffix; it is not enabled here.
+                let id = app.config().identifier.clone();
+                let wide = |s: String| -> Vec<u16> {
+                    std::ffi::OsStr::new(&s)
+                        .encode_wide()
+                        .chain(std::iter::once(0))
+                        .collect()
+                };
+                let class = wide(format!("{id}-sic"));
+                let name = wide(format!("{id}-siw"));
+                // SAFETY: this setup hook runs on the main thread once the event loop is ready, so the
+                // plugin has already created its window; both names are NUL-terminated and outlive the
+                // call, and a missing window surfaces as an Err rather than a null handle.
+                unsafe {
+                    match FindWindowW(PCWSTR(class.as_ptr()), PCWSTR(name.as_ptr())) {
+                        Ok(hwnd) => {
+                            let _ = SetLayeredWindowAttributes(hwnd, COLORREF(0), 0, LWA_ALPHA);
+                        }
+                        Err(e) => eprintln!("single-instance helper window not found: {e}"),
+                    }
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -855,6 +941,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             commands::probe_remote_fingerprint,
             commands::url_trust_fingerprint,
             commands::open_devtools,
+            commands::set_native_theme,
             // Desktop-only SSH connection, provisioning, serve, forwarding, and auto-login.
             commands::ssh_probe_host,
             commands::ssh_trust_host,
@@ -880,36 +967,6 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
         .run({
             use std::sync::atomic::Ordering;
             move |app, event| {
-                // Confirm user-triggered exits in the frontend so the dialog can carry localized copy and the
-                // "save workspace" checkbox. Programmatic exit/restart with a code already belongs to a confirmed
-                // workflow and must not prompt again.
-                let request_quit_confirmation = |app: &tauri::AppHandle| {
-                    let st = app.state::<QuitState>();
-                    if st.confirmed.load(Ordering::SeqCst) || st.pending.swap(true, Ordering::SeqCst)
-                    {
-                        return;
-                    }
-                    st.acked.store(false, Ordering::SeqCst);
-                    use tauri::Emitter;
-                    if app.emit("app://quit-requested", ()).is_err() {
-                        native_quit_confirmation(app);
-                        return;
-                    }
-                    // A webview that never acknowledges within the grace period would leave the application
-                    // unquittable, so fall back to the native dialog.
-                    let app = app.clone();
-                    std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_secs(5));
-                        let st = app.state::<QuitState>();
-                        if st.pending.load(Ordering::SeqCst)
-                            && !st.acked.load(Ordering::SeqCst)
-                            && !st.confirmed.load(Ordering::SeqCst)
-                        {
-                            native_quit_confirmation(&app);
-                        }
-                    });
-                };
-
                 match &event {
                     tauri::RunEvent::ExitRequested { code: None, api, .. }
                         if !app.state::<QuitState>().confirmed.load(Ordering::SeqCst) =>
@@ -949,6 +1006,50 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 }
             }
         });
+}
+
+/// Confirm user-triggered exits in the frontend so the dialog can carry localized copy and the "save workspace"
+/// checkbox. Programmatic exit/restart with a code already belongs to a confirmed workflow and must not prompt
+/// again. Shared by the run-loop (window close, dock quit) and the macOS Quit menu item.
+#[cfg(feature = "gui")]
+fn request_quit_confirmation(app: &tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+    let st = app.state::<QuitState>();
+    if st.confirmed.load(Ordering::SeqCst) {
+        return;
+    }
+    // A request arriving while one is already pending is not a duplicate to drop: the frontend that
+    // acknowledged the first one may since have reloaded or crashed, taking its dialog with it. Dropping
+    // it would latch `pending` forever and leave the application unquittable, because only the frontend
+    // or a native dialog ever clears that flag. Ask again instead, on a short grace period.
+    let repeat = st.pending.swap(true, Ordering::SeqCst);
+    let epoch = st.epoch.fetch_add(1, Ordering::SeqCst) + 1;
+    st.acked.store(false, Ordering::SeqCst);
+    use tauri::Emitter;
+    if app.emit("app://quit-requested", ()).is_err() {
+        native_quit_confirmation(app);
+        return;
+    }
+    // A webview that never acknowledges within the grace period would leave the application
+    // unquittable, so fall back to the native dialog. A live frontend acknowledges every request it
+    // receives, so a repeat press needs only a short wait before the native dialog takes over.
+    let grace = if repeat {
+        std::time::Duration::from_millis(1200)
+    } else {
+        std::time::Duration::from_secs(5)
+    };
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(grace);
+        let st = app.state::<QuitState>();
+        if st.epoch.load(Ordering::SeqCst) == epoch
+            && st.pending.load(Ordering::SeqCst)
+            && !st.acked.load(Ordering::SeqCst)
+            && !st.confirmed.load(Ordering::SeqCst)
+        {
+            native_quit_confirmation(&app);
+        }
+    });
 }
 
 /// Degraded quit confirmation used when the webview cannot present the frontend dialog. A native message dialog

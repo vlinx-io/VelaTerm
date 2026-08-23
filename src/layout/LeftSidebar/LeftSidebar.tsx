@@ -20,6 +20,7 @@ import { MARK_LABEL_KEYS, NODE_MARKS, normalizeMark } from "../../marks";
 import { useSessionMenu } from "../sessionMenu";
 import { GlobalSearch } from "../GlobalSearch/GlobalSearch";
 import { ArchivePanel } from "./ArchivePanel";
+import { labelWithCombo } from "../../hooks/shortcutRegistry";
 import {
   ProjectTree,
   type TreeHandlers,
@@ -363,6 +364,7 @@ function SidebarTreeDivider({
 
 export function LeftSidebar() {
   const t = useT();
+  const shortcutOverrides = useTermStore((s) => s.shortcutOverrides);
   const width = useTermStore((s) => s.leftWidth);
   const importProject = useTermStore((s) => s.importProject);
   const setCloneModalOpen = useTermStore((s) => s.setCloneModalOpen);
@@ -679,7 +681,11 @@ export function LeftSidebar() {
         <button className="icon-btn sm" title={t("tree.cloneProject")} onClick={() => setCloneModalOpen(true)}>
           <Icons.git size={14} />
         </button>
-        <button className="icon-btn sm" title={t("tree.globalSearch")} onClick={() => setGlobalSearchOpen(true)}>
+        <button
+          className="icon-btn sm"
+          title={labelWithCombo(t("tree.globalSearch"), "globalSearch", shortcutOverrides)}
+          onClick={() => setGlobalSearchOpen(true)}
+        >
           <Icons.search size={14} />
         </button>
         <button className="icon-btn sm" title={t("tree.archivedSessions")} onClick={() => setArchiveOpen(true)}>

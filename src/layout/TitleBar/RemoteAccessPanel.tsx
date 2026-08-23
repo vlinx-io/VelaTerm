@@ -18,6 +18,8 @@ import {
   type WebServerStatus,
 } from "../../ipc/webServer";
 import { copyText } from "../../ipc/info";
+import { mirrorSetEnabled } from "../../ipc/mirror";
+import { useTermStore } from "../../store/termStore";
 import { invoke } from "../../ipc/transport";
 
 /** app_settings key persisting the selected advertised IP; empty string means automatic (backend default). */
@@ -71,6 +73,8 @@ export function RemoteAccessPanel({
   onStatusChange?: (status: WebServerStatus | null) => void;
 }) {
   const t = useT();
+  const mirrorEnabled = useTermStore((st) => st.mirrorEnabled);
+  const setMirrorEnabled = useTermStore((st) => st.setMirrorEnabled);
   const [status, setStatus] = useState<WebServerStatus | null>(null);
   const [password, setPassword] = useState("");
   // Listening port defaults to 8799 and remains editable in case it is occupied. The first status load
@@ -283,6 +287,50 @@ export function RemoteAccessPanel({
     effectiveIp,
     status?.port ?? null,
     status?.scheme ?? null,
+  );
+
+  // Mirror mode, shown in both states so it can be set before starting and changed while running.
+  // The store value is the shared one: the backend broadcasts every switch, so a second window of this
+  // panel and every connected device follow along without polling.
+  const mirrorToggle = (
+    <label
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 8,
+        marginBottom: 12,
+        cursor: "pointer",
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={mirrorEnabled}
+        onChange={(e) => {
+          const next = e.target.checked;
+          // Apply locally first so the checkbox never lags the click; the broadcast confirms it and
+          // corrects this window if the write fails.
+          setMirrorEnabled(next);
+          mirrorSetEnabled(next).catch((err) => setError(String(err)));
+        }}
+        style={{ marginTop: 2, flex: "none", cursor: "pointer" }}
+      />
+      <span style={{ minWidth: 0 }}>
+        <span style={{ display: "block", fontSize: 12.5, color: "var(--text)" }}>
+          {t("remote.mirror")}
+        </span>
+        <span
+          style={{
+            display: "block",
+            marginTop: 2,
+            fontSize: 11,
+            lineHeight: 1.4,
+            color: "var(--text-dim)",
+          }}
+        >
+          {t("remote.mirrorHint")}
+        </span>
+      </span>
+    </label>
   );
 
   // Advertised-IP selector, shown while stopped (below the port field) and while running (above the
@@ -640,6 +688,8 @@ export function RemoteAccessPanel({
 
             <div style={{ height: 6 }} />
 
+            {mirrorToggle}
+
             <button
               onClick={stop}
               disabled={busy}
@@ -721,6 +771,7 @@ export function RemoteAccessPanel({
                 outline: "none",
               }}
             />
+            {mirrorToggle}
             <button
               onClick={start}
               disabled={busy}

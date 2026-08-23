@@ -20,6 +20,8 @@ import {
   worktreesInSubtree,
 } from "../ipc/commands";
 import { copyText, openDir } from "../ipc/info";
+import { createAgentPreset } from "../ipc/presets";
+import { PresetIcon } from "./agentPresetIcon";
 import { onGitbashDownloadDone } from "../ipc/events";
 import { env } from "../platform";
 import { DOC_SAVE_EVENT } from "../hooks/useKeyboardShortcuts";
@@ -172,6 +174,7 @@ export interface SessionMenu {
 export function useSessionMenu(): SessionMenu {
   const t = useT();
   const addSession = useTermStore((s) => s.addSession);
+  const agentPresets = useTermStore((s) => s.agentPresets);
   const openSession = useTermStore((s) => s.openSession);
   // New Terminal creates an eph- draft only in the center pane, without persistence or a tree node.
   const newScratchTab = useTermStore((s) => s.newScratchTab);
@@ -287,7 +290,15 @@ export function useSessionMenu(): SessionMenu {
     parentSessionId: string | null = null,
     // Terminal-only explicit shell; empty means system default.
     shell: string | null = null,
-    opts?: { name?: string; agentArgs?: string; permissionMode?: string | null },
+    opts?: {
+      name?: string;
+      agentArgs?: string;
+      permissionMode?: string | null;
+      /** Preset this session came from; display data only. */
+      agentPresetId?: string | null;
+      /** Executable overriding the kind's default, copied from a preset or typed by the user. */
+      agentPath?: string | null;
+    },
   ) => {
     const st = useTermStore.getState();
     // Include ephemeral terminals when numbering so menu and tab/Cmd+T entry points do not collide.
@@ -349,6 +360,8 @@ export function useSessionMenu(): SessionMenu {
       shell: shell || undefined,
       agentArgs: rawArgs.trim() || null,
       permissionMode: rawPerm || null,
+      agentPresetId: opts?.agentPresetId ?? null,
+      agentPath: opts?.agentPath ?? null,
       ...(wt
         ? { cwd: wt.cwd, worktreePath: wt.worktreePath, worktreeBaseRef: wt.worktreeBaseRef }
         : {}),
@@ -415,6 +428,8 @@ export function useSessionMenu(): SessionMenu {
       worktreeName: string;
       agentArgs: string;
       permissionMode: string | null;
+      agentPresetId?: string | null;
+      agentPath?: string | null;
     },
   ) => {
     const st = useTermStore.getState();
@@ -437,6 +452,8 @@ export function useSessionMenu(): SessionMenu {
       worktreeBaseRef: wt.baseRef || null,
       agentArgs: payload.agentArgs.trim() || null,
       permissionMode: payload.permissionMode || null,
+      agentPresetId: payload.agentPresetId ?? null,
+      agentPath: payload.agentPath ?? null,
     });
     if (created) openSession(created.id);
   };
@@ -453,6 +470,8 @@ export function useSessionMenu(): SessionMenu {
       worktreePath: string;
       agentArgs: string;
       permissionMode: string | null;
+      agentPresetId?: string | null;
+      agentPath?: string | null;
     },
   ) => {
     const created = await addSession({
@@ -466,6 +485,8 @@ export function useSessionMenu(): SessionMenu {
       worktreeBaseRef: null,
       agentArgs: payload.agentArgs.trim() || null,
       permissionMode: payload.permissionMode || null,
+      agentPresetId: payload.agentPresetId ?? null,
+      agentPath: payload.agentPath ?? null,
     });
     if (created) openSession(created.id);
   };
@@ -600,6 +621,34 @@ export function useSessionMenu(): SessionMenu {
           icon: kindIconEl("zoo"),
           onClick: () => void handleNewSession(projectId, groupId, "zoo", parentSessionId),
         },
+        // Saved presets, listed after the built-in agents they behave like. Each launches directly with
+        // its own executable and defaults, which is the point of saving one.
+        ...(agentPresets.length > 0
+          ? [
+              { label: "", separator: true } as MenuItem,
+              ...agentPresets.map(
+                (p): MenuItem => ({
+                  label: t("tree.newAgentSession", p.name),
+                  icon: <PresetIcon preset={p} />,
+                  onClick: () =>
+                    void handleNewSession(
+                      projectId,
+                      groupId,
+                      p.baseKind,
+                      parentSessionId,
+                      null,
+                      {
+                        name: p.name,
+                        agentArgs: p.agentArgs ?? "",
+                        permissionMode: p.permissionMode ?? null,
+                        agentPresetId: p.id,
+                        agentPath: p.execPath ?? null,
+                      },
+                    ),
+                }),
+              ),
+            ]
+          : []),
         // Custom launch arguments use the dialog for kind, optional name, and arguments.
         { label: "", separator: true },
         {
@@ -1095,7 +1144,30 @@ export function useSessionMenu(): SessionMenu {
           parentSessionId={dialog.parentSessionId}
           initialWtMode={dialog.initialWtMode}
           onCancel={() => setDialog(null)}
-          onConfirm={async ({ kind, name, agentArgs, permissionMode, worktree }) => {
+          onConfirm={async ({
+            kind,
+            name,
+            agentArgs,
+            permissionMode,
+            worktree,
+            execPath,
+            agentPresetId,
+            savePreset,
+          }) => {
+            // Saving happens first so the new session can carry the preset's ID. A failure here stops the
+            // creation, because the user asked for both and a silent half is worse than an error.
+            let presetId = agentPresetId;
+            if (savePreset) {
+              const created = await createAgentPreset(kind, {
+                name: savePreset.name,
+                execPath,
+                agentArgs,
+                permissionMode,
+                icon: savePreset.icon,
+              });
+              presetId = created.id;
+              await useTermStore.getState().loadAgentPresets();
+            }
             // Session worktree modes create normally, create an isolated worktree first, or bind an existing one.
             // Keep the dialog open on errors and close only on success.
             if (worktree.mode === "new") {
@@ -1103,14 +1175,30 @@ export function useSessionMenu(): SessionMenu {
                 dialog.projectId,
                 dialog.groupId,
                 dialog.parentSessionId,
-                { kind, name, worktreeName: worktree.name, agentArgs, permissionMode },
+                {
+                  kind,
+                  name,
+                  worktreeName: worktree.name,
+                  agentArgs,
+                  permissionMode,
+                  agentPresetId: presetId,
+                  agentPath: execPath,
+                },
               );
             } else if (worktree.mode === "existing") {
               await handleNewSessionInWorktree(
                 dialog.projectId,
                 dialog.groupId,
                 dialog.parentSessionId,
-                { kind, name, worktreePath: worktree.path, agentArgs, permissionMode },
+                {
+                  kind,
+                  name,
+                  worktreePath: worktree.path,
+                  agentArgs,
+                  permissionMode,
+                  agentPresetId: presetId,
+                  agentPath: execPath,
+                },
               );
             } else {
               await handleNewSession(
@@ -1119,7 +1207,13 @@ export function useSessionMenu(): SessionMenu {
                 kind,
                 dialog.parentSessionId,
                 null,
-                { name, agentArgs, permissionMode },
+                {
+                  name,
+                  agentArgs,
+                  permissionMode,
+                  agentPresetId: presetId,
+                  agentPath: execPath,
+                },
               );
             }
             setDialog(null);

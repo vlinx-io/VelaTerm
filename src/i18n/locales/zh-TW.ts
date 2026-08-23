@@ -50,7 +50,7 @@ const zhTW: typeof en = {
   "titlebar.themeSystem": (resolved) => `跟隨系統（目前${resolved}）`, // Follow system (currently {resolved})
   "titlebar.themeDark": "深色", // Dark
   "titlebar.themeLight": "淺色", // Light
-  "titlebar.browser": "內建瀏覽器（⌘⇧B）", // Built-in Browser (⌘⇧B)
+  "titlebar.browser": "內建瀏覽器", // Built-in Browser
   "titlebar.remoteAccess": "遠端存取（瀏覽器）", // Remote Access (Browser)
   "titlebar.connectRemote": "連線到遠端服務", // Connect to Remote Server
   "titlebar.share": "分享", // Share
@@ -140,6 +140,8 @@ const zhTW: typeof en = {
   "spawn.promptLabel": "提示詞", // Prompt
   "spawn.agentLabel": "智能體", // Agent
   "spawn.worktreeLabel": "獨立 git worktree", // Separate git worktree
+  "spawn.modelLabel": "模型", // Model
+  "spawn.effortLabel": "推理強度", // Effort
   "spawn.launch": "啟動", // Launch
   "spawn.remaining": (n: number) => `還有 ${n} 個待確認`, // ${n} more pending
   "spawn.notifyTitle": "派生會話待確認", // Spawn session awaiting confirmation
@@ -154,6 +156,28 @@ const zhTW: typeof en = {
   "changes.notRepo": "不是 git 儲存庫",
   "changes.selectFile": "選擇檔案查看",
   "changes.binary": "二進位檔案，無法逐行 diff",
+  "changes.commitTitle": (hash: string) => `提交 ${hash}`,
+
+  "git.staged": "已暫存",
+  "git.changes": "變更",
+  "git.untracked": "未追蹤檔案",
+  "git.committed": "已提交的變更",
+  "git.stage": "暫存",
+  "git.unstage": "取消暫存",
+  "git.stageAll": "全部暫存",
+  "git.unstageAll": "全部取消暫存",
+  "git.discard": "捨棄變更",
+  "git.deleteFile": "刪除",
+  "git.viewAll": "檢視全部",
+  "git.detached": "（分離 HEAD）",
+  "git.aheadBehind": "相對上游分支領先和落後的提交數",
+  "git.commitPlaceholder": "提交說明",
+  "git.amend": "修改上一次提交",
+  "git.amendCommit": "修改提交",
+  "git.commitCount": (n: number) => `提交 ${n} 個檔案`,
+  "git.commitNoFiles": "這個提交沒有檔案變更",
+  "git.noCommits": "尚未有提交",
+  "git.loadMore": "載入更多",
   "tree.merge": "合併…",
   "tree.copyWorktreePath": "複製 worktree 路徑",
   "tree.openWorktreeDir": "開啟 worktree 目錄",
@@ -215,6 +239,7 @@ const zhTW: typeof en = {
   "settings.termFontSize": "終端機字級", // Terminal size
   "settings.fontDefault": "預設", // Default
   "settings.fontCustom": "自訂…", // Custom
+  "settings.fontUnavailable": "本機未安裝此字型",
   "settings.fontAuto": "自動", // Auto
   "settings.fontSmaller": "縮小", // Smaller
   "settings.fontLarger": "放大", // Larger
@@ -303,6 +328,9 @@ const zhTW: typeof en = {
   "remote.autoRestartHint":
     "重新開啟應用程式時遠端存取會自動恢復，「停止伺服器」可關閉此功能。", // Remote access restarts automatically when the app is reopened. Stop Server turns this off.
   "remote.autostartFailed": "自動啟動失敗：", // Automatic start failed:
+  "remote.mirror": "多端介面鏡像", // Mirror layout across devices
+  "remote.mirrorHint":
+    "分頁、分割與目前工作階段在所有已連線裝置上保持一致，各端的鍵盤焦點互不打擾。", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
 
   // ── Remote connection panel ──
   "connect.title": "連線到遠端服務", // Connect to Remote Server
@@ -408,7 +436,7 @@ const zhTW: typeof en = {
   "clone.elapsed": (seconds: number) => `已用時 ${seconds} 秒`,
   "clone.slowHint": "已連續 30 秒沒有進度，請檢查遠端機器的網路或 Proxy；你也可以取消後重試。",
   "clone.submit": "複製", // Clone
-  "tree.globalSearch": "搜尋所有會話 (⌘⇧F)", // Search All Sessions (⌘⇧F)
+  "tree.globalSearch": "搜尋所有會話", // Search All Sessions
   "tree.archivedSessions": "已封存會話", // Archived Sessions
   "tree.searchPlaceholder": "搜尋會話 / 群組…", // Search sessions / groups…
   "tree.clearSearch": "清空搜尋", // Clear search
@@ -471,6 +499,14 @@ const zhTW: typeof en = {
   "tree.cwdLabel": "工作目錄（留空用專案根）", // Working directory (leave empty for project root)
   "tree.initCmdLabel": "啟動命令（可選）", // Startup command (optional)
   "tree.agentArgsLabel": "啟動參數（可選）", // Launch args (optional)
+  "preset.execPathLabel": "可執行檔（選填）",
+  "preset.execPathPlaceholder": "/usr/local/bin/claude",
+  "preset.execPathHint": "留空則使用該智慧體已設定的指令。填了就只有這個工作階段用它，可以跑相容的替代程式。",
+  "preset.saveLabel": "儲存為預設組合",
+  "preset.namePlaceholder": "為這個預設組合命名",
+  "preset.iconChoose": "選擇圖示",
+  "preset.iconClear": "移除",
+  "preset.iconHint": "方形圖片效果最好，其他圖片會裁切並縮放到 64x64。",
   "tree.permissionSkipLabel": "跳過全部權限確認", // Skip all permission confirmations
   "tree.permissionSkipHint":
     "啟動時帶上該 agent 的「跳過確認」flag（如 Claude 的 --dangerously-skip-permissions；Codex 還會一併關閉沙箱）。每次啟動都生效，請謹慎使用。",
@@ -602,6 +638,7 @@ const zhTW: typeof en = {
   "browser.back": "上一頁", // Back
   "browser.forward": "下一頁", // Forward
   "browser.reload": "重新整理", // Reload
+  "browser.desktopOnly": "瀏覽器分頁只能在桌面端開啟。", // Browser tabs open in the desktop app only.
   "browser.stop": "停止載入", // Stop loading
   "browser.openExternal": "以系統瀏覽器開啟", // Open in system browser
   "browser.addressPlaceholder": "輸入網址或搜尋字詞", // Enter URL or search terms
@@ -682,7 +719,7 @@ const zhTW: typeof en = {
   "doc.outlineEmpty": "沒有標題", // No headings
   "doc.saving": "儲存中…", // Saving…
   "doc.overwriteConfirm": "已存在同名檔案，點「覆蓋」替換原檔案。", // A file with this name already exists. Click "Overwrite" to replace it.
-  "doc.saveTooltip": "儲存（⌘S）", // Save (⌘S)
+  "doc.saveTooltip": "儲存", // Save
   "doc.externalChanged": "檔案已在磁碟上被修改（你有未儲存的本地修改）。", // The file was modified on disk…
   "doc.reloadDiscard": "重新載入（捨棄我的修改）", // Reload (discard my changes)
   "doc.externalChangedClean": "檔案已在磁碟上被修改。", // The file was modified on disk.
@@ -785,7 +822,7 @@ const zhTW: typeof en = {
   "login.rateLimited": "嘗試次數過多，請稍候一分鐘後再試。", // Too many attempts. Please wait a minute and try again.
   "login.failed": "登入失敗，請重試", // Login failed, please try again
   "login.pairingRequired": "此服務要求使用配對連結存取。請用桌面端「遠端存取」產生的配對連結開啟。", // This server requires a pairing link
-  "login.authFailed": "密碼錯誤，或配對連結已失效，請用新的配對連結重新連線。", // Wrong password or pairing link expired
+  "login.authFailed": "認證失敗。請確認存取密碼；若配對連結已重新產生，請改用新連結。", // Authentication failed, check password or use a new pairing link
   "dir.title": "選擇專案目錄", // Choose Project Directory
   "dir.pathPlaceholder": "搜尋，或輸入路徑後按 Enter 跳轉（支援 ~ 開頭）", // Search, or type a path and press Enter (supports ~)
   "dir.up": "上一層", // Up one level

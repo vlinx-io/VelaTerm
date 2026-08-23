@@ -49,7 +49,15 @@ const restrictedSyntax = [
 
 export default [
   {
-    ignores: ["dist/**", "node_modules/**", "src-tauri/**", "electron-poc/**"],
+    // .vlx-worktrees holds git worktrees for other branches: separate checkouts whose code belongs to those
+    // branches, not to this one. Linting them reports problems no commit here can fix.
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      "src-tauri/**",
+      "electron-poc/**",
+      ".vlx-worktrees/**",
+    ],
   },
   {
     files: ["src/**/*.{ts,tsx}"],

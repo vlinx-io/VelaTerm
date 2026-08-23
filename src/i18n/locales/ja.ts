@@ -50,7 +50,7 @@ const ja: typeof en = {
   "titlebar.themeSystem": (resolved) => `システムに従う（現在: ${resolved}）`, // Follow system (currently {resolved})
   "titlebar.themeDark": "ダーク", // Dark
   "titlebar.themeLight": "ライト", // Light
-  "titlebar.browser": "内蔵ブラウザ（⌘⇧B）", // Built-in Browser (⌘⇧B)
+  "titlebar.browser": "内蔵ブラウザ", // Built-in Browser
   "titlebar.remoteAccess": "リモートアクセス（ブラウザ）", // Remote Access (Browser)
   "titlebar.connectRemote": "リモートサーバーに接続", // Connect to Remote Server
   "titlebar.share": "共有", // Share
@@ -141,6 +141,8 @@ const ja: typeof en = {
   "spawn.promptLabel": "Prompt", // Prompt
   "spawn.agentLabel": "Agent", // Agent
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
+  "spawn.modelLabel": "モデル", // Model
+  "spawn.effortLabel": "推論強度", // Effort
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
@@ -155,6 +157,28 @@ const ja: typeof en = {
   "changes.notRepo": "Git リポジトリではありません",
   "changes.selectFile": "ファイルを選択してください",
   "changes.binary": "バイナリファイル — 行差分は表示できません",
+  "changes.commitTitle": (hash: string) => `コミット ${hash}`,
+
+  "git.staged": "ステージ済み",
+  "git.changes": "変更",
+  "git.untracked": "未追跡ファイル",
+  "git.committed": "コミット済みの変更",
+  "git.stage": "ステージ",
+  "git.unstage": "ステージ解除",
+  "git.stageAll": "すべてステージ",
+  "git.unstageAll": "すべてステージ解除",
+  "git.discard": "変更を破棄",
+  "git.deleteFile": "削除",
+  "git.viewAll": "すべて表示",
+  "git.detached": "(detached)",
+  "git.aheadBehind": "上流ブランチに対する先行・遅延コミット数",
+  "git.commitPlaceholder": "コミットメッセージ",
+  "git.amend": "直前のコミットを修正",
+  "git.amendCommit": "コミットを修正",
+  "git.commitCount": (n: number) => `${n} ファイルをコミット`,
+  "git.commitNoFiles": "このコミットにファイルの変更はありません",
+  "git.noCommits": "コミットがありません",
+  "git.loadMore": "さらに読み込む",
   "tree.merge": "Merge…", // TODO translate
   "tree.copyWorktreePath": "Copy worktree path",
   "tree.openWorktreeDir": "Open worktree folder",
@@ -218,6 +242,7 @@ const ja: typeof en = {
   "settings.termFontSize": "Terminal size", // TODO translate
   "settings.fontDefault": "Default", // TODO translate
   "settings.fontCustom": "Custom…", // TODO translate
+  "settings.fontUnavailable": "このデバイスにインストールされていません",
   "settings.fontAuto": "Auto", // TODO translate
   "settings.fontSmaller": "Smaller", // TODO translate
   "settings.fontLarger": "Larger", // TODO translate
@@ -306,6 +331,9 @@ const ja: typeof en = {
   "remote.autoRestartHint":
     "リモートアクセスはアプリの再起動時に自動的に再開されます。「サーバーを停止」で無効になります。", // Remote access restarts automatically when the app is reopened. Stop Server turns this off.
   "remote.autostartFailed": "自動起動に失敗しました:", // Automatic start failed:
+  "remote.mirror": "デバイス間でレイアウトを同期", // Mirror layout across devices
+  "remote.mirrorHint":
+    "タブ・分割・アクティブなセッションが接続中のすべての端末で一致します。キーボードフォーカスは各端末でそのまま保たれます。", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
 
   // ── Remote connection panel ──
   "connect.title": "リモートサーバーに接続", // Connect to Remote Server
@@ -412,7 +440,7 @@ const ja: typeof en = {
   "clone.elapsed": (seconds: number) => `経過 ${seconds} 秒`,
   "clone.slowHint": "30 秒間進捗がありません。リモートマシンのネットワークまたはプロキシを確認するか、キャンセルして再試行してください。",
   "clone.submit": "クローン", // Clone
-  "tree.globalSearch": "すべてのセッションを検索 (⌘⇧F)", // Search All Sessions (⌘⇧F)
+  "tree.globalSearch": "すべてのセッションを検索", // Search All Sessions
   "tree.archivedSessions": "アーカイブ済みセッション", // Archived Sessions
   "tree.searchPlaceholder": "セッション / グループを検索…", // Search sessions / groups…
   "tree.clearSearch": "検索をクリア", // Clear search
@@ -475,6 +503,14 @@ const ja: typeof en = {
   "tree.cwdLabel": "作業ディレクトリ（空欄でプロジェクトルート）", // Working directory (leave empty for project root)
   "tree.initCmdLabel": "起動コマンド（任意）", // Startup command (optional)
   "tree.agentArgsLabel": "起動引数（任意）", // Launch args (optional)
+  "preset.execPathLabel": "実行ファイル（任意）",
+  "preset.execPathPlaceholder": "/usr/local/bin/claude",
+  "preset.execPathHint": "空欄ならエージェントに設定済みのコマンドを使います。指定するとこのセッションだけが互換の別プログラムで動きます。",
+  "preset.saveLabel": "プリセットとして保存",
+  "preset.namePlaceholder": "プリセット名",
+  "preset.iconChoose": "アイコンを選択",
+  "preset.iconClear": "削除",
+  "preset.iconHint": "正方形の画像が最適です。それ以外は切り取って 64x64 に縮小します。",
   "tree.permissionSkipLabel": "すべての権限確認をスキップ", // Skip all permission confirmations
   "tree.permissionSkipHint":
     "起動時にこのエージェントのバイパス用フラグを付与します（例: Claude の --dangerously-skip-permissions。Codex はサンドボックスも無効化）。毎回の起動で有効になるため、慎重に使用してください。",
@@ -608,6 +644,7 @@ const ja: typeof en = {
   "browser.back": "戻る", // Back
   "browser.forward": "進む", // Forward
   "browser.reload": "再読み込み", // Reload
+  "browser.desktopOnly": "ブラウザタブはデスクトップアプリでのみ開けます。", // Browser tabs open in the desktop app only.
   "browser.stop": "読み込みを中止", // Stop loading
   "browser.openExternal": "システムのブラウザで開く", // Open in system browser
   "browser.addressPlaceholder": "URL または検索語を入力", // Enter URL or search terms
@@ -689,7 +726,7 @@ const ja: typeof en = {
   "doc.outlineEmpty": "見出しなし", // No headings
   "doc.saving": "保存中…", // Saving…
   "doc.overwriteConfirm": "同名のファイルが既に存在します。「上書き」で置き換えます。", // A file with this name already exists. Click "Overwrite" to replace it.
-  "doc.saveTooltip": "保存（⌘S）", // Save (⌘S)
+  "doc.saveTooltip": "保存", // Save
   "doc.externalChanged": "ファイルがディスク上で変更されました（未保存のローカル変更があります）。", // The file was modified on disk…
   "doc.reloadDiscard": "再読み込み（自分の変更を破棄）", // Reload (discard my changes)
   "doc.externalChangedClean": "ファイルがディスク上で変更されました。", // The file was modified on disk.
@@ -794,7 +831,7 @@ const ja: typeof en = {
   "login.rateLimited": "試行回数が多すぎます。1分ほど待ってから再度お試しください。", // Too many attempts. Please wait a minute and try again.
   "login.failed": "ログインに失敗しました。もう一度お試しください", // Login failed, please try again
   "login.pairingRequired": "このサーバーはペアリングリンクが必要です。デスクトップアプリの「リモートアクセス」で生成したリンクを開いてください。", // This server requires a pairing link
-  "login.authFailed": "パスワードが違うか、ペアリングリンクの有効期限が切れています。新しいペアリングリンクで再接続してください。", // Wrong password or pairing link expired
+  "login.authFailed": "認証に失敗しました。アクセスパスワードを確認してください。リンクを再生成した場合は新しいペアリングリンクを使用してください。", // Authentication failed, check password or use a new pairing link
   "dir.title": "プロジェクトディレクトリを選択", // Choose Project Directory
   "dir.pathPlaceholder": "検索、またはパスを入力して Enter で移動（~ 始まりに対応）", // Search, or type a path and press Enter (supports ~)
   "dir.up": "一つ上へ", // Up one level

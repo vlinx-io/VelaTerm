@@ -12,6 +12,7 @@ import { kindIconEl } from "../sessionViewers/sessionMeta";
 import { useT } from "../../i18n";
 import { usePtySession } from "../../hooks/usePtySession";
 import { useGitBranch } from "../../hooks/useGitBranch";
+import { IS_PLAIN_BROWSER } from "../../hooks/shortcutRegistry";
 import { copyText } from "../../ipc/info";
 import {
   agentInstallRecipe,
@@ -44,8 +45,9 @@ import {
 } from "../../terminal/registry";
 import { effectiveStatus, type Session } from "../../types";
 
-// Platform-specific terminal search hint: Cmd+F on macOS, Ctrl+Alt+F on Windows/Linux (see useKeyboardShortcuts).
-const SEARCH_KEY = isMac ? "⌘F" : "Ctrl+Alt+F";
+// Platform-specific terminal search hint: Cmd+F on macOS shells, Ctrl+Alt+F on Windows/Linux and
+// plain browsers (see IS_PLAIN_BROWSER / useKeyboardShortcuts).
+const SEARCH_KEY = isMac && !IS_PLAIN_BROWSER ? "⌘F" : "Ctrl+Alt+F";
 
 export const TerminalView = memo(function TerminalView({
   session,
@@ -96,8 +98,17 @@ export const TerminalView = memo(function TerminalView({
   // and visibility, not DOM focus; without this, keystrokes remain in the sidebar or previous control until the
   // terminal is clicked. Use visible + active session rather than relying on the header-highlight `focused`
   // prop, and wait one animation frame for display:block before focusing.
+  // Skip that focus when this activation came from mirror mode rather than from this window: a peer
+  // switching tabs must rearrange what is shown here without pulling the keyboard away from whoever is
+  // typing locally. Clicking a terminal still focuses it — xterm handles that itself, no effect involved.
+  // The marker is consumed here, so the next activation of this same session — one the user made — focuses
+  // normally even while the peer keeps publishing frames.
   useEffect(() => {
     if (hidden || !isActive) return;
+    if (useTermStore.getState().mirrorFocusSessionId === session.id) {
+      useTermStore.setState({ mirrorFocusSessionId: null });
+      return;
+    }
     const raf = requestAnimationFrame(() => focusTerminal(session.id));
     return () => cancelAnimationFrame(raf);
   }, [hidden, isActive, session.id]);
@@ -249,7 +260,7 @@ export const TerminalView = memo(function TerminalView({
       >
         {/* The pane header is always shown. Even a single, unsplit pane keeps it so the split button
             stays clickable and the user can split at any time; the close button is disabled while there
-            is only one pane. The ⌘D / ⌘⇧D shortcuts still split as well. */}
+            is only one pane. The split shortcuts (⌘D/⌘⇧D, or Ctrl+Alt+D/E elsewhere) split as well. */}
         <div className="pane-head">
           {/* The kind icon and status dot reuse the same shared components as the tabs and the sidebar tree, keeping all three consistent. */}
           <span

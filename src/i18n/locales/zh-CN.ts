@@ -49,7 +49,7 @@ const zhCN: typeof en = {
   "titlebar.themeSystem": (resolved) => `跟随系统（当前${resolved}）`,
   "titlebar.themeDark": "暗色",
   "titlebar.themeLight": "亮色",
-  "titlebar.browser": "内置浏览器（⌘⇧B）",
+  "titlebar.browser": "内置浏览器",
   "titlebar.remoteAccess": "远程访问（浏览器）",
   "titlebar.connectRemote": "连接远程服务",
   "titlebar.share": "分享", // Share
@@ -139,6 +139,8 @@ const zhCN: typeof en = {
   "spawn.promptLabel": "提示词",
   "spawn.agentLabel": "智能体",
   "spawn.worktreeLabel": "独立 git worktree",
+  "spawn.modelLabel": "模型",
+  "spawn.effortLabel": "推理强度",
   "spawn.launch": "启动",
   "spawn.remaining": (n: number) => `还有 ${n} 个待确认`,
   "spawn.notifyTitle": "派生会话待确认",
@@ -153,6 +155,28 @@ const zhCN: typeof en = {
   "changes.notRepo": "不是 git 仓库",
   "changes.selectFile": "选择文件查看",
   "changes.binary": "二进制文件，无法逐行 diff",
+  "changes.commitTitle": (hash: string) => `提交 ${hash}`,
+
+  "git.staged": "已暂存",
+  "git.changes": "更改",
+  "git.untracked": "未跟踪文件",
+  "git.committed": "已提交的更改",
+  "git.stage": "暂存",
+  "git.unstage": "取消暂存",
+  "git.stageAll": "全部暂存",
+  "git.unstageAll": "全部取消暂存",
+  "git.discard": "放弃更改",
+  "git.deleteFile": "删除",
+  "git.viewAll": "查看全部",
+  "git.detached": "（游离 HEAD）",
+  "git.aheadBehind": "相对上游分支领先和落后的提交数",
+  "git.commitPlaceholder": "提交说明",
+  "git.amend": "修改上一次提交",
+  "git.amendCommit": "修改提交",
+  "git.commitCount": (n: number) => `提交 ${n} 个文件`,
+  "git.commitNoFiles": "这个提交没有文件变化",
+  "git.noCommits": "还没有提交",
+  "git.loadMore": "加载更多",
   "tree.merge": "合并…",
   "tree.copyWorktreePath": "复制 worktree 路径",
   "tree.openWorktreeDir": "打开 worktree 目录",
@@ -214,6 +238,7 @@ const zhCN: typeof en = {
   "settings.termFontSize": "终端字号",
   "settings.fontDefault": "默认",
   "settings.fontCustom": "自定义…",
+  "settings.fontUnavailable": "本机未安装该字体",
   "settings.fontAuto": "自动",
   "settings.fontSmaller": "缩小",
   "settings.fontLarger": "放大",
@@ -302,6 +327,9 @@ const zhCN: typeof en = {
   "remote.autoRestartHint":
     "重新打开应用时远程访问会自动恢复，「停止服务」可关闭此功能。", // Remote access restarts automatically when the app is reopened. Stop Server turns this off.
   "remote.autostartFailed": "自动启动失败：", // Automatic start failed:
+  "remote.mirror": "多端界面镜像", // Mirror layout across devices
+  "remote.mirrorHint":
+    "标签、分屏和当前会话在所有已连接设备上保持一致，各端的键盘焦点互不打扰。", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
 
   // ── Remote connection panel ──
   "connect.title": "连接远程服务",
@@ -407,7 +435,7 @@ const zhCN: typeof en = {
   "clone.elapsed": (seconds: number) => `已用时 ${seconds} 秒`,
   "clone.slowHint": "已连续 30 秒没有进度，请检查远程机器的网络或代理；你也可以取消后重试。",
   "clone.submit": "克隆",
-  "tree.globalSearch": "搜索所有会话 (⌘⇧F)",
+  "tree.globalSearch": "搜索所有会话",
   "tree.archivedSessions": "已归档会话",
   "tree.searchPlaceholder": "搜索会话 / 分组…",
   "tree.clearSearch": "清空搜索",
@@ -470,6 +498,14 @@ const zhCN: typeof en = {
   "tree.cwdLabel": "工作目录（留空用项目根）",
   "tree.initCmdLabel": "启动命令（可选）",
   "tree.agentArgsLabel": "启动参数（可选）",
+  "preset.execPathLabel": "可执行文件（可选）",
+  "preset.execPathPlaceholder": "/usr/local/bin/claude",
+  "preset.execPathHint": "留空则用该智能体已配置的命令。填了就只有这个会话用它，可以跑兼容的替代程序。",
+  "preset.saveLabel": "存为预设",
+  "preset.namePlaceholder": "给这个预设起个名",
+  "preset.iconChoose": "选择图标",
+  "preset.iconClear": "移除",
+  "preset.iconHint": "方形图片效果最好，其他图片会裁剪并缩放到 64x64。",
   "tree.permissionSkipLabel": "跳过全部权限确认",
   "tree.permissionSkipHint":
     "启动时带上该 agent 的「跳过确认」flag（如 Claude 的 --dangerously-skip-permissions；Codex 还会一并关闭沙箱）。每次启动都生效，请谨慎使用。",
@@ -601,6 +637,7 @@ const zhCN: typeof en = {
   "browser.back": "后退",
   "browser.forward": "前进",
   "browser.reload": "刷新",
+  "browser.desktopOnly": "浏览器标签只能在桌面端打开。", // Browser tabs open in the desktop app only.
   "browser.stop": "停止加载",
   "browser.openExternal": "在系统浏览器中打开",
   "browser.addressPlaceholder": "输入网址或搜索词",
@@ -681,7 +718,7 @@ const zhCN: typeof en = {
   "doc.outlineEmpty": "没有标题",
   "doc.saving": "保存中…",
   "doc.overwriteConfirm": "已存在同名文件，点「覆盖」替换原文件。",
-  "doc.saveTooltip": "保存（⌘S）",
+  "doc.saveTooltip": "保存",
   "doc.externalChanged": "文件已在磁盘上被修改（你有未保存的本地修改）。",
   "doc.reloadDiscard": "重新加载（丢弃我的修改）",
   "doc.externalChangedClean": "文件已在磁盘上被修改。",
@@ -784,7 +821,7 @@ const zhCN: typeof en = {
   "login.rateLimited": "尝试次数过多，请稍等一分钟后重试。", // Too many attempts. Please wait a minute and try again.
   "login.failed": "登录失败，请重试",
   "login.pairingRequired": "此服务要求使用配对链接访问。请用桌面端「远程访问」生成的配对链接打开。",
-  "login.authFailed": "密码错误，或配对链接已失效，请用新的配对链接重新连接。",
+  "login.authFailed": "认证失败。请确认访问密码；如果配对链接已重新生成，请改用新链接。",
   "dir.title": "选择项目目录",
   "dir.pathPlaceholder": "搜索，或输入路径后回车跳转（支持 ~ 开头）",
   "dir.up": "上一级",

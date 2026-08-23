@@ -1,7 +1,11 @@
 //! Changes modal showing all uncommitted workspace changes relative to HEAD: staged, unstaged, and untracked.
-//! The left side lists changed files; selecting one renders a line-by-line HEAD-versus-worktree diff in a
-//! CodeMirror MergeView on the right. Mounted at the App root and driven by changesCwd in the store, this
-//! self-contained overlay does not interact with center tabs or keep-alive behavior.
+//! The left side lists changed files; selecting one renders a line-by-line diff in a CodeMirror MergeView on
+//! the right. Mounted at the App root and driven by changesCwd in the store, this self-contained overlay does
+//! not interact with center tabs or keep-alive behavior.
+//!
+//! With changesCommit set the same layout shows one commit instead of the worktree: the file list comes from
+//! that commit and each diff compares its parent against it. The Git panel's history opens the modal this way,
+//! so committed and uncommitted changes are read through one viewer.
 
 import { useEffect, useRef, useState } from "react";
 import { MergeView } from "@codemirror/merge";
@@ -11,6 +15,8 @@ import { useT } from "../../i18n";
 import { useSuspendNativeViews } from "../../hooks/nativeViewSuspend";
 import {
   gitChangedFiles,
+  gitCommitFileDiff,
+  gitCommitFiles,
   gitFileDiff,
   type ChangedFile,
   type FileDiff,
@@ -24,7 +30,17 @@ import { languageExtensionFor, vlxCmHighlighting } from "./codeMirrorTheme";
  * transparently once loaded. `tick` is the modal's refresh counter: it carries no data, it only forces
  * the open diff to reload so it cannot disagree with the refreshed line counts beside it.
  */
-function DiffView({ cwd, path, tick }: { cwd: string; path: string; tick: number }) {
+function DiffView({
+  cwd,
+  path,
+  tick,
+  commit,
+}: {
+  cwd: string;
+  path: string;
+  tick: number;
+  commit: string | null;
+}) {
   const t = useT();
   const ref = useRef<HTMLDivElement>(null);
   const [diff, setDiff] = useState<FileDiff | null>(null);
@@ -34,7 +50,8 @@ function DiffView({ cwd, path, tick }: { cwd: string; path: string; tick: number
     let alive = true;
     setDiff(null);
     setErr("");
-    void gitFileDiff(cwd, path)
+    const load = commit ? gitCommitFileDiff(cwd, commit, path) : gitFileDiff(cwd, path);
+    void load
       .then((d) => {
         if (alive) setDiff(d);
       })
@@ -44,7 +61,7 @@ function DiffView({ cwd, path, tick }: { cwd: string; path: string; tick: number
     return () => {
       alive = false;
     };
-  }, [cwd, path, tick]);
+  }, [cwd, path, tick, commit]);
 
   useEffect(() => {
     const el = ref.current;
@@ -104,29 +121,35 @@ function DiffView({ cwd, path, tick }: { cwd: string; path: string; tick: number
 export function ChangesModal() {
   const t = useT();
   const cwd = useTermStore((s) => s.changesCwd);
+  const commit = useTermStore((s) => s.changesCommit);
+  const initialPath = useTermStore((s) => s.changesPath);
   const close = useTermStore((s) => s.closeChanges);
   const [files, setFiles] = useState<ChangedFile[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [err, setErr] = useState("");
   const [tick, setTick] = useState(0);
 
-  // Opening a different directory resets the list; a manual refresh keeps the current selection instead.
+  // Opening a different directory or commit resets the list; a manual refresh keeps the current selection.
   useEffect(() => {
     setFiles(null);
     setSelected(null);
     setErr("");
-  }, [cwd]);
+  }, [cwd, commit]);
 
   useEffect(() => {
     if (!cwd) return;
     let alive = true;
-    void gitChangedFiles(cwd)
+    const load = commit ? gitCommitFiles(cwd, commit) : gitChangedFiles(cwd);
+    void load
       .then((fs) => {
         if (!alive) return;
         setFiles(fs);
-        setSelected((cur) =>
-          cur && fs.some((f) => f.path === cur) ? cur : (fs[0]?.path ?? null),
-        );
+        // Keep whatever is already selected across a refresh; on first load honour the caller's
+        // requested file, which is how clicking a row in the Git panel lands on that same file.
+        setSelected((cur) => {
+          const wanted = cur ?? initialPath;
+          return wanted && fs.some((f) => f.path === wanted) ? wanted : (fs[0]?.path ?? null);
+        });
         setErr("");
       })
       .catch((e) => {
@@ -135,7 +158,7 @@ export function ChangesModal() {
     return () => {
       alive = false;
     };
-  }, [cwd, tick]);
+  }, [cwd, commit, initialPath, tick]);
 
   // Suspend native browser views while the modal is visible so they cannot cover it (architecture document §17).
   useSuspendNativeViews(Boolean(cwd));
@@ -182,7 +205,7 @@ export function ChangesModal() {
           }}
         >
           <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--text-primary)" }}>
-            {t("changes.title")}
+            {commit ? t("changes.commitTitle", commit) : t("changes.title")}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="vlx-btn" onClick={() => setTick((n) => n + 1)}>
@@ -293,7 +316,7 @@ export function ChangesModal() {
 
           <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
             {selected ? (
-              <DiffView cwd={cwd} path={selected} tick={tick} />
+              <DiffView cwd={cwd} path={selected} tick={tick} commit={commit} />
             ) : (
               <div style={{ padding: 16, fontSize: 12.5, color: "var(--text-muted)" }}>
                 {t("changes.selectFile")}

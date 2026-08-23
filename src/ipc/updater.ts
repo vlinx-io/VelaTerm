@@ -17,6 +17,11 @@
 //! read it, keeping updater concerns out of termStore.
 //!
 //! Browser and remote clients lack the updater plugin and do not self-update, so `!isTauri` skips it.
+//!
+//! Every check carries the `X-Install-Id` header, an anonymous identifier the backend generates once per
+//! installation. It lets the update server count installations instead of IP addresses, which merge users
+//! behind one NAT and split a single user whose address changes. Checks repeat on a schedule as well as at
+//! startup, because a terminal often stays open for days and would otherwise never report again.
 
 import { message } from "@tauri-apps/plugin-dialog";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -24,7 +29,7 @@ import { check, type Update } from "@tauri-apps/plugin-updater";
 import { useSyncExternalStore } from "react";
 
 import { LOCALES, t, type Locale } from "../i18n";
-import { isTauri } from "./transport";
+import { invoke, isTauri } from "./transport";
 import { localizeReleaseNotes, sliceReleaseNotes } from "./updateNotes";
 
 /** Version recorded by Skip This Version. It affects only silent startup checks; explicit menu checks
@@ -201,6 +206,46 @@ function localizedNotesFromManifest(
   return result;
 }
 
+/** Cached installation identifier. The backend issues it once and never changes it, so one read per
+ * process is enough; a failed read stays null and simply retries on the next check. */
+let cachedInstallId: string | null = null;
+
+/** Anonymous installation identifier for update-check telemetry, or null when it cannot be read.
+ * Failure is never fatal: the check proceeds without the header and the server records the row anyway. */
+async function installId(): Promise<string | null> {
+  if (cachedInstallId) return cachedInstallId;
+  try {
+    const id = await invoke<string>("install_id");
+    cachedInstallId = id || null;
+  } catch (err) {
+    console.error("[updater] could not read install id", err);
+    cachedInstallId = null;
+  }
+  return cachedInstallId;
+}
+
+/** Call the updater endpoint with the installation header attached. */
+async function checkWithId(): Promise<Update | null> {
+  const id = await installId();
+  return check(id ? { headers: { "X-Install-Id": id } } : undefined);
+}
+
+/**
+ * Repeat the request purely for its server-side record and release the handle.
+ *
+ * A pending prompt makes `checkForUpdates` return early, which would silence telemetry for exactly the
+ * installations that have not updated yet — the ones whose count matters most. This keeps them visible
+ * without touching the prompt the user has already been shown.
+ */
+async function pingForTelemetry(): Promise<void> {
+  try {
+    const update = await checkWithId();
+    if (update) await update.close().catch(() => {});
+  } catch (err) {
+    console.error("[updater] telemetry-only update check failed", err);
+  }
+}
+
 /**
  * Check for updates.
  * @param manual True for an explicit Check for Updates action: report no-update and failure results,
@@ -209,27 +254,38 @@ function localizedNotesFromManifest(
  */
 export async function checkForUpdates({
   manual = false,
-}: { manual?: boolean } = {}): Promise<void> {
-  if (!isTauri) return;
-  if (checking) return;
+}: { manual?: boolean } = {}): Promise<boolean> {
+  if (!isTauri) return false;
   // Reuse an existing pending prompt. An explicit check opens it rather than replacing its Update
-  // handle with a second one and leaking the first.
+  // handle with a second one and leaking the first. This runs before the in-flight guard: reopening a
+  // dialog needs no network, and making the menu item silently do nothing while a background check
+  // happens to be running is worse than reopening it.
+  if (state.prompt && manual) {
+    openUpdateModal();
+    return false;
+  }
+  if (checking) return false;
   if (state.prompt) {
-    if (manual) openUpdateModal();
-    return;
+    checking = true;
+    try {
+      await pingForTelemetry();
+    } finally {
+      checking = false;
+    }
+    return true;
   }
   checking = true;
   try {
-    const update = await check();
+    const update = await checkWithId();
     if (!update) {
       if (manual) {
         await message(t("updater.upToDate"), { title: t("updater.title") });
       }
-      return;
+      return true;
     }
     if (!manual && loadSkippedVersion() === update.version) {
       await update.close().catch(() => {});
-      return;
+      return true;
     }
     const url = update.rawJson.url;
     const notes = update.body ?? "";
@@ -262,4 +318,45 @@ export async function checkForUpdates({
   } finally {
     checking = false;
   }
+  return true;
+}
+
+/** Delay before the first check so it never competes with startup work for the main thread. */
+const STARTUP_DELAY_MS = 5_000;
+
+/** Gap between silent checks. A terminal commonly stays open for days, so a startup-only check would
+ * both miss releases published mid-session and, on the server side, make long-running installations
+ * invisible in usage counts. */
+const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/** How often the schedule compares the clock against the interval above. */
+const TICK_MS = 5 * 60 * 1000;
+
+/**
+ * Start silent update checks: one shortly after launch, then one every six hours.
+ *
+ * The interval is enforced against the wall clock rather than by a six-hour timer, because a laptop
+ * that sleeps stops firing timers: on wake the next tick sees the elapsed time and checks immediately,
+ * instead of waiting out a timer that stood still. Returns a function that stops the schedule.
+ */
+export function startUpdateSchedule(): () => void {
+  if (!isTauri) return () => {};
+  let lastCheckAt = Date.now();
+  const run = () => {
+    // Advance the clock only when a check actually ran. A scheduled run that collided with a manual
+    // check returns early, and resetting the clock for it would postpone the next silent check by a
+    // full interval; leaving the clock alone lets the next tick retry within minutes.
+    const startedAt = Date.now();
+    void checkForUpdates({ manual: false }).then((ran) => {
+      if (ran) lastCheckAt = startedAt;
+    });
+  };
+  const startup = setTimeout(run, STARTUP_DELAY_MS);
+  const tick = setInterval(() => {
+    if (Date.now() - lastCheckAt >= CHECK_INTERVAL_MS) run();
+  }, TICK_MS);
+  return () => {
+    clearTimeout(startup);
+    clearInterval(tick);
+  };
 }

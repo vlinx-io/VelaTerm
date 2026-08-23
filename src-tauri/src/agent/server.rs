@@ -31,6 +31,12 @@ pub struct SpawnRequest {
     /// Whether to create a dedicated Git worktree; the frontend defaults to true.
     #[serde(default)]
     pub worktree: Option<bool>,
+    /// Model override chosen in the spawn confirmation dialog.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Effort override chosen in the spawn confirmation dialog.
+    #[serde(default)]
+    pub effort: Option<String>,
 }
 
 /// Request from `view <file|URL>` to open a tab.
@@ -159,6 +165,10 @@ fn serve_loop(server: tiny_http::Server, app: AppCtx, token: String) {
             }
         },
         |req| {
+            // A new card supersedes any earlier answer to the same task: an agent retrying a request the
+            // user cancelled sends the identical parent and prompt, and a stale claim would make
+            // confirming the new card do nothing.
+            crate::command_core::release_spawn_claim(&req.parent_session_id, &req.prompt);
             // Forward an in-session child-task request so the frontend can create and start it.
             app_for_spawn.emit("spawn://request", req);
         },

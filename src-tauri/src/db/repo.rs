@@ -8,7 +8,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use uuid::Uuid;
 
-use crate::models::{Group, NodeKind, Project, Session, SessionKind, Tree};
+use crate::models::{
+    AgentPreset, Group, NodeKind, Project, Session, SessionKind, Tree, AGENT_PRESET_ICON_MAX_BYTES,
+};
 
 /// Converts Windows verbatim paths returned by `std::fs::canonicalize` into the ordinary form used
 /// by the UI and persisted session configuration. Drive paths become `D:\dir`; verbatim UNC paths
@@ -121,6 +123,9 @@ fn map_session(row: &Row) -> rusqlite::Result<Session> {
         worktree_base_ref: row.get(20)?,
         // Append the emoji marker at index 21.
         mark: row.get(21)?,
+        // Append the agent preset link and per-session executable at indices 22/23.
+        agent_preset_id: row.get(22)?,
+        agent_path: normalize_optional_windows_verbatim_path(row.get(23)?),
     })
 }
 
@@ -128,7 +133,7 @@ fn map_session(row: &Row) -> rusqlite::Result<Session> {
 const SESSION_COLUMNS: &str = "id, project_id, group_id, name, shell, cwd, env_json, init_cmd, \
      hotkey, sort_order, created_at, kind, agent_session_id, \
      parent_session_id, collapsed, worktree_path, archived_at, browser_url, agent_args, \
-     permission_mode, worktree_base_ref, mark";
+     permission_mode, worktree_base_ref, mark, agent_preset_id, agent_path";
 
 /// Import an existing directory as a project, using its directory name.
 pub fn import_project(conn: &Connection, root_path: &str) -> Result<Project, String> {
@@ -282,6 +287,8 @@ pub fn create_session(
         None,
         None,
         None,
+        None,
+        None,
     )
 }
 
@@ -302,6 +309,8 @@ pub fn create_session_full(
     agent_args: Option<&str>,
     permission_mode: Option<&str>,
     worktree_base_ref: Option<&str>,
+    agent_preset_id: Option<&str>,
+    agent_path: Option<&str>,
 ) -> Result<Session, String> {
     let session = Session {
         id: new_id(),
@@ -332,14 +341,19 @@ pub fn create_session_full(
         archived_at: None,
         browser_url: None,
         mark: None,
+        // A preset's launch values are copied here by the caller; this ID is display data only.
+        agent_preset_id: agent_preset_id
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty()),
+        agent_path: agent_path.map(|s| s.to_string()).filter(|s| !s.is_empty()),
         sort_order: now_millis(),
         created_at: now_secs(),
     };
 
     conn.execute(
         "INSERT INTO sessions
-           (id, project_id, group_id, name, kind, shell, cwd, env_json, init_cmd, hotkey, parent_session_id, collapsed, worktree_path, sort_order, created_at, agent_args, permission_mode, worktree_base_ref)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+           (id, project_id, group_id, name, kind, shell, cwd, env_json, init_cmd, hotkey, parent_session_id, collapsed, worktree_path, sort_order, created_at, agent_args, permission_mode, worktree_base_ref, agent_preset_id, agent_path)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
         params![
             session.id,
             session.project_id,
@@ -359,6 +373,8 @@ pub fn create_session_full(
             session.agent_args,
             session.permission_mode,
             session.worktree_base_ref,
+            session.agent_preset_id,
+            session.agent_path,
         ],
     )
     .map_err(|e| format!("Failed to write session: {e}"))?;
@@ -392,6 +408,9 @@ pub fn persist_session(
         cwd: cwd.map(|s| s.to_string()).filter(|s| !s.is_empty()),
         env_json: None,
         init_cmd: init_cmd.map(|s| s.to_string()).filter(|s| !s.is_empty()),
+        // An ephemeral session was never created from a preset and uses the per-kind default executable.
+        agent_preset_id: None,
+        agent_path: None,
         agent_args: None,
         permission_mode: None,
         hotkey: None,
@@ -470,6 +489,161 @@ pub fn get_agent_args(conn: &Connection, id: &str) -> Result<Option<String>, Str
     .map_err(|e| format!("Failed to read agent args: {e}"))
 }
 
+/// Column list for `agent_presets`, matching `map_agent_preset`.
+const AGENT_PRESET_COLUMNS: &str =
+    "id, name, base_kind, exec_path, agent_args, permission_mode, icon, sort_order, created_at";
+
+fn map_agent_preset(row: &rusqlite::Row) -> rusqlite::Result<AgentPreset> {
+    Ok(AgentPreset {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        base_kind: SessionKind::from_db(&row.get::<_, String>(2)?),
+        exec_path: normalize_optional_windows_verbatim_path(row.get(3)?),
+        agent_args: row.get(4)?,
+        permission_mode: row.get(5)?,
+        icon: row.get(6)?,
+        sort_order: row.get(7)?,
+        created_at: row.get(8)?,
+    })
+}
+
+/// All presets in menu order.
+pub fn list_agent_presets(conn: &Connection) -> Result<Vec<AgentPreset>, String> {
+    let sql = format!("SELECT {AGENT_PRESET_COLUMNS} FROM agent_presets ORDER BY sort_order, created_at");
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| format!("Failed to query agent presets: {e}"))?;
+    let rows = stmt
+        .query_map([], map_agent_preset)
+        .map_err(|e| format!("Failed to read agent presets: {e}"))?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| format!("Failed to read agent presets: {e}"))
+}
+
+/// Reject an oversized icon rather than storing a row that would be expensive to sync.
+fn check_icon(icon: Option<&str>) -> Result<(), String> {
+    match icon {
+        Some(v) if v.len() > AGENT_PRESET_ICON_MAX_BYTES => Err(format!(
+            "Icon is too large ({} KB); the limit is {} KB",
+            v.len() / 1024,
+            AGENT_PRESET_ICON_MAX_BYTES / 1024
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// A preset needs a name to be selectable in the menu at all.
+fn check_name(name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Preset name cannot be empty".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Create a preset, appended after the existing ones.
+pub fn create_agent_preset(
+    conn: &Connection,
+    name: &str,
+    base_kind: SessionKind,
+    exec_path: Option<&str>,
+    agent_args: Option<&str>,
+    permission_mode: Option<&str>,
+    icon: Option<&str>,
+) -> Result<AgentPreset, String> {
+    check_icon(icon)?;
+    let preset = AgentPreset {
+        id: new_id(),
+        name: check_name(name)?,
+        base_kind,
+        exec_path: exec_path.map(str::to_string).filter(|s| !s.is_empty()),
+        agent_args: agent_args.map(str::to_string).filter(|s| !s.is_empty()),
+        permission_mode: permission_mode.map(str::to_string).filter(|s| !s.is_empty()),
+        icon: icon.map(str::to_string).filter(|s| !s.is_empty()),
+        sort_order: now_millis(),
+        created_at: now_secs(),
+    };
+    conn.execute(
+        "INSERT INTO agent_presets
+           (id, name, base_kind, exec_path, agent_args, permission_mode, icon, sort_order, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            preset.id,
+            preset.name,
+            preset.base_kind.as_str(),
+            preset.exec_path,
+            preset.agent_args,
+            preset.permission_mode,
+            preset.icon,
+            preset.sort_order,
+            preset.created_at,
+        ],
+    )
+    .map_err(|e| format!("Failed to write agent preset: {e}"))?;
+    Ok(preset)
+}
+
+/// Update a preset in place. Sessions already created from it keep their copied values and are unaffected.
+#[allow(clippy::too_many_arguments)]
+pub fn update_agent_preset(
+    conn: &Connection,
+    id: &str,
+    name: &str,
+    exec_path: Option<&str>,
+    agent_args: Option<&str>,
+    permission_mode: Option<&str>,
+    icon: Option<&str>,
+) -> Result<(), String> {
+    check_icon(icon)?;
+    let name = check_name(name)?;
+    let n = conn
+        .execute(
+            "UPDATE agent_presets
+               SET name = ?1, exec_path = ?2, agent_args = ?3, permission_mode = ?4, icon = ?5
+             WHERE id = ?6",
+            params![name, exec_path, agent_args, permission_mode, icon, id],
+        )
+        .map_err(|e| format!("Failed to update agent preset: {e}"))?;
+    if n == 0 {
+        return Err("Agent preset no longer exists".to_string());
+    }
+    Ok(())
+}
+
+/// Delete a preset. Sessions created from it keep running: they hold their own copy of every launch value
+/// and only lose the preset's name and icon in the sidebar.
+pub fn delete_agent_preset(conn: &Connection, id: &str) -> Result<(), String> {
+    conn.execute("DELETE FROM agent_presets WHERE id = ?1", params![id])
+        .map_err(|e| format!("Failed to delete agent preset: {e}"))?;
+    Ok(())
+}
+
+/// Persist a new menu order from a full list of preset IDs.
+pub fn reorder_agent_presets(conn: &Connection, ids: &[String]) -> Result<(), String> {
+    for (i, id) in ids.iter().enumerate() {
+        conn.execute(
+            "UPDATE agent_presets SET sort_order = ?1 WHERE id = ?2",
+            params![i as i64, id],
+        )
+        .map_err(|e| format!("Failed to reorder agent presets: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Read this session's own agent executable, returning Ok(None) when absent or unset. A value here
+/// overrides the per-kind default in app_settings, which is what lets two sessions of the same kind run
+/// different drop-in binaries at the same time.
+pub fn get_agent_path(conn: &Connection, id: &str) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT agent_path FROM sessions WHERE id = ?1",
+        params![id],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .optional()
+    .map(|opt| opt.flatten())
+    .map_err(|e| format!("Failed to read agent path: {e}"))
+}
+
 /// Read permission mode for inject::permission_flag, returning Ok(None) when absent or unset.
 pub fn get_permission_mode(conn: &Connection, id: &str) -> Result<Option<String>, String> {
     conn.query_row(
@@ -517,6 +691,30 @@ pub fn delete_app_setting(conn: &Connection, key: &str) -> Result<(), String> {
     conn.execute("DELETE FROM app_settings WHERE key = ?1", params![key])
         .map_err(|e| format!("Failed to delete app setting {key}: {e}"))?;
     Ok(())
+}
+
+/// Read a preference, creating it with `default` when absent, and return the effective value.
+///
+/// Insert and read share one connection under the database mutex, so two concurrent callers cannot
+/// each generate a value and overwrite one another: the loser's insert is ignored and both observe
+/// the winner's value. Used for the installation identifier, which must never change once issued.
+pub fn get_or_create_app_setting(
+    conn: &Connection,
+    key: &str,
+    default: &str,
+) -> Result<String, String> {
+    conn.execute(
+        "INSERT INTO app_settings(key, value, updated_at) VALUES(?1, ?2, ?3) \
+         ON CONFLICT(key) DO NOTHING",
+        params![key, default, now_secs()],
+    )
+    .map_err(|e| format!("Failed to seed app setting {key}: {e}"))?;
+    conn.query_row(
+        "SELECT value FROM app_settings WHERE key = ?1",
+        params![key],
+        |row| row.get::<_, String>(0),
+    )
+    .map_err(|e| format!("Failed to read app setting {key}: {e}"))
 }
 
 /// Batch-upsert preferences with last-write-wins and current-second updated_at.
@@ -770,6 +968,9 @@ pub fn fork_session(conn: &Connection, source_id: &str) -> Result<Session, Strin
         init_cmd: source.init_cmd.clone(),
         // A fork is a parallel conversation in the same lineage, so copy launch arguments/permissions.
         agent_args: source.agent_args.clone(),
+        // A fork runs the same agent as its source, so it keeps both the executable and the preset badge.
+        agent_preset_id: source.agent_preset_id.clone(),
+        agent_path: source.agent_path.clone(),
         permission_mode: source.permission_mode.clone(),
         hotkey: None,
         agent_session_id: Some(anchor.clone()),
@@ -789,8 +990,9 @@ pub fn fork_session(conn: &Connection, source_id: &str) -> Result<Session, Strin
         "INSERT INTO sessions
            (id, project_id, group_id, name, kind, shell, cwd, env_json, init_cmd, hotkey,
             agent_session_id, parent_session_id, collapsed, worktree_path,
-            fork_pending, sort_order, created_at, agent_args, permission_mode, mark)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, 1, ?14, ?15, ?16, ?17, ?18)",
+            fork_pending, sort_order, created_at, agent_args, permission_mode, mark,
+            agent_preset_id, agent_path)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, 1, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
         params![
             session.id,
             session.project_id,
@@ -810,6 +1012,8 @@ pub fn fork_session(conn: &Connection, source_id: &str) -> Result<Session, Strin
             session.agent_args,
             session.permission_mode,
             session.mark,
+            session.agent_preset_id,
+            session.agent_path,
         ],
     )
     .map_err(|e| format!("Failed to write forked session: {e}"))?;
@@ -1380,6 +1584,53 @@ fn gc_empty_tombstones(
     Ok(())
 }
 
+/// Ancestry walks are bounded so an already-cyclic row set cannot spin. Trees are shallow in practice,
+/// so reaching the cap means the data is corrupt and the move must be refused.
+const ANCESTRY_WALK_MAX: usize = 1000;
+
+/// Whether re-parenting `id` under `target` would make the node its own ancestor. The walk starts at the
+/// target, so parenting a node to itself is rejected as well.
+fn creates_session_cycle(conn: &Connection, id: &str, target: &str) -> Result<bool, String> {
+    let mut cur = Some(target.to_string());
+    for _ in 0..ANCESTRY_WALK_MAX {
+        let Some(node) = cur else { return Ok(false) };
+        if node == id {
+            return Ok(true);
+        }
+        cur = conn
+            .query_row(
+                "SELECT parent_session_id FROM sessions WHERE id = ?1",
+                params![node],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|e| format!("Failed to read session ancestry: {e}"))?
+            .flatten();
+    }
+    Ok(true)
+}
+
+/// Group counterpart of `creates_session_cycle`, walking `parent_group_id`.
+fn creates_group_cycle(conn: &Connection, id: &str, target: &str) -> Result<bool, String> {
+    let mut cur = Some(target.to_string());
+    for _ in 0..ANCESTRY_WALK_MAX {
+        let Some(node) = cur else { return Ok(false) };
+        if node == id {
+            return Ok(true);
+        }
+        cur = conn
+            .query_row(
+                "SELECT parent_group_id FROM groups WHERE id = ?1",
+                params![node],
+                |r| r.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .map_err(|e| format!("Failed to read group ancestry: {e}"))?
+            .flatten();
+    }
+    Ok(true)
+}
+
 /// Move a node to a new parent and sort position; projects support reordering only.
 pub fn move_node(
     conn: &Connection,
@@ -1392,6 +1643,13 @@ pub fn move_node(
 ) -> Result<(), String> {
     match kind {
         NodeKind::Group => {
+            // A group that becomes its own ancestor makes every recursive descendant query below spin
+            // while holding the connection mutex, so refuse the move instead of persisting the cycle.
+            if let Some(parent) = target_group_id {
+                if creates_group_cycle(conn, id, parent)? {
+                    return Err("Cannot move a group into itself or its own subtree".into());
+                }
+            }
             conn.execute(
                 "UPDATE groups SET project_id = ?1, parent_group_id = ?2, sort_order = ?3 WHERE id = ?4",
                 params![target_project_id, target_group_id, sort_order, id],
@@ -1399,6 +1657,13 @@ pub fn move_node(
             .map_err(|e| format!("Failed to move group: {e}"))?;
         }
         NodeKind::Session => {
+            // Same cycle guard as groups: `move_node` is reachable over the WebSocket dispatch, where no
+            // drag-and-drop check stands between a caller and a self-parenting session.
+            if let Some(parent) = target_parent_session_id {
+                if creates_session_cycle(conn, id, parent)? {
+                    return Err("Cannot move a session into itself or its own subtree".into());
+                }
+            }
             // Session parent modes are exclusive: group/project-root clears parent_session_id;
             // nesting uses the parent's group and session ID.
             conn.execute(
@@ -1652,6 +1917,66 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
         conn.execute_batch(crate::db::schema::SCHEMA).unwrap();
         conn
+    }
+
+    /// `move_node` must refuse to make a session its own ancestor: `move_node` is reachable over the
+    /// WebSocket dispatch, and the recursive descendant queries in this module use `UNION ALL` with no
+    /// cycle breaker, so a persisted cycle would spin while holding the connection mutex.
+    #[test]
+    fn move_node_refuses_session_cycles() {
+        let conn = mem_conn();
+        conn.execute(
+            "INSERT INTO projects (id, name, root_path, sort_order, created_at)
+             VALUES ('p1', 'p', '/tmp', 0, 0)",
+            [],
+        )
+        .unwrap();
+        for (id, parent) in [("a", None), ("b", Some("a")), ("c", Some("b"))] {
+            conn.execute(
+                "INSERT INTO sessions (id, project_id, name, kind, sort_order, parent_session_id, created_at)
+                 VALUES (?1, 'p1', ?1, 'terminal', 0, ?2, 0)",
+                params![id, parent],
+            )
+            .unwrap();
+        }
+
+        // A node cannot become its own parent, nor a descendant's child.
+        assert!(move_node(&conn, NodeKind::Session, "a", Some("p1"), None, Some("a"), 0).is_err());
+        assert!(move_node(&conn, NodeKind::Session, "a", Some("p1"), None, Some("c"), 0).is_err());
+        // Moving down an unrelated branch stays allowed.
+        assert!(move_node(&conn, NodeKind::Session, "c", Some("p1"), None, Some("a"), 0).is_ok());
+        let parent: Option<String> = conn
+            .query_row("SELECT parent_session_id FROM sessions WHERE id = 'c'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(parent.as_deref(), Some("a"));
+        // The rejected moves left the tree untouched.
+        let root: Option<String> = conn
+            .query_row("SELECT parent_session_id FROM sessions WHERE id = 'a'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(root, None);
+    }
+
+    /// Groups nest through `parent_group_id` and feed the same style of recursive query.
+    #[test]
+    fn move_node_refuses_group_cycles() {
+        let conn = mem_conn();
+        conn.execute(
+            "INSERT INTO projects (id, name, root_path, sort_order, created_at)
+             VALUES ('p1', 'p', '/tmp', 0, 0)",
+            [],
+        )
+        .unwrap();
+        for (id, parent) in [("g1", None), ("g2", Some("g1"))] {
+            conn.execute(
+                "INSERT INTO groups (id, project_id, name, sort_order, parent_group_id, created_at)
+                 VALUES (?1, 'p1', ?1, 0, ?2, 0)",
+                params![id, parent],
+            )
+            .unwrap();
+        }
+        assert!(move_node(&conn, NodeKind::Group, "g1", Some("p1"), Some("g2"), None, 0).is_err());
+        assert!(move_node(&conn, NodeKind::Group, "g1", Some("p1"), Some("g1"), None, 0).is_err());
+        assert!(move_node(&conn, NodeKind::Group, "g2", Some("p1"), None, None, 0).is_ok());
     }
 
     #[test]
@@ -2557,6 +2882,76 @@ mod tests {
 
     /// Custom arguments/permission mode round-trip through full creation, reads, update, and fork;
     /// the legacy wrapper leaves both absent.
+    /// Presets round-trip, and the values a session copies from one survive the preset's deletion — the
+    /// property the whole design rests on.
+    #[test]
+    fn agent_preset_crud_and_session_independence() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+
+        let preset = create_agent_preset(
+            &conn,
+            "  DeepSeek  ",
+            SessionKind::Claude,
+            Some("/opt/bin/claude-deepseek"),
+            Some("--model ds"),
+            Some("skip"),
+            Some("data:image/png;base64,AAAA"),
+        )
+        .unwrap();
+        // The name is trimmed on the way in.
+        assert_eq!(preset.name, "DeepSeek");
+        assert_eq!(list_agent_presets(&conn).unwrap().len(), 1);
+
+        // A session created from the preset copies the launch values onto its own row.
+        let session = create_session_full(
+            &conn,
+            &project.id,
+            None,
+            "worker",
+            SessionKind::Claude,
+            None,
+            None,
+            None,
+            None,
+            None,
+            preset.agent_args.as_deref(),
+            preset.permission_mode.as_deref(),
+            None,
+            Some(&preset.id),
+            preset.exec_path.as_deref(),
+        )
+        .unwrap();
+        assert_eq!(session.agent_path.as_deref(), Some("/opt/bin/claude-deepseek"));
+        assert_eq!(session.agent_preset_id.as_deref(), Some(preset.id.as_str()));
+
+        // Editing the preset leaves the existing session alone.
+        update_agent_preset(&conn, &preset.id, "Renamed", Some("/other/bin"), None, None, None).unwrap();
+        assert_eq!(
+            get_agent_path(&conn, &session.id).unwrap().as_deref(),
+            Some("/opt/bin/claude-deepseek")
+        );
+
+        // Deleting it leaves the session launchable, with only the badge gone.
+        delete_agent_preset(&conn, &preset.id).unwrap();
+        assert!(list_agent_presets(&conn).unwrap().is_empty());
+        assert_eq!(
+            get_agent_path(&conn, &session.id).unwrap().as_deref(),
+            Some("/opt/bin/claude-deepseek")
+        );
+    }
+
+    /// An empty name and an oversized icon are refused rather than stored.
+    #[test]
+    fn agent_preset_rejects_empty_name_and_oversized_icon() {
+        let conn = mem_conn();
+        assert!(create_agent_preset(&conn, "   ", SessionKind::Claude, None, None, None, None).is_err());
+        let huge = "x".repeat(AGENT_PRESET_ICON_MAX_BYTES + 1);
+        assert!(
+            create_agent_preset(&conn, "ok", SessionKind::Claude, None, None, None, Some(&huge)).is_err()
+        );
+    }
+
     #[test]
     fn agent_args_roundtrip_create_update_fork() {
         let conn = mem_conn();
@@ -2576,6 +2971,8 @@ mod tests {
             None,
             Some("--model opus"),
             Some("skip"),
+            None,
+            None,
             None,
         )
         .unwrap();

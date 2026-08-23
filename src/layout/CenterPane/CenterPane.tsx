@@ -5,6 +5,7 @@
 import { lazy, Suspense, useCallback, useMemo, useRef } from "react";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
+import { IS_PLAIN_BROWSER } from "../../hooks/shortcutRegistry";
 import { isMac } from "../../ipc/transport";
 import { useTermStore } from "../../store/termStore";
 import {
@@ -15,6 +16,7 @@ import {
   type Rect,
 } from "./paneTree";
 import { BrowserView } from "./browser/BrowserView";
+import { env } from "../../platform/env";
 import { DormantPane } from "./DormantPane";
 import { LiveTabsOverLimitDialog } from "./LiveTabsOverLimitDialog";
 import { SearchBar } from "./SearchBar";
@@ -187,7 +189,7 @@ export function CenterPane() {
               <div>{t("center.noSession")}</div>
               <div style={{ color: "var(--text-faint)" }}>
                 {t("center.noSessionHintPre")}
-                <kbd>{isMac ? "⌘T" : "Ctrl Alt T"}</kbd>
+                <kbd>{isMac && !IS_PLAIN_BROWSER ? "⌘T" : "Ctrl Alt T"}</kbd>
                 {t("center.noSessionHintPost")}
               </div>
               <button className="empty-action" onClick={() => void newScratchTab()}>
@@ -251,9 +253,30 @@ export function CenterPane() {
             the toolbar uses display:none. */}
         {openTabs
           .filter((tabId) => browserTabs[tabId])
-          .map((tabId) => (
-            <BrowserView key={tabId} tab={browserTabs[tabId]} hidden={tabId !== activeTabId} />
-          ))}
+          .map((tabId) =>
+            // Web content lives in a native child WebView, which exists only in the desktop shells. A
+            // browser tab still reaches a remote client through mirror mode, where it renders as this
+            // notice: the tab stays in place, so following the layout never closes the peer's tab.
+            env.hasNativeHost ? (
+              <BrowserView key={tabId} tab={browserTabs[tabId]} hidden={tabId !== activeTabId} />
+            ) : (
+              <div
+                key={tabId}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: tabId === activeTabId ? "grid" : "none",
+                  placeItems: "center",
+                  padding: 24,
+                  textAlign: "center",
+                  color: "var(--text-dim)",
+                  fontSize: 13,
+                }}
+              >
+                {t("browser.desktopOnly")}
+              </div>
+            ),
+          )}
 
         {activeTabId &&
           dividers.map((d) => (

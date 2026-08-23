@@ -14,8 +14,8 @@
 //! `pty_spawn` and `read_recording` remain outside this module.
 
 use crate::db::repo;
-use crate::host::{AppCtx, TREE_CHANGED};
-use crate::models::{Group, NodeKind, Project, Session, SessionKind, Tree};
+use crate::host::{AppCtx, PRESETS_CHANGED, TREE_CHANGED};
+use crate::models::{AgentPreset, Group, NodeKind, Project, Session, SessionKind, Tree};
 
 // Private helpers.
 
@@ -118,6 +118,86 @@ pub fn create_group(
     Ok(group)
 }
 
+// Agent presets. Successful writes emit `PRESETS_CHANGED` so every client refreshes its new-session menu.
+
+/// List every agent preset in menu order.
+pub fn list_agent_presets(ctx: &AppCtx) -> Result<Vec<AgentPreset>, String> {
+    let conn = ctx.db().conn.lock().unwrap();
+    repo::list_agent_presets(&conn)
+}
+
+/// Create an agent preset from a launch configuration the user chose to keep.
+pub fn create_agent_preset(
+    ctx: &AppCtx,
+    name: &str,
+    base_kind: SessionKind,
+    exec_path: Option<&str>,
+    agent_args: Option<&str>,
+    permission_mode: Option<&str>,
+    icon: Option<&str>,
+) -> Result<AgentPreset, String> {
+    let preset = {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::create_agent_preset(
+            &conn,
+            name,
+            base_kind,
+            empty_to_none(exec_path),
+            empty_to_none(agent_args),
+            empty_to_none(permission_mode),
+            empty_to_none(icon),
+        )?
+    };
+    ctx.emit(PRESETS_CHANGED, ());
+    Ok(preset)
+}
+
+/// Update an agent preset. Sessions already created from it keep their own copied launch values.
+pub fn update_agent_preset(
+    ctx: &AppCtx,
+    id: &str,
+    name: &str,
+    exec_path: Option<&str>,
+    agent_args: Option<&str>,
+    permission_mode: Option<&str>,
+    icon: Option<&str>,
+) -> Result<(), String> {
+    {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::update_agent_preset(
+            &conn,
+            id,
+            name,
+            empty_to_none(exec_path),
+            empty_to_none(agent_args),
+            empty_to_none(permission_mode),
+            empty_to_none(icon),
+        )?;
+    }
+    ctx.emit(PRESETS_CHANGED, ());
+    Ok(())
+}
+
+/// Delete an agent preset. Sessions created from it keep launching exactly as before.
+pub fn delete_agent_preset(ctx: &AppCtx, id: &str) -> Result<(), String> {
+    {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::delete_agent_preset(&conn, id)?;
+    }
+    ctx.emit(PRESETS_CHANGED, ());
+    Ok(())
+}
+
+/// Persist a new menu order from the full list of preset IDs.
+pub fn reorder_agent_presets(ctx: &AppCtx, ids: &[String]) -> Result<(), String> {
+    {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::reorder_agent_presets(&conn, ids)?;
+    }
+    ctx.emit(PRESETS_CHANGED, ());
+    Ok(())
+}
+
 /// Creates a session, optionally prepopulating an agent-session resume anchor.
 #[allow(clippy::too_many_arguments)]
 pub fn create_session(
@@ -135,11 +215,15 @@ pub fn create_session(
     permission_mode: Option<&str>,
     agent_session_id: Option<&str>,
     worktree_base_ref: Option<&str>,
+    agent_preset_id: Option<&str>,
+    agent_path: Option<&str>,
 ) -> Result<Session, String> {
     // Normalize empty strings consistently across transports.
     let agent_args = empty_to_none(agent_args);
     let permission_mode = empty_to_none(permission_mode);
     let worktree_base_ref = empty_to_none(worktree_base_ref);
+    let agent_preset_id = empty_to_none(agent_preset_id);
+    let agent_path = empty_to_none(agent_path);
     let session = {
         let conn = ctx.db().conn.lock().unwrap();
         let mut session = repo::create_session_full(
@@ -156,6 +240,8 @@ pub fn create_session(
             agent_args,
             permission_mode,
             worktree_base_ref,
+            agent_preset_id,
+            agent_path,
         )?;
         let seeded_agent_id = agent_session_id
             .map(|s| s.trim().to_string())
@@ -391,6 +477,25 @@ pub fn set_browser_url(ctx: &AppCtx, id: &str, url: &str) -> Result<(), String> 
 pub fn get_app_settings(ctx: &AppCtx) -> Result<std::collections::HashMap<String, String>, String> {
     let conn = ctx.db().conn.lock().unwrap();
     repo::get_app_settings(&conn)
+}
+
+/// app_settings key holding this installation's anonymous identifier.
+const INSTALL_ID_KEY: &str = "install_id";
+
+/// Return this installation's anonymous identifier, generating and persisting one on first call.
+///
+/// A random UUID with no link to the machine, the user, or any account: it exists so update-check
+/// telemetry can count distinct installations instead of distinct IP addresses, which both merges
+/// everyone behind one NAT and splits a single user across a changing home address. It lives in
+/// `app_settings`, so it is per data directory — development and release builds have separate
+/// databases and therefore separate identifiers, which is what we want.
+pub fn install_id(ctx: &AppCtx) -> Result<String, String> {
+    let conn = ctx.db().conn.lock().unwrap();
+    repo::get_or_create_app_setting(
+        &conn,
+        INSTALL_ID_KEY,
+        &uuid::Uuid::new_v4().to_string(),
+    )
 }
 
 /// Batch-upserts application preferences by key with last-write-wins semantics. This is the authoritative backend
@@ -811,6 +916,135 @@ pub fn web_server_stop(ctx: &AppCtx) -> Result<(), String> {
     Ok(())
 }
 
+/// app_settings key: "1" (or absent, the default) while mirror mode is on, "0" once the host turns it off.
+const MIRROR_ENABLED_KEY: &str = "remoteAccess.mirror";
+
+/// Whether mirror mode is on. Absent means on: the checkbox in the remote-access panel ships checked, so a
+/// database written before this feature existed must read as enabled rather than silently opting out.
+fn mirror_enabled(ctx: &AppCtx) -> bool {
+    get_app_settings(ctx)
+        .ok()
+        .and_then(|s| s.get(MIRROR_ENABLED_KEY).cloned())
+        .map(|v| v != "0")
+        .unwrap_or(true)
+}
+
+/// Current mirror mode plus the published layout, for a client aligning itself right after it connects.
+pub fn mirror_get(ctx: &AppCtx) -> serde_json::Value {
+    let snap = crate::web::mirror::current();
+    let mut out = snap.to_json();
+    out["enabled"] = serde_json::Value::Bool(mirror_enabled(ctx));
+    out
+}
+
+/// Publish `state` as the shared layout on behalf of the calling client and broadcast it to every other one.
+///
+/// `source` is the caller's connection ID, supplied by the transport rather than the caller's arguments, so a
+/// client cannot forge someone else's identity and thereby suppress their echo filter. The push is stored even
+/// when mirror mode is off — clients stop pushing on their own — so the last arrangement is never half-written.
+pub fn mirror_push(ctx: &AppCtx, source: &str, state: serde_json::Value) -> serde_json::Value {
+    let snap = crate::web::mirror::push(source, state);
+    let payload = snap.to_json();
+    ctx.emit(crate::web::mirror::LAYOUT_EVENT, payload.clone());
+    payload
+}
+
+/// How long an answered spawn request is remembered. Long enough that a client which was offline
+/// during the answer cannot revive the card by answering it later, short enough that the table stays
+/// small in a session running for days.
+const SPAWN_CLAIM_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// Spawn requests already answered, keyed by parent session and prompt, with the time they were claimed.
+fn spawn_claims() -> &'static std::sync::Mutex<
+    std::collections::HashMap<String, std::time::Instant>,
+> {
+    static CLAIMS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
+    > = std::sync::OnceLock::new();
+    CLAIMS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Forget a request's claim, so a fresh card for the same task can be answered again.
+///
+/// Called when the agent issues the request. An agent that retries a task the user just cancelled sends
+/// the identical parent and prompt, and without this the new card would look like an answered one and
+/// confirming it would silently do nothing.
+pub fn release_spawn_claim(parent_session_id: &str, prompt: &str) {
+    spawn_claims()
+        .lock()
+        .unwrap()
+        .remove(&spawn_claim_key(parent_session_id, prompt));
+}
+
+/// Claim one spawn request, returning true only for the first caller.
+///
+/// The confirmation card appears on every connected client, so the same request can be answered twice
+/// within the same second — one person on a desktop and a phone, or two people. The broadcast alone
+/// cannot prevent the duplicate, because it arrives after the other client has already begun creating
+/// a worktree and a child session. Claiming decides a single winner before any work starts.
+///
+/// Expired entries are pruned on each call, which is enough: claims are rare and few.
+fn claim_spawn(key: String) -> bool {
+    let mut claims = spawn_claims().lock().unwrap();
+    let now = std::time::Instant::now();
+    claims.retain(|_, at| now.duration_since(*at) < SPAWN_CLAIM_TTL);
+    claims.insert(key, now).is_none()
+}
+
+/// Build the claim key. The unit separator cannot appear in a session ID, so no prompt can be crafted
+/// to collide with a different request.
+fn spawn_claim_key(parent_session_id: &str, prompt: &str) -> String {
+    format!("{parent_session_id}\u{1f}{prompt}")
+}
+
+/// Answer a spawn request on behalf of the calling client, and report whether this caller won it.
+///
+/// Returns false when another client already confirmed or cancelled the same request; that caller must
+/// then do nothing but drop its card, or the task runs twice. The winner's broadcast carries
+/// `parentSessionId` and `prompt` for identification plus a `source` connection ID so the originator can
+/// skip its own echo.
+pub fn resolve_spawn(
+    ctx: &AppCtx,
+    source: &str,
+    parent_session_id: &str,
+    prompt: &str,
+    confirmed: bool,
+) -> bool {
+    if !claim_spawn(spawn_claim_key(parent_session_id, prompt)) {
+        return false;
+    }
+    let payload = serde_json::json!({
+        "source": source,
+        "parentSessionId": parent_session_id,
+        "prompt": prompt,
+        "confirmed": confirmed,
+    });
+    ctx.emit("spawn://resolved", payload);
+    true
+}
+
+/// Turn mirror mode on or off for every client, persisting the choice for the next launch.
+///
+/// Switching off clears the published layout so a later switch-on starts from whoever publishes first,
+/// instead of every client snapping back to an arrangement from hours ago.
+pub fn mirror_set_enabled(ctx: &AppCtx, enabled: bool) -> Result<(), String> {
+    set_app_settings(
+        ctx,
+        std::collections::HashMap::from([(
+            MIRROR_ENABLED_KEY.to_string(),
+            if enabled { "1" } else { "0" }.to_string(),
+        )]),
+    )?;
+    if !enabled {
+        crate::web::mirror::clear();
+    }
+    ctx.emit(
+        crate::web::mirror::MODE_EVENT,
+        serde_json::json!({ "enabled": enabled }),
+    );
+    Ok(())
+}
+
 /// Returns LAN remote status, port, access URL, and certificate fingerprint, merged with the persisted
 /// saved port and auto-start flag so the panel can prefill and explain itself after a restart.
 pub fn web_server_status(ctx: &AppCtx) -> crate::web::WebServerStatus {
@@ -897,10 +1131,26 @@ pub fn web_server_autostart(
 #[cfg(test)]
 mod tests {
     use super::{
-        autostart_config, get_app_settings, set_app_settings, web_server_autostart,
-        web_server_status, web_server_stop,
+        autostart_config, claim_spawn, get_app_settings, install_id, release_spawn_claim,
+        set_app_settings, spawn_claim_key, web_server_autostart, web_server_status, web_server_stop,
     };
     use std::collections::HashMap;
+
+    /// Only the first answer to a spawn request wins; a second one — the same card confirmed on a phone
+    /// a moment later — must be told it lost, so it cannot create a second worktree and child session.
+    #[test]
+    fn only_the_first_answer_claims_a_spawn_request() {
+        let key = spawn_claim_key("ses-claim-test", "build the thing");
+        assert!(claim_spawn(key.clone()), "the first answer wins");
+        assert!(!claim_spawn(key.clone()), "a second answer must lose");
+        // A different prompt, or the same prompt under a different parent, is a different request.
+        assert!(claim_spawn(spawn_claim_key("ses-claim-test", "build something else")));
+        assert!(claim_spawn(spawn_claim_key("ses-claim-test2", "build the thing")));
+        // An agent retrying a task the user cancelled sends the identical parent and prompt. Issuing the
+        // new card releases the old claim, so confirming it works instead of silently doing nothing.
+        release_spawn_claim("ses-claim-test", "build the thing");
+        assert!(claim_spawn(key), "a re-issued request can be answered again");
+    }
 
     /// Builds a headless AppCtx over a fresh SQLite db inside `dir` (mirrors web::tests).
     fn headless_ctx(dir: &std::path::Path) -> crate::host::AppCtx {
@@ -924,6 +1174,24 @@ mod tests {
             ]),
         )
         .unwrap();
+    }
+
+    /// The installation identifier is issued once and then stays put: telemetry counts installations by
+    /// it, so a value that changed between calls would inflate every usage figure it feeds.
+    #[test]
+    fn install_id_is_generated_once_and_reused() {
+        let tmp = std::env::temp_dir().join(format!("vlx-cc-install-{}", std::process::id()));
+        let ctx = headless_ctx(&tmp);
+
+        let first = install_id(&ctx).unwrap();
+        assert_eq!(first.len(), 36, "expected a canonical UUID, got {first}");
+        assert_eq!(install_id(&ctx).unwrap(), first);
+        // It is an ordinary preference, so a reopened database returns the same value.
+        assert_eq!(
+            get_app_settings(&ctx).unwrap().get("install_id").map(String::as_str),
+            Some(first.as_str())
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// Acceptance criterion 5: a manual stop persists enabled=0 while keeping port and password hash

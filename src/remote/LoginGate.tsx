@@ -242,6 +242,30 @@ export function LoginGate({ children }: { children: ReactNode }) {
           >
             {t("login.authFailed")}
           </div>
+          {/* Without a way back this page is a dead end: the window has to be closed and reopened
+              even when the rejection was momentary. Returning to the password form keeps the typed
+              password in state, so confirming it re-runs the handshake in place. */}
+          <button
+            type="button"
+            onClick={() => {
+              setError("");
+              setPhase("need-login");
+            }}
+            style={{
+              marginTop: 16,
+              width: "100%",
+              padding: "10px 0",
+              border: "none",
+              borderRadius: 8,
+              background: "var(--accent)",
+              color: "var(--bg-0)",
+              fontSize: 13.5,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            {t("common.retry")}
+          </button>
         </div>
       </div>
     );

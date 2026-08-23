@@ -74,6 +74,25 @@ export interface Group {
   mark?: string | null;
 }
 
+/** A reusable agent launch configuration shown in the new-session menu.
+ *
+ * `baseKind` is the built-in agent whose behavior the preset reuses, so hooks, resume and status detection
+ * keep working unchanged; the preset only supplies the label, icon, executable and defaults on top. */
+export interface AgentPreset {
+  id: string;
+  name: string;
+  baseKind: Session["kind"];
+  /** Absolute path; empty falls back to the per-kind default and then to PATH. */
+  execPath?: string | null;
+  agentArgs?: string | null;
+  permissionMode?: string | null;
+  /** base64 data URL, or empty to render the base kind's built-in icon. A path would be unreadable to
+   *  browser and remote clients, so the image travels inline. */
+  icon?: string | null;
+  sortOrder: number;
+  createdAt: number;
+}
+
 export interface Session {
   id: string;
   projectId: string;
@@ -90,6 +109,13 @@ export interface Session {
   /** Two-state permission mode: empty/`"default"` asks incrementally (default); `"skip"` bypasses every permission
    *  confirmation. Agent sessions only; the backend maps it to the appropriate launch flag by kind (none for opencode). */
   permissionMode?: string | null;
+  /** Agent preset this session came from, used only to show its name and icon. The preset's launch values
+   *  are copied onto the session at creation, so editing or deleting the preset changes nothing here and a
+   *  dangling ID is harmless. */
+  agentPresetId?: string | null;
+  /** Executable for this session's agent, overriding the per-kind default. Empty falls back to that
+   *  default and then to a PATH lookup; this is what lets two sessions of one kind run different binaries. */
+  agentPath?: string | null;
   hotkey?: string | null;
   /** Last remembered native agent session ID for automatic Claude/Codex resume; the frontend only passes/displays it. */
   agentSessionId?: string | null;

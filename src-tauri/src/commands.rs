@@ -513,6 +513,8 @@ pub async fn open_remote_window(
         .title(format!("VelaTerm · Remote: {display_addr}"))
         .inner_size(1280.0, 820.0)
         .min_inner_size(900.0, 600.0)
+        // Open with the chrome the user already chose instead of the OS default; see `set_native_theme`.
+        .theme(crate::native_theme(&app))
         .initialization_script(&init_script)
         // Disable native drag/drop interception so macOS WKWebView delivers HTML5 image drops.
         .disable_drag_drop_handler()
@@ -638,6 +640,40 @@ pub fn open_devtools(window: tauri::WebviewWindow) {
     {
         let _ = window;
     }
+}
+
+/// Match native window chrome to the frontend's light/dark mode. Windows only.
+///
+/// The app keeps the system title bar, and Windows paints it light until `set_theme` turns on DWM's
+/// immersive dark mode, leaving a white strip above a dark UI (issue #26 section 5). `mode` mirrors the
+/// frontend's `ThemeMode`: `dark`/`light` pin the chrome, anything else (`system`) restores follow-the-OS
+/// so a later OS change still reaches the title bar.
+///
+/// Deliberately a no-op elsewhere. On macOS and Linux the window theme is an app-wide appearance override,
+/// so applying it would also repaint native menus and dialogs and flip the WebView's `prefers-color-scheme`
+/// — a behaviour change nobody asked for on platforms whose chrome already tracks the app correctly.
+///
+/// Remembering the value matters as much as applying it: windows opened later (remote/SSH) read it at build
+/// time so they never flash the wrong chrome. `set_theme` only posts a message to the event loop and touches
+/// no I/O, so a synchronous command is correct here.
+#[tauri::command]
+pub fn set_native_theme(app: AppHandle, mode: String) {
+    #[cfg(windows)]
+    {
+        let theme = match mode.as_str() {
+            "dark" => Some(tauri::Theme::Dark),
+            "light" => Some(tauri::Theme::Light),
+            _ => None,
+        };
+        if let Some(state) = app.try_state::<crate::NativeTheme>() {
+            *state.0.lock().unwrap() = theme;
+        }
+        for (_, win) in app.webview_windows() {
+            let _ = win.set_theme(theme);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (app, mode);
 }
 
 // ─────────────────────────── SSH remote connections ───────────────────────────
@@ -825,6 +861,8 @@ fn open_login_window(
         .title(format!("VelaTerm · SSH: {host}"))
         .inner_size(1280.0, 820.0)
         .min_inner_size(900.0, 600.0)
+        // Open with the chrome the user already chose instead of the OS default; see `set_native_theme`.
+        .theme(crate::native_theme(app))
         .initialization_script(&init_script)
         .disable_drag_drop_handler()
         .build()

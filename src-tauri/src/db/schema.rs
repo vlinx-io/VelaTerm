@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   init_cmd    TEXT,
   agent_args  TEXT,
   permission_mode TEXT,
+  agent_preset_id TEXT,
+  agent_path  TEXT,
   hotkey      TEXT,
   agent_session_id TEXT,
   parent_session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
@@ -114,6 +116,29 @@ CREATE TABLE IF NOT EXISTS url_host_keys (
   host_port    TEXT PRIMARY KEY,   -- "host:port" TLS endpoint and fingerprint trust anchor
   fingerprint  TEXT NOT NULL,      -- Uppercase, colon-separated SHA-256 fingerprint from probe_fingerprint
   confirmed_at INTEGER NOT NULL    -- Time in seconds when the user last confirmed this fingerprint
+);
+
+-- Reusable agent launch configurations. A preset is display and launch data only: `base_kind` says which
+-- built-in agent it behaves like, so hook injection, resume and status detection keep using SessionKind
+-- unchanged, while the preset supplies the name, icon, executable and default arguments. This is what lets
+-- several drop-in replacements of the same CLI run side by side, which a single per-kind executable path
+-- in app_settings cannot express.
+--
+-- Sessions copy a preset's values onto their own row at creation and keep `agent_preset_id` for display
+-- only, so editing or deleting a preset never disturbs sessions already created from it.
+--
+-- `icon` holds a base64 data URL rather than a file path: remote and browser clients cannot read a local
+-- file, and an inline value reaches them through the existing tree sync.
+CREATE TABLE IF NOT EXISTS agent_presets (
+  id              TEXT PRIMARY KEY,
+  name            TEXT NOT NULL,
+  base_kind       TEXT NOT NULL,              -- SessionKind string; currently always 'claude'
+  exec_path       TEXT,                       -- Absolute path; empty falls back to PATH lookup
+  agent_args      TEXT,
+  permission_mode TEXT,
+  icon            TEXT,                       -- base64 data URL, size-capped at write time
+  sort_order      INTEGER NOT NULL DEFAULT 0,
+  created_at      INTEGER NOT NULL
 );
 
 -- Freshness bookkeeping for the global search index. Each session/track records how far indexing has

@@ -195,9 +195,14 @@ async fn handle_socket(
     // Register session-independent global forwarding for spawn, document-open, tree, and clone events.
     for name in [
         "spawn://request",
+        "spawn://resolved",
         "view://request",
         crate::host::TREE_CHANGED,
+        crate::host::PRESETS_CHANGED,
         crate::git::CLONE_PROGRESS_EVENT,
+        // UI mirror: the shared layout and the on/off switch both reach every client this way.
+        crate::web::mirror::LAYOUT_EVENT,
+        crate::web::mirror::MODE_EVENT,
     ] {
         event_ids.push(listen_forward(&ctx.app, name, out_tx.clone()));
     }

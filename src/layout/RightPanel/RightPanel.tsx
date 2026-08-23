@@ -10,7 +10,7 @@ import { useT } from "../../i18n";
 import { useTermStore } from "../../store/termStore";
 import { type Group, type Project, type Session } from "../../types";
 import { FilesTab } from "./FilesTab";
-import { GitTab } from "./GitTab";
+import { GitTab } from "./git/GitTab";
 import { InfoTab } from "./InfoTab";
 import { KV } from "./parts";
 

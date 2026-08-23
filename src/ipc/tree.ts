@@ -78,6 +78,10 @@ export interface CreateSessionInput {
   agentArgs?: string | null;
   /** Agent permission mode: `"skip"` bypasses confirmations; empty/`"default"` asks incrementally. */
   permissionMode?: string | null;
+  /** Preset this session was created from; display data only, since the launch values are copied over. */
+  agentPresetId?: string | null;
+  /** Executable for this session's agent, overriding the per-kind default. */
+  agentPath?: string | null;
 }
 
 export function createSession(input: CreateSessionInput): Promise<Session> {
@@ -95,6 +99,8 @@ export function createSession(input: CreateSessionInput): Promise<Session> {
     agentSessionId: input.agentSessionId ?? null,
     agentArgs: input.agentArgs ?? null,
     permissionMode: input.permissionMode ?? null,
+    agentPresetId: input.agentPresetId ?? null,
+    agentPath: input.agentPath ?? null,
   });
 }
 

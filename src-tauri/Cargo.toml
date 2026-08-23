@@ -1,6 +1,6 @@
 [package]
 name = "velaterm"
-version = "0.1.101"
+version = "0.1.102"
 description = "VelaTerm multi-session terminal manager"
 authors = ["vlinx"]
 edition = "2021"
@@ -115,6 +115,11 @@ base64 = "0.22"
 # Cross-platform process-tree CPU/memory sampling uses sysinfo native APIs rather than external ps. Enable
 # only `system`, pin the version for reproducibility, and omit unrelated disk/network/component/user features.
 sysinfo = { version = "=0.33.1", default-features = false, features = ["system"] }
+# On-the-fly compression of static frontend assets (see web/static_assets.rs). rust-embed's `compression`
+# feature only shrinks the assets inside the binary and hands back plaintext bytes, so it does nothing for
+# transfer size; these two codecs do. Brotli is preferred and gzip is the fallback for older clients.
+brotli = "8"
+flate2 = "1"
 
 # Unix-only rlimit support raises open-file soft limits for inherited agent sessions, avoiding macOS's
 # default 256-descriptor failures. Windows has no equivalent.

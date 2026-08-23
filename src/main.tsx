@@ -10,7 +10,7 @@ import "@fontsource/jetbrains-mono/400-italic.css";
 import "./styles/fonts.css";
 import "./styles/index.css";
 import App from "./App";
-import { t } from "./i18n";
+import { initI18n, t } from "./i18n";
 import MobileApp from "./mobile/MobileApp";
 import { isMobileView } from "./mobile/detect";
 import { LoginGate } from "./remote/LoginGate";
@@ -20,6 +20,23 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 // items in uncovered areas, mixing unrelated actions and styles. Cancel only the browser default in
 // capture phase; propagation continues to terminal, tab, file-tree, and editor React handlers.
 document.addEventListener("contextmenu", (event) => event.preventDefault(), { capture: true });
+
+// macOS text services (auto-capitalization, autocorrect, spell-check marking) apply to every
+// editable element in WKWebView unless the page opts out per element. Project names, paths, and
+// commands must arrive verbatim, so opt out globally on focus instead of repeating the three
+// attributes in each component (FormModal had them; CreateProjectModal and others did not).
+// focusin fires before the first keystroke and costs nothing on the terminal render hot path,
+// unlike a subtree MutationObserver. Attributes already set in JSX win: only absent ones are added.
+document.addEventListener("focusin", (event) => {
+  const el = event.target;
+  if (!(el instanceof HTMLElement)) return;
+  const editable =
+    el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el.isContentEditable;
+  if (!editable) return;
+  if (!el.hasAttribute("autocapitalize")) el.setAttribute("autocapitalize", "none");
+  if (!el.hasAttribute("autocorrect")) el.setAttribute("autocorrect", "off");
+  if (!el.hasAttribute("spellcheck")) el.setAttribute("spellcheck", "false");
+});
 
 // Global fallback: render unhandled errors outside React directly into a DOM panel.
 installGlobalErrorOverlay();
@@ -34,13 +51,19 @@ if ("__TAURI_INTERNALS__" in window) {
   (window as unknown as Record<string, unknown>).OffscreenCanvas = undefined;
 }
 
+// Dictionaries other than English load on demand, so wait for the active one before the first paint;
+// otherwise a non-English user briefly sees English and then a full re-render. `finally` rather than
+// `then`: if the dictionary fails to load there is nothing to wait for, and English is a usable UI.
+//
 // Do not use React.StrictMode: development double mounting would duplicate xterm instances and PTY
 // spawns. Select the mobile layout once at startup for non-Tauri narrow touch screens or overrides.
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <ErrorBoundary>
-    <LoginGate>{isMobileView() ? <MobileApp /> : <App />}</LoginGate>
-  </ErrorBoundary>,
-);
+void initI18n().finally(() => {
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <ErrorBoundary>
+      <LoginGate>{isMobileView() ? <MobileApp /> : <App />}</LoginGate>
+    </ErrorBoundary>,
+  );
+});
 
 function installGlobalErrorOverlay() {
   let overlayEl: HTMLElement | null = null;

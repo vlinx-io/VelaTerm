@@ -162,6 +162,30 @@ export function listen<T>(
     : wsClient.listen<T>(name, cb);
 }
 
+/**
+ * Emits on the native Tauri event bus regardless of transport mode.
+ *
+ * The counterpart to `listenNative`, for the events a remote window exchanges with the desktop process
+ * that hosts it — its SSH tunnel, for instance — rather than with the server it displays.
+ */
+export async function emitNative(name: string, payload?: unknown): Promise<void> {
+  const { emit } = await import("@tauri-apps/api/event");
+  await emit(name, payload);
+}
+
+/**
+ * Listens through the native Tauri event bus regardless of transport mode. Remote windows
+ * (`__VLX_FORCE_BROWSER__`) route `listen` over the WebSocket relay to the remote server, which never
+ * carries events emitted by the local desktop process — such as `menu://action`. Use this for those
+ * local-shell events; the window keeps `__TAURI_INTERNALS__` precisely so native listening still works.
+ */
+export function listenNative<T>(
+  name: string,
+  cb: (payload: T) => void,
+): Promise<UnlistenFn> {
+  return tauriListen<T>(name, (e) => cb(e.payload));
+}
+
 // PTY output streams.
 
 /**

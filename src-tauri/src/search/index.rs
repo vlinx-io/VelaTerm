@@ -500,6 +500,8 @@ mod tests {
             id: id.to_string(),
             project_id: "p".to_string(),
             group_id: None,
+            agent_preset_id: None,
+            agent_path: None,
             name: id.to_string(),
             kind,
             shell: None,

@@ -50,7 +50,7 @@ const ptBR: typeof en = {
   "titlebar.themeSystem": (resolved) => `Seguir o sistema (atualmente ${resolved})`, // Follow system (currently {resolved})
   "titlebar.themeDark": "Escuro", // Dark
   "titlebar.themeLight": "Claro", // Light
-  "titlebar.browser": "Navegador integrado (⌘⇧B)", // Built-in Browser (⌘⇧B)
+  "titlebar.browser": "Navegador integrado", // Built-in Browser
   "titlebar.remoteAccess": "Acesso remoto (navegador)", // Remote Access (Browser)
   "titlebar.connectRemote": "Conectar a servidor remoto", // Connect to Remote Server
   "titlebar.share": "Compartilhar", // Share
@@ -142,6 +142,8 @@ const ptBR: typeof en = {
   "spawn.promptLabel": "Prompt", // Prompt
   "spawn.agentLabel": "Agent", // Agent
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
+  "spawn.modelLabel": "Modelo", // Model
+  "spawn.effortLabel": "Esforço", // Effort
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
@@ -156,6 +158,28 @@ const ptBR: typeof en = {
   "changes.notRepo": "Não é um repositório git",
   "changes.selectFile": "Selecione um arquivo",
   "changes.binary": "Arquivo binário — diff por linha indisponível",
+  "changes.commitTitle": (hash: string) => `Commit ${hash}`,
+
+  "git.staged": "Preparado",
+  "git.changes": "Alterações",
+  "git.untracked": "Arquivos não rastreados",
+  "git.committed": "Alterações commitadas",
+  "git.stage": "Preparar",
+  "git.unstage": "Remover do preparo",
+  "git.stageAll": "Preparar tudo",
+  "git.unstageAll": "Remover tudo do preparo",
+  "git.discard": "Descartar",
+  "git.deleteFile": "Excluir",
+  "git.viewAll": "Ver tudo",
+  "git.detached": "(destacado)",
+  "git.aheadBehind": "Commits à frente e atrás do branch upstream",
+  "git.commitPlaceholder": "Mensagem do commit",
+  "git.amend": "Corrigir o último commit",
+  "git.amendCommit": "Corrigir commit",
+  "git.commitCount": (n: number) => (n === 1 ? "Commitar 1 arquivo" : `Commitar ${n} arquivos`),
+  "git.commitNoFiles": "Este commit não altera arquivos",
+  "git.noCommits": "Ainda não há commits",
+  "git.loadMore": "Carregar mais",
   "tree.merge": "Merge…", // TODO translate
   "tree.copyWorktreePath": "Copy worktree path",
   "tree.openWorktreeDir": "Open worktree folder",
@@ -219,6 +243,7 @@ const ptBR: typeof en = {
   "settings.termFontSize": "Terminal size", // TODO translate
   "settings.fontDefault": "Default", // TODO translate
   "settings.fontCustom": "Custom…", // TODO translate
+  "settings.fontUnavailable": "Não instalada neste dispositivo",
   "settings.fontAuto": "Auto", // TODO translate
   "settings.fontSmaller": "Smaller", // TODO translate
   "settings.fontLarger": "Larger", // TODO translate
@@ -307,6 +332,9 @@ const ptBR: typeof en = {
   "remote.autoRestartHint":
     "O acesso remoto reinicia automaticamente ao reabrir o aplicativo. \"Parar servidor\" desativa isso.", // Remote access restarts automatically when the app is reopened. Stop Server turns this off.
   "remote.autostartFailed": "Falha no início automático:", // Automatic start failed:
+  "remote.mirror": "Espelhar o layout em todos os dispositivos", // Mirror layout across devices
+  "remote.mirrorHint":
+    "Abas, divisões e a sessão ativa ficam iguais em todos os dispositivos conectados. O foco do teclado permanece onde está em cada um.", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
 
   // ── Remote connection panel ──
   "connect.title": "Conectar a servidor remoto", // Connect to Remote Server
@@ -414,7 +442,7 @@ const ptBR: typeof en = {
   "clone.elapsed": (seconds: number) => `${seconds} s decorridos`,
   "clone.slowHint": "Sem progresso há 30 segundos. Verifique a rede ou o proxy da máquina remota; você pode cancelar e tentar novamente.",
   "clone.submit": "Clonar", // Clone
-  "tree.globalSearch": "Pesquisar em todas as sessões (⌘⇧F)", // Search All Sessions (⌘⇧F)
+  "tree.globalSearch": "Pesquisar em todas as sessões", // Search All Sessions
   "tree.archivedSessions": "Sessões arquivadas", // Archived Sessions
   "tree.searchPlaceholder": "Buscar sessões / grupos…", // Search sessions / groups…
   "tree.clearSearch": "Limpar busca", // Clear search
@@ -478,6 +506,14 @@ const ptBR: typeof en = {
   "tree.cwdLabel": "Diretório de trabalho (vazio = raiz do projeto)", // Working directory (leave empty for project root)
   "tree.initCmdLabel": "Comando de inicialização (opcional)", // Startup command (optional)
   "tree.agentArgsLabel": "Argumentos de inicialização (opcional)", // Launch args (optional)
+  "preset.execPathLabel": "Executável (opcional)",
+  "preset.execPathPlaceholder": "/usr/local/bin/claude",
+  "preset.execPathHint": "Deixe vazio para usar o comando configurado do agente. Informe para que apenas esta sessão use um substituto compatível.",
+  "preset.saveLabel": "Salvar como predefinição",
+  "preset.namePlaceholder": "Nomeie esta predefinição",
+  "preset.iconChoose": "Escolher ícone",
+  "preset.iconClear": "Remover",
+  "preset.iconHint": "Imagens quadradas funcionam melhor; as demais são cortadas e reduzidas para 64x64.",
   "tree.permissionSkipLabel": "Pular todas as confirmações de permissão", // Skip all permission confirmations
   "tree.permissionSkipHint":
     "Inicia com a flag de bypass deste agente (ex.: Claude --dangerously-skip-permissions; o Codex também desativa o sandbox). Vale a cada inicialização — use com cuidado.",
@@ -612,6 +648,7 @@ const ptBR: typeof en = {
   "browser.back": "Voltar", // Back
   "browser.forward": "Avançar", // Forward
   "browser.reload": "Recarregar", // Reload
+  "browser.desktopOnly": "As abas do navegador abrem apenas no aplicativo de desktop.", // Browser tabs open in the desktop app only.
   "browser.stop": "Parar o carregamento", // Stop loading
   "browser.openExternal": "Abrir no navegador do sistema", // Open in system browser
   "browser.addressPlaceholder": "Digite uma URL ou termos de busca", // Enter URL or search terms
@@ -693,7 +730,7 @@ const ptBR: typeof en = {
   "doc.outlineEmpty": "Sem títulos", // No headings
   "doc.saving": "Salvando…", // Saving…
   "doc.overwriteConfirm": "Já existe um arquivo com esse nome. Clique em “Substituir” para substituí-lo.", // A file with this name already exists. Click "Overwrite" to replace it.
-  "doc.saveTooltip": "Salvar (⌘S)", // Save (⌘S)
+  "doc.saveTooltip": "Salvar", // Save
   "doc.externalChanged":
     "O arquivo foi modificado no disco (você tem alterações locais não salvas).", // The file was modified on disk…
   "doc.reloadDiscard": "Recarregar (descartar minhas alterações)", // Reload (discard my changes)
@@ -803,7 +840,7 @@ const ptBR: typeof en = {
   "login.rateLimited": "Muitas tentativas. Aguarde um minuto e tente novamente.", // Too many attempts. Please wait a minute and try again.
   "login.failed": "Falha no login, tente novamente", // Login failed, please try again
   "login.pairingRequired": "Este servidor requer um link de emparelhamento. Abra o link gerado no painel de Acesso remoto do app de desktop.", // This server requires a pairing link
-  "login.authFailed": "Senha incorreta ou o link de emparelhamento expirou. Reconecte-se com um novo link de emparelhamento.", // Wrong password or pairing link expired
+  "login.authFailed": "Falha na autenticação. Verifique a senha de acesso ou abra um novo link de emparelhamento se ele foi gerado novamente.", // Authentication failed, check password or use a new pairing link
   "dir.title": "Escolher diretório do projeto", // Choose Project Directory
   "dir.pathPlaceholder": "Pesquise, ou digite um caminho e pressione Enter (aceita ~)", // Search, or type a path and press Enter (supports ~)
   "dir.up": "Um nível acima", // Up one level

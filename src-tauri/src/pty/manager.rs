@@ -383,6 +383,9 @@ impl PtyManager {
         // rewrite of `PYTHONHOME`, `LD_LIBRARY_PATH`, `PATH`, and friends. Undo it before anything else so
         // the user's shell sees the system environment and later overrides here still win. No-op elsewhere.
         crate::appimage::scrub_pty(&mut cmd);
+        // Drop inherited color suppressors before advertising color, so an instance launched from an IDE
+        // or an agent harness does not hand every session a monochrome TUI.
+        scrub_color_suppressors(&mut cmd);
         // Advertise a color-capable terminal.
         cmd.env("TERM", "xterm-256color");
         // Explicitly advertise true color so applications do not conservatively fall back to 256 colors.
@@ -489,7 +492,7 @@ impl PtyManager {
 
         // Build in-memory injection and the launch command for typed sessions. Read the configured executable
         // path at spawn time so settings changes apply to the next launch.
-        let bin_path = agent_bin_path(&app, kind);
+        let bin_path = session_agent_path(&app, &id).or_else(|| agent_bin_path(&app, kind));
         // Lazily install Pi's state-bridge extension under `<data_dir>/pi/` and pass its absolute path for
         // loading through `-e "$VLX_PI_EXT"`. The static extension reads the session's injected `VLX_*` values.
         // It reports without persisting the port or token. If installation fails, log it and let Pi launch
@@ -1306,6 +1309,33 @@ impl PtyManager {
     }
 }
 
+/// Whether a `FORCE_COLOR` value disables color. Anything else (`1`, `2`, `3`, `true`) was set to turn
+/// color on and is left alone.
+fn force_color_disables(value: &str) -> bool {
+    let v = value.trim();
+    v.is_empty() || v.eq_ignore_ascii_case("0") || v.eq_ignore_ascii_case("false")
+}
+
+/// Remove the inherited environment variables that make color-aware CLIs go monochrome.
+///
+/// A PTY inherits this process's environment. When the app is started from an IDE, an agent harness or
+/// any CI-like shell that exports `NO_COLOR`, `FORCE_COLOR=0` or `CI`, chalk/Ink emit no SGR at all and
+/// an agent TUI renders in the default foreground, even though `TERM` and `COLORTERM` advertise color
+/// right after this call. Only the launcher's leftovers are dropped: a user who exports these in a shell
+/// profile still gets them, because the profile runs inside the PTY. `TERM=dumb` needs no handling here
+/// since `TERM` is overwritten unconditionally.
+fn scrub_color_suppressors(cmd: &mut portable_pty::CommandBuilder) {
+    cmd.env_remove("NO_COLOR");
+    cmd.env_remove("CI");
+    let disables = cmd
+        .get_env("FORCE_COLOR")
+        .and_then(|v| v.to_str())
+        .is_some_and(force_color_disables);
+    if disables {
+        cmd.env_remove("FORCE_COLOR");
+    }
+}
+
 /// Nudges PTY rows to trigger SIGWINCH and force a full-screen TUI redraw. It operates directly on the master
 /// without changing authoritative size, ownership, or resize broadcasts. Rows minimize text reflow; failures are ignored.
 ///
@@ -1428,13 +1458,32 @@ pub(crate) fn agent_bin_path(app: &AppCtx, kind: SessionKind) -> Option<String> 
     if p.is_empty() {
         return None;
     }
-    // Expand `~/` and manually entered Windows `~\` prefixes; preserve all other paths.
+    Some(expand_home_prefix(p))
+}
+
+/// Expand a leading `~/`, or the Windows `~\` people type by hand, against the home directory. Every other
+/// path is returned unchanged, including one whose home directory cannot be resolved.
+fn expand_home_prefix(p: &str) -> String {
     if let Some(rest) = p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\")) {
         if let Some(home) = crate::host::home_dir() {
-            return Some(home.join(rest).to_string_lossy().to_string());
+            return home.join(rest).to_string_lossy().to_string();
         }
     }
-    Some(p.to_string())
+    p.to_string()
+}
+
+/// This session's own agent executable, or None to fall back to the per-kind default. Read at spawn time
+/// like the default, so editing it applies to the next launch.
+fn session_agent_path(app: &AppCtx, id: &str) -> Option<String> {
+    let raw = {
+        let conn = app.db().conn.lock().ok()?;
+        crate::db::repo::get_agent_path(&conn, id).ok()?
+    }?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(expand_home_prefix(trimmed))
 }
 
 /// Detects whether the installed Codex supports the trust flag required for lifecycle-hook injection.
@@ -1898,6 +1947,37 @@ fn home_dir() -> Option<String> {
 mod tests {
     use portable_pty::{native_pty_system, CommandBuilder, PtySize};
     use std::io::Read;
+
+    /// Color suppressors inherited from the launcher are dropped, while a `FORCE_COLOR` that was raised
+    /// deliberately survives. Values come from the base environment a `CommandBuilder` starts with.
+    #[test]
+    fn scrub_color_suppressors_drops_only_the_suppressing_values() {
+        let mut cmd = CommandBuilder::new("bash");
+        cmd.env("NO_COLOR", "1");
+        cmd.env("CI", "true");
+        cmd.env("FORCE_COLOR", "0");
+        super::scrub_color_suppressors(&mut cmd);
+        assert!(cmd.get_env("NO_COLOR").is_none());
+        assert!(cmd.get_env("CI").is_none());
+        assert!(cmd.get_env("FORCE_COLOR").is_none());
+
+        let mut kept = CommandBuilder::new("bash");
+        kept.env("FORCE_COLOR", "3");
+        super::scrub_color_suppressors(&mut kept);
+        assert_eq!(kept.get_env("FORCE_COLOR").unwrap(), "3");
+    }
+
+    /// Only `0`, `false` and an empty value mean "no color"; every other value turns color on.
+    #[test]
+    fn force_color_disables_matches_only_off_values() {
+        assert!(super::force_color_disables("0"));
+        assert!(super::force_color_disables(" false "));
+        assert!(super::force_color_disables("FALSE"));
+        assert!(super::force_color_disables(""));
+        assert!(!super::force_color_disables("1"));
+        assert!(!super::force_color_disables("3"));
+        assert!(!super::force_color_disables("true"));
+    }
 
     /// Persisted shell validation: reject empty values, allow bare command names for `PATH`, and require
     /// absolute paths to exist.

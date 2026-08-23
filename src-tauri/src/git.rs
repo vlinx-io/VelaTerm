@@ -190,7 +190,10 @@ pub fn status(path: &str) -> GitStatus {
         return GitStatus::not_repo();
     }
 
-    let branch = run_git(path, &["rev-parse", "--abbrev-ref", "HEAD"]).filter(|s| !s.is_empty());
+    // A detached HEAD makes `--abbrev-ref` answer with the literal "HEAD", which is not a branch name.
+    // Reporting None lets the UI say "detached" instead of showing a branch called HEAD.
+    let branch = run_git(path, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .filter(|s| !s.is_empty() && s != "HEAD");
 
     // ahead/behind are relative to upstream; use 0/0 when no upstream exists.
     let (mut ahead, mut behind) = (0, 0);
@@ -1499,6 +1502,20 @@ pub struct ChangedFile {
     pub deletions: u32,
     /// Whether numstat marks the file as binary.
     pub binary: bool,
+    /// Index-side state from porcelain column X: empty, modified, added, deleted, or renamed.
+    /// A non-empty value means the file has something staged.
+    pub index: String,
+    /// Worktree-side state from porcelain column Y: empty, modified, added, deleted, renamed, or
+    /// untracked. A non-empty value means the file has something not yet staged.
+    pub worktree: String,
+    /// Staged line counts against HEAD (`git diff --numstat --cached`); zero when nothing is staged.
+    pub staged_additions: u32,
+    pub staged_deletions: u32,
+    pub staged_binary: bool,
+    /// Unstaged line counts against the index (`git diff --numstat`); zero when the worktree matches.
+    pub unstaged_additions: u32,
+    pub unstaged_deletions: u32,
+    pub unstaged_binary: bool,
 }
 
 /// Both sides of a single-file diff: HEAD versus worktree.
@@ -1530,34 +1547,7 @@ pub struct CommitInfo {
 
 /// Return up to `limit` recent commits; non-repositories/empty histories return an empty vector.
 pub fn recent_commits(cwd: &str, limit: usize) -> Vec<CommitInfo> {
-    let is_repo = run_git(cwd, &["rev-parse", "--is-inside-work-tree"])
-        .map(|s| s == "true")
-        .unwrap_or(false);
-    if !is_repo {
-        return Vec::new();
-    }
-    let n = limit.clamp(1, 50).to_string();
-    // Separate fields with unit separator and commits by line; one-line subjects cannot contain it.
-    let pretty = "--pretty=format:%h\x1f%s\x1f%an\x1f%cr";
-    let out = match run_git(cwd, &["log", "-n", &n, pretty]) {
-        Some(s) if !s.is_empty() => s,
-        _ => return Vec::new(),
-    };
-    out.lines()
-        .filter_map(|line| {
-            let mut f = line.split('\x1f');
-            let hash = f.next()?.to_string();
-            if hash.is_empty() {
-                return None;
-            }
-            Some(CommitInfo {
-                subject: f.next().unwrap_or("").to_string(),
-                author: f.next().unwrap_or("").to_string(),
-                relative: f.next().unwrap_or("").to_string(),
-                hash,
-            })
-        })
-        .collect()
+    log_page(cwd, limit.clamp(1, 50), 0)
 }
 
 /// Resolve repository root, falling back to the supplied directory.
@@ -1565,6 +1555,46 @@ fn repo_top(cwd: &str) -> String {
     run_git(cwd, &["rev-parse", "--show-toplevel"])
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| cwd.to_string())
+}
+
+/// Map one porcelain column to a display status. Column X is the index side and column Y the
+/// worktree side; a space (or the `?` of an untracked pair, handled by the caller) means "nothing
+/// on this side". Keeping the sides apart is what lets the Git panel show Staged and Changes as
+/// separate groups, and one file in both at once when it is partly staged.
+fn porcelain_side(c: char) -> &'static str {
+    match c {
+        'M' | 'T' => "modified",
+        'A' => "added",
+        'D' => "deleted",
+        'R' => "renamed",
+        'C' => "added",
+        'U' => "modified", // unmerged: treat as a content conflict the user still has to resolve
+        _ => "",
+    }
+}
+
+/// Collect a `git diff --numstat` map of path -> (additions, deletions, binary).
+/// Binary files report `-` for both counts.
+fn numstat_map(cwd: &str, args: &[&str]) -> std::collections::HashMap<String, (u32, u32, bool)> {
+    let mut map = std::collections::HashMap::new();
+    let Some(out) = run_git(cwd, args) else {
+        return map;
+    };
+    for line in out.lines() {
+        let mut it = line.split('\t');
+        let a = it.next().unwrap_or("");
+        let d = it.next().unwrap_or("");
+        let p = it.next().unwrap_or("").trim();
+        if p.is_empty() {
+            continue;
+        }
+        let binary = a == "-" || d == "-";
+        map.insert(
+            p.to_string(),
+            (a.parse().unwrap_or(0), d.parse().unwrap_or(0), binary),
+        );
+    }
+    map
 }
 
 /// Map porcelain XY codes to display status.
@@ -1593,25 +1623,12 @@ pub fn changed_files(cwd: &str) -> Result<Vec<ChangedFile>, String> {
     if !is_repo {
         return Err(format!("Not a git repository: {cwd}"));
     }
-    // numstat counts tracked staged/unstaged lines against HEAD; binary values are `-`.
-    let mut stat: std::collections::HashMap<String, (u32, u32, bool)> =
-        std::collections::HashMap::new();
-    if let Some(out) = run_git(cwd, &["diff", "--numstat", "HEAD"]) {
-        for line in out.lines() {
-            let mut it = line.split('\t');
-            let a = it.next().unwrap_or("");
-            let d = it.next().unwrap_or("");
-            let p = it.next().unwrap_or("").trim();
-            if p.is_empty() {
-                continue;
-            }
-            let binary = a == "-" || d == "-";
-            stat.insert(
-                p.to_string(),
-                (a.parse().unwrap_or(0), d.parse().unwrap_or(0), binary),
-            );
-        }
-    }
+    // Three numstat views: everything against HEAD (what the change viewer shows), the staged part
+    // alone, and the not-yet-staged part alone. The Git panel needs the last two to label its
+    // Staged and Changes groups with their own line counts.
+    let stat = numstat_map(cwd, &["diff", "--numstat", "HEAD"]);
+    let staged = numstat_map(cwd, &["diff", "--numstat", "--cached", "HEAD"]);
+    let unstaged = numstat_map(cwd, &["diff", "--numstat"]);
     // Porcelain supplies XY in columns 0-1 and path from column 3, including untracked files.
     let porcelain = run_git_raw(cwd, &["status", "--porcelain"]).unwrap_or_default();
     let mut files: Vec<ChangedFile> = Vec::new();
@@ -1634,12 +1651,34 @@ pub fn changed_files(cwd: &str) -> Result<Vec<ChangedFile>, String> {
         }
         let status = porcelain_status(xy);
         let (additions, deletions, binary) = stat.get(&path).copied().unwrap_or((0, 0, false));
+        let (sa, sd, sb) = staged.get(&path).copied().unwrap_or((0, 0, false));
+        let (ua, ud, ub) = unstaged.get(&path).copied().unwrap_or((0, 0, false));
+        // Untracked files report `??`, which is neither an index nor a worktree code: place them
+        // entirely on the worktree side so the panel can list them under Untracked files.
+        let mut chars = xy.chars();
+        let (x, y) = (chars.next().unwrap_or(' '), chars.next().unwrap_or(' '));
+        let (index_side, worktree_side) = if xy == "??" {
+            (String::new(), "untracked".to_string())
+        } else {
+            (
+                porcelain_side(x).to_string(),
+                porcelain_side(y).to_string(),
+            )
+        };
         files.push(ChangedFile {
             path,
             status: status.to_string(),
             additions,
             deletions,
             binary,
+            index: index_side,
+            worktree: worktree_side,
+            staged_additions: sa,
+            staged_deletions: sd,
+            staged_binary: sb,
+            unstaged_additions: ua,
+            unstaged_deletions: ud,
+            unstaged_binary: ub,
         });
     }
     files.sort_by(|a, b| a.path.cmp(&b.path));
@@ -1723,6 +1762,392 @@ pub fn file_diff_at(cwd: &str, path: &str, work_path: &std::path::Path) -> Resul
     })
 }
 
+// ─────────────────────────── Git panel actions ───────────────────────────
+// Staging, committing, discarding, and history browsing for the right panel's Git tab. Everything
+// here goes through the git binary; the one exception is deleting an untracked file, which no git
+// command does and which therefore carries its own containment check.
+
+/// Upper bound on paths handed to a single git invocation. A repository with thousands of changes
+/// would otherwise exceed the platform's command-line length limit, so callers batch instead.
+const MAX_PATHS_PER_CALL: usize = 200;
+
+/// Reject a repository-relative path that could escape the repository or be read as an option.
+/// Paths reaching these commands come from a client, not from our own listing, so treat them as
+/// untrusted: absolute paths, `..` components, and empty strings are refused outright. Everything
+/// that passes is still handed to git after a `--` separator.
+fn check_rel_path(path: &str) -> Result<(), String> {
+    let p = path.trim();
+    if p.is_empty() {
+        return Err("Empty path".into());
+    }
+    let candidate = std::path::Path::new(p);
+    if candidate.is_absolute() || p.starts_with('/') || p.starts_with('\\') {
+        return Err(format!("Path must be repository-relative: {p}"));
+    }
+    // Windows drive-letter forms such as `C:file` are relative to a drive, not to the repository.
+    if p.chars().nth(1) == Some(':') {
+        return Err(format!("Path must be repository-relative: {p}"));
+    }
+    for part in candidate.components() {
+        if matches!(part, std::path::Component::ParentDir) {
+            return Err(format!("Path escapes the repository: {p}"));
+        }
+    }
+    Ok(())
+}
+
+/// Validate a non-empty batch of repository-relative paths.
+fn check_rel_paths(paths: &[String]) -> Result<(), String> {
+    if paths.is_empty() {
+        return Err("No paths given".into());
+    }
+    for p in paths {
+        check_rel_path(p)?;
+    }
+    Ok(())
+}
+
+/// Confirm `cwd` is inside a work tree before any mutation runs.
+fn require_repo(cwd: &str) -> Result<(), String> {
+    if cwd.trim().is_empty() {
+        return Err("No working directory".into());
+    }
+    let is_repo = run_git(cwd, &["rev-parse", "--is-inside-work-tree"])
+        .map(|s| s == "true")
+        .unwrap_or(false);
+    if is_repo {
+        Ok(())
+    } else {
+        Err(format!("Not a git repository: {cwd}"))
+    }
+}
+
+/// Whether the repository has a commit yet. A freshly initialized repository has no HEAD, which
+/// changes how unstaging and history have to work.
+fn has_head(cwd: &str) -> bool {
+    crate::host::command("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(["rev-parse", "--verify", "--quiet", "HEAD"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Run git and return its trimmed stderr as the error when it fails. The message goes straight to
+/// the UI, so it stays in English like every other backend string.
+fn run_git_checked(cwd: &str, args: &[&str]) -> Result<String, String> {
+    let out = crate::host::command("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(args)
+        .output()
+        .map_err(|e| format!("Failed to run git: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        let err = if err.is_empty() {
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        } else {
+            err
+        };
+        return Err(if err.is_empty() {
+            format!("git {} failed", args.first().copied().unwrap_or("command"))
+        } else {
+            err
+        });
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Run `git <prefix> -- <paths>` in batches so long file lists cannot overflow the command line.
+fn run_git_on_paths(cwd: &str, prefix: &[&str], paths: &[String]) -> Result<(), String> {
+    for chunk in paths.chunks(MAX_PATHS_PER_CALL) {
+        let mut args: Vec<&str> = prefix.to_vec();
+        args.push("--");
+        for p in chunk {
+            args.push(p.as_str());
+        }
+        run_git_checked(cwd, &args)?;
+    }
+    Ok(())
+}
+
+/// Stage the given paths, including untracked files and deletions.
+///
+/// Runs from the repository root: `changed_files` reports root-relative paths, while git resolves a
+/// pathspec against the directory it runs in. A session opened in a subdirectory would otherwise make
+/// git look for `sub/a.txt` inside `sub/`, and `add` fails with "pathspec did not match any files".
+pub fn stage(cwd: &str, paths: &[String]) -> Result<(), String> {
+    require_repo(cwd)?;
+    check_rel_paths(paths)?;
+    run_git_on_paths(&repo_top(cwd), &["add", "-A"], paths)
+}
+
+/// Unstage the given paths, leaving the worktree untouched. Before the first commit there is no
+/// HEAD to restore from, so drop the entries from the index instead.
+///
+/// Runs from the repository root for the same reason as `stage`, and here the mismatch is silent:
+/// `reset` matching nothing still exits 0, so the panel would report success and leave the file staged.
+pub fn unstage(cwd: &str, paths: &[String]) -> Result<(), String> {
+    require_repo(cwd)?;
+    check_rel_paths(paths)?;
+    let root = repo_top(cwd);
+    if has_head(&root) {
+        run_git_on_paths(&root, &["reset", "-q", "HEAD"], paths)
+    } else {
+        run_git_on_paths(
+            &root,
+            &["rm", "--cached", "-r", "-q", "--ignore-unmatch"],
+            paths,
+        )
+    }
+}
+
+/// Which of `paths` git currently tracks. Untracked files need deleting rather than restoring.
+///
+/// Callers pass the repository root: both the pathspec and, thanks to `--full-name`, the output are
+/// then root-relative, matching the paths `changed_files` produced.
+fn tracked_paths(cwd: &str, paths: &[String]) -> std::collections::HashSet<String> {
+    let mut tracked = std::collections::HashSet::new();
+    for chunk in paths.chunks(MAX_PATHS_PER_CALL) {
+        let mut args: Vec<&str> = vec!["ls-files", "--full-name", "--"];
+        for p in chunk {
+            args.push(p.as_str());
+        }
+        if let Some(out) = run_git(cwd, &args) {
+            for line in out.lines() {
+                let name = line.trim().trim_matches('"');
+                if !name.is_empty() {
+                    tracked.insert(name.to_string());
+                }
+            }
+        }
+    }
+    tracked
+}
+
+/// Delete one untracked entry, refusing anything that does not resolve inside the repository.
+/// This is the only place the Git panel writes to disk without git mediating, so the containment
+/// check is the safeguard: resolve the repository root and the target's parent directory to their
+/// real locations and require the second to sit under the first. Resolving the parent rather than
+/// the target itself means a symlinked file is removed as a link, never followed.
+fn delete_untracked(repo_root: &std::path::Path, rel: &str) -> Result<(), String> {
+    let target = repo_root.join(rel);
+    let parent = target
+        .parent()
+        .ok_or_else(|| format!("Cannot resolve parent of {rel}"))?;
+    let root_real = repo_root
+        .canonicalize()
+        .map_err(|e| format!("Cannot resolve repository root: {e}"))?;
+    let parent_real = parent
+        .canonicalize()
+        .map_err(|e| format!("Cannot resolve {rel}: {e}"))?;
+    if !parent_real.starts_with(&root_real) {
+        return Err(format!("Path escapes the repository: {rel}"));
+    }
+    let name = target
+        .file_name()
+        .ok_or_else(|| format!("Cannot resolve name of {rel}"))?;
+    let real_target = parent_real.join(name);
+    // symlink_metadata does not follow links: a symlinked directory is unlinked, not walked into.
+    let meta = match std::fs::symlink_metadata(&real_target) {
+        Ok(m) => m,
+        // Already gone is the outcome the caller wanted.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("Cannot inspect {rel}: {e}")),
+    };
+    let result = if meta.is_dir() {
+        std::fs::remove_dir_all(&real_target)
+    } else {
+        std::fs::remove_file(&real_target)
+    };
+    result.map_err(|e| format!("Cannot delete {rel}: {e}"))
+}
+
+/// Discard worktree changes for the given paths: tracked files are restored from the index, and
+/// untracked files are deleted. Staged content is deliberately left alone — unstage first to get
+/// rid of that — so a single discard can never destroy work the user has already staged.
+///
+/// Everything here runs from the repository root. The paths come from `changed_files` and are
+/// root-relative; resolving them against a subdirectory session would make `ls-files` match nothing,
+/// which this function reads as "untracked" and answers by deleting the file from disk — the one
+/// outcome a discard must never produce for a tracked file.
+pub fn discard(cwd: &str, paths: &[String]) -> Result<(), String> {
+    require_repo(cwd)?;
+    check_rel_paths(paths)?;
+    let root = repo_top(cwd);
+    let tracked = tracked_paths(&root, paths);
+    let (restore, remove): (Vec<String>, Vec<String>) = paths
+        .iter()
+        .cloned()
+        .partition(|p| tracked.contains(p.as_str()));
+    if !restore.is_empty() {
+        run_git_on_paths(&root, &["checkout", "-q"], &restore)?;
+    }
+    if !remove.is_empty() {
+        let root_path = std::path::PathBuf::from(&root);
+        for rel in &remove {
+            delete_untracked(&root_path, rel)?;
+        }
+    }
+    Ok(())
+}
+
+/// Commit what is staged and return the new commit. `amend` rewrites the previous commit instead,
+/// which git refuses before the first commit.
+pub fn commit(cwd: &str, message: &str, amend: bool) -> Result<CommitInfo, String> {
+    require_repo(cwd)?;
+    let msg = message.trim();
+    if msg.is_empty() {
+        return Err("Commit message is empty".into());
+    }
+    if amend && !has_head(cwd) {
+        return Err("Nothing to amend: this repository has no commits yet".into());
+    }
+    let mut args: Vec<&str> = vec!["commit", "-q"];
+    if amend {
+        args.push("--amend");
+    }
+    args.push("-m");
+    args.push(msg);
+    run_git_checked(cwd, &args)?;
+    log_page(cwd, 1, 0)
+        .into_iter()
+        .next()
+        .ok_or_else(|| "Commit succeeded but could not be read back".to_string())
+}
+
+/// Total commits reachable from HEAD; zero outside a repository or before the first commit.
+pub fn commit_count(cwd: &str) -> u32 {
+    run_git(cwd, &["rev-list", "--count", "HEAD"])
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+
+/// Field separator for commit pretty-printing: a one-line subject cannot contain a unit separator.
+const COMMIT_PRETTY: &str = "--pretty=format:%h\x1f%s\x1f%an\x1f%cr";
+
+/// Parse the unit-separated commit lines produced by [`COMMIT_PRETTY`].
+fn parse_commit_lines(out: &str) -> Vec<CommitInfo> {
+    out.lines()
+        .filter_map(|line| {
+            let mut f = line.split('\x1f');
+            let hash = f.next()?.to_string();
+            if hash.is_empty() {
+                return None;
+            }
+            Some(CommitInfo {
+                subject: f.next().unwrap_or("").to_string(),
+                author: f.next().unwrap_or("").to_string(),
+                relative: f.next().unwrap_or("").to_string(),
+                hash,
+            })
+        })
+        .collect()
+}
+
+/// One page of history, newest first. `offset` skips that many commits, so the Git panel can keep
+/// loading older pages; non-repositories and empty histories return an empty vector.
+pub fn log_page(cwd: &str, limit: usize, offset: usize) -> Vec<CommitInfo> {
+    if run_git(cwd, &["rev-parse", "--is-inside-work-tree"]).as_deref() != Some("true") {
+        return Vec::new();
+    }
+    let n = limit.clamp(1, 200).to_string();
+    let skip = format!("--skip={}", offset.min(1_000_000));
+    match run_git(cwd, &["log", "-n", &n, &skip, COMMIT_PRETTY]) {
+        Some(s) if !s.is_empty() => parse_commit_lines(&s),
+        _ => Vec::new(),
+    }
+}
+
+/// Reject anything that is not a plain object name. History arguments come from a client, and git
+/// accepts a whole revision language plus `--option`-shaped arguments in the same position, so the
+/// only safe rule is to allow short and full hexadecimal hashes and nothing else.
+fn check_commit_hash(hash: &str) -> Result<(), String> {
+    let h = hash.trim();
+    let ok = (4..=40).contains(&h.len()) && h.chars().all(|c| c.is_ascii_hexdigit());
+    if ok {
+        Ok(())
+    } else {
+        Err(format!("Not a commit hash: {hash}"))
+    }
+}
+
+/// Files changed by one commit, with that commit's own line counts. Merge commits produce no
+/// diff against a single parent and therefore return an empty list.
+pub fn commit_files(cwd: &str, hash: &str) -> Result<Vec<ChangedFile>, String> {
+    require_repo(cwd)?;
+    check_commit_hash(hash)?;
+    let stat = numstat_map(cwd, &["diff-tree", "--no-commit-id", "--numstat", "-r", hash]);
+    let names = run_git(
+        cwd,
+        &["diff-tree", "--no-commit-id", "--name-status", "-r", hash],
+    )
+    .unwrap_or_default();
+    let mut files: Vec<ChangedFile> = Vec::new();
+    for line in names.lines() {
+        let mut it = line.split('\t');
+        let code = it.next().unwrap_or("").trim();
+        let first = it.next().unwrap_or("").trim();
+        // Rename and copy rows carry a similarity score and both paths; the new path is what the
+        // commit produced, so report that one.
+        let path = it.next().unwrap_or(first).trim().trim_matches('"').to_string();
+        if path.is_empty() {
+            continue;
+        }
+        let status = porcelain_side(code.chars().next().unwrap_or('M'));
+        let status = if status.is_empty() { "modified" } else { status };
+        let (additions, deletions, binary) = stat.get(&path).copied().unwrap_or((0, 0, false));
+        files.push(ChangedFile {
+            path,
+            status: status.to_string(),
+            additions,
+            deletions,
+            binary,
+            index: status.to_string(),
+            worktree: String::new(),
+            staged_additions: additions,
+            staged_deletions: deletions,
+            staged_binary: binary,
+            unstaged_additions: 0,
+            unstaged_deletions: 0,
+            unstaged_binary: false,
+        });
+    }
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(files)
+}
+
+/// Both sides of one file's diff inside a commit: the parent's content versus the commit's.
+/// A root commit has no parent, so the original side is empty — the same shape an added file has.
+pub fn commit_file_diff(cwd: &str, hash: &str, path: &str) -> Result<FileDiff, String> {
+    require_repo(cwd)?;
+    check_commit_hash(hash)?;
+    check_rel_path(path)?;
+    let original_bytes = git_show_bytes(cwd, &format!("{hash}^:{path}"));
+    let modified_bytes = git_show_bytes(cwd, &format!("{hash}:{path}"));
+    let binary = original_bytes.as_deref().map(is_binary_bytes).unwrap_or(false)
+        || modified_bytes.as_deref().map(is_binary_bytes).unwrap_or(false);
+    if binary {
+        return Ok(FileDiff {
+            path: path.to_string(),
+            original: String::new(),
+            modified: String::new(),
+            binary: true,
+        });
+    }
+    Ok(FileDiff {
+        path: path.to_string(),
+        original: original_bytes
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+            .unwrap_or_default(),
+        modified: modified_bytes
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+            .unwrap_or_default(),
+        binary: false,
+    })
+}
+
 #[cfg(test)]
 mod merge_tests {
     use super::*;
@@ -1784,6 +2209,225 @@ mod merge_tests {
         // Empty arguments stay rejected on both entry points.
         assert!(file_diff_at("", "a.txt", &work_path).is_err());
         assert!(file_diff_at(&cwd, " ", &work_path).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Sessions often sit in a subdirectory of the repository. `changed_files` reports paths relative to
+    /// the repository root, so every write has to run from the root: resolved against the subdirectory,
+    /// `stage` fails outright, `unstage` matches nothing while still exiting 0, and `discard` sees a
+    /// tracked file as untracked and deletes it from disk instead of restoring it.
+    #[test]
+    fn writes_from_a_subdirectory_session_use_root_relative_paths() {
+        let dir = init_repo();
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub/nested.txt"), "one\n").unwrap();
+        git(&dir, &["add", "-A"]);
+        git(&dir, &["commit", "-q", "-m", "nested"]);
+        std::fs::write(dir.join("sub/nested.txt"), "one\ntwo\n").unwrap();
+        // The panel's own working directory: the session opened inside sub/.
+        let cwd = dir.join("sub").to_string_lossy().to_string();
+        let path = vec!["sub/nested.txt".to_string()];
+
+        let listed = changed_files(&cwd).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].path, "sub/nested.txt", "paths are root-relative");
+
+        stage(&cwd, &path).unwrap();
+        let staged = changed_files(&cwd).unwrap();
+        assert_eq!(staged[0].index, "modified", "stage must reach the index");
+
+        unstage(&cwd, &path).unwrap();
+        let unstaged = changed_files(&cwd).unwrap();
+        assert_eq!(unstaged[0].index, "", "unstage must clear the index side");
+
+        discard(&cwd, &path).unwrap();
+        assert!(
+            dir.join("sub/nested.txt").exists(),
+            "discarding a tracked file must restore it, never delete it"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("sub/nested.txt")).unwrap(),
+            "one\n",
+            "discard must restore the committed content"
+        );
+        assert!(changed_files(&cwd).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Staging one file must move it to the index side alone, leaving a second changed file
+    /// entirely on the worktree side. This is the split the Git panel's Staged and Changes groups
+    /// are built on, so a regression here silently mislabels every row.
+    #[test]
+    fn changed_files_separates_index_from_worktree() {
+        let dir = init_repo();
+        let cwd = dir.to_string_lossy().to_string();
+        std::fs::write(dir.join("a.txt"), "hello\nstaged\n").unwrap();
+        std::fs::write(dir.join("new.txt"), "brand new\n").unwrap();
+        stage(&cwd, &["a.txt".to_string()]).unwrap();
+
+        let files = changed_files(&cwd).unwrap();
+        let a = files.iter().find(|f| f.path == "a.txt").unwrap();
+        assert_eq!(a.index, "modified", "staged edit belongs to the index side");
+        assert_eq!(a.worktree, "", "nothing is left unstaged for a.txt");
+        assert_eq!((a.staged_additions, a.staged_deletions), (1, 0));
+        assert_eq!((a.unstaged_additions, a.unstaged_deletions), (0, 0));
+
+        let new = files.iter().find(|f| f.path == "new.txt").unwrap();
+        assert_eq!(new.index, "");
+        assert_eq!(new.worktree, "untracked");
+
+        // Editing the staged file again puts it on BOTH sides at once, which is what git means and
+        // what the panel must show: part of a.txt is going into the next commit, part is not.
+        std::fs::write(dir.join("a.txt"), "hello\nstaged\nunstaged\n").unwrap();
+        let files = changed_files(&cwd).unwrap();
+        let a = files.iter().find(|f| f.path == "a.txt").unwrap();
+        assert_eq!(a.index, "modified");
+        assert_eq!(a.worktree, "modified");
+        assert_eq!(a.staged_additions, 1);
+        assert_eq!(a.unstaged_additions, 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Stage, unstage, and commit round-trip, including the untracked file that only `git add`
+    /// picks up and the commit count the history section labels itself with.
+    #[test]
+    fn stage_unstage_and_commit_round_trip() {
+        let dir = init_repo();
+        let cwd = dir.to_string_lossy().to_string();
+        std::fs::write(dir.join("new.txt"), "brand new\n").unwrap();
+        assert_eq!(commit_count(&cwd), 1);
+
+        stage(&cwd, &["new.txt".to_string()]).unwrap();
+        let staged = changed_files(&cwd).unwrap();
+        assert_eq!(staged.iter().find(|f| f.path == "new.txt").unwrap().index, "added");
+
+        unstage(&cwd, &["new.txt".to_string()]).unwrap();
+        let back = changed_files(&cwd).unwrap();
+        let f = back.iter().find(|f| f.path == "new.txt").unwrap();
+        assert_eq!(f.index, "", "unstaging returns the file to the worktree side");
+        assert_eq!(f.worktree, "untracked");
+
+        stage(&cwd, &["new.txt".to_string()]).unwrap();
+        let made = commit(&cwd, "add new.txt", false).unwrap();
+        assert_eq!(made.subject, "add new.txt");
+        assert_eq!(commit_count(&cwd), 2);
+        assert!(changed_files(&cwd).unwrap().is_empty(), "committing clears the working tree");
+
+        // An empty message is refused before git runs, so no half-made commit can result.
+        assert!(commit(&cwd, "   ", false).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Discard restores a tracked file from the index and deletes an untracked one — but never
+    /// touches what is already staged, which is the property that keeps it from destroying work.
+    #[test]
+    fn discard_restores_tracked_and_deletes_untracked_but_spares_staged() {
+        let dir = init_repo();
+        let cwd = dir.to_string_lossy().to_string();
+        std::fs::write(dir.join("staged.txt"), "keep me\n").unwrap();
+        stage(&cwd, &["staged.txt".to_string()]).unwrap();
+        std::fs::write(dir.join("a.txt"), "hello\nedited\n").unwrap();
+        std::fs::write(dir.join("junk.txt"), "throwaway\n").unwrap();
+
+        discard(
+            &cwd,
+            &["a.txt".to_string(), "junk.txt".to_string(), "staged.txt".to_string()],
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "hello\n");
+        assert!(!dir.join("junk.txt").exists(), "untracked file is deleted");
+        assert!(
+            dir.join("staged.txt").exists(),
+            "a staged file survives discard: its content lives in the index, not only on disk"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Path and hash arguments arrive from a client, so the validators are the boundary. Absolute
+    /// paths, parent-directory escapes, and anything that is not a plain object name are refused
+    /// before a git command or a filesystem delete is ever built.
+    #[test]
+    fn path_and_hash_validators_reject_hostile_input() {
+        assert!(check_rel_path("src/main.rs").is_ok());
+        assert!(check_rel_path("").is_err());
+        assert!(check_rel_path("   ").is_err());
+        assert!(check_rel_path("/etc/passwd").is_err());
+        assert!(check_rel_path("../outside.txt").is_err());
+        assert!(check_rel_path("src/../../outside.txt").is_err());
+        assert!(check_rel_path("C:secret.txt").is_err());
+        assert!(check_rel_paths(&[]).is_err(), "an empty batch must not mean everything");
+
+        assert!(check_commit_hash("11ac20c").is_ok());
+        assert!(check_commit_hash("11ac20cdeadbeef11ac20cdeadbeef11ac20cdea").is_ok());
+        assert!(check_commit_hash("HEAD").is_err());
+        assert!(check_commit_hash("HEAD~3").is_err());
+        assert!(check_commit_hash("--upload-pack=evil").is_err());
+        assert!(check_commit_hash("abc").is_err(), "too short to be an object name");
+    }
+
+    /// Deleting an untracked entry is the one raw filesystem write here, so its containment check
+    /// gets its own test: a path resolving outside the repository is refused, and a symlink is
+    /// unlinked rather than followed into its target.
+    #[test]
+    fn delete_untracked_stays_inside_the_repository() {
+        let dir = init_repo();
+        let outside = std::env::temp_dir().join(format!("vlx-outside-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&outside).unwrap();
+        let treasure = outside.join("treasure.txt");
+        std::fs::write(&treasure, "do not delete\n").unwrap();
+
+        // A path that climbs out never reaches the filesystem: the validator rejects it first.
+        assert!(discard(&dir.to_string_lossy(), &["../treasure.txt".to_string()]).is_err());
+
+        // A symlink pointing outside is removed as a link; its target survives.
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&treasure, dir.join("link.txt")).unwrap();
+            delete_untracked(&dir, "link.txt").unwrap();
+            assert!(!dir.join("link.txt").exists(), "the link itself is gone");
+            assert!(treasure.exists(), "the link target outside the repository is untouched");
+        }
+
+        // Deleting something that is already gone is the outcome the caller wanted, not an error.
+        delete_untracked(&dir, "never-existed.txt").unwrap();
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    /// History paging and per-commit file listing: what the Git panel's Committed changes section
+    /// reads. Paging must not repeat a commit, and a commit's file list carries its own counts.
+    #[test]
+    fn history_paging_and_commit_files() {
+        let dir = init_repo();
+        let cwd = dir.to_string_lossy().to_string();
+        for i in 0..3 {
+            std::fs::write(dir.join(format!("f{i}.txt")), format!("line {i}\n")).unwrap();
+            stage(&cwd, &[format!("f{i}.txt")]).unwrap();
+            commit(&cwd, &format!("commit {i}"), false).unwrap();
+        }
+        assert_eq!(commit_count(&cwd), 4);
+
+        let first = log_page(&cwd, 2, 0);
+        let second = log_page(&cwd, 2, 2);
+        assert_eq!(first.len(), 2);
+        assert_eq!(second.len(), 2);
+        assert_eq!(first[0].subject, "commit 2", "history is newest first");
+        assert!(
+            first.iter().all(|c| second.iter().all(|o| o.hash != c.hash)),
+            "an offset page must not repeat the previous page"
+        );
+
+        let files = commit_files(&cwd, &first[0].hash).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "f2.txt");
+        assert_eq!(files[0].status, "added");
+        assert_eq!(files[0].additions, 1);
+
+        let diff = commit_file_diff(&cwd, &first[0].hash, "f2.txt").unwrap();
+        assert_eq!(diff.original, "", "a file added by the commit has no parent side");
+        assert_eq!(diff.modified, "line 2\n");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

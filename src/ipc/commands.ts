@@ -2,6 +2,7 @@
 
 import {
   invoke,
+  isTauri,
   ptyTeardown,
   readRecordingStream,
   spawnPty,
@@ -82,10 +83,35 @@ export function ptyKill(sessionId: string): Promise<void> {
   return invoke("pty_kill", { sessionId });
 }
 
+// Sessions whose view is disappearing because this client is following a peer's mirrored layout, rather than
+// because anyone here decided to close them. Marked just before the layout is applied and consumed by the
+// unmount that follows within the same render pass; the window only bounds a stale mark after a failed apply.
+const mirrorDetaches = new Map<string, number>();
+const MIRROR_DETACH_WINDOW_MS = 5000;
+
+/** Mark sessions as leaving this window's layout by mirror, not by a local close. */
+export function markMirrorDetach(sessionIds: Iterable<string>): void {
+  const now = Date.now();
+  for (const [id, at] of mirrorDetaches) {
+    if (now - at >= MIRROR_DETACH_WINDOW_MS) mirrorDetaches.delete(id);
+  }
+  for (const id of sessionIds) mirrorDetaches.set(id, now);
+}
+
 /**
  * Releases this client's session use on `usePtySession` unmount. Desktop kills; browser detaches without killing the shared process.
+ *
+ * The one exception is a mirrored removal. Desktop unmount normally means kill, which is right when someone
+ * closes a tab here, but following a peer's layout must never end anyone's work — a remote client closing a tab
+ * detaches for itself, and mirroring that decision back must not upgrade it into killing the process. The
+ * session keeps running and stays reachable from the sidebar.
  */
 export function ptyTeardownSession(sessionId: string): Promise<void> {
+  const at = mirrorDetaches.get(sessionId);
+  if (at !== undefined) {
+    mirrorDetaches.delete(sessionId);
+    if (isTauri && Date.now() - at < MIRROR_DETACH_WINDOW_MS) return Promise.resolve();
+  }
   return ptyTeardown(sessionId);
 }
 
@@ -488,6 +514,18 @@ export interface ChangedFile {
   additions: number;
   deletions: number;
   binary: boolean;
+  /** Index-side state: `""` when nothing is staged, otherwise modified/added/deleted/renamed. */
+  index: string;
+  /** Worktree-side state: `""` when the worktree matches the index, otherwise the change or `"untracked"`. */
+  worktree: string;
+  /** Line counts of the staged part alone. */
+  stagedAdditions: number;
+  stagedDeletions: number;
+  stagedBinary: boolean;
+  /** Line counts of the not-yet-staged part alone. */
+  unstagedAdditions: number;
+  unstagedDeletions: number;
+  unstagedBinary: boolean;
 }
 
 /** Two sides of a file diff: HEAD versus worktree. */
@@ -522,6 +560,51 @@ export interface CommitInfo {
 /** Gets recent commits for cwd's repository; returns empty outside a repository or with no commits. */
 export function gitRecentCommits(cwd: string): Promise<CommitInfo[]> {
   return invoke<CommitInfo[]>("git_recent_commits", { cwd });
+}
+
+// Git panel: staging, committing, discarding, and history browsing.
+
+/** Stages the given repository-relative paths, untracked files and deletions included. */
+export function gitStage(cwd: string, paths: string[]): Promise<void> {
+  return invoke<void>("git_stage", { cwd, paths });
+}
+
+/** Unstages the given paths, leaving the worktree untouched. */
+export function gitUnstage(cwd: string, paths: string[]): Promise<void> {
+  return invoke<void>("git_unstage", { cwd, paths });
+}
+
+/**
+ * Discards worktree changes: tracked files go back to the index, untracked files are deleted.
+ * Staged content survives, so a discard can never throw away what the user already staged.
+ */
+export function gitDiscard(cwd: string, paths: string[]): Promise<void> {
+  return invoke<void>("git_discard", { cwd, paths });
+}
+
+/** Commits what is staged and returns the new commit. */
+export function gitCommit(cwd: string, message: string, amend = false): Promise<CommitInfo> {
+  return invoke<CommitInfo>("git_commit", { cwd, message, amend });
+}
+
+/** Total commits reachable from HEAD; zero outside a repository or before the first commit. */
+export function gitCommitCount(cwd: string): Promise<number> {
+  return invoke<number>("git_commit_count", { cwd });
+}
+
+/** One page of history, newest first. */
+export function gitLogPage(cwd: string, limit: number, offset: number): Promise<CommitInfo[]> {
+  return invoke<CommitInfo[]>("git_log_page", { cwd, limit, offset });
+}
+
+/** Files changed by one commit; merge commits return an empty list. */
+export function gitCommitFiles(cwd: string, hash: string): Promise<ChangedFile[]> {
+  return invoke<ChangedFile[]>("git_commit_files", { cwd, hash });
+}
+
+/** Both sides of one file's diff inside a commit: the parent's content versus the commit's. */
+export function gitCommitFileDiff(cwd: string, hash: string, path: string): Promise<FileDiff> {
+  return invoke<FileDiff>("git_commit_file_diff", { cwd, hash, path });
 }
 
 // Gitea integration, phase two.
@@ -571,6 +654,21 @@ export function installSpawnSkills(): Promise<void> {
 
 export function uninstallSpawnSkills(): Promise<void> {
   return invoke("uninstall_spawn_skills");
+}
+
+/**
+ * Answer a spawn confirmation card, so other clients dismiss theirs.
+ *
+ * Resolves to true only for the client that answered first. The same card is shown everywhere, so a
+ * second answer arriving a moment later must not act on it: the winner is already creating the worktree
+ * and the child session, and a loser that proceeded would run the whole task a second time.
+ */
+export function resolveSpawn(
+  parentSessionId: string,
+  prompt: string,
+  confirmed: boolean,
+): Promise<boolean> {
+  return invoke<boolean>("resolve_spawn", { parentSessionId, prompt, confirmed });
 }
 
 // Pasted-image cleanup.

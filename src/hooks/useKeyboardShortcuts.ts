@@ -10,6 +10,8 @@
 //! usePtySession blocks these Ctrl+Alt combinations from xterm so it cannot emit stray Escape bytes.
 //! This listener runs in document capture phase before xterm/editors. The shortcut recorder runs even
 //! earlier on window capture and stops propagation while recording.
+//! Plain-browser clients (URL remote access) use the Ctrl+Alt defaults on every OS: browser-reserved
+//! combos such as ⌘D/⌘T/⌘W/⌘F never reach the page, so the Cmd bindings would be dead keys.
 
 /** Custom document-save event name; detail is the document-tab ID and DocView listens for it. */
 export const DOC_SAVE_EVENT = "vlx:doc-save";

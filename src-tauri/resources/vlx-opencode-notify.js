@@ -30,13 +30,17 @@ export const VlxNotify = async () => {
 
   let lastEvent = null; // Deduplicate consecutive identical states.
   let captured = false; // Capture OpenCode's own session ID only with the first event.
+  let promptSent = false; // Send the first user message only once; the backend names the session from it.
 
   // Fire-and-forget POST; failures remain silent and never block OpenCode.
-  const post = (event, ocSessionId) => {
+  const post = (event, ocSessionId, extra = {}) => {
     const url = `${base}/hook/${encodeURIComponent(sid)}?t=${encodeURIComponent(
       token,
     )}&e=${event}`;
-    const body = ocSessionId ? JSON.stringify({ session_id: ocSessionId }) : undefined;
+    const hasBody = Boolean(ocSessionId) || Object.keys(extra).length > 0;
+    const body = hasBody
+      ? JSON.stringify({ ...(ocSessionId ? { session_id: ocSessionId } : {}), ...extra })
+      : undefined;
     try {
       fetch(url, {
         method: "POST",
@@ -58,6 +62,27 @@ export const VlxNotify = async () => {
   };
 
   return {
+    // The first user message names the vlx-term session. The backend parses
+    // UserPromptSubmit-shaped bodies and renames auto-numbered placeholders.
+    "chat.message": async ({ sessionID }, { message, parts }) => {
+      if (promptSent || message?.role !== "user") return;
+      const text = (parts ?? [])
+        .filter((p) => p?.type === "text")
+        .map((p) => p.text?.trim() ?? "")
+        .filter(Boolean)
+        .join("\n")
+        .trim();
+      if (!text) return;
+      promptSent = true;
+      if (sessionID) captured = true;
+      // Record the state here as well: the session.status busy event that follows this message would
+      // otherwise fail the dedup check and post a second, identical working signal.
+      lastEvent = "working";
+      post("working", sessionID, {
+        hook_event_name: "UserPromptSubmit",
+        prompt: text,
+      });
+    },
     event: async ({ event }) => {
       const type = event?.type;
       const props = event?.properties ?? {};

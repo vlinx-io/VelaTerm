@@ -32,6 +32,8 @@ import {
   worktreeLabel,
 } from "./sessionMenuShared";
 import { kindIconEl } from "./sessionViewers/sessionMeta";
+import { fileToIconDataUrl, PresetIcon } from "./agentPresetIcon";
+import type { AgentPreset } from "../types";
 
 export function ConfirmDelete({
   name,
@@ -1091,6 +1093,12 @@ export function NewAgentSession({
     agentArgs: string;
     permissionMode: string | null;
     worktree: WorktreeChoice;
+    /** Executable overriding the kind's default; empty keeps that default. */
+    execPath: string;
+    /** Preset this configuration came from, or null when a built-in kind was chosen directly. */
+    agentPresetId: string | null;
+    /** Set when the user asked to keep this configuration, so the caller saves it before creating. */
+    savePreset: { name: string; icon: string | null } | null;
   }) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -1104,6 +1112,20 @@ export function NewAgentSession({
   const [skipPerm, setSkipPerm] = useState(
     () => agentDefaults["claude"]?.permissionMode === "skip",
   );
+  // Executable for this session alone. Empty falls back to the kind's global default and then to PATH; a
+  // value here is what lets two sessions of one kind run different drop-in binaries at the same time.
+  const [execPath, setExecPath] = useState("");
+  // Presets are listed under the built-in kinds in the type dropdown. Picking one prefills the fields below
+  // and is remembered, so the created session can show the preset's name and icon.
+  const presets = useTermStore((s) => s.agentPresets);
+  const [presetId, setPresetId] = useState<string | null>(null);
+  const selectedPreset = presets.find((p) => p.id === presetId) ?? null;
+  // Keeping this configuration for next time. The preset name falls back to the session name, so the common
+  // case is a single checkbox click.
+  const [savePreset, setSavePreset] = useState(false);
+  const [presetName, setPresetName] = useState("");
+  const [presetIcon, setPresetIcon] = useState<string | null>(null);
+  const [iconError, setIconError] = useState<string | null>(null);
 
   // ── Worktree selection: none at project root, create new, or attach existing. initialWtMode distinguishes
   // custom-argument creation's default none from New Worktree Session's new mode. ──
@@ -1172,6 +1194,9 @@ export function NewAgentSession({
   // The binary permission toggle can safely follow the new type's default.
   const changeKind = (k: SessionKind) => {
     setTypeOpen(false);
+    // Choosing a built-in kind drops the selected preset, including the executable it filled in.
+    setPresetId(null);
+    setExecPath("");
     setAgentArgs((cur) =>
       cur.trim() === "" || cur === (agentDefaults[kind]?.args ?? "")
         ? agentDefaults[k]?.args ?? ""
@@ -1179,6 +1204,26 @@ export function NewAgentSession({
     );
     setSkipPerm(agentDefaults[k]?.permissionMode === "skip");
     setKind(k);
+  };
+
+  /** Adopt a preset: its base kind decides behavior, its launch values prefill the fields below. */
+  const choosePreset = (p: AgentPreset) => {
+    setTypeOpen(false);
+    setPresetId(p.id);
+    setKind(p.baseKind);
+    setExecPath(p.execPath ?? "");
+    setAgentArgs(p.agentArgs ?? "");
+    setSkipPerm(p.permissionMode === "skip");
+  };
+
+  /** Read a chosen image, downscale it to a square icon and keep it as a data URL. */
+  const pickIcon = async (file: File) => {
+    setIconError(null);
+    try {
+      setPresetIcon(await fileToIconDataUrl(file));
+    } catch (e) {
+      setIconError(e instanceof Error ? e.message : String(e));
+    }
   };
   // Permission-toggle support follows the selected agent type; OpenCode has no corresponding flag.
   const permSupported = supportsPermissionToggle(kind);
@@ -1211,6 +1256,11 @@ export function NewAgentSession({
         agentArgs: normalizeArgDashes(agentArgs),
         permissionMode: permSupported && skipPerm ? "skip" : null,
         worktree,
+        execPath: execPath.trim(),
+        agentPresetId: presetId,
+        savePreset: savePreset
+          ? { name: presetName.trim() || finalName, icon: presetIcon }
+          : null,
       });
       // The parent closes on success; catch keeps the dialog open on failure.
     } catch (e) {
@@ -1278,7 +1328,7 @@ export function NewAgentSession({
               borderColor: typeOpen ? "var(--accent)" : undefined,
             }}
           >
-            <span>{kindLabel(kind)}</span>
+            <span>{selectedPreset ? selectedPreset.name : kindLabel(kind)}</span>
             <Icons.chevD size={14} style={{ color: "var(--text-muted)", flex: "none" }} />
           </button>
           {typeOpen && (
@@ -1328,6 +1378,45 @@ export function NewAgentSession({
                       }}
                     >
                       <span style={{ flex: 1 }}>{kindLabel(k)}</span>
+                      {on && <Icons.check size={13} style={{ flex: "none" }} />}
+                    </div>
+                  );
+                })}
+                {/* Saved configurations, listed under the built-in kinds they behave like. */}
+                {presets.length > 0 && (
+                  <div
+                    style={{
+                      margin: "4px 0",
+                      borderTop: "1px solid var(--border)",
+                    }}
+                  />
+                )}
+                {presets.map((p) => {
+                  const on = p.id === presetId;
+                  return (
+                    <div
+                      key={p.id}
+                      onClick={() => choosePreset(p)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "6px 9px",
+                        borderRadius: 5,
+                        cursor: "pointer",
+                        fontSize: 13,
+                        color: on ? "var(--accent)" : "var(--text-primary)",
+                        background: on ? "var(--accent-soft)" : "transparent",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!on) e.currentTarget.style.background = "var(--bg-elevated)";
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!on) e.currentTarget.style.background = "transparent";
+                      }}
+                    >
+                      <PresetIcon preset={p} size={14} />
+                      <span style={{ flex: 1 }}>{p.name}</span>
                       {on && <Icons.check size={13} style={{ flex: "none" }} />}
                     </div>
                   );
@@ -1547,6 +1636,127 @@ export function NewAgentSession({
             onChange={(e) => setAgentArgs(e.target.value)}
           />
         </label>
+
+        <label style={{ display: "block", marginTop: 12 }}>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+            {t("preset.execPathLabel")}
+          </div>
+          <input
+            className="vlx-input"
+            autoCapitalize="none"
+            spellCheck={false}
+            placeholder={t("preset.execPathPlaceholder")}
+            value={execPath}
+            onChange={(e) => setExecPath(e.target.value)}
+          />
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--text-muted)",
+              lineHeight: 1.5,
+              marginTop: 4,
+            }}
+          >
+            {t("preset.execPathHint")}
+          </div>
+        </label>
+
+        {/* Keep this configuration for reuse. Saving is what turns a one-off launch into a menu entry. */}
+        <div style={{ marginTop: 12 }}>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 13,
+              color: "var(--text-primary)",
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={savePreset}
+              onChange={(e) => setSavePreset(e.target.checked)}
+            />
+            {t("preset.saveLabel")}
+          </label>
+          {savePreset && (
+            <div style={{ marginTop: 8, marginLeft: 24 }}>
+              <input
+                className="vlx-input"
+                autoCapitalize="none"
+                placeholder={name.trim() || t("preset.namePlaceholder")}
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+              />
+              <div
+                style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}
+              >
+                {presetIcon ? (
+                  <img
+                    src={presetIcon}
+                    alt=""
+                    style={{ width: 20, height: 20, borderRadius: 4, flex: "none" }}
+                  />
+                ) : (
+                  <span style={{ flex: "none" }}>{kindIconEl(kind)}</span>
+                )}
+                <label
+                  className="vlx-input"
+                  style={{
+                    flex: "none",
+                    width: "auto",
+                    padding: "3px 10px",
+                    fontSize: 12,
+                    cursor: "pointer",
+                  }}
+                >
+                  {t("preset.iconChoose")}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{ display: "none" }}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      // Clear the input so choosing the same file twice fires change again.
+                      e.target.value = "";
+                      if (f) void pickIcon(f);
+                    }}
+                  />
+                </label>
+                {presetIcon && (
+                  <button
+                    type="button"
+                    className="vlx-input"
+                    style={{
+                      flex: "none",
+                      width: "auto",
+                      padding: "3px 10px",
+                      fontSize: 12,
+                      cursor: "pointer",
+                    }}
+                    onClick={() => {
+                      setPresetIcon(null);
+                      setIconError(null);
+                    }}
+                  >
+                    {t("preset.iconClear")}
+                  </button>
+                )}
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: iconError ? "var(--status-error)" : "var(--text-muted)",
+                  lineHeight: 1.5,
+                  marginTop: 4,
+                }}
+              >
+                {iconError ?? t("preset.iconHint")}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Two-position switch for the permission mode. opencode has no matching flag, so it is disabled with a short explanation. */}
         <div style={{ marginTop: 12 }}>

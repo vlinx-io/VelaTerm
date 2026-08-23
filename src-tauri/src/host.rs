@@ -32,6 +32,11 @@ use crate::web::WebServer;
 /// tree to synchronize sidebars. Both desktop commands and browser WebSocket dispatch must emit it.
 pub const TREE_CHANGED: &str = "tree://changed";
 
+/// Global event emitted with an empty payload after any agent-preset mutation. Presets appear in the
+/// new-session menu on every client, so each one reloads its list on this signal. Kept separate from
+/// `TREE_CHANGED` because presets live outside the session tree and change far less often.
+pub const PRESETS_CHANGED: &str = "presets://changed";
+
 /// Cross-platform home directory: `$HOME` on Unix and `%USERPROFILE%` or known-folder APIs on Windows.
 ///
 /// Use this for agent data directories such as `~/.claude`, `~/.codex`, and `~/.cursor` instead of

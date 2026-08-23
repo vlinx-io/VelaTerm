@@ -88,6 +88,41 @@ impl SessionKind {
     }
 }
 
+/// A reusable agent launch configuration.
+///
+/// A preset is display and launch data only. `base_kind` names the built-in agent it behaves like, so hook
+/// injection, resume and status detection keep working off [`SessionKind`] unchanged; the preset supplies
+/// the label, icon, executable and defaults on top. That separation is what lets several drop-in
+/// replacements of one CLI run side by side, which a single per-kind executable path cannot express.
+///
+/// Creating a session from a preset copies these launch values onto the session row, so editing or
+/// deleting a preset never changes how an existing session starts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPreset {
+    pub id: String,
+    /// User-chosen label shown in the new-session menu and on the session itself.
+    pub name: String,
+    /// Built-in agent whose behavior this preset reuses. Currently always `Claude`.
+    pub base_kind: SessionKind,
+    /// Absolute executable path. None or empty falls back to the per-kind default, then to `PATH`.
+    pub exec_path: Option<String>,
+    /// Launch arguments copied onto sessions created from this preset.
+    pub agent_args: Option<String>,
+    /// Permission mode copied onto sessions created from this preset.
+    pub permission_mode: Option<String>,
+    /// Optional icon as a base64 data URL, capped at [`AGENT_PRESET_ICON_MAX_BYTES`]. A path would be
+    /// unreadable to browser and remote clients, while an inline value reaches them through tree sync.
+    /// None renders the base kind's built-in icon.
+    pub icon: Option<String>,
+    pub sort_order: i64,
+    pub created_at: i64,
+}
+
+/// Upper bound on a preset icon, applied when writing. Icons are downscaled to 64x64 before encoding, so
+/// this is generous for a PNG of that size while keeping the row small enough to sync cheaply.
+pub const AGENT_PRESET_ICON_MAX_BYTES: usize = 64 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
@@ -148,6 +183,14 @@ pub struct Session {
     /// `--force`; OpenCode/Pi have no flag, while Cline injects `--auto-approve true/false` in both modes.
     /// Persisted independently of `agent_args`.
     pub permission_mode: Option<String>,
+    /// Agent preset this session was created from, used only to show its name and icon. The preset's
+    /// launch values are copied onto this row at creation, so editing or deleting the preset never
+    /// changes how an existing session starts and a dangling ID is harmless.
+    pub agent_preset_id: Option<String>,
+    /// Executable for this session's agent, overriding the per-kind default in app_settings. This is what
+    /// lets several drop-in replacements of the same CLI run side by side. Empty or None falls back to
+    /// that default, and then to a PATH lookup.
+    pub agent_path: Option<String>,
     pub hotkey: Option<String>,
     /// Last recorded native agent session ID, or None before a resumable conversation exists. Reopening
     /// passes it unchanged to Claude `--resume`, Codex `resume`, or the corresponding agent mechanism.

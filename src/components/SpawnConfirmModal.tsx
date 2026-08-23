@@ -1,6 +1,7 @@
 //! Child-session spawn confirmation card. When pre-spawn confirmation is enabled, requests from
-//! vspawn or the `/vspawn` skill let the user review and edit the prompt, agent type, and worktree
-//! choice before starting, or cancel without creating a session. Multiple requests queue in arrival order.
+//! vspawn or the `/vspawn` skill let the user review and edit the prompt, agent type, model,
+//! effort, and worktree choice before starting, or cancel without creating a session. Multiple
+//! requests queue in arrival order.
 //!
 //! The interaction follows Claude Desktop's spawn prompt: a nonmodal upper-right card that does not
 //! take focus or block terminal input. Outside clicks and Escape do not dismiss it, preventing
@@ -33,19 +34,52 @@ const KIND_OPTIONS: { value: SpawnKind; label: string }[] = [
   { value: "terminal", label: "Terminal" },
 ];
 
+/** Model options available in the model selector. Empty string means inherit from parent/defaults. */
+const MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "Default" },
+  { value: "sonnet", label: "Sonnet" },
+  { value: "opus", label: "Opus" },
+  { value: "haiku", label: "Haiku" },
+];
+
+/** Effort options. Empty string means inherit from parent/defaults. */
+const EFFORT_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "Default" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "max", label: "Max" },
+];
+
+/** Agent kinds that accept --model / --effort flags. */
+const SUPPORTS_MODEL_EFFORT = new Set<string>(["claude"]);
+
+/** Extract a flag value from an agentArgs string, e.g. parseFlag("--model opus --effort high", "model") → "opus". */
+function parseFlag(args: string | null | undefined, flag: string): string {
+  if (!args) return "";
+  const re = new RegExp(`--${flag}\\s+(\\S+)`);
+  const m = re.exec(args);
+  return m ? m[1] : "";
+}
+
 /**
- * Custom agent-type dropdown matching the settings LangSelect. Native `<select>` is avoided because
- * macOS renders a system arrow and highlighted border that conflict with the dark form.
+ * Generic dropdown for the spawn card, reused by agent kind, model, and effort selectors.
+ * Native `<select>` is avoided because macOS renders a system arrow and highlighted border that
+ * conflict with the dark form.
  */
-function KindSelect({
+function SpawnSelect<T extends string>({
   value,
   onChange,
+  options,
+  width = 120,
 }: {
-  value: SpawnKind;
-  onChange: (v: SpawnKind) => void;
+  value: T;
+  onChange: (v: T) => void;
+  options: { value: T; label: string }[];
+  width?: number;
 }) {
   const [open, setOpen] = useState(false);
-  const current = KIND_OPTIONS.find((o) => o.value === value)?.label ?? value;
+  const current = options.find((o) => o.value === value)?.label ?? value;
 
   return (
     <div style={{ position: "relative" }}>
@@ -56,7 +90,7 @@ function KindSelect({
           display: "flex",
           alignItems: "center",
           gap: 6,
-          width: 150,
+          width,
           height: 32,
           padding: "0 9px",
           background: "var(--bg-app)",
@@ -98,7 +132,7 @@ function KindSelect({
               top: "calc(100% + 4px)",
               left: 0,
               zIndex: 1150,
-              width: 150,
+              width,
               maxHeight: 260,
               overflowY: "auto",
               padding: 4,
@@ -108,11 +142,11 @@ function KindSelect({
               boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
             }}
           >
-            {KIND_OPTIONS.map((opt) => {
+            {options.map((opt) => {
               const on = opt.value === value;
               return (
                 <div
-                  key={opt.value}
+                  key={opt.value || "_default"}
                   onClick={() => {
                     onChange(opt.value);
                     setOpen(false);
@@ -152,6 +186,7 @@ export function SpawnConfirmModal() {
   const t = useT();
   const queue = useTermStore((s) => s.pendingSpawns);
   const sessions = useTermStore((s) => s.sessions);
+  const agentDefaults = useTermStore((s) => s.agentDefaults);
   const confirmSpawn = useTermStore((s) => s.confirmSpawn);
   const cancelSpawn = useTermStore((s) => s.cancelSpawn);
 
@@ -164,6 +199,8 @@ export function SpawnConfirmModal() {
   const [prompt, setPrompt] = useState("");
   const [kind, setKind] = useState<SpawnKind>("claude");
   const [worktree, setWorktree] = useState(true);
+  const [model, setModel] = useState("");
+  const [effort, setEffort] = useState("");
 
   // Reset fields when the queue head changes after enqueue, confirmation, or cancellation. Each
   // queued request is a new object, so reference changes reliably trigger the reset.
@@ -184,13 +221,27 @@ export function SpawnConfirmModal() {
       parent?.kind === "zoo"
         ? parent.kind
         : "claude";
+    const resolvedKind = (req.kind ?? null) || fallback;
     setPrompt(req.prompt);
-    setKind((req.kind ?? null) || fallback);
+    setKind(resolvedKind);
     // Worktrees default on, matching backend and legacy behavior; only explicit false disables them.
     setWorktree(req.worktree !== false);
     // Depend only on req because parent is derived from it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [req]);
+
+  // Model and effort belong to the agent that will actually run, so re-derive them whenever the kind
+  // changes. Inheriting the parent's arguments only makes sense for the same agent: carrying a Claude
+  // model name onto a Codex command line launches the child with a model it does not have.
+  useEffect(() => {
+    if (!req) return;
+    const inherited = parent && parent.kind === kind ? parent.agentArgs : "";
+    const args = inherited || agentDefaults[kind]?.args || "";
+    setModel(parseFlag(args, "model"));
+    setEffort(parseFlag(args, "effort"));
+    // Parent and defaults are derived from req and kind.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [req, kind]);
 
   // Suspend native browser views while the card is visible so they cannot cover it.
   useSuspendNativeViews(Boolean(req));
@@ -199,6 +250,7 @@ export function SpawnConfirmModal() {
 
   const canLaunch = prompt.trim().length > 0;
   const remaining = queue.length - 1;
+  const showModelEffort = SUPPORTS_MODEL_EFFORT.has(kind);
 
   const launch = () => {
     if (!canLaunch) return;
@@ -207,6 +259,10 @@ export function SpawnConfirmModal() {
       prompt,
       kind,
       worktree,
+      // Agents without these selectors never receive an override: the fields are hidden, so any value
+      // still held there is a leftover from another agent the user cannot see or clear.
+      model: showModelEffort ? model || null : null,
+      effort: showModelEffort ? effort || null : null,
     });
   };
 
@@ -311,7 +367,7 @@ export function SpawnConfirmModal() {
             >
               {t("spawn.agentLabel")}
             </div>
-            <KindSelect value={kind} onChange={setKind} />
+            <SpawnSelect value={kind} onChange={setKind} options={KIND_OPTIONS} width={150} />
           </label>
 
           <label
@@ -333,6 +389,37 @@ export function SpawnConfirmModal() {
             {t("spawn.worktreeLabel")}
           </label>
         </div>
+
+        {/* Model and effort selectors, shown only for agent kinds that support them. */}
+        {showModelEffort && (
+          <div style={{ display: "flex", gap: 14, alignItems: "flex-end" }}>
+            <label style={{ display: "block" }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-muted)",
+                  marginBottom: 4,
+                }}
+              >
+                {t("spawn.modelLabel")}
+              </div>
+              <SpawnSelect value={model} onChange={setModel} options={MODEL_OPTIONS} width={120} />
+            </label>
+
+            <label style={{ display: "block" }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-muted)",
+                  marginBottom: 4,
+                }}
+              >
+                {t("spawn.effortLabel")}
+              </div>
+              <SpawnSelect value={effort} onChange={setEffort} options={EFFORT_OPTIONS} width={120} />
+            </label>
+          </div>
+        )}
       </div>
 
       <div

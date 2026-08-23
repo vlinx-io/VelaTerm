@@ -182,6 +182,16 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         )
         .map_err(|e| format!("Failed to migrate ssh_hosts.shared_db: {e}"))?;
     }
+    // Add the agent-preset link and the per-session executable path. Both are nullable: existing sessions
+    // keep resolving their executable through the per-kind default in app_settings, exactly as before.
+    if !column_exists(conn, "sessions", "agent_preset_id") {
+        conn.execute("ALTER TABLE sessions ADD COLUMN agent_preset_id TEXT", [])
+            .map_err(|e| format!("Failed to migrate sessions.agent_preset_id: {e}"))?;
+    }
+    if !column_exists(conn, "sessions", "agent_path") {
+        conn.execute("ALTER TABLE sessions ADD COLUMN agent_path TEXT", [])
+            .map_err(|e| format!("Failed to migrate sessions.agent_path: {e}"))?;
+    }
     // Create the parent index only after migration adds parent_session_id. Putting it in SCHEMA would fail
     // on old databases before ALTER runs; IF NOT EXISTS remains safe and idempotent for new databases.
     conn.execute(

@@ -18,6 +18,8 @@ import Icons from "../../components/Icons";
 import { useGitBranchInfo } from "../../hooks/useGitBranch";
 import { dateLocale, useT } from "../../i18n";
 import type { Session, SessionKind } from "../../types";
+import { useTermStore } from "../../store/termStore";
+import { sessionIconEl } from "../agentPresetIcon";
 
 /**
  * Distinguishing colors for each agent. Claude orange is Anthropic's official color. The other
@@ -129,6 +131,8 @@ export function SessionKindIcon({
   rootPath?: string | null;
 }) {
   const t = useT();
+  // A session created from a preset shows the preset's icon; a deleted preset falls back to the kind's.
+  const presets = useTermStore((st) => st.agentPresets);
   // A stored worktreePath is conclusive, so pass null to short-circuit the hook and avoid a Git probe.
   const probePath = session.worktreePath ? null : session.cwd || rootPath || null;
   const git = useGitBranchInfo(probePath);
@@ -137,7 +141,7 @@ export function SessionKindIcon({
   const wtDir = wtPath ? (wtPath.split("/").filter(Boolean).pop() ?? wtPath) : null;
   return (
     <>
-      {kindIconEl(session.kind, size)}
+      {sessionIconEl(session, presets, size)}
       {inWorktree && (
         <span className="wt-badge" title={`${t("spawn.worktreeLabel")}${wtDir ? `: ${wtDir}` : ""}`}>
           <Icons.branch size={8} sw={2} />

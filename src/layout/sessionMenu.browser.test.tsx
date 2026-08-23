@@ -33,6 +33,7 @@ const testState = vi.hoisted(() => {
       ephemeralSessions: {},
       projects: [{ id: "project-1", rootPath: "/tmp/project" }],
       agentDefaults: {},
+      agentPresets: [],
     },
   };
 });

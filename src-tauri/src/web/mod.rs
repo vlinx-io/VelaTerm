@@ -13,8 +13,10 @@ mod auth;
 // desktop_call also uses dispatch, so expose it within the crate rather than keeping it private to web transport.
 pub(crate) mod dispatch;
 mod e2ee;
+pub(crate) mod mirror;
 mod rate_limit;
 mod sniff;
+mod static_assets;
 mod tls;
 pub mod tunnel;
 mod ws;
@@ -22,7 +24,7 @@ mod ws;
 use std::sync::Mutex;
 
 use axum::extract::State;
-use axum::http::{header, StatusCode, Uri};
+use axum::http::{StatusCode, Uri};
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::Router;
@@ -500,27 +502,37 @@ async fn mode_info(State(ctx): State<Ctx>) -> impl IntoResponse {
 
 /// Serves embedded SPA assets, falling back to index.html for frontend routing. Assets contain no secrets and are
 /// public; actual data and terminal access remain protected through `/ws`.
-async fn static_handler(State(_ctx): State<Ctx>, uri: Uri) -> impl IntoResponse {
+///
+/// Compression, ETag validators, and cache policy live in `static_assets`; this handler only resolves which
+/// embedded file answers the request. See that module for why serving these raw was expensive.
+async fn static_handler(
+    State(_ctx): State<Ctx>,
+    headers: axum::http::HeaderMap,
+    uri: Uri,
+) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/');
     let path = if path.is_empty() { "index.html" } else { path };
 
-    if let Some(content) = Assets::get(path) {
-        let mime = mime_for(path);
-        return ([(header::CONTENT_TYPE, mime)], content.data.into_owned()).into_response();
+    if let Some(res) = static_assets::serve(path, path, mime_for(path), &headers).await {
+        return res;
     }
-    // SPA fallback sends unknown paths to frontend routing.
-    match Assets::get("index.html") {
-        Some(content) => (
-            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-            content.data.into_owned(),
-        )
-            .into_response(),
-        None => (
-            StatusCode::NOT_FOUND,
-            "Frontend assets not found (dist not built?)",
-        )
-            .into_response(),
+    // SPA fallback sends unknown paths to frontend routing. index.html's own revalidate policy applies,
+    // not the requested route's, because these bytes are index.html regardless of the URL that asked.
+    if let Some(res) = static_assets::serve(
+        "index.html",
+        "index.html",
+        "text/html; charset=utf-8",
+        &headers,
+    )
+    .await
+    {
+        return res;
     }
+    (
+        StatusCode::NOT_FOUND,
+        "Frontend assets not found (dist not built?)",
+    )
+        .into_response()
 }
 
 /// Write a secret file so it is owner-only (0600) from the moment it exists, instead of chmod-after-write,

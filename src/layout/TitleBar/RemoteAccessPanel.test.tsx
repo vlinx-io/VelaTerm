@@ -16,6 +16,8 @@ const {
   webServerStatusMock,
   webServerStartMock,
   appSettings,
+  mirrorSetEnabledMock,
+  mirrorState,
 } = vi.hoisted(() => {
   const appSettings: Record<string, string> = {};
   // Default invoke implementation; tests overriding it (e.g. to defer get_app_settings) rely on
@@ -31,6 +33,8 @@ const {
   return {
     appSettings,
     defaultInvoke,
+    mirrorSetEnabledMock: vi.fn().mockResolvedValue(undefined),
+    mirrorState: { enabled: true, set: vi.fn() },
     invokeMock: vi.fn(defaultInvoke),
     networkInterfacesListMock: vi.fn(),
     webPairingCreateMock: vi.fn(),
@@ -45,6 +49,13 @@ vi.mock("../../i18n", () => ({
 }));
 vi.mock("../../ipc/transport", () => ({ invoke: invokeMock }));
 vi.mock("../../ipc/info", () => ({ copyText: vi.fn() }));
+vi.mock("../../ipc/mirror", () => ({ mirrorSetEnabled: mirrorSetEnabledMock }));
+// The panel reads mirror mode from the store; stub it rather than loading the store and its platform
+// adapter chain, which this suite has no other reason to pull in.
+vi.mock("../../store/termStore", () => ({
+  useTermStore: (sel: (s: unknown) => unknown) =>
+    sel({ mirrorEnabled: mirrorState.enabled, setMirrorEnabled: mirrorState.set }),
+}));
 // The backdrop shell pulls in platform hooks irrelevant here; render children directly.
 vi.mock("../../components/Backdrop", () => ({
   Backdrop: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -127,6 +138,44 @@ afterEach(() => {
   vi.clearAllMocks();
   invokeMock.mockImplementation(defaultInvoke);
   for (const key of Object.keys(appSettings)) delete appSettings[key];
+  mirrorState.enabled = true;
+});
+
+describe("mirror-mode switch", () => {
+  it("offers mirror mode while stopped, checked by default", async () => {
+    mockStopped({});
+    render(<RemoteAccessPanel onClose={() => {}} />);
+
+    const box = await waitFor(() => {
+      const el = screen.getByLabelText(/remote\.mirror/, { selector: "input" });
+      return el as HTMLInputElement;
+    });
+    expect(box.checked).toBe(true);
+  });
+
+  it("applies a switch-off locally and asks the backend to broadcast it", async () => {
+    mockStopped({});
+    render(<RemoteAccessPanel onClose={() => {}} />);
+    const box = await waitFor(
+      () => screen.getByLabelText(/remote\.mirror/, { selector: "input" }) as HTMLInputElement,
+    );
+
+    fireEvent.click(box);
+
+    expect(mirrorState.set).toHaveBeenCalledWith(false);
+    expect(mirrorSetEnabledMock).toHaveBeenCalledWith(false);
+  });
+
+  it("stays available while the service runs, so it can be changed without a restart", async () => {
+    webServerStatusMock.mockResolvedValue(runningStatus());
+    networkInterfacesListMock.mockResolvedValue([]);
+    webPairingCreateMock.mockResolvedValue({ url: "https://x/#pair=abc", deviceToken: "t" });
+    render(<RemoteAccessPanel onClose={() => {}} />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/remote\.mirror/, { selector: "input" })).toBeTruthy();
+    });
+  });
 });
 
 describe("advertised-IP selector", () => {

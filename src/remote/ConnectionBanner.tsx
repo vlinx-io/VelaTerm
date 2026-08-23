@@ -11,7 +11,13 @@
 
 import { useEffect, useState } from "react";
 import { useT } from "../i18n";
-import { isTauri, isRemoteWindow, remoteSshSession } from "../ipc/transport";
+import {
+  emitNative,
+  isTauri,
+  isRemoteWindow,
+  listenNative,
+  remoteSshSession,
+} from "../ipc/transport";
 import { wsClient } from "../ipc/wsClient";
 
 /** Failure count before showing the banner; the first may be transient, the second is considered disconnected. */
@@ -44,12 +50,13 @@ export function ConnectionBanner() {
     let disposed = false;
     void (async () => {
       try {
-        const { listen } = await import("@tauri-apps/api/event");
-        const un = await listen<{ session: string; state: string }>(
+        // Native rather than the regular transport listen: this window's WebSocket goes to the remote
+        // server, which knows nothing about the local tunnel carrying it.
+        const un = await listenNative<{ session: string; state: string }>(
           "ssh://tunnel-state",
-          (ev) => {
-            if (ev.payload.session !== remoteSshSession) return;
-            const s = ev.payload.state;
+          (payload) => {
+            if (payload.session !== remoteSshSession) return;
+            const s = payload.state;
             if (s === "up") {
               setTunnel(null);
               // Replace the old potentially half-open socket immediately after tunnel recovery.
@@ -81,8 +88,7 @@ export function ConnectionBanner() {
     if (isRemoteWindow && remoteSshSession) {
       void (async () => {
         try {
-          const { emit } = await import("@tauri-apps/api/event");
-          await emit("vlx://ssh-reconnect", { session: remoteSshSession });
+          await emitNative("vlx://ssh-reconnect", { session: remoteSshSession });
         } catch {
           /* Continue with WebSocket reconnection if emitting fails. */
         }

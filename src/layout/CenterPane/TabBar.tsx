@@ -13,6 +13,7 @@ import { useT } from "../../i18n";
 import { DOC_EXPORT_PDF_EVENT } from "../../hooks/useKeyboardShortcuts";
 import { isTauri } from "../../ipc/transport";
 import { env } from "../../platform";
+import { labelWithCombo } from "../../hooks/shortcutRegistry";
 import { useTermStore } from "../../store/termStore";
 import { effectiveStatus, type Session } from "../../types";
 import { type TreeNodeRef } from "../LeftSidebar/ProjectTree";
@@ -63,6 +64,7 @@ function useCtrlCharGuard() {
 
 export function TabBar() {
   const t = useT();
+  const shortcutOverrides = useTermStore((s) => s.shortcutOverrides);
   const tabRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const ctrlCharGuard = useCtrlCharGuard();
   const projects = useTermStore((s) => s.projects);
@@ -460,7 +462,7 @@ export function TabBar() {
         {(isTauri || env.isElectron) && (
           <button
             className="tab-add"
-            title={t("titlebar.browser")}
+            title={labelWithCombo(t("titlebar.browser"), "newBrowserTab", shortcutOverrides)}
             onClick={() => useTermStore.getState().openBrowserTab()}
           >
             <Icons.compass size={14} />

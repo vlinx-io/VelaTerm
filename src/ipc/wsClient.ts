@@ -401,8 +401,20 @@ class WsClient {
       this.lastConnectHadToken = this.sessionToken !== null;
       const ws = new WebSocket(url);
       ws.binaryType = "arraybuffer";
+      // Claim ownership at construction, not at onopen. `close()` only starts the closing handshake,
+      // so a forced reconnect (wakeReconnect) builds this socket while the previous one is still
+      // CLOSING and still delivering queued frames. Owning the socket from birth lets every callback
+      // below test `this.ws !== ws` and ignore a superseded connection. Without that test the two
+      // sockets shared one set of E2EE fields: the newer onopen overwrote clientKeys, the older
+      // socket's e2ee_ready derived sharedKey from the wrong key pair, and the live socket's own
+      // e2ee_ready then failed to decrypt and was reported as an authentication failure.
+      this.supersede(this.ws);
+      this.ws = ws;
       ws.onopen = () => {
-        this.ws = ws;
+        if (this.ws !== ws) {
+          ws.close();
+          return;
+        }
         if (this.pairing) {
           // E2EE flow: generate an ephemeral client key and send e2ee_hello in plaintext. Delay
           // goOnline until onMessage receives e2ee_authenticated.
@@ -420,8 +432,15 @@ class WsClient {
           this.goOnline(ws);
         }
       };
-      ws.onmessage = (ev) => this.onMessage(ev);
+      // Frames from a superseded socket must never touch the live connection's E2EE state.
+      ws.onmessage = (ev) => {
+        if (this.ws !== ws) return;
+        this.onMessage(ev);
+      };
       ws.onclose = () => {
+        // A superseded socket closing is expected and owns none of the state below; the live socket
+        // drives reconnection. Reacting here would clear the new connection's keys mid-handshake.
+        if (this.ws !== ws) return;
         this.ws = null;
         this.connectPromise = null;
         // Reset E2EE state so the next connection uses a fresh handshake and ephemeral key.
@@ -439,6 +458,7 @@ class WsClient {
         this.scheduleReconnect();
       };
       ws.onerror = () => {
+        if (this.ws !== ws) return;
         // onclose normally follows onerror; only reject the initial ensure if it has not opened.
         if (this.connectPromise) {
           this.connectPromise = null;
@@ -463,11 +483,18 @@ class WsClient {
     // socket as half-open and close it so onclose can trigger automatic recovery.
     this.lastInbound = Date.now();
     clearInterval(this.idleTimer);
-    this.idleTimer = setInterval(() => {
+    const timer = setInterval(() => {
+      // Stop with the socket that owns this timer: a superseded connection must not close on the
+      // live one's behalf, and its interval would otherwise outlive the field that tracks it.
+      if (this.ws !== ws) {
+        clearInterval(timer);
+        return;
+      }
       if (Date.now() - this.lastInbound > IDLE_TIMEOUT_MS) {
         ws.close();
       }
     }, IDLE_CHECK_MS);
+    this.idleTimer = timer;
     // Recover by reattaching every registered PTY. attachOnly never revives a session closed by
     // another client during the outage as an empty shell; the server replays the mode prelude and
     // current screen.
@@ -496,6 +523,22 @@ class WsClient {
     }
     this.pendingConnect?.resolve();
     this.pendingConnect = null;
+  }
+
+  /** Retire the socket a new connection replaces. Its `onclose` is ignored from this point on, so
+   *  the teardown that handler would have performed happens here: close it if it is still live and
+   *  fail its in-flight requests, which will never receive a reply on the new connection. */
+  private supersede(prev: WebSocket | null) {
+    if (!prev) return;
+    if (
+      prev.readyState === WebSocket.OPEN ||
+      prev.readyState === WebSocket.CONNECTING
+    ) {
+      prev.close();
+    }
+    for (const p of this.pending.values())
+      p.reject(new TransportError(t("transport.wsDisconnected")));
+    this.pending.clear();
   }
 
   /** On E2EE decryption/auth failure, close the connection and send LoginGate back to login.
@@ -588,7 +631,15 @@ class WsClient {
         const plain =
           typeof ev.data === "string" ? this.decryptText(ev.data) : null;
         if (plain === null) {
-          this.failHandshake();
+          // An undecryptable frame proves nothing about the credentials, so it must not land on the
+          // terminal "wrong password or expired link" page — that page has no way back and a single
+          // transient fault would strand the window until the user reopened it. Log it and close so
+          // the normal backoff reconnect runs a fresh handshake.
+          recordRequestError(
+            "ws:e2ee-decrypt",
+            "could not decrypt a handshake frame; closing the socket to retry",
+          );
+          this.ws?.close();
           return;
         }
         let m: { type?: string; code?: string };
@@ -667,8 +718,11 @@ class WsClient {
 
   private send(obj: unknown) {
     const text = JSON.stringify(obj);
-    // Encrypt all outbound text after E2EE is ready. Handshake hello/auth frames bypass this path.
-    this.ws?.send(this.e2eeReady ? this.encryptText(text) : text);
+    // The socket is owned from construction, so it can be CONNECTING here; sending then throws
+    // InvalidStateError. Encrypt all outbound text after E2EE is ready — handshake hello/auth
+    // frames bypass this path.
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.ws.send(this.e2eeReady ? this.encryptText(text) : text);
   }
 
   /** Dispatch an event locally through the same path as server events, used after reattach failure. */

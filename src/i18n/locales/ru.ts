@@ -60,7 +60,7 @@ const ru: typeof en = {
   "titlebar.themeSystem": (resolved) => `Как в системе (сейчас: ${resolved})`, // Follow system (currently {resolved})
   "titlebar.themeDark": "Тёмная", // Dark
   "titlebar.themeLight": "Светлая", // Light
-  "titlebar.browser": "Встроенный браузер (⌘⇧B)", // Built-in Browser (⌘⇧B)
+  "titlebar.browser": "Встроенный браузер", // Built-in Browser
   "titlebar.remoteAccess": "Удалённый доступ (браузер)", // Remote Access (Browser)
   "titlebar.connectRemote": "Подключиться к удалённому серверу", // Connect to Remote Server
   "titlebar.share": "Поделиться", // Share
@@ -152,6 +152,8 @@ const ru: typeof en = {
   "spawn.promptLabel": "Prompt", // Prompt
   "spawn.agentLabel": "Agent", // Agent
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
+  "spawn.modelLabel": "Модель", // Model
+  "spawn.effortLabel": "Усилие", // Effort
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
@@ -166,6 +168,28 @@ const ru: typeof en = {
   "changes.notRepo": "Не git-репозиторий",
   "changes.selectFile": "Выберите файл",
   "changes.binary": "Двоичный файл — построчный diff недоступен",
+  "changes.commitTitle": (hash: string) => `Коммит ${hash}`,
+
+  "git.staged": "В индексе",
+  "git.changes": "Изменения",
+  "git.untracked": "Неотслеживаемые файлы",
+  "git.committed": "Закоммиченные изменения",
+  "git.stage": "Добавить в индекс",
+  "git.unstage": "Убрать из индекса",
+  "git.stageAll": "Добавить всё",
+  "git.unstageAll": "Убрать всё",
+  "git.discard": "Отменить изменения",
+  "git.deleteFile": "Удалить",
+  "git.viewAll": "Показать всё",
+  "git.detached": "(отсоединённый HEAD)",
+  "git.aheadBehind": "Коммиты впереди и позади вышестоящей ветки",
+  "git.commitPlaceholder": "Сообщение коммита",
+  "git.amend": "Изменить последний коммит",
+  "git.amendCommit": "Изменить коммит",
+  "git.commitCount": (n: number) => `Закоммитить файлов: ${n}`,
+  "git.commitNoFiles": "В этом коммите нет изменений файлов",
+  "git.noCommits": "Коммитов пока нет",
+  "git.loadMore": "Загрузить ещё",
   "tree.merge": "Merge…", // TODO translate
   "tree.copyWorktreePath": "Copy worktree path",
   "tree.openWorktreeDir": "Open worktree folder",
@@ -229,6 +253,7 @@ const ru: typeof en = {
   "settings.termFontSize": "Terminal size", // TODO translate
   "settings.fontDefault": "Default", // TODO translate
   "settings.fontCustom": "Custom…", // TODO translate
+  "settings.fontUnavailable": "Не установлен на этом устройстве",
   "settings.fontAuto": "Auto", // TODO translate
   "settings.fontSmaller": "Smaller", // TODO translate
   "settings.fontLarger": "Larger", // TODO translate
@@ -317,6 +342,9 @@ const ru: typeof en = {
   "remote.autoRestartHint":
     "Удалённый доступ автоматически возобновляется при повторном открытии приложения. «Остановить сервер» отключает это.", // Remote access restarts automatically when the app is reopened. Stop Server turns this off.
   "remote.autostartFailed": "Сбой автоматического запуска:", // Automatic start failed:
+  "remote.mirror": "Зеркалировать раскладку на всех устройствах", // Mirror layout across devices
+  "remote.mirrorHint":
+    "Вкладки, разделения и активная сессия одинаковы на всех подключённых устройствах. Фокус клавиатуры на каждом остаётся на месте.", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
 
   // ── Remote connection panel ──
   "connect.title": "Подключиться к удалённому серверу", // Connect to Remote Server
@@ -425,7 +453,7 @@ const ru: typeof en = {
   "clone.elapsed": (seconds: number) => `Прошло ${seconds} с`,
   "clone.slowHint": "Нет прогресса в течение 30 секунд. Проверьте сеть или прокси удалённого компьютера; можно отменить и повторить попытку.",
   "clone.submit": "Клонировать", // Clone
-  "tree.globalSearch": "Искать во всех сессиях (⌘⇧F)", // Search All Sessions (⌘⇧F)
+  "tree.globalSearch": "Искать во всех сессиях", // Search All Sessions
   "tree.archivedSessions": "Архив сессий", // Archived Sessions
   "tree.searchPlaceholder": "Поиск сессий / групп…", // Search sessions / groups…
   "tree.clearSearch": "Очистить поиск", // Clear search
@@ -489,6 +517,14 @@ const ru: typeof en = {
   "tree.cwdLabel": "Рабочий каталог (пусто = корень проекта)", // Working directory (leave empty for project root)
   "tree.initCmdLabel": "Команда запуска (необязательно)", // Startup command (optional)
   "tree.agentArgsLabel": "Аргументы запуска (необязательно)", // Launch args (optional)
+  "preset.execPathLabel": "Исполняемый файл (необязательно)",
+  "preset.execPathPlaceholder": "/usr/local/bin/claude",
+  "preset.execPathHint": "Оставьте пустым, чтобы использовать команду, настроенную для агента. Укажите путь, и только этот сеанс запустится с совместимой заменой.",
+  "preset.saveLabel": "Сохранить как пресет",
+  "preset.namePlaceholder": "Название пресета",
+  "preset.iconChoose": "Выбрать значок",
+  "preset.iconClear": "Убрать",
+  "preset.iconHint": "Лучше всего подходят квадратные изображения; остальные обрезаются и масштабируются до 64x64.",
   "tree.permissionSkipLabel": "Пропускать все подтверждения разрешений", // Skip all permission confirmations
   "tree.permissionSkipHint":
     "Запускает с флагом обхода этого агента (напр. Claude --dangerously-skip-permissions; Codex также отключает песочницу). Применяется при каждом запуске — используйте с осторожностью.",
@@ -628,6 +664,7 @@ const ru: typeof en = {
   "browser.back": "Назад", // Back
   "browser.forward": "Вперёд", // Forward
   "browser.reload": "Обновить", // Reload
+  "browser.desktopOnly": "Вкладки браузера открываются только в настольном приложении.", // Browser tabs open in the desktop app only.
   "browser.stop": "Остановить загрузку", // Stop loading
   "browser.openExternal": "Открыть в системном браузере", // Open in system browser
   "browser.addressPlaceholder": "Введите URL или поисковый запрос", // Enter URL or search terms
@@ -709,7 +746,7 @@ const ru: typeof en = {
   "doc.outlineEmpty": "Нет заголовков", // No headings
   "doc.saving": "Сохранение…", // Saving…
   "doc.overwriteConfirm": "Файл с таким именем уже существует. Нажмите «Перезаписать», чтобы заменить его.", // A file with this name already exists. Click "Overwrite" to replace it.
-  "doc.saveTooltip": "Сохранить (⌘S)", // Save (⌘S)
+  "doc.saveTooltip": "Сохранить", // Save
   "doc.externalChanged":
     "Файл изменён на диске (у вас есть несохранённые локальные изменения).", // The file was modified on disk…
   "doc.reloadDiscard": "Перезагрузить (отбросить мои изменения)", // Reload (discard my changes)
@@ -820,7 +857,7 @@ const ru: typeof en = {
   "login.rateLimited": "Слишком много попыток. Подождите минуту и попробуйте снова.", // Too many attempts. Please wait a minute and try again.
   "login.failed": "Не удалось войти, попробуйте ещё раз", // Login failed, please try again
   "login.pairingRequired": "Этот сервер требует ссылку для сопряжения. Откройте ссылку, созданную в панели «Удалённый доступ» настольного приложения.", // This server requires a pairing link
-  "login.authFailed": "Неверный пароль или ссылка для сопряжения устарела. Подключитесь снова по новой ссылке.", // Wrong password or pairing link expired
+  "login.authFailed": "Ошибка аутентификации. Проверьте пароль доступа или откройте новую ссылку для сопряжения, если её создали заново.", // Authentication failed, check password or use a new pairing link
   "dir.title": "Выбор каталога проекта", // Choose Project Directory
   "dir.pathPlaceholder": "Поиск или введите путь и нажмите Enter (поддерживается ~)", // Search, or type a path and press Enter (supports ~)
   "dir.up": "На уровень вверх", // Up one level

@@ -50,7 +50,7 @@ const ko: typeof en = {
   "titlebar.themeSystem": (resolved) => `시스템 따름 (현재: ${resolved})`, // Follow system (currently {resolved})
   "titlebar.themeDark": "다크", // Dark
   "titlebar.themeLight": "라이트", // Light
-  "titlebar.browser": "내장 브라우저 (⌘⇧B)", // Built-in Browser (⌘⇧B)
+  "titlebar.browser": "내장 브라우저", // Built-in Browser
   "titlebar.remoteAccess": "원격 접속 (브라우저)", // Remote Access (Browser)
   "titlebar.connectRemote": "원격 서버에 연결", // Connect to Remote Server
   "titlebar.share": "공유", // Share
@@ -141,6 +141,8 @@ const ko: typeof en = {
   "spawn.promptLabel": "Prompt", // Prompt
   "spawn.agentLabel": "Agent", // Agent
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
+  "spawn.modelLabel": "모델", // Model
+  "spawn.effortLabel": "추론 강도", // Effort
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
@@ -155,6 +157,28 @@ const ko: typeof en = {
   "changes.notRepo": "Git 저장소가 아닙니다",
   "changes.selectFile": "파일을 선택하세요",
   "changes.binary": "바이너리 파일 — 줄 단위 diff 불가",
+  "changes.commitTitle": (hash: string) => `커밋 ${hash}`,
+
+  "git.staged": "스테이징됨",
+  "git.changes": "변경 사항",
+  "git.untracked": "추적되지 않는 파일",
+  "git.committed": "커밋된 변경 사항",
+  "git.stage": "스테이징",
+  "git.unstage": "스테이징 취소",
+  "git.stageAll": "모두 스테이징",
+  "git.unstageAll": "모두 스테이징 취소",
+  "git.discard": "변경 사항 버리기",
+  "git.deleteFile": "삭제",
+  "git.viewAll": "모두 보기",
+  "git.detached": "(detached)",
+  "git.aheadBehind": "업스트림 브랜치 대비 앞선/뒤처진 커밋 수",
+  "git.commitPlaceholder": "커밋 메시지",
+  "git.amend": "마지막 커밋 수정",
+  "git.amendCommit": "커밋 수정",
+  "git.commitCount": (n: number) => `${n}개 파일 커밋`,
+  "git.commitNoFiles": "이 커밋에는 파일 변경이 없습니다",
+  "git.noCommits": "아직 커밋이 없습니다",
+  "git.loadMore": "더 불러오기",
   "tree.merge": "Merge…", // TODO translate
   "tree.copyWorktreePath": "Copy worktree path",
   "tree.openWorktreeDir": "Open worktree folder",
@@ -218,6 +242,7 @@ const ko: typeof en = {
   "settings.termFontSize": "Terminal size", // TODO translate
   "settings.fontDefault": "Default", // TODO translate
   "settings.fontCustom": "Custom…", // TODO translate
+  "settings.fontUnavailable": "이 기기에 설치되어 있지 않음",
   "settings.fontAuto": "Auto", // TODO translate
   "settings.fontSmaller": "Smaller", // TODO translate
   "settings.fontLarger": "Larger", // TODO translate
@@ -306,6 +331,9 @@ const ko: typeof en = {
   "remote.autoRestartHint":
     "원격 액세스는 앱을 다시 열면 자동으로 다시 시작됩니다. \"서버 중지\"로 끌 수 있습니다.", // Remote access restarts automatically when the app is reopened. Stop Server turns this off.
   "remote.autostartFailed": "자동 시작 실패:", // Automatic start failed:
+  "remote.mirror": "기기 간 레이아웃 미러링", // Mirror layout across devices
+  "remote.mirrorHint":
+    "탭, 분할, 활성 세션이 연결된 모든 기기에서 동일하게 유지됩니다. 키보드 포커스는 기기마다 그대로 유지됩니다.", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
 
   // ── Remote connection panel ──
   "connect.title": "원격 서버에 연결", // Connect to Remote Server
@@ -411,7 +439,7 @@ const ko: typeof en = {
   "clone.elapsed": (seconds: number) => `${seconds}초 경과`,
   "clone.slowHint": "30초 동안 진행되지 않았습니다. 원격 컴퓨터의 네트워크 또는 프록시를 확인하거나 취소 후 다시 시도하세요.",
   "clone.submit": "클론", // Clone
-  "tree.globalSearch": "모든 세션 검색 (⌘⇧F)", // Search All Sessions (⌘⇧F)
+  "tree.globalSearch": "모든 세션 검색", // Search All Sessions
   "tree.archivedSessions": "보관된 세션", // Archived Sessions
   "tree.searchPlaceholder": "세션 / 그룹 검색…", // Search sessions / groups…
   "tree.clearSearch": "검색 지우기", // Clear search
@@ -474,6 +502,14 @@ const ko: typeof en = {
   "tree.cwdLabel": "작업 디렉터리 (비우면 프로젝트 루트)", // Working directory (leave empty for project root)
   "tree.initCmdLabel": "시작 명령 (선택)", // Startup command (optional)
   "tree.agentArgsLabel": "실행 인자 (선택)", // Launch args (optional)
+  "preset.execPathLabel": "실행 파일(선택)",
+  "preset.execPathPlaceholder": "/usr/local/bin/claude",
+  "preset.execPathHint": "비워 두면 에이전트에 설정된 명령을 사용합니다. 지정하면 이 세션만 호환 대체 프로그램으로 실행됩니다.",
+  "preset.saveLabel": "프리셋으로 저장",
+  "preset.namePlaceholder": "프리셋 이름",
+  "preset.iconChoose": "아이콘 선택",
+  "preset.iconClear": "제거",
+  "preset.iconHint": "정사각형 이미지가 가장 좋습니다. 나머지는 잘라서 64x64로 축소합니다.",
   "tree.permissionSkipLabel": "모든 권한 확인 건너뛰기", // Skip all permission confirmations
   "tree.permissionSkipHint":
     "시작 시 이 에이전트의 우회 플래그를 추가합니다(예: Claude의 --dangerously-skip-permissions, Codex는 샌드박스도 비활성화). 시작할 때마다 적용되므로 주의해서 사용하세요.",
@@ -606,6 +642,7 @@ const ko: typeof en = {
   "browser.back": "뒤로", // Back
   "browser.forward": "앞으로", // Forward
   "browser.reload": "새로고침", // Reload
+  "browser.desktopOnly": "브라우저 탭은 데스크톱 앱에서만 열립니다.", // Browser tabs open in the desktop app only.
   "browser.stop": "로드 중지", // Stop loading
   "browser.openExternal": "시스템 브라우저에서 열기", // Open in system browser
   "browser.addressPlaceholder": "URL 또는 검색어 입력", // Enter URL or search terms
@@ -687,7 +724,7 @@ const ko: typeof en = {
   "doc.outlineEmpty": "제목 없음", // No headings
   "doc.saving": "저장 중…", // Saving…
   "doc.overwriteConfirm": "같은 이름의 파일이 이미 있습니다. ‘덮어쓰기’를 누르면 대체합니다.", // A file with this name already exists. Click "Overwrite" to replace it.
-  "doc.saveTooltip": "저장 (⌘S)", // Save (⌘S)
+  "doc.saveTooltip": "저장", // Save
   "doc.externalChanged": "디스크에서 파일이 수정되었습니다 (저장하지 않은 로컬 변경이 있습니다).", // The file was modified on disk…
   "doc.reloadDiscard": "다시 불러오기 (내 변경 버리기)", // Reload (discard my changes)
   "doc.externalChangedClean": "디스크에서 파일이 수정되었습니다.", // The file was modified on disk.
@@ -791,7 +828,7 @@ const ko: typeof en = {
   "login.rateLimited": "시도 횟수가 너무 많습니다. 1분 후 다시 시도해 주세요.", // Too many attempts. Please wait a minute and try again.
   "login.failed": "로그인 실패, 다시 시도하세요", // Login failed, please try again
   "login.pairingRequired": "이 서버는 페어링 링크가 필요합니다. 데스크톱 앱의 '원격 액세스'에서 생성한 링크로 여세요.", // This server requires a pairing link
-  "login.authFailed": "비밀번호가 틀렸거나 페어링 링크가 만료되었습니다. 새 페어링 링크로 다시 연결하세요.", // Wrong password or pairing link expired
+  "login.authFailed": "인증에 실패했습니다. 액세스 비밀번호를 확인하세요. 링크를 다시 생성했다면 새 페어링 링크를 사용하세요.", // Authentication failed, check password or use a new pairing link
   "dir.title": "프로젝트 디렉터리 선택", // Choose Project Directory
   "dir.pathPlaceholder": "검색하거나 경로를 입력하고 Enter로 이동 (~ 지원)", // Search, or type a path and press Enter (supports ~)
   "dir.up": "상위 폴더로", // Up one level

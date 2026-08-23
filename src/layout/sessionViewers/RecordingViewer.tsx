@@ -12,7 +12,8 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
-import { WebglAddon } from "@xterm/addon-webgl";
+import type { WebglAddon } from "@xterm/addon-webgl";
+import { loadWebglCtor } from "../../term/rendererAddons";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 
 import Icons from "../../components/Icons";
@@ -84,14 +85,19 @@ export function RecordingViewer({
     currentOrdinalRef.current = 0;
 
     let webgl: WebglAddon | undefined;
-    try {
-      webgl = new WebglAddon();
-      term.loadAddon(webgl);
-    } catch {
-      /* Fall back to DOM rendering when WebGL is unavailable. */
-    }
-
     let disposed = false;
+    // The WebGL addon is a separate chunk (see term/rendererAddons.ts), so attaching is asynchronous
+    // and the replay renders through DOM until it arrives. `disposed` keeps a late arrival from
+    // attaching to a terminal this effect has already torn down.
+    void loadWebglCtor().then((Ctor) => {
+      if (!Ctor || disposed) return;
+      try {
+        webgl = new Ctor();
+        term.loadAddon(webgl);
+      } catch {
+        /* Fall back to DOM rendering when WebGL is unavailable. */
+      }
+    });
     const safeFit = () => {
       if (disposed) return;
       try {

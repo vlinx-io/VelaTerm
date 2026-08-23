@@ -53,7 +53,9 @@ const ACCENT_HEX: Record<string, string> = {
 };
 const ACCENTS: AccentChoice[] = ["auto", "green", "blue", "amber", "violet"];
 
-/** Preset monospace fonts; fontStack preserves a monospace fallback when a font is unavailable. */
+/** Preset monospace fonts; fontStack preserves a monospace fallback when a font is unavailable.
+ * The Nerd Font and CJK entries at the end are the ones agent TUIs and Chinese terminals commonly need,
+ * which otherwise had to be typed as a custom name on every machine. */
 const MONO_FONTS = [
   "JetBrains Mono",
   "SF Mono",
@@ -65,6 +67,12 @@ const MONO_FONTS = [
   "Source Code Pro",
   "Hack",
   "Ubuntu Mono",
+  "JetBrainsMono Nerd Font",
+  "CaskaydiaCove Nerd Font",
+  "FiraCode Nerd Font",
+  "Hack Nerd Font",
+  "Maple Mono NF CN",
+  "Sarasa Mono SC",
 ];
 
 /** Shared style for the font-size stepper's minus/plus buttons. */
@@ -335,6 +343,29 @@ function ShellSelect() {
   );
 }
 
+/** Whether a font name actually resolves on this device.
+ *
+ * A mistyped name is otherwise silent: the stack falls back to the generic monospace family while the
+ * settings row keeps showing the name as if it were in use. Measure a probe string in the candidate font
+ * against two very different generic families; a font that renders identically to both is not resolving,
+ * while a real font differs from at least one. Metric-compatible clones are the known blind spot, and
+ * reporting those as available is the safe direction.
+ */
+function isFontAvailable(name: string): boolean {
+  if (typeof document === "undefined") return true;
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (!ctx) return true; // Without a 2D context there is nothing to measure, so never warn.
+  const probe = "mmmmmmmmmmlliWWMO0@1";
+  const measure = (family: string) => {
+    ctx.font = `72px ${family}`;
+    return ctx.measureText(probe).width;
+  };
+  const quoted = JSON.stringify(name);
+  return (["monospace", "serif"] as const).some(
+    (base) => measure(`${quoted}, ${base}`) !== measure(base),
+  );
+}
+
 /** Font picker with presets and a custom-name input. A null value uses the default monospace stack.
  * Like the other appearance dropdowns, it avoids native select rendering. */
 function FontSelect({
@@ -350,6 +381,23 @@ function FontSelect({
   const [draft, setDraft] = useState("");
   const isPreset = value != null && MONO_FONTS.includes(value);
   const display = value == null ? t("settings.fontDefault") : value;
+  const [missing, setMissing] = useState(false);
+  useEffect(() => {
+    if (value == null) {
+      setMissing(false);
+      return;
+    }
+    let alive = true;
+    const check = () => {
+      if (alive) setMissing(!isFontAvailable(value));
+    };
+    check();
+    // A web font still loading would measure as missing on the first pass.
+    void document.fonts?.ready.then(check).catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [value]);
 
   if (editing) {
     return (
@@ -420,6 +468,11 @@ function FontSelect({
         </span>
         <Icons.chevD size={12} style={{ color: "var(--text-dim)", flex: "none" }} />
       </button>
+      {missing && (
+        <div style={{ marginTop: 4, width: 160, fontSize: 10.5, color: "var(--amber, #f5b14c)" }}>
+          {t("settings.fontUnavailable")}
+        </div>
+      )}
 
       {open && (
         <>
@@ -462,10 +515,24 @@ function FontSelect({
                   setOpen(false);
                 },
               })),
+              // A custom name is listed as its own row, so picking a preset and coming back does not mean
+              // retyping it. `__custom` below always opens the editor with the current value.
+              ...(value != null && !isPreset
+                ? [
+                    {
+                      key: "__current",
+                      label: value,
+                      on: true,
+                      act: () => {
+                        setOpen(false);
+                      },
+                    },
+                  ]
+                : []),
               {
                 key: "__custom",
                 label: t("settings.fontCustom"),
-                on: value != null && !isPreset,
+                on: false,
                 act: () => {
                   setDraft(value && !isPreset ? value : "");
                   setOpen(false);

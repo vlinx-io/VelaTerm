@@ -1,6 +1,7 @@
 //! Backend event listeners routed through the transport adapter: Tauri events on desktop, WebSocket relay in browsers.
 
-import { listen, type UnlistenFn } from "./transport";
+import { isRemoteWindow, listen, listenNative, type UnlistenFn } from "./transport";
+import type { MirrorSnapshot } from "./mirror";
 
 // PTY output bypasses the event channel and travels directly through spawnPty's binary Channel / WS binary frames; see transport.ts.
 
@@ -84,6 +85,10 @@ export interface SpawnRequest {
   prompt: string;
   kind?: "claude" | "codex" | "opencode" | "copilot" | "cursor" | "antigravity" | "cline" | "pi" | "crush" | "kiro" | "grok" | "zoo" | "terminal" | null;
   worktree?: boolean | null;
+  /** Model override chosen in the spawn confirmation dialog; null inherits from parent or defaults. */
+  model?: string | null;
+  /** Effort override chosen in the spawn confirmation dialog; null inherits from parent or defaults. */
+  effort?: string | null;
 }
 
 /** Listen for child-task requests as a global event registered once on mount. */
@@ -91,6 +96,21 @@ export function onSpawnRequest(
   cb: (req: SpawnRequest) => void,
 ): Promise<UnlistenFn> {
   return listen<SpawnRequest>("spawn://request", (payload) => cb(payload));
+}
+
+/** Payload broadcast when any client confirms or cancels a spawn confirmation card. */
+export interface SpawnResolved {
+  source: string;
+  parentSessionId: string;
+  prompt: string;
+  confirmed: boolean;
+}
+
+/** Listen for spawn-resolved events so other clients can dismiss their matching confirmation card. */
+export function onSpawnResolved(
+  cb: (ev: SpawnResolved) => void,
+): Promise<UnlistenFn> {
+  return listen<SpawnResolved>("spawn://resolved", (payload) => cb(payload));
 }
 
 /**
@@ -120,6 +140,34 @@ export function onTreeChanged(cb: () => void): Promise<UnlistenFn> {
   return listen("tree://changed", () => cb());
 }
 
+/**
+ * Listen for agent-preset changes broadcast after any client creates, edits, deletes or reorders one.
+ * Presets appear in every client's new-session menu, so each reloads its list. Kept separate from the tree
+ * event because presets live outside the session tree and change far less often.
+ */
+export function onPresetsChanged(cb: () => void): Promise<UnlistenFn> {
+  return listen("presets://changed", () => cb());
+}
+
+/**
+ * Listen for a layout published by any client in mirror mode. The payload carries the publisher's connection ID,
+ * which the receiver compares against its own `getClientSource()` to drop its own echo.
+ */
+export function onMirrorLayout(
+  cb: (snap: MirrorSnapshot) => void,
+): Promise<UnlistenFn> {
+  return listen<MirrorSnapshot>("mirror://layout", cb);
+}
+
+/** Listen for the host switching mirror mode on or off. */
+export function onMirrorMode(
+  cb: (enabled: boolean) => void,
+): Promise<UnlistenFn> {
+  return listen<{ enabled: boolean }>("mirror://mode", (payload) =>
+    cb(payload.enabled),
+  );
+}
+
 /** Stable `git clone --progress` phase; operationId isolates progress when clones run concurrently. */
 export interface CloneProgress {
   operationId: string;
@@ -143,9 +191,11 @@ export function onCloneProgress(
 
 /**
  * Action from the native macOS application menu. Backend `on_menu_event` emits custom menu clicks as
- * `menu://action` with the action ID as payload. Only desktop Tauri has a native menu; browser/remote clients do
- * not receive this Tauri-channel event. Terminal split actions are registered here because WKWebView may
- * consume their macOS key equivalents before dispatching a JavaScript keydown event.
+ * `menu://action` with the action ID as payload. Only desktop Tauri has a native menu; plain browsers do
+ * not receive this event. Remote windows (SSH / paired URL) are local Tauri windows and do receive it,
+ * but their regular `listen` goes over the WebSocket relay to the remote server, so they must listen
+ * natively. Terminal split actions are registered here because WKWebView may consume their macOS key
+ * equivalents before dispatching a JavaScript keydown event.
  */
 export type MenuAction =
   | "settings"
@@ -158,6 +208,9 @@ export type MenuAction =
 export function onMenuAction(
   cb: (action: MenuAction) => void,
 ): Promise<UnlistenFn> {
+  if (isRemoteWindow) {
+    return listenNative<MenuAction>("menu://action", (payload) => cb(payload));
+  }
   return listen<MenuAction>("menu://action", (payload) => cb(payload));
 }
 

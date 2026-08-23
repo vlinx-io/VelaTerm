@@ -80,25 +80,27 @@ describe("wsClient E2EE handshake failure wiring", () => {
     expect(reasons).toEqual(["unauthorized"]);
   });
 
-  it("reports an undecryptable handshake frame without a reason (credential-failure path)", () => {
+  it("does NOT report auth loss for an undecryptable handshake frame", () => {
     setupHandshake();
     const reasons: Array<string | undefined> = [];
     const unsubscribe = wsClient.onAuthLost((reason) => reasons.push(reason));
-    // Valid base64, but random bytes that no key decrypts (decryptText returns null).
+    // Valid base64, but random bytes that no key decrypts (decryptText returns null). This says
+    // nothing about the credentials, so it must close and retry rather than strand the window on
+    // the terminal "wrong password or invalid link" page.
     internals.onMessage({ data: bytesToB64(nacl.randomBytes(64)) });
     unsubscribe();
-    expect(reasons).toEqual([undefined]);
+    expect(reasons).toEqual([]);
   });
 
-  it("treats a handshake frame with INVALID base64 as a failed handshake instead of throwing", () => {
+  it("swallows a handshake frame with INVALID base64 instead of throwing or reporting auth loss", () => {
     setupHandshake();
     const reasons: Array<string | undefined> = [];
     const unsubscribe = wsClient.onAuthLost((reason) => reasons.push(reason));
-    // atob throws on this input; decryptText must catch it and degrade to the null path, which the
-    // handshake handler maps to failHandshake — never an uncaught exception out of onMessage.
+    // atob throws on this input; decryptText must catch it and degrade to the same close-and-retry
+    // path — never an uncaught exception out of onMessage, never a credential verdict.
     expect(() => internals.onMessage({ data: "%%%not-base64%%%" })).not.toThrow();
     unsubscribe();
-    expect(reasons).toEqual([undefined]);
+    expect(reasons).toEqual([]);
   });
 });
 
@@ -129,5 +131,114 @@ describe("wsClient reply rejection error mapping", () => {
     });
     await promise;
     expect(rejected?.message).toBe("plain backend failure");
+  });
+});
+
+/** Minimal WebSocket stand-in: `close()` only moves to CLOSING, exactly like the browser, so the
+ *  overlap window between a superseded socket and its `onclose` is reproducible. */
+class FakeWebSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+  binaryType = "";
+  readyState: number = FakeWebSocket.CONNECTING;
+  closeCalls = 0;
+  sent: unknown[] = [];
+  onopen: (() => void) | null = null;
+  onmessage: ((ev: { data: unknown }) => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  constructor(readonly url: string) {
+    created.push(this);
+  }
+  send(data: unknown) {
+    this.sent.push(data);
+  }
+  close() {
+    this.closeCalls++;
+    this.readyState = FakeWebSocket.CLOSING;
+  }
+}
+let created: FakeWebSocket[] = [];
+
+type ReconnectInternals = WsClientInternals & {
+  ws: FakeWebSocket | null;
+  password: string;
+  everConnected: boolean;
+  connectPromise: Promise<void> | null;
+  lastInbound: number;
+  clientKeys: { publicKey: Uint8Array; secretKey: Uint8Array } | null;
+  ensure: () => Promise<void>;
+};
+const reconnect = wsClient as unknown as ReconnectInternals;
+
+describe("wsClient superseded-socket isolation", () => {
+  const realWebSocket = globalThis.WebSocket;
+
+  afterEach(() => {
+    globalThis.WebSocket = realWebSocket;
+    created = [];
+    reconnect.ws = null;
+    reconnect.password = "";
+    reconnect.everConnected = false;
+    reconnect.connectPromise = null;
+    reconnect.clientKeys = null;
+  });
+
+  /** Drive a pairing-mode connection to the state a forced reconnect starts from: socket open, its
+   *  connect promise already settled, and inbound traffic stale enough to look half-open. */
+  function connectFirstSocket(): FakeWebSocket {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    reconnect.pairing = { token: "device-token", serverPub: new Uint8Array(32) };
+    reconnect.password = "pw";
+    void reconnect.ensure();
+    const a = created[0];
+    a.readyState = FakeWebSocket.OPEN;
+    a.onopen?.();
+    // goOnline's observable effects for this test; the handshake itself is covered above.
+    reconnect.connectPromise = null;
+    reconnect.everConnected = true;
+    reconnect.lastInbound = 0;
+    return a;
+  }
+
+  it("hands ownership to the replacement socket and ignores the old one's late callbacks", () => {
+    const a = connectFirstSocket();
+    // A forced reconnect closes A and immediately builds B, while A is still CLOSING and can still
+    // deliver queued frames — the overlap that used to corrupt the shared E2EE keys.
+    wsClient.forceReconnect();
+    const b = created[1];
+    expect(b).toBeDefined();
+    expect(a.closeCalls).toBe(1);
+    expect(reconnect.ws).toBe(b);
+
+    // B negotiates its own key pair; a late frame on A must not consume or overwrite it.
+    b.readyState = FakeWebSocket.OPEN;
+    b.onopen?.();
+    const keysB = reconnect.clientKeys;
+    expect(keysB).not.toBeNull();
+    a.onmessage?.({ data: JSON.stringify({ type: "e2ee_ready" }) });
+    expect(reconnect.sharedKey).toBeNull();
+    expect(reconnect.clientKeys).toBe(keysB);
+
+    // A's close arrives last and must not disown B or reset its handshake state.
+    a.readyState = FakeWebSocket.CLOSED;
+    a.onclose?.();
+    expect(reconnect.ws).toBe(b);
+  });
+
+  it("fails the superseded socket's in-flight requests instead of leaving them pending", async () => {
+    connectFirstSocket();
+    let rejected: Error | undefined;
+    const inflight = new Promise<unknown>((resolve, reject) => {
+      reconnect.pending.set(11, { resolve, reject });
+    }).catch((e: Error) => {
+      rejected = e;
+    });
+    wsClient.forceReconnect();
+    await inflight;
+    expect(rejected).toBeDefined();
+    expect(reconnect.pending.size).toBe(0);
   });
 });

@@ -53,6 +53,9 @@ const MANAGEMENT_CMDS: &[&str] = &[
     "web_devices_list",
     "web_device_revoke",
     "network_interfaces_list",
+    // Mirror mode is host-side service configuration (the checkbox lives in the desktop remote-access
+    // panel), so a paired device may follow the shared layout but never switch the feature for everyone.
+    "mirror_set_enabled",
 ];
 
 /// Commands that read or write stored secrets and are therefore gated to local origins — the class
@@ -276,6 +279,31 @@ pub fn dispatch(
             opt_str(args, "worktreePath").as_deref(),
             opt_str(args, "worktreeBaseRef").as_deref(),
         )?),
+        "list_agent_presets" => to_value(core::list_agent_presets(app)?),
+        // Agent presets carry `execPath`, which names a program rather than reading a file. It is gated
+        // by the same reasoning as create_session's `agentPath`: a paired device already holds a shell.
+        "create_agent_preset" => to_value(core::create_agent_preset(
+            app,
+            &req_str(args, "name")?,
+            req_kind::<SessionKind>(args, "baseKind")?,
+            opt_str(args, "execPath").as_deref(),
+            opt_str(args, "agentArgs").as_deref(),
+            opt_str(args, "permissionMode").as_deref(),
+            opt_str(args, "icon").as_deref(),
+        )?),
+        "update_agent_preset" => to_value(core::update_agent_preset(
+            app,
+            &req_str(args, "id")?,
+            &req_str(args, "name")?,
+            opt_str(args, "execPath").as_deref(),
+            opt_str(args, "agentArgs").as_deref(),
+            opt_str(args, "permissionMode").as_deref(),
+            opt_str(args, "icon").as_deref(),
+        )?),
+        "delete_agent_preset" => to_value(core::delete_agent_preset(app, &req_str(args, "id")?)?),
+        "reorder_agent_presets" => {
+            to_value(core::reorder_agent_presets(app, &req_str_vec(args, "ids")?)?)
+        }
         "create_session" => to_value(core::create_session(
             app,
             &req_str(args, "projectId")?,
@@ -291,6 +319,8 @@ pub fn dispatch(
             opt_str(args, "permissionMode").as_deref(),
             opt_str(args, "agentSessionId").as_deref(),
             opt_str(args, "worktreeBaseRef").as_deref(),
+            opt_str(args, "agentPresetId").as_deref(),
+            opt_str(args, "agentPath").as_deref(),
         )?),
         "persist_session" => to_value(core::persist_session(
             app,
@@ -403,6 +433,9 @@ pub fn dispatch(
         // Remote and Electron clients compare backend CARGO_PKG_VERSION with __APP_VERSION__ at startup
         // and report frontend/backend build drift. This shares Tauri's app_version source.
         "app_version" => to_value(env!("CARGO_PKG_VERSION")),
+        // Anonymous per-installation identifier sent as a header with desktop update checks, so the
+        // update server can count installations rather than IP addresses. Created on first call.
+        "install_id" => to_value(core::install_id(app)?),
         "set_app_settings" => {
             let entries = args
                 .get("entries")
@@ -455,6 +488,46 @@ pub fn dispatch(
             }
         }
         "git_recent_commits" => to_value(git::recent_commits(&req_str(args, "cwd")?, 5)),
+        // Git panel history: a page of commits, one commit's files, and one file's diff inside it.
+        "git_commit_count" => to_value(git::commit_count(&req_str(args, "cwd")?)),
+        "git_log_page" => to_value(git::log_page(
+            &req_str(args, "cwd")?,
+            opt_u64(args, "limit").unwrap_or(30) as usize,
+            opt_u64(args, "offset").unwrap_or(0) as usize,
+        )),
+        "git_commit_files" => to_value(git::commit_files(
+            &req_str(args, "cwd")?,
+            &req_str(args, "hash")?,
+        )?),
+        "git_commit_file_diff" => {
+            // Unlike git_file_diff this never touches the worktree: both sides come out of the
+            // object database through `git show`, so a path here can only name repository content
+            // and the data-dir ACL has nothing to gate.
+            to_value(git::commit_file_diff(
+                &req_str(args, "cwd")?,
+                &req_str(args, "hash")?,
+                &req_str(args, "path")?,
+            )?)
+        }
+        // Git panel mutations. Each is git-mediated and refused outside a repository; `paths` are
+        // repository-relative and validated in git.rs before any command runs.
+        "git_stage" => {
+            git::stage(&req_str(args, "cwd")?, &req_str_vec(args, "paths")?)?;
+            Ok(Value::Null)
+        }
+        "git_unstage" => {
+            git::unstage(&req_str(args, "cwd")?, &req_str_vec(args, "paths")?)?;
+            Ok(Value::Null)
+        }
+        "git_discard" => {
+            git::discard(&req_str(args, "cwd")?, &req_str_vec(args, "paths")?)?;
+            Ok(Value::Null)
+        }
+        "git_commit" => to_value(git::commit(
+            &req_str(args, "cwd")?,
+            &req_str(args, "message")?,
+            args.get("amend").and_then(Value::as_bool).unwrap_or(false),
+        )?),
         "agent_context_info" => {
             to_value(core::agent_context_info(app, &req_str(args, "sessionId")?)?)
         }
@@ -712,6 +785,18 @@ pub fn dispatch(
             Ok(Value::Null)
         }
         "web_server_status" => to_value(core::web_server_status(app)),
+        // UI mirror: every client publishes its layout here and follows what the others publish. `source`
+        // comes from the transport, never from the arguments, so the echo filter cannot be spoofed.
+        "mirror_get" => Ok(core::mirror_get(app)),
+        "mirror_push" => Ok(core::mirror_push(
+            app,
+            source,
+            args.get("state").cloned().unwrap_or(Value::Null),
+        )),
+        "mirror_set_enabled" => {
+            core::mirror_set_enabled(app, req_bool(args, "enabled")?)?;
+            Ok(Value::Null)
+        }
         // Stateless interface enumeration for the panel's IP selector; the module is called directly
         // because no AppCtx is involved, and desktop_call routes the desktop shell through here too.
         "network_interfaces_list" => to_value(crate::web::network_interfaces_list()),
@@ -740,6 +825,16 @@ pub fn dispatch(
             Ok(Value::Null)
         }
 
+        // Answers true only for the client that answered first; a later caller must drop its card
+        // without spawning anything.
+        "resolve_spawn" => Ok(Value::Bool(core::resolve_spawn(
+            app,
+            source,
+            &req_str(args, "parentSessionId")?,
+            &req_str(args, "prompt")?,
+            req_bool(args, "confirmed")?,
+        ))),
+
         other => Err(format!("Unknown command: {other}")),
     }
 }
@@ -755,6 +850,21 @@ fn req_str(args: &Value, key: &str) -> Result<String, String> {
         .and_then(Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| format!("Missing string parameter {key}"))
+}
+
+/// Read a required array-of-strings argument, rejecting a non-array or any non-string element.
+fn req_str_vec(args: &Value, key: &str) -> Result<Vec<String>, String> {
+    let arr = args
+        .get(key)
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("Missing array parameter {key}"))?;
+    arr.iter()
+        .map(|v| {
+            v.as_str()
+                .map(str::to_string)
+                .ok_or_else(|| format!("Parameter {key} must contain only strings"))
+        })
+        .collect()
 }
 
 /// Decode a base64 string argument to bytes. WebSocket binary payloads such as images use base64,
@@ -1039,6 +1149,9 @@ mod tests {
             "web_devices_list",
             "web_device_revoke",
             "network_interfaces_list",
+            // Added with mirror mode: the switch belongs to the host running the service, not to the
+            // devices connecting to it.
+            "mirror_set_enabled",
         ];
         assert_eq!(
             MANAGEMENT_CMDS, EXPECTED_GATED,
@@ -1530,6 +1643,8 @@ mod tests {
         "args, \"to\")",
         "args, \"destPath\")",
         "args, \"docPath\")",
+        // The Git panel's batch arms take repository-relative paths under this key.
+        "args, \"paths\")",
         "args, \"repoRoot\")",
         "args, \"wtPath\")",
         "args, \"repo\")",
@@ -1540,6 +1655,11 @@ mod tests {
         // rejects separators, so the gate on parentDir covers the composed target — but the key is
         // tracked here so a future arm consuming folderName without such a gate turns red.
         "args, \"folderName\")",
+        // agentPath names the executable a session's PTY runs. Tracked so a future arm taking it
+        // without a gate turns red; create_session itself is justified below.
+        "args, \"agentPath\")",
+        // execPath is the preset-level counterpart of agentPath, same reasoning.
+        "args, \"execPath\")",
     ];
     /// Deliberately ungated path-taking arms, each with its standing justification (mirrors the
     /// sweep comment at the file arms): metadata-only, or repo-scoped through git itself — never
@@ -1553,17 +1673,35 @@ mod tests {
         "git_branch_list",
         "git_merge_preview", // diff_stat summary, no raw file bytes
         "git_merge_apply",   // git-mediated mutation, refused outside a repository
+        // Git panel arms. History reads come out of the object database (`git log`, `diff-tree`,
+        // `git show <hash>:<path>`), never from a caller-named file on disk, so repository content
+        // is all they can return. The mutations run through git with a `--` separator after
+        // git.rs rejects absolute paths and `..` components, and git itself refuses a pathspec
+        // outside the repository — the one raw filesystem write, deleting an untracked entry,
+        // re-resolves the repository root and requires the target's real parent to sit under it.
+        "git_commit_count",
+        "git_log_page",
+        "git_commit_files",
+        "git_commit_file_diff",
+        "git_stage",
+        "git_unstage",
+        "git_discard",
+        "git_commit",
         "create_worktree",   // git-mediated, refused outside a repository
         "list_worktrees",
         "commit_worktree",   // git-mediated mutation, refused outside a repository
         "delete_branch",
-        // Session-tree metadata arms: `cwd`/`worktreePath` only choose where a PTY spawns; the
-        // arms read and write no file content, and a remote paired device is trusted with a
-        // shell in any directory by the threat model anyway.
+        // Session-tree metadata arms: `cwd`/`worktreePath` only choose where a PTY spawns and
+        // `agentPath` which program it spawns; the arms read and write no file content, and a
+        // remote paired device already holds a full shell through `pty_spawn` by the threat model,
+        // so naming a directory or a binary for it grants nothing further.
         "create_group",
         "create_session",
         "persist_session",
         "update_session",
+        // Preset arms store `execPath` as the program a future session will run; they open no file.
+        "create_agent_preset",
+        "update_agent_preset",
         // Pure DB insert: rootPath is stored as the project root and never read or written on disk
         // by this arm; the sessions it enables later run through the shell trust above.
         "import_project",
@@ -1826,6 +1964,59 @@ mod tests {
         assert_eq!(CallOrigin::for_serve_mode(ServeMode::LoopbackHttp), CallOrigin::Local);
         assert_eq!(CallOrigin::for_serve_mode(ServeMode::LanTls), CallOrigin::Remote);
         assert_eq!(CallOrigin::for_serve_mode(ServeMode::LanHttp), CallOrigin::Remote);
+    }
+
+    /// Mirror mode: a remote client follows and publishes the shared layout, but only a local one may
+    /// switch the feature on or off — the checkbox is host-side service configuration.
+    #[test]
+    fn mirror_commands_gate_only_the_switch() {
+        let app = test_ctx();
+        // The layout hub is a process-wide singleton; hold the shared test lock for the whole body.
+        let _hub = crate::web::mirror::test_guard();
+
+        let pushed = dispatch(
+            &app,
+            "mirror_push",
+            &json!({ "state": { "v": 1, "center": { "openTabs": ["A"] } } }),
+            "ws-7",
+            CallOrigin::Remote,
+        )
+        .expect("a remote client must be able to publish its layout");
+        // The publisher is stamped from the connection, never from the arguments, so the echo filter on
+        // the receiving side cannot be spoofed by a caller claiming to be someone else.
+        assert_eq!(pushed["source"], "ws-7");
+        assert_eq!(pushed["rev"], 1);
+
+        let got = dispatch(&app, "mirror_get", &json!({}), "ws-7", CallOrigin::Remote)
+            .expect("a remote client must be able to read the shared layout");
+        assert_eq!(got["state"]["center"]["openTabs"][0], "A");
+        assert_eq!(got["enabled"], true, "mirror mode is on unless the host turned it off");
+
+        let denied = dispatch(
+            &app,
+            "mirror_set_enabled",
+            &json!({ "enabled": false }),
+            "ws-7",
+            CallOrigin::Remote,
+        )
+        .expect_err("switching mirror mode is management-plane, not available to remote clients");
+        assert!(denied.starts_with("remote_cmd_forbidden"), "unexpected error: {denied}");
+
+        dispatch(
+            &app,
+            "mirror_set_enabled",
+            &json!({ "enabled": false }),
+            DESKTOP_SOURCE,
+            CallOrigin::Local,
+        )
+        .expect("the host may switch it");
+        let after = dispatch(&app, "mirror_get", &json!({}), DESKTOP_SOURCE, CallOrigin::Local).unwrap();
+        assert_eq!(after["enabled"], false);
+        // Switching off drops the published layout, so switching back on starts from whoever publishes
+        // first rather than restoring an arrangement from hours ago. The revision keeps counting, or a
+        // client that stayed connected would dismiss every later push as a stale frame.
+        assert_eq!(after["state"], serde_json::Value::Null);
+        assert_eq!(after["rev"], 1);
     }
 
     /// get_app_settings hides the security-relevant keys (remoteAccess.* verifier/autostart config and
