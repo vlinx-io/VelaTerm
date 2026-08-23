@@ -10,6 +10,7 @@
 
 import { useEffect, useState } from "react";
 import { useT } from "../i18n";
+import { flushNow } from "../ipc/settingsSync";
 import { platform } from "../platform";
 import { useTermStore } from "../store/termStore";
 import { Backdrop } from "./Backdrop";
@@ -51,8 +52,14 @@ export function QuitConfirmModal() {
     void platform.quit.cancel();
   };
 
-  const confirm = () => {
+  const confirm = async () => {
     setSaveWorkspaceOnQuit(save);
+    // Force the checkbox answer to the backend before approving the exit. Settings writes are debounced by
+    // 400 ms, and the process dies well inside that window, so the backend would keep the previous value.
+    // Startup reconciliation treats the backend as authoritative and overwrites the local copy from it, which
+    // means a skipped flush does not merely fail to save the answer -- it silently reverts the one already
+    // written to localStorage, and the checkbox comes back unticked every launch.
+    await flushNow();
     // Write the snapshot before approving the exit; the shell terminates the process as soon as confirm resolves.
     if (save) saveWorkspaceSnapshot();
     setAsking(false);
@@ -148,7 +155,7 @@ export function QuitConfirmModal() {
           </button>
           <button
             autoFocus
-            onClick={confirm}
+            onClick={() => void confirm()}
             style={{
               padding: "7px 16px",
               border: "none",
