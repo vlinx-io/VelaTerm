@@ -61,8 +61,15 @@ function flush(): void {
 /** Flush pending writes to the backend immediately and await completion, bypassing debounce. Use when a setting
  *  is needed immediately after writing—for example, when an install card fills an agent path and restarts the
  *  session. Backend spawn reads the path from app_settings at that moment and would see the old value if it were
- *  still waiting in the 400 ms debounce window. */
-export async function flushNow(): Promise<void> {
+ *  still waiting in the 400 ms debounce window.
+ *
+ *  `timeoutMs` caps the wait. `invoke` has no timeout of its own: over WebSocket transport (Electron shell and
+ *  remote-connection windows) a request is only settled by a reply or by `onclose`, and a half-open socket
+ *  produces neither, so the promise can hang forever. Callers that block a user action on this—approving an
+ *  exit, above all—must pass a bound; the local cache is already written, so giving up merely leaves the backend
+ *  to catch up on the next successful write. Omit it to wait indefinitely, which stays correct for callers that
+ *  need the backend to be current before they proceed. */
+export async function flushNow(timeoutMs?: number): Promise<void> {
   if (timer) {
     clearTimeout(timer);
     timer = null;
@@ -70,9 +77,21 @@ export async function flushNow(): Promise<void> {
   const entries = pending;
   pending = {};
   if (Object.keys(entries).length === 0) return;
-  await invoke("set_app_settings", { entries }).catch(() => {
+  const write = invoke("set_app_settings", { entries }).catch(() => {
     /* Fail silently when the backend is unavailable; localStorage still serves this shell as its local cache. */
   });
+  if (timeoutMs === undefined) {
+    await write;
+    return;
+  }
+  let bell: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    write,
+    new Promise<void>((resolve) => {
+      bell = setTimeout(resolve, timeoutMs);
+    }),
+  ]);
+  clearTimeout(bell);
 }
 
 /**

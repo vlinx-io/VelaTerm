@@ -44,6 +44,17 @@ fn main() {
     // that may not need the directory at all.
     let _ = std::fs::create_dir_all("../dist");
 
+    // Creating the directory trades a loud compile error for a silent one: a release build with nothing in
+    // `../dist` now embeds an empty asset bundle and boots to a blank window instead of refusing to compile.
+    // `pnpm release` and `tauri build` populate it through `beforeBuildCommand` and never hit this, so the
+    // warning is aimed at a bare `cargo build --release` that skipped the frontend.
+    let dist_is_empty = std::fs::read_dir("../dist")
+        .map(|mut entries| entries.next().is_none())
+        .unwrap_or(true);
+    if dist_is_empty && std::env::var("PROFILE").as_deref() == Ok("release") {
+        println!("cargo:warning=../dist is empty; this build embeds no frontend assets and will show a blank window. Run `pnpm build` first, or build through `pnpm release`.");
+    }
+
     // Run tauri-build only for GUI builds. It parses tauri.conf.json, requires frontendDist (../dist), and
     // generates permission scaffolding for generate_context!. The minimal server (`--no-default-features`) does
     // not call generate_context! or need frontend output; skipping this step allows builds without ../dist.

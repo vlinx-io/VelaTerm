@@ -143,6 +143,32 @@ describe("QuitConfirmModal", () => {
     await waitFor(() => expect(quit.confirm).toHaveBeenCalled());
   });
 
+  // `invoke` never times out, so an unbounded flush would freeze the dialog with no way to quit whenever the
+  // backend stops answering. The call must carry a bound rather than wait forever.
+  it("bounds the flush instead of waiting on the backend indefinitely", async () => {
+    await open();
+    await confirmExit();
+    expect(typeof flushNow.mock.calls[0][0]).toBe("number");
+  });
+
+  // The button stays mounted while the flush is in flight, so without a guard an impatient second click would
+  // run the whole approval path again and send a second confirm to the shell.
+  it("ignores a second click while the exit is already being approved", async () => {
+    let landFlush: () => void = () => {};
+    flushNow.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { landFlush = resolve; }),
+    );
+    await open();
+    const button = screen.getByText("quit.confirm");
+    fireEvent.click(button);
+    fireEvent.click(button);
+
+    await act(async () => landFlush());
+    await waitFor(() => expect(quit.confirm).toHaveBeenCalled());
+    expect(quit.confirm).toHaveBeenCalledTimes(1);
+    expect(flushNow).toHaveBeenCalledTimes(1);
+  });
+
   it("preticks the box from the remembered preference", async () => {
     store.saveWorkspaceOnQuit = true;
     await open();

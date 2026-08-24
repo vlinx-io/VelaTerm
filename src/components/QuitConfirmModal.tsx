@@ -15,6 +15,9 @@ import { platform } from "../platform";
 import { useTermStore } from "../store/termStore";
 import { Backdrop } from "./Backdrop";
 
+/** Upper bound on the pre-exit settings flush; see the comment in `confirm`. */
+const FLUSH_TIMEOUT_MS = 600;
+
 export function QuitConfirmModal() {
   const t = useT();
   const saveWorkspaceOnQuit = useTermStore((s) => s.saveWorkspaceOnQuit);
@@ -23,6 +26,8 @@ export function QuitConfirmModal() {
 
   const [asking, setAsking] = useState(false);
   const [save, setSave] = useState(saveWorkspaceOnQuit);
+  /** Set once the exit is approved, to keep the in-flight settings flush from being re-entered. */
+  const [exiting, setExiting] = useState(false);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -48,18 +53,27 @@ export function QuitConfirmModal() {
   if (!asking) return null;
 
   const cancel = () => {
+    if (exiting) return; // The exit is already approved; a backdrop click must not cancel it half-way.
     setAsking(false);
     void platform.quit.cancel();
   };
 
   const confirm = async () => {
+    if (exiting) return;
+    setExiting(true);
     setSaveWorkspaceOnQuit(save);
     // Force the checkbox answer to the backend before approving the exit. Settings writes are debounced by
     // 400 ms, and the process dies well inside that window, so the backend would keep the previous value.
     // Startup reconciliation treats the backend as authoritative and overwrites the local copy from it, which
     // means a skipped flush does not merely fail to save the answer -- it silently reverts the one already
     // written to localStorage, and the checkbox comes back unticked every launch.
-    await flushNow();
+    //
+    // Cap the wait: `invoke` never times out, and over WebSocket transport a half-open socket settles the
+    // request neither with a reply nor with a close, so an unbounded await would leave the dialog frozen with
+    // no way to quit. The bound sits just above the debounce window it replaces. Losing the write is the
+    // lesser failure -- localStorage keeps this shell correct, and reconciliation is only wrong when another
+    // shell has since changed the same key.
+    await flushNow(FLUSH_TIMEOUT_MS);
     // Write the snapshot before approving the exit; the shell terminates the process as soon as confirm resolves.
     if (save) saveWorkspaceSnapshot();
     setAsking(false);
@@ -155,6 +169,7 @@ export function QuitConfirmModal() {
           </button>
           <button
             autoFocus
+            disabled={exiting}
             onClick={() => void confirm()}
             style={{
               padding: "7px 16px",
@@ -164,7 +179,8 @@ export function QuitConfirmModal() {
               color: "var(--bg-0)",
               fontSize: 12.5,
               fontWeight: 600,
-              cursor: "pointer",
+              cursor: exiting ? "default" : "pointer",
+              opacity: exiting ? 0.6 : 1,
             }}
           >
             {t("quit.confirm")}
