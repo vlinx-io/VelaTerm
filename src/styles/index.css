@@ -42,54 +42,29 @@ body {
   user-select: text;
 }
 
-/* ─── IME pre-edit overlay: give the helper container a real width, then bound and theme it. ───
-   While composing, the uncommitted pre-edit text is drawn by xterm into `.composition-view`, which
-   lives in `.xterm-helpers`. That container is `position:absolute; top:0` with no left/right/width
-   and only absolutely positioned children, so it shrink-to-fits to **zero width**. `.composition-view`
-   is then positioned by xterm with an inline `left` (the cursor x); adding a `right` bound inside a
-   zero-width containing block resolves to a negative width, clamped to 0, and the pre-edit text is
-   invisible on every platform. Measured in Chromium 151 (the WebView2 engine): helpers 0x0,
-   `.composition-view` 0x20 with `.active` and the correct textContent.
-   Stretching `.xterm-helpers` across `.xterm-screen` makes `right` mean what it was written to mean,
-   and restores a second thing that matters more: xterm sizes the hidden textarea to the composition
-   view's bounds (CompositionHelper.updateCompositionElements), so a zero-width view also collapsed
-   the textarea to 1x1 — the rectangle the OS IME anchors its candidate window to. Windows users
-   therefore saw neither the pre-edit string nor the candidate window (issue #6).
-   The container has no background and zero height, so widening it changes nothing else visually. */
-.xterm .xterm-helpers {
-  left: 0;
-  right: 0;
-}
-
+/* ─── IME pre-edit overlay: keep it within the terminal's right edge. ───
+   While composing, the uncommitted pre-edit text is drawn by xterm's .composition-view. It is
+   positioned absolutely at the cursor with white-space:nowrap, and the parent .xterm has no
+   overflow, so a long string runs straight past the terminal's right edge (xterm's own source still
+   carries a TODO about this). xterm sets only left (the cursor x), never right or width, so we add a
+   right bound to keep the width inside the terminal and allow wrapping: the pre-edit text now wraps
+   downward inside the terminal instead of overflowing sideways. This is a presentation-only fix and
+   does not change the text actually sent. */
 /* ─── IME fix: WKWebView does not activate an IME for elements with opacity:0. ───
    xterm.css sets opacity:0 on the hidden textarea by default, so macOS WKWebView never fires
    compositionstart and the composing keystrokes of a Chinese or Japanese input method are sent to
    the terminal verbatim (typing produces uuuu instead of characters). A very small opacity fixes it:
-   invisible to the eye, yet the IME still treats the element as visible. `color: transparent` keeps
-   the browser-drawn pre-edit inside the textarea from ghosting under `.composition-view`, which is
-   the single visible pre-edit surface on all platforms. */
+   invisible to the eye, yet the IME still treats the element as visible. */
 .xterm .xterm-helper-textarea {
   opacity: 0.01 !important;
   color: transparent !important;
 }
 
-/* The pre-edit overlay itself. `right` keeps a long string inside the terminal so it wraps downward
-   instead of running past the right edge (xterm's own source still carries a TODO about this).
-   xterm pins an inline `height` of exactly one cell, which would clip every wrapped line but the
-   first, so `height` is released while its inline `line-height` still sets the per-line height. Its
-   xterm.css default is hard-coded black-on-white; theme it so it reads on both schemes. This is a
-   presentation-only fix and does not change the text actually sent. */
 .xterm .composition-view {
   right: 2px;
   white-space: pre-wrap;
   word-break: break-all;
-  height: auto !important;
-  background: var(--bg-2);
-  color: var(--text);
-  border: 1px solid var(--accent-line);
-  border-radius: 3px;
-  padding: 0 2px;
-  pointer-events: none;
+  overflow: hidden;
 }
 
 /* ─── Context-menu items shared through ContextMenu. ─── */

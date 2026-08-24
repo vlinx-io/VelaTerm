@@ -534,8 +534,9 @@ impl PtyManager {
         } else {
             None
         };
-        let codex_hooks_supported =
-            kind != SessionKind::Codex || codex_lifecycle_hooks_supported(bin_path.as_deref());
+        // Windows temporarily forgoes lifecycle hooks; see `codex_lifecycle_hooks_supported`.
+        let codex_hooks_supported = kind != SessionKind::Codex
+            || (!cfg!(windows) && codex_lifecycle_hooks_supported(bin_path.as_deref()));
         let should_capture_agent_id = resume_id.is_none() || fork;
         // Only the Windows theme-injection branch mutates this value.
         #[cfg_attr(not(windows), allow(unused_mut))]
@@ -1491,6 +1492,12 @@ fn session_agent_path(app: &AppCtx, id: &str) -> Option<String> {
 /// Inspects only public `--help` output without starting a session or using the network. Failure means
 /// unsupported and retains notify/screen/busy fallback. Windows `.cmd` wrappers run through cmd.exe; native
 /// executables run directly. Probe each launch so an in-place Codex upgrade takes effect immediately.
+///
+/// Callers currently skip this probe on Windows and never inject hooks there. The inline TOML table passed
+/// as `-c hooks=<table>` contains spaces and double quotes, and an npm-installed `codex.cmd` re-parses the
+/// command line through cmd.exe, which drops the quoting and splits the value into separate arguments. Codex
+/// then rejects the stray `--codex-hook` token and refuses to start (issue #53). Restore Windows hook support
+/// once the handlers move into `~/.codex/hooks.json`, leaving only quote-free flags on the command line.
 fn codex_lifecycle_hooks_supported(bin_path: Option<&str>) -> bool {
     let program = bin_path.filter(|p| !p.trim().is_empty()).unwrap_or("codex");
     #[cfg(windows)]

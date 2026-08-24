@@ -384,21 +384,6 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
     container.addEventListener("compositionstart", onUserInputSignal, true);
     container.addEventListener("compositionupdate", onUserInputSignal, true);
 
-    // Release the hidden textarea's geometry once composing ends. While composing, xterm stretches it to
-    // the pre-edit overlay's bounds so the OS anchors its candidate window correctly, but it never shrinks
-    // it again: the invisible element keeps covering as many rows as the pre-edit occupied and wins hit
-    // testing there (the helper layer sits above the rows), so clicks and drag-selection over that patch
-    // stop reaching the terminal. Clearing the inline values restores xterm's 0x0 default from xterm.css
-    // while leaving left/top alone, which is where the next composition wants to start anyway.
-    const onCompositionEndReset = () => {
-      const ta = container.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea");
-      if (!ta) return;
-      ta.style.width = "";
-      ta.style.height = "";
-      ta.style.lineHeight = "";
-    };
-    container.addEventListener("compositionend", onCompositionEndReset, true);
-
     let disposed = false;
     let unlistenExit: UnlistenFn | undefined;
     let unlistenKilled: UnlistenFn | undefined;
@@ -907,7 +892,6 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       container.removeEventListener("keydown", onUserInputSignal, true);
       container.removeEventListener("compositionstart", onUserInputSignal, true);
       container.removeEventListener("compositionupdate", onUserInputSignal, true);
-      container.removeEventListener("compositionend", onCompositionEndReset, true);
       imeFix?.dispose();
       writeParsedSub.dispose();
       dataSub.dispose();
