@@ -4,7 +4,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { quit, store } = vi.hoisted(() => ({
+const { flushNow, quit, store } = vi.hoisted(() => ({
+  flushNow: vi.fn().mockResolvedValue(undefined),
   quit: {
     onRequested: vi.fn(),
     ack: vi.fn().mockResolvedValue(undefined),
@@ -20,6 +21,7 @@ const { quit, store } = vi.hoisted(() => ({
 
 vi.mock("../i18n", () => ({ useT: () => (key: string) => key }));
 vi.mock("../platform", () => ({ platform: { quit } }));
+vi.mock("../ipc/settingsSync", () => ({ flushNow }));
 vi.mock("../hooks/nativeViewSuspend", () => ({ useSuspendNativeViews: () => {} }));
 vi.mock("../store/termStore", () => {
   const useTermStore = (selector: (s: typeof store) => unknown) => selector(store);
@@ -42,6 +44,12 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
+
+/** Approve the exit and let confirm()'s awaited settings flush settle before asserting. */
+async function confirmExit() {
+  fireEvent.click(screen.getByText("quit.confirm"));
+  await waitFor(() => expect(quit.confirm).toHaveBeenCalled());
+}
 
 /** Render and drive the shell request so the dialog is on screen. */
 async function open() {
@@ -74,7 +82,7 @@ describe("QuitConfirmModal", () => {
 
   it("exits without saving when the box is unticked", async () => {
     await open();
-    fireEvent.click(screen.getByText("quit.confirm"));
+    await confirmExit();
     expect(store.saveWorkspaceSnapshot).not.toHaveBeenCalled();
     expect(quit.confirm).toHaveBeenCalled();
   });
@@ -82,7 +90,7 @@ describe("QuitConfirmModal", () => {
   it("writes the snapshot before approving the exit when ticked", async () => {
     await open();
     fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByText("quit.confirm"));
+    await confirmExit();
 
     expect(store.saveWorkspaceSnapshot).toHaveBeenCalled();
     expect(quit.confirm).toHaveBeenCalled();
@@ -95,8 +103,44 @@ describe("QuitConfirmModal", () => {
   it("remembers the choice as the next exit's default", async () => {
     await open();
     fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByText("quit.confirm"));
+    await confirmExit();
     expect(store.setSaveWorkspaceOnQuit).toHaveBeenCalledWith(true);
+  });
+
+  // Settings writes are debounced by 400 ms and the process dies well inside that window. Startup
+  // reconciliation then treats the backend as authoritative, so an unflushed answer is not merely lost:
+  // it overwrites the value already in localStorage, and the box comes back unticked every launch.
+  it("flushes the remembered choice to the backend before approving the exit", async () => {
+    await open();
+    fireEvent.click(screen.getByRole("checkbox"));
+    await confirmExit();
+
+    expect(flushNow).toHaveBeenCalled();
+    expect(flushNow.mock.invocationCallOrder[0]).toBeGreaterThan(
+      store.setSaveWorkspaceOnQuit.mock.invocationCallOrder[0],
+    );
+    expect(flushNow.mock.invocationCallOrder[0]).toBeLessThan(
+      quit.confirm.mock.invocationCallOrder[0],
+    );
+  });
+
+  // Call order alone does not prove the fix: a fire-and-forget `flushNow()` satisfies every assertion above
+  // while still racing termination, which is the whole bug. Hold the flush unresolved and require that the
+  // exit stays unapproved until it lands, so dropping the await fails here.
+  it("does not approve the exit until the flush has landed", async () => {
+    let landFlush: () => void = () => {};
+    flushNow.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { landFlush = resolve; }),
+    );
+    await open();
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByText("quit.confirm"));
+
+    await waitFor(() => expect(flushNow).toHaveBeenCalled());
+    expect(quit.confirm).not.toHaveBeenCalled();
+
+    await act(async () => landFlush());
+    await waitFor(() => expect(quit.confirm).toHaveBeenCalled());
   });
 
   it("preticks the box from the remembered preference", async () => {
