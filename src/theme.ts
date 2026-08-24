@@ -148,10 +148,15 @@ function syncNativeChrome(mode: ThemeMode) {
   });
 }
 
-/** Apply a scheme: resolve it, write data-theme, persist the mode, and synchronize xterm colors. */
+/** Apply a scheme: resolve it, write data-theme and color-scheme, persist the mode, and synchronize xterm colors. */
 export function applyTheme(mode: ThemeMode) {
   const resolved = resolveTheme(mode);
   document.documentElement.dataset.theme = resolved;
+  // color-scheme drives how the user agent renders native in-page controls: checkboxes, radios, selects,
+  // scrollbars, and form fields. index.html only seeds it from prefers-color-scheme, so without this line it
+  // keeps following the OS for the window's lifetime and an explicit dark theme still draws light checkboxes
+  // on a light-mode system. 'system' mode stays live because the media-query watcher re-runs applyTheme.
+  document.documentElement.style.colorScheme = resolved;
   localStorage.setItem(STORAGE_KEY, mode);
   setXtermTheme(XTERM_THEME[resolved]);
   syncNativeChrome(mode);
