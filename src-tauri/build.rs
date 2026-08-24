@@ -35,6 +35,15 @@ fn main() {
     // refresh automatically. Full `cargo build` and release paths always produce a fresh value.
     println!("cargo:rerun-if-changed=../.git/HEAD");
 
+    // Ensure ../dist exists before anything resolves it. `rust_embed::Embed` in `web` resolves its `#[folder]`
+    // at COMPILE time and fails the whole crate when the directory is absent, which is the state of every fresh
+    // clone until the frontend has been built once. `beforeDevCommand` is `pnpm dev` — a dev server that never
+    // writes `dist/` — so `tauri dev` cannot bootstrap a clean checkout without this. Creating the directory is
+    // enough; its contents are not needed here, because debug builds read it from disk at runtime and release
+    // builds populate it through `beforeBuildCommand`. Best-effort: a failure here is not worth blocking a build
+    // that may not need the directory at all.
+    let _ = std::fs::create_dir_all("../dist");
+
     // Run tauri-build only for GUI builds. It parses tauri.conf.json, requires frontendDist (../dist), and
     // generates permission scaffolding for generate_context!. The minimal server (`--no-default-features`) does
     // not call generate_context! or need frontend output; skipping this step allows builds without ../dist.

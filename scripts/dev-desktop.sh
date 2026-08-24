@@ -29,9 +29,17 @@ source "$(dirname "$0")/dev-lib.sh"
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     if [ ! -f src-tauri/resources/gitbash/usr/bin/bash.exe ]; then
-      echo "==> resources/gitbash is empty, fetching the minimal Git Bash first (fetch-gitbash.ps1)"
-      powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-gitbash.ps1 \
-        || { echo "✗ fetch-gitbash failed, aborting" >&2; exit 1; }
+      if [ -f scripts/fetch-gitbash.ps1 ]; then
+        echo "==> resources/gitbash is empty, fetching the minimal Git Bash first (fetch-gitbash.ps1)"
+        powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/fetch-gitbash.ps1 \
+          || { echo "✗ fetch-gitbash failed, aborting" >&2; exit 1; }
+      else
+        # The bundled Git Bash is a packaging input, not a build input: the dev window runs fine without it.
+        # Aborting here makes `pnpm dev:desktop` unusable on Windows whenever the fetch script is unavailable,
+        # so degrade to a warning and let the developer decide.
+        echo "==> scripts/fetch-gitbash.ps1 not found; continuing without the bundled Git Bash." >&2
+        echo "    Windows' bundled default-shell option will be unavailable in this dev build." >&2
+      fi
     fi ;;
 esac
 
