@@ -1,3 +1,47 @@
+## v0.1.104 — 2026-08-25
+
+### KI-Agenten
+
+- **Die Karte für Unteraufgaben bietet jetzt die echten Modelle jedes Agenten an und dasjenige Aufwands-Flag, das der Agent auch wirklich versteht.** Die Karte baute ihre Startargumente für alle Agenten mit `--model` und `--effort` zusammen, doch nur Claude, Kiro und Antigravity schreiben den Denkaufwand so — Grok und Zoo nennen ihn `--reasoning-effort`, Cline nennt ihn `--thinking`. Wer bei einem der übrigen eine Aufwandsstufe wählte, übergab der CLI ein Flag, von dem sie noch nie gehört hatte, und die Sitzung startete nicht. Jeder Agent steuert jetzt seine eigenen Flag-Namen und seine eigenen Werte bei. Die Modellauswahl richtet sich danach, was die jeweilige CLI mitteilen kann: Wer seinen Katalog auflisten kann (OpenCode, Grok, Crush, Antigravity, Cursor, pi, Kiro), wird danach gefragt und bietet die echte Liste an; wer eine feste Auswahl hat (Claude, Codex, Kimi Code), bietet genau diese an; der Rest zeigt ein Textfeld mit einem Beispiel für die erwartete Schreibweise. Ein Agent, der nicht installiert oder nicht angemeldet ist, sagt das, statt endlos zu drehen. Die Wahl von „Standard“ löscht jetzt eine geerbte Überschreibung, statt den alten Wert stehen zu lassen, und die Wahl einer Aufwandsstufe verwirft nicht mehr das von der übergeordneten Sitzung geerbte Modell.
+
+- **Eine aus einer Kimi-Code-Sitzung gestartete Unteraufgabe bleibt Kimi Code.** Kimi Code fehlte in der Liste, aus der der Startpfad den Agenten der übergeordneten Sitzung übernimmt, sodass die Untersitzungen stillschweigend mit dem Standardagenten zurückkamen.
+
+### Arbeitsbereich
+
+- **Eine Gruppe lässt sich auch nachträglich in einen Worktree verschieben.** Der Worktree wurde beim Anlegen der Gruppe gewählt und stand von da an fest; wer es sich anders überlegte, musste die Gruppe löschen und neu aufbauen. Ein Rechtsklick auf eine Gruppe und „Move to Worktree…“ legt einen neuen Worktree an, bindet einen vorhandenen ein oder richtet eine bereits gebundene Gruppe neu aus. Nur die Gruppe selbst ändert sich: Sitzungen, die schon darin liegen, behalten das Verzeichnis, mit dem sie angelegt wurden — eine laufende Sitzung kann nicht in ein anderes Verzeichnis unterhalb ihrer selbst verschoben werden —, während später angelegte Sitzungen im Worktree starten.
+
+- **Der Spiegelmodus umfasst jetzt den gesamten Baum der Seitenleiste.** Bisher teilte er die Auswahl und die eingeklappten Bereiche; das Suchfeld sowie die Status- und Markierungsfilter blieben lokal, in der Annahme, ihre Synchronisierung störe denjenigen, der gerade etwas nachschlägt. Diese Überlegung war verkehrt herum: Spiegeln heißt, dass beide Fenster denselben Zustand halten, und nicht, dass eines die Tastenanschläge des anderen nachspielt — ein Filter, der hier an ist, ist auch dort an. Was wirklich stört, sind zwei Seiten, die verschiedene Bäume zeigen. Jetzt reist jede Projektion der Seitenleiste mit: das aufgeteilte Layout, der Name jeder Projektion, ihr Suchtext, ihre Status- und Markierungsfilter und ihr eigener Einklappzustand. Das Format der Momentaufnahme steht jetzt auf Version 2, und ein Client mit einer älteren Version hört auf zu spiegeln, statt ein Bild nur halb anzuwenden — laden Sie also jedes Fenster neu, das Sie über das Update hinweg offen gelassen haben.
+
+### Oberfläche
+
+- **Das Schließen des Fensters unter macOS stellt jetzt dieselbe Frage wie das Beenden.** ⌘Q und der Menüeintrag liefen über die eigene Rückfrage der App, doch der rote Schließen-Knopf zerstörte das Fenster auf der Stelle — und genau dieses Fenster enthält die Webview, in der der Bestätigungsdialog lebt. Man bekam also entweder gar keine Rückfrage oder den abgespeckten nativen Ersatz, ohne das Kästchen „Arbeitsbereich sichern“ und mit unübersetztem Text. Auf allen drei Plattformen bleibt das Fenster jetzt offen, bis Sie geantwortet haben.
+
+- **„Arbeitsbereich sichern“ ist von vornherein angehakt und bleibt so, wie Sie es einstellen.** Ein verlorenes Layout kostet mehr als eine ungewollte Momentaufnahme, deshalb startet das Kästchen angehakt. Bisher vergaß es die Einstellung außerdem: Sie wurde mit 400 ms Verzögerung in die Datenbank geschrieben, und das Beenden tötete den Prozess noch innerhalb dieses Zeitfensters, sodass der nächste Start gegen den alten Wert abglich und Ihre Änderung zurücknahm. Der Schreibvorgang wird jetzt vor dem Beenden herausgeschrieben, mit einer Obergrenze von 600 ms, damit ein hängendes Backend den Bestätigungsknopf nicht ewig drehen lässt. (Beigetragen von FarhadGSRX.)
+
+- **Passwörter im Fernverbindungs-Panel lassen sich anzeigen.** Sowohl das URL-Passwort als auch das SSH-Passwort haben einen Augen-Knopf, der zwischen verdeckter Darstellung und Klartext umschaltet. Der Anzeigezustand gilt nur für das jeweilige Feld und wird zurückgesetzt, sobald das Panel schließt, sodass nie ein Passwort offen auf dem Bildschirm stehen bleibt.
+
+- **Das Filter-Badge in der Seitenleiste zählt jeden aktiven Filter.** Ein Markierungsfilter ließ die Schaltfläche nur aufleuchten, ohne etwas dazuzusagen, sodass dort 1 stehen konnte, während zwei Filter aktiv waren. Es zählt jetzt Status und Markierungen zusammen und stimmt mit den Haken im Aufklappmenü überein; ein einzelner Statusfilter behält seinen farbigen Punkt.
+
+### Fehlerbehebungen
+
+- **Automatische Updates unter macOS funktionieren wieder.** Die Pakete der v0.1.103 enthielten AppleDouble-Begleiteinträge (`._VelaTerm.app`); der Updater entfernt von jedem Pfad die erste Komponente — womit hier ein leerer Pfad übrig blieb — und weigerte sich daraufhin, das Archiv überhaupt zu entpacken. Betroffen waren beide Architekturen, alle macOS-Nutzer auf v0.1.103 saßen also fest. Beim Packen entstehen diese Einträge nicht mehr.
+
+- **Native Bedienelemente folgen dem Thema der App, wenn es vom System abweicht.** Ein Themenwechsel setzte zwar die Farben der App selbst, aktualisierte aber nie `color-scheme`: Dieser Wert wurde einmal beim Start aus der Systemeinstellung übernommen und danach nie wieder angefasst, sodass Kontrollkästchen, Aufklappmenüs und Bildlaufleisten unter einer hellen App auf einem dunklen System dunkel blieben. (Beigetragen von FarhadGSRX.)
+
+- **Ein frisch geklontes Repository lässt sich wieder bauen.** Die Rust-Crate bettet `../dist` beim Kompilieren ein, und der Dev-Befehl erzeugt dieses Verzeichnis nicht — ein frisch geklontes Repository scheiterte deshalb schon beim Kompilieren, bevor es überhaupt laufen konnte. Das Build-Skript legt das Verzeichnis jetzt an, wenn es fehlt. (Beigetragen von FarhadGSRX.)
+
+---
+
+## v0.1.103 — 2026-08-24
+
+### Fehlerbehebungen
+
+- **Codex-Sitzungen unter Windows verweigern nicht mehr den Start.** Jede Codex-Sitzung schlug sofort mit `unexpected argument '--codex-hook'` fehl, da die TOML-Tabelle der Lifecycle-Hooks über die Kommandozeile mit Leerzeichen und Anführungszeichen übergeben wurde und das per npm installierte `codex.cmd` dies über cmd.exe erneut verarbeitet — cmd.exe entfernt die Anführungszeichen und teilt den Wert an Leerzeichen in mehrere Argumente auf. Die Hook-Injektion wird unter Windows nun übersprungen; die Statuserkennung fällt auf die bestehenden Heuristiken notify / screen / busy zurück, die weiterhin Leerlauf- und Beschäftigungszustände melden, wenn auch weniger präzise als Hooks. macOS und Linux sind nicht betroffen und verwenden weiterhin Hooks.
+
+- **Die Windows-IME-Voreditierkorrektur aus v0.1.102 wurde zurückgenommen.** Die Korrektur, die das Kompositions-Overlay für die Eingabe von Chinesisch, Japanisch und Koreanisch wiederherstellte, fügte ihm auch eine Hintergrundfarbe, einen 1px-Rahmen und abgerundete Ecken hinzu, wodurch beim Tippen ein kleines Kästchen um den Voreditiertext im Terminal erschien — etwas, das dort nicht erscheinen sollte. Da die Overlay-Dimensionierung, die Helper-Container-Geometrie und die Textarea-Bereinigung voneinander abhingen, musste die gesamte Änderung zurückgenommen werden. Das zugrundeliegende Problem — blindes Tippen von CJK unter Windows — bleibt offen und wird in Issue #6 verfolgt.
+
+---
+
 ## v0.1.102 — 2026-08-23
 
 ### KI-Agenten

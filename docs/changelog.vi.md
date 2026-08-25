@@ -1,3 +1,47 @@
+## v0.1.104 — 2026-08-25
+
+### Tác nhân AI
+
+- **Thẻ tác vụ con giờ đưa ra đúng những mô hình mà mỗi tác nhân thực sự có, và đúng cờ mức độ suy luận mà tác nhân đó hiểu được.** Thẻ này dựng tham số khởi chạy bằng `--model` và `--effort` cho tất cả, nhưng chỉ Claude, Kiro và Antigravity viết mức độ suy luận theo cách đó — Grok và Zoo gọi nó là `--reasoning-effort`, còn Cline gọi là `--thinking`. Chọn một mức độ suy luận cho bất kỳ tác nhân nào còn lại là đưa cho CLI một cờ mà nó chưa từng nghe tới, và phiên không khởi động được. Giờ mỗi tác nhân tự khai báo tên cờ và tập giá trị của riêng mình. Ô chọn mô hình đi theo những gì từng CLI có thể cho biết: những CLI liệt kê được danh mục của mình (OpenCode, Grok, Crush, Antigravity, Cursor, pi, Kiro) sẽ được hỏi và đưa ra danh sách thật, những CLI có tập cố định (Claude, Codex, Kimi Code) đưa ra đúng tập đó, số còn lại cho bạn một ô nhập văn bản kèm ví dụ về dạng thức chúng mong đợi. Tác nhân chưa cài hoặc chưa đăng nhập sẽ nói thẳng như vậy, thay vì quay vòng mãi không dứt. Chọn “Mặc định” giờ xóa hẳn giá trị ghi đè được thừa hưởng chứ không để nguyên giá trị cũ, và chọn một mức độ suy luận không còn làm mất mô hình thừa hưởng từ phiên cha.
+
+- **Tác vụ con sinh ra từ một phiên Kimi Code vẫn là Kimi Code.** Kimi Code bị thiếu trong danh sách mà luồng tạo tác vụ con dùng để thừa hưởng tác nhân của phiên cha, nên các phiên con của nó âm thầm quay về tác nhân mặc định.
+
+### Không gian làm việc
+
+- **Một nhóm có thể chuyển sang worktree sau khi đã tạo xong.** Worktree được chọn ngay lúc tạo nhóm và cố định từ đó về sau; đổi ý nghĩa là phải xóa nhóm rồi dựng lại. Nhấp chuột phải vào một nhóm rồi chọn “Move to Worktree…” để tạo worktree mới, gắn vào một worktree sẵn có, hoặc trỏ lại một nhóm vốn đã gắn. Chỉ bản thân nhóm thay đổi: các phiên đang ở bên trong vẫn giữ đúng thư mục lúc chúng được tạo — một phiên đang chạy không thể bị chuyển sang thư mục khác ngay dưới chân nó — còn các phiên tạo sau đó sẽ khởi động trong worktree.
+
+- **Chế độ phản chiếu giờ bao trùm toàn bộ cây thanh bên.** Trước đây nó chỉ chia sẻ lựa chọn và các bảng đã thu gọn; ô tìm kiếm cùng các bộ lọc trạng thái và dấu đánh dấu vẫn nằm cục bộ, với lập luận rằng đồng bộ chúng sẽ làm phiền người đang tra cứu. Lập luận đó ngược: phản chiếu nghĩa là hai cửa sổ giữ cùng một trạng thái, chứ không phải cửa sổ này diễn lại từng phím gõ của cửa sổ kia — bộ lọc bật ở đây thì cũng bật ở kia. Thứ thực sự làm phiền người dùng là hai bên hiển thị hai cây khác nhau. Giờ mọi phép chiếu của thanh bên đều được truyền đi: bố cục chia khung, tên của từng phép chiếu, nội dung ô tìm kiếm, các bộ lọc trạng thái và dấu đánh dấu, cùng trạng thái thu gọn của riêng nó. Định dạng ảnh chụp trạng thái đã chuyển sang phiên bản 2, và máy khách chạy phiên bản cũ sẽ dừng phản chiếu thay vì áp dụng nửa khung hình, nên hãy tải lại những cửa sổ bạn để mở suốt quá trình nâng cấp.
+
+### Giao diện
+
+- **Đóng cửa sổ trên macOS giờ hỏi đúng câu hỏi mà việc thoát ứng dụng vẫn hỏi.** ⌘Q và mục menu đều đi qua hộp xác nhận của chính ứng dụng, nhưng nút đóng màu đỏ thì hủy cửa sổ ngay lập tức — mà chính cửa sổ đó lại chứa webview nơi hộp thoại xác nhận sống. Kết quả là bạn hoặc không thấy xác nhận nào, hoặc chỉ thấy bản dự phòng gốc rút gọn của hệ điều hành, không có ô “lưu không gian làm việc” và văn bản thì chưa dịch. Cả ba nền tảng giờ đều giữ cửa sổ mở cho tới khi bạn trả lời.
+
+- **Ô “lưu không gian làm việc” được bật sẵn, và nó nằm yên ở nơi bạn đặt.** Mất một bố cục thì thiệt hơn là có thừa một ảnh chụp, nên ô này mặc định đã tick. Trước đây nó còn hay quên: cài đặt được ghi xuống cơ sở dữ liệu qua một khoảng chờ gộp 400ms, mà việc thoát lại giết tiến trình ngay trong khoảng đó, nên lần khởi chạy sau đối chiếu với giá trị cũ và trả thay đổi của bạn về như trước. Giờ phần ghi được đẩy xuống đĩa trước khi thoát, kèm trần 600ms để một backend treo không làm nút xác nhận quay mãi. (Do FarhadGSRX đóng góp.)
+
+- **Mật khẩu trong bảng kết nối từ xa có thể hiện ra để xem.** Cả mật khẩu URL lẫn mật khẩu SSH đều có nút hình con mắt để chuyển qua lại giữa che dấu và văn bản thường. Trạng thái đang hiện chỉ áp cho riêng ô đó và được đặt lại khi đóng bảng, nên không bao giờ có mật khẩu nào bị bỏ quên trên màn hình.
+
+- **Huy hiệu bộ lọc ở thanh bên đếm mọi bộ lọc đang bật.** Bộ lọc theo dấu đánh dấu chỉ làm sáng nút lên mà không nói gì thêm, nên huy hiệu có thể hiện số 1 trong khi hai bộ lọc đang hoạt động. Giờ nó đếm cả trạng thái lẫn dấu đánh dấu và khớp với các dấu tick trong danh sách thả xuống; một bộ lọc trạng thái đơn lẻ vẫn giữ chấm màu của nó.
+
+### Sửa lỗi
+
+- **Cập nhật tự động trên macOS đã hoạt động trở lại.** Các gói v0.1.103 mang theo những mục đồng hành kiểu AppleDouble (`._VelaTerm.app`); bộ cập nhật cắt bỏ thành phần đầu tiên của đường dẫn — để lại một đường dẫn rỗng — rồi từ chối giải nén cả kho lưu trữ. Cả hai kiến trúc đều dính, nên mọi người dùng macOS đang ở v0.1.103 đều mắc kẹt tại đó. Khâu đóng gói giờ không còn ghi ra những mục đó nữa.
+
+- **Các điều khiển gốc của hệ thống đi theo giao diện của ứng dụng khi nó khác với hệ thống.** Việc áp dụng một giao diện chỉ đặt màu của riêng ứng dụng mà không bao giờ cập nhật `color-scheme` — giá trị này chỉ được lấy một lần lúc khởi động theo tùy chọn của hệ thống rồi không đổi nữa — nên hộp kiểm, danh sách thả xuống và thanh cuộn vẫn tối trong khi ứng dụng đang sáng trên một hệ thống tối. (Do FarhadGSRX đóng góp.)
+
+- **Bản vừa nhân bản về đã dựng được trở lại.** Crate Rust nhúng `../dist` vào lúc biên dịch, mà lệnh dev thì không tạo ra thư mục đó, nên một kho vừa nhân bản về đã hỏng ngay khi biên dịch, trước cả lúc kịp chạy. Script dựng giờ tự tạo thư mục khi nó chưa có. (Do FarhadGSRX đóng góp.)
+
+---
+
+## v0.1.103 — 2026-08-24
+
+### Sửa lỗi
+
+- **Phiên Codex trên Windows không còn từ chối khởi động.** Mỗi phiên Codex đều thất bại ngay lập tức với `unexpected argument '--codex-hook'` vì bảng TOML của lifecycle hook được truyền qua dòng lệnh chứa dấu cách và dấu ngoặc kép, và `codex.cmd` cài qua npm xử lý lại qua cmd.exe — cmd.exe loại bỏ dấu ngoặc kép và tách giá trị thành nhiều đối số theo dấu cách. Giờ đây Windows bỏ qua việc tiêm hook; phát hiện trạng thái quay về cơ chế heuristic notify / screen / busy hiện có, vẫn báo cáo trạng thái rảnh và bận nhưng kém chính xác hơn hook. macOS và Linux không bị ảnh hưởng, tiếp tục sử dụng hook.
+
+- **Đã hoàn tác bản sửa lỗi IME tiền soạn thảo trên Windows từ v0.1.102.** Bản sửa lỗi khôi phục lớp phủ soạn thảo cho đầu vào tiếng Trung, Nhật, Hàn đồng thời thêm màu nền, viền 1px và bo tròn góc, khiến khi gõ phím trong terminal xuất hiện một ô nhỏ bao quanh văn bản tiền soạn thảo — điều không nên xảy ra trong terminal. Vì kích thước lớp phủ, hình học của container phụ trợ và việc dọn dẹp textarea phụ thuộc lẫn nhau, toàn bộ thay đổi phải được hoàn tác cùng lúc. Vấn đề gốc — gõ CJK mù trên Windows — vẫn chưa được giải quyết và được theo dõi tại issue #6.
+
+---
+
 ## v0.1.102 — 2026-08-23
 
 ### Tác nhân AI

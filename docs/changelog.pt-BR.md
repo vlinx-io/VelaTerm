@@ -1,3 +1,47 @@
+## v0.1.104 — 2026-08-25
+
+### Agentes de IA
+
+- **O cartão de tarefa filha agora oferece os modelos reais de cada agente e a flag de esforço que aquele agente realmente entende.** O cartão montava seus argumentos de inicialização com `--model` e `--effort` para tudo, mas só Claude, Kiro e Antigravity escrevem assim o esforço de raciocínio — Grok e Zoo chamam de `--reasoning-effort`, e Cline chama de `--thinking`. Escolher um nível de esforço para qualquer um dos outros entregava à CLI uma flag da qual ela nunca tinha ouvido falar, e a sessão não chegava a iniciar. Agora cada agente contribui com os próprios nomes de flag e os próprios valores. O controle de modelo segue o que cada CLI consegue nos contar: as que sabem listar o catálogo (OpenCode, Grok, Crush, Antigravity, Cursor, pi, Kiro) são consultadas e oferecem a lista real, as que têm um conjunto fixo (Claude, Codex, Kimi Code) oferecem esse conjunto, e as demais dão um campo de texto com um exemplo do formato que esperam. Um agente que não esteja instalado ou em que você não tenha feito login avisa, em vez de ficar girando para sempre. Escolher "Padrão" agora limpa um valor herdado em vez de deixar o antigo no lugar, e escolher um nível de esforço não descarta mais o modelo herdado da sessão pai.
+
+- **Uma tarefa filha criada a partir de uma sessão Kimi Code continua sendo Kimi Code.** O Kimi Code faltava na lista que o caminho de criação usa para herdar o agente do pai, então suas sessões filhas voltavam silenciosamente como o agente padrão.
+
+### Espaço de trabalho
+
+- **Um grupo pode ser movido para um worktree depois de criado.** O worktree era escolhido na criação do grupo e ficava fixo dali em diante; mudar de ideia significava apagar o grupo e montá-lo de novo. Clique com o botão direito em um grupo e escolha "Move to Worktree…" para criar um worktree novo, vincular um existente ou reapontar um grupo que já esteja vinculado. Só o grupo em si muda: as sessões que já estão dentro mantêm o diretório com que foram criadas — uma sessão em execução não pode ser movida para outro diretório debaixo de si mesma —, enquanto as sessões criadas depois começam no worktree.
+
+- **O modo espelho agora cobre toda a árvore da barra lateral.** Ele compartilhava a seleção e os painéis recolhidos; a caixa de busca e os filtros de estado e de marcador ficavam locais, pela ideia de que sincronizá-los atrapalha quem está procurando alguma coisa. Esse raciocínio estava invertido: espelhar significa que as duas janelas mantêm o mesmo estado, não que uma reproduza as teclas digitadas na outra — um filtro que está ligado aqui está ligado lá. O que de fato atrapalha as pessoas é os dois lados mostrarem árvores diferentes. Agora toda projeção da barra lateral viaja: o layout dividido, o nome de cada projeção, seu texto de busca, seus filtros de estado e de marcador, e seu próprio estado de recolhimento. O formato do instantâneo passou para a versão 2, e um cliente rodando uma versão mais antiga para de espelhar em vez de aplicar meio quadro, então recarregue qualquer janela que você tenha deixado aberta durante a atualização.
+
+### Interface
+
+- **Fechar a janela no macOS faz a mesma pergunta que sair.** ⌘Q e o item de menu passavam pela confirmação do próprio aplicativo, mas o botão vermelho de fechar destruía a janela na hora — e é essa janela que contém a webview onde o diálogo de confirmação vive. Ou você não recebia confirmação nenhuma, ou recebia o substituto nativo reduzido, sem a caixa de "salvar o espaço de trabalho" e com o texto sem tradução. As três plataformas agora seguram a janela aberta até você responder.
+
+- **"Salvar o espaço de trabalho" vem marcado por padrão, e fica como você deixou.** Perder um layout custa mais do que um instantâneo indesejado, então a caixa começa marcada. Ela também costumava esquecer: a configuração era gravada no banco de dados com um atraso de 400 ms, e sair matava o processo dentro dessa janela, então a inicialização seguinte se reconciliava com o valor antigo e desfazia sua alteração. A gravação agora é descarregada antes da saída, com um teto de 600 ms para que um backend travado não deixe o botão de confirmar girando. (Contribuição de FarhadGSRX.)
+
+- **As senhas do painel de conexão remota podem ser reveladas.** Tanto a senha da URL quanto a senha SSH têm um botão de olho que alterna entre texto oculto e texto plano. O estado revelado é local ao campo e é redefinido quando o painel fecha, então uma senha nunca fica exposta na tela.
+
+- **O selo de filtros da barra lateral conta todos os filtros ligados.** Um filtro de marcador apenas acendia o botão sem dizer mais nada, então o selo podia marcar 1 com dois filtros ativos. Agora ele soma estados e marcadores juntos e bate com as marcações do menu suspenso; um único filtro de estado mantém seu ponto colorido.
+
+### Correções
+
+- **As atualizações automáticas no macOS voltaram a funcionar.** Os pacotes da v0.1.103 carregavam entradas complementares do AppleDouble (`._VelaTerm.app`), das quais o atualizador remove o primeiro componente do caminho — deixando um caminho vazio —, e então ele se recusava a desempacotar o arquivo. As duas arquiteturas foram afetadas, então todo usuário de macOS na v0.1.103 ficava preso nela. O empacotamento não grava mais essas entradas.
+
+- **Os controles nativos seguem o tema do aplicativo quando ele difere do do sistema.** Aplicar um tema definia as cores do próprio aplicativo, mas nunca atualizava `color-scheme`, que era definido uma única vez na inicialização a partir da preferência do sistema e nunca mais mudava, então caixas de seleção, menus suspensos e barras de rolagem continuavam escuros sob um aplicativo claro em um sistema escuro. (Contribuição de FarhadGSRX.)
+
+- **Um clone novo volta a compilar.** O crate Rust embute `../dist` em tempo de compilação, e o comando de desenvolvimento não o produz, então um repositório recém-clonado falhava ao compilar antes mesmo de conseguir rodar. O script de build agora cria o diretório quando ele não existe. (Contribuição de FarhadGSRX.)
+
+---
+
+## v0.1.103 — 2026-08-24
+
+### Correções
+
+- **Sessões Codex no Windows não recusam mais iniciar.** Cada sessão Codex falhava imediatamente com `unexpected argument '--codex-hook'` porque a tabela TOML dos hooks de ciclo de vida, passada pela linha de comando, contém espaços e aspas duplas, e o `codex.cmd` instalado pelo npm reprocessa isso através do cmd.exe, que remove as aspas e divide o valor em múltiplos argumentos. A injeção de hooks agora é ignorada no Windows; a detecção de estado recorre às heurísticas existentes notify / screen / busy, que continuam reportando estados de repouso e atividade, embora com menos precisão que os hooks. macOS e Linux não são afetados e continuam usando hooks.
+
+- **Revertida a correção de pré-edição IME do Windows da v0.1.102.** A correção que restaurou o overlay de composição para entrada em chinês, japonês e coreano também adicionou cor de fundo, borda de 1px e cantos arredondados, desenhando uma pequena caixa ao redor do texto de pré-edição dentro do terminal — algo que não deveria aparecer ali. Como o dimensionamento do overlay, a geometria do container auxiliar e a limpeza do textarea eram interdependentes, toda a alteração precisou ser revertida. O problema subjacente — digitação cega de CJK no Windows — permanece aberto e é rastreado na issue #6.
+
+---
+
 ## v0.1.102 — 2026-08-23
 
 ### Agentes de IA

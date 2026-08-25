@@ -1115,6 +1115,23 @@ pub fn set_node_mark(
     Ok(())
 }
 
+/// Bind an existing group to a worktree directory, or re-point it at a different one. Only the group
+/// row changes: sessions already in the group keep the working directory they were created with, while
+/// sessions created afterwards inherit this binding. Passing None for both columns clears the binding.
+pub fn set_group_worktree(
+    conn: &Connection,
+    id: &str,
+    worktree_path: Option<&str>,
+    worktree_base_ref: Option<&str>,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE groups SET worktree_path = ?2, worktree_base_ref = ?3 WHERE id = ?1",
+        params![id, worktree_path, worktree_base_ref],
+    )
+    .map_err(|e| format!("Failed to update worktree binding: {e}"))?;
+    Ok(())
+}
+
 /// Clear a node's worktree binding after its directory is removed, converting it to an ordinary
 /// session/group. Sessions also clear cwd so launch falls back to project root. Projects are ignored.
 pub fn clear_node_worktree(conn: &Connection, kind: NodeKind, id: &str) -> Result<(), String> {
@@ -1998,6 +2015,46 @@ mod tests {
             r"\\?\Volume{abc}\repo",
             "device paths with no ordinary Win32 equivalent must not be mangled"
         );
+    }
+
+    #[test]
+    fn set_group_worktree_binds_the_group_and_leaves_its_sessions_alone() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        let group = create_group(&conn, &project.id, None, "auth").unwrap();
+        let session = create_session(
+            &conn,
+            &project.id,
+            Some(&group.id),
+            "terminal",
+            SessionKind::Terminal,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let wt = std::env::temp_dir().join(".vlx-worktrees/auth-a1b2c3");
+        let wt = wt.to_str().unwrap();
+        set_group_worktree(&conn, &group.id, Some(wt), Some("refs/heads/dev")).unwrap();
+
+        let tree = list_tree(&conn).unwrap();
+        let g = tree.groups.iter().find(|g| g.id == group.id).unwrap();
+        assert_eq!(g.worktree_path.as_deref(), Some(wt));
+        assert_eq!(g.worktree_base_ref.as_deref(), Some("refs/heads/dev"));
+        // The session created before the binding keeps its own directory: only later ones inherit it.
+        let s = tree.sessions.iter().find(|s| s.id == session.id).unwrap();
+        assert_eq!(s.cwd, None);
+        assert_eq!(s.worktree_path, None);
+
+        // Re-pointing overwrites both columns rather than accumulating.
+        set_group_worktree(&conn, &group.id, Some("/tmp/other"), None).unwrap();
+        let tree = list_tree(&conn).unwrap();
+        let g = tree.groups.iter().find(|g| g.id == group.id).unwrap();
+        assert_eq!(g.worktree_path.as_deref(), Some("/tmp/other"));
+        assert_eq!(g.worktree_base_ref, None);
     }
 
     #[test]

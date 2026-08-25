@@ -535,3 +535,25 @@ svg { display: block; }
 /* While remote access runs, light the status-bar port segment to match the `.remote-on` globe. */
 .statusbar .seg.web-on { color: var(--accent); }
 .statusbar .seg.web-on svg { filter: drop-shadow(0 0 4px color-mix(in oklch, var(--accent) 60%, transparent)); }
+
+/* Quit confirmation dialog. The "save workspace" row is an option, not an alert: it stays quiet until
+   ticked, then tints with the current accent instead of a fixed color. */
+.quit-card { width: 420px; max-width: 92vw; background: var(--bg-2); border: 1px solid var(--border-strong); border-radius: var(--r-lg); box-shadow: var(--shadow); overflow: hidden; }
+.quit-head { padding: 18px 18px 14px; }
+.quit-title { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.quit-body { margin-top: 7px; font-size: 12px; line-height: 1.65; color: var(--text-dim); }
+.quit-opt { display: flex; align-items: flex-start; gap: 10px; margin: 0 18px 16px; padding: 11px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-hover); cursor: pointer; transition: background .12s, border-color .12s; }
+.quit-opt:hover { border-color: var(--border-strong); }
+.quit-opt.on { background: var(--accent-soft); border-color: var(--accent-line); }
+.quit-opt input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.quit-box { flex: none; width: 15px; height: 15px; margin-top: 1px; display: grid; place-items: center; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--bg-0); transition: background .12s, border-color .12s; }
+.quit-opt.on .quit-box { background: var(--accent); border-color: var(--accent); }
+.quit-opt-label { font-size: 12.5px; color: var(--text); }
+.quit-opt-hint { margin-top: 4px; font-size: 11.5px; line-height: 1.5; color: var(--text-dim); }
+.quit-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border); background: var(--bg-1); }
+.quit-btn { height: 28px; padding: 0 14px; border-radius: var(--r-sm); font-size: 12.5px; transition: background .12s, border-color .12s, color .12s; }
+.quit-btn.ghost { border: 1px solid var(--border); color: var(--text-mid); }
+.quit-btn.ghost:hover { border-color: var(--border-strong); background: var(--bg-hover); color: var(--text); }
+.quit-btn.primary { border: 1px solid var(--accent); background: var(--accent); color: var(--bg-0); font-weight: 600; }
+.quit-btn.primary:hover { filter: brightness(1.06); }
+.quit-btn:disabled { opacity: .6; cursor: default; filter: none; }

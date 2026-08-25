@@ -16,6 +16,7 @@ pub mod inject;
 pub mod install;
 pub mod kimi;
 pub mod kiro;
+pub mod model_catalog;
 pub mod opencode;
 pub mod pi;
 pub mod resume;

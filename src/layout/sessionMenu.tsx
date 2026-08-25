@@ -46,6 +46,7 @@ import {
   DeleteWorktree,
   NewAgentSession,
   GroupInfo,
+  MoveGroupToWorktree,
   NewGroup,
   ResumeSession,
   SessionInfo,
@@ -111,6 +112,8 @@ export type Dialog =
   | { type: "editSession"; id: string; initial: Record<string, string> }
   | { type: "sessionInfo"; id: string; advanced?: boolean }
   | { type: "groupInfo"; id: string }
+  // Binds an existing group to a worktree; sessions already in the group keep their own directory.
+  | { type: "moveGroupWorktree"; groupId: string }
   | { type: "confirmDelete"; node: TreeNodeRef; worktreePaths: string[] }
   | { type: "confirmDeleteMany"; nodes: SelNode[] }
   | {
@@ -188,6 +191,7 @@ export function useSessionMenu(): SessionMenu {
   const archiveSession = useTermStore((s) => s.archiveSession);
   const setNodeMark = useTermStore((s) => s.setNodeMark);
   const clearNodeWorktree = useTermStore((s) => s.clearNodeWorktree);
+  const setGroupWorktree = useTermStore((s) => s.setGroupWorktree);
   const forkSession = useTermStore((s) => s.forkSession);
   const closeSession = useTermStore((s) => s.closeSession);
   const setActiveTab = useTermStore((s) => s.setActiveTab);
@@ -1096,6 +1100,36 @@ export function useSessionMenu(): SessionMenu {
             } else {
               await addGroup(dialog.projectId, dialog.parentGroupId, name);
             }
+            setDialog(null);
+          }}
+        />
+      )}
+      {dialog?.type === "moveGroupWorktree" && (
+        <MoveGroupToWorktree
+          groupId={dialog.groupId}
+          onCancel={() => setDialog(null)}
+          onConfirm={async (worktree) => {
+            const st = useTermStore.getState();
+            const group = st.groups.find((g) => g.id === dialog.groupId);
+            let path: string;
+            let baseRef: string | null = null;
+            if (worktree.mode === "new") {
+              // Resolve the repository against the parent group or project, not this group's own binding.
+              const parentGroup = group?.parentGroupId
+                ? st.groups.find((g) => g.id === group.parentGroupId)
+                : null;
+              const project = st.projects.find((p) => p.id === group?.projectId);
+              const repoRoot = parentGroup?.worktreePath || project?.rootPath || null;
+              if (!repoRoot) throw new Error(t("worktree.noRepoRoot"));
+              const wt = await createWorktree(repoRoot, worktree.name);
+              path = wt.path;
+              baseRef = wt.baseRef || null;
+            } else if (worktree.mode === "existing") {
+              path = worktree.path;
+            } else {
+              return;
+            }
+            await setGroupWorktree(dialog.groupId, path, baseRef);
             setDialog(null);
           }}
         />

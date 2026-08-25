@@ -361,6 +361,23 @@ pub fn set_node_mark(
     Ok(())
 }
 
+/// Binds an existing group to a worktree so sessions created in it afterwards start there and it shows the
+/// sidebar tag. Sessions already in the group are left alone: their working directory was copied in at creation
+/// time and changing it under a running PTY is not possible. See `repo::set_group_worktree`.
+pub fn set_group_worktree(
+    ctx: &AppCtx,
+    id: &str,
+    worktree_path: Option<&str>,
+    worktree_base_ref: Option<&str>,
+) -> Result<(), String> {
+    {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::set_group_worktree(&conn, id, empty_to_none(worktree_path), empty_to_none(worktree_base_ref))?;
+    }
+    ctx.emit(TREE_CHANGED, ());
+    Ok(())
+}
+
 /// Converts a node to a normal session/group after its worktree directory is deleted by clearing worktree bindings.
 /// Sessions also clear cwd so they start from project root. See `repo::clear_node_worktree`.
 pub fn clear_node_worktree(ctx: &AppCtx, kind: NodeKind, id: &str) -> Result<(), String> {

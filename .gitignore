@@ -75,5 +75,8 @@ vlx-term-server
 *.mp4
 *.bak.html
 
+# macOS AppleDouble companions — never belong in a bundle or a commit
+._*
+
 # ─── Release credentials never belong in the public repository ───
 certs/

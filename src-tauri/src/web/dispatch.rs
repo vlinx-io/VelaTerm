@@ -244,6 +244,11 @@ pub fn dispatch(
         "agent_locate_bin" => to_value(crate::agent::install::locate_installed_bin(&req_str(
             args, "agent",
         )?)),
+        // Model enumeration spawns the agent CLI and waits for it, so it belongs on the same blocking
+        // path as agent_locate_bin rather than on the main thread.
+        "agent_list_models" => to_value(crate::agent::model_catalog::list_models(&req_str(
+            args, "agent",
+        )?)?),
 
         // ── Tree management orchestrated by command_core ──
         "list_tree" => to_value(core::list_tree(app)?),
@@ -364,6 +369,17 @@ pub fn dispatch(
                 req_kind::<NodeKind>(args, "kind")?,
                 &req_str(args, "id")?,
                 opt_str(args, "mark").as_deref(),
+            )?;
+            Ok(Value::Null)
+        }
+        // Binds an existing group to a worktree. Sessions already inside keep their own working directory;
+        // only sessions created later inherit it.
+        "set_group_worktree" => {
+            core::set_group_worktree(
+                app,
+                &req_str(args, "id")?,
+                opt_str(args, "worktreePath").as_deref(),
+                opt_str(args, "worktreeBaseRef").as_deref(),
             )?;
             Ok(Value::Null)
         }
@@ -1696,6 +1712,7 @@ mod tests {
         // remote paired device already holds a full shell through `pty_spawn` by the threat model,
         // so naming a directory or a binary for it grants nothing further.
         "create_group",
+        "set_group_worktree",
         "create_session",
         "persist_session",
         "update_session",

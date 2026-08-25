@@ -83,7 +83,10 @@ function TreeFilter({ view }: { view: SidebarTreeView }) {
   }, [projects, groups, sessions]);
 
   const active = statusFilter !== null || markFilter !== null;
-  const selectedStatus = statusFilter?.length === 1
+  // The badge counts every active filter, status and marker alike, so it always matches the number of ticks in
+  // the dropdown. The colored dot survives only for the one case it stays unambiguous: a lone status filter.
+  const filterCount = (statusFilter?.length ?? 0) + (markFilter ? 1 : 0);
+  const selectedStatus = filterCount === 1 && statusFilter?.length === 1
     ? STATUS_FILTERS.find((f) => f.st === statusFilter[0])
     : null;
 
@@ -109,8 +112,8 @@ function TreeFilter({ view }: { view: SidebarTreeView }) {
         onClick={() => setFilterOpen((o) => !o)}
       >
         <Icons.sliders size={14} />
-        {/* One status keeps its color badge; multiple statuses use a count. The marker filter only lights the button
-            up: a second badge would not fit next to the status one, and the dropdown already names the marker. */}
+        {/* A single status filter keeps its color dot; anything else shows how many filters are on. Which marker is
+            picked stays in the dropdown, since a second badge would not fit next to this one. */}
         {selectedStatus ? (
           <span
             className={
@@ -121,8 +124,8 @@ function TreeFilter({ view }: { view: SidebarTreeView }) {
               background: selectedStatus.color,
             }}
           />
-        ) : statusFilter ? (
-          <span className="filter-badge">{statusFilter.length}</span>
+        ) : filterCount > 0 ? (
+          <span className="filter-badge">{filterCount}</span>
         ) : null}
       </button>
       {filterOpen && (
@@ -608,6 +611,12 @@ export function LeftSidebar() {
         {
           label: t("tree.newSubgroup"),
           onClick: () => openDialog({ type: "newGroup", projectId: node.projectId, parentGroupId: node.id }),
+        },
+        // Move to Worktree binds the group to a worktree, new or existing, and re-points a group that already
+        // has one. Sessions already in the group keep their own directory; later ones start in the worktree.
+        {
+          label: t("tree.moveGroupToWorktree"),
+          onClick: () => openDialog({ type: "moveGroupWorktree", groupId: node.id }),
         },
         // Convert to Regular Group appears only after the bound worktree directory is deleted. It clears
         // the binding; deleting a worktree and converting the group are separate operations.

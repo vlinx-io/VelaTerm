@@ -12,7 +12,9 @@
 import { useEffect, useState } from "react";
 import { useT } from "../i18n";
 import { useSuspendNativeViews } from "../hooks/nativeViewSuspend";
+import { agentListModels } from "../ipc/commands";
 import type { SpawnRequest } from "../ipc/events";
+import { modelSpec, readFlag } from "../agents/modelSpec";
 import { useTermStore } from "../store/termStore";
 import Icons from "./Icons";
 
@@ -28,38 +30,28 @@ const KIND_OPTIONS: { value: SpawnKind; label: string }[] = [
   { value: "cline", label: "Cline" },
   { value: "pi", label: "Pi" },
   { value: "crush", label: "Crush" },
+  { value: "kimi", label: "Kimi Code" },
   { value: "kiro", label: "Kiro" },
   { value: "grok", label: "Grok Build (Grok 4.5)" },
   { value: "zoo", label: "Zoo Code" },
   { value: "terminal", label: "Terminal" },
 ];
 
-/** Model options available in the model selector. Empty string means inherit from parent/defaults. */
-const MODEL_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "Default" },
-  { value: "sonnet", label: "Sonnet" },
-  { value: "opus", label: "Opus" },
-  { value: "haiku", label: "Haiku" },
-];
+/**
+ * Cache of listed model catalogues, keyed by agent kind and shared by every card in this window.
+ *
+ * Listing spawns the agent CLI and can take seconds, so a kind is asked at most once per app run.
+ * A failed or empty listing caches an empty array too: retrying on every dropdown open would make the
+ * dialog feel stuck for anyone whose CLI is not signed in.
+ */
+const modelCatalogCache = new Map<string, Promise<string[]>>();
 
-/** Effort options. Empty string means inherit from parent/defaults. */
-const EFFORT_OPTIONS: { value: string; label: string }[] = [
-  { value: "", label: "Default" },
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "max", label: "Max" },
-];
-
-/** Agent kinds that accept --model / --effort flags. */
-const SUPPORTS_MODEL_EFFORT = new Set<string>(["claude"]);
-
-/** Extract a flag value from an agentArgs string, e.g. parseFlag("--model opus --effort high", "model") → "opus". */
-function parseFlag(args: string | null | undefined, flag: string): string {
-  if (!args) return "";
-  const re = new RegExp(`--${flag}\\s+(\\S+)`);
-  const m = re.exec(args);
-  return m ? m[1] : "";
+function loadModelCatalog(kind: string): Promise<string[]> {
+  const cached = modelCatalogCache.get(kind);
+  if (cached) return cached;
+  const p = agentListModels(kind).catch(() => [] as string[]);
+  modelCatalogCache.set(kind, p);
+  return p;
 }
 
 /**
@@ -201,6 +193,9 @@ export function SpawnConfirmModal() {
   const [worktree, setWorktree] = useState(true);
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
+  // Listed catalogue for the current kind, plus whether the listing call is still outstanding.
+  const [catalog, setCatalog] = useState<string[]>([]);
+  const [listing, setListing] = useState(false);
 
   // Reset fields when the queue head changes after enqueue, confirmation, or cancellation. Each
   // queued request is a new object, so reference changes reliably trigger the reset.
@@ -216,6 +211,7 @@ export function SpawnConfirmModal() {
       parent?.kind === "cline" ||
       parent?.kind === "pi" ||
       parent?.kind === "crush" ||
+      parent?.kind === "kimi" ||
       parent?.kind === "kiro" ||
       parent?.kind === "grok" ||
       parent?.kind === "zoo"
@@ -235,12 +231,37 @@ export function SpawnConfirmModal() {
   // model name onto a Codex command line launches the child with a model it does not have.
   useEffect(() => {
     if (!req) return;
+    const spec = modelSpec(kind);
     const inherited = parent && parent.kind === kind ? parent.agentArgs : "";
     const args = inherited || agentDefaults[kind]?.args || "";
-    setModel(parseFlag(args, "model"));
-    setEffort(parseFlag(args, "effort"));
+    // Each agent spells these flags differently, so read back the flag this agent actually uses; a
+    // Claude `--effort` sitting in another agent's arguments is not this agent's effort setting.
+    setModel(spec ? readFlag(args, spec.modelFlag) : "");
+    setEffort(spec?.effort ? readFlag(args, spec.effort.flag) : "");
     // Parent and defaults are derived from req and kind.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [req, kind]);
+
+  // Fetch the catalogue for agents that can list one. The request is cached per kind, and a stale
+  // guard drops a slow answer once the user has already switched to a different agent.
+  useEffect(() => {
+    const spec = modelSpec(kind);
+    if (!req || spec?.source !== "list") {
+      setCatalog([]);
+      setListing(false);
+      return;
+    }
+    let live = true;
+    setCatalog([]);
+    setListing(true);
+    void loadModelCatalog(kind).then((models) => {
+      if (!live) return;
+      setCatalog(models);
+      setListing(false);
+    });
+    return () => {
+      live = false;
+    };
   }, [req, kind]);
 
   // Suspend native browser views while the card is visible so they cannot cover it.
@@ -250,7 +271,20 @@ export function SpawnConfirmModal() {
 
   const canLaunch = prompt.trim().length > 0;
   const remaining = queue.length - 1;
-  const showModelEffort = SUPPORTS_MODEL_EFFORT.has(kind);
+  const spec = modelSpec(kind);
+  // Every agent CLI takes a model; only plain terminals have nothing to choose.
+  const showModel = spec !== null;
+  const listedModels = spec?.source === "static" ? (spec.models ?? []) : catalog;
+  const modelOptions = [
+    { value: "", label: t("spawn.modelDefault") },
+    ...listedModels.map((m) => ({ value: m, label: m })),
+  ];
+  const effortOptions = spec?.effort
+    ? [
+        { value: "", label: t("spawn.modelDefault") },
+        ...spec.effort.values.map((v) => ({ value: v, label: v })),
+      ]
+    : [];
 
   const launch = () => {
     if (!canLaunch) return;
@@ -261,8 +295,8 @@ export function SpawnConfirmModal() {
       worktree,
       // Agents without these selectors never receive an override: the fields are hidden, so any value
       // still held there is a leftover from another agent the user cannot see or clear.
-      model: showModelEffort ? model || null : null,
-      effort: showModelEffort ? effort || null : null,
+      model: showModel ? model.trim() || null : null,
+      effort: spec?.effort ? effort || null : null,
     });
   };
 
@@ -390,8 +424,10 @@ export function SpawnConfirmModal() {
           </label>
         </div>
 
-        {/* Model and effort selectors, shown only for agent kinds that support them. */}
-        {showModelEffort && (
+        {/* Model and effort controls. Which control appears depends on the agent: a dropdown when its
+            models are known or listable, a text field when its CLI enumerates nothing, and no effort
+            selector at all for agents whose CLI has no such flag. */}
+        {showModel && spec && (
           <div style={{ display: "flex", gap: 14, alignItems: "flex-end" }}>
             <label style={{ display: "block" }}>
               <div
@@ -403,21 +439,64 @@ export function SpawnConfirmModal() {
               >
                 {t("spawn.modelLabel")}
               </div>
-              <SpawnSelect value={model} onChange={setModel} options={MODEL_OPTIONS} width={120} />
+              {spec.source === "free" ? (
+                <input
+                  className="vlx-input"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder={spec.placeholder ?? t("spawn.modelDefault")}
+                  spellCheck={false}
+                  style={{
+                    width: 190,
+                    height: 32,
+                    boxSizing: "border-box",
+                    fontFamily: "var(--font-mono, monospace)",
+                    fontSize: 12.5,
+                  }}
+                />
+              ) : (
+                <SpawnSelect
+                  value={model}
+                  onChange={setModel}
+                  options={modelOptions}
+                  width={190}
+                />
+              )}
+              {/* Listing runs the agent CLI, so say what is happening instead of showing a dropdown
+                  that briefly holds nothing but Default. */}
+              {spec.source === "list" && (listing || catalog.length === 0) && (
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    color: "var(--text-muted)",
+                    marginTop: 4,
+                    maxWidth: 190,
+                  }}
+                >
+                  {listing ? t("spawn.modelLoading") : t("spawn.modelListUnavailable")}
+                </div>
+              )}
             </label>
 
-            <label style={{ display: "block" }}>
-              <div
-                style={{
-                  fontSize: 11,
-                  color: "var(--text-muted)",
-                  marginBottom: 4,
-                }}
-              >
-                {t("spawn.effortLabel")}
-              </div>
-              <SpawnSelect value={effort} onChange={setEffort} options={EFFORT_OPTIONS} width={120} />
-            </label>
+            {spec.effort && (
+              <label style={{ display: "block" }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "var(--text-muted)",
+                    marginBottom: 4,
+                  }}
+                >
+                  {t("spawn.effortLabel")}
+                </div>
+                <SpawnSelect
+                  value={effort}
+                  onChange={setEffort}
+                  options={effortOptions}
+                  width={120}
+                />
+              </label>
+            )}
           </div>
         )}
       </div>

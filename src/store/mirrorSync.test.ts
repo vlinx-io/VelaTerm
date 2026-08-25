@@ -128,6 +128,22 @@ function seedSnapshotSource(tab: string) {
     leftCollapsed: false,
     rightCollapsed: false,
     inspectorTab: "files",
+    sidebarTreeViews: [
+      {
+        id: "main",
+        name: "main",
+        treeFilter: "",
+        statusFilter: null,
+        statusFilterIds: null,
+        markFilter: null,
+        collapsedOverrides: null,
+      },
+    ],
+    sidebarTreeTabs: [
+      { id: "t1", root: { kind: "leaf", paneId: "sp-main", viewId: "main" }, activeViewId: "main" },
+    ],
+    primarySidebarTreeViewId: "main",
+    activeSidebarTreeViewId: "main",
   });
 }
 

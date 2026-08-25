@@ -974,9 +974,11 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                         api.prevent_exit();
                         request_quit_confirmation(app);
                     }
-                    // On Windows/Linux, intercept final main-window closure before destruction so canceling
-                    // does not leave a windowless background process.
-                    #[cfg(not(target_os = "macos"))]
+                    // Intercept main-window closure before destruction on every platform. Letting the window die
+                    // first would tear down the webview that owns the confirmation dialog, so the prompt would
+                    // arrive after the window is gone and could only be the degraded native fallback -- no
+                    // "save workspace" checkbox, no translated copy. Canceling would also leave a windowless
+                    // background process behind.
                     tauri::RunEvent::WindowEvent {
                         label,
                         event: tauri::WindowEvent::CloseRequested { api, .. },

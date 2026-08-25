@@ -1,9 +1,53 @@
 # Changelog
 
-> Created: 2026-07-09 16:10 · Updated: 2026-08-23
+> Created: 2026-07-09 16:10 · Updated: 2026-08-25
 
 All notable changes to VelaTerm are documented here, newest first.
 v0.1.91 is the first public release; earlier version numbers were internal iterations and are not covered.
+
+---
+
+## v0.1.104 — 2026-08-25
+
+### AI agents
+
+- **The child-task card now offers each agent's real models, and the effort flag that agent actually understands.** The card built its launch arguments with `--model` and `--effort` for everything, but only Claude, Kiro and Antigravity spell reasoning effort that way — Grok and Zoo call it `--reasoning-effort`, Cline calls it `--thinking`. Picking an effort level for any of the others handed the CLI a flag it had never heard of, and the session failed to start. Every agent now contributes its own flag names and its own values. The model control follows what each CLI can tell us: the ones that can list their catalogue (OpenCode, Grok, Crush, Antigravity, Cursor, pi, Kiro) are asked for it and offer the real list, the ones with a fixed set (Claude, Codex, Kimi Code) offer that set, and the rest give you a text field with an example of the shape they expect. An agent that is not installed or not signed in says so instead of spinning forever. Choosing "Default" now clears an inherited override rather than leaving the old value in place, and picking an effort level no longer drops the model inherited from the parent session.
+
+- **A child task spawned from a Kimi Code session stays Kimi Code.** Kimi Code was missing from the list the spawn path uses to inherit the parent's agent, so its child sessions quietly came back as the default agent instead.
+
+### Workspace
+
+- **A group can be moved to a worktree after it was created.** The worktree was chosen when the group was created and fixed from then on; changing your mind meant deleting the group and building it again. Right-click a group and pick "Move to Worktree…" to create a new worktree, bind an existing one, or re-point a group that is already bound. Only the group itself changes: sessions already inside keep the directory they were created with — a running session cannot be moved to another directory underneath itself — while sessions created afterwards start in the worktree.
+
+- **Mirror mode now covers the whole sidebar tree.** It shared the selection and the collapsed panels; the search box and the status and marker filters stayed local, on the theory that syncing them interrupts whoever is looking something up. That reasoning was backwards: mirroring means both windows hold the same state, not that one replays the other's keystrokes — a filter that is on here is on there. What actually interrupts people is the two sides showing different trees. Every sidebar projection now travels: the split layout, each projection's name, its search text, its status and marker filters, and its own collapse state. The snapshot format moved to version 2, and a client running an older version stops mirroring rather than applying half of a frame, so reload any window you left open through the upgrade.
+
+### Interface
+
+- **Closing the window on macOS asks the same question as quitting.** ⌘Q and the menu item went through the app's own confirmation, but the red close button destroyed the window outright — and that window holds the webview the confirmation dialog lives in. You either got no confirmation at all or the stripped-down native fallback, with no "save workspace" checkbox and untranslated text. All three platforms now hold the window open until you answer.
+
+- **"Save workspace" is on by default, and it stays where you put it.** Losing a layout costs more than an unwanted snapshot, so the box starts checked. It also used to forget: the setting was written to the database through a 400ms debounce, and quitting killed the process inside that window, so the next launch reconciled against the old value and put your change back. The write is now flushed before exit, with a 600ms ceiling so a stalled backend cannot leave the confirm button spinning. (Contributed by FarhadGSRX.)
+
+- **Passwords in the remote-connection panel can be revealed.** Both the URL password and the SSH password have an eye button that switches between masked and plain text. The revealed state is local to the field and resets when the panel closes, so a password is never left sitting on screen.
+
+- **The sidebar filter badge counts every filter that is on.** A marker filter only lit the button up without saying anything, so the badge could read 1 while two filters were active. It now counts statuses and markers together and matches the ticks in the dropdown; a single status filter keeps its coloured dot.
+
+### Fixed
+
+- **Automatic updates on macOS work again.** The v0.1.103 packages carried AppleDouble companion entries (`._VelaTerm.app`), which the updater strips the first path component from — leaving an empty path — and it then refused to unpack the archive at all. Both architectures were affected, so every macOS user on v0.1.103 was stuck there. Packaging no longer writes those entries.
+
+- **Native controls follow the app's theme when it differs from the system's.** Applying a theme set the app's own colours but never updated `color-scheme`, which was seeded once at startup from the system preference and never changed again, so checkboxes, dropdowns and scrollbars stayed dark under a light app on a dark system. (Contributed by FarhadGSRX.)
+
+- **A fresh clone builds again.** The Rust crate embeds `../dist` at compile time, and the dev command does not produce it, so a newly cloned repository failed to compile before it could run. The build script now creates the directory when it is missing. (Contributed by FarhadGSRX.)
+
+---
+
+## v0.1.103 — 2026-08-24
+
+### Fixed
+
+- **Codex sessions on Windows no longer refuse to start.** Every Codex session failed immediately with `unexpected argument '--codex-hook'` because the lifecycle-hook TOML table passed on the command line contains spaces and double quotes, and npm-installed `codex.cmd` re-parses that through cmd.exe, which strips the quotes and splits the value into separate arguments. Hook injection is now skipped on Windows; status detection falls back to the existing notify / screen / busy heuristics, which still report idle and busy states — just less precisely than hooks. macOS and Linux are unaffected and continue to use hooks.
+
+- **Rolled back the Windows IME pre-edit fix from v0.1.102.** The fix that restored the composition overlay for Chinese, Japanese and Korean input also gave it a visible background, border and rounded corners, which drew a small box around the pre-edit text inside the terminal — something that should not appear there. Because the overlay sizing, the helper-container geometry and the textarea cleanup were all interdependent, the entire change had to be reverted together. The underlying issue — typing CJK blind on Windows — remains open and tracked in issue #6.
 
 ---
 

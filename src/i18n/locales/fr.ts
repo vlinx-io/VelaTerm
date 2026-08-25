@@ -144,6 +144,9 @@ const fr: typeof en = {
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
   "spawn.modelLabel": "Modèle", // Model
   "spawn.effortLabel": "Effort", // Effort
+  "spawn.modelDefault": "Par défaut", // Default
+  "spawn.modelLoading": "Chargement des modèles…", // Listing models…
+  "spawn.modelListUnavailable": "Aucune liste de modèles — indiquez-le dans les arguments de l’agent", // No model list available
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
@@ -189,6 +192,7 @@ const fr: typeof en = {
   "tree.deleteWorktreePlaceholder": "Select a worktree…", // TODO translate
   "tree.deleteWorktreeForce": "Force delete (discard uncommitted changes)", // TODO translate
   "tree.convertToNormalSession": "Convert to normal session", // TODO translate
+  "tree.moveGroupToWorktree": "Déplacer vers un worktree…",
   "tree.convertToNormalGroup": "Convert to normal group", // TODO translate
   "merge.title": "Merge branches", // TODO translate
   "merge.desc": "Pick a source and a target branch; the source merges into the target.", // TODO translate
@@ -364,6 +368,8 @@ const fr: typeof en = {
   "connect.forgetHost": "Oublier cet hôte",
   "connect.savedHasPassword": "Mot de passe enregistré",
   "connect.rememberPassword": "Se souvenir du mot de passe",
+  "connect.showPassword": "Afficher le mot de passe",
+  "connect.hidePassword": "Masquer le mot de passe",
   "connect.urlPasswordPlaceholder": "Mot de passe de connexion",
   "connect.shareDesktopDb": "Utiliser la base de données de l'app de bureau distante",
   "connect.shareDesktopDbHint":
@@ -581,6 +587,8 @@ const fr: typeof en = {
   "worktreeSel.empty": "Aucun worktree existant dans ce dépôt.", // No existing worktrees in this repository.
   "worktreeSel.loadFailed": "Impossible de lister les worktrees (pas un dépôt git ?).", // Couldn't list worktrees (not a git repository?).
   "group.worktreeHint": "Les sessions créées dans ce groupe utiliseront ce worktree par défaut.", // Sessions created in this group will use this worktree by default.
+  "worktree.moveGroupTitle": "Déplacer le groupe vers un worktree",
+  "worktree.moveGroupHint": "Les sessions créées désormais dans ce groupe utiliseront ce worktree. Celles qui existent déjà conservent leur répertoire actuel.",
 
   // ── Archive panel ──
   "archive.title": "Sessions archivées", // Archived Sessions

@@ -142,6 +142,9 @@ const en = {
   "spawn.worktreeLabel": "Separate git worktree",
   "spawn.modelLabel": "Model",
   "spawn.effortLabel": "Effort",
+  "spawn.modelDefault": "Default",
+  "spawn.modelLoading": "Listing models…",
+  "spawn.modelListUnavailable": "No model list available — type one in the agent arguments",
   "spawn.launch": "Launch",
   "spawn.remaining": (n: number) => `${n} more pending`,
   "spawn.notifyTitle": "Spawn session awaiting confirmation",
@@ -188,6 +191,7 @@ const en = {
   "tree.deleteWorktreePlaceholder": "Select a worktree…",
   "tree.deleteWorktreeForce": "Force delete (discard uncommitted changes)",
   "tree.convertToNormalSession": "Convert to normal session",
+  "tree.moveGroupToWorktree": "Move to Worktree…",
   "tree.convertToNormalGroup": "Convert to normal group",
   "merge.title": "Merge branches",
   "merge.desc": "Pick a source and a target branch; the source merges into the target.",
@@ -363,6 +367,8 @@ const en = {
   "connect.forgetHost": "Forget this host",
   "connect.savedHasPassword": "Password saved",
   "connect.rememberPassword": "Remember password",
+  "connect.showPassword": "Show password",
+  "connect.hidePassword": "Hide password",
   "connect.urlPasswordPlaceholder": "Login password",
   "connect.shareDesktopDb": "Use remote desktop app's database",
   "connect.shareDesktopDbHint":
@@ -582,6 +588,8 @@ const en = {
   "worktreeSel.empty": "No existing worktrees in this repository.",
   "worktreeSel.loadFailed": "Couldn't list worktrees (not a git repository?).",
   "group.worktreeHint": "Sessions created in this group will use this worktree by default.",
+  "worktree.moveGroupTitle": "Move Group to Worktree",
+  "worktree.moveGroupHint": "Sessions created in this group from now on will use this worktree. Sessions already in it keep their current directory.",
 
   // ── Archive panel ──
   "archive.title": "Archived Sessions",

@@ -339,8 +339,8 @@ function killSidecar() {
 }
 
 /**
- * Centralized application-exit confirmation. Window close on Windows/Linux and the application menu/Cmd+Q
- * all converge here. Closing a normal window does not quit on macOS, so only before-quit invokes this path.
+ * Centralized application-exit confirmation. The window close button, the application menu and Cmd+Q all
+ * converge here, on every platform.
  */
 async function requestQuitConfirmation() {
   if (state.quitConfirmed || state.quitConfirmationPending || !state.quitConfirmationEnabled) {
@@ -619,14 +619,15 @@ function createWindow() {
   // Forward window focus changes to the renderer for platform.window.onFocusChanged.
   win.on("focus", () => win.webContents.send("vlx:window:focus", true));
   win.on("blur", () => win.webContents.send("vlx:window:focus", false));
-  if (process.platform !== "darwin") {
-    win.on("close", (event) => {
-      if (state.quitConfirmationEnabled && !state.quitConfirmed) {
-        event.preventDefault();
-        void requestQuitConfirmation();
-      }
-    });
-  }
+  // Every platform, macOS included: hold the window open until the user confirms. Destroying it first would
+  // take the renderer that owns the confirmation dialog with it, leaving only the degraded native fallback --
+  // no "save workspace" checkbox, no translated copy -- and on macOS a windowless process behind it.
+  win.on("close", (event) => {
+    if (state.quitConfirmationEnabled && !state.quitConfirmed) {
+      event.preventDefault();
+      void requestQuitConfirmation();
+    }
+  });
   win.on("closed", () => {
     // Browser child views are destroyed with the window; remove stale Map references to prevent leaks.
     closeAllBrowserViews();

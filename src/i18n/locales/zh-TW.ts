@@ -142,6 +142,9 @@ const zhTW: typeof en = {
   "spawn.worktreeLabel": "獨立 git worktree", // Separate git worktree
   "spawn.modelLabel": "模型", // Model
   "spawn.effortLabel": "推理強度", // Effort
+  "spawn.modelDefault": "預設", // Default
+  "spawn.modelLoading": "正在取得模型…", // Listing models…
+  "spawn.modelListUnavailable": "取不到模型清單 — 請在代理參數裡直接填", // No model list available
   "spawn.launch": "啟動", // Launch
   "spawn.remaining": (n: number) => `還有 ${n} 個待確認`, // ${n} more pending
   "spawn.notifyTitle": "派生會話待確認", // Spawn session awaiting confirmation
@@ -187,6 +190,7 @@ const zhTW: typeof en = {
   "tree.deleteWorktreePlaceholder": "選擇一個 worktree…",
   "tree.deleteWorktreeForce": "強制刪除（捨棄未提交的變更）",
   "tree.convertToNormalSession": "轉為普通會話",
+  "tree.moveGroupToWorktree": "轉移到 Worktree…",
   "tree.convertToNormalGroup": "轉為普通群組",
   "merge.title": "合併分支",
   "merge.desc": "選好來源分支與目標分支，把來源合併進目標；方向可用中間按鈕調換。",
@@ -358,6 +362,8 @@ const zhTW: typeof en = {
   "connect.forgetHost": "忘記此主機",
   "connect.savedHasPassword": "已儲存密碼",
   "connect.rememberPassword": "記住密碼",
+  "connect.showPassword": "顯示密碼",
+  "connect.hidePassword": "隱藏密碼",
   "connect.urlPasswordPlaceholder": "登入密碼",
   "connect.shareDesktopDb": "共用遠端桌面版的資料庫",
   "connect.shareDesktopDbHint":
@@ -573,6 +579,8 @@ const zhTW: typeof en = {
   "worktreeSel.empty": "此儲存庫沒有現有的 worktree。", // No existing worktrees in this repository.
   "worktreeSel.loadFailed": "無法列出 worktree（不是 git 儲存庫？）。", // Couldn't list worktrees (not a git repository?).
   "group.worktreeHint": "在此分組下新建的會話將預設使用此 worktree。", // Sessions created in this group will use this worktree by default.
+  "worktree.moveGroupTitle": "把分組轉移到 Worktree",
+  "worktree.moveGroupHint": "之後在這個分組裡新建的工作階段會用這個 worktree；已有的則留在原來的目錄。",
 
   // ── Archive panel ──
   "archive.title": "已封存會話", // Archived Sessions

@@ -22,6 +22,7 @@ import { notify } from "../notify";
 import type { ScreenDetection } from "../terminal/screenDetect";
 import * as tree from "../ipc/tree";
 import { listAgentPresets } from "../ipc/presets";
+import { applyFlag, modelSpec } from "../agents/modelSpec";
 import { platform } from "../platform";
 import {
   collectSessionIds,
@@ -950,6 +951,12 @@ interface TermStore {
   updateSession: (id: string, input: tree.UpdateSessionInput) => Promise<void>;
   /** Converts a node back to a normal session/group after its worktree is deleted, clearing session cwd too. */
   clearNodeWorktree: (kind: NodeKind, id: string) => Promise<void>;
+  /** Binds an existing group to a worktree; sessions already in it keep their own cwd. */
+  setGroupWorktree: (
+    id: string,
+    worktreePath: string | null,
+    worktreeBaseRef: string | null,
+  ) => Promise<void>;
   deleteNode: (kind: NodeKind, id: string) => Promise<void>;
   deleteMany: (nodes: SelNode[]) => Promise<void>;
   /** Archives a session without deleting data, closing any visible/background tab first. */
@@ -1349,6 +1356,20 @@ function saveSidebarViewsTick(getState: () => TermStore) {
       /* Ignore unavailable or full local storage. */
     }
   }, 200);
+}
+
+/** The primary projection's conditions, which several call sites read from the top-level store fields. */
+function primaryViewAliases(
+  views: SidebarTreeView[],
+  primaryId: string,
+): Pick<TermStore, "treeFilter" | "statusFilter" | "statusFilterIds" | "markFilter"> {
+  const primary = views.find((view) => view.id === primaryId) ?? views[0];
+  return {
+    treeFilter: primary.treeFilter,
+    statusFilter: primary.statusFilter,
+    statusFilterIds: primary.statusFilterIds,
+    markFilter: primary.markFilter,
+  };
 }
 
 /**
@@ -1865,6 +1886,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
                     ? "pi"
                     : parent.kind === "crush"
                       ? "crush"
+                      : parent.kind === "kimi"
+                      ? "kimi"
                       : parent.kind === "kiro"
                         ? "kiro"
                       : parent.kind === "grok"
@@ -1902,12 +1925,15 @@ export const useTermStore = create<TermStore>((set, get) => ({
     // Apply model/effort overrides from the spawn confirmation dialog: strip the flag being overridden
     // so it cannot appear twice, then append the chosen value. Each flag is handled on its own —
     // stripping both whenever either was chosen would silently drop the parent's model just because
-    // the user picked an effort level.
-    if (req.model) {
-      agentArgs = `${agentArgs.replace(/--model\s+\S+/g, "").trim()} --model ${req.model}`.trim();
+    // the user picked an effort level. Flag names come from the agent's own spec: `--effort` belongs
+    // to Claude, Kiro, and Antigravity, while Grok and Zoo spell it `--reasoning-effort` and Cline
+    // spells it `--thinking`, so a hardcoded name would launch most agents with an unknown flag.
+    const spec = modelSpec(kind ?? "");
+    if (req.model && spec) {
+      agentArgs = applyFlag(agentArgs, spec.modelFlag, req.model);
     }
-    if (req.effort) {
-      agentArgs = `${agentArgs.replace(/--effort\s+\S+/g, "").trim()} --effort ${req.effort}`.trim();
+    if (req.effort && spec?.effort) {
+      agentArgs = applyFlag(agentArgs, spec.effort.flag, req.effort);
     }
     const finalArgs = agentArgs || null;
 
@@ -1961,6 +1987,11 @@ export const useTermStore = create<TermStore>((set, get) => ({
 
   clearNodeWorktree: async (kind, id) => {
     await tree.clearNodeWorktree(kind, id);
+    await get().loadTree();
+  },
+
+  setGroupWorktree: async (id, worktreePath, worktreeBaseRef) => {
+    await tree.setGroupWorktree(id, worktreePath, worktreeBaseRef);
     await get().loadTree();
   },
 
@@ -3208,6 +3239,19 @@ export const useTermStore = create<TermStore>((set, get) => ({
       selection: layout.left.selection,
       inspectTarget: layout.left.inspectTarget,
       leftCollapsed: layout.left.collapsed,
+      // The sidebar projections travel with the arrangement, filters included: mirror mode means the two
+      // windows hold the same state. An empty list is a payload this client could not use, and replacing a
+      // working sidebar with nothing would be worse than staying put.
+      ...(layout.left.views.length
+        ? {
+            sidebarTreeViews: layout.left.views,
+            sidebarTreeTabs: layout.left.tabs,
+            primarySidebarTreeViewId: layout.left.primaryViewId,
+            activeSidebarTreeViewId: layout.left.activeViewId,
+            // Keep the primary-view aliases in step; the status bar and the mobile list read those.
+            ...primaryViewAliases(layout.left.views, layout.left.primaryViewId),
+          }
+        : {}),
       inspectorTab: layout.right.inspectorTab,
       rightCollapsed: layout.right.collapsed,
       // Only an activation that actually changes which session is active can steal focus, so repeated
@@ -3222,6 +3266,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
     // Persist locally too, so reloading this client comes back to the mirrored arrangement rather than
     // to whatever it had before it started following.
     saveLayoutTick();
+    if (layout.left.views.length) saveSidebarViewsTick(get);
   },
   resizeLeft: (deltaX) =>
     set((s) => ({ leftWidth: clamp(s.leftWidth + deltaX, LEFT_MIN, LEFT_MAX) })),

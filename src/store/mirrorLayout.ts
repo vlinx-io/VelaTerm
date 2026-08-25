@@ -1,23 +1,41 @@
 //! Pure layout snapshot for mirror mode: build it from store state, and validate one that arrived from a peer.
 //!
 //! Kept free of store and transport imports so it stays unit-testable and so `termStore` can import the type
-//! without a runtime cycle. What belongs in here is the *arrangement* — which tabs exist, how panes are split,
-//! what is active — and nothing that is either client-specific or already shared by other means:
+//! without a runtime cycle. What belongs in here is the *state* two mirrored windows must agree on — which tabs
+//! exist, how panes are split, what is active, and how the sidebar tree is projected and filtered. What stays
+//! out is either client-specific or already shared by other means:
 //!
 //! - pixel widths of the three columns stay local, because the two windows are rarely the same size;
-//! - scroll position, search boxes, and sidebar filters stay local, because syncing them interrupts the peer;
+//! - scroll position stays local, because it follows from a viewport height the peer does not have;
 //! - terminal cols/rows stay out entirely: the PTY has exactly one size, arbitrated by the owner model
 //!   (communication doc §6.3), and a second authority over it would only fight that one;
-//! - tree collapse state is already global — it lives in SQLite — so republishing it here would be redundant.
+//! - the shared tree's collapse state is already global — it lives in SQLite — so republishing it here would be
+//!   redundant. The per-projection collapse overrides are not global, so those do travel.
+//!
+//! Sidebar search text and status/marker filters travel with the rest. Mirror mode means the two windows hold
+//! the same state, not that they replay each other's keystrokes: a filter that is on here is on there.
 
 import type { PaneNode } from "../layout/CenterPane/paneTree";
+import {
+  collectSidebarViewIds,
+  firstSidebarViewId,
+  makeSidebarTreeTab,
+  type SidebarTreeTab,
+  type SidebarViewPaneNode,
+} from "../layout/LeftSidebar/sidebarTreeLayout";
 import type { InspectorTab } from "../theme";
-import type { Session } from "../types";
+import type { AgentState, Session } from "../types";
 import type { DocTab } from "./docTab";
-import type { BrowserTab, SelNode } from "./termStore";
+import type { BrowserTab, SelNode, SidebarTreeView } from "./termStore";
 
 /** Current snapshot schema. A peer running an older or newer version is ignored rather than half-applied. */
-export const MIRROR_LAYOUT_VERSION = 1;
+export const MIRROR_LAYOUT_VERSION = 2;
+
+/** Upper bound on a published per-view ID map, so a corrupt payload cannot grow without limit. */
+const VIEW_MAP_LIMIT = 20000;
+
+/** The session states a status filter may name. */
+const AGENT_STATES: AgentState[] = ["working", "asking", "waiting"];
 
 /** Center-pane arrangement: the tabs, their pane trees, and what is active. */
 export interface MirrorCenter {
@@ -41,11 +59,25 @@ export interface MirrorCenter {
   browserTabs: Record<string, BrowserTab>;
 }
 
-/** Sidebar state worth sharing: what is selected and inspected, and whether the column is collapsed. */
+/**
+ * Sidebar state: what is selected and inspected, whether the column is collapsed, and the whole set of tree
+ * projections with the split layout that arranges them.
+ *
+ * An empty `views` means the peer published nothing usable; a client that receives that keeps its own sidebar
+ * rather than emptying it.
+ */
 export interface MirrorLeft {
   selection: SelNode[];
   inspectTarget: SelNode | null;
   collapsed: boolean;
+  /** Every saved projection, with its name, search text, status/marker filters and collapse overrides. */
+  views: SidebarTreeView[];
+  /** Sidebar tabs, each owning a binary split tree whose leaves reference projection IDs. */
+  tabs: SidebarTreeTab[];
+  /** The projection that follows the shared tree state; always one of `views`. */
+  primaryViewId: string;
+  /** The projection receiving pane-local commands; always one of `views`. */
+  activeViewId: string;
 }
 
 /** Right panel: which of the three tabs is showing, and whether the column is collapsed. */
@@ -80,6 +112,10 @@ export interface MirrorLayoutSource {
   leftCollapsed: boolean;
   rightCollapsed: boolean;
   inspectorTab: InspectorTab;
+  sidebarTreeViews: SidebarTreeView[];
+  sidebarTreeTabs: SidebarTreeTab[];
+  primarySidebarTreeViewId: string;
+  activeSidebarTreeViewId: string;
 }
 
 /** Keep only the map entries whose key appears in `ids`. */
@@ -140,6 +176,10 @@ export function buildMirrorLayout(s: MirrorLayoutSource): MirrorLayout {
       selection: [...s.selection],
       inspectTarget: s.inspectTarget,
       collapsed: s.leftCollapsed,
+      views: s.sidebarTreeViews,
+      tabs: s.sidebarTreeTabs,
+      primaryViewId: s.primarySidebarTreeViewId,
+      activeViewId: s.activeSidebarTreeViewId,
     },
     right: {
       inspectorTab: s.inspectorTab,
@@ -222,6 +262,156 @@ function selNode(v: unknown): SelNode | null {
   return { id: v.id, kind: v.kind };
 }
 
+/** Restore a published ID snapshot, keeping only explicit `true` entries. */
+function trueMap(v: unknown): Record<string, true> | null {
+  if (!isObj(v)) return null;
+  const out: Record<string, true> = {};
+  let count = 0;
+  for (const [id, value] of Object.entries(v)) {
+    if (value !== true || !id) continue;
+    out[id.slice(0, 100)] = true;
+    if (++count >= VIEW_MAP_LIMIT) break;
+  }
+  // An empty snapshot is still a snapshot: the filter was on and matched nothing, which the peer shows too.
+  return out;
+}
+
+/** Restore a published collapse map, dropping anything that is not an explicit boolean. */
+function boolMap(v: unknown): Record<string, boolean> | null {
+  if (!isObj(v)) return null;
+  const out: Record<string, boolean> = {};
+  let count = 0;
+  for (const [id, value] of Object.entries(v)) {
+    if (typeof value !== "boolean" || !id) continue;
+    out[id.slice(0, 100)] = value;
+    if (++count >= VIEW_MAP_LIMIT) break;
+  }
+  return count > 0 ? out : null;
+}
+
+/** Keep the states a status filter may name, or null when it names none. */
+function statusStates(v: unknown): AgentState[] | null {
+  if (!Array.isArray(v)) return null;
+  const selected = AGENT_STATES.filter((state) => v.includes(state));
+  return selected.length > 0 ? selected : null;
+}
+
+/**
+ * Validate one published projection.
+ *
+ * A status filter means nothing without the ID snapshot taken when it was switched on, so one that arrives
+ * without it starts unfiltered rather than hiding rows by a rule this client cannot reproduce.
+ */
+function sidebarView(v: unknown): SidebarTreeView | null {
+  if (!isObj(v) || typeof v.id !== "string") return null;
+  const id = v.id.slice(0, 100);
+  if (!id) return null;
+  const statusFilterIds = trueMap(v.statusFilterIds);
+  const statusFilter = statusFilterIds ? statusStates(v.statusFilter) : null;
+  const name =
+    typeof v.name === "string"
+      ? v.name.replace(/[\u0000-\u001F\u007F-\u009F]/g, "").trim().slice(0, 80)
+      : "";
+  return {
+    id,
+    // The pane header needs some label; the ID is at least stable and identical on both sides.
+    name: name || id,
+    treeFilter: typeof v.treeFilter === "string" ? v.treeFilter.slice(0, 500) : "",
+    statusFilter,
+    statusFilterIds: statusFilter ? statusFilterIds : null,
+    markFilter:
+      typeof v.markFilter === "string" && v.markFilter.trim()
+        ? v.markFilter.trim().slice(0, 16)
+        : null,
+    collapsedOverrides: boolMap(v.collapsedOverrides),
+  };
+}
+
+/** Validate one published sidebar split tree, rejecting duplicate or dangling projection references. */
+function sidebarPane(
+  v: unknown,
+  validViewIds: Set<string>,
+  usedViewIds: Set<string>,
+  usedPaneIds: Set<string>,
+): SidebarViewPaneNode | null {
+  if (!isObj(v)) return null;
+  const paneId = typeof v.paneId === "string" ? v.paneId.slice(0, 100) : "";
+  if (!paneId || usedPaneIds.has(paneId)) return null;
+  usedPaneIds.add(paneId);
+  if (v.kind === "leaf") {
+    const viewId = typeof v.viewId === "string" ? v.viewId : "";
+    if (!validViewIds.has(viewId) || usedViewIds.has(viewId)) return null;
+    usedViewIds.add(viewId);
+    return { kind: "leaf", paneId, viewId };
+  }
+  if (v.kind !== "split" || (v.dir !== "horizontal" && v.dir !== "vertical")) return null;
+  const rawFirst = Array.isArray(v.sizes) ? Number(v.sizes[0]) : 50;
+  const first = Number.isFinite(rawFirst) ? Math.max(10, Math.min(90, rawFirst)) : 50;
+  const a = sidebarPane(v.a, validViewIds, usedViewIds, usedPaneIds);
+  const b = sidebarPane(v.b, validViewIds, usedViewIds, usedPaneIds);
+  if (!a || !b) return null;
+  return { kind: "split", paneId, dir: v.dir, sizes: [first, 100 - first], a, b };
+}
+
+/**
+ * Validate the published sidebar: its projections, the tabs arranging them, and which one is primary or active.
+ *
+ * A projection the peer's tabs never reference still gets a tab of its own here, because losing one would leave
+ * the two sidebars showing different panes — the exact divergence mirroring is for. Returning empty views tells
+ * the caller the payload was unusable and the local sidebar should stay as it is.
+ */
+function sidebarState(left: Record<string, unknown>): {
+  views: SidebarTreeView[];
+  tabs: SidebarTreeTab[];
+  primaryViewId: string;
+  activeViewId: string;
+} {
+  const empty = { views: [], tabs: [], primaryViewId: "", activeViewId: "" };
+  if (!Array.isArray(left.views)) return empty;
+  const views: SidebarTreeView[] = [];
+  const seen = new Set<string>();
+  for (const candidate of left.views) {
+    const view = sidebarView(candidate);
+    if (!view || seen.has(view.id)) continue;
+    seen.add(view.id);
+    views.push(view);
+  }
+  if (views.length === 0) return empty;
+  const validViewIds = new Set(views.map((view) => view.id));
+  let usedViewIds = new Set<string>();
+  const seenTabIds = new Set<string>();
+  const tabs: SidebarTreeTab[] = [];
+  for (const candidate of Array.isArray(left.tabs) ? left.tabs : []) {
+    if (!isObj(candidate) || typeof candidate.id !== "string") continue;
+    const id = candidate.id.slice(0, 100);
+    if (!id || seenTabIds.has(id)) continue;
+    // Try the tab against a copy: a rejected tab must not consume the projections it referenced.
+    const candidateViewIds = new Set(usedViewIds);
+    const root = sidebarPane(candidate.root, validViewIds, candidateViewIds, new Set<string>());
+    if (!root) continue;
+    seenTabIds.add(id);
+    usedViewIds = candidateViewIds;
+    const memberIds = collectSidebarViewIds(root);
+    const activeViewId =
+      typeof candidate.activeViewId === "string" && memberIds.includes(candidate.activeViewId)
+        ? candidate.activeViewId
+        : firstSidebarViewId(root);
+    tabs.push({ id, root, activeViewId });
+  }
+  for (const view of views) {
+    if (!usedViewIds.has(view.id)) tabs.push(makeSidebarTreeTab(view.id));
+  }
+  const primaryViewId =
+    typeof left.primaryViewId === "string" && validViewIds.has(left.primaryViewId)
+      ? left.primaryViewId
+      : views[0].id;
+  const activeViewId =
+    typeof left.activeViewId === "string" && validViewIds.has(left.activeViewId)
+      ? left.activeViewId
+      : primaryViewId;
+  return { views, tabs, primaryViewId, activeViewId };
+}
+
 /**
  * Validate a snapshot received from a peer, returning null when it is unusable.
  *
@@ -262,6 +452,7 @@ export function sanitizeMirrorLayout(raw: unknown): MirrorLayout | null {
         : [],
       inspectTarget: selNode(left.inspectTarget),
       collapsed: left.collapsed === true,
+      ...sidebarState(left),
     },
     right: { inspectorTab, collapsed: right.collapsed === true },
   };

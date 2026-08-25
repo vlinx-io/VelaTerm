@@ -56,6 +56,10 @@ const WATCHED = [
   "leftCollapsed",
   "rightCollapsed",
   "inspectorTab",
+  "sidebarTreeViews",
+  "sidebarTreeTabs",
+  "primarySidebarTreeViewId",
+  "activeSidebarTreeViewId",
 ] as const;
 
 /** Serialize the arrangement this client would publish right now. */

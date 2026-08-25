@@ -154,6 +154,9 @@ const ru: typeof en = {
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
   "spawn.modelLabel": "Модель", // Model
   "spawn.effortLabel": "Усилие", // Effort
+  "spawn.modelDefault": "По умолчанию", // Default
+  "spawn.modelLoading": "Загрузка моделей…", // Listing models…
+  "spawn.modelListUnavailable": "Список моделей недоступен — укажите её в аргументах агента", // No model list available
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
@@ -199,6 +202,7 @@ const ru: typeof en = {
   "tree.deleteWorktreePlaceholder": "Select a worktree…", // TODO translate
   "tree.deleteWorktreeForce": "Force delete (discard uncommitted changes)", // TODO translate
   "tree.convertToNormalSession": "Convert to normal session", // TODO translate
+  "tree.moveGroupToWorktree": "Переместить в worktree…",
   "tree.convertToNormalGroup": "Convert to normal group", // TODO translate
   "merge.title": "Merge branches", // TODO translate
   "merge.desc": "Pick a source and a target branch; the source merges into the target.", // TODO translate
@@ -374,6 +378,8 @@ const ru: typeof en = {
   "connect.forgetHost": "Забыть этот хост",
   "connect.savedHasPassword": "Пароль сохранён",
   "connect.rememberPassword": "Запомнить пароль",
+  "connect.showPassword": "Показать пароль",
+  "connect.hidePassword": "Скрыть пароль",
   "connect.urlPasswordPlaceholder": "Пароль для входа",
   "connect.shareDesktopDb": "Использовать базу данных настольного приложения на удалённой машине",
   "connect.shareDesktopDbHint":
@@ -592,6 +598,8 @@ const ru: typeof en = {
   "worktreeSel.empty": "В этом репозитории нет существующих worktree.", // No existing worktrees in this repository.
   "worktreeSel.loadFailed": "Не удалось получить список worktree (не git-репозиторий?).", // Couldn't list worktrees (not a git repository?).
   "group.worktreeHint": "Сессии, созданные в этой группе, по умолчанию будут использовать это worktree.", // Sessions created in this group will use this worktree by default.
+  "worktree.moveGroupTitle": "Переместить группу в worktree",
+  "worktree.moveGroupHint": "Сессии, созданные в этой группе с этого момента, будут использовать этот worktree. Уже существующие сохранят свой каталог.",
 
   // ── Archive panel ──
   "archive.title": "Архив сессий", // Archived Sessions

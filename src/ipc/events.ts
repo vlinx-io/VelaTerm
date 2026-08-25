@@ -2,6 +2,7 @@
 
 import { isRemoteWindow, listen, listenNative, type UnlistenFn } from "./transport";
 import type { MirrorSnapshot } from "./mirror";
+import type { AgentKind } from "../types";
 
 // PTY output bypasses the event channel and travels directly through spawnPty's binary Channel / WS binary frames; see transport.ts.
 
@@ -83,7 +84,7 @@ export function onPtyStatus(
 export interface SpawnRequest {
   parentSessionId: string;
   prompt: string;
-  kind?: "claude" | "codex" | "opencode" | "copilot" | "cursor" | "antigravity" | "cline" | "pi" | "crush" | "kiro" | "grok" | "zoo" | "terminal" | null;
+  kind?: AgentKind | "terminal" | null;
   worktree?: boolean | null;
   /** Model override chosen in the spawn confirmation dialog; null inherits from parent or defaults. */
   model?: string | null;

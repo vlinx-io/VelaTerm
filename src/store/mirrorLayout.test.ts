@@ -10,7 +10,9 @@ import {
   type MirrorLayoutSource,
 } from "./mirrorLayout";
 import type { PaneNode } from "../layout/CenterPane/paneTree";
+import type { SidebarTreeTab } from "../layout/LeftSidebar/sidebarTreeLayout";
 import type { Session } from "../types";
+import type { SidebarTreeView } from "./termStore";
 
 const leaf = (paneId: string, sessionId: string): PaneNode => ({
   kind: "leaf",
@@ -47,6 +49,25 @@ function session(id: string): Session {
   };
 }
 
+function view(id: string, over: Partial<SidebarTreeView> = {}): SidebarTreeView {
+  return {
+    id,
+    name: id,
+    treeFilter: "",
+    statusFilter: null,
+    statusFilterIds: null,
+    markFilter: null,
+    collapsedOverrides: null,
+    ...over,
+  };
+}
+
+const tab = (id: string, viewId: string): SidebarTreeTab => ({
+  id,
+  root: { kind: "leaf", paneId: `sp-${viewId}`, viewId },
+  activeViewId: viewId,
+});
+
 function source(over: Partial<MirrorLayoutSource> = {}): MirrorLayoutSource {
   return {
     openTabs: ["A"],
@@ -65,6 +86,10 @@ function source(over: Partial<MirrorLayoutSource> = {}): MirrorLayoutSource {
     leftCollapsed: false,
     rightCollapsed: true,
     inspectorTab: "git",
+    sidebarTreeViews: [view("main")],
+    sidebarTreeTabs: [tab("t1", "main")],
+    primarySidebarTreeViewId: "main",
+    activeSidebarTreeViewId: "main",
     ...over,
   };
 }
@@ -112,6 +137,40 @@ describe("buildMirrorLayout", () => {
     expect(Object.keys(layout.center.ephemeralSessions)).toEqual(["eph-1"]);
   });
 
+  it("carries the sidebar projections with their filters, which mirror mode keeps identical on both sides", () => {
+    const filtered = view("split-1", {
+      treeFilter: "pr",
+      statusFilter: ["working"],
+      statusFilterIds: { s1: true },
+      markFilter: "\u2b50",
+      collapsedOverrides: { p1: true },
+    });
+    const layout = buildMirrorLayout(
+      source({
+        sidebarTreeViews: [view("main"), filtered],
+        sidebarTreeTabs: [
+          {
+            id: "t1",
+            root: {
+              kind: "split",
+              paneId: "sp-root",
+              dir: "vertical",
+              sizes: [50, 50],
+              a: { kind: "leaf", paneId: "sp-main", viewId: "main" },
+              b: { kind: "leaf", paneId: "sp-1", viewId: "split-1" },
+            },
+            activeViewId: "split-1",
+          },
+        ],
+        activeSidebarTreeViewId: "split-1",
+      }),
+    );
+    expect(layout.left.views[1]).toEqual(filtered);
+    expect(layout.left.tabs[0].root.kind).toBe("split");
+    expect(layout.left.primaryViewId).toBe("main");
+    expect(layout.left.activeViewId).toBe("split-1");
+  });
+
   it("serializes identically for two unchanged builds, which is what stops the sync loop feeding itself", () => {
     const s = source({ liveTabs: ["B"], paneTrees: { A: leaf("pa", "A"), B: leaf("pb", "B") } });
     expect(JSON.stringify(buildMirrorLayout(s))).toBe(JSON.stringify(buildMirrorLayout(s)));
@@ -151,6 +210,56 @@ describe("sanitizeMirrorLayout", () => {
     const out = sanitizeMirrorLayout(raw)!;
     expect(out.left.selection).toEqual([{ id: "A", kind: "session" }]);
     expect(out.right.inspectorTab).toBe("files");
+  });
+});
+
+describe("sanitizeMirrorLayout: sidebar", () => {
+  const valid = () => JSON.parse(JSON.stringify(buildMirrorLayout(source())));
+
+  it("restores a status filter only with the ID snapshot it was captured against", () => {
+    const raw = valid();
+    raw.left.views = [
+      { ...view("main"), statusFilter: ["working"], statusFilterIds: null },
+      { ...view("v2"), statusFilter: ["asking"], statusFilterIds: { s1: true } },
+    ];
+    raw.left.tabs = [tab("t1", "main"), tab("t2", "v2")];
+    const out = sanitizeMirrorLayout(raw)!;
+    expect(out.left.views[0].statusFilter).toBeNull();
+    expect(out.left.views[1].statusFilter).toEqual(["asking"]);
+    expect(out.left.views[1].statusFilterIds).toEqual({ s1: true });
+  });
+
+  it("drops a tab whose split references a projection that is not there", () => {
+    const raw = valid();
+    raw.left.tabs = [tab("t1", "ghost"), tab("t2", "main")];
+    const out = sanitizeMirrorLayout(raw)!;
+    expect(out.left.tabs.map((x) => x.id)).toEqual(["t2"]);
+  });
+
+  it("gives a projection no tab claims one of its own, so neither side loses a pane", () => {
+    const raw = valid();
+    raw.left.views = [view("main"), view("orphan")];
+    const out = sanitizeMirrorLayout(raw)!;
+    expect(out.left.tabs).toHaveLength(2);
+    expect(out.left.tabs[1].root).toMatchObject({ kind: "leaf", viewId: "orphan" });
+  });
+
+  it("falls back to the first projection when the primary and active IDs are unknown", () => {
+    const raw = valid();
+    raw.left.primaryViewId = "gone";
+    raw.left.activeViewId = "gone";
+    const out = sanitizeMirrorLayout(raw)!;
+    expect(out.left.primaryViewId).toBe("main");
+    expect(out.left.activeViewId).toBe("main");
+  });
+
+  it("returns no projections for an unusable payload, which tells the client to keep its own sidebar", () => {
+    const raw = valid();
+    raw.left.views = [{ id: 7 }, null];
+    expect(sanitizeMirrorLayout(raw)!.left.views).toEqual([]);
+    const missing = valid();
+    delete missing.left.views;
+    expect(sanitizeMirrorLayout(missing)!.left.views).toEqual([]);
   });
 });
 

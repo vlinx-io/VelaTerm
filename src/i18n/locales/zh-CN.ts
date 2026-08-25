@@ -141,6 +141,9 @@ const zhCN: typeof en = {
   "spawn.worktreeLabel": "独立 git worktree",
   "spawn.modelLabel": "模型",
   "spawn.effortLabel": "推理强度",
+  "spawn.modelDefault": "默认", // Default
+  "spawn.modelLoading": "正在获取模型…", // Listing models…
+  "spawn.modelListUnavailable": "取不到模型列表 — 请在智能体参数里直接填", // No model list available
   "spawn.launch": "启动",
   "spawn.remaining": (n: number) => `还有 ${n} 个待确认`,
   "spawn.notifyTitle": "派生会话待确认",
@@ -186,6 +189,7 @@ const zhCN: typeof en = {
   "tree.deleteWorktreePlaceholder": "选择一个 worktree…",
   "tree.deleteWorktreeForce": "强制删除（丢弃未提交的改动）",
   "tree.convertToNormalSession": "转为普通会话",
+  "tree.moveGroupToWorktree": "转移到 Worktree…",
   "tree.convertToNormalGroup": "转为普通分组",
   "merge.title": "合并分支",
   "merge.desc": "选好来源分支与目标分支，把来源合并进目标；方向可用中间按钮调换。",
@@ -357,6 +361,8 @@ const zhCN: typeof en = {
   "connect.forgetHost": "忘记此主机",
   "connect.savedHasPassword": "已保存密码",
   "connect.rememberPassword": "记住密码",
+  "connect.showPassword": "显示密码",
+  "connect.hidePassword": "隐藏密码",
   "connect.urlPasswordPlaceholder": "登录密码",
   "connect.shareDesktopDb": "复用远端桌面版的数据库",
   "connect.shareDesktopDbHint":
@@ -572,6 +578,8 @@ const zhCN: typeof en = {
   "worktreeSel.empty": "该仓库没有已存在的 worktree。",
   "worktreeSel.loadFailed": "无法列出 worktree（不是 git 仓库？）。",
   "group.worktreeHint": "在该分组下新建的会话将默认使用此 worktree。",
+  "worktree.moveGroupTitle": "把分组转移到 Worktree",
+  "worktree.moveGroupHint": "之后在这个分组里新建的会话会用这个 worktree；已有的会话还是留在原来的目录。",
 
   // ── Archive panel ──
   "archive.title": "已归档会话",

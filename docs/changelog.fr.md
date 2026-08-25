@@ -1,3 +1,47 @@
+## v0.1.104 — 2026-08-25
+
+### Agents IA
+
+- **La carte de sous-tâche propose désormais les vrais modèles de chaque agent, et l'option d'effort que cet agent comprend réellement.** La carte construisait ses arguments de lancement avec `--model` et `--effort` pour tout le monde, alors que seuls Claude, Kiro et Antigravity écrivent ainsi l'effort de raisonnement — Grok et Zoo l'appellent `--reasoning-effort`, Cline l'appelle `--thinking`. Choisir un niveau d'effort pour l'un des autres passait à la CLI une option dont elle n'avait jamais entendu parler, et la session ne démarrait pas. Chaque agent fournit maintenant ses propres noms d'options et ses propres valeurs. Le sélecteur de modèle suit ce que chaque CLI est capable de nous dire : celles qui savent énumérer leur catalogue (OpenCode, Grok, Crush, Antigravity, Cursor, pi, Kiro) sont interrogées et proposent la vraie liste, celles qui ont un ensemble figé (Claude, Codex, Kimi Code) proposent cet ensemble, et les autres vous laissent un champ de texte avec un exemple de la forme attendue. Un agent qui n'est pas installé ou pas connecté le dit, au lieu de tourner indéfiniment. Choisir « Par défaut » efface désormais une valeur héritée au lieu de laisser l'ancienne en place, et choisir un niveau d'effort ne fait plus tomber le modèle hérité de la session parente.
+
+- **Une sous-tâche lancée depuis une session Kimi Code reste en Kimi Code.** Kimi Code manquait dans la liste dont le chemin de lancement se sert pour hériter de l'agent du parent : ses sessions enfants revenaient donc silencieusement avec l'agent par défaut.
+
+### Espace de travail
+
+- **Un groupe peut être déplacé vers un worktree après sa création.** Le worktree se choisissait à la création du groupe et restait figé ensuite ; changer d'avis obligeait à supprimer le groupe et à le reconstruire. Faites un clic droit sur un groupe et choisissez « Move to Worktree… » pour créer un nouveau worktree, en rattacher un existant, ou réorienter un groupe déjà rattaché. Seul le groupe lui-même change : les sessions déjà à l'intérieur gardent le répertoire avec lequel elles ont été créées — une session en cours d'exécution ne peut pas être déplacée vers un autre répertoire situé sous elle-même — tandis que les sessions créées ensuite démarrent dans le worktree.
+
+- **Le mode miroir couvre maintenant tout l'arbre de la barre latérale.** Il partageait la sélection et les panneaux repliés ; le champ de recherche et les filtres d'état et de marque restaient locaux, au motif que les synchroniser interrompt celui qui est en train de chercher quelque chose. Le raisonnement était à l'envers : mettre en miroir signifie que les deux fenêtres tiennent le même état, pas que l'une rejoue les frappes de l'autre — un filtre actif ici est actif là-bas. Ce qui interrompt vraiment les gens, ce sont deux côtés qui montrent des arbres différents. Chaque projection de la barre latérale voyage désormais : la disposition des divisions, le nom de chaque projection, son texte de recherche, ses filtres d'état et de marque, et son propre état de repli. Le format de l'instantané passe en version 2, et un client resté sur une version antérieure cesse de se mettre en miroir plutôt que d'appliquer la moitié d'une trame : rechargez donc toute fenêtre que vous avez laissée ouverte pendant la mise à jour.
+
+### Interface
+
+- **Fermer la fenêtre sous macOS pose la même question que quitter.** ⌘Q et l'entrée de menu passaient par la confirmation de l'application, mais le bouton rouge de fermeture détruisait la fenêtre sur-le-champ — or c'est cette fenêtre qui héberge la webview où vit la boîte de confirmation. Vous n'aviez donc aucune confirmation du tout, ou bien le repli natif réduit à l'essentiel, sans case « enregistrer l'espace de travail » et avec un texte non traduit. Les trois plateformes maintiennent désormais la fenêtre ouverte jusqu'à votre réponse.
+
+- **« Enregistrer l'espace de travail » est coché par défaut, et reste comme vous l'avez laissé.** Perdre une disposition coûte plus cher qu'un instantané dont on n'avait pas besoin : la case démarre donc cochée. Elle oubliait aussi votre choix : le réglage était écrit en base de données à travers un anti-rebond de 400 ms, et quitter tuait le processus pendant cette fenêtre, si bien que le lancement suivant se réconciliait avec l'ancienne valeur et remettait votre modification en place. L'écriture est maintenant vidée avant la sortie, avec un plafond de 600 ms pour qu'un backend bloqué ne laisse pas le bouton de confirmation tourner indéfiniment. (Contribution de FarhadGSRX.)
+
+- **Les mots de passe du panneau de connexion distante peuvent être révélés.** Le mot de passe de l'URL comme celui du SSH disposent d'un bouton en forme d'œil qui bascule entre masqué et texte en clair. L'état révélé est propre au champ et se réinitialise à la fermeture du panneau : un mot de passe ne reste donc jamais affiché à l'écran.
+
+- **Le badge de filtre de la barre latérale compte tous les filtres actifs.** Un filtre de marque se contentait d'allumer le bouton sans rien dire, si bien que le badge pouvait afficher 1 alors que deux filtres étaient actifs. Il additionne désormais les états et les marques et correspond aux coches du menu déroulant ; un filtre d'état seul garde sa pastille colorée.
+
+### Corrections
+
+- **Les mises à jour automatiques fonctionnent de nouveau sous macOS.** Les paquets de la v0.1.103 transportaient des entrées compagnes AppleDouble (`._VelaTerm.app`) ; le programme de mise à jour retire le premier composant de chaque chemin — ce qui ne laissait ici qu'un chemin vide — et refusait alors de décompresser l'archive. Les deux architectures étaient touchées : tous les utilisateurs macOS en v0.1.103 restaient donc bloqués. L'empaquetage n'écrit plus ces entrées.
+
+- **Les contrôles natifs suivent le thème de l'application quand il diffère de celui du système.** Appliquer un thème définissait bien les couleurs de l'application, mais ne mettait jamais à jour `color-scheme`, initialisé une seule fois au démarrage depuis la préférence du système et jamais retouché ensuite : les cases à cocher, les menus déroulants et les barres de défilement restaient sombres sous une application claire posée sur un système sombre. (Contribution de FarhadGSRX.)
+
+- **Un clone tout neuf se compile de nouveau.** La crate Rust embarque `../dist` à la compilation, et la commande de développement ne le produit pas : un dépôt fraîchement cloné échouait donc à compiler avant même de pouvoir tourner. Le script de build crée maintenant le répertoire quand il manque. (Contribution de FarhadGSRX.)
+
+---
+
+## v0.1.103 — 2026-08-24
+
+### Corrections
+
+- **Les sessions Codex sous Windows ne refusent plus de démarrer.** Chaque session Codex échouait immédiatement avec `unexpected argument '--codex-hook'` parce que la table TOML des hooks de cycle de vie, passée en ligne de commande, contient des espaces et des guillemets doubles, et `codex.cmd` installé par npm repasse cela par cmd.exe, qui supprime les guillemets et découpe la valeur en plusieurs arguments. L'injection des hooks est désormais ignorée sous Windows ; la détection d'état revient aux heuristiques existantes notify / screen / busy, qui continuent de signaler les états actif et inactif, mais avec moins de précision que les hooks. macOS et Linux ne sont pas affectés et continuent d'utiliser les hooks.
+
+- **La correction du pré-édit IME Windows de la v0.1.102 a été annulée.** La correction qui restaurait l'overlay de composition pour la saisie en chinois, japonais et coréen lui ajoutait également une couleur de fond, une bordure de 1px et des coins arrondis, ce qui dessinait un petit cadre autour du texte de pré-édition dans le terminal — ce qui ne devrait pas y apparaître. Comme le dimensionnement de l'overlay, la géométrie du conteneur auxiliaire et le nettoyage du textarea étaient interdépendants, l'ensemble de la modification a dû être annulé. Le problème sous-jacent — saisie CJK à l'aveugle sous Windows — reste ouvert et est suivi dans l'issue #6.
+
+---
+
 ## v0.1.102 — 2026-08-23
 
 ### Agents IA

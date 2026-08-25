@@ -170,6 +170,16 @@ export function agentLocateBin(agent: string): Promise<string | null> {
   return invoke<string | null>("agent_locate_bin", { agent });
 }
 
+/**
+ * Asks an agent CLI to print the models it can run, normalized to bare identifiers.
+ *
+ * Agents whose CLI has no listing command return an empty array rather than an error. The call spawns
+ * the CLI and waits for it, so treat it as slow and cache the result per agent kind.
+ */
+export function agentListModels(agent: string): Promise<string[]> {
+  return invoke<string[]>("agent_list_models", { agent });
+}
+
 /** Bundled/full Git Bash installation state, meaningful only on Windows. */
 export interface GitbashStatus {
   /** Whether any usable bundled-minimal or downloaded-full Git Bash exists. */

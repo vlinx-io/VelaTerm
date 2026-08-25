@@ -167,6 +167,13 @@ describe("LeftSidebar", () => {
     expect(screen.getByText("tree.newTerminalSession")).toBeTruthy();
   });
 
+  it("offers Move to Worktree on a group that has no worktree yet", () => {
+    render(<LeftSidebar />);
+
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Group" }));
+    expect(screen.getByText("tree.moveGroupToWorktree")).toBeTruthy();
+  });
+
   it("exposes only a temporary context target while the menu is open", () => {
     render(<LeftSidebar />);
     const tree = screen.getByTestId("project-tree");

@@ -190,6 +190,17 @@ export function clearNodeWorktree(kind: NodeKind, id: string): Promise<void> {
   return invoke("clear_node_worktree", { kind, id });
 }
 
+/** Bind an existing group to a worktree directory, or re-point it at another one. Sessions already in the
+ * group keep their own cwd; only sessions created afterwards inherit the binding. Passing null for both
+ * clears it. */
+export function setGroupWorktree(
+  id: string,
+  worktreePath: string | null,
+  worktreeBaseRef: string | null,
+): Promise<void> {
+  return invoke("set_group_worktree", { id, worktreePath, worktreeBaseRef });
+}
+
 export function moveNode(
   kind: NodeKind,
   id: string,

@@ -144,6 +144,9 @@ const vi: typeof en = {
   "spawn.worktreeLabel": "Git worktree riêng",
   "spawn.modelLabel": "Model",
   "spawn.effortLabel": "Effort",
+  "spawn.modelDefault": "Mặc định", // Default
+  "spawn.modelLoading": "Đang tải danh sách mô hình…", // Listing models…
+  "spawn.modelListUnavailable": "Không có danh sách mô hình — hãy nhập vào tham số agent", // No model list available
   "spawn.launch": "Khởi chạy",
   "spawn.remaining": (n: number) => `Còn ${n} yêu cầu đang chờ`,
   "spawn.notifyTitle": "Phiên được tạo đang chờ xác nhận",
@@ -189,6 +192,7 @@ const vi: typeof en = {
   "tree.deleteWorktreePlaceholder": "Chọn một worktree…",
   "tree.deleteWorktreeForce": "Buộc xóa (hủy thay đổi chưa commit)",
   "tree.convertToNormalSession": "Chuyển thành phiên thường",
+  "tree.moveGroupToWorktree": "Chuyển sang worktree…",
   "tree.convertToNormalGroup": "Chuyển thành nhóm thường",
   "merge.title": "Hợp nhất nhánh",
   "merge.desc": "Chọn nhánh nguồn và nhánh đích; nhánh nguồn sẽ được hợp nhất vào nhánh đích.",
@@ -358,6 +362,8 @@ const vi: typeof en = {
   "connect.forgetHost": "Quên máy chủ này",
   "connect.savedHasPassword": "Đã lưu mật khẩu",
   "connect.rememberPassword": "Nhớ mật khẩu",
+  "connect.showPassword": "Hiện mật khẩu",
+  "connect.hidePassword": "Ẩn mật khẩu",
   "connect.urlPasswordPlaceholder": "Mật khẩu đăng nhập",
   "connect.shareDesktopDb": "Dùng cơ sở dữ liệu của ứng dụng máy tính từ xa",
   "connect.shareDesktopDbHint":
@@ -564,6 +570,8 @@ const vi: typeof en = {
   "worktreeSel.empty": "Không có worktree sẵn có trong kho này.",
   "worktreeSel.loadFailed": "Không thể liệt kê worktree (không phải kho Git?).",
   "group.worktreeHint": "Các phiên được tạo trong nhóm này mặc định sẽ dùng worktree này.",
+  "worktree.moveGroupTitle": "Chuyển nhóm sang worktree",
+  "worktree.moveGroupHint": "Các phiên tạo trong nhóm này từ giờ sẽ dùng worktree này. Các phiên đã có vẫn giữ thư mục hiện tại.",
 
   // Lưu trữ và tìm kiếm
   "archive.title": "Phiên đã lưu trữ",

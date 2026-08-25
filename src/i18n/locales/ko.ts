@@ -143,6 +143,9 @@ const ko: typeof en = {
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
   "spawn.modelLabel": "모델", // Model
   "spawn.effortLabel": "추론 강도", // Effort
+  "spawn.modelDefault": "기본값", // Default
+  "spawn.modelLoading": "모델 목록 불러오는 중…", // Listing models…
+  "spawn.modelListUnavailable": "모델 목록을 가져올 수 없음 — 에이전트 인수에 직접 입력", // No model list available
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
@@ -188,6 +191,7 @@ const ko: typeof en = {
   "tree.deleteWorktreePlaceholder": "Select a worktree…", // TODO translate
   "tree.deleteWorktreeForce": "Force delete (discard uncommitted changes)", // TODO translate
   "tree.convertToNormalSession": "Convert to normal session", // TODO translate
+  "tree.moveGroupToWorktree": "Worktree로 이동…",
   "tree.convertToNormalGroup": "Convert to normal group", // TODO translate
   "merge.title": "Merge branches", // TODO translate
   "merge.desc": "Pick a source and a target branch; the source merges into the target.", // TODO translate
@@ -361,6 +365,8 @@ const ko: typeof en = {
   "connect.forgetHost": "이 호스트 삭제",
   "connect.savedHasPassword": "비밀번호 저장됨",
   "connect.rememberPassword": "비밀번호 저장",
+  "connect.showPassword": "비밀번호 표시",
+  "connect.hidePassword": "비밀번호 숨기기",
   "connect.urlPasswordPlaceholder": "로그인 비밀번호",
   "connect.shareDesktopDb": "원격 데스크톱 앱의 데이터베이스 공유",
   "connect.shareDesktopDbHint":
@@ -577,6 +583,8 @@ const ko: typeof en = {
   "worktreeSel.empty": "이 저장소에 기존 worktree가 없습니다.", // No existing worktrees in this repository.
   "worktreeSel.loadFailed": "worktree 목록을 가져올 수 없습니다 (git 저장소가 아닌가요?).", // Couldn't list worktrees (not a git repository?).
   "group.worktreeHint": "이 그룹에서 만든 세션은 기본적으로 이 worktree를 사용합니다.", // Sessions created in this group will use this worktree by default.
+  "worktree.moveGroupTitle": "그룹을 Worktree로 이동",
+  "worktree.moveGroupHint": "이제부터 이 그룹에서 만드는 세션은 이 worktree를 사용합니다. 기존 세션은 현재 디렉터리를 유지합니다.",
 
   // ── Archive panel ──
   "archive.title": "보관된 세션", // Archived Sessions

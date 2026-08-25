@@ -83,105 +83,52 @@ export function QuitConfirmModal() {
   return (
     <Backdrop onClose={cancel}>
       <div
-        style={{
-          width: 400,
-          background: "var(--bg-2)",
-          border: "1px solid var(--border-strong)",
-          borderRadius: 12,
-          boxShadow: "var(--shadow)",
-          overflow: "hidden",
-        }}
+        className="quit-card"
         onKeyDown={(e) => {
           if (e.key === "Escape") cancel();
-          if (e.key === "Enter") confirm();
+          if (e.key === "Enter") void confirm();
         }}
       >
-        <div style={{ padding: "14px 16px 10px" }}>
-          <div style={{ fontWeight: 700, fontSize: 14, color: "var(--text)" }}>
-            {t("quit.title")}
-          </div>
-          <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, color: "var(--text-dim)" }}>
-            {t("quit.body")}
-          </div>
+        <div className="quit-head">
+          <div className="quit-title">{t("quit.title")}</div>
+          <div className="quit-body">{t("quit.body")}</div>
         </div>
 
-        <label
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 8,
-            margin: "0 12px 4px",
-            padding: "8px 10px",
-            borderRadius: 7,
-            cursor: "pointer",
-            background: save
-              ? "var(--accent-dim, rgba(var(--accent-rgb, 63,207,142), 0.12))"
-              : "transparent",
-            border: save ? "1px solid var(--accent)" : "1px solid transparent",
-            transition: "background 0.1s, border-color 0.1s",
-          }}
-        >
+        <label className={save ? "quit-opt on" : "quit-opt"}>
           <input
             type="checkbox"
             checked={save}
             onChange={(e) => setSave(e.target.checked)}
-            style={{
-              width: 16,
-              height: 16,
-              flex: "none",
-              margin: "1px 0 0",
-              accentColor: "var(--accent)",
-              cursor: "pointer",
-            }}
           />
-          <span style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ fontSize: 12.5, color: "var(--text)" }}>
-              {t("quit.saveWorkspace")}
-            </span>
-            <span style={{ fontSize: 11.5, lineHeight: 1.5, color: "var(--text-dim)" }}>
+          <span className="quit-box" aria-hidden="true">
+            <svg width="10" height="10" viewBox="0 0 10 10" style={{ opacity: save ? 1 : 0 }}>
+              <path
+                d="M1.6 5.2 4 7.6 8.6 2.4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+          <span>
+            <span className="quit-opt-label">{t("quit.saveWorkspace")}</span>
+            <span className="quit-opt-hint" style={{ display: "block" }}>
               {t("quit.saveWorkspaceHint")}
             </span>
           </span>
         </label>
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: 8,
-            padding: "10px 16px",
-            borderTop: "1px solid var(--border)",
-          }}
-        >
-          <button
-            onClick={cancel}
-            style={{
-              padding: "7px 14px",
-              border: "1px solid var(--border)",
-              borderRadius: 7,
-              background: "transparent",
-              color: "var(--text-dim)",
-              fontSize: 12.5,
-              cursor: "pointer",
-            }}
-          >
+        <div className="quit-foot">
+          <button className="quit-btn ghost" onClick={cancel}>
             {t("common.cancel")}
           </button>
           <button
+            className="quit-btn primary"
             autoFocus
             disabled={exiting}
             onClick={() => void confirm()}
-            style={{
-              padding: "7px 16px",
-              border: "none",
-              borderRadius: 7,
-              background: "var(--accent)",
-              color: "var(--bg-0)",
-              fontSize: 12.5,
-              fontWeight: 600,
-              cursor: exiting ? "default" : "pointer",
-              opacity: exiting ? 0.6 : 1,
-            }}
           >
             {t("quit.confirm")}
           </button>

@@ -143,6 +143,9 @@ const ja: typeof en = {
   "spawn.worktreeLabel": "Separate git worktree", // Separate git worktree
   "spawn.modelLabel": "モデル", // Model
   "spawn.effortLabel": "推論強度", // Effort
+  "spawn.modelDefault": "デフォルト", // Default
+  "spawn.modelLoading": "モデルを取得中…", // Listing models…
+  "spawn.modelListUnavailable": "モデル一覧を取得できません — エージェント引数で指定してください", // No model list available
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
@@ -188,6 +191,7 @@ const ja: typeof en = {
   "tree.deleteWorktreePlaceholder": "Select a worktree…", // TODO translate
   "tree.deleteWorktreeForce": "Force delete (discard uncommitted changes)", // TODO translate
   "tree.convertToNormalSession": "Convert to normal session", // TODO translate
+  "tree.moveGroupToWorktree": "Worktree に移動…",
   "tree.convertToNormalGroup": "Convert to normal group", // TODO translate
   "merge.title": "Merge branches", // TODO translate
   "merge.desc": "Pick a source and a target branch; the source merges into the target.", // TODO translate
@@ -362,6 +366,8 @@ const ja: typeof en = {
   "connect.forgetHost": "このホストを削除",
   "connect.savedHasPassword": "パスワード保存済み",
   "connect.rememberPassword": "パスワードを保存",
+  "connect.showPassword": "パスワードを表示",
+  "connect.hidePassword": "パスワードを非表示",
   "connect.urlPasswordPlaceholder": "ログインパスワード",
   "connect.shareDesktopDb": "リモートのデスクトップ版のデータベースを共用",
   "connect.shareDesktopDbHint":
@@ -578,6 +584,8 @@ const ja: typeof en = {
   "worktreeSel.empty": "このリポジトリには既存の worktree がありません。", // No existing worktrees in this repository.
   "worktreeSel.loadFailed": "worktree を一覧できませんでした（git リポジトリではない？）。", // Couldn't list worktrees (not a git repository?).
   "group.worktreeHint": "このグループで作成したセッションは既定でこの worktree を使用します。", // Sessions created in this group will use this worktree by default.
+  "worktree.moveGroupTitle": "グループを Worktree に移動",
+  "worktree.moveGroupHint": "以後このグループで作成するセッションはこの worktree を使います。既存のセッションは今のディレクトリのままです。",
 
   // ── Archive panel ──
   "archive.title": "アーカイブ済みセッション", // Archived Sessions
