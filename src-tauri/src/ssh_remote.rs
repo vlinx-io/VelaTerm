@@ -72,6 +72,8 @@ pub struct SshHostInfo {
     pub has_password: bool,
     /// Previous choice to reuse the remote desktop database, restored by reconnect UI.
     pub shared_db: bool,
+    /// Previous choice to mirror the UI layout across the service's clients, restored by reconnect UI.
+    pub mirror: bool,
 }
 
 /// Keyring service name isolates dev/release identifiers and SSH versus URL password kinds.
@@ -743,6 +745,10 @@ struct RunState {
     /// run.json defaults false for an isolated database.
     #[serde(default)]
     shared_db: bool,
+    /// Whether the service runs with UI mirror mode on. Reconnect requires the same mode; legacy run.json
+    /// defaults false, which matches the checkbox shipping unchecked.
+    #[serde(default)]
+    mirror: bool,
 }
 
 /// Return the POSIX-shell data-directory expression by mode/OS. Isolated mode uses
@@ -761,8 +767,8 @@ fn serve_data_dir_expr(os: &str, shared_db: bool) -> String {
     }
 }
 
-/// Start detached remote `vela-server --serve --local-http` and persist pid/port/password/version/shared_db
-/// in run.json so the service survives client disconnect and can be reused consistently.
+/// Start detached remote `vela-server --serve --local-http` and persist pid/port/password/version/shared_db/
+/// mirror in run.json so the service survives client disconnect and can be reused consistently.
 ///
 /// Pass the alphanumeric random password through VELA_SERVE_PASSWORD, never remote process argv.
 fn start_detached_serve(
@@ -772,6 +778,7 @@ fn start_detached_serve(
     rport: u16,
     os: &str,
     shared_db: bool,
+    mirror: bool,
 ) -> Result<u32, String> {
     if !valid_version(version) {
         return Err(format!("Invalid version: {version}"));
@@ -782,16 +789,19 @@ fn start_detached_serve(
     let bin = remote_bin_path(version);
     let run = remote_run_json();
     let data_dir_expr = serve_data_dir_expr(os, shared_db);
-    // Embed shared_db directly as a JSON true/false literal.
+    // Embed shared_db and mirror directly as JSON true/false literals.
     let shared_json = if shared_db { "true" } else { "false" };
+    let mirror_json = if mirror { "true" } else { "false" };
+    // The remote machine is headless and has no panel, so the mirror choice travels as a startup flag.
+    let mirror_arg = if mirror { "1" } else { "0" };
     // nohup, closed stdin, redirected logs, and `&` detach from SSH. Persist `$!` state under
     // ~/.velaterm regardless of the selected data directory, then echo the PID.
     let remote_cmd = format!(
         "mkdir -p \"{data_dir_expr}\"; \
          nohup env VELA_SERVE_PASSWORD='{password}' \"{bin}\" --serve --local-http --port {rport} \
-           --data-dir \"{data_dir_expr}\" </dev/null >\"$HOME/.velaterm/server.log\" 2>&1 & \
+           --data-dir \"{data_dir_expr}\" --mirror {mirror_arg} </dev/null >\"$HOME/.velaterm/server.log\" 2>&1 & \
          P=$!; \
-         printf '{{\"pid\":%d,\"port\":%d,\"password\":\"%s\",\"version\":\"%s\",\"shared_db\":{shared_json}}}\\n' \"$P\" {rport} '{password}' '{version}' > \"{run}\"; \
+         printf '{{\"pid\":%d,\"port\":%d,\"password\":\"%s\",\"version\":\"%s\",\"shared_db\":{shared_json},\"mirror\":{mirror_json}}}\\n' \"$P\" {rport} '{password}' '{version}' > \"{run}\"; \
          echo \"$P\""
     );
     let out = t.exec(&remote_cmd)?;
@@ -1370,12 +1380,14 @@ fn random_password() -> String {
 /// Requires confirmed known_hosts trust. Auto uses agent/keys and marks rejection for a password prompt;
 /// Password uses the transport's supported implementation.
 ///
-/// shared_db selects isolated ~/.velaterm/data or the remote desktop release database.
+/// shared_db selects isolated ~/.velaterm/data or the remote desktop release database, and mirror decides
+/// whether the started service mirrors its UI layout across every client connected to it.
 pub fn connect(
     app_data_dir: &Path,
     host: &str,
     auth: SshAuth,
     shared_db: bool,
+    mirror: bool,
     progress: Progress,
 ) -> Result<ConnectResult, String> {
     if !valid_ssh_target(host) {
@@ -1388,7 +1400,7 @@ pub fn connect(
     let transport = connect_transport(host, &session, auth, progress)?;
 
     // Register successful transport to keep it alive; on failure stop forwarding and disconnect cleanly.
-    match connect_inner(app_data_dir, transport.as_ref(), shared_db, progress) {
+    match connect_inner(app_data_dir, transport.as_ref(), shared_db, mirror, progress) {
         Ok(r) => {
             transports()
                 .lock()
@@ -1407,6 +1419,7 @@ fn connect_inner(
     app_data_dir: &Path,
     t: &dyn SshTransport,
     shared_db: bool,
+    mirror: bool,
     progress: Progress,
 ) -> Result<ConnectResult, String> {
     let session = t.session();
@@ -1424,8 +1437,9 @@ fn connect_inner(
 
     // Detect a persistent service retained from an earlier disconnect or abnormal exit.
     if let Some(rs) = detect_running(t) {
-        // Reuse only when both version and data mode match; otherwise restart to avoid exposing the wrong DB.
-        if rs.version == version && rs.shared_db == shared_db {
+        // Reuse only when version, data mode, and mirror mode all match; otherwise restart, both to avoid
+        // exposing the wrong DB and because mirror mode is fixed at startup for a service with no panel.
+        if rs.version == version && rs.shared_db == shared_db && rs.mirror == mirror {
             // Reuse its port/password and add only forwarding, preserving remote sessions.
             progress("forward", None);
             let local_port = t.open_forward(rs.port)?;
@@ -1465,7 +1479,7 @@ fn connect_inner(
 
     let password = random_password();
     let rport = remote_serve_port(session);
-    start_detached_serve(t, version, &password, rport, &sys.os, shared_db)?;
+    start_detached_serve(t, version, &password, rport, &sys.os, shared_db, mirror)?;
     progress("forward", None);
     let local_port = t.open_forward(rport)?;
     Ok(ConnectResult {
@@ -1559,6 +1573,7 @@ mod tests {
             &host,
             SshAuth::Auto,
             false,
+            false,
             &|_: &str, _: Option<u8>| {},
         )
         .expect("connect should succeed");
@@ -1617,6 +1632,7 @@ mod tests {
             &host,
             SshAuth::Auto,
             false,
+            false,
             &|_: &str, _: Option<u8>| {},
         )
         .expect("the first connection should succeed");
@@ -1630,6 +1646,7 @@ mod tests {
             &tmp,
             &host,
             SshAuth::Auto,
+            false,
             false,
             &|_: &str, _: Option<u8>| {},
         )
@@ -1648,6 +1665,7 @@ mod tests {
             &tmp,
             &host,
             SshAuth::Auto,
+            false,
             false,
             &|_: &str, _: Option<u8>| {},
         )

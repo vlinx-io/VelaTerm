@@ -28,6 +28,7 @@ import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { ClipboardAddon, type IClipboardProvider } from "@xterm/addon-clipboard";
 import { ImageAddon } from "@xterm/addon-image";
+import { reportInterrupt } from "../ipc/sessionState";
 import type { UnlistenFn } from "../ipc/transport";
 import { terminalLinkHandler, webLinkActivate } from "../terminal/openLink";
 
@@ -39,7 +40,6 @@ import {
   ptySpawn,
   ptyTeardownSession,
   ptyWrite,
-  wasKilledLocally,
 } from "../ipc/commands";
 import {
   copyText,
@@ -568,6 +568,10 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
 
     const runDetect = (force = false) => {
       if (disposed || !screenDetectKind) return;
+      // Only the client controlling this terminal's grid reads it. Everyone else renders a scaled copy of
+      // that grid, so their reading describes the copy rather than the session — the backend would refuse
+      // it anyway, and running the detector on it is pure wasted work.
+      if (ownerRef.current !== null && ownerRef.current !== getClientSource()) return;
       // Hook-authoritative agents normally skip screen reads outside working. The remaining screen-enabled
       // fallbacks may use a stable idle screen to recover from an agent-specific missing completion event.
       const rtNow = useTermStore.getState().runtimes[session.id];
@@ -689,8 +693,17 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
           dlog("pty exit -> closeSession", session.id);
           useTermStore.getState().closeSession(session.id);
         }),
-        onPtyKilled(session.id, () => {
-          if (disposed || wasKilledLocally(session.id)) return;
+        onPtyKilled(session.id, (ev) => {
+          if (disposed) return;
+          // Our own request: this instance is already tearing itself down through its unmount path.
+          if (ev.source === getClientSource()) return;
+          // A restart brings the same session straight back. Closing the pane here would make restarting
+          // a session on one client wipe its tab on every other one — and the restarting client would
+          // then receive that closed layout back through the mirror.
+          if (ev.reason === "restart") {
+            dlog("pty restarted elsewhere -> keeping the pane", session.id);
+            return;
+          }
           dlog("pty killed by another end -> closeSession", session.id);
           useTermStore.getState().closeSession(session.id);
         }),
@@ -827,12 +840,10 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       }
       // Change only working to waiting for agents that still require an input-interrupt fallback. Codex is
       // hook-only: its Stop lifecycle event owns this transition, and missing events must remain visible.
-      if (agentKind && agentKind !== "codex" && isInterrupt) {
-        if (cur === "working") {
-          useTermStore
-            .getState()
-            .setRuntime(session.id, { agentState: "waiting" });
-        }
+      // Report it rather than applying it: an interrupt typed here ends the turn for the session, not just
+      // for this window, and the other client used to keep showing the turn as still running.
+      if (agentKind && agentKind !== "codex" && isInterrupt && cur === "working") {
+        void reportInterrupt(session.id).catch(() => {});
       }
     });
 

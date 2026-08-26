@@ -16,127 +16,9 @@ import {
   type MergeBranchesPreview,
 } from "../ipc/commands";
 import { useTermStore } from "../store/termStore";
-import Icons from "./Icons";
+import Select from "./Select";
 
 type Phase = "loading" | "notRepo" | "ready" | "working" | "done" | "conflict" | "error";
-
-/**
- * Custom branch dropdown matching SpawnConfirmModal's KindSelect. Native `<select>` is avoided
- * because WKWebView forces a light beveled appearance that conflicts with the theme.
- */
-function BranchSelect({
-  value,
-  options,
-  placeholder,
-  disabled,
-  onChange,
-}: {
-  value: string;
-  options: string[];
-  placeholder: string;
-  disabled?: boolean;
-  onChange: (v: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-
-  return (
-    <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          width: "100%",
-          height: 32,
-          padding: "0 9px",
-          background: "var(--bg-app)",
-          color: value ? "var(--text-primary)" : "var(--text-muted)",
-          border: `1px solid ${open ? "var(--accent)" : "var(--border)"}`,
-          borderRadius: 5,
-          fontFamily: "var(--font-mono)",
-          fontSize: 12.5,
-          cursor: disabled ? "default" : "pointer",
-          opacity: disabled ? 0.6 : 1,
-        }}
-      >
-        <span
-          style={{
-            flex: 1,
-            textAlign: "left",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {value || placeholder}
-        </span>
-        <Icons.chevD size={12} style={{ color: "var(--text-muted)", flex: "none" }} />
-      </button>
-
-      {open && (
-        <>
-          {/* Transparent backdrop closes the dropdown on any outside click. */}
-          <div
-            style={{ position: "fixed", inset: 0, zIndex: 1240 }}
-            onMouseDown={() => setOpen(false)}
-          />
-          <div
-            style={{
-              position: "absolute",
-              top: "calc(100% + 4px)",
-              left: 0,
-              right: 0,
-              zIndex: 1250,
-              maxHeight: 240,
-              overflowY: "auto",
-              padding: 4,
-              background: "var(--bg-panel)",
-              border: "1px solid var(--border-strong)",
-              borderRadius: 8,
-              boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
-            }}
-          >
-            {options.map((name) => {
-              const on = name === value;
-              return (
-                <div
-                  key={name}
-                  onClick={() => {
-                    onChange(name);
-                    setOpen(false);
-                  }}
-                  style={{
-                    padding: "6px 8px",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    fontSize: 12.5,
-                    fontFamily: "var(--font-mono)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    color: on ? "var(--accent)" : "var(--text-primary)",
-                    background: on ? "var(--accent-soft)" : "transparent",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!on) e.currentTarget.style.background = "var(--bg-elevated)";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!on) e.currentTarget.style.background = "transparent";
-                  }}
-                >
-                  {name}
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
 
 export function MergeModal() {
   const t = useT();
@@ -303,6 +185,7 @@ export function MergeModal() {
 
   const mono = "var(--font-mono, monospace)";
   const branchNames = branches?.branches.map((b) => b.name) ?? [];
+  const branchOptions = branchNames.map((n) => ({ value: n, label: n }));
 
   return (
     <div
@@ -370,11 +253,13 @@ export function MergeModal() {
                 <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
                   {t("merge.sourceLabel")}
                 </div>
-                <BranchSelect
+                <Select
                   value={source}
-                  options={branchNames}
+                  options={branchOptions}
                   placeholder={t("merge.selectBranch")}
                   disabled={phase === "working"}
+                  width="100%"
+                  mono
                   onChange={setSource}
                 />
               </div>
@@ -393,11 +278,13 @@ export function MergeModal() {
                 <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
                   {t("merge.targetLabel")}
                 </div>
-                <BranchSelect
+                <Select
                   value={targetBranch}
-                  options={branchNames}
+                  options={branchOptions}
                   placeholder={t("merge.selectBranch")}
                   disabled={phase === "working"}
+                  width="100%"
+                  mono
                   onChange={setTargetBranch}
                 />
               </div>

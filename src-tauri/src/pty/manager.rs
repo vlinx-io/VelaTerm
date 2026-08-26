@@ -10,7 +10,8 @@ use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
 use super::monitor::{OutputScanner, ScanEvent};
 use super::session::{
-    OutputCoalescer, OutputSink, OutputStream, PtySession, Recorder, INPUT_QUEUE_CAP,
+    KillInfo, KillReason, OutputCoalescer, OutputSink, OutputStream, PtySession, Recorder,
+    INPUT_QUEUE_CAP,
 };
 use super::{AgentState, StatusSignal};
 use crate::agent::inject;
@@ -168,6 +169,14 @@ impl PtyManager {
             .collect()
     }
 
+    /// Returns the whole cached `state` payload for a session, or None when it has never emitted one.
+    ///
+    /// Read this **before** `cache_status` overwrites it when a decision depends on what changed —
+    /// raising the unread marker only on a real transition, for one.
+    pub fn cached_state_signal(&self, sid: &str) -> Option<serde_json::Value> {
+        self.status_cache.lock().unwrap().get(sid)?.get("state").cloned()
+    }
+
     /// Returns the agent state last emitted for a session, read from the status snapshot cache.
     ///
     /// The cache holds exactly what clients last received, so background helpers can decide whether a
@@ -182,6 +191,14 @@ impl PtyManager {
                 .as_str()?
                 .to_string(),
         )
+    }
+
+    /// Returns the client currently controlling this session's grid, or None when nobody does.
+    ///
+    /// Only the owner may resize, so the owner is the one client whose rendered screen matches the PTY's
+    /// real dimensions. That makes it the only client whose reading of that screen is worth trusting.
+    pub fn size_owner(&self, id: &str) -> Option<String> {
+        self.sessions.lock().unwrap().get(id)?.size_owner.lock().unwrap().clone()
     }
 
     /// Returns whether the manager still owns a PTY session.
@@ -727,6 +744,9 @@ impl PtyManager {
         // Intentional-termination flag shared with the reader to suppress natural-exit events after `kill()`.
         let intentional = Arc::new(AtomicBool::new(false));
         let intentional_reader = Arc::clone(&intentional);
+        // Who killed the session and why, filled in by `kill` and read by the reader when it announces it.
+        let kill_info: Arc<Mutex<Option<KillInfo>>> = Arc::new(Mutex::new(None));
+        let kill_info_reader = Arc::clone(&kill_info);
 
         // Shared output state combines replay, mode tracking, and subscribers under one lock. The spawning
         // caller is the first subscriber, and the reader ingests through the same shared object.
@@ -742,11 +762,18 @@ impl PtyManager {
                 killer,
                 pid,
                 intentional,
+                kill_info,
                 stream: Arc::clone(&stream),
                 size: Mutex::new((cols, rows)),
                 size_owner: Mutex::new(Some(source.to_string())),
             },
         );
+
+        // Announce the running process here, before the first status signal of this launch. Any signal
+        // creates the session's record on demand, and a record created before this would carry
+        // `alive: false` — long enough for another client to put a placeholder in front of a session
+        // that is in fact already running.
+        crate::session_state::set_alive(&app, &id, true);
 
         // Monitor state tracks the last output for hysteretic busy/idle detection and an `alive` flag that
         // stops monitoring after EOF or termination.
@@ -898,8 +925,19 @@ impl PtyManager {
             if !intentional_reader.load(Ordering::SeqCst) {
                 app.emit(&exit_event, ());
             } else {
-                app.emit(&killed_event, ());
+                // Say who asked and whether the session is coming back. A bare announcement forced every
+                // other client to guess, and guessing "gone" made restarting a session close its tab
+                // everywhere; the requester had to filter its own echo by a three-second timing window.
+                let info = kill_info_reader.lock().unwrap().clone().unwrap_or(KillInfo {
+                    source: String::new(),
+                    reason: KillReason::Close,
+                });
+                app.emit(&killed_event, info);
             }
+            // No process behind this session any more. Clients render a placeholder for it instead of
+            // mounting a terminal, which is what stops a client from starting every restored session it
+            // sees the moment it connects.
+            crate::session_state::set_alive(&app, &id_for_read, false);
             // Rebuild the stopped session's search index in the background. This is best-effort; stale refresh
             // before search preserves correctness.
             {
@@ -1261,8 +1299,16 @@ impl PtyManager {
     }
 
     /// Terminates and removes a session. Marks it intentional before EOF so the reader suppresses natural-exit events.
-    pub fn kill(&self, id: &str) -> Result<(), String> {
+    ///
+    /// `source` is the requesting client's connection ID and `reason` says whether a new process for this
+    /// same session follows. Both travel out on `pty://killed/{id}` so other clients can tell a restart
+    /// from a close, and the requester can recognise its own echo.
+    pub fn kill(&self, id: &str, source: &str, reason: KillReason) -> Result<(), String> {
         if let Some(mut session) = self.sessions.lock().unwrap().remove(id) {
+            *session.kill_info.lock().unwrap() = Some(KillInfo {
+                source: source.to_string(),
+                reason,
+            });
             session.intentional.store(true, Ordering::SeqCst);
             let _ = session.killer.kill();
         }
@@ -1274,6 +1320,10 @@ impl PtyManager {
     pub fn kill_all(&self) {
         let mut map = self.sessions.lock().unwrap();
         for (_, mut session) in map.drain() {
+            *session.kill_info.lock().unwrap() = Some(KillInfo {
+                source: DESKTOP_SOURCE.to_string(),
+                reason: KillReason::Close,
+            });
             session.intentional.store(true, Ordering::SeqCst);
             let _ = session.killer.kill();
         }
@@ -1952,6 +2002,7 @@ fn home_dir() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::{KillReason, DESKTOP_SOURCE};
     use portable_pty::{native_pty_system, CommandBuilder, PtySize};
     use std::io::Read;
 
@@ -2098,7 +2149,7 @@ mod tests {
         assert!(mgr.status_snapshot("s2").is_empty());
 
         // Kill clears cached state even when no process exists.
-        mgr.kill("s1").unwrap();
+        mgr.kill("s1", DESKTOP_SOURCE, KillReason::Close).unwrap();
         assert!(mgr.status_snapshot("s1").is_empty());
     }
 
@@ -2176,7 +2227,7 @@ mod tests {
         // The reservation guard has cleared the spawn set.
         assert!(mgr.spawning.lock().unwrap().is_empty());
 
-        mgr.kill("race-1").unwrap();
+        mgr.kill("race-1", DESKTOP_SOURCE, KillReason::Close).unwrap();
         let _ = std::fs::remove_dir_all(&data_dir);
     }
 
@@ -2255,7 +2306,7 @@ mod tests {
         assert_eq!((second.cols, second.rows), (120, 32));
         assert_eq!(second.owner.as_deref(), Some("desktop"));
 
-        mgr.kill("size-1").unwrap();
+        mgr.kill("size-1", DESKTOP_SOURCE, KillReason::Close).unwrap();
         let _ = std::fs::remove_dir_all(&data_dir);
     }
 
@@ -2314,7 +2365,7 @@ mod tests {
         assert!(re.attached);
         assert_eq!(re.pid, first.pid);
 
-        mgr.kill("ao-1").unwrap();
+        mgr.kill("ao-1", DESKTOP_SOURCE, KillReason::Close).unwrap();
         let _ = std::fs::remove_dir_all(&data_dir);
     }
 
@@ -2419,7 +2470,7 @@ mod tests {
         assert!(got[0]["owner"].is_null());
 
         app.unlisten(listener);
-        mgr.kill("own-1").unwrap();
+        mgr.kill("own-1", DESKTOP_SOURCE, KillReason::Close).unwrap();
         let _ = std::fs::remove_dir_all(&data_dir);
     }
 

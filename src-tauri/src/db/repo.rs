@@ -736,14 +736,14 @@ pub fn set_app_settings(
 
 // ─────────────────────────── SSH connection history ───────────────────────────
 
-/// List SSH hosts most-recent-first with target, label, timestamp, and prior shared-db choice.
-/// The upper layer augments password-memory state from the keyring; this layer never accesses it.
+/// List SSH hosts most-recent-first with target, label, timestamp, and the prior shared-db and mirror
+/// choices. The upper layer augments password-memory state from the keyring; this layer never accesses it.
 pub fn list_ssh_hosts(
     conn: &Connection,
-) -> Result<Vec<(String, Option<String>, i64, bool)>, String> {
+) -> Result<Vec<(String, Option<String>, i64, bool, bool)>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT target, label, last_connected_at, shared_db FROM ssh_hosts ORDER BY last_connected_at DESC",
+            "SELECT target, label, last_connected_at, shared_db, mirror FROM ssh_hosts ORDER BY last_connected_at DESC",
         )
         .map_err(|e| format!("Failed to prepare ssh_hosts query: {e}"))?;
     let rows = stmt
@@ -753,6 +753,7 @@ pub fn list_ssh_hosts(
                 row.get::<_, Option<String>>(1)?,
                 row.get::<_, i64>(2)?,
                 row.get::<_, bool>(3)?,
+                row.get::<_, bool>(4)?,
             ))
         })
         .map_err(|e| format!("Failed to query ssh_hosts: {e}"))?;
@@ -763,17 +764,19 @@ pub fn list_ssh_hosts(
     Ok(out)
 }
 
-/// Upsert a successful connection by target, updating timestamp/shared-db and setting created_at initially.
+/// Upsert a successful connection by target, updating timestamp/shared-db/mirror and setting created_at
+/// initially.
 pub fn upsert_ssh_host(
     conn: &Connection,
     target: &str,
     now: i64,
     shared_db: bool,
+    mirror: bool,
 ) -> Result<(), String> {
     conn.execute(
-        "INSERT INTO ssh_hosts(target, label, last_connected_at, shared_db, created_at) VALUES(?1, NULL, ?2, ?3, ?2) \
-         ON CONFLICT(target) DO UPDATE SET last_connected_at = excluded.last_connected_at, shared_db = excluded.shared_db",
-        params![target, now, shared_db],
+        "INSERT INTO ssh_hosts(target, label, last_connected_at, shared_db, mirror, created_at) VALUES(?1, NULL, ?2, ?3, ?4, ?2) \
+         ON CONFLICT(target) DO UPDATE SET last_connected_at = excluded.last_connected_at, shared_db = excluded.shared_db, mirror = excluded.mirror",
+        params![target, now, shared_db, mirror],
     )
     .map_err(|e| format!("Failed to upsert ssh host: {e}"))?;
     Ok(())

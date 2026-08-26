@@ -199,8 +199,17 @@ pub fn dispatch(
             )?;
             Ok(Value::Null)
         }
+        // `source` comes from the connection, never from the arguments, so the requester's own echo filter
+        // cannot be spoofed. `reason` separates a restart (other clients keep their pane and wait for the
+        // new process) from a close (they close it).
         "pty_kill" => {
-            app.pty().kill(&req_str(args, "sessionId")?)?;
+            app.pty().kill(
+                &req_str(args, "sessionId")?,
+                source,
+                crate::pty::session::KillReason::parse(
+                    args.get("reason").and_then(Value::as_str),
+                ),
+            )?;
             Ok(Value::Null)
         }
         "pty_redraw" => {
@@ -650,6 +659,18 @@ pub fn dispatch(
             files::write_bytes(&path, &req_kind::<Vec<u8>>(args, "data")?)?;
             Ok(Value::Null)
         }
+        // Chunked upload counterpart of `read_file_base64`: a whole file cannot cross the WebSocket
+        // frame limit, so remote clients push it one sequential chunk at a time. Same write class as
+        // write_bytes_file, so it carries the same remote data-dir ACL.
+        "write_file_chunk" => {
+            let path = req_str(args, "path")?;
+            guard_remote_path(app, origin, &path)?;
+            to_value(files::write_file_chunk(
+                &path,
+                req_u64(args, "offset")?,
+                &b64_bytes(args, "bytesB64")?,
+            )?)
+        }
         // Browser/remote image paste sends base64 bytes and an extension, saves to a temporary directory,
         // and returns the absolute path for the terminal. Authenticated WebSocket transport, E2EE under
         // pairing, replaces the old cookie-only `/api/upload` path. Base64 is smaller than number[] and
@@ -674,6 +695,16 @@ pub fn dispatch(
                 &b64_bytes(args, "bytesB64")?,
                 &req_str(args, "ext")?,
             )?)
+        }
+        // Mints the short-lived URL the browser's own downloader fetches. The ACL applies here, at issue
+        // time, because that is where the caller's origin is known: by the time the URL is fetched there is
+        // no session behind it, only a ticket that can read the one file it was minted for.
+        "create_download_ticket" => {
+            let path = req_str(args, "path")?;
+            guard_remote_path(app, origin, &path)?;
+            // Refuse up front rather than minting a ticket that will 404, so the failure names the real cause.
+            files::stat_file(&path)?;
+            to_value(crate::web::download::issue(&path))
         }
         "stat_file" => to_value(files::stat_file(&req_str(args, "path")?)?),
         "read_file_base64" => {
@@ -811,6 +842,43 @@ pub fn dispatch(
         )),
         "mirror_set_enabled" => {
             core::mirror_set_enabled(app, req_bool(args, "enabled")?)?;
+            Ok(Value::Null)
+        }
+        // Authoritative session facts. Every client asks for the whole set once it connects, then follows
+        // the `session://state` broadcast; a client that never opened a session still learns about it.
+        "session_states" => to_value(crate::session_state::snapshot()),
+        // A client reports that someone has now looked at this session: it was on screen, in a focused
+        // window, for long enough to count as read. The backend clears the marker for **every** client,
+        // which is the whole point — reading a reply in the browser must clear the dot on the desktop.
+        "session_mark_read" => {
+            crate::session_state::set_unread(app, &req_str(args, "sessionId")?, false);
+            Ok(Value::Null)
+        }
+        // The reporting counterpart: a client saw something worth a look that the backend cannot see for
+        // itself. Screen detection needs this until it reports through `session_report_screen` and the
+        // backend raises the marker from its own arbitration instead.
+        "session_mark_unread" => {
+            crate::session_state::set_unread(app, &req_str(args, "sessionId")?, true);
+            Ok(Value::Null)
+        }
+        // A client reports what it sees on the rendered terminal grid, which the backend cannot read for
+        // itself. `source` comes from the connection, and only the session's size owner is accepted: it
+        // is the one client rendering at the PTY's real dimensions, so only its reading describes the
+        // session rather than a scaled copy of it. The backend arbitrates and broadcasts the conclusion.
+        "session_report_screen" => {
+            let session_id = req_str(args, "sessionId")?;
+            let screen: crate::session_state::ScreenReport = args
+                .get("screen")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .ok_or("session_report_screen requires a screen report")?;
+            let owner = app.pty().size_owner(&session_id);
+            crate::session_state::report_screen(app, &session_id, source, owner.as_deref(), screen)?;
+            Ok(Value::Null)
+        }
+        // Ctrl+C or a bare Esc ends a turn that emits no completion event of its own. Any client may
+        // report it: unlike a screen reading, it is a keystroke the user actually sent to the session.
+        "session_report_interrupt" => {
+            crate::session_state::report_interrupt(app, &req_str(args, "sessionId")?);
             Ok(Value::Null)
         }
         // Stateless interface enumeration for the panel's IP selector; the module is called directly

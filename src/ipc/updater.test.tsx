@@ -144,6 +144,51 @@ describe("update-check telemetry", () => {
   });
 });
 
+describe("a check while a prompt is already pending", () => {
+  it("replaces a stale prompt when the menu check finds a newer release", async () => {
+    const stale = fakeUpdate("0.1.101");
+    check.mockResolvedValueOnce(stale);
+    const { result } = renderHook(() => useUpdateState());
+    await act(() => checkForUpdates({ manual: false }));
+    expect(result.current.prompt?.version).toBe("0.1.101");
+
+    check.mockResolvedValueOnce(fakeUpdate("0.1.104"));
+    await act(() => checkForUpdates({ manual: true }));
+
+    // The menu action reached the server rather than reopening what was already on screen.
+    expect(check).toHaveBeenCalledTimes(2);
+    expect(result.current.prompt?.version).toBe("0.1.104");
+    expect(result.current.modalOpen).toBe(true);
+    expect(stale.close).toHaveBeenCalledOnce();
+  });
+
+  it("replaces a stale prompt from a silent check too", async () => {
+    check.mockResolvedValueOnce(fakeUpdate("0.1.101"));
+    const { result } = renderHook(() => useUpdateState());
+    await act(() => checkForUpdates({ manual: false }));
+
+    check.mockResolvedValueOnce(fakeUpdate("0.1.104"));
+    await act(() => checkForUpdates({ manual: false }));
+
+    expect(result.current.prompt?.version).toBe("0.1.104");
+    // A silent check lights the status bar without opening the dialog, replacement included.
+    expect(result.current.modalOpen).toBe(false);
+  });
+
+  it("retires a pending prompt once the server reports no newer release", async () => {
+    const stale = fakeUpdate("0.1.101");
+    check.mockResolvedValueOnce(stale);
+    const { result } = renderHook(() => useUpdateState());
+    await act(() => checkForUpdates({ manual: false }));
+
+    check.mockResolvedValueOnce(null);
+    await act(() => checkForUpdates({ manual: false }));
+
+    expect(result.current.prompt).toBeNull();
+    expect(stale.close).toHaveBeenCalledOnce();
+  });
+});
+
 describe("the silent check schedule", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());

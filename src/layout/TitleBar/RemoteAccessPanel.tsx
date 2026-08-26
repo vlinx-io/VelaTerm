@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useT } from "../../i18n";
 import { Backdrop } from "../../components/Backdrop";
+import Select from "../../components/Select";
+import { PasswordField } from "../../components/PasswordField";
 import {
   networkInterfacesList,
   webDeviceRevoke,
@@ -334,56 +336,17 @@ export function RemoteAccessPanel({
   );
 
   // Advertised-IP selector, shown while stopped (below the port field) and while running (above the
-  // pairing block); one persisted selection drives both.
+  // pairing block); one persisted selection drives both. A native `<select>` is avoided: WKWebView
+  // renders it with system chrome that clashes with the dark panel.
   const ipSelector = (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        width: "100%",
-        boxSizing: "border-box",
-        marginBottom: 8,
-        border: "1px solid var(--border)",
-        borderRadius: "var(--r-sm, 6px)",
-        background: "var(--bg-0)",
-        overflow: "hidden",
-      }}
-    >
-      <span
-        style={{
-          padding: "8px 10px",
-          fontSize: 13,
-          color: "var(--text-dim)",
-          whiteSpace: "nowrap",
-          borderRight: "1px solid var(--border)",
-        }}
-      >
-        {t("remote.ipLabel")}
-      </span>
-      <select
-        aria-label={t("remote.ipLabel")}
-        value={effectiveIp}
-        onChange={(e) => chooseIp(e.target.value)}
-        style={{
-          flex: 1,
-          minWidth: 0,
-          padding: "8px 6px",
-          border: "none",
-          background: "transparent",
-          color: "var(--text)",
-          fontSize: 13,
-          outline: "none",
-        }}
-      >
-        <option value="">{t("remote.ipAuto")}</option>
-        {ifaces.map((i) => (
-          <option key={`${i.name}-${i.ip}`} value={i.ip}>
-            {i.ip} · {i.name}
-            {i.vpn ? ` (${t("remote.ipVpn")})` : ""}
-          </option>
-        ))}
-      </select>
-    </div>
+    <IpSelect
+      label={t("remote.ipLabel")}
+      autoLabel={t("remote.ipAuto")}
+      vpnLabel={t("remote.ipVpn")}
+      value={effectiveIp}
+      ifaces={ifaces}
+      onChange={chooseIp}
+    />
   );
   // Pairing fragments are interface-independent. Reuse the first link's `#pair=...` fragment with each host URL.
   const pairFragment = pairUrl ? pairUrl.slice(pairUrl.indexOf("/#") + 1) : "";
@@ -749,27 +712,15 @@ export function RemoteAccessPanel({
               />
             </div>
             {ipSelector}
-            <input
-              type="password"
+            <PasswordField
               value={password}
               placeholder={t("remote.passwordPlaceholder")}
               autoFocus
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={setPassword}
               onKeyDown={(e) => {
                 if (e.key === "Enter") void start();
               }}
-              style={{
-                width: "100%",
-                boxSizing: "border-box",
-                padding: "8px 10px",
-                marginBottom: 12,
-                border: "1px solid var(--border)",
-                borderRadius: "var(--r-sm, 6px)",
-                background: "var(--bg-0)",
-                color: "var(--text)",
-                fontSize: 13,
-                outline: "none",
-              }}
+              wrapStyle={{ marginBottom: 12 }}
             />
             {mirrorToggle}
             <button
@@ -1007,4 +958,42 @@ function btnStyle(
     cursor: busy ? "default" : "pointer",
     opacity: busy ? 0.6 : 1,
   };
+}
+
+/** Advertised-IP field: a caption on the left, the chosen address on the right. */
+function IpSelect({
+  label,
+  autoLabel,
+  vpnLabel,
+  value,
+  ifaces,
+  onChange,
+}: {
+  label: string;
+  autoLabel: string;
+  vpnLabel: string;
+  value: string;
+  ifaces: NetworkInterface[];
+  onChange: (ip: string) => void;
+}) {
+  const options = [
+    { value: "", label: autoLabel },
+    ...ifaces.map((i) => ({
+      value: i.ip,
+      label: `${i.ip} · ${i.name}${i.vpn ? ` (${vpnLabel})` : ""}`,
+    })),
+  ];
+
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <Select
+        value={options.some((o) => o.value === value) ? value : ""}
+        onChange={onChange}
+        options={options}
+        width="100%"
+        leading={label}
+        ariaLabel={label}
+      />
+    </div>
+  );
 }

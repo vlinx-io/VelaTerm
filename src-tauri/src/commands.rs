@@ -237,9 +237,21 @@ pub fn pty_resize(
 }
 
 /// Terminate a session.
+///
+/// `reason` says whether a new process for this same session follows (`restart`) or the session is going
+/// away (`close`); it travels out on `pty://killed/{id}` so other clients keep or close their pane. An
+/// absent reason reads as `close`.
 #[tauri::command]
-pub fn pty_kill(state: State<PtyManager>, session_id: String) -> Result<(), String> {
-    state.kill(&session_id)
+pub fn pty_kill(
+    state: State<PtyManager>,
+    session_id: String,
+    reason: Option<String>,
+) -> Result<(), String> {
+    state.kill(
+        &session_id,
+        crate::pty::manager::DESKTOP_SOURCE,
+        crate::pty::session::KillReason::parse(reason.as_deref()),
+    )
 }
 
 // ─────────────────────────── Replay, Git Bash, and tree management ───────────────────────────
@@ -713,9 +725,12 @@ pub async fn ssh_connect(
     password: Option<String>,
     remember: Option<bool>,
     shared_db: Option<bool>,
+    mirror: Option<bool>,
 ) -> Result<String, String> {
     // Data mode defaults to an isolated database; true reuses the remote desktop release database.
     let shared_db = shared_db.unwrap_or(false);
+    // Mirror mode defaults off for SSH: the switch is hidden behind Option/Alt and starts unchecked.
+    let mirror = mirror.unwrap_or(false);
     let data_dir = app
         .path()
         .app_data_dir()
@@ -745,7 +760,8 @@ pub async fn ssh_connect(
             Some(pw) => crate::ssh_remote::SshAuth::Password(pw.to_string()),
             None => crate::ssh_remote::SshAuth::Auto,
         };
-        let mut res = crate::ssh_remote::connect(&data_dir, &host_bg, auth, shared_db, &progress);
+        let mut res =
+            crate::ssh_remote::connect(&data_dir, &host_bg, auth, shared_db, mirror, &progress);
         // If key auth fails without a supplied password, retry once from the keyring. Otherwise
         // preserve AUTH_REQUIRED so the frontend can prompt manually.
         if let Err(e) = &res {
@@ -758,6 +774,7 @@ pub async fn ssh_connect(
                         &host_bg,
                         crate::ssh_remote::SshAuth::Password(pw.clone()),
                         shared_db,
+                        mirror,
                         &progress,
                     );
                     if let Ok(ok) = retry {
@@ -786,7 +803,7 @@ pub async fn ssh_connect(
             .map(|d| d.as_secs() as i64)
             .unwrap_or(0);
         let conn = db.conn.lock().unwrap();
-        let _ = repo::upsert_ssh_host(&conn, &host, now, shared_db);
+        let _ = repo::upsert_ssh_host(&conn, &host, now, shared_db, mirror);
     }
 
     let session = r.session.clone();

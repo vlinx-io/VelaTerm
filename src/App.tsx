@@ -17,17 +17,20 @@ import { LeftSidebar } from "./layout/LeftSidebar/LeftSidebar";
 import { RightPanel } from "./layout/RightPanel/RightPanel";
 import { StatusBar } from "./layout/StatusBar/StatusBar";
 import { TitleBar } from "./layout/TitleBar/TitleBar";
-import { loadLangChoice, setLang } from "./i18n";
 import { listShells } from "./ipc/commands";
 import {
   onMenuAction,
   onSpawnRequest,
   onSpawnResolved,
   onPresetsChanged,
+  onSessionState,
   onTreeChanged,
   onViewRequest,
 } from "./ipc/events";
-import { reconcileSettings } from "./ipc/settingsSync";
+import {
+  refreshSettingsFromBackend,
+  startSettingsWatch,
+} from "./store/settingsWatch";
 import { getClientSource, isTauri } from "./ipc/transport";
 import { wsClient } from "./ipc/wsClient";
 import { checkForUpdates, startUpdateSchedule } from "./ipc/updater";
@@ -86,7 +89,11 @@ function App() {
     const offConnState = isTauri
       ? undefined
       : wsClient.onConnState((state) => {
-          if (state === "online") void loadTree().catch(() => {});
+          if (state !== "online") return;
+          void loadTree().catch(() => {});
+          // Broadcasts that landed while the socket was down are not replayed, so re-read the
+          // authoritative session records rather than carrying a stale set of dots forward.
+          void useTermStore.getState().syncSessionStates();
         });
     // Detect and cache available shells here for the inline selector. Module-level detection would
     // race WebSocket connection before remote login completes. On failure, leave an empty list so the
@@ -95,18 +102,9 @@ function App() {
       .then((shells) => useTermStore.setState({ shells }))
       .catch(() => {});
     // Reconcile cross-shell preferences with the shared backend as authority, applying differences once
-    // and seeding missing backend keys from local values. Enable outbound sync only afterward.
-    void reconcileSettings().then((changed) => {
-      if (changed.has("vlx-lang")) setLang(loadLangChoice());
-      if (
-        changed.has("vlx-theme") ||
-        changed.has("vlx-sound") ||
-        changed.has("vlx-notify") ||
-        changed.has("vlx-settings")
-      ) {
-        useTermStore.getState().hydrateSettingsFromCache();
-      }
-    });
+    // and seeding missing backend keys from local values. Enable outbound sync only afterward. The same
+    // helper handles the runtime broadcast below, so startup and mid-run reconciliation cannot drift.
+    void refreshSettingsFromBackend();
     const unwatch = watchSystemTheme(() => {
       if (useTermStore.getState().theme === "system") applyAppearance();
     });
@@ -185,6 +183,15 @@ function App() {
     // Mirror mode: follow and publish the shared layout so a remote browser renders this same arrangement.
     // Phones opt out inside startMirrorSync; when mirror mode is off it only listens for the switch.
     const stopMirrorSync = startMirrorSync();
+    // Preferences are backend-authoritative but were reconciled only at startup, so a change made in
+    // another shell stayed invisible here until the next launch. Follow the broadcast instead.
+    const stopSettingsWatch = startSettingsWatch();
+    // Authoritative session records: read the whole set once, then follow the broadcast. This is a
+    // connection-level subscription, so a session this client has never opened still shows its state.
+    void useTermStore.getState().syncSessionStates();
+    const unlistenSessionState = onSessionState((batch) =>
+      useTermStore.getState().applySessionStates(batch),
+    );
     return () => {
       unwatch();
       offConnState?.();
@@ -195,9 +202,11 @@ function App() {
       clearTimeout(treeTimer);
       void unlistenTree.then((fn) => fn());
       void unlistenPresets.then((fn) => fn());
+      void unlistenSessionState.then((fn) => fn());
       void unlistenMenu.then((fn) => fn());
       stopUpdateSchedule();
       stopMirrorSync();
+      stopSettingsWatch();
     };
     // Run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps

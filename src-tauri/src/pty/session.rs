@@ -429,6 +429,10 @@ pub struct PtySession {
     /// Whether termination was intentional, such as restart or closing a split. Shared with the reader so it suppresses
     /// natural-exit events that would otherwise close the pane.
     pub intentional: Arc<AtomicBool>,
+    /// Who asked for the termination and why, filled in by `kill` and read by the reader when it announces
+    /// the death. Without it the announcement is bare, and every other client has to guess whether the
+    /// session is coming back — which is why restarting one used to close its tab everywhere.
+    pub kill_info: Arc<Mutex<Option<KillInfo>>>,
     /// Shared single-lock OutputStream; the reader ingests each chunk into buffering, tracking, and fan-out.
     pub stream: Arc<Mutex<OutputStream>>,
     /// Authoritative `(cols, rows)`, initialized at spawn and updated after resize. Attached mirror xterms match it
@@ -439,14 +443,69 @@ pub struct PtySession {
     pub size_owner: Mutex<Option<String>>,
 }
 
+/// Why a session was deliberately terminated, and by whom.
+///
+/// `reason` separates the two cases that look identical from the outside: `restart` means the same
+/// session is about to come back with a new process, so every client keeps its pane and waits; `close`
+/// means it is going away, so other clients close their view. `source` is the requesting client's
+/// connection ID (`desktop` or `ws-N`), which lets the requester recognise and ignore its own echo
+/// instead of inferring it from a timing window.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KillInfo {
+    pub source: String,
+    pub reason: KillReason,
+}
+
+/// Whether a deliberate termination ends the session or precedes a new process for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KillReason {
+    /// The session is going away: closing a tab, closing a split, deleting the session.
+    Close,
+    /// A new process for this same session follows immediately.
+    Restart,
+}
+
+impl KillReason {
+    /// Parse the wire value, defaulting to `Close`.
+    ///
+    /// An unknown or missing reason must read as `Close`: keeping a pane for a session that never comes
+    /// back leaves a dead terminal on screen, which is worse than closing one the user meant to restart.
+    pub fn parse(raw: Option<&str>) -> Self {
+        match raw {
+            Some("restart") => KillReason::Restart,
+            _ => KillReason::Close,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        ModeTracker, OutputCoalescer, OutputStream, ScrollbackBuffer, COALESCE_MAX_BYTES,
+        KillReason, ModeTracker, OutputCoalescer, OutputStream, ScrollbackBuffer, COALESCE_MAX_BYTES,
         COALESCE_WINDOW,
     };
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
+
+    /// An unknown or missing reason has to read as `close`. Keeping a pane for a session that never
+    /// comes back leaves a dead terminal on screen, which is worse than closing one meant to restart —
+    /// and an older client that sends no reason at all must keep behaving the way it always did.
+    #[test]
+    fn an_unknown_kill_reason_reads_as_close() {
+        assert_eq!(KillReason::parse(Some("restart")), KillReason::Restart);
+        assert_eq!(KillReason::parse(Some("close")), KillReason::Close);
+        assert_eq!(KillReason::parse(None), KillReason::Close);
+        assert_eq!(KillReason::parse(Some("something-else")), KillReason::Close);
+    }
+
+    /// The wire form is what other clients branch on, so it must stay exactly these two words.
+    #[test]
+    fn kill_reason_serializes_to_its_wire_form() {
+        assert_eq!(serde_json::to_string(&KillReason::Restart).unwrap(), "\"restart\"");
+        assert_eq!(serde_json::to_string(&KillReason::Close).unwrap(), "\"close\"");
+    }
 
     /// Coalescer sends sparse output immediately and accumulates dense output without reordering.
     #[test]

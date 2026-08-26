@@ -53,6 +53,9 @@ const ptBR: typeof en = {
   "titlebar.browser": "Navegador integrado", // Built-in Browser
   "titlebar.remoteAccess": "Acesso remoto (navegador)", // Remote Access (Browser)
   "titlebar.connectRemote": "Conectar a servidor remoto", // Connect to Remote Server
+  "titlebar.mirrored": "Espelhado", // Mirrored
+  "titlebar.mirroredHint":
+    "O espelhamento está ativado: abas, divisões e a sessão ativa acompanham o host. O interruptor fica no host.", // Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.
   "titlebar.share": "Compartilhar", // Share
   "share.title": "Compartilhar o VelaTerm", // Share VelaTerm
   "share.subtitle":
@@ -146,7 +149,7 @@ const ptBR: typeof en = {
   "spawn.effortLabel": "Esforço", // Effort
   "spawn.modelDefault": "Padrão", // Default
   "spawn.modelLoading": "Carregando modelos…", // Listing models…
-  "spawn.modelListUnavailable": "Sem lista de modelos — informe nos argumentos do agente", // No model list available
+  "spawn.modelListUnavailable": "Sem lista de modelos — digite um identificador acima", // No model list available — type an identifier above
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
@@ -310,7 +313,7 @@ const ptBR: typeof en = {
   "remote.start": "Iniciar servidor", // Start Server
   "remote.portLabel": "Porta", // Port
   "remote.portInvalid": "A porta deve estar entre 1 e 65535", // Port must be between 1 and 65535
-  "remote.ipLabel": "Endereço IP", // IP address
+  "remote.ipLabel": "IP", // IP address
   "remote.ipAuto": "Automático (primeiro endereço LAN)", // Automatic (first LAN address)
   "remote.ipVpn": "VPN", // VPN
   "remote.qrHint":
@@ -371,6 +374,9 @@ const ptBR: typeof en = {
   "connect.showPassword": "Mostrar senha",
   "connect.hidePassword": "Ocultar senha",
   "connect.urlPasswordPlaceholder": "Senha de login",
+  "connect.mirror": "Espelhar o layout em todos os dispositivos", // Mirror layout across devices
+  "connect.mirrorHint":
+    "Abas, divisões e a sessão ativa ficam iguais em todos os dispositivos conectados a este serviço remoto. Desmarcado, cada dispositivo mantém o próprio layout.", // Tabs, splits, and the active session stay the same on every device connected to this remote service. Off = each device keeps its own layout.
   "connect.shareDesktopDb": "Usar o banco de dados do app de desktop remoto",
   "connect.shareDesktopDbHint":
     "Compartilha um banco de dados com o app de desktop da máquina remota (melhor quando ambos têm a mesma versão). Desativado = banco de dados isolado.",
@@ -789,7 +795,19 @@ const ptBR: typeof en = {
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
+  "files.dblClickOpen": "Clique duas vezes para abrir",
   "files.deleteConfirm": (name) => `Excluir "${name}"? Isso não pode ser desfeito.`, // Delete "{name}"? This can't be undone.
+
+  // ── File transfer (remote access) ──
+  "transfer.uploadsTitle": "Envios", // Uploads
+  "transfer.download": "Baixar", // Download
+  "transfer.upload": "Enviar arquivos…", // Upload Files…
+  "transfer.uploadTooltip": "Enviar arquivos para esta pasta", // Upload files to this folder
+  "transfer.clear": "Limpar", // Clear
+  "transfer.cancelled": "Cancelado", // Cancelled
+  "transfer.failed": "Falhou", // Failed
+  "transfer.stalled": "Reconectando…", // Reconnecting…
+  "transfer.foldersUnsupported": "Não é possível enviar pastas.", // Folders can't be uploaded.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => (n === 1 ? "1 sessão" : `${n} sessões`), // {n} sessions
@@ -967,7 +985,7 @@ const ptBR: typeof en = {
   "updater.hide": "Hide", // TODO translate
   "updater.hideHint": "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
   "updater.downloadManually": "Download manually", // TODO translate
-  "updater.downloadManuallyHint": "Open the installer download in your browser.", // TODO translate
+  "updater.downloadManuallyHint": "Open the download page in your browser.", // TODO translate
   "updater.windowsNotice":
     "VelaTerm will close while the installer runs, then reopen on its own.", // TODO translate
   "updater.installingWindows":

@@ -88,6 +88,8 @@ const Icons: Record<string, IconComponent> = {
   connect: I([r("path", { key: 1, d: "M2 8h5.5" }), r("path", { key: 2, d: "M5.5 5.5L8 8 5.5 10.5" }), r("rect", { key: 3, x: 10, y: 3, width: 4, height: 10, rx: 1 })]),
   monitor: I([r("rect", { key: 1, x: 2.5, y: 3, width: 11, height: 8, rx: 1.5 }), r("path", { key: 2, d: "M6 13.5h4M8 11v2.5" })]),
   download: I([r("path", { key: 1, d: "M8 2.5V10M4.8 7.2L8 10.4l3.2-3.2" }), r("path", { key: 2, d: "M3 11.2v1.3a1 1 0 001 1h8a1 1 0 001-1v-1.3" })]),
+  // Mirror of download: same tray, arrow pointing up and out.
+  upload: I([r("path", { key: 1, d: "M8 10.4V2.9M4.8 6.1L8 2.9l3.2 3.2" }), r("path", { key: 2, d: "M3 11.2v1.3a1 1 0 001 1h8a1 1 0 001-1v-1.3" })]),
   arrowLeft: I([r("path", { key: 1, d: "M13 8H3.5M7.5 4L3.5 8l4 4" })]),
   arrowRight: I([r("path", { key: 1, d: "M3 8h9.5M8.5 4l4 4-4 4" })]),
   external: I([r("path", { key: 1, d: "M6.5 3.5H4A1.5 1.5 0 002.5 5v7A1.5 1.5 0 004 13.5h7A1.5 1.5 0 0012.5 12V9.5" }), r("path", { key: 2, d: "M9.5 2.5h4v4M13.2 2.8L8 8" })]),

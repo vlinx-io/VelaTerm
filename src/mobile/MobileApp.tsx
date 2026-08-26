@@ -11,9 +11,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { SpawnConfirmModal } from "../components/SpawnConfirmModal";
 import { useNotifications } from "../hooks/useNotifications";
-import { onSpawnRequest, onSpawnResolved, onTreeChanged } from "../ipc/events";
+import {
+  onSessionState,
+  onSpawnRequest,
+  onSpawnResolved,
+  onTreeChanged,
+} from "../ipc/events";
 import { getClientSource } from "../ipc/transport";
 import { ConnectionBanner } from "../remote/ConnectionBanner";
+import {
+  refreshSettingsFromBackend,
+  startSettingsWatch,
+} from "../store/settingsWatch";
 import { useTermStore } from "../store/termStore";
 import { watchSystemTheme } from "../theme";
 import type { SessionId } from "../types";
@@ -37,6 +46,17 @@ function MobileApp() {
   useEffect(() => {
     applyAppearance();
     void loadTree();
+    // Phones share the same backend-authoritative preferences as the desktop, but this view never
+    // reconciled them: it neither picked up a theme or language chosen elsewhere nor seeded its own.
+    // Do the startup pass here too, then follow later changes over the broadcast.
+    void refreshSettingsFromBackend();
+    const stopSettingsWatch = startSettingsWatch();
+    // Authoritative session records, same as the desktop: read the whole set, then follow the broadcast.
+    // Without this the phone shows unread dots only for sessions it opened itself.
+    void useTermStore.getState().syncSessionStates();
+    const unlistenSessionState = onSessionState((batch) =>
+      useTermStore.getState().applySessionStates(batch),
+    );
     const unwatch = watchSystemTheme(() => {
       if (useTermStore.getState().theme === "system") applyAppearance();
     });
@@ -58,10 +78,12 @@ function MobileApp() {
     });
     return () => {
       unwatch();
+      stopSettingsWatch();
       void unlistenSpawn.then((fn) => fn());
       void unlistenResolved.then((fn) => fn());
       clearTimeout(treeTimer);
       void unlistenTree.then((fn) => fn());
+      void unlistenSessionState.then((fn) => fn());
     };
     // Run only once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps

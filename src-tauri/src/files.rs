@@ -336,6 +336,54 @@ pub fn write_bytes(path: &str, data: &[u8]) -> Result<(), String> {
     std::fs::write(path, data).map_err(|e| format!("Failed to write file: {e}"))
 }
 
+/// Appends one chunk of an upload, creating and truncating the file at offset 0.
+///
+/// Counterpart of `read_file_base64`: whole-file writes cannot cross the WebSocket frame limit, so an upload
+/// walks the file sequentially and each call carries the offset it believes it is at. That offset must equal
+/// the file's current length — a mismatch means a stale retry or a concurrent writer raced us, and silently
+/// seeking would splice two different uploads into one corrupt file. Returns the new length so the caller can
+/// verify its own progress accounting.
+///
+/// Callers upload into a temporary sibling and rename on completion, so an interrupted transfer never leaves a
+/// truncated file at the destination path.
+pub fn write_file_chunk(path: &str, offset: u64, data: &[u8]) -> Result<u64, String> {
+    use std::io::{Seek, SeekFrom, Write};
+
+    if data.len() as u64 > CHUNK_MAX {
+        return Err(format!(
+            "Chunk too large ({} bytes, limit {CHUNK_MAX})",
+            data.len()
+        ));
+    }
+    let mut f = if offset == 0 {
+        // A restarted upload reuses the same temporary path, so the first chunk must discard any leftovers.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)
+            .map_err(|e| format!("Failed to create file: {e}"))?
+    } else {
+        let f = std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .map_err(|e| format!("Failed to open file: {e}"))?;
+        let len = f
+            .metadata()
+            .map_err(|e| format!("Failed to read file metadata: {e}"))?
+            .len();
+        if len != offset {
+            return Err(format!("Upload offset mismatch (file is {len}, chunk is {offset})"));
+        }
+        f
+    };
+    f.seek(SeekFrom::Start(offset))
+        .map_err(|e| format!("Failed to seek file: {e}"))?;
+    f.write_all(data)
+        .map_err(|e| format!("Failed to write file: {e}"))?;
+    Ok(offset + data.len() as u64)
+}
+
 /// Lightweight stat used by the frontend's two-second external-change poll.
 pub fn stat_file(path: &str) -> Result<FileStat, String> {
     let meta = std::fs::metadata(path).map_err(|e| format!("Failed to read file metadata: {e}"))?;
@@ -348,10 +396,19 @@ pub fn stat_file(path: &str) -> Result<FileStat, String> {
     })
 }
 
-// Chunked binary reading for the image viewer.
+// Chunked binary reading and writing for the image viewer and for file transfer.
 
-/// Total-size safety limit for chunked binary reads.
-const BIN_MAX: u64 = 50 * 1024 * 1024;
+/// Per-call byte ceiling for chunked binary reads and writes.
+///
+/// This bounds a single WebSocket message: base64 inflates payloads by a third and tokio-tungstenite defaults
+/// to a 16 MiB frame, so one call must stay well under it.
+const CHUNK_MAX: u64 = 8 * 1024 * 1024;
+
+/// Whole-file ceiling for `read_file_base64`, whose caller holds the result in memory as one Blob.
+///
+/// Uploads are not bounded by it (they are written chunk by chunk with no whole-file read) and neither are
+/// downloads, which stream over `/api/download` instead of passing through this function.
+const BLOB_MAX: u64 = 50 * 1024 * 1024;
 
 /// One `read_file_base64` chunk with base64 bytes, total size, and current mtime.
 ///
@@ -367,8 +424,10 @@ pub struct FileChunk {
 
 /// Reads `[offset, offset+max_len)` and base64-encodes it for chunked image loading.
 ///
-/// Requires a regular file no larger than 50 MB, with no extension restriction for future binary previews. An
-/// out-of-range offset returns an empty chunk; frontend stops after collecting `size` bytes.
+/// Requires a regular file no larger than `BLOB_MAX`, with no extension restriction for future binary
+/// previews. The ceiling exists because the only caller assembles the whole file in memory as one Blob;
+/// downloads do not come through here at all, they stream over `/api/download`. An out-of-range offset returns
+/// an empty chunk; the frontend stops after collecting `size` bytes.
 pub fn read_file_base64(path: &str, offset: u64, max_len: u64) -> Result<FileChunk, String> {
     use std::io::{Seek, SeekFrom};
 
@@ -377,7 +436,7 @@ pub fn read_file_base64(path: &str, offset: u64, max_len: u64) -> Result<FileChu
         return Err("Not a regular file".to_string());
     }
     let size = meta.len();
-    if size > BIN_MAX {
+    if size > BLOB_MAX {
         return Err(format!(
             "File too large ({:.1}MB, limit 50MB)",
             size as f64 / 1024.0 / 1024.0
@@ -390,7 +449,7 @@ pub fn read_file_base64(path: &str, offset: u64, max_len: u64) -> Result<FileChu
         let mut f = std::fs::File::open(path).map_err(|e| format!("Failed to open file: {e}"))?;
         f.seek(SeekFrom::Start(offset))
             .map_err(|e| format!("Failed to seek file: {e}"))?;
-        f.take(max_len)
+        f.take(max_len.min(CHUNK_MAX))
             .read_to_end(&mut bytes)
             .map_err(|e| format!("Failed to read file: {e}"))?;
     }
@@ -783,13 +842,24 @@ mod tests {
 
     #[test]
     fn read_file_base64_rejects_oversize_and_dir() {
-        // Exceed the 50 MB limit by one byte using sparse set_len.
+        // The viewer assembles the whole file in memory, so anything past the ceiling is refused. Sparse
+        // set_len keeps the test cheap.
         let path = tmp_path("bin-oversize");
         let f = std::fs::File::create(&path).unwrap();
-        f.set_len(super::BIN_MAX + 1).unwrap();
+        f.set_len(super::BLOB_MAX + 1).unwrap();
         drop(f);
         let err = read_file_base64(&path.to_string_lossy(), 0, 1024).unwrap_err();
         assert!(err.contains("too large"), "got: {err}");
+        let _ = std::fs::remove_file(&path);
+
+        // A single call never returns more than the per-message ceiling, whatever length is asked for.
+        let path = tmp_path("bin-chunkcap");
+        let f = std::fs::File::create(&path).unwrap();
+        f.set_len(super::CHUNK_MAX + 1024).unwrap();
+        drop(f);
+        let c = read_file_base64(&path.to_string_lossy(), 0, u64::MAX).unwrap();
+        assert_eq!(c.size, super::CHUNK_MAX + 1024, "total size is reported in full");
+        assert_eq!(c.base64.len() as u64, super::CHUNK_MAX.div_ceil(3) * 4);
         let _ = std::fs::remove_file(&path);
 
         // Reject directories.
@@ -797,6 +867,37 @@ mod tests {
         assert!(err.contains("Not a regular file"), "got: {err}");
         // Missing paths error.
         assert!(read_file_base64(&tmp_path("missing").to_string_lossy(), 0, 1).is_err());
+    }
+
+    #[test]
+    fn write_file_chunk_appends_sequentially_and_rejects_gaps() {
+        use super::write_file_chunk;
+
+        let path = tmp_path("upload-chunks");
+        let p = path.to_string_lossy().to_string();
+
+        // Sequential chunks assemble the original bytes, each call returning the new length.
+        assert_eq!(write_file_chunk(&p, 0, b"hello ").unwrap(), 6);
+        assert_eq!(write_file_chunk(&p, 6, b"world").unwrap(), 11);
+        assert_eq!(std::fs::read(&path).unwrap(), b"hello world");
+
+        // An offset that does not match the current length is refused rather than seeking past a hole or
+        // overwriting the middle of another upload.
+        let err = write_file_chunk(&p, 99, b"x").unwrap_err();
+        assert!(err.contains("offset mismatch"), "got: {err}");
+        let err = write_file_chunk(&p, 3, b"x").unwrap_err();
+        assert!(err.contains("offset mismatch"), "got: {err}");
+        assert_eq!(std::fs::read(&path).unwrap(), b"hello world", "a refused chunk writes nothing");
+
+        // Offset 0 truncates, so a restarted upload never inherits the previous attempt's tail.
+        assert_eq!(write_file_chunk(&p, 0, b"new").unwrap(), 3);
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+
+        // Chunks larger than the per-call ceiling are refused before any IO.
+        let err = write_file_chunk(&p, 0, &vec![0u8; (super::CHUNK_MAX + 1) as usize]).unwrap_err();
+        assert!(err.contains("Chunk too large"), "got: {err}");
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

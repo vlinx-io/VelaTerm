@@ -6,7 +6,7 @@ description: >-
   (use vspawn-tree for a worktree). Only use when the user explicitly invokes /vspawn or $vspawn; never auto-trigger.
   This is a real session run by its own process in the vlx-term left-panel tree — not an in-process sub-agent,
   and not a background Task. Available only inside vlx-term-hosted sessions.
-argument-hint: "[--worktree] [--claude|--codex] <task>"
+argument-hint: "[--worktree] [--yes] [--claude|--codex] <task>"
 disable-model-invocation: true
 allowed-tools: Bash(vspawn:*)
 ---
@@ -52,8 +52,11 @@ flag, and **do not** write that instruction into the prompt:
 - "want a worktree / open a separate workspace / a separate branch," or a leading `--worktree` → add `--worktree`
   to the command.
 - Specifying claude / codex, or a leading `--claude` / `--codex` → add the matching flag.
+- "no dialog / don't ask me / just start it / start it straight away," or a leading `--yes` (`-y`) → add `--yes`.
+  The child session then starts immediately with the default settings, with no confirmation card to click.
 
-Defaults: **no** worktree (run in the current directory), and **follow** the current session type.
+Defaults: **no** worktree (run in the current directory), **follow** the current session type, and **show** the
+confirmation card when the user has "Confirm before spawn" turned on.
 
 ## Step 3: Run the command
 
@@ -61,7 +64,7 @@ Pass the prompt you expanded in Step 1 **as a single argument** (escaping any qu
 `vspawn` from PATH:
 
 ```bash
-vspawn [--worktree] [--claude|--codex] "<expanded self-contained prompt>"
+vspawn [--worktree] [--yes] [--claude|--codex] "<expanded self-contained prompt>"
 ```
 
 After it succeeds, give the user a one-line summary: "Spawned a child session in vlx-term: <brief task summary>".

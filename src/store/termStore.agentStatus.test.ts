@@ -1,7 +1,12 @@
 //! Regression coverage for Codex hook-only arbitration: source selection happens before the first lifecycle event,
 //! and neither screen scraping nor PTY activity may ever fabricate a Codex state.
+//!
+//! Arbitration itself now lives in the backend, where both clients read the same answer instead of each
+//! computing its own — `src-tauri/src/session_state.rs` carries these same rules and its own tests. What
+//! remains in the client is the escape hatch: set `vlx-arbitration` to `frontend` and the old chain runs
+//! again. These tests exercise that path, so it cannot rot while it is still the way back.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../ipc/commands", () => ({
   createWorktree: vi.fn(),
@@ -35,6 +40,7 @@ const visibleWorking = {
 };
 
 beforeEach(() => {
+  localStorage.setItem("vlx-arbitration", "frontend");
   sessionId = `codex-status-${++seq}`;
   useTermStore.setState({
     runtimes: {
@@ -50,6 +56,10 @@ beforeEach(() => {
     paneTrees: {},
     windowFocused: true,
   });
+});
+
+afterEach(() => {
+  localStorage.removeItem("vlx-arbitration");
 });
 
 describe("Codex lifecycle hook state arbitration", () => {

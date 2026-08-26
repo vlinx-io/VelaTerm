@@ -113,6 +113,20 @@ export function readFileBase64(
   return invoke<FileChunk>("read_file_base64", { path, offset, maxLen });
 }
 
+/**
+ * Append one upload chunk, truncating the file at offset 0, and resolve to the file's new length.
+ *
+ * The backend refuses any offset that is not the file's current length, so callers must upload sequentially
+ * and must not retry a chunk that already landed.
+ */
+export function writeFileChunk(
+  path: string,
+  offset: number,
+  bytesB64: string,
+): Promise<number> {
+  return invoke<number>("write_file_chunk", { path, offset, bytesB64 });
+}
+
 /** Chunk size: 2 MB (~2.7 MB after Base64), keeping remote WS messages bounded and allowing terminal traffic between chunks. */
 export const FILE_BLOB_CHUNK = 2 * 1024 * 1024;
 

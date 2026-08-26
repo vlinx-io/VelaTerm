@@ -52,6 +52,9 @@ const en = {
   "titlebar.browser": "Built-in Browser",
   "titlebar.remoteAccess": "Remote Access (Browser)",
   "titlebar.connectRemote": "Connect to Remote Server",
+  "titlebar.mirrored": "Mirrored",
+  "titlebar.mirroredHint":
+    "Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.",
   "titlebar.share": "Share",
   "share.title": "Share VelaTerm",
   "share.subtitle":
@@ -144,7 +147,7 @@ const en = {
   "spawn.effortLabel": "Effort",
   "spawn.modelDefault": "Default",
   "spawn.modelLoading": "Listing models…",
-  "spawn.modelListUnavailable": "No model list available — type one in the agent arguments",
+  "spawn.modelListUnavailable": "No model list available — type an identifier above",
   "spawn.launch": "Launch",
   "spawn.remaining": (n: number) => `${n} more pending`,
   "spawn.notifyTitle": "Spawn session awaiting confirmation",
@@ -309,7 +312,7 @@ const en = {
   "remote.start": "Start Server",
   "remote.portLabel": "Port",
   "remote.portInvalid": "Port must be between 1 and 65535",
-  "remote.ipLabel": "IP address",
+  "remote.ipLabel": "IP",
   "remote.ipAuto": "Automatic (first LAN address)",
   "remote.ipVpn": "VPN",
   "remote.qrHint":
@@ -370,6 +373,9 @@ const en = {
   "connect.showPassword": "Show password",
   "connect.hidePassword": "Hide password",
   "connect.urlPasswordPlaceholder": "Login password",
+  "connect.mirror": "Mirror layout across devices",
+  "connect.mirrorHint":
+    "Tabs, splits, and the active session stay the same on every device connected to this remote service. Off = each device keeps its own layout.",
   "connect.shareDesktopDb": "Use remote desktop app's database",
   "connect.shareDesktopDbHint":
     "Shares one database with the remote machine's desktop app (best when both are the same version). Off = isolated database.",
@@ -804,7 +810,19 @@ const en = {
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
+  "files.dblClickOpen": "Double-click to open",
   "files.deleteConfirm": (name: string) => `Delete "${name}"? This can't be undone.`,
+
+  // ── File transfer (remote access) ──
+  "transfer.uploadsTitle": "Uploads",
+  "transfer.download": "Download",
+  "transfer.upload": "Upload Files…",
+  "transfer.uploadTooltip": "Upload files to this folder",
+  "transfer.clear": "Clear",
+  "transfer.cancelled": "Cancelled",
+  "transfer.failed": "Failed",
+  "transfer.stalled": "Reconnecting…",
+  "transfer.foldersUnsupported": "Folders can't be uploaded.",
 
   // ── Status bar ──
   "statusbar.sessions": (n: number) => (n === 1 ? "1 session" : `${n} sessions`),
@@ -974,7 +992,7 @@ const en = {
   "updater.hide": "Hide",
   "updater.hideHint": "Keep downloading in the background. Progress stays in the status bar.",
   "updater.downloadManually": "Download manually",
-  "updater.downloadManuallyHint": "Open the installer download in your browser.",
+  "updater.downloadManuallyHint": "Open the download page in your browser.",
   "updater.windowsNotice":
     "VelaTerm will close while the installer runs, then reopen on its own.",
   "updater.installingWindows":

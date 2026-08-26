@@ -87,12 +87,14 @@ CREATE TABLE IF NOT EXISTS app_settings (
 -- anchor for Remember Password. Passwords never enter the database; they live only in the system keyring
 -- under service `{identifier}.ssh` and account `target`. This table stores the host, last connection time,
 -- and previous data-mode selection. Password presence is queried from the keyring; see ssh_remote and
--- command_core. CREATE IF NOT EXISTS is safe for old databases; migrate adds their shared_db column.
+-- command_core. CREATE IF NOT EXISTS is safe for old databases; migrate adds their shared_db and mirror
+-- columns.
 CREATE TABLE IF NOT EXISTS ssh_hosts (
   target            TEXT PRIMARY KEY,   -- user@host[:port], also used as the keyring account
   label             TEXT,               -- Reserved for a user-defined alias
   last_connected_at INTEGER NOT NULL,   -- Last successful connection time in seconds; sorted descending
   shared_db         INTEGER NOT NULL DEFAULT 0,  -- Previous "reuse remote desktop database" choice
+  mirror            INTEGER NOT NULL DEFAULT 0,  -- Previous "mirror layout across devices" choice
   created_at        INTEGER NOT NULL
 );
 

@@ -21,6 +21,7 @@ mod models;
 mod procstat;
 mod pty;
 mod search;
+mod session_state;
 // GUI-only vela-server provisioning: R2 download, minisign verification, and cache.
 #[cfg(feature = "gui")]
 mod server_supply;
@@ -1118,6 +1119,10 @@ struct ServeArgs {
     /// when stdout is not a terminal. Without it, non-TTY runs (systemd/journald) get only the token-less
     /// base URL so the credential does not persist in service logs.
     print_pairing: bool,
+    /// `--mirror <0|1>`: force UI mirror mode on or off for this service instead of reading the database.
+    /// SSH connections carry the client's choice here, because the machine running the service is headless
+    /// and has no panel to switch it in. None leaves the stored setting in charge.
+    mirror: Option<bool>,
 }
 
 /// Recommended headless password environment variable, avoiding exposure in process arguments.
@@ -1134,6 +1139,7 @@ fn parse_serve_args(args: &[String], env_password: Option<String>) -> Result<Ser
     let mut local_http = false;
     let mut lan_http = false;
     let mut print_pairing = false;
+    let mut mirror: Option<bool> = None;
 
     let mut it = args.iter().skip(2); // Skip executable name and --serve.
     while let Some(arg) = it.next() {
@@ -1159,6 +1165,14 @@ fn parse_serve_args(args: &[String], env_password: Option<String>) -> Result<Ser
             "--print-pairing" => {
                 print_pairing = true;
             }
+            "--mirror" => {
+                let v = it.next().ok_or("--mirror requires a value")?;
+                mirror = Some(match v.as_str() {
+                    "1" | "on" | "true" => true,
+                    "0" | "off" | "false" => false,
+                    other => return Err(format!("--mirror has invalid value: {other} (use 0 or 1)")),
+                });
+            }
             other => return Err(format!("unknown argument: {other}")),
         }
     }
@@ -1177,6 +1191,7 @@ fn parse_serve_args(args: &[String], env_password: Option<String>) -> Result<Ser
         local_http,
         lan_http,
         print_pairing,
+        mirror,
     })
 }
 
@@ -1214,7 +1229,7 @@ pub fn run_serve(args: &[String]) {
         Err(e) => {
             eprintln!("vlx-term --serve failed to start: {e}");
             eprintln!(
-                "usage: vlx-term --serve [--port 8799] [--password <password>] [--data-dir <dir>] [--local-http] [--lan-http] [--print-pairing]"
+                "usage: vlx-term --serve [--port 8799] [--password <password>] [--data-dir <dir>] [--local-http] [--lan-http] [--print-pairing] [--mirror 0|1]"
             );
             std::process::exit(1);
         }
@@ -1248,6 +1263,12 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
     agent::spawn_cli::refresh_installed_skills();
     if let Err(e) = agent::opencode::install(&data_dir) {
         eprintln!("failed to install opencode plugin (opencode status will degrade to screen detection): {e}");
+    }
+
+    // An explicit --mirror from the SSH client decides mirror mode for this service, ahead of whatever the
+    // database holds. Set it before the web service accepts its first client so nobody reads the old value.
+    if let Some(m) = args.mirror {
+        command_core::set_mirror_override(m);
     }
 
     // Create the in-process host before starting and attaching the AppCtx-dependent hook service.
@@ -1442,6 +1463,7 @@ mod tests {
                 local_http: false,
                 lan_http: false,
                 print_pairing: false,
+                mirror: None,
             }
         );
     }
@@ -1477,6 +1499,23 @@ mod tests {
         let got = parse_serve_args(&argv(&["--password", "pw"]), None).expect("parsing should succeed");
         assert!(!got.local_http);
         assert!(!got.lan_http);
+    }
+
+    #[test]
+    fn parse_serve_args_mirror_flag() {
+        // SSH connections state mirror mode explicitly, so both spellings of on and off must parse.
+        let on = parse_serve_args(&argv(&["--mirror", "1", "--password", "pw"]), None)
+            .expect("parsing should succeed");
+        assert_eq!(on.mirror, Some(true));
+        let off = parse_serve_args(&argv(&["--mirror", "0", "--password", "pw"]), None)
+            .expect("parsing should succeed");
+        assert_eq!(off.mirror, Some(false));
+        // Omitting the flag leaves the stored setting in charge rather than forcing a value.
+        let none = parse_serve_args(&argv(&["--password", "pw"]), None).expect("parsing should succeed");
+        assert_eq!(none.mirror, None);
+        // A value that is neither 0 nor 1 is an error, not a silent default.
+        assert!(parse_serve_args(&argv(&["--mirror", "yes-please", "--password", "pw"]), None).is_err());
+        assert!(parse_serve_args(&argv(&["--mirror"]), None).is_err());
     }
 
     #[test]
@@ -1523,6 +1562,7 @@ mod tests {
             local_http: false,
             lan_http: false,
             print_pairing: false,
+            mirror: None,
         };
         assert_eq!(
             serve_data_dir(&args, "io.vlinx.vlxterm").unwrap(),

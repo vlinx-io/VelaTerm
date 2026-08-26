@@ -2,6 +2,8 @@
 
 import { isRemoteWindow, listen, listenNative, type UnlistenFn } from "./transport";
 import type { MirrorSnapshot } from "./mirror";
+import type { SessionStateBatch } from "./sessionState";
+import type { KillReason } from "./commands";
 import type { AgentKind } from "../types";
 
 // PTY output bypasses the event channel and travels directly through spawnPty's binary Channel / WS binary frames; see transport.ts.
@@ -14,17 +16,37 @@ export function onPtyExit(
   return listen(`pty://exit/${sessionId}`, () => cb());
 }
 
+/** Who ended a session deliberately, and whether it is coming back. */
+export interface PtyKilled {
+  /** Connection ID of the client that asked: `desktop`, or `ws-N`. Empty when the backend shut down. */
+  source: string;
+  /** `restart` means a new process for this same session follows; `close` means it is going away. */
+  reason: KillReason;
+}
+
 /**
  * Listen for explicit session termination initiated by a client, such as closing a desktop tab or restarting a
  * session. This differs from pty://exit (natural exit): the initiating client cleans up through its own unmount
- * path and ignores the event via its disposed guard, while **other clients** viewing the same session close their
- * local views. They can reopen it from the sidebar instead of remaining silently frozen.
+ * path, while **other clients** viewing the same session close their local views. They can reopen it from the
+ * sidebar instead of remaining silently frozen.
+ *
+ * The payload is what makes that decision possible. It used to be empty, so a client could only guess why the
+ * session died — and guessing "gone" meant restarting a session closed its tab on every other client. The
+ * requester likewise had to recognise its own echo through a three-second timing window; `source` says so
+ * outright.
  */
 export function onPtyKilled(
   sessionId: string,
-  cb: () => void,
+  cb: (ev: PtyKilled) => void,
 ): Promise<UnlistenFn> {
-  return listen(`pty://killed/${sessionId}`, () => cb());
+  return listen<Partial<PtyKilled> | null>(`pty://killed/${sessionId}`, (payload) =>
+    cb({
+      source: payload?.source ?? "",
+      // An unknown reason has to read as `close`: keeping a pane for a session that never comes back
+      // leaves a dead terminal on screen, which is worse than closing one the user meant to restart.
+      reason: payload?.reason === "restart" ? "restart" : "close",
+    }),
+  );
 }
 
 /**
@@ -90,6 +112,8 @@ export interface SpawnRequest {
   model?: string | null;
   /** Effort override chosen in the spawn confirmation dialog; null inherits from parent or defaults. */
   effort?: string | null;
+  /** Set by `vspawn --yes`: run immediately with default settings, bypassing the confirmation card. */
+  noConfirm?: boolean | null;
 }
 
 /** Listen for child-task requests as a global event registered once on mount. */
@@ -148,6 +172,38 @@ export function onTreeChanged(cb: () => void): Promise<UnlistenFn> {
  */
 export function onPresetsChanged(cb: () => void): Promise<UnlistenFn> {
   return listen("presets://changed", () => cb());
+}
+
+/**
+ * Listen for application preferences written by any client. The payload lists the key names that were
+ * written and deliberately carries **no values**: `remoteAccess.*` and `gitea.token` are stripped from a
+ * remote client's `get_app_settings` reply, and a broadcast carrying values would bypass that filter.
+ * Receivers re-read through `reconcileSettings()`, so the filter keeps applying.
+ */
+export function onSettingsChanged(
+  cb: (keys: string[]) => void,
+): Promise<UnlistenFn> {
+  return listen<string[]>("settings://changed", (payload) =>
+    cb(Array.isArray(payload) ? payload : []),
+  );
+}
+
+/**
+ * Listen for authoritative session records the backend has just changed.
+ *
+ * This is a **connection-level** subscription, registered when the socket opens rather than when a
+ * session is attached. Per-session status events only reach a client that has opened that session, which
+ * is why a freshly connected browser used to show a dot on nothing but its own tabs.
+ *
+ * The payload carries only the records that changed, so merge it — a session missing from a batch has
+ * not been reset, it simply has no news.
+ */
+export function onSessionState(
+  cb: (batch: SessionStateBatch) => void,
+): Promise<UnlistenFn> {
+  return listen<SessionStateBatch>("session://state", (payload) =>
+    cb(payload && typeof payload === "object" ? payload : {}),
+  );
 }
 
 /**

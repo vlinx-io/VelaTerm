@@ -12,12 +12,20 @@ import {
   resolveSpawn,
   type ShellOption,
 } from "../ipc/commands";
+import {
+  markSessionRead,
+  markSessionUnread,
+  reportScreen,
+  sessionStates,
+  type SessionStateBatch,
+} from "../ipc/sessionState";
 import { pushSetting } from "../ipc/settingsSync";
 import { isTauri } from "../ipc/transport";
 import { env } from "../platform";
 import { genId } from "../genId";
 import type { SpawnRequest, StatusSignal } from "../ipc/events";
 import type { MirrorLayout } from "./mirrorLayout";
+import { whenFirstMirrorAlign } from "./mirrorAlign";
 import { notify } from "../notify";
 import type { ScreenDetection } from "../terminal/screenDetect";
 import * as tree from "../ipc/tree";
@@ -1090,10 +1098,16 @@ interface TermStore {
   setWindowFocused: (focused: boolean) => void;
   /** Clears notification markers for missing sessions when the window returns to the foreground. */
   focusReturned: () => void;
-  /** Clears a session's notification marker after it has been viewed. */
+  /** Reports that a session has been read, clearing its marker on every client. */
   clearNotification: (id: SessionId) => void;
-  /** Clears all notification markers, session dots, and the Dock badge. */
+  /** Reports every marked session as read, clearing all dots and the Dock badge everywhere. */
   clearAllNotifications: () => void;
+  /** Merges a batch of authoritative session records from the backend into local state. */
+  applySessionStates: (batch: SessionStateBatch) => void;
+  /** Marks a session unread locally and pops one system notification for that rising edge. */
+  raiseUnread: (id: SessionId, body: string, title?: string | null) => void;
+  /** Reads every authoritative session record at once, for connect and reconnect. */
+  syncSessionStates: () => Promise<void>;
 
   // Layout.
   toggleLeft: () => void;
@@ -1231,8 +1245,30 @@ const NOTIFY_STATES: AgentState[] = ["asking", "waiting"];
 /**
  * Last working timestamp per session, used for the 1200 ms working-to-idle hold. Keep it outside reactive
  * runtime state so every signal does not defeat value deduplication and cause unnecessary rerenders.
+ *
+ * Only the legacy arbitration path below reads this; the backend keeps its own copy for the same purpose.
  */
 const workingPulseAt = new Map<string, number>();
+
+/** Escape hatch: set `vlx-arbitration` to `frontend` to decide agent state in the client again. */
+const ARBITRATION_KEY = "vlx-arbitration";
+
+/**
+ * Whether this client decides agent state for itself instead of following the backend.
+ *
+ * Agent state is the product's core signal, and every rule in the chain was added because something went
+ * wrong without it. Moving the chain to the backend is what makes two clients agree, but it is also the
+ * riskiest change in this area, so the old path stays reachable for a release or two: set
+ * `localStorage.vlx-arbitration = "frontend"` and reload. There is deliberately no UI for it — it is a
+ * way back if the new path misbehaves, not a preference anyone should be choosing between.
+ */
+function frontendArbitration(): boolean {
+  try {
+    return localStorage.getItem(ARBITRATION_KEY) === "frontend";
+  } catch {
+    return false;
+  }
+}
 
 /** Localized notification text for each agent state. */
 function agentNotifyText(state: AgentState): string {
@@ -1248,19 +1284,23 @@ function isVisibleSession(store: TermStore, sessionId: string): boolean {
 }
 
 /**
- * Sends a system notification unless the session is currently visible in the focused window. Prefixes the
- * session name and returns whether notification state should be marked.
+ * Sends a system notification unless the session is currently visible in the focused window, prefixing
+ * the session name.
+ *
+ * This is deliberately a **device** decision, and the only part of notification handling that still is.
+ * Whether the session holds an unread result belongs to the session and is decided by the backend;
+ * whether *this* screen should interrupt its user depends on which window has focus here.
  */
 function notifyRaw(
   store: TermStore,
   id: string,
   title: string | null | undefined,
   body: string,
-): boolean {
+): void {
   // Suppress only when the window is focused and the session is visible. Use reliable host-maintained
   // `windowFocused`; `document.hasFocus()` can remain true for an unfocused macOS WKWebView.
   const visible = isVisibleSession(store, id);
-  if (store.windowFocused && visible) return false;
+  if (store.windowFocused && visible) return;
   const session =
     store.sessions.find((s) => s.id === id) ?? store.ephemeralSessions[id];
   const name = session?.name ?? t("common.session");
@@ -1268,21 +1308,7 @@ function notifyRaw(
   const prefix = `${agent} · ${name}`;
   // Append an OSC 777 title after the session prefix; OSC 9 and agent state use the prefix alone.
   const heading = title ? `${prefix} · ${title}` : prefix;
-  // When system notifications are disabled, still return true so unread UI and Dock badges remain active.
   if (store.notifyEnabled) void notify(id, heading, body, store.soundEnabled);
-  return true;
-}
-
-/**
- * Builds an agent notification from the session name and returns whether it should be marked as unread.
- */
-function notifyAgentState(
-  store: TermStore,
-  id: string,
-  agentState: AgentState,
-): boolean {
-  if (!NOTIFY_STATES.includes(agentState)) return false;
-  return notifyRaw(store, id, undefined, agentNotifyText(agentState));
 }
 
 /** Persists appearance and applies it to `documentElement`, resolving automatic accents against brightness. */
@@ -1555,6 +1581,14 @@ export const useTermStore = create<TermStore>((set, get) => ({
 
   loadTree: async () => {
     const t = await tree.listTree();
+    // A remote window keeps its own arrangement in local storage, but mirror mode may be about to replace
+    // it with the desktop's. Landing the saved one first and being overwritten a moment later mounts a set
+    // of terminals only to unmount them, and mounting is what starts a process: on a session whose shell is
+    // already gone that is a real spawn, which a browser client's unmount detaches from rather than kills.
+    // So wait for the first alignment to conclude, and leave the restore alone once a peer's layout won.
+    if (!layoutRestored && platform.env.isBrowser && (await whenFirstMirrorAlign())) {
+      layoutRestored = true;
+    }
     set((state) => {
       const runtimes = { ...state.runtimes };
       for (const s of t.sessions) {
@@ -1790,8 +1824,20 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
 
   handleSpawnRequest: async (req) => {
-    // Queue for review when spawn confirmation is enabled; otherwise execute immediately.
-    if (!get().spawnConfirm) {
+    // Queue for review when spawn confirmation is enabled; otherwise execute immediately. `vspawn --yes`
+    // asks for the same immediate start per call, so it overrides the setting for that one request.
+    if (!get().spawnConfirm || req.noConfirm) {
+      // Claim the request before running it. The spawn event reaches every connected client, so without
+      // a claim each one starts the same task: two clients with confirmation off ran it twice, and a
+      // client with confirmation on was left holding a card nobody would ever answer. Confirm and cancel
+      // already claim; this path was the only one that did not. A backend that cannot answer (older
+      // build, transport error) falls back to running, which is the previous behavior.
+      const won = await resolveSpawn(
+        req.parentSessionId,
+        req.prompt,
+        true,
+      ).catch(() => true);
+      if (!won) return;
       await get().executeSpawn(req);
       return;
     }
@@ -2970,11 +3016,18 @@ export const useTermStore = create<TermStore>((set, get) => ({
     if (signal.kind === "agent_missing") return;
     const prev = get().runtimes[id] ?? { status: "idle" as const };
     const next: Partial<SessionRuntime> = {};
+    // Agent state is decided by the backend and arrives through `applySessionStates`. What is left here
+    // is what the record does not carry: the terminal title, the running tool, the raw activity flag, and
+    // the decision to interrupt this user with a system notification. Two clients used to reach their own
+    // conclusions from their own inputs — a screen only one of them could read, an interrupt only one of
+    // them saw — and disagreed for good reasons. Now they read the same answer.
+    const legacy = frontendArbitration();
     // Read the module-level working timestamp before the switch for state-transition debouncing.
     const pulse = workingPulseAt.get(id);
 
     switch (signal.kind) {
       case "state":
+        if (!legacy) break;
         // Accept structured hook/notify state directly; full-authority locking is handled below.
         next.agentState = signal.state;
         if (prev.agent === "codex" && signal.authoritative) next.agentHookReady = true;
@@ -3015,6 +3068,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
         }
         break;
       case "agent":
+        if (!legacy) break;
         // Set or clear agent kind from typed spawn or Terminal fallback detection. Codex declares its state
         // source at launch: hook-capable sessions become authoritative immediately, before SessionStart arrives,
         // so screen/output guesses can never win a startup race. Clear any stale state replayed by hot reload;
@@ -3033,6 +3087,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
         }
         break;
       case "hook_ready":
+        if (!legacy) break;
         // SessionStart proves the modern Codex hook chain without inventing an activity state or notification.
         if (prev.agent === "codex" && prev.agentStateSource === "hooks") {
           next.agentHookReady = true;
@@ -3046,10 +3101,12 @@ export const useTermStore = create<TermStore>((set, get) => ({
         next.currentTool = signal.tool;
         break;
       case "busy":
+        // The raw activity flag stays here: the Info panel shows it, and it is not agent state.
+        next.busy = signal.busy;
+        if (!legacy) break;
         // Use activity-based working/waiting only for fallback agents before an authoritative event arrives.
         // Codex never consumes this signal: modern versions are hook-only, while legacy output does not justify
         // pretending that an exact working/waiting state is known.
-        next.busy = signal.busy;
         if (prev.agent && prev.agent !== "codex" && !prev.authoritative) {
           next.agentState = signal.busy ? "working" : "waiting";
           if (signal.busy) next.everWorked = true;
@@ -3063,13 +3120,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
         if (prev.authoritative) {
           return;
         }
-        // Reuse visibility suppression with OSC-provided title/body and record the notification timestamp.
-        const popped = notifyRaw(get(), id, signal.title, signal.body);
-        if (popped) {
-          set((state) => ({
-            notifications: { ...state.notifications, [id]: Date.now() },
-          }));
-        }
+        get().raiseUnread(id, signal.body, signal.title);
         // OSC notifications do not alter agent state.
         return;
       }
@@ -3085,25 +3136,42 @@ export const useTermStore = create<TermStore>((set, get) => ({
       }));
     }
 
-    // Only authoritative, nonsilent state changes notify. Busy fallbacks and replayed/idle correction stay quiet.
+    // Only nonsilent state changes notify. Busy fallbacks and replayed/idle corrections stay quiet.
     if (
       signal.kind === "state" &&
       !signal.silent &&
-      next.agentState != null &&
-      next.agentState !== prev.agentState &&
-      NOTIFY_STATES.includes(next.agentState)
+      signal.state !== prev.agentState &&
+      NOTIFY_STATES.includes(signal.state)
     ) {
-      // Mark unread in the sidebar only when notification handling succeeds.
-      if (notifyAgentState(get(), id, next.agentState)) {
-        set((state) => ({
-          notifications: { ...state.notifications, [id]: Date.now() },
-        }));
-      }
+      get().raiseUnread(id, agentNotifyText(signal.state));
     }
+  },
+
+  raiseUnread: (id, body, title) => {
+    // The rising edge is what a notification is for. A client learns of an unread result twice — from the
+    // signal it can read directly, and from the backend record a moment later — so marking locally at the
+    // same moment as popping is what keeps one result from interrupting the user twice.
+    if (id in get().notifications) return;
+    notifyRaw(get(), id, title, body);
+    set((state) => ({ notifications: { ...state.notifications, [id]: Date.now() } }));
   },
 
   applyScreenDetection: (id, screen) => {
     if (screen.skip) return;
+    if (!frontendArbitration()) {
+      // Report what was seen and let the backend decide what it means. The reading has to happen here —
+      // it needs a laid-out grid, which exists only where a terminal is rendered — but the conclusion
+      // drawn from it is a fact about the session, and two clients drawing their own left them disagreeing.
+      void reportScreen(id, {
+        state: screen.state,
+        visibleBlocker: screen.visibleBlocker,
+        visibleWorking: screen.visibleWorking,
+        skip: screen.skip,
+      }).catch(() => {
+        /* A refused report (this client no longer owns the terminal) is expected, not an error. */
+      });
+      return;
+    }
 
     const rt = get().runtimes[id];
     if (!rt) return;
@@ -3119,12 +3187,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
 
     const setScreenState = (state: AgentState) => {
       const updates: Partial<SessionRuntime> = { agentState: state };
-      if (state === "working") {
-        updates.everWorked = true;
-        updates.lastIdleAt = 0;
-      } else if (state === "waiting" || state === "asking") {
-        if (!rt.lastIdleAt) updates.lastIdleAt = Date.now();
-      }
+      if (state === "working") updates.everWorked = true;
       // Skip store updates when screen-detection results match current values.
       const dirty = Object.entries(updates).some(
         ([k, v]) => !Object.is((rt as unknown as Record<string, unknown>)[k], v),
@@ -3135,11 +3198,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
         }));
       }
       if (state !== prevState && NOTIFY_STATES.includes(state)) {
-        if (notifyAgentState(get(), id, state)) {
-          set((s) => ({
-            notifications: { ...s.notifications, [id]: Date.now() },
-          }));
-        }
+        // The escape-hatch path still has to tell the backend, or reading the result on this client would
+        // leave the marker standing on the other one.
+        get().raiseUnread(id, agentNotifyText(state));
+        void markSessionUnread(id).catch(() => {});
       }
     };
 
@@ -3175,21 +3237,131 @@ export const useTermStore = create<TermStore>((set, get) => ({
     }
   },
 
-  clearNotification: (id) =>
+  clearNotification: (id) => {
+    // Tell the backend first, then clear locally without waiting: the round trip is short but visible,
+    // and the backend's broadcast will confirm the same result a moment later. Reporting is what makes
+    // this global — reading a reply in the browser has to clear the dot on the desktop too.
+    if (id in get().notifications) void markSessionRead(id).catch(() => {});
     set((state) => {
       if (!(id in state.notifications)) return {};
       const rest = { ...state.notifications };
       delete rest[id];
       return { notifications: rest };
-    }),
+    });
+  },
 
-  clearAllNotifications: () =>
-    set((state) =>
-      Object.keys(state.notifications).length === 0 ? {} : { notifications: {} },
-    ),
+  clearAllNotifications: () => {
+    const marked = Object.keys(get().notifications);
+    if (marked.length === 0) return;
+    for (const id of marked) void markSessionRead(id).catch(() => {});
+    set({ notifications: {} });
+  },
+
+  applySessionStates: (batch) => {
+    // Sessions with a terminal running here. A process ending must never replace one of those with a
+    // placeholder: the user still wants to read what it printed before it died.
+    const displayed = new Set(liveTerminalIds());
+    // In the escape-hatch mode this client decides agent state for itself, so a record must not overwrite
+    // what it concluded for a session it is displaying. On the normal path the record is the answer for
+    // every session, displayed or not — that is the whole point.
+    const keepsOwnState = frontendArbitration() ? displayed : new Set<string>();
+    // Sessions that were not marked before this batch: their notification, if any, is owed here.
+    const wasMarked = get().notifications;
+    const newlyUnread: SessionId[] = [];
+    set((state) => {
+      const notifications = { ...state.notifications };
+      const runtimes = { ...state.runtimes };
+      const dormantSessions = { ...state.dormantSessions };
+      let unreadDirty = false;
+      let runtimeDirty = false;
+      let dormantDirty = false;
+      // Sessions the layout will render. A record about anything else says nothing about what to mount.
+      const laidOut = new Set<string>();
+      for (const tabId of Object.keys(state.paneTrees)) {
+        for (const sid of collectSessionIds(state.paneTrees[tabId])) laidOut.add(sid);
+      }
+      for (const [id, record] of Object.entries(batch)) {
+        if (!record) continue;
+        if (record.unread) {
+          // Keep an existing timestamp. It records when this client first saw the marker and drives the
+          // two-second read delay; restarting it on every broadcast would keep pushing that delay back.
+          if (!(id in notifications)) {
+            notifications[id] = Date.now();
+            unreadDirty = true;
+            if (!(id in wasMarked)) newlyUnread.push(id);
+          }
+        } else if (id in notifications) {
+          delete notifications[id];
+          unreadDirty = true;
+        }
+        // Whether to mount a terminal for a laid-out session now follows the backend, because mounting is
+        // what starts a process. A client that had not opened a session could not tell "not running" from
+        // "running, just not opened here", so it mounted — which is how a browser connecting to a desktop
+        // that had merely *restored* a workspace launched every one of those sessions for real.
+        if (!displayed.has(id) && laidOut.has(id) && record.alive !== undefined) {
+          if (record.alive && dormantSessions[id]) {
+            delete dormantSessions[id];
+            dormantDirty = true;
+          } else if (!record.alive && !dormantSessions[id]) {
+            dormantSessions[id] = true;
+            dormantDirty = true;
+          }
+        }
+        if (keepsOwnState.has(id)) continue;
+        const prev = runtimes[id] ?? { status: "idle" as const };
+        const next: SessionRuntime = {
+          ...prev,
+          alive: record.alive,
+          agent: record.agent ?? null,
+          agentState: record.agentState ?? null,
+          agentStateSource: record.stateSource ?? undefined,
+          agentHookReady: record.hookReady,
+          authoritative: record.authoritative,
+          everWorked: record.everWorked,
+        };
+        if (
+          Object.keys(next).some(
+            (k) =>
+              !Object.is(
+                (next as unknown as Record<string, unknown>)[k],
+                (prev as unknown as Record<string, unknown>)[k],
+              ),
+          )
+        ) {
+          runtimes[id] = next;
+          runtimeDirty = true;
+        }
+      }
+      return {
+        ...(unreadDirty ? { notifications } : {}),
+        ...(runtimeDirty ? { runtimes } : {}),
+        ...(dormantDirty ? { dormantSessions } : {}),
+      };
+    });
+    // Notify for results this client had not already heard about directly. A conclusion the backend
+    // reached on its own — from a screen reading, from output activity — reaches the user no other way.
+    for (const id of newlyUnread) {
+      const state = batch[id]?.agentState;
+      notifyRaw(
+        get(),
+        id,
+        undefined,
+        agentNotifyText(state && NOTIFY_STATES.includes(state) ? state : "waiting"),
+      );
+    }
+  },
+
+  syncSessionStates: async () => {
+    // A batch read is the only way to close the gap left by broadcasts that landed while this client was
+    // not connected, and the only way a client learns about sessions it has never opened.
+    const batch = await sessionStates().catch(() => null);
+    if (batch) get().applySessionStates(batch);
+  },
 
   restartSession: async (id) => {
-    await ptyKill(id).catch(() => {});
+    // Say it is a restart. Other clients then keep their pane and wait for the new process instead of
+    // reading a bare death announcement as "closed" and wiping the tab everywhere.
+    await ptyKill(id, "restart").catch(() => {});
     set((state) => ({
       epochs: { ...state.epochs, [id]: (state.epochs[id] ?? 0) + 1 },
     }));
@@ -3222,7 +3394,22 @@ export const useTermStore = create<TermStore>((set, get) => ({
 
   applyMirrorLayout: (layout) => {
     const c = layout.center;
+    const displayed = new Set(liveTerminalIds());
     set((s) => ({
+      // A leaf arriving from a peer is not a request to start anything. If the backend says no process
+      // stands behind that session, render a placeholder: mounting a terminal is what starts one, and
+      // that is how a browser following a desktop which had merely *restored* a workspace launched every
+      // one of those sessions for real. A leaf the user opened here is intent to start and never lands
+      // in this branch.
+      dormantSessions: Object.values(c.paneTrees).reduce(
+        (acc, tree) => {
+          for (const sid of collectSessionIds(tree)) {
+            if (!displayed.has(sid) && s.runtimes[sid]?.alive === false) acc[sid] = true;
+          }
+          return acc;
+        },
+        { ...s.dormantSessions } as Record<SessionId, true>,
+      ),
       openTabs: c.openTabs,
       liveTabs: c.liveTabs,
       pinnedTabs: c.pinnedTabs,

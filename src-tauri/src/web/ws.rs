@@ -199,6 +199,11 @@ async fn handle_socket(
         "view://request",
         crate::host::TREE_CHANGED,
         crate::host::PRESETS_CHANGED,
+        // Preferences are backend-authoritative; this tells every client to re-read them mid-run.
+        crate::host::SETTINGS_CHANGED,
+        // Authoritative session facts. Registered here, per connection, rather than on attach: a dot on a
+        // session this client has never opened is exactly what the per-attach registration could not do.
+        crate::session_state::STATE_EVENT,
         crate::git::CLONE_PROGRESS_EVENT,
         // UI mirror: the shared layout and the on/off switch both reach every client this way.
         crate::web::mirror::LAYOUT_EVENT,

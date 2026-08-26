@@ -37,6 +37,10 @@ pub struct SpawnRequest {
     /// Effort override chosen in the spawn confirmation dialog.
     #[serde(default)]
     pub effort: Option<String>,
+    /// Set by `vspawn --yes`: start the child immediately with default settings, skipping the
+    /// confirmation dialog even when the "confirm before spawn" setting is on.
+    #[serde(default)]
+    pub no_confirm: bool,
 }
 
 /// Request from `view <file|URL>` to open a tab.
@@ -261,6 +265,9 @@ fn serve_with(
     mut on_view: impl FnMut(ViewRequest),
 ) {
     let mut turn_guard = CodexTurnGuard::default();
+    // Sessions already named from an Antigravity transcript. Their payloads carry no prompt, so the name
+    // comes from a file read; remembering the ones that succeeded keeps it to one read per session.
+    let mut agy_named: std::collections::HashSet<String> = std::collections::HashSet::new();
     for mut request in server.incoming_requests() {
         // Copy the URL before borrowing the request to read its body.
         let url = request.url().to_string();
@@ -296,6 +303,14 @@ fn serve_with(
             // session name once instead of asking every client to rename it.
             if let Some(text) = parse_first_prompt(&body) {
                 on_prompt(sid.clone(), text);
+            } else if !agy_named.contains(&sid) {
+                // Antigravity is the one agent whose hooks carry no prompt text; its payload names the
+                // transcript instead. An empty read means the first user step is not flushed yet, so the
+                // session's next event tries again.
+                if let Some(text) = crate::agent::antigravity::first_prompt_from_transcript(&body) {
+                    agy_named.insert(sid.clone());
+                    on_prompt(sid.clone(), text);
+                }
             }
             // Emit an additional Tool signal from lifecycle fields so Info can show active tooling.
             if let Some(tool_signal) = parse_tool_signal(&body) {
@@ -317,8 +332,9 @@ fn serve_with(
 }
 
 /// Extract an agent session ID from a hook JSON body. Support `session_id`, `sessionId`,
-/// `taskId`/`task_id`, and Codex notify's `thread-id`/`thread_id`. Because hook URLs already embed
-/// the VelaTerm sid, this mapping is more precise than scanning rollouts by cwd/mtime.
+/// `taskId`/`task_id`, Codex notify's `thread-id`/`thread_id`, and Antigravity's `conversationId`.
+/// Because hook URLs already embed the VelaTerm sid, this mapping is more precise than scanning
+/// rollouts by cwd/mtime.
 fn parse_session_id(body: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
     let sid = v
@@ -327,7 +343,9 @@ fn parse_session_id(body: &str) -> Option<String> {
         .or_else(|| v.get("taskId"))
         .or_else(|| v.get("task_id"))
         .or_else(|| v.get("thread-id"))
-        .or_else(|| v.get("thread_id"))?
+        .or_else(|| v.get("thread_id"))
+        // Antigravity spells it `conversationId`; its payloads carry no other identifier.
+        .or_else(|| v.get("conversationId"))?
         .as_str()?
         .trim();
     if sid.is_empty() {
@@ -341,8 +359,11 @@ fn parse_session_id(body: &str) -> Option<String> {
 /// - Claude `UserPromptSubmit` and Cursor `beforeSubmitPrompt`: top-level `prompt`.
 /// - Cline `prompt_submit`: nested `userPromptSubmit.prompt`.
 /// - Codex `agent-turn-complete`: `input-messages[]`, so naming happens after the first turn.
+/// - Copilot `userPromptSubmitted`: top-level `prompt` in a body that names no event at all.
 ///
 /// Other hooks and non-JSON bodies return None. The backend uses this text to name placeholders.
+/// Antigravity is the one agent no branch here can serve; its payloads carry no prompt, so
+/// `serve_with` falls back to `antigravity::first_prompt_from_transcript`.
 fn parse_first_prompt(body: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
     // Codex notify supplies string-array input-messages. For completed turns, use the first nonempty
@@ -379,6 +400,18 @@ fn parse_first_prompt(body: &str) -> Option<String> {
                 .and_then(|u| u.get("prompt"))
                 .and_then(|p| p.as_str()),
         );
+    }
+    // Copilot names no event in the body at all: `userPromptSubmitted` sends
+    // `{sessionId, timestamp, cwd, prompt}`, while its tool events send `toolName`/`toolArgs` and no
+    // `prompt` (both captured from copilot CLI). So a body that names neither an event nor a tool, yet
+    // carries a prompt, is a submit. Agents that do name their event never reach here, which keeps
+    // deliberate exclusions such as Kiro's prompt-repeating `agentSpawn` excluded.
+    if v.get("hook_event_name").is_none()
+        && v.get("hookEventName").is_none()
+        && v.get("hookName").is_none()
+        && v.get("toolName").is_none()
+    {
+        return non_empty_trimmed(v.get("prompt").and_then(|p| p.as_str()));
     }
     None
 }
@@ -1300,6 +1333,9 @@ mod tests {
             parse_session_id(codex_snake).as_deref(),
             Some("codex-thread-2")
         );
+        // Antigravity payloads carry only a protojson camelCase conversationId.
+        let agy = r#"{"conversationId":"f1d8a47f","invocationNum":0,"workspacePaths":[]}"#;
+        assert_eq!(parse_session_id(agy).as_deref(), Some("f1d8a47f"));
         // Blank/missing fields and invalid JSON yield None.
         assert!(parse_session_id(r#"{"session_id":"  "}"#).is_none());
         assert!(parse_session_id(r#"{"sessionId":"  "}"#).is_none());
@@ -1344,6 +1380,17 @@ mod tests {
             parse_first_prompt(r#"{"type":"agent-turn-complete","input-messages":[]}"#).is_none()
         );
         // Missing/blank nested Cline fields yield None without falling back to unrelated fields.
+        // Copilot's captured userPromptSubmitted body names no event; its tool events carry no prompt.
+        let copilot = r#"{"sessionId":"0923e786","timestamp":1787711034375,"cwd":"/tmp","prompt":"Reply with only: OK"}"#;
+        assert_eq!(
+            parse_first_prompt(copilot).as_deref(),
+            Some("Reply with only: OK")
+        );
+        let copilot_tool = r#"{"sessionId":"0923e786","cwd":"/tmp","toolName":"view","toolArgs":"{}"}"#;
+        assert!(parse_first_prompt(copilot_tool).is_none());
+        // Copilot's sessionStart repeats the -p prompt as initialPrompt, which must not name the session.
+        let copilot_start = r#"{"sessionId":"0923e786","cwd":"/tmp","source":"new","initialPrompt":"Reply with only: OK"}"#;
+        assert!(parse_first_prompt(copilot_start).is_none());
         assert!(parse_first_prompt(r#"{"hookName":"prompt_submit","taskId":"t1"}"#).is_none());
         assert!(parse_first_prompt(
             r#"{"hookName":"prompt_submit","userPromptSubmit":{"prompt":"  "}}"#
@@ -1486,6 +1533,74 @@ mod tests {
 
     /// Real HTTP serve_with test posts the same /spawn body as `vlx-spawn` and verifies routing and
     /// parsing through HTTP, token validation, and the on_spawn callback.
+    #[test]
+    fn serve_with_names_antigravity_sessions_from_the_transcript() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        // Antigravity hook bodies carry no prompt, so the service reads the transcript they name.
+        let dir = std::env::temp_dir().join(format!("vlx-agy-serve-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let transcript = dir.join("transcript_full.jsonl");
+        let step = serde_json::json!({
+            "step_index": 0,
+            "type": "USER_INPUT",
+            "content": "<USER_REQUEST>\nFix the login page styling\n</USER_REQUEST>"
+        });
+        std::fs::write(&transcript, format!("{step}\n")).unwrap();
+        let body = serde_json::json!({
+            "conversationId": "conv-1",
+            "transcriptPath": transcript.display().to_string()
+        })
+        .to_string();
+
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let (tx, rx) = mpsc::channel();
+        let (id_tx, id_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            serve_with(
+                server,
+                "tok",
+                |_sid, _sig| {},
+                move |sid, prompt| {
+                    let _ = tx.send((sid, prompt));
+                },
+                move |sid, agent_id| {
+                    let _ = id_tx.send((sid, agent_id));
+                },
+                |_req| {},
+                |_req| {},
+            );
+        });
+
+        let url = format!("http://127.0.0.1:{port}/hook/s1?t=tok&e=working");
+        forward_notify(&url, &body);
+
+        assert_eq!(
+            id_rx
+                .recv_timeout(Duration::from_secs(3))
+                .expect("conversationId should be captured as the resume anchor"),
+            ("s1".to_string(), "conv-1".to_string())
+        );
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(3))
+                .expect("the transcript should supply the first prompt"),
+            ("s1".to_string(), "Fix the login page styling".to_string())
+        );
+
+        // The read happens once per session: later events of the same session no longer reread it.
+        let stop = format!("http://127.0.0.1:{port}/hook/s1?t=tok&e=waiting");
+        forward_notify(&stop, &body);
+        assert!(
+            rx.recv_timeout(Duration::from_millis(500)).is_err(),
+            "a named session must not report its first prompt twice"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn serve_with_routes_spawn_request() {
         use std::sync::mpsc;

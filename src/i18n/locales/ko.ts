@@ -53,6 +53,9 @@ const ko: typeof en = {
   "titlebar.browser": "내장 브라우저", // Built-in Browser
   "titlebar.remoteAccess": "원격 접속 (브라우저)", // Remote Access (Browser)
   "titlebar.connectRemote": "원격 서버에 연결", // Connect to Remote Server
+  "titlebar.mirrored": "미러링 중", // Mirrored
+  "titlebar.mirroredHint":
+    "미러링이 켜져 있습니다. 탭, 분할, 활성 세션이 호스트를 따릅니다. 스위치는 호스트에 있습니다.", // Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.
   "titlebar.share": "공유", // Share
   "share.title": "VelaTerm 공유", // Share VelaTerm
   "share.subtitle":
@@ -145,7 +148,7 @@ const ko: typeof en = {
   "spawn.effortLabel": "추론 강도", // Effort
   "spawn.modelDefault": "기본값", // Default
   "spawn.modelLoading": "모델 목록 불러오는 중…", // Listing models…
-  "spawn.modelListUnavailable": "모델 목록을 가져올 수 없음 — 에이전트 인수에 직접 입력", // No model list available
+  "spawn.modelListUnavailable": "모델 목록을 가져올 수 없음 — 위에 식별자를 입력하세요", // No model list available — type an identifier above
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
@@ -309,7 +312,7 @@ const ko: typeof en = {
   "remote.start": "서버 시작", // Start Server
   "remote.portLabel": "포트", // Port
   "remote.portInvalid": "포트는 1에서 65535 사이여야 합니다", // Port must be between 1 and 65535
-  "remote.ipLabel": "IP 주소", // IP address
+  "remote.ipLabel": "IP", // IP address
   "remote.ipAuto": "자동 (첫 번째 LAN 주소)", // Automatic (first LAN address)
   "remote.ipVpn": "VPN", // VPN
   "remote.qrHint":
@@ -368,6 +371,9 @@ const ko: typeof en = {
   "connect.showPassword": "비밀번호 표시",
   "connect.hidePassword": "비밀번호 숨기기",
   "connect.urlPasswordPlaceholder": "로그인 비밀번호",
+  "connect.mirror": "기기 간 레이아웃 미러링", // Mirror layout across devices
+  "connect.mirrorHint":
+    "이 원격 서비스에 연결된 모든 기기에서 탭, 분할, 활성 세션이 동일하게 유지됩니다. 끄면 기기마다 자체 레이아웃을 유지합니다.", // Tabs, splits, and the active session stay the same on every device connected to this remote service. Off = each device keeps its own layout.
   "connect.shareDesktopDb": "원격 데스크톱 앱의 데이터베이스 공유",
   "connect.shareDesktopDbHint":
     "원격 컴퓨터의 데스크톱 앱과 동일한 데이터베이스를 공유합니다(양쪽 버전을 동일하게 유지하는 것을 권장). 끄면 독립된 데이터베이스를 사용합니다.",
@@ -779,7 +785,19 @@ const ko: typeof en = {
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
+  "files.dblClickOpen": "두 번 클릭하여 열기",
   "files.deleteConfirm": (name) => `"${name}"을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다.`, // Delete "{name}"? This can't be undone.
+
+  // ── File transfer (remote access) ──
+  "transfer.uploadsTitle": "업로드", // Uploads
+  "transfer.download": "다운로드", // Download
+  "transfer.upload": "파일 업로드…", // Upload Files…
+  "transfer.uploadTooltip": "이 폴더에 파일 업로드", // Upload files to this folder
+  "transfer.clear": "지우기", // Clear
+  "transfer.cancelled": "취소됨", // Cancelled
+  "transfer.failed": "실패", // Failed
+  "transfer.stalled": "다시 연결하는 중…", // Reconnecting…
+  "transfer.foldersUnsupported": "폴더는 업로드할 수 없습니다.", // Folders can't be uploaded.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => `세션 ${n}개`, // {n} sessions
@@ -954,7 +972,7 @@ const ko: typeof en = {
   "updater.hide": "Hide", // TODO translate
   "updater.hideHint": "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
   "updater.downloadManually": "Download manually", // TODO translate
-  "updater.downloadManuallyHint": "Open the installer download in your browser.", // TODO translate
+  "updater.downloadManuallyHint": "Open the download page in your browser.", // TODO translate
   "updater.windowsNotice":
     "VelaTerm will close while the installer runs, then reopen on its own.", // TODO translate
   "updater.installingWindows":

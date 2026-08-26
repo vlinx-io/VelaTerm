@@ -4,6 +4,7 @@ import { useState } from "react";
 import { normalizeArgDashes } from "../args";
 import { useT } from "../i18n";
 import { Backdrop } from "./Backdrop";
+import Select from "./Select";
 
 export interface FieldDef {
   key: string;
@@ -46,11 +47,9 @@ function SelectField({
 
   return (
     <>
-      <select
-        className="vlx-input"
+      <Select
         value={custom ? CUSTOM_SENTINEL : value}
-        onChange={(e) => {
-          const v = e.target.value;
+        onChange={(v) => {
           if (v === CUSTOM_SENTINEL) {
             setCustom(true);
           } else {
@@ -58,16 +57,15 @@ function SelectField({
             onChange(v);
           }
         }}
-      >
-        {opts.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-        {field.allowCustom && (
-          <option value={CUSTOM_SENTINEL}>{t("form.customOption")}</option>
-        )}
-      </select>
+        options={[
+          ...opts,
+          ...(field.allowCustom
+            ? [{ value: CUSTOM_SENTINEL, label: t("form.customOption"), separatorBefore: true }]
+            : []),
+        ]}
+        width="100%"
+        ariaLabel={field.label}
+      />
       {custom && (
         <input
           className="vlx-input"

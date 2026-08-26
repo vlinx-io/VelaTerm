@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from "react";
 import { Backdrop } from "../../components/Backdrop";
-import Icons from "../../components/Icons";
+import Select, { type SelectOption } from "../../components/Select";
 import {
   getLangChoice,
   LOCALE_NAMES,
@@ -92,133 +92,41 @@ const STEP_BTN: React.CSSProperties = {
 };
 
 
-/** Custom language dropdown. WKWebView forces native selects into a light beveled style that clashes
- * with the theme, so this uses a button and popup list. */
+/** Language picker. Writing the choice through to the backend as well keeps other shells in sync. */
 function LangSelect() {
   const t = useT();
   const choice = getLangChoice();
-  const [open, setOpen] = useState(false);
 
-  const options: { value: LangChoice; label: string }[] = [
+  const options: SelectOption<LangChoice>[] = [
     { value: "auto", label: t("settings.langAuto") },
     ...LOCALES.map((loc) => ({ value: loc as LangChoice, label: LOCALE_NAMES[loc] })),
   ];
-  const current = options.find((o) => o.value === choice)?.label ?? choice;
 
   return (
-    <div style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          width: 160,
-          height: 26,
-          padding: "0 8px",
-          background: "var(--bg-active)",
-          color: "var(--text)",
-          border: `1px solid ${open ? "var(--accent)" : "var(--border)"}`,
-          borderRadius: 6,
-          fontSize: 11.5,
-          cursor: "pointer",
-        }}
-      >
-        <span
-          style={{
-            flex: 1,
-            textAlign: "left",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {current}
-        </span>
-        <Icons.chevD size={12} style={{ color: "var(--text-dim)", flex: "none" }} />
-      </button>
-
-      {open && (
-        <>
-          {/* Transparent backdrop closes the dropdown; the outer card stops mousedown before it closes the modal. */}
-          <div
-            style={{ position: "fixed", inset: 0, zIndex: 1140 }}
-            onMouseDown={() => setOpen(false)}
-          />
-          <div
-            style={{
-              position: "absolute",
-              top: "calc(100% + 4px)",
-              right: 0,
-              zIndex: 1150,
-              width: 172,
-              maxHeight: 260,
-              overflowY: "auto",
-              padding: 4,
-              background: "var(--bg-2)",
-              border: "1px solid var(--border-strong)",
-              borderRadius: 8,
-              boxShadow: "var(--shadow)",
-            }}
-          >
-            {options.map((opt) => {
-              const on = opt.value === choice;
-              return (
-                <div
-                  key={opt.value}
-                  onClick={() => {
-                    setLang(opt.value);
-                    pushSetting("vlx-lang", opt.value); // Also persist in the backend for cross-shell sharing.
-                    setOpen(false);
-                  }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "5px 8px",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    fontSize: 11.5,
-                    color: on ? "var(--accent)" : "var(--text)",
-                    background: on ? "var(--accent-soft)" : "transparent",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!on) e.currentTarget.style.background = "var(--bg-3, rgba(128,128,128,0.12))";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!on) e.currentTarget.style.background = "transparent";
-                  }}
-                >
-                  <span
-                    style={{
-                      flex: 1,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {opt.label}
-                  </span>
-                  {on && <Icons.check size={12} style={{ flex: "none" }} />}
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-    </div>
+    <Select
+      value={choice}
+      onChange={(v) => {
+        setLang(v);
+        pushSetting("vlx-lang", v); // Also persist in the backend for cross-shell sharing.
+      }}
+      options={options}
+      size="sm"
+      width={160}
+      menuWidth={172}
+      align="right"
+      ariaLabel={t("settings.language")}
+    />
   );
 }
 
-/** Custom default-shell dropdown containing the system default and detected shells. Hide the row
- * when detection is unavailable. New terminals without an explicit choice use this value; tree and
+/** Default-shell picker listing the system default plus detected shells. The row hides itself when
+ * detection turns up nothing. New terminals without an explicit choice use this value; tree and
  * edit-form entry points may still override it per launch. */
 function ShellSelect() {
   const t = useT();
   const defaultShell = useTermStore((s) => s.defaultShell);
   const setDefaultShell = useTermStore((s) => s.setDefaultShell);
   const [shells, setShells] = useState<ShellOption[]>([]);
-  const [open, setOpen] = useState(false);
   useEffect(() => {
     let alive = true;
     listShells()
@@ -231,114 +139,23 @@ function ShellSelect() {
 
   if (!shells.length) return null;
 
-  const options: { value: string; label: string }[] = [
+  const options = [
     { value: "", label: t("tree.shellSystemDefault") },
     ...shells.map((s) => ({ value: s.path, label: s.label })),
   ];
-  const current = options.find((o) => o.value === defaultShell)?.label ?? defaultShell;
 
   return (
     <Field label={t("settings.defaultShell")}>
-      <div style={{ position: "relative" }}>
-        <button
-          onClick={() => setOpen((o) => !o)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            width: 160,
-            height: 26,
-            padding: "0 8px",
-            background: "var(--bg-active)",
-            color: "var(--text)",
-            border: `1px solid ${open ? "var(--accent)" : "var(--border)"}`,
-            borderRadius: 6,
-            fontSize: 11.5,
-            cursor: "pointer",
-          }}
-        >
-          <span
-            style={{
-              flex: 1,
-              textAlign: "left",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {current}
-          </span>
-          <Icons.chevD size={12} style={{ color: "var(--text-dim)", flex: "none" }} />
-        </button>
-
-        {open && (
-          <>
-            <div
-              style={{ position: "fixed", inset: 0, zIndex: 1140 }}
-              onMouseDown={() => setOpen(false)}
-            />
-            <div
-              style={{
-                position: "absolute",
-                top: "calc(100% + 4px)",
-                right: 0,
-                zIndex: 1150,
-                width: 172,
-                maxHeight: 260,
-                overflowY: "auto",
-                padding: 4,
-                background: "var(--bg-2)",
-                border: "1px solid var(--border-strong)",
-                borderRadius: 8,
-                boxShadow: "var(--shadow)",
-              }}
-            >
-              {options.map((opt) => {
-                const on = opt.value === defaultShell;
-                return (
-                  <div
-                    key={opt.value || "__system__"}
-                    onClick={() => {
-                      setDefaultShell(opt.value);
-                      setOpen(false);
-                    }}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 6,
-                      padding: "5px 8px",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                      fontSize: 11.5,
-                      color: on ? "var(--accent)" : "var(--text)",
-                      background: on ? "var(--accent-soft)" : "transparent",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!on)
-                        e.currentTarget.style.background = "var(--bg-3, rgba(128,128,128,0.12))";
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!on) e.currentTarget.style.background = "transparent";
-                    }}
-                  >
-                    <span
-                      style={{
-                        flex: 1,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {opt.label}
-                    </span>
-                    {on && <Icons.check size={12} style={{ flex: "none" }} />}
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </div>
+      <Select
+        value={defaultShell}
+        onChange={setDefaultShell}
+        options={options}
+        size="sm"
+        width={160}
+        menuWidth={172}
+        align="right"
+        ariaLabel={t("settings.defaultShell")}
+      />
     </Field>
   );
 }
@@ -371,16 +188,17 @@ function isFontAvailable(name: string): boolean {
 function FontSelect({
   value,
   onChange,
+  label,
 }: {
   value: string | null;
   onChange: (v: string | null) => void;
+  /** Field caption, reused as the control's accessible name. */
+  label: string;
 }) {
   const t = useT();
-  const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const isPreset = value != null && MONO_FONTS.includes(value);
-  const display = value == null ? t("settings.fontDefault") : value;
   const [missing, setMissing] = useState(false);
   useEffect(() => {
     if (value == null) {
@@ -436,147 +254,39 @@ function FontSelect({
     );
   }
 
+  // Sentinel for the row that opens the free-text editor. A NUL prefix cannot collide with a font name.
+  const CUSTOM = "\u0000custom";
+  const options = [
+    { value: "", label: t("settings.fontDefault") },
+    ...MONO_FONTS.map((f) => ({ value: f, label: f })),
+    // A typed-in name keeps its own row, so picking a preset and coming back does not mean retyping it.
+    ...(value != null && !isPreset ? [{ value, label: value }] : []),
+    { value: CUSTOM, label: t("settings.fontCustom"), separatorBefore: true },
+  ];
+
   return (
-    <div style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          width: 160,
-          height: 26,
-          padding: "0 8px",
-          background: "var(--bg-active)",
-          color: "var(--text)",
-          border: `1px solid ${open ? "var(--accent)" : "var(--border)"}`,
-          borderRadius: 6,
-          fontSize: 11.5,
-          cursor: "pointer",
+    <div>
+      <Select
+        value={value ?? ""}
+        onChange={(v) => {
+          if (v === CUSTOM) {
+            setDraft(value && !isPreset ? value : "");
+            setEditing(true);
+            return;
+          }
+          onChange(v || null);
         }}
-      >
-        <span
-          style={{
-            flex: 1,
-            textAlign: "left",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {display}
-        </span>
-        <Icons.chevD size={12} style={{ color: "var(--text-dim)", flex: "none" }} />
-      </button>
+        options={options}
+        size="sm"
+        width={160}
+        menuWidth={172}
+        align="right"
+        ariaLabel={label}
+      />
       {missing && (
         <div style={{ marginTop: 4, width: 160, fontSize: 10.5, color: "var(--amber, #f5b14c)" }}>
           {t("settings.fontUnavailable")}
         </div>
-      )}
-
-      {open && (
-        <>
-          <div
-            style={{ position: "fixed", inset: 0, zIndex: 1140 }}
-            onMouseDown={() => setOpen(false)}
-          />
-          <div
-            style={{
-              position: "absolute",
-              top: "calc(100% + 4px)",
-              right: 0,
-              zIndex: 1150,
-              width: 172,
-              maxHeight: 260,
-              overflowY: "auto",
-              padding: 4,
-              background: "var(--bg-2)",
-              border: "1px solid var(--border-strong)",
-              borderRadius: 8,
-              boxShadow: "var(--shadow)",
-            }}
-          >
-            {[
-              {
-                key: "__default",
-                label: t("settings.fontDefault"),
-                on: value == null,
-                act: () => {
-                  onChange(null);
-                  setOpen(false);
-                },
-              },
-              ...MONO_FONTS.map((f) => ({
-                key: f,
-                label: f,
-                on: value === f,
-                act: () => {
-                  onChange(f);
-                  setOpen(false);
-                },
-              })),
-              // A custom name is listed as its own row, so picking a preset and coming back does not mean
-              // retyping it. `__custom` below always opens the editor with the current value.
-              ...(value != null && !isPreset
-                ? [
-                    {
-                      key: "__current",
-                      label: value,
-                      on: true,
-                      act: () => {
-                        setOpen(false);
-                      },
-                    },
-                  ]
-                : []),
-              {
-                key: "__custom",
-                label: t("settings.fontCustom"),
-                on: false,
-                act: () => {
-                  setDraft(value && !isPreset ? value : "");
-                  setOpen(false);
-                  setEditing(true);
-                },
-              },
-            ].map((opt) => (
-              <div
-                key={opt.key}
-                onClick={opt.act}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "5px 8px",
-                  borderRadius: 6,
-                  cursor: "pointer",
-                  fontSize: 11.5,
-                  color: opt.on ? "var(--accent)" : "var(--text)",
-                  background: opt.on ? "var(--accent-soft)" : "transparent",
-                }}
-                onMouseEnter={(e) => {
-                  if (!opt.on)
-                    e.currentTarget.style.background = "var(--bg-3, rgba(128,128,128,0.12))";
-                }}
-                onMouseLeave={(e) => {
-                  if (!opt.on) e.currentTarget.style.background = "transparent";
-                }}
-              >
-                <span
-                  style={{
-                    flex: 1,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {opt.label}
-                </span>
-                {opt.on && <Icons.check size={12} style={{ flex: "none" }} />}
-              </div>
-            ))}
-          </div>
-        </>
       )}
     </div>
   );
@@ -904,7 +614,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   />
                 </Field>
                 <Field label={t("settings.uiFont")}>
-                  <FontSelect value={uiFontFamily} onChange={setUiFontFamily} />
+                  <FontSelect value={uiFontFamily} onChange={setUiFontFamily} label={t("settings.uiFont")} />
                 </Field>
                 <Field label={t("settings.uiFontSize")}>
                   <FontSizeStepper
@@ -925,7 +635,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 <ImagePasteModeField />
                 <ShellSelect />
                 <Field label={t("settings.termFont")}>
-                  <FontSelect value={termFontFamily} onChange={setTermFontFamily} />
+                  <FontSelect value={termFontFamily} onChange={setTermFontFamily} label={t("settings.termFont")} />
                 </Field>
                 <Field label={t("settings.termFontSize")}>
                   <FontSizeStepper

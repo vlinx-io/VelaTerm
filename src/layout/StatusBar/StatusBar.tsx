@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Icons from "../../components/Icons";
+import { SELECT_PANEL } from "../../components/Select";
 import { SessionStatusBadge } from "../../components/SessionStatusBadge";
 import { useGitBranchInfo } from "../../hooks/useGitBranch";
 import { t, useT } from "../../i18n";
@@ -330,20 +331,13 @@ function BackgroundTabsSeg() {
       {open && (
         <div
           style={{
-            position: "absolute",
+            ...SELECT_PANEL,
+            top: undefined, // Opens upward: the status bar sits at the bottom of the window.
             bottom: "100%",
             right: 0,
             marginBottom: 6,
-            zIndex: 1000,
             minWidth: 280,
             maxWidth: 400,
-            maxHeight: 260,
-            overflowY: "auto",
-            padding: 4,
-            background: "var(--bg-2)",
-            border: "1px solid var(--border-strong)",
-            borderRadius: 8,
-            boxShadow: "var(--shadow)",
             cursor: "default",
           }}
           onClick={(e) => e.stopPropagation()}
@@ -377,7 +371,7 @@ function BackgroundTabsSeg() {
                   color: "var(--text)",
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "var(--bg-3, rgba(128,128,128,0.12))";
+                  e.currentTarget.style.background = "var(--bg-hover)";
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.background = "transparent";
@@ -563,18 +557,15 @@ function PermissionSeg() {
       {open && (
         <div
           style={{
-            position: "absolute",
+            ...SELECT_PANEL,
+            top: undefined, // Opens upward, as above.
             bottom: "100%",
             left: 0,
             marginBottom: 6,
-            zIndex: 1000,
             minWidth: 240,
             maxWidth: 340,
+            maxHeight: undefined,
             padding: 6,
-            background: "var(--bg-2)",
-            border: "1px solid var(--border-strong)",
-            borderRadius: 8,
-            boxShadow: "var(--shadow)",
             cursor: "default",
             color: "var(--text)",
           }}

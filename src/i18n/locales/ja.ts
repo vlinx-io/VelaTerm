@@ -53,6 +53,9 @@ const ja: typeof en = {
   "titlebar.browser": "内蔵ブラウザ", // Built-in Browser
   "titlebar.remoteAccess": "リモートアクセス（ブラウザ）", // Remote Access (Browser)
   "titlebar.connectRemote": "リモートサーバーに接続", // Connect to Remote Server
+  "titlebar.mirrored": "ミラー中", // Mirrored
+  "titlebar.mirroredHint":
+    "ミラーが有効です。タブ・分割・アクティブなセッションはホストに追従します。切り替えはホスト側にあります。", // Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.
   "titlebar.share": "共有", // Share
   "share.title": "VelaTerm を共有", // Share VelaTerm
   "share.subtitle":
@@ -145,7 +148,7 @@ const ja: typeof en = {
   "spawn.effortLabel": "推論強度", // Effort
   "spawn.modelDefault": "デフォルト", // Default
   "spawn.modelLoading": "モデルを取得中…", // Listing models…
-  "spawn.modelListUnavailable": "モデル一覧を取得できません — エージェント引数で指定してください", // No model list available
+  "spawn.modelListUnavailable": "モデル一覧を取得できません — 上の欄に識別子を入力してください", // No model list available — type an identifier above
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
@@ -309,7 +312,7 @@ const ja: typeof en = {
   "remote.start": "サーバーを開始", // Start Server
   "remote.portLabel": "ポート", // Port
   "remote.portInvalid": "ポートは 1〜65535 の範囲で指定してください", // Port must be between 1 and 65535
-  "remote.ipLabel": "IP アドレス", // IP address
+  "remote.ipLabel": "IP", // IP address
   "remote.ipAuto": "自動（最初の LAN アドレス）", // Automatic (first LAN address)
   "remote.ipVpn": "VPN", // VPN
   "remote.qrHint":
@@ -369,6 +372,9 @@ const ja: typeof en = {
   "connect.showPassword": "パスワードを表示",
   "connect.hidePassword": "パスワードを非表示",
   "connect.urlPasswordPlaceholder": "ログインパスワード",
+  "connect.mirror": "デバイス間でレイアウトを同期", // Mirror layout across devices
+  "connect.mirrorHint":
+    "このリモートサービスに接続したすべての端末で、タブ・分割・アクティブなセッションが一致します。オフなら各端末が自分のレイアウトを保ちます。", // Tabs, splits, and the active session stay the same on every device connected to this remote service. Off = each device keeps its own layout.
   "connect.shareDesktopDb": "リモートのデスクトップ版のデータベースを共用",
   "connect.shareDesktopDbHint":
     "リモートマシンのデスクトップ版と同じデータベースを共有します（両方を同じバージョンに揃えることを推奨）。オフにすると独立したデータベースを使用します。",
@@ -782,7 +788,19 @@ const ja: typeof en = {
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
+  "files.dblClickOpen": "ダブルクリックで開く",
   "files.deleteConfirm": (name) => `「${name}」を削除しますか？この操作は元に戻せません。`, // Delete "{name}"? This can't be undone.
+
+  // ── File transfer (remote access) ──
+  "transfer.uploadsTitle": "アップロード", // Uploads
+  "transfer.download": "ダウンロード", // Download
+  "transfer.upload": "ファイルをアップロード…", // Upload Files…
+  "transfer.uploadTooltip": "このフォルダーにファイルをアップロード", // Upload files to this folder
+  "transfer.clear": "クリア", // Clear
+  "transfer.cancelled": "キャンセル済み", // Cancelled
+  "transfer.failed": "失敗", // Failed
+  "transfer.stalled": "再接続中…", // Reconnecting…
+  "transfer.foldersUnsupported": "フォルダーはアップロードできません。", // Folders can't be uploaded.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => `${n} セッション`, // {n} sessions
@@ -957,7 +975,7 @@ const ja: typeof en = {
   "updater.hide": "Hide", // TODO translate
   "updater.hideHint": "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
   "updater.downloadManually": "Download manually", // TODO translate
-  "updater.downloadManuallyHint": "Open the installer download in your browser.", // TODO translate
+  "updater.downloadManuallyHint": "Open the download page in your browser.", // TODO translate
   "updater.windowsNotice":
     "VelaTerm will close while the installer runs, then reopen on its own.", // TODO translate
   "updater.installingWindows":

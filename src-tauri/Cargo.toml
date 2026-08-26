@@ -1,6 +1,6 @@
 [package]
 name = "velaterm"
-version = "0.1.104"
+version = "0.1.105"
 description = "VelaTerm multi-session terminal manager"
 authors = ["vlinx"]
 edition = "2021"
@@ -80,7 +80,9 @@ tiny_http = "0.12"
 # Browser remote-access service hosts static frontend assets and bridges commands, events, and PTY over
 # WebSocket. An axum Tokio runtime runs on its own thread outside the Tauri event loop.
 axum = { version = "0.7", features = ["ws"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "fs"] }
+# ReaderStream turns a file handle into a response body, so a download streams instead of being buffered.
+tokio-util = { version = "0.7", features = ["io"] }
 # Extension traits for axum WebSocket split, next, and send.
 futures-util = "0.3"
 # Embed compressed ../dist assets in release binaries for offline use and transparent decompression, while

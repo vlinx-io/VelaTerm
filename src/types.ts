@@ -174,6 +174,14 @@ export interface SessionRuntime {
   authoritative?: boolean;
   /** Backend activity indicating sustained output; used only to infer state for fallback agents run manually in Terminal sessions. */
   busy?: boolean;
+  /**
+   * Whether a process is running behind this session, as reported by the backend.
+   *
+   * Undefined means the backend has said nothing yet, which is not the same as "no process": a session
+   * nobody has ever started has no record at all. Only an explicit `false` justifies rendering a
+   * placeholder instead of mounting a terminal, because mounting is what starts a process.
+   */
+  alive?: boolean;
   /** Most recent OSC terminal title, for information display. */
   title?: string | null;
   /**
@@ -187,11 +195,6 @@ export interface SessionRuntime {
    * falsely appear as waiting. See plan §3.6.
    */
   everWorked?: boolean;
-  /**
-   * Start time in milliseconds of continuous screen-detected idle, used by arbitration to require stable idle
-   * for more than two seconds. Reset to zero for any non-idle result; record the current time on first idle.
-   */
-  lastIdleAt?: number;
   // Note: the "most recent working transition" used by the 1200 ms working→idle debounce has moved out of this
   // type. It changes on every working signal and would defeat applyStatusSignal's value-level guard (React-side
   // deduplication). It now lives in termStore's module-level workingPulseAt Map for internal decisions only.

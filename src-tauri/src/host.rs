@@ -37,6 +37,13 @@ pub const TREE_CHANGED: &str = "tree://changed";
 /// `TREE_CHANGED` because presets live outside the session tree and change far less often.
 pub const PRESETS_CHANGED: &str = "presets://changed";
 
+/// Global event emitted after any successful `app_settings` write, carrying **only the key names** that
+/// were written (`Vec<String>`), never their values. `remoteAccess.*` and `gitea.token` are protected
+/// keys that `web/dispatch.rs` strips from a remote client's `get_app_settings` reply; shipping values
+/// in a broadcast would walk straight around that filter. Key names let each client re-read through the
+/// normal path, so the filter still applies. Clients reconcile their local preference cache on receipt.
+pub const SETTINGS_CHANGED: &str = "settings://changed";
+
 /// Cross-platform home directory: `$HOME` on Unix and `%USERPROFILE%` or known-folder APIs on Windows.
 ///
 /// Use this for agent data directories such as `~/.claude`, `~/.codex`, and `~/.cursor` instead of
@@ -174,9 +181,18 @@ impl AppCtx {
     /// subscriber table used by `web/ws.rs` in headless mode.
     pub fn emit<S: serde::Serialize + Clone>(&self, event: &str, payload: S) {
         // Cache the latest pty://status/* value by signal kind in PtyManager so late-attaching browser
-        // clients and hot-reloaded desktop clients receive a snapshot during attach.
+        // clients and hot-reloaded desktop clients receive a snapshot during attach. The same pass feeds
+        // the authoritative session record: it needs the *previous* state to tell a real transition from
+        // a repeat, so read the cache before overwriting it.
         if let Some(sid) = event.strip_prefix("pty://status/") {
             if let Ok(value) = serde_json::to_value(payload.clone()) {
+                let previous = match self {
+                    #[cfg(feature = "gui")]
+                    AppCtx::Tauri(app) => app
+                        .try_state::<PtyManager>()
+                        .and_then(|pty| pty.cached_state_signal(sid)),
+                    AppCtx::Headless(host) => host.pty.cached_state_signal(sid),
+                };
                 match self {
                     #[cfg(feature = "gui")]
                     AppCtx::Tauri(app) => {
@@ -186,6 +202,7 @@ impl AppCtx {
                     }
                     AppCtx::Headless(host) => host.pty.cache_status(sid, &value),
                 }
+                crate::session_state::observe_status(self, sid, &value, previous.as_ref());
             }
         }
         match self {

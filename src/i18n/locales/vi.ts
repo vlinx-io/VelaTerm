@@ -53,6 +53,9 @@ const vi: typeof en = {
   "titlebar.browser": "Trình duyệt tích hợp",
   "titlebar.remoteAccess": "Truy cập từ xa (Trình duyệt)",
   "titlebar.connectRemote": "Kết nối máy chủ từ xa",
+  "titlebar.mirrored": "Đang phản chiếu", // Mirrored
+  "titlebar.mirroredHint":
+    "Phản chiếu đang bật: thẻ, khung chia và phiên đang mở đi theo máy chủ. Công tắc nằm ở máy chủ.", // Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.
   "titlebar.share": "Chia sẻ",
   "share.title": "Chia sẻ VelaTerm",
   "share.subtitle":
@@ -146,7 +149,7 @@ const vi: typeof en = {
   "spawn.effortLabel": "Effort",
   "spawn.modelDefault": "Mặc định", // Default
   "spawn.modelLoading": "Đang tải danh sách mô hình…", // Listing models…
-  "spawn.modelListUnavailable": "Không có danh sách mô hình — hãy nhập vào tham số agent", // No model list available
+  "spawn.modelListUnavailable": "Không có danh sách mô hình — nhập định danh ở trên", // No model list available — type an identifier above
   "spawn.launch": "Khởi chạy",
   "spawn.remaining": (n: number) => `Còn ${n} yêu cầu đang chờ`,
   "spawn.notifyTitle": "Phiên được tạo đang chờ xác nhận",
@@ -308,7 +311,7 @@ const vi: typeof en = {
   "remote.start": "Khởi động máy chủ",
   "remote.portLabel": "Cổng",
   "remote.portInvalid": "Cổng phải nằm trong khoảng 1 đến 65535",
-  "remote.ipLabel": "Địa chỉ IP", // IP address
+  "remote.ipLabel": "IP", // IP address
   "remote.ipAuto": "Tự động (địa chỉ LAN đầu tiên)", // Automatic (first LAN address)
   "remote.ipVpn": "VPN", // VPN
   "remote.qrHint":
@@ -365,6 +368,9 @@ const vi: typeof en = {
   "connect.showPassword": "Hiện mật khẩu",
   "connect.hidePassword": "Ẩn mật khẩu",
   "connect.urlPasswordPlaceholder": "Mật khẩu đăng nhập",
+  "connect.mirror": "Đồng bộ bố cục giữa các thiết bị", // Mirror layout across devices
+  "connect.mirrorHint":
+    "Thẻ, khung chia và phiên đang mở giống nhau trên mọi thiết bị kết nối tới dịch vụ từ xa này. Không bật thì mỗi thiết bị giữ bố cục riêng.", // Tabs, splits, and the active session stay the same on every device connected to this remote service. Off = each device keeps its own layout.
   "connect.shareDesktopDb": "Dùng cơ sở dữ liệu của ứng dụng máy tính từ xa",
   "connect.shareDesktopDbHint":
     "Dùng chung một cơ sở dữ liệu với ứng dụng máy tính trên máy từ xa (tốt nhất khi cùng phiên bản). Tắt = cơ sở dữ liệu tách biệt.",
@@ -776,7 +782,19 @@ const vi: typeof en = {
   "files.copyPath": "Sao chép đường dẫn",
   "files.copyRelPath": "Sao chép đường dẫn tương đối",
   "files.filterPlaceholder": "Lọc tệp…",
+  "files.dblClickOpen": "Nhấp đúp để mở",
   "files.deleteConfirm": (name: string) => `Xóa “${name}”? Không thể hoàn tác.`,
+
+  // ── File transfer (remote access) ──
+  "transfer.uploadsTitle": "Tệp tải lên", // Uploads
+  "transfer.download": "Tải xuống", // Download
+  "transfer.upload": "Tải tệp lên…", // Upload Files…
+  "transfer.uploadTooltip": "Tải tệp lên thư mục này", // Upload files to this folder
+  "transfer.clear": "Xóa", // Clear
+  "transfer.cancelled": "Đã hủy", // Cancelled
+  "transfer.failed": "Thất bại", // Failed
+  "transfer.stalled": "Đang kết nối lại…", // Reconnecting…
+  "transfer.foldersUnsupported": "Không thể tải thư mục lên.", // Folders can't be uploaded.
 
   // Thanh trạng thái
   "statusbar.sessions": (n: number) => `${n} phiên`,
@@ -938,7 +956,7 @@ const vi: typeof en = {
   "updater.hide": "Ẩn",
   "updater.hideHint": "Tiếp tục tải trong nền. Tiến trình vẫn hiển thị trên thanh trạng thái.",
   "updater.downloadManually": "Tải xuống thủ công",
-  "updater.downloadManuallyHint": "Mở tệp cài đặt trong trình duyệt.",
+  "updater.downloadManuallyHint": "Mở trang tải xuống trong trình duyệt.",
   "updater.windowsNotice":
     "VelaTerm sẽ đóng khi trình cài đặt chạy rồi tự mở lại.",
   "updater.installingWindows":

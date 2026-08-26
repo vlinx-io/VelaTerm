@@ -80,3 +80,62 @@ describe("spawn confirmation claim", () => {
     expect(useTermStore.getState().pendingSpawns).toHaveLength(0);
   });
 });
+
+/** Run one request through handleSpawnRequest against a stubbed executeSpawn, returning that stub. */
+async function handleWith(
+  claim: () => Promise<boolean>,
+  patch: Partial<{ spawnConfirm: boolean }> = {},
+) {
+  const executeSpawn = vi.fn().mockResolvedValue(undefined);
+  resolveSpawn.mockImplementation(claim);
+  useTermStore.setState({
+    spawnConfirm: false,
+    notifyEnabled: false,
+    pendingSpawns: [],
+    executeSpawn,
+    ...patch,
+  });
+  await useTermStore.getState().handleSpawnRequest({ ...request });
+  return executeSpawn;
+}
+
+describe("spawn claim on the immediate-start path", () => {
+  beforeEach(() => {
+    resolveSpawn.mockReset();
+  });
+
+  it("claims before running when confirmation is off", async () => {
+    const executeSpawn = await handleWith(() => Promise.resolve(true));
+
+    expect(resolveSpawn).toHaveBeenCalledWith("parent-1", "build the thing", true);
+    expect(executeSpawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not run when another client already claimed the request", async () => {
+    // Two clients with confirmation off both receive the same spawn event. Without a claim each one
+    // starts the task, producing two worktrees and two agents for one request.
+    const executeSpawn = await handleWith(() => Promise.resolve(false));
+
+    expect(executeSpawn).not.toHaveBeenCalled();
+  });
+
+  it("still runs when the backend cannot answer the claim", async () => {
+    const executeSpawn = await handleWith(() =>
+      Promise.reject(new Error("unknown command")),
+    );
+
+    expect(executeSpawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("queues a card without claiming when confirmation is on", async () => {
+    // The claim belongs to the answer, not to the arrival: claiming here would settle the request
+    // before anyone looked at it and dismiss the card on every other client.
+    const executeSpawn = await handleWith(() => Promise.resolve(true), {
+      spawnConfirm: true,
+    });
+
+    expect(resolveSpawn).not.toHaveBeenCalled();
+    expect(executeSpawn).not.toHaveBeenCalled();
+    expect(useTermStore.getState().pendingSpawns).toHaveLength(1);
+  });
+});

@@ -415,6 +415,29 @@ svg { display: block; }
 .file-row .gb, .diffstat .gb { font-size: 9.5px; width: 14px; text-align: center; font-weight: 700; flex: none; }
 .gb-M { color: var(--yellow); } .gb-A { color: var(--green); } .gb-U { color: var(--text-faint); } .gb-D { color: var(--red); }
 .gb-R { color: var(--cyan, #4aa); } .gb-\? { color: var(--text-faint); }
+/* Row under an external file drag: the upload lands in this directory (or a file's parent). */
+.file-row.drop-target { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+
+/* Transfer queue strip below the Files tree, listing uploads and downloads with progress. */
+.transfer-queue { flex: none; max-height: 30%; overflow-y: auto; border-top: 1px solid var(--border); background: var(--bg-panel); }
+.transfer-head { display: flex; align-items: center; gap: 6px; padding: 5px 10px; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
+.transfer-clear { margin-left: auto; border: none; background: transparent; color: var(--text-faint); font-size: 10px; letter-spacing: 0.5px; text-transform: uppercase; cursor: pointer; }
+.transfer-clear:hover { color: var(--text); }
+.transfer-row { position: relative; display: flex; align-items: center; gap: 6px; padding: 3px 10px; font-size: 11px; color: var(--text-mid); white-space: nowrap; }
+.transfer-row .transfer-dir { flex: none; display: grid; place-items: center; color: var(--text-faint); }
+.transfer-row .transfer-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.transfer-row .transfer-detail { flex: none; color: var(--text-faint); font-size: 10px; overflow: hidden; text-overflow: ellipsis; max-width: 68%; }
+/* A stalled upload is still running, so it keeps its bar and dims rather than reading as finished. */
+.transfer-row.stalled .transfer-detail { color: var(--yellow); }
+.transfer-row.stalled .transfer-bar > span { opacity: 0.5; }
+.transfer-row .transfer-cancel { flex: none; width: 16px; height: 16px; display: grid; place-items: center; border: none; background: transparent; color: var(--text-faint); cursor: pointer; }
+.transfer-row .transfer-cancel:hover { color: var(--red); }
+.transfer-row.failed .transfer-detail { color: var(--red); }
+.transfer-row.done .transfer-detail { color: var(--green); }
+.transfer-row.cancelled { opacity: 0.6; }
+/* Progress fills the row's bottom edge, so a long file name never pushes the bar out of view. */
+.transfer-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--border); }
+.transfer-bar > span { display: block; height: 100%; background: var(--accent); transition: width 0.15s linear; }
 
 .insp-section { padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .insp-section h4 { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; margin-bottom: 10px; }

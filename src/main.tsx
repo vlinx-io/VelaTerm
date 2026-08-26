@@ -11,6 +11,7 @@ import "./styles/fonts.css";
 import "./styles/index.css";
 import App from "./App";
 import { initI18n, t } from "./i18n";
+import { recordRequestError } from "./ipc/reqLog";
 import MobileApp from "./mobile/MobileApp";
 import { isMobileView } from "./mobile/detect";
 import { LoginGate } from "./remote/LoginGate";
@@ -106,11 +107,13 @@ function installGlobalErrorOverlay() {
   }
 
   window.addEventListener("error", (e) => {
-    if (e.error) {
-      show(e.error.message, e.error.stack ?? "");
-    } else {
-      show(e.message || "Unknown error", `at ${e.filename}:${e.lineno}:${e.colno}`);
+    const message = e.error?.message ?? e.message ?? "Unknown error";
+    const detail = e.error?.stack ?? `at ${e.filename}:${e.lineno}:${e.colno}`;
+    if (isBenignDisposedCallbackError(message, detail)) {
+      recordRequestError("uncaught:benign", `${message}\n${detail}`);
+      return;
     }
+    show(message, detail);
   });
 
   window.addEventListener("unhandledrejection", (e) => {
@@ -122,9 +125,30 @@ function installGlobalErrorOverlay() {
       return;
     }
     if (err instanceof Error) {
+      if (isBenignDisposedCallbackError(err.message, err.stack ?? "")) {
+        recordRequestError("uncaught:benign", `${err.message}\n${err.stack ?? ""}`);
+        return;
+      }
       show(err.message, err.stack ?? "");
     } else {
       show("Unhandled Promise Rejection", String(err));
     }
   });
+}
+
+/** Known-harmless failures from callbacks that outlive the object they belong to.
+ *
+ * xterm's Viewport constructor schedules `setTimeout(() => this.syncScrollArea())` and `reset()` schedules
+ * the same call through requestAnimationFrame, and neither is cancelled on dispose. A terminal opened and
+ * disposed within one macrotask (session tree rebuilds during remote connect do exactly that) therefore
+ * still runs the callback, which reads `RenderService.dimensions` after the MutableDisposable holding the
+ * renderer was cleared. The throw comes from a timer, so no try/catch or error boundary can reach it, and
+ * nothing is actually broken: the terminal it belonged to is already gone.
+ *
+ * Match narrowly rather than suppressing uncaught errors in general, so real crashes still reach the
+ * overlay. Engines word the message differently (WebKit prints the failing expression, Chromium prints the
+ * missing property), hence the check against both message and stack. */
+function isBenignDisposedCallbackError(message: string, stack: string): boolean {
+  if (!/syncScrollArea/.test(stack) && !/syncScrollArea/.test(message)) return false;
+  return /_renderer|dimensions/.test(message);
 }

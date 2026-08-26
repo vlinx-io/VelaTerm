@@ -53,6 +53,9 @@ const zhTW: typeof en = {
   "titlebar.browser": "內建瀏覽器", // Built-in Browser
   "titlebar.remoteAccess": "遠端存取（瀏覽器）", // Remote Access (Browser)
   "titlebar.connectRemote": "連線到遠端服務", // Connect to Remote Server
+  "titlebar.mirrored": "鏡像中", // Mirrored
+  "titlebar.mirroredHint":
+    "鏡像已開啟：分頁、分割與目前工作階段跟隨主機。開關在主機端。", // Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.
   "titlebar.share": "分享", // Share
   "share.title": "分享 VelaTerm", // Share VelaTerm
   "share.subtitle":
@@ -144,7 +147,7 @@ const zhTW: typeof en = {
   "spawn.effortLabel": "推理強度", // Effort
   "spawn.modelDefault": "預設", // Default
   "spawn.modelLoading": "正在取得模型…", // Listing models…
-  "spawn.modelListUnavailable": "取不到模型清單 — 請在代理參數裡直接填", // No model list available
+  "spawn.modelListUnavailable": "取不到模型清單 — 在上面直接填模型名", // No model list available — type an identifier above
   "spawn.launch": "啟動", // Launch
   "spawn.remaining": (n: number) => `還有 ${n} 個待確認`, // ${n} more pending
   "spawn.notifyTitle": "派生會話待確認", // Spawn session awaiting confirmation
@@ -306,7 +309,7 @@ const zhTW: typeof en = {
   "remote.start": "啟動服務", // Start Server
   "remote.portLabel": "連接埠", // Port
   "remote.portInvalid": "連接埠必須是 1 到 65535 之間的數字", // Port must be between 1 and 65535
-  "remote.ipLabel": "IP 位址", // IP address
+  "remote.ipLabel": "IP", // IP address
   "remote.ipAuto": "自動（第一個區域網路位址）", // Automatic (first LAN address)
   "remote.ipVpn": "VPN", // VPN
   "remote.qrHint":
@@ -365,6 +368,9 @@ const zhTW: typeof en = {
   "connect.showPassword": "顯示密碼",
   "connect.hidePassword": "隱藏密碼",
   "connect.urlPasswordPlaceholder": "登入密碼",
+  "connect.mirror": "多端介面鏡像", // Mirror layout across devices
+  "connect.mirrorHint":
+    "分頁、分割與目前工作階段在連到這台遠端服務的所有裝置上保持一致。不勾選則各裝置各自保有自己的版面。", // Tabs, splits, and the active session stay the same on every device connected to this remote service. Off = each device keeps its own layout.
   "connect.shareDesktopDb": "共用遠端桌面版的資料庫",
   "connect.shareDesktopDbHint":
     "與遠端機器的桌面版共用同一資料庫（建議兩邊同版本）。不勾則使用獨立資料庫。",
@@ -774,7 +780,19 @@ const zhTW: typeof en = {
   "files.copyPath": "複製路徑", // Copy Path
   "files.copyRelPath": "複製相對路徑", // Copy Relative Path
   "files.filterPlaceholder": "篩選檔案…", // Filter files
+  "files.dblClickOpen": "雙擊開啟", // Double-click to open
   "files.deleteConfirm": (name) => `確定刪除「${name}」？此操作無法復原。`, // Delete "{name}"? This can't be undone.
+
+  // ── File transfer (remote access) ──
+  "transfer.uploadsTitle": "上傳", // Uploads
+  "transfer.download": "下載", // Download
+  "transfer.upload": "上傳檔案…", // Upload Files…
+  "transfer.uploadTooltip": "把檔案上傳到這個目錄", // Upload files to this folder
+  "transfer.clear": "清空", // Clear
+  "transfer.cancelled": "已取消", // Cancelled
+  "transfer.failed": "失敗", // Failed
+  "transfer.stalled": "正在重新連線…", // Reconnecting…
+  "transfer.foldersUnsupported": "資料夾傳不了。", // Folders can't be uploaded.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => `${n} 會話`, // {n} sessions
@@ -946,7 +964,7 @@ const zhTW: typeof en = {
   "updater.hide": "隱藏",
   "updater.hideHint": "在背景繼續下載，進度會留在狀態列。",
   "updater.downloadManually": "手動下載",
-  "updater.downloadManuallyHint": "在瀏覽器中開啟安裝包的下載連結。",
+  "updater.downloadManuallyHint": "在瀏覽器中開啟下載頁面。",
   "updater.windowsNotice": "安裝期間 VelaTerm 會關閉，安裝完成後自動重新開啟。",
   "updater.installingWindows":
     "正在安裝… VelaTerm 即將關閉，安裝程式會完成更新並重新開啟它。",

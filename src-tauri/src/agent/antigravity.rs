@@ -17,7 +17,9 @@
 //! Invocation events use the verified flat `[{"type":"command","command":"<script> <state>"}]` form
 //! without matcher or nested hooks, matching the production Orca integration. Only tool events use wrappers.
 //!
-//! Each payload carries top-level `session_id`, the `--conversation=<id>` resume anchor persisted by server.rs.
+//! Each payload carries top-level `conversationId` (protojson camelCase), the `--conversation=<id>` resume
+//! anchor persisted by server.rs, plus `transcriptPath`. No payload carries the user's prompt, so the
+//! automatic first-message rename reads it from that transcript; see `first_prompt_from_transcript`.
 //!
 //! Antigravity has no safely observable approval lifecycle hook because those hooks decide allow/deny/ask.
 //! Permission prompts therefore remain working, with neutral screen detection as fallback.
@@ -27,10 +29,73 @@
 //! Exact Pre/PostInvocation granularity still needs a logged-in conversation check; Stop and working-state
 //! debouncing mitigate either behavior.
 
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 /// Namespaced top-level hooks.json group; all other groups remain untouched.
 const GROUP: &str = "vlx-term-status";
+
+/// Lines scanned at the head of a transcript while looking for the first user step. The user input is
+/// step 0 in practice; a small budget keeps a long transcript from being read on every hook call.
+const TRANSCRIPT_SCAN_LINES: usize = 32;
+
+/// First user message of an Antigravity conversation, read from the transcript a hook payload names.
+///
+/// Unlike Claude or Cursor, Antigravity hook payloads carry no prompt text: `PreInvocation`,
+/// `PostInvocation`, and `Stop` all deliver only conversation metadata. Every payload does carry
+/// `transcriptPath`, and the transcript's first `USER_INPUT` step holds the submitted message wrapped in
+/// `<USER_REQUEST>` tags, next to metadata blocks that must not become the session name. Reading it lets
+/// Antigravity share the automatic first-message rename that `server.rs` performs for every other agent.
+///
+/// Returns None when the body is not an Antigravity payload, the transcript is not yet written, or the
+/// first user step has not been flushed; the caller simply retries on the session's next hook event.
+pub fn first_prompt_from_transcript(body: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    let path = v.get("transcriptPath").and_then(|p| p.as_str())?.trim();
+    if path.is_empty() {
+        return None;
+    }
+    first_user_request(Path::new(path))
+}
+
+/// Scan the head of a transcript for the first `USER_INPUT` step and return its request text.
+fn first_user_request(transcript: &Path) -> Option<String> {
+    let file = std::fs::File::open(transcript).ok()?;
+    for line in std::io::BufReader::new(file)
+        .lines()
+        .take(TRANSCRIPT_SCAN_LINES)
+        .map_while(Result::ok)
+    {
+        let Ok(step) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        if step.get("type").and_then(|t| t.as_str()) != Some("USER_INPUT") {
+            continue;
+        }
+        if let Some(text) = step
+            .get("content")
+            .and_then(|c| c.as_str())
+            .and_then(user_request_text)
+        {
+            return Some(text);
+        }
+    }
+    None
+}
+
+/// Extract the text between the `<USER_REQUEST>` tags, dropping the metadata blocks that follow it.
+fn user_request_text(content: &str) -> Option<String> {
+    const OPEN: &str = "<USER_REQUEST>";
+    const CLOSE: &str = "</USER_REQUEST>";
+    let start = content.find(OPEN)? + OPEN.len();
+    let end = start + content[start..].find(CLOSE)?;
+    let text = content[start..end].trim();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_string())
+    }
+}
 
 /// Static POSIX script where `$1` is working/waiting. Missing variables and curl failures consume input,
 /// return allow, and exit successfully so hooks cannot disrupt Antigravity.
@@ -197,6 +262,106 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// Real CLI payload shape: metadata only, naming the transcript that holds the prompt.
+    fn payload(transcript: &Path) -> String {
+        serde_json::json!({
+            "conversationId": "f1d8a47f-6de3-4db2-87ea-6908fd1e7697",
+            "invocationNum": 0,
+            "modelName": "gemini-3.7-flash-high",
+            "transcriptPath": transcript.display().to_string(),
+            "workspacePaths": []
+        })
+        .to_string()
+    }
+
+    /// One transcript line, matching the captured CLI shape: the request sits in `<USER_REQUEST>` tags and
+    /// is followed by metadata blocks that must not leak into the session name.
+    fn user_step(request: &str) -> String {
+        serde_json::json!({
+            "step_index": 0,
+            "source": "USER_EXPLICIT",
+            "type": "USER_INPUT",
+            "status": "DONE",
+            "content": format!(
+                "<USER_REQUEST>\n{request}\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nThe current local time is: 2026-08-26T10:05:14+08:00.\n</ADDITIONAL_METADATA>"
+            )
+        })
+        .to_string()
+    }
+
+    /// A system step, which never names a session.
+    fn checkpoint_step() -> String {
+        serde_json::json!({
+            "step_index": 1,
+            "source": "SYSTEM",
+            "type": "CHECKPOINT",
+            "status": "DONE",
+            "content": "the earlier parts of this conversation have been truncated"
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn first_prompt_reads_the_user_request_from_the_transcript() {
+        let dir = tmp_dir("transcript");
+        let transcript = dir.join("transcript_full.jsonl");
+        std::fs::write(
+            &transcript,
+            format!("{}\n{}\n", user_step("Fix the login page styling"), checkpoint_step()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            first_prompt_from_transcript(&payload(&transcript)).as_deref(),
+            Some("Fix the login page styling")
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn first_prompt_skips_leading_non_user_steps_and_trims() {
+        let dir = tmp_dir("transcript-skip");
+        let transcript = dir.join("transcript_full.jsonl");
+        std::fs::write(
+            &transcript,
+            format!("{}\n{}\n", checkpoint_step(), user_step("  Rewrite the article  ")),
+        )
+        .unwrap();
+
+        assert_eq!(
+            first_prompt_from_transcript(&payload(&transcript)).as_deref(),
+            Some("Rewrite the article")
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn first_prompt_is_none_until_a_user_request_exists() {
+        let dir = tmp_dir("transcript-empty");
+        let transcript = dir.join("transcript_full.jsonl");
+        // A transcript the CLI has not written yet: the caller retries on the session's next hook event.
+        assert!(first_prompt_from_transcript(&payload(&transcript)).is_none());
+
+        // System steps only, plus a blank request, leave nothing worth renaming with.
+        std::fs::write(
+            &transcript,
+            format!("{}\n{}\n", checkpoint_step(), user_step("   ")),
+        )
+        .unwrap();
+        assert!(first_prompt_from_transcript(&payload(&transcript)).is_none());
+
+        // Payloads from the other agents never name a transcript.
+        assert!(first_prompt_from_transcript(
+            r#"{"hook_event_name":"UserPromptSubmit","prompt":"hi"}"#
+        )
+        .is_none());
+        assert!(first_prompt_from_transcript("not json").is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

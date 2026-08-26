@@ -25,6 +25,7 @@ import { getClientSource, isTauri } from "../ipc/transport";
 import { wsClient } from "../ipc/wsClient";
 import { isMobileView } from "../mobile/detect";
 import { markMirrorDetach } from "../ipc/commands";
+import { settleFirstMirrorAlign } from "./mirrorAlign";
 import { buildMirrorLayout, layoutSessionIds, sanitizeMirrorLayout } from "./mirrorLayout";
 import { useTermStore } from "./termStore";
 
@@ -73,7 +74,12 @@ function currentJson(): string {
  * Safe to call on any client: phones opt out here rather than at every call site.
  */
 export function startMirrorSync(): () => void {
-  if (isMobileView()) return () => {};
+  if (isMobileView()) {
+    // Nothing will ever align here, so release the initial layout restore instead of making it wait out
+    // its whole budget before falling back to local storage.
+    settleFirstMirrorAlign(false);
+    return () => {};
+  }
 
   const store = useTermStore;
   /** Serialization of the last arrangement known to be in sync; a push that matches it is skipped. */
@@ -155,20 +161,36 @@ export function startMirrorSync(): () => void {
     clearTimeout(alignTimer);
     mirrorGet().then(
       (status) => {
-        if (stopped) return;
+        if (stopped) {
+          settleFirstMirrorAlign(false);
+          return;
+        }
         alignAttempt = 0;
         store.getState().setMirrorEnabled(status.enabled);
-        if (!status.enabled) return;
+        if (!status.enabled) {
+          settleFirstMirrorAlign(false);
+          return;
+        }
         // A broadcast can overtake this reply. Applying the snapshot unconditionally would then roll the
         // client back to the older arrangement and, because the baseline follows, leave it there.
+        let applied = false;
         if (status.state) {
-          if (status.rev >= lastRev) apply(status.state, status.rev);
+          if (status.rev >= lastRev) {
+            apply(status.state, status.rev);
+            applied = true;
+          }
         } else publish();
+        // Tell the initial layout restore whether an arrangement has landed. Reporting after the apply
+        // keeps the restore from reading a half-written store.
+        settleFirstMirrorAlign(applied);
       },
       () => {
         // Usually a socket that is not ready yet at mount. Nothing else retries: pushes are gated on
         // mirrorEnabled, which stays false here, so without a retry this page never mirrors again.
-        if (stopped || alignAttempt >= ALIGN_RETRIES) return;
+        if (stopped || alignAttempt >= ALIGN_RETRIES) {
+          settleFirstMirrorAlign(false);
+          return;
+        }
         const delay = ALIGN_RETRY_BASE_MS * 2 ** alignAttempt;
         alignAttempt += 1;
         alignTimer = setTimeout(align, delay);

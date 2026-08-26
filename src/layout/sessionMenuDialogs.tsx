@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { normalizeArgDashes } from "../args";
 import { Backdrop } from "../components/Backdrop";
 import Icons from "../components/Icons";
+import Select from "../components/Select";
 import { useGitBranchInfo } from "../hooks/useGitBranch";
 import { useSuspendNativeViews } from "../hooks/nativeViewSuspend";
 import { dateLocale, useT } from "../i18n";
@@ -143,7 +144,6 @@ export function DeleteWorktree({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string>("");
-  const [pickOpen, setPickOpen] = useState(false);
   const [force, setForce] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -214,101 +214,14 @@ export function DeleteWorktree({
         {loading ? (
           <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("worktreeSel.loading")}</div>
         ) : list && list.length > 0 ? (
-          <div style={{ position: "relative" }}>
-            <button
-              type="button"
-              className="vlx-input"
-              onClick={() => setPickOpen((o) => !o)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                cursor: "pointer",
-                textAlign: "left",
-                borderColor: pickOpen ? "var(--accent)" : undefined,
-              }}
-            >
-              <span
-                style={{
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  color: selected ? undefined : "var(--text-muted)",
-                }}
-              >
-                {selected
-                  ? worktreeLabel(list.find((w) => w.path === selected))
-                  : t("tree.deleteWorktreePlaceholder")}
-              </span>
-              <Icons.chevD size={14} style={{ color: "var(--text-muted)", flex: "none" }} />
-            </button>
-            {pickOpen && (
-              <>
-                <div
-                  style={{ position: "fixed", inset: 0, zIndex: 1190 }}
-                  onClick={() => setPickOpen(false)}
-                />
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "calc(100% + 4px)",
-                    left: 0,
-                    right: 0,
-                    zIndex: 1200,
-                    maxHeight: 220,
-                    overflowY: "auto",
-                    padding: 4,
-                    background: "var(--bg-panel)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 8,
-                    boxShadow: "0 10px 40px rgba(0,0,0,0.5)",
-                  }}
-                >
-                  {list.map((w) => {
-                    const on = w.path === selected;
-                    return (
-                      <div
-                        key={w.path}
-                        onClick={() => {
-                          setSelected(w.path);
-                          setPickOpen(false);
-                        }}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 6,
-                          padding: "6px 9px",
-                          borderRadius: 5,
-                          cursor: "pointer",
-                          fontSize: 13,
-                          color: on ? "var(--accent)" : "var(--text-primary)",
-                          background: on ? "var(--accent-soft)" : "transparent",
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!on) e.currentTarget.style.background = "var(--bg-elevated)";
-                        }}
-                        onMouseLeave={(e) => {
-                          if (!on) e.currentTarget.style.background = "transparent";
-                        }}
-                      >
-                        <span
-                          style={{
-                            flex: 1,
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {worktreeLabel(w)}
-                        </span>
-                        {on && <Icons.check size={13} style={{ flex: "none" }} />}
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-          </div>
+          <Select
+            value={selected}
+            onChange={setSelected}
+            options={list.map((w) => ({ value: w.path, label: worktreeLabel(w) }))}
+            placeholder={t("tree.deleteWorktreePlaceholder")}
+            width="100%"
+            ariaLabel={t("tree.deleteWorktreeTitle")}
+          />
         ) : (
           <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
             {loadError ? t("worktreeSel.loadFailed") : t("worktreeSel.empty")}
@@ -708,8 +621,6 @@ export interface WorktreeChoiceState {
   loadError: string | null;
   selected: string;
   setSelected: (p: string) => void;
-  pickOpen: boolean;
-  setPickOpen: (o: boolean) => void;
   /** False while existing mode still has nothing selected. */
   ready: boolean;
   /** Result handed back to the caller; an empty create-mode name falls back to the dialog's own name. */
@@ -731,7 +642,6 @@ export function useWorktreeChoice(
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string>("");
-  const [pickOpen, setPickOpen] = useState(false);
 
   useEffect(() => {
     if (mode !== "existing" || existing !== null || !repoRoot) return;
@@ -774,8 +684,6 @@ export function useWorktreeChoice(
     loadError,
     selected,
     setSelected,
-    pickOpen,
-    setPickOpen,
     ready: mode !== "existing" || selected.trim().length > 0,
     choice: (fallbackName: string) =>
       mode === "new"
@@ -872,98 +780,13 @@ export function WorktreeChoiceField({
               {t("worktreeSel.loading")}
             </div>
           ) : wt.existing && wt.existing.length > 0 ? (
-            <div style={{ position: "relative" }}>
-              <button
-                type="button"
-                className="vlx-input"
-                onClick={() => wt.setPickOpen(!wt.pickOpen)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  cursor: "pointer",
-                  textAlign: "left",
-                  borderColor: wt.pickOpen ? "var(--accent)" : undefined,
-                }}
-              >
-                <span
-                  style={{
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {worktreeLabel(wt.existing.find((w) => w.path === wt.selected))}
-                </span>
-                <Icons.chevD size={14} style={{ color: "var(--text-muted)", flex: "none" }} />
-              </button>
-              {wt.pickOpen && (
-                <>
-                  <div
-                    style={{ position: "fixed", inset: 0, zIndex: 1190 }}
-                    onClick={() => wt.setPickOpen(false)}
-                  />
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: "calc(100% + 4px)",
-                      left: 0,
-                      right: 0,
-                      zIndex: 1200,
-                      maxHeight: 220,
-                      overflowY: "auto",
-                      padding: 4,
-                      background: "var(--bg-panel)",
-                      border: "1px solid var(--border)",
-                      borderRadius: 8,
-                      boxShadow: "0 10px 40px rgba(0,0,0,0.5)",
-                    }}
-                  >
-                    {wt.existing.map((w) => {
-                      const on = w.path === wt.selected;
-                      return (
-                        <div
-                          key={w.path}
-                          onClick={() => {
-                            wt.setSelected(w.path);
-                            wt.setPickOpen(false);
-                          }}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                            padding: "6px 9px",
-                            borderRadius: 5,
-                            cursor: "pointer",
-                            fontSize: 13,
-                            color: on ? "var(--accent)" : "var(--text-primary)",
-                            background: on ? "var(--accent-soft)" : "transparent",
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!on) e.currentTarget.style.background = "var(--bg-elevated)";
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!on) e.currentTarget.style.background = "transparent";
-                          }}
-                        >
-                          <span
-                            style={{
-                              flex: 1,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {worktreeLabel(w)}
-                          </span>
-                          {on && <Icons.check size={13} style={{ flex: "none" }} />}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
-            </div>
+            <Select
+              value={wt.selected}
+              onChange={wt.setSelected}
+              options={wt.existing.map((w) => ({ value: w.path, label: worktreeLabel(w) }))}
+              width="100%"
+              ariaLabel={t("worktreeSel.label")}
+            />
           ) : (
             <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.5 }}>
               {wt.loadError ? t("worktreeSel.loadFailed") : t("worktreeSel.empty")}
@@ -1299,7 +1122,6 @@ export function NewAgentSession({
   const t = useT();
   const agentDefaults = useTermStore((s) => s.agentDefaults);
   const [kind, setKind] = useState<SessionKind>("claude");
-  const [typeOpen, setTypeOpen] = useState(false);
   const [name, setName] = useState("");
   // Prefill arguments and permissions from this type's global agent template; users may override or clear.
   const [agentArgs, setAgentArgs] = useState(() => agentDefaults["claude"]?.args ?? "");
@@ -1313,7 +1135,6 @@ export function NewAgentSession({
   // and is remembered, so the created session can show the preset's name and icon.
   const presets = useTermStore((s) => s.agentPresets);
   const [presetId, setPresetId] = useState<string | null>(null);
-  const selectedPreset = presets.find((p) => p.id === presetId) ?? null;
   // Keeping this configuration for next time. The preset name falls back to the session name, so the common
   // case is a single checkbox click.
   const [savePreset, setSavePreset] = useState(false);
@@ -1351,7 +1172,6 @@ export function NewAgentSession({
   // When type changes, replace arguments only if still equal to the old default or empty; preserve user edits.
   // The binary permission toggle can safely follow the new type's default.
   const changeKind = (k: SessionKind) => {
-    setTypeOpen(false);
     // Choosing a built-in kind drops the selected preset, including the executable it filled in.
     setPresetId(null);
     setExecPath("");
@@ -1366,7 +1186,6 @@ export function NewAgentSession({
 
   /** Adopt a preset: its base kind decides behavior, its launch values prefill the fields below. */
   const choosePreset = (p: AgentPreset) => {
-    setTypeOpen(false);
     setPresetId(p.id);
     setKind(p.baseKind);
     setExecPath(p.execPath ?? "");
@@ -1460,122 +1279,32 @@ export function NewAgentSession({
         <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
           {t("resume.agentType")}
         </div>
-        {/* A custom dropdown rather than a native <select>: WKWebView forces the latter into a light,
-            raised box that clashes with the theme. This matches the language dropdown in Appearance
-            settings. Clicking the backdrop closes only the dropdown, never the surrounding dialog: the
-            backdrop is a DOM child of the panel, whose stopPropagation absorbs the bubbling event. */}
-        <div style={{ position: "relative", marginBottom: 12 }}>
-          <button
-            type="button"
-            className="vlx-input"
-            onClick={() => setTypeOpen((o) => !o)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              cursor: "pointer",
-              textAlign: "left",
-              borderColor: typeOpen ? "var(--accent)" : undefined,
+        {/* Built-in kinds first, then saved presets under a rule. The value carries its source so the
+            two lists can share one dropdown without their ids colliding. */}
+        <div style={{ marginBottom: 12 }}>
+          <Select
+            value={presetId ? `p:${presetId}` : `k:${kind}`}
+            onChange={(v) => {
+              if (v.startsWith("p:")) {
+                const p = presets.find((x) => x.id === v.slice(2));
+                if (p) choosePreset(p);
+              } else {
+                changeKind(v.slice(2) as SessionKind);
+              }
             }}
-          >
-            <span>{selectedPreset ? selectedPreset.name : kindLabel(kind)}</span>
-            <Icons.chevD size={14} style={{ color: "var(--text-muted)", flex: "none" }} />
-          </button>
-          {typeOpen && (
-            <>
-              <div
-                style={{ position: "fixed", inset: 0, zIndex: 1190 }}
-                onClick={() => setTypeOpen(false)}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 4px)",
-                  left: 0,
-                  right: 0,
-                  zIndex: 1200,
-                  padding: 4,
-                  background: "var(--bg-panel)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  boxShadow: "0 10px 40px rgba(0,0,0,0.5)",
-                }}
-              >
-                {AGENT_ARGS_KINDS.map((k) => {
-                  const on = k === kind;
-                  return (
-                    <div
-                      key={k}
-                      onClick={() => changeKind(k)}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        padding: "6px 9px",
-                        borderRadius: 5,
-                        cursor: "pointer",
-                        fontSize: 13,
-                        color: on ? "var(--accent)" : "var(--text-primary)",
-                        background: on ? "var(--accent-soft)" : "transparent",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!on)
-                          e.currentTarget.style.background =
-                            "var(--bg-elevated)";
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!on) e.currentTarget.style.background = "transparent";
-                      }}
-                    >
-                      <span style={{ flex: 1 }}>{kindLabel(k)}</span>
-                      {on && <Icons.check size={13} style={{ flex: "none" }} />}
-                    </div>
-                  );
-                })}
-                {/* Saved configurations, listed under the built-in kinds they behave like. */}
-                {presets.length > 0 && (
-                  <div
-                    style={{
-                      margin: "4px 0",
-                      borderTop: "1px solid var(--border)",
-                    }}
-                  />
-                )}
-                {presets.map((p) => {
-                  const on = p.id === presetId;
-                  return (
-                    <div
-                      key={p.id}
-                      onClick={() => choosePreset(p)}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        padding: "6px 9px",
-                        borderRadius: 5,
-                        cursor: "pointer",
-                        fontSize: 13,
-                        color: on ? "var(--accent)" : "var(--text-primary)",
-                        background: on ? "var(--accent-soft)" : "transparent",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!on) e.currentTarget.style.background = "var(--bg-elevated)";
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!on) e.currentTarget.style.background = "transparent";
-                      }}
-                    >
-                      <PresetIcon preset={p} size={14} />
-                      <span style={{ flex: 1 }}>{p.name}</span>
-                      {on && <Icons.check size={13} style={{ flex: "none" }} />}
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
+            options={[
+              ...AGENT_ARGS_KINDS.map((k) => ({ value: `k:${k}`, label: kindLabel(k) })),
+              ...presets.map((p, n) => ({
+                value: `p:${p.id}`,
+                label: p.name,
+                icon: <PresetIcon preset={p} size={14} />,
+                separatorBefore: n === 0,
+              })),
+            ]}
+            width="100%"
+            ariaLabel={t("resume.agentType")}
+          />
         </div>
-
         <label style={{ display: "block", marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
             {t("tree.sessionNameAuto")}
@@ -1835,7 +1564,6 @@ export function ResumeSession({
   const t = useT();
   const agentDefaults = useTermStore((s) => s.agentDefaults);
   const [kind, setKind] = useState<SessionKind>("claude");
-  const [typeOpen, setTypeOpen] = useState(false);
   const [sessionId, setSessionId] = useState("");
   const [name, setName] = useState("");
   // Prefill arguments and permissions from the type's global agent template; users may override or clear.
@@ -1846,7 +1574,6 @@ export function ResumeSession({
   // On type change, replace arguments only if still at the old default or empty; preserve user edits.
   // The binary permission toggle safely follows the new type's default.
   const changeKind = (k: SessionKind) => {
-    setTypeOpen(false);
     setAgentArgs((cur) =>
       cur.trim() === "" || cur === (agentDefaults[kind]?.args ?? "")
         ? agentDefaults[k]?.args ?? ""
@@ -1911,82 +1638,14 @@ export function ResumeSession({
         <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
           {t("resume.agentType")}
         </div>
-        {/* A custom dropdown rather than a native <select>: WKWebView forces the latter into a light,
-            raised box that clashes with the theme. This matches the dropdowns in "new session with
-            custom arguments" and Appearance settings. Clicking the backdrop closes only the dropdown,
-            never the surrounding dialog: the backdrop is a DOM child of the panel, whose
-            stopPropagation absorbs the bubbling event. */}
-        <div style={{ position: "relative", marginBottom: 12 }}>
-          <button
-            type="button"
-            className="vlx-input"
-            onClick={() => setTypeOpen((o) => !o)}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              cursor: "pointer",
-              textAlign: "left",
-              borderColor: typeOpen ? "var(--accent)" : undefined,
-            }}
-          >
-            <span>{kindLabel(kind)}</span>
-            <Icons.chevD size={14} style={{ color: "var(--text-muted)", flex: "none" }} />
-          </button>
-          {typeOpen && (
-            <>
-              <div
-                style={{ position: "fixed", inset: 0, zIndex: 1190 }}
-                onClick={() => setTypeOpen(false)}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 4px)",
-                  left: 0,
-                  right: 0,
-                  zIndex: 1200,
-                  padding: 4,
-                  background: "var(--bg-panel)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  boxShadow: "0 10px 40px rgba(0,0,0,0.5)",
-                }}
-              >
-                {RESUMABLE_KINDS.map((opt) => {
-                  const on = opt.kind === kind;
-                  return (
-                    <div
-                      key={opt.kind}
-                      onClick={() => changeKind(opt.kind)}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 6,
-                        padding: "6px 9px",
-                        borderRadius: 5,
-                        cursor: "pointer",
-                        fontSize: 13,
-                        color: on ? "var(--accent)" : "var(--text-primary)",
-                        background: on ? "var(--accent-soft)" : "transparent",
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!on)
-                          e.currentTarget.style.background =
-                            "var(--bg-elevated)";
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!on) e.currentTarget.style.background = "transparent";
-                      }}
-                    >
-                      <span style={{ flex: 1 }}>{opt.label}</span>
-                      {on && <Icons.check size={13} style={{ flex: "none" }} />}
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
+        <div style={{ marginBottom: 12 }}>
+          <Select
+            value={kind}
+            onChange={changeKind}
+            options={RESUMABLE_KINDS.map((opt) => ({ value: opt.kind, label: opt.label }))}
+            width="100%"
+            ariaLabel={t("resume.agentType")}
+          />
         </div>
 
         <label style={{ display: "block", marginBottom: 12 }}>

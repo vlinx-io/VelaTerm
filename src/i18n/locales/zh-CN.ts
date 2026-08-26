@@ -52,6 +52,9 @@ const zhCN: typeof en = {
   "titlebar.browser": "内置浏览器",
   "titlebar.remoteAccess": "远程访问（浏览器）",
   "titlebar.connectRemote": "连接远程服务",
+  "titlebar.mirrored": "镜像中", // Mirrored
+  "titlebar.mirroredHint":
+    "镜像已开启：标签页、分屏和当前会话跟随主机。开关在主机那边。", // Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.
   "titlebar.share": "分享", // Share
   "share.title": "分享 VelaTerm", // Share VelaTerm
   "share.subtitle":
@@ -143,7 +146,7 @@ const zhCN: typeof en = {
   "spawn.effortLabel": "推理强度",
   "spawn.modelDefault": "默认", // Default
   "spawn.modelLoading": "正在获取模型…", // Listing models…
-  "spawn.modelListUnavailable": "取不到模型列表 — 请在智能体参数里直接填", // No model list available
+  "spawn.modelListUnavailable": "取不到模型列表 — 在上面直接填模型名", // No model list available — type an identifier above
   "spawn.launch": "启动",
   "spawn.remaining": (n: number) => `还有 ${n} 个待确认`,
   "spawn.notifyTitle": "派生会话待确认",
@@ -305,7 +308,7 @@ const zhCN: typeof en = {
   "remote.start": "开启服务",
   "remote.portLabel": "端口",
   "remote.portInvalid": "端口必须是 1 到 65535 之间的数字",
-  "remote.ipLabel": "IP 地址", // IP address
+  "remote.ipLabel": "IP", // IP address
   "remote.ipAuto": "自动（第一个局域网地址）", // Automatic (first LAN address)
   "remote.ipVpn": "VPN", // VPN
   "remote.qrHint":
@@ -364,6 +367,9 @@ const zhCN: typeof en = {
   "connect.showPassword": "显示密码",
   "connect.hidePassword": "隐藏密码",
   "connect.urlPasswordPlaceholder": "登录密码",
+  "connect.mirror": "多端界面镜像", // Mirror layout across devices
+  "connect.mirrorHint":
+    "标签、分屏和当前会话在连到这台远端服务的所有设备上保持一致。不勾则各设备各自管各自的布局。", // Tabs, splits, and the active session stay the same on every device connected to this remote service. Off = each device keeps its own layout.
   "connect.shareDesktopDb": "复用远端桌面版的数据库",
   "connect.shareDesktopDbHint":
     "与远端机器的桌面版共用同一数据库（建议两边同版本）。不勾则使用独立数据库。",
@@ -773,7 +779,19 @@ const zhCN: typeof en = {
   "files.copyPath": "复制路径", // Copy Path
   "files.copyRelPath": "复制相对路径", // Copy Relative Path
   "files.filterPlaceholder": "过滤文件…", // Filter files
+  "files.dblClickOpen": "双击打开", // Double-click to open
   "files.deleteConfirm": (name) => `确定删除“${name}”？此操作不可撤销。`, // Delete "{name}"? This can't be undone.
+
+  // ── File transfer (remote access) ──
+  "transfer.uploadsTitle": "上传", // Uploads
+  "transfer.download": "下载", // Download
+  "transfer.upload": "上传文件…", // Upload Files…
+  "transfer.uploadTooltip": "把文件上传到这个目录", // Upload files to this folder
+  "transfer.clear": "清空", // Clear
+  "transfer.cancelled": "已取消", // Cancelled
+  "transfer.failed": "失败", // Failed
+  "transfer.stalled": "正在重连…", // Reconnecting…
+  "transfer.foldersUnsupported": "文件夹传不了。", // Folders can't be uploaded.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => `${n} 会话`,
@@ -945,7 +963,7 @@ const zhCN: typeof en = {
   "updater.hide": "隐藏",
   "updater.hideHint": "在后台继续下载，进度会留在状态栏。",
   "updater.downloadManually": "手动下载",
-  "updater.downloadManuallyHint": "在浏览器中打开安装包的下载链接。",
+  "updater.downloadManuallyHint": "在浏览器中打开下载页面。",
   "updater.windowsNotice": "安装期间 VelaTerm 会关闭，安装完成后自动重新打开。",
   "updater.installingWindows":
     "正在安装… VelaTerm 即将关闭，安装程序会完成更新并重新打开它。",

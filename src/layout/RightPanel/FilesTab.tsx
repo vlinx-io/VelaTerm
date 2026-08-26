@@ -2,7 +2,7 @@
 //! hidden-item filtering, search, file preview, and create/edit/delete context actions. Extracted from
 //! RightPanel; FileNodeT, FileRow, ConfirmModal, and related helpers remain private to this tab.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Icons from "../../components/Icons";
 import { Backdrop } from "../../components/Backdrop";
 import { fileIcon } from "./fileIcons";
@@ -22,6 +22,16 @@ import {
   type DirEntry,
   type FilePreview,
 } from "../../ipc/info";
+import {
+  cancelTransfer,
+  clearFinishedTransfers,
+  getTransfers,
+  startDownload,
+  startUpload,
+  subscribeTransfers,
+  type Transfer,
+} from "../../ipc/transfer";
+import { env } from "../../platform";
 import { useTermStore } from "../../store/termStore";
 /* ===================== Files: real tree, preview, and one-level lazy loading ===================== */
 
@@ -111,6 +121,7 @@ function FileRow({
   onOpen,
   onDir,
   onContext,
+  onDropFiles,
 }: {
   node: FileNodeT;
   depth: number;
@@ -123,8 +134,48 @@ function FileRow({
   onOpen: (n: FileNodeT) => void;
   onDir: (n: FileNodeT) => void;
   onContext: (e: React.MouseEvent, n: FileNodeT) => void;
+  /** Files dropped onto this row; null when transfer is unavailable, which also disables the drop target. */
+  onDropFiles: ((n: FileNodeT, files: File[], skippedFolders: boolean) => void) | null;
 }) {
   const t = useT();
+  // Highlight the row under an external file drag. Tracked per row so nested directories do not all light up.
+  const [dropOver, setDropOver] = useState(false);
+  // A drag carrying files is an upload; internal drags (tab and session reordering) carry other types only.
+  const dragProps = onDropFiles
+    ? {
+        onDragOver: (e: React.DragEvent) => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer.dropEffect = "copy" as const;
+          setDropOver(true);
+        },
+        onDragLeave: () => setDropOver(false),
+        onDrop: (e: React.DragEvent) => {
+          if (!e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          e.stopPropagation();
+          setDropOver(false);
+          // Uploading a folder would mean walking its entries recursively, which this transfer path does not
+          // do, so folders are separated out here and reported rather than failing later as unreadable files.
+          const items = Array.from(e.dataTransfer.items ?? []);
+          const files: File[] = [];
+          let skippedFolders = false;
+          for (const item of items) {
+            if (item.webkitGetAsEntry?.()?.isDirectory) {
+              skippedFolders = true;
+              continue;
+            }
+            const f = item.getAsFile();
+            if (f) files.push(f);
+          }
+          // Fall back to the flat list where DataTransferItem is unavailable; folders then fail per file.
+          if (!items.length) files.push(...Array.from(e.dataTransfer.files));
+          if (files.length || skippedFolders) onDropFiles(node, files, skippedFolders);
+        },
+      }
+    : {};
+  const dropCls = dropOver ? " drop-target" : "";
   // Each depth gets a 13px indentation cell with a subtle `.ind` guide for legible nesting.
   const inds =
     depth > 0 ? (
@@ -144,9 +195,10 @@ function FileRow({
     return (
       <div>
         <div
-          className={"file-row" + (node.isHidden ? " hidden-entry" : "") + focusCls}
+          className={"file-row" + (node.isHidden ? " hidden-entry" : "") + focusCls + dropCls}
           onClick={() => onDir(node)}
           onContextMenu={(e) => onContext(e, node)}
+          {...dragProps}
         >
           {inds}
           <span className="tw">{open ? <Icons.chevD size={13} /> : <Icons.chevR size={13} />}</span>
@@ -185,6 +237,7 @@ function FileRow({
                 onOpen={onOpen}
                 onDir={onDir}
                 onContext={onContext}
+                onDropFiles={onDropFiles}
               />
             ))
           ))}
@@ -197,11 +250,14 @@ function FileRow({
         "file-row" +
         (selPath === node.path ? " sel" : "") +
         (node.isHidden ? " hidden-entry" : "") +
-        focusCls
+        focusCls +
+        dropCls
       }
+      title={t("files.dblClickOpen")}
       onClick={() => onFile(node)}
       onDoubleClick={() => onOpen(node)}
       onContextMenu={(e) => onContext(e, node)}
+      {...dragProps}
     >
       {inds}
       <span className="tw leaf" />
@@ -239,6 +295,13 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
   const [filter, setFilter] = useState("");
   // Keyboard focus row, independent of selected preview; focusing a file also previews it.
   const [focusPath, setFocusPath] = useState<string | null>(null);
+  // File transfer is only meaningful when the server is a different machine from the browser: on the desktop
+  // the "server" is this machine, where Show in File Manager already does the job.
+  const canTransfer = env.isBrowser;
+  const transfers = useSyncExternalStore(subscribeTransfers, getTransfers);
+  // Hidden picker for the upload button, plus the directory the pending pick targets.
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const uploadDirRef = useRef<string | null>(null);
   const treeRef = useRef<HTMLDivElement>(null);
   // Container for the tree and preview, whose height bounds preview resizing.
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -369,6 +432,31 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
     setRoot((r) => (r ? { ...r } : r));
   };
 
+  // Upload one at a time rather than in parallel: several concurrent chunk streams on one connection would
+  // compete with terminal traffic without finishing any file sooner.
+  const uploadInto = async (dirPath: string, files: File[], skippedFolders = false) => {
+    setErr(skippedFolders ? t("transfer.foldersUnsupported") : null);
+    let landed = false;
+    for (const f of files) {
+      landed = (await startUpload(f, dirPath)) || landed;
+    }
+    if (!landed) return;
+    const node = findNodeByPath(root, dirPath);
+    if (node) await reloadDir(node);
+  };
+
+  // Dropping onto a file targets its containing directory, matching how the create actions resolve a target.
+  const onDropFiles = (node: FileNodeT, files: File[], skippedFolders: boolean) => {
+    const dir = node.isDir ? node.path : parentPathOf(node.path);
+    void uploadInto(dir, files, skippedFolders);
+  };
+
+  // Open the system file picker for a directory; the chosen files arrive in the input's change handler.
+  const pickUpload = (dirPath: string) => {
+    uploadDirRef.current = dirPath;
+    uploadInputRef.current?.click();
+  };
+
   // Open the context menu at the pointer; create in the directory itself or a file's parent.
   const onContext = (e: React.MouseEvent, node: FileNodeT) => {
     e.preventDefault();
@@ -483,6 +571,26 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
               icon: <Icons.code size={14} />,
               onClick: () => onOpen(node),
             },
+          ] as MenuItem[])
+        : []),
+      // Transfer actions, shown only for remote access where the server is a different machine.
+      ...(canTransfer
+        ? ([
+            ...(node.isDir
+              ? []
+              : [
+                  {
+                    label: t("transfer.download"),
+                    icon: <Icons.download size={14} />,
+                    onClick: () => void startDownload(node.path),
+                  },
+                ]),
+            {
+              label: t("transfer.upload"),
+              icon: <Icons.upload size={14} />,
+              onClick: () => pickUpload(dir.path),
+            },
+            { separator: true, label: "" },
           ] as MenuItem[])
         : []),
       {
@@ -613,6 +721,16 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
         <button className="files-toggle" title={t("files.newTooltip")} aria-label={t("files.newTooltip")} onClick={onPlus}>
           <Icons.filePlus size={13} />
         </button>
+        {canTransfer && (
+          <button
+            className="files-toggle"
+            title={t("transfer.uploadTooltip")}
+            aria-label={t("transfer.uploadTooltip")}
+            onClick={() => pickUpload(sel?.isDir ? sel.path : root.path)}
+          >
+            <Icons.upload size={13} />
+          </button>
+        )}
         <button
           className={"files-toggle" + (showHidden ? " on" : "")}
           title={showHidden ? t("panel.hideHidden") : t("panel.showHidden")}
@@ -679,8 +797,25 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
           onOpen={onOpen}
           onDir={onDir}
           onContext={onContext}
+          onDropFiles={canTransfer ? onDropFiles : null}
         />
       </div>
+      {canTransfer && (
+        <input
+          ref={uploadInputRef}
+          type="file"
+          multiple
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const dir = uploadDirRef.current;
+            const files = Array.from(e.target.files ?? []);
+            // Reset the value so choosing the same file twice in a row still fires change.
+            e.target.value = "";
+            if (dir && files.length) void uploadInto(dir, files);
+          }}
+        />
+      )}
+      {transfers.length > 0 && <TransferQueue items={transfers} />}
       {showPreview && previewNode && (
         <>
           {/* Vertically draggable divider between the file tree and the preview pane. */}
@@ -778,6 +913,86 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
           onCancel={() => setDel(null)}
         />
       )}
+    </div>
+  );
+}
+
+/** Time left as m:ss or h:mm:ss, which needs no translation and reads the same as any download manager. */
+function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (s < 3600) return `${Math.floor(s / 60)}:${pad(s % 60)}`;
+  return `${Math.floor(s / 3600)}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
+}
+
+/** Human-readable byte size for transfer progress, at the coarsest unit that still reads precisely. */
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+/**
+ * Transfer queue strip below the tree.
+ *
+ * It lives here rather than inside the tree because transfers are panel-wide, and it reads from the module-level
+ * store so an upload survives switching tabs.
+ */
+function TransferQueue({ items }: { items: Transfer[] }) {
+  const t = useT();
+  const anyFinished = items.some((x) => x.state !== "active");
+  return (
+    <div className="transfer-queue">
+      <div className="transfer-head">
+        <span>{t("transfer.uploadsTitle")}</span>
+        {anyFinished && (
+          <button className="transfer-clear" onClick={clearFinishedTransfers}>
+            {t("transfer.clear")}
+          </button>
+        )}
+      </div>
+      {items.map((x) => {
+        const pct = x.total > 0 ? Math.min(100, Math.round((x.transferred / x.total) * 100)) : 0;
+        const size = x.total > 0 ? `${formatBytes(x.transferred)} / ${formatBytes(x.total)}` : formatBytes(x.transferred);
+        // Rate and time left only appear once they are measured, so the line never shows a placeholder value.
+        const rate = x.bytesPerSec ? ` · ${formatBytes(x.bytesPerSec)}/s` : "";
+        const eta = x.etaSec != null && x.etaSec > 0 ? ` · ${formatDuration(x.etaSec)}` : "";
+        const detail =
+          x.state === "failed"
+            ? x.error || t("transfer.failed")
+            : x.state === "cancelled"
+              ? t("transfer.cancelled")
+              : x.state === "stalled"
+                ? `${t("transfer.stalled")} · ${size}`
+                : size + rate + eta;
+        return (
+          <div key={x.id} className={"transfer-row " + x.state} title={x.path}>
+            <span className="transfer-dir">
+              <Icons.upload size={12} />
+            </span>
+            <span className="transfer-name">{x.name}</span>
+            <span className="transfer-detail">{detail}</span>
+            {x.state === "active" || x.state === "stalled" ? (
+              <button
+                className="transfer-cancel"
+                title={t("common.cancel")}
+                aria-label={t("common.cancel")}
+                onClick={() => cancelTransfer(x.id)}
+              >
+                <Icons.x size={11} />
+              </button>
+            ) : (
+              <span className="transfer-cancel" />
+            )}
+            {(x.state === "active" || x.state === "stalled") && (
+              <span className="transfer-bar">
+                <span style={{ width: `${pct}%` }} />
+              </span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

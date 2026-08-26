@@ -14,7 +14,7 @@
 //! `pty_spawn` and `read_recording` remain outside this module.
 
 use crate::db::repo;
-use crate::host::{AppCtx, PRESETS_CHANGED, TREE_CHANGED};
+use crate::host::{AppCtx, PRESETS_CHANGED, SETTINGS_CHANGED, TREE_CHANGED};
 use crate::models::{AgentPreset, Group, NodeKind, Project, Session, SessionKind, Tree};
 
 // Private helpers.
@@ -401,6 +401,12 @@ pub fn delete_node(ctx: &AppCtx, kind: NodeKind, id: &str) -> Result<(), String>
     if !hard_deleted.is_empty() {
         // Clear the shared full-text index regardless of which client initiated deletion.
         let _ = crate::search::index::drop_sessions(ctx.db(), &hard_deleted);
+        // Drop the authoritative session records too. They deliberately outlive a process exit — an
+        // agent that finished and left an unread result behind must stay marked — so removal from the
+        // tree is the only thing that clears one.
+        for sid in &hard_deleted {
+            crate::session_state::forget(sid);
+        }
         // Remove recordings consistently, including Electron over WS, so orphaned .log files do not remain.
         if let Ok(data_dir) = ctx.data_dir() {
             let dir = data_dir.join("recordings");
@@ -517,12 +523,25 @@ pub fn install_id(ctx: &AppCtx) -> Result<String, String> {
 
 /// Batch-upserts application preferences by key with last-write-wins semantics. This is the authoritative backend
 /// side of frontend local-cache dual writes, used for startup seeding and debounced setting changes.
+///
+/// Broadcasts `SETTINGS_CHANGED` with the written key names on success, so a preference changed in one
+/// shell reaches the others while they run instead of waiting for their next launch. Only names travel,
+/// never values; see the constant's documentation for why. The writer receives its own broadcast as well,
+/// exactly like `TREE_CHANGED`: client-side reconciliation is idempotent, so the extra pass is harmless.
 pub fn set_app_settings(
     ctx: &AppCtx,
     entries: std::collections::HashMap<String, String>,
 ) -> Result<(), String> {
-    let conn = ctx.db().conn.lock().unwrap();
-    repo::set_app_settings(&conn, &entries)
+    {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::set_app_settings(&conn, &entries)?;
+    }
+    // An empty batch changes nothing; staying quiet avoids waking every client for no reason.
+    if !entries.is_empty() {
+        let keys: Vec<String> = entries.keys().cloned().collect();
+        ctx.emit(SETTINGS_CHANGED, keys);
+    }
+    Ok(())
 }
 
 /// Immediately clears temporary pasted images and returns `{removed, freedBytes}` for display. Although independent
@@ -614,7 +633,7 @@ pub fn ssh_hosts_list(ctx: &AppCtx) -> Result<Vec<crate::ssh_remote::SshHostInfo
     };
     Ok(rows
         .into_iter()
-        .map(|(target, label, last_connected_at, shared_db)| {
+        .map(|(target, label, last_connected_at, shared_db, mirror)| {
             let has_password = crate::ssh_remote::has_password(&id, "ssh", &target);
             crate::ssh_remote::SshHostInfo {
                 target,
@@ -622,6 +641,7 @@ pub fn ssh_hosts_list(ctx: &AppCtx) -> Result<Vec<crate::ssh_remote::SshHostInfo
                 last_connected_at,
                 has_password,
                 shared_db,
+                mirror,
             }
         })
         .collect())
@@ -936,9 +956,26 @@ pub fn web_server_stop(ctx: &AppCtx) -> Result<(), String> {
 /// app_settings key: "1" (or absent, the default) while mirror mode is on, "0" once the host turns it off.
 const MIRROR_ENABLED_KEY: &str = "remoteAccess.mirror";
 
-/// Whether mirror mode is on. Absent means on: the checkbox in the remote-access panel ships checked, so a
-/// database written before this feature existed must read as enabled rather than silently opting out.
+/// Mirror mode forced by `--serve --mirror <0|1>`, set once at startup and never afterwards.
+///
+/// A headless service has no panel of its own, so an SSH client states the mode when it starts the service.
+/// The choice is deliberately kept in memory instead of written to app_settings: with the shared-database
+/// option the service opens the remote machine's own desktop database, and one SSH connection must not
+/// silently flip the checkbox that user sees in their own remote-access panel.
+static MIRROR_OVERRIDE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Record the startup override. Called before the web service starts; later calls are ignored.
+pub fn set_mirror_override(enabled: bool) {
+    let _ = MIRROR_OVERRIDE.set(enabled);
+}
+
+/// Whether mirror mode is on: the startup override when one was given, otherwise the stored setting.
+/// Absent means on: the checkbox in the remote-access panel ships checked, so a database written before
+/// this feature existed must read as enabled rather than silently opting out.
 fn mirror_enabled(ctx: &AppCtx) -> bool {
+    if let Some(forced) = MIRROR_OVERRIDE.get() {
+        return *forced;
+    }
     get_app_settings(ctx)
         .ok()
         .and_then(|s| s.get(MIRROR_ENABLED_KEY).cloned())
@@ -1175,6 +1212,46 @@ mod tests {
         let db = crate::db::Db::open(&dir.join("t.db")).unwrap();
         let host = std::sync::Arc::new(crate::host::HeadlessHost::new(dir.to_path_buf(), db));
         crate::host::AppCtx::Headless(host)
+    }
+
+    /// A preference written by one client must reach the others while they run, so the broadcast fires
+    /// on every successful write — and it must carry key names only. Values would walk around the
+    /// dispatch filter that hides `remoteAccess.*` and `gitea.token` from remote clients.
+    #[test]
+    fn set_app_settings_broadcasts_key_names_only() {
+        let dir = std::env::temp_dir().join(format!("vlx-settings-broadcast-{}", std::process::id()));
+        let ctx = headless_ctx(&dir);
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let sink = seen.clone();
+        ctx.listen(crate::host::SETTINGS_CHANGED, move |payload| {
+            sink.lock().unwrap().push(payload.to_string());
+        });
+
+        // An empty batch changes nothing, so it must stay quiet rather than wake every client.
+        set_app_settings(&ctx, HashMap::new()).unwrap();
+        assert!(seen.lock().unwrap().is_empty(), "an empty write broadcasts nothing");
+
+        set_app_settings(
+            &ctx,
+            HashMap::from([
+                ("vlx-theme".to_string(), "dark".to_string()),
+                ("remoteAccess.passwordHash".to_string(), "$argon2id$secret".to_string()),
+            ]),
+        )
+        .unwrap();
+
+        let payloads = seen.lock().unwrap().clone();
+        assert_eq!(payloads.len(), 1, "one write broadcasts once");
+        let keys: Vec<String> = serde_json::from_str(&payloads[0]).unwrap();
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&"vlx-theme".to_string()));
+        assert!(keys.contains(&"remoteAccess.passwordHash".to_string()));
+        assert!(
+            !payloads[0].contains("dark") && !payloads[0].contains("$argon2id$secret"),
+            "the payload must never carry values: {}",
+            payloads[0]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn seed_remote_settings(ctx: &crate::host::AppCtx, lan_http: &str) {

@@ -63,6 +63,9 @@ const ru: typeof en = {
   "titlebar.browser": "Встроенный браузер", // Built-in Browser
   "titlebar.remoteAccess": "Удалённый доступ (браузер)", // Remote Access (Browser)
   "titlebar.connectRemote": "Подключиться к удалённому серверу", // Connect to Remote Server
+  "titlebar.mirrored": "Зеркало", // Mirrored
+  "titlebar.mirroredHint":
+    "Зеркалирование включено: вкладки, разделения и активная сессия следуют за хостом. Переключатель находится на хосте.", // Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.
   "titlebar.share": "Поделиться", // Share
   "share.title": "Поделиться VelaTerm", // Share VelaTerm
   "share.subtitle":
@@ -156,7 +159,7 @@ const ru: typeof en = {
   "spawn.effortLabel": "Усилие", // Effort
   "spawn.modelDefault": "По умолчанию", // Default
   "spawn.modelLoading": "Загрузка моделей…", // Listing models…
-  "spawn.modelListUnavailable": "Список моделей недоступен — укажите её в аргументах агента", // No model list available
+  "spawn.modelListUnavailable": "Список моделей недоступен — введите идентификатор выше", // No model list available — type an identifier above
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
@@ -320,7 +323,7 @@ const ru: typeof en = {
   "remote.start": "Запустить сервер", // Start Server
   "remote.portLabel": "Порт", // Port
   "remote.portInvalid": "Порт должен быть от 1 до 65535", // Port must be between 1 and 65535
-  "remote.ipLabel": "IP-адрес", // IP address
+  "remote.ipLabel": "IP", // IP address
   "remote.ipAuto": "Автоматически (первый LAN-адрес)", // Automatic (first LAN address)
   "remote.ipVpn": "VPN", // VPN
   "remote.qrHint":
@@ -381,6 +384,9 @@ const ru: typeof en = {
   "connect.showPassword": "Показать пароль",
   "connect.hidePassword": "Скрыть пароль",
   "connect.urlPasswordPlaceholder": "Пароль для входа",
+  "connect.mirror": "Зеркалировать раскладку на всех устройствах", // Mirror layout across devices
+  "connect.mirrorHint":
+    "Вкладки, разделения и активная сессия одинаковы на всех устройствах, подключённых к этому удалённому сервису. Выключено — каждое устройство сохраняет свою раскладку.", // Tabs, splits, and the active session stay the same on every device connected to this remote service. Off = each device keeps its own layout.
   "connect.shareDesktopDb": "Использовать базу данных настольного приложения на удалённой машине",
   "connect.shareDesktopDbHint":
     "Общая база данных с настольным приложением на удалённой машине (лучше, когда версии совпадают). Выкл. = отдельная база данных.",
@@ -805,7 +811,19 @@ const ru: typeof en = {
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
+  "files.dblClickOpen": "Двойной клик, чтобы открыть",
   "files.deleteConfirm": (name) => `Удалить «${name}»? Это действие нельзя отменить.`, // Delete "{name}"? This can't be undone.
+
+  // ── File transfer (remote access) ──
+  "transfer.uploadsTitle": "Загрузки на сервер", // Uploads
+  "transfer.download": "Скачать", // Download
+  "transfer.upload": "Загрузить файлы…", // Upload Files…
+  "transfer.uploadTooltip": "Загрузить файлы в эту папку", // Upload files to this folder
+  "transfer.clear": "Очистить", // Clear
+  "transfer.cancelled": "Отменено", // Cancelled
+  "transfer.failed": "Ошибка", // Failed
+  "transfer.stalled": "Переподключение…", // Reconnecting…
+  "transfer.foldersUnsupported": "Папки загрузить нельзя.", // Folders can't be uploaded.
 
   // ── Status bar ──
   "statusbar.sessions": (n) =>
@@ -984,7 +1002,7 @@ const ru: typeof en = {
   "updater.hide": "Hide", // TODO translate
   "updater.hideHint": "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
   "updater.downloadManually": "Download manually", // TODO translate
-  "updater.downloadManuallyHint": "Open the installer download in your browser.", // TODO translate
+  "updater.downloadManuallyHint": "Open the download page in your browser.", // TODO translate
   "updater.windowsNotice":
     "VelaTerm will close while the installer runs, then reopen on its own.", // TODO translate
   "updater.installingWindows":

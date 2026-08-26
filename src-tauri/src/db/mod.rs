@@ -182,6 +182,14 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         )
         .map_err(|e| format!("Failed to migrate ssh_hosts.shared_db: {e}"))?;
     }
+    // Add ssh_hosts.mirror to restore the host's last mirror-mode choice, defaulting to off.
+    if table_exists(conn, "ssh_hosts") && !column_exists(conn, "ssh_hosts", "mirror") {
+        conn.execute(
+            "ALTER TABLE ssh_hosts ADD COLUMN mirror INTEGER NOT NULL DEFAULT 0",
+            [],
+        )
+        .map_err(|e| format!("Failed to migrate ssh_hosts.mirror: {e}"))?;
+    }
     // Add the agent-preset link and the per-session executable path. Both are nullable: existing sessions
     // keep resolving their executable through the per-kind default in app_settings, exactly as before.
     if !column_exists(conn, "sessions", "agent_preset_id") {

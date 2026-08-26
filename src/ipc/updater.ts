@@ -30,7 +30,7 @@ import { useSyncExternalStore } from "react";
 
 import { LOCALES, t, type Locale } from "../i18n";
 import { invoke, isTauri } from "./transport";
-import { localizeReleaseNotes, sliceReleaseNotes } from "./updateNotes";
+import { compareVersions, localizeReleaseNotes, sliceReleaseNotes } from "./updateNotes";
 
 /** Version recorded by Skip This Version. It affects only silent startup checks; explicit menu checks
  * ignore it so users can still install a previously skipped release. */
@@ -72,9 +72,12 @@ export interface UpdatePrompt {
   notes: string;
   /** Localized release notes, with untranslated release sections falling back to English. */
   localizedNotes: Partial<Record<Locale, string>>;
-  /** Direct platform installer URL from the endpoint, offered when automatic updating fails. */
-  downloadUrl: string | null;
 }
+
+/** Website download page, offered when automatic updating fails. The endpoint's own `url` is not used
+ * here: it points at an updater payload (a `.app.tar.gz` on macOS) that the plugin unpacks in place,
+ * not at something a user can install by hand. The page hands out the real installers. */
+export const DOWNLOAD_PAGE_URL = "https://velaterm.com/download";
 
 /** Current update phase, used by both the status bar and modal to select their presentation. */
 export type UpdateStage =
@@ -231,63 +234,58 @@ async function checkWithId(): Promise<Update | null> {
 }
 
 /**
- * Repeat the request purely for its server-side record and release the handle.
- *
- * A pending prompt makes `checkForUpdates` return early, which would silence telemetry for exactly the
- * installations that have not updated yet — the ones whose count matters most. This keeps them visible
- * without touching the prompt the user has already been shown.
- */
-async function pingForTelemetry(): Promise<void> {
-  try {
-    const update = await checkWithId();
-    if (update) await update.close().catch(() => {});
-  } catch (err) {
-    console.error("[updater] telemetry-only update check failed", err);
-  }
-}
-
-/**
  * Check for updates.
  * @param manual True for an explicit Check for Updates action: report no-update and failure results,
  *   ignore the skipped-version record, and open the modal immediately. False for startup checks:
  *   show only an unskipped new release in the status bar, with no modal or error interruption.
+ *
+ * Every call reaches the server, a pending prompt included. An earlier design handed the pending prompt
+ * back without a request, which pinned long-running installations to the first release they ever saw: a
+ * client that found 0.1.101 and stayed open kept offering 0.1.101 after 0.1.104 shipped, and Check for
+ * Updates only reopened that stale dialog. The pending prompt is now replaced whenever the server names
+ * a newer version, and the duplicate handle released whenever it does not.
  */
 export async function checkForUpdates({
   manual = false,
 }: { manual?: boolean } = {}): Promise<boolean> {
   if (!isTauri) return false;
-  // Reuse an existing pending prompt. An explicit check opens it rather than replacing its Update
-  // handle with a second one and leaking the first. This runs before the in-flight guard: reopening a
-  // dialog needs no network, and making the menu item silently do nothing while a background check
-  // happens to be running is worse than reopening it.
-  if (state.prompt && manual) {
-    openUpdateModal();
+  // A check is already in flight. Reopening the dialog needs no network, and letting the menu item do
+  // nothing at all because a background check happens to overlap is worse than showing what is known.
+  if (checking) {
+    if (manual) openUpdateModal();
     return false;
-  }
-  if (checking) return false;
-  if (state.prompt) {
-    checking = true;
-    try {
-      await pingForTelemetry();
-    } finally {
-      checking = false;
-    }
-    return true;
   }
   checking = true;
   try {
     const update = await checkWithId();
+    const pending = state.prompt;
+
     if (!update) {
+      // The server reports no newer release, so a prompt still on screen is stale: its release was
+      // installed by other means or withdrawn. Retire it unless a download is already running.
+      if (pending && !isBusy()) {
+        setState({ ...IDLE });
+        await pending.update.close().catch(() => {});
+      }
       if (manual) {
         await message(t("updater.upToDate"), { title: t("updater.title") });
       }
       return true;
     }
+
     if (!manual && loadSkippedVersion() === update.version) {
       await update.close().catch(() => {});
       return true;
     }
-    const url = update.rawJson.url;
+
+    // Keep the pending prompt when the server names the release it already describes, and while that
+    // release is downloading; this request's handle is released in both cases.
+    if (pending && (isBusy() || compareVersions(update.version, pending.version) <= 0)) {
+      await update.close().catch(() => {});
+      if (manual) openUpdateModal();
+      return true;
+    }
+
     const notes = update.body ?? "";
     setState({
       prompt: {
@@ -301,12 +299,14 @@ export async function checkForUpdates({
           notes,
           update.currentVersion,
         ),
-        downloadUrl: typeof url === "string" ? url : null,
       },
       stage: { kind: "available" },
-      // Silent checks only light the status bar; explicit checks open the requested details.
-      modalOpen: manual,
+      // Silent checks only light the status bar; explicit checks open the requested details. An open
+      // modal stays open so a replacement release swaps its contents instead of closing it.
+      modalOpen: manual || state.modalOpen,
     });
+    // Release the superseded handle only after its replacement is in place.
+    if (pending) await pending.update.close().catch(() => {});
   } catch (err) {
     console.error("[updater] update check failed", err);
     if (manual) {

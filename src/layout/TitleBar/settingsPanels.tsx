@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { normalizeArgDashes } from "../../args";
-import Icons from "../../components/Icons";
+import Select from "../../components/Select";
 import { useT, type I18nKey } from "../../i18n";
 import {
   DEFAULT_BINDINGS,
@@ -215,8 +215,7 @@ const AGENT_DEFAULT_KINDS: {
   { kind: "zoo", label: "Zoo Code", yolo: "", permVia: "inverse" },
 ];
 
-/** Agent dropdown showing the selected icon and name, with an identifying icon for each option.
- * Uses the same custom control as language and font selectors to avoid WKWebView's light native bevel. */
+/** Agent picker: each row carries the agent's own icon so the list reads at a glance. */
 function AgentSelect({
   value,
   onChange,
@@ -224,93 +223,12 @@ function AgentSelect({
   value: SessionKind;
   onChange: (v: SessionKind) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const cur = AGENT_DEFAULT_KINDS.find((a) => a.kind === value);
-  return (
-    <div style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          width: 200,
-          height: 28,
-          padding: "0 8px",
-          background: "var(--bg-active)",
-          color: "var(--text)",
-          border: `1px solid ${open ? "var(--accent)" : "var(--border)"}`,
-          borderRadius: 6,
-          fontSize: 12,
-          cursor: "pointer",
-        }}
-      >
-        <span style={{ display: "inline-flex", flex: "none" }}>{kindIconEl(value, 15)}</span>
-        <span style={{ flex: 1, textAlign: "left" }}>{cur?.label ?? value}</span>
-        <Icons.chevD size={12} style={{ color: "var(--text-dim)", flex: "none" }} />
-      </button>
-
-      {open && (
-        <>
-          <div
-            style={{ position: "fixed", inset: 0, zIndex: 1140 }}
-            onMouseDown={() => setOpen(false)}
-          />
-          <div
-            style={{
-              position: "absolute",
-              top: "calc(100% + 4px)",
-              right: 0,
-              zIndex: 1150,
-              width: 200,
-              padding: 4,
-              background: "var(--bg-2)",
-              border: "1px solid var(--border-strong)",
-              borderRadius: 8,
-              boxShadow: "var(--shadow)",
-            }}
-          >
-            {AGENT_DEFAULT_KINDS.map((a) => {
-              const on = a.kind === value;
-              return (
-                <div
-                  key={a.kind}
-                  onClick={() => {
-                    onChange(a.kind);
-                    setOpen(false);
-                  }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "6px 8px",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    fontSize: 12,
-                    color: on ? "var(--accent)" : "var(--text)",
-                    background: on ? "var(--accent-soft)" : "transparent",
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!on)
-                      e.currentTarget.style.background = "var(--bg-3, rgba(128,128,128,0.12))";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!on) e.currentTarget.style.background = "transparent";
-                  }}
-                >
-                  <span style={{ display: "inline-flex", flex: "none" }}>
-                    {kindIconEl(a.kind, 15)}
-                  </span>
-                  <span style={{ flex: 1 }}>{a.label}</span>
-                  {on && <Icons.check size={12} style={{ flex: "none" }} />}
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-    </div>
-  );
+  const options = AGENT_DEFAULT_KINDS.map((a) => ({
+    value: a.kind,
+    label: a.label,
+    icon: <span style={{ display: "inline-flex", flex: "none" }}>{kindIconEl(a.kind, 15)}</span>,
+  }));
+  return <Select value={value} onChange={onChange} options={options} width={200} align="right" />;
 }
 
 /** Multiline default-arguments field with a label above a full-width textarea. Edits remain local until

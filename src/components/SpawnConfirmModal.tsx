@@ -17,6 +17,7 @@ import type { SpawnRequest } from "../ipc/events";
 import { modelSpec, readFlag } from "../agents/modelSpec";
 import { useTermStore } from "../store/termStore";
 import Icons from "./Icons";
+import Select, { SELECT_PANEL, selectRowStyle } from "./Select";
 
 /** Agent types available in the selector, matching non-null SpawnRequest.kind values. */
 type SpawnKind = NonNullable<SpawnRequest["kind"]>;
@@ -55,115 +56,117 @@ function loadModelCatalog(kind: string): Promise<string[]> {
 }
 
 /**
- * Generic dropdown for the spawn card, reused by agent kind, model, and effort selectors.
- * Native `<select>` is avoided because macOS renders a system arrow and highlighted border that
- * conflict with the dark form.
+ * Model field: a text box with a dropdown of the identifiers this agent is known to accept.
+ *
+ * The known list is a shortcut, not a whitelist. Agent CLIs take model identifiers this app has no
+ * way to enumerate — a dated Claude id like `claude-opus-4-6`, a provider-prefixed name, a locally
+ * configured alias — so the box stays editable and anything typed is passed through verbatim. An
+ * empty box means "no --model flag", which is what Default does.
  */
-function SpawnSelect<T extends string>({
+function ModelCombo({
   value,
   onChange,
   options,
-  width = 120,
+  placeholder,
+  width = 190,
 }: {
-  value: T;
-  onChange: (v: T) => void;
-  options: { value: T; label: string }[];
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  placeholder: string;
   width?: number;
 }) {
   const [open, setOpen] = useState(false);
-  const current = options.find((o) => o.value === value)?.label ?? value;
+  const typed = value.trim().toLowerCase();
+  // Typing narrows the list; a custom identifier simply matches nothing and the list stays out of the
+  // way. The Default row appears only on an empty box, where clearing is not already one keystroke.
+  const matches = typed
+    ? options.filter((o) => o.toLowerCase().includes(typed))
+    : options;
+  const rows: { value: string; label: string }[] = [
+    ...(typed ? [] : [{ value: "", label: placeholder }]),
+    ...matches.map((m) => ({ value: m, label: m })),
+  ];
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ position: "relative", width }}>
+      <input
+        className="vlx-input"
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            // Swallow it here so the card's own handlers never see a dismissal meant for the list.
+            e.stopPropagation();
+            setOpen(false);
+          }
+        }}
+        placeholder={placeholder}
+        spellCheck={false}
+        autoComplete="off"
+        style={{
+          width: "100%",
+          height: 32,
+          boxSizing: "border-box",
+          paddingRight: 26,
+          fontFamily: "var(--font-mono, monospace)",
+          fontSize: 12.5,
+        }}
+      />
       <button
         type="button"
+        aria-label={placeholder}
         onClick={() => setOpen((o) => !o)}
         style={{
+          position: "absolute",
+          top: 0,
+          right: 0,
+          width: 24,
+          height: 32,
           display: "flex",
           alignItems: "center",
-          gap: 6,
-          width,
-          height: 32,
-          padding: "0 9px",
-          background: "var(--bg-app)",
-          color: "var(--text-primary)",
-          border: `1px solid ${open ? "var(--accent)" : "var(--border)"}`,
-          borderRadius: 5,
-          fontFamily: "var(--font-mono)",
-          fontSize: 12.5,
+          justifyContent: "center",
+          background: "transparent",
+          border: "none",
+          padding: 0,
           cursor: "pointer",
         }}
       >
-        <span
-          style={{
-            flex: 1,
-            textAlign: "left",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {current}
-        </span>
-        <Icons.chevD
-          size={12}
-          style={{ color: "var(--text-muted)", flex: "none" }}
-        />
+        <Icons.chevD size={12} style={{ color: "var(--text-muted)" }} />
       </button>
 
-      {open && (
+      {open && rows.length > 0 && (
         <>
-          {/* Transparent backdrop closes the dropdown on any outside click. */}
+          {/* Transparent backdrop closes the list on any outside click. */}
           <div
             style={{ position: "fixed", inset: 0, zIndex: 1140 }}
             onMouseDown={() => setOpen(false)}
           />
-          <div
-            style={{
-              position: "absolute",
-              top: "calc(100% + 4px)",
-              left: 0,
-              zIndex: 1150,
-              width,
-              maxHeight: 260,
-              overflowY: "auto",
-              padding: 4,
-              background: "var(--bg-panel)",
-              border: "1px solid var(--border-strong)",
-              borderRadius: 8,
-              boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
-            }}
-          >
-            {options.map((opt) => {
+          <div style={{ ...SELECT_PANEL, left: 0, width }}>
+            {rows.map((opt) => {
               const on = opt.value === value;
               return (
                 <div
                   key={opt.value || "_default"}
-                  onClick={() => {
+                  // Mouse down fires before the input loses focus, so the choice is not lost to a blur.
+                  onMouseDown={(e) => {
+                    e.preventDefault();
                     onChange(opt.value);
                     setOpen(false);
                   }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                    padding: "6px 8px",
-                    borderRadius: 6,
-                    cursor: "pointer",
-                    fontSize: 12.5,
-                    color: on ? "var(--accent)" : "var(--text-primary)",
-                    background: on ? "var(--accent-soft)" : "transparent",
-                  }}
+                  style={selectRowStyle(on, false, "md", true)}
                   onMouseEnter={(e) => {
-                    if (!on)
-                      e.currentTarget.style.background = "var(--bg-elevated)";
+                    if (!on) e.currentTarget.style.background = "var(--bg-hover)";
                   }}
                   onMouseLeave={(e) => {
                     if (!on) e.currentTarget.style.background = "transparent";
                   }}
                 >
                   <span style={{ flex: 1 }}>{opt.label}</span>
-                  {on && <Icons.check size={12} style={{ flex: "none" }} />}
                 </div>
               );
             })}
@@ -275,10 +278,6 @@ export function SpawnConfirmModal() {
   // Every agent CLI takes a model; only plain terminals have nothing to choose.
   const showModel = spec !== null;
   const listedModels = spec?.source === "static" ? (spec.models ?? []) : catalog;
-  const modelOptions = [
-    { value: "", label: t("spawn.modelDefault") },
-    ...listedModels.map((m) => ({ value: m, label: m })),
-  ];
   const effortOptions = spec?.effort
     ? [
         { value: "", label: t("spawn.modelDefault") },
@@ -401,7 +400,7 @@ export function SpawnConfirmModal() {
             >
               {t("spawn.agentLabel")}
             </div>
-            <SpawnSelect value={kind} onChange={setKind} options={KIND_OPTIONS} width={150} />
+            <Select value={kind} onChange={setKind} options={KIND_OPTIONS} width={150} mono />
           </label>
 
           <label
@@ -424,9 +423,9 @@ export function SpawnConfirmModal() {
           </label>
         </div>
 
-        {/* Model and effort controls. Which control appears depends on the agent: a dropdown when its
-            models are known or listable, a text field when its CLI enumerates nothing, and no effort
-            selector at all for agents whose CLI has no such flag. */}
+        {/* Model and effort controls. The model box is always typeable and offers whatever the agent is
+            known to accept as a dropdown, so an identifier this app cannot enumerate can still be
+            entered. Agents whose CLI has no effort flag get no effort selector. */}
         {showModel && spec && (
           <div style={{ display: "flex", gap: 14, alignItems: "flex-end" }}>
             <label style={{ display: "block" }}>
@@ -439,29 +438,17 @@ export function SpawnConfirmModal() {
               >
                 {t("spawn.modelLabel")}
               </div>
-              {spec.source === "free" ? (
-                <input
-                  className="vlx-input"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder={spec.placeholder ?? t("spawn.modelDefault")}
-                  spellCheck={false}
-                  style={{
-                    width: 190,
-                    height: 32,
-                    boxSizing: "border-box",
-                    fontFamily: "var(--font-mono, monospace)",
-                    fontSize: 12.5,
-                  }}
-                />
-              ) : (
-                <SpawnSelect
-                  value={model}
-                  onChange={setModel}
-                  options={modelOptions}
-                  width={190}
-                />
-              )}
+              <ModelCombo
+                value={model}
+                onChange={setModel}
+                options={listedModels}
+                placeholder={
+                  spec.source === "free"
+                    ? (spec.placeholder ?? t("spawn.modelDefault"))
+                    : t("spawn.modelDefault")
+                }
+                width={190}
+              />
               {/* Listing runs the agent CLI, so say what is happening instead of showing a dropdown
                   that briefly holds nothing but Default. */}
               {spec.source === "list" && (listing || catalog.length === 0) && (
@@ -489,11 +476,12 @@ export function SpawnConfirmModal() {
                 >
                   {t("spawn.effortLabel")}
                 </div>
-                <SpawnSelect
+                <Select
                   value={effort}
                   onChange={setEffort}
                   options={effortOptions}
                   width={120}
+                  mono
                 />
               </label>
             )}

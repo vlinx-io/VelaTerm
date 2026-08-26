@@ -14,6 +14,7 @@ import type { ReactNode } from "react";
 import { getLocale, useT } from "../i18n";
 import {
   closeUpdateModal,
+  DOWNLOAD_PAGE_URL,
   dismissUpdate,
   restartApp,
   startInstall,
@@ -247,7 +248,6 @@ export function UpdateModal() {
 
   const busy = stage.kind === "downloading" || stage.kind === "installing";
   const win = isWindows();
-  const { downloadUrl } = prompt;
   // useT subscribes to the locale store, so changing language rerenders with the matching changelog.
   const releaseNotes = prompt.localizedNotes[getLocale()] ?? prompt.notes;
 
@@ -367,10 +367,10 @@ export function UpdateModal() {
               {t("updater.skipVersion")}
             </button>
           )}
-          {stage.kind === "error" && downloadUrl && (
+          {stage.kind === "error" && (
             <button
               onClick={() => {
-                void platform.opener.openExternal(downloadUrl).catch(() => {});
+                void platform.opener.openExternal(DOWNLOAD_PAGE_URL).catch(() => {});
               }}
               title={t("updater.downloadManuallyHint")}
               style={{

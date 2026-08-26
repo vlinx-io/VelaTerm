@@ -5,7 +5,7 @@ description: >-
   Only use when the user explicitly invokes /vspawn-tree or $vspawn-tree; never auto-trigger. This is a real session run by its
   own process in the vlx-term left-panel tree — not an in-process sub-agent, and not a background Task. Available only
   inside vlx-term-hosted sessions.
-argument-hint: "[--claude|--codex] <task>"
+argument-hint: "[--yes] [--claude|--codex] <task>"
 disable-model-invocation: true
 allowed-tools: Bash(vspawn-tree:*)
 ---
@@ -49,13 +49,16 @@ Detect "specifying claude / codex" from the user input (or a leading `--claude` 
 flag, and **don't** write it into the prompt. The default follows the current session type. (This command always
 opens a worktree, so there's nothing to detect there.)
 
+Also detect "no dialog / don't ask me / just start it" (or a leading `--yes` / `-y`) → add `--yes`, which starts
+the child session immediately with the default settings instead of showing the confirmation card.
+
 ## Step 3: Run the command (always opens a worktree)
 
 Pass the prompt you expanded in Step 1 **as a single argument** (escaping any quotes inside it correctly), and run
 `vspawn-tree` from PATH:
 
 ```bash
-vspawn-tree [--claude|--codex] "<expanded self-contained prompt>"
+vspawn-tree [--yes] [--claude|--codex] "<expanded self-contained prompt>"
 ```
 
 After it succeeds, give the user a one-line summary: "Spawned a child session in vlx-term (dedicated worktree):

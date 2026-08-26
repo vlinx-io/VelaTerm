@@ -47,6 +47,10 @@ export function TitleBar() {
   const toggleLeft = useTermStore((s) => s.toggleLeft);
   const rightCollapsed = useTermStore((s) => s.rightCollapsed);
   const toggleRight = useTermStore((s) => s.toggleRight);
+  // Mirror mode is switched on the host only. Without a marker, a followed client sees its tabs and
+  // splits rearrange with no visible cause; the badge names where those changes come from. Hidden on the
+  // host, which already shows the switch in its remote-access panel.
+  const mirrorEnabled = useTermStore((s) => s.mirrorEnabled);
 
   // Store-level settings visibility is shared by the gear and the macOS native Settings menu.
   const settingsOpen = useTermStore((s) => s.settingsOpen);
@@ -195,6 +199,24 @@ export function TitleBar() {
             }}
           >
             Remote · {remoteInfo.address}
+          </span>
+        )}
+        {mirrorEnabled && !(isTauri || env.isElectron) && (
+          <span
+            title={t("titlebar.mirroredHint")}
+            style={{
+              marginLeft: 6,
+              fontSize: 9.5,
+              fontWeight: 700,
+              letterSpacing: 0.4,
+              textTransform: "uppercase",
+              padding: "1px 6px",
+              borderRadius: 4,
+              color: "var(--accent)",
+              background: "var(--accent-soft)",
+            }}
+          >
+            ⤢ {t("titlebar.mirrored")}
           </span>
         )}
         {versionMismatch && (

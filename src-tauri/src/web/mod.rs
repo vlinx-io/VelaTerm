@@ -12,6 +12,8 @@ mod access_store;
 mod auth;
 // desktop_call also uses dispatch, so expose it within the crate rather than keeping it private to web transport.
 pub(crate) mod dispatch;
+// dispatch mints download tickets, so this is reachable from the crate rather than private to web transport.
+pub(crate) mod download;
 mod e2ee;
 pub(crate) mod mirror;
 mod rate_limit;
@@ -487,6 +489,12 @@ fn build_router(ctx: Ctx) -> Router {
         .route("/api/logout", post(auth::logout))
         // Image upload now invokes save_pasted_image over authenticated WS with paired E2EE. The cookie-only
         // POST /api/upload path was removed because paired sessions had no cookie and received 401.
+        //
+        // File download is the one route that cannot ride the WebSocket: a browser's download manager needs a
+        // real HTTP response to stream, resume and report speed, and it sends no Authorization header when it
+        // fetches. Its credential is therefore a ticket in the URL, minted over the authenticated socket for
+        // one path and valid for minutes — see `download`.
+        .route("/api/download", get(download::handler))
         .route("/ws", get(ws::ws_handler))
         .fallback(static_handler)
         .with_state(ctx)

@@ -61,26 +61,21 @@ export function ptyRedraw(sessionId: string): Promise<void> {
   return invoke("pty_redraw", { sessionId });
 }
 
-// Track recently killed sessions locally. The initiator also receives broadcast pty://killed; a late event after a
-// restart's epoch remount could close the new view because its disposed flag is false. Ignore our own events for 3s.
-const localKills = new Map<string, number>();
-const LOCAL_KILL_WINDOW_MS = 3000;
-
-/** Whether this client killed the session within three seconds, used to ignore its own broadcast. */
-export function wasKilledLocally(sessionId: string): boolean {
-  const t = localKills.get(sessionId);
-  return t !== undefined && Date.now() - t < LOCAL_KILL_WINDOW_MS;
-}
+/**
+ * Why a session is being terminated.
+ *
+ * The backend puts this on `pty://killed/{id}`, which is the difference between the two cases that look
+ * identical from outside: `restart` means the same session comes back with a new process, so every client
+ * keeps its pane and waits; `close` means it is going away, so other clients close their view.
+ */
+export type KillReason = "close" | "restart";
 
 /** Explicitly terminates a PTY session on either transport. */
-export function ptyKill(sessionId: string): Promise<void> {
-  // Record before invoking because the event may arrive before resolution; prune expired entries.
-  const now = Date.now();
-  for (const [id, t] of localKills) {
-    if (now - t >= LOCAL_KILL_WINDOW_MS) localKills.delete(id);
-  }
-  localKills.set(sessionId, now);
-  return invoke("pty_kill", { sessionId });
+export function ptyKill(
+  sessionId: string,
+  reason: KillReason = "close",
+): Promise<void> {
+  return invoke("pty_kill", { sessionId, reason });
 }
 
 // Sessions whose view is disappearing because this client is following a peer's mirrored layout, rather than

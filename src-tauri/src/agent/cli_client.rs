@@ -44,6 +44,7 @@ pub fn run_spawn(args: &[String]) -> ! {
         &parsed.prompt,
         parsed.kind.as_deref(),
         parsed.worktree,
+        parsed.no_confirm,
     );
     let endpoint = format!("{url}/spawn?t={token}");
     match post_json(&endpoint, &body) {
@@ -113,7 +114,8 @@ pub fn run_view(args: &[String]) -> ! {
 }
 
 const SPAWN_USAGE: &str =
-    "usage: vspawn [--worktree] [--claude|--codex|--copilot|--kiro] <task description...>";
+    "usage: vspawn [--worktree] [--yes] [--claude|--codex|--copilot|--kiro] <task description...>\n\
+    --yes  skip the confirmation dialog and start the child session with default settings";
 const VIEW_USAGE: &str = "usage: vopen <file|url>...   (relative paths resolve against the current dir; opens multiple at once)\n\
     opens by type: markdown editor / image viewer / code editor (syntax highlight)\n\
     http/https urls open in an in-app browser tab (desktop only)";
@@ -138,6 +140,8 @@ fn require_env(name: &str) -> Result<String, String> {
 struct SpawnArgs {
     worktree: bool,
     kind: Option<String>,
+    /// Skip the confirmation dialog and start the child session with default settings.
+    no_confirm: bool,
     prompt: String,
 }
 
@@ -148,11 +152,13 @@ enum SpawnParse {
 }
 
 /// Parse arguments after `--spawn`. `--worktree/--wt` enables a worktree, `--no-worktree/--nowt`
-/// disables it, agent flags select kind, help flags show usage, and everything after `--` is prompt
-/// text even when prefixed by `-`. Other options are errors; remaining words join into a required prompt.
+/// disables it, `--yes/-y/--no-confirm` skips the confirmation dialog, agent flags select kind, help
+/// flags show usage, and everything after `--` is prompt text even when prefixed by `-`. Other options
+/// are errors; remaining words join into a required prompt.
 fn parse_spawn_args(rest: &[String]) -> SpawnParse {
     let mut worktree = false;
     let mut kind: Option<String> = None;
+    let mut no_confirm = false;
     let mut words: Vec<&str> = Vec::new();
     let mut i = 0;
     while i < rest.len() {
@@ -160,6 +166,7 @@ fn parse_spawn_args(rest: &[String]) -> SpawnParse {
         match a {
             "--worktree" | "--wt" => worktree = true,
             "--no-worktree" | "--nowt" => worktree = false,
+            "--yes" | "-y" | "--no-confirm" => no_confirm = true,
             "--claude" => kind = Some("claude".to_string()),
             "--codex" => kind = Some("codex".to_string()),
             "--copilot" => kind = Some("copilot".to_string()),
@@ -185,17 +192,28 @@ fn parse_spawn_args(rest: &[String]) -> SpawnParse {
     SpawnParse::Ok(SpawnArgs {
         worktree,
         kind,
+        no_confirm,
         prompt,
     })
 }
 
 /// Build the `/spawn` JSON body, omitting kind so the frontend can inherit it when absent. serde_json
-/// safely escapes quotes, newlines, and backslashes.
-fn build_spawn_body(sid: &str, prompt: &str, kind: Option<&str>, worktree: bool) -> String {
+/// safely escapes quotes, newlines, and backslashes. `noConfirm` is only written when set, keeping the
+/// body identical to previous builds for ordinary spawns.
+fn build_spawn_body(
+    sid: &str,
+    prompt: &str,
+    kind: Option<&str>,
+    worktree: bool,
+    no_confirm: bool,
+) -> String {
     let mut obj = serde_json::Map::new();
     obj.insert("parentSessionId".into(), serde_json::json!(sid));
     obj.insert("prompt".into(), serde_json::json!(prompt));
     obj.insert("worktree".into(), serde_json::json!(worktree));
+    if no_confirm {
+        obj.insert("noConfirm".into(), serde_json::json!(true));
+    }
     if let Some(k) = kind {
         obj.insert("kind".into(), serde_json::json!(k));
     }
@@ -293,18 +311,45 @@ mod tests {
 
     #[test]
     fn build_spawn_body_omits_kind_when_none() {
-        let body = build_spawn_body("p1", "fix a bug", None, false);
+        let body = build_spawn_body("p1", "fix a bug", None, false, false);
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["parentSessionId"], "p1");
         assert_eq!(v["prompt"], "fix a bug");
         assert_eq!(v["worktree"], false);
         assert!(v.get("kind").is_none(), "the field should be omitted when kind is empty");
+        assert!(
+            v.get("noConfirm").is_none(),
+            "the field should be omitted unless --yes was passed"
+        );
+    }
+
+    #[test]
+    fn build_spawn_body_marks_no_confirm() {
+        let body = build_spawn_body("p1", "fix a bug", None, false, true);
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(v["noConfirm"], true);
+    }
+
+    #[test]
+    fn parse_spawn_yes_flag() {
+        for flag in ["--yes", "-y", "--no-confirm"] {
+            let SpawnParse::Ok(p) = parse_spawn_args(&args(&[flag, "do", "it"])) else {
+                panic!("parsing should succeed");
+            };
+            assert!(p.no_confirm, "{flag} should skip the confirmation dialog");
+            assert_eq!(p.prompt, "do it");
+        }
+        // Absent by default.
+        let SpawnParse::Ok(p) = parse_spawn_args(&args(&["do", "it"])) else {
+            panic!("parsing should succeed");
+        };
+        assert!(!p.no_confirm);
     }
 
     #[test]
     fn build_spawn_body_escapes_special_chars() {
         // serde_json escapes quotes, newlines, and backslashes without handwritten json_escape.
-        let body = build_spawn_body("p", "line1\n\"quotes\" \\backslash", Some("claude"), true);
+        let body = build_spawn_body("p", "line1\n\"quotes\" \\backslash", Some("claude"), true, false);
         let v: serde_json::Value = serde_json::from_str(&body).expect("should be valid JSON");
         assert_eq!(v["prompt"], "line1\n\"quotes\" \\backslash");
         assert_eq!(v["kind"], "claude");

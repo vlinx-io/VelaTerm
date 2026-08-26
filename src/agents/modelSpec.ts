@@ -8,10 +8,12 @@
 import type { AgentKind } from "../types";
 
 /**
- * Where a model list comes from.
+ * Where a model list comes from. The list is a suggestion, never a whitelist: the spawn dialog's model
+ * box stays typeable for every source, so a dated identifier such as `claude-opus-4-6` or a locally
+ * configured alias can always be passed through.
  * - `static`: the CLI ships a fixed set of aliases or presets, listed in `models`.
  * - `list`: the CLI can print its own catalogue, fetched through `agentListModels`.
- * - `free`: the CLI enumerates nothing, so the user types an identifier.
+ * - `free`: the CLI enumerates nothing, so there is nothing to suggest.
  */
 export type ModelSource = "static" | "list" | "free";
 

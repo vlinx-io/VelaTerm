@@ -141,6 +141,44 @@ afterEach(() => {
   mirrorState.enabled = true;
 });
 
+// --- IP dropdown helpers -------------------------------------------------------------------
+// The advertised-IP control is a custom dropdown (a combobox button plus a listbox rendered only
+// while open), so tests open it to read options and click an option to choose an address.
+
+function ipCombo(): HTMLElement {
+  return screen.getByRole("combobox", { name: "remote.ipLabel" });
+}
+
+/** Open the dropdown if closed and return its options in DOM order. */
+function openIpOptions(): HTMLElement[] {
+  const combo = ipCombo();
+  if (combo.getAttribute("aria-expanded") !== "true") fireEvent.click(combo);
+  return screen.getAllByRole("option");
+}
+
+/** Number of options, leaving the dropdown closed again. */
+function ipOptionLabels(): string[] {
+  const labels = openIpOptions().map((o) => o.textContent ?? "");
+  const combo = ipCombo();
+  if (combo.getAttribute("aria-expanded") === "true") fireEvent.click(combo);
+  return labels;
+}
+
+/** Label currently shown on the closed control. */
+function ipShownLabel(): string {
+  return ipCombo().textContent ?? "";
+}
+
+/** Pick the option whose label starts with `ip` ("" picks Automatic). */
+function selectIp(ip: string) {
+  const options = openIpOptions();
+  const target = ip
+    ? options.find((o) => (o.textContent ?? "").startsWith(ip))
+    : options[0];
+  if (!target) throw new Error(`no IP option for ${ip}`);
+  fireEvent.click(target);
+}
+
 describe("mirror-mode switch", () => {
   it("offers mirror mode while stopped, checked by default", async () => {
     mockStopped({});
@@ -185,15 +223,9 @@ describe("advertised-IP selector", () => {
 
     // The stopped-state selector is replaced by the running-state one once the status arrives, so
     // re-query until the running selector carries all options.
-    await waitFor(() => {
-      const sel = screen.getByRole("combobox", { name: "remote.ipLabel" }) as HTMLSelectElement;
-      expect(sel.options.length).toBe(3);
-    });
-    const select = screen.getByRole("combobox", {
-      name: "remote.ipLabel",
-    }) as HTMLSelectElement;
+    await waitFor(() => expect(ipOptionLabels().length).toBe(3));
     // Automatic plus both interfaces, with the interface name and the VPN mark visible.
-    const labels = Array.from(select.options).map((o) => o.textContent);
+    const labels = ipOptionLabels();
     expect(labels[0]).toBe("remote.ipAuto");
     expect(labels).toContain("192.168.1.5 · en0");
     expect(labels).toContain("100.100.83.2 · utun3 (remote.ipVpn)");
@@ -203,7 +235,7 @@ describe("advertised-IP selector", () => {
       expect(webPairingCreateMock).toHaveBeenCalledWith(undefined, false),
     );
 
-    fireEvent.change(select, { target: { value: "100.100.83.2" } });
+    selectIp("100.100.83.2");
 
     // Selection is persisted under the share-IP key and regenerates the link with exactly that address.
     expect(invokeMock).toHaveBeenCalledWith("set_app_settings", {
@@ -233,9 +265,8 @@ describe("advertised-IP selector", () => {
 
     // The restored setting shows in the selector once interfaces and settings have arrived.
     await waitFor(() => {
-      const sel = screen.getByRole("combobox", { name: "remote.ipLabel" }) as HTMLSelectElement;
-      expect(sel.options.length).toBe(3);
-      expect(sel.value).toBe("100.100.83.2");
+      expect(ipOptionLabels().length).toBe(3);
+      expect(ipShownLabel()).toContain("100.100.83.2");
     });
 
     // The setting may arrive after the automatic pairing; the regeneration effect must then re-pair
@@ -258,9 +289,8 @@ describe("advertised-IP selector", () => {
 
     // Wait for the running-state selector with the full option list, then check the shown value.
     await waitFor(() => {
-      const sel = screen.getByRole("combobox", { name: "remote.ipLabel" }) as HTMLSelectElement;
-      expect(sel.options.length).toBe(3);
-      expect(sel.value).toBe("");
+      expect(ipOptionLabels().length).toBe(3);
+      expect(ipShownLabel()).toBe("remote.ipAuto");
     });
 
     // Pairing uses the automatic backend default; no call ever passes the vanished address.
@@ -290,13 +320,8 @@ describe("advertised-IP selector", () => {
     });
     render(<RemoteAccessPanel onClose={vi.fn()} />);
 
-    await waitFor(() => {
-      const sel = screen.getByRole("combobox", { name: "remote.ipLabel" }) as HTMLSelectElement;
-      expect(sel.options.length).toBe(3);
-    });
-    fireEvent.change(screen.getByRole("combobox", { name: "remote.ipLabel" }), {
-      target: { value: "100.101.0.7" },
-    });
+    await waitFor(() => expect(ipOptionLabels().length).toBe(3));
+    selectIp("100.101.0.7");
 
     await waitFor(() =>
       expect(webPairingCreateMock).toHaveBeenCalledWith("100.101.0.7", false),
@@ -386,16 +411,11 @@ describe("stopped-state IP selector", () => {
     render(<RemoteAccessPanel onClose={vi.fn()} />);
 
     // The stopped panel shows the selector (next to the port field) with all options.
-    await waitFor(() => {
-      const sel = screen.getByRole("combobox", { name: "remote.ipLabel" }) as HTMLSelectElement;
-      expect(sel.options.length).toBe(3);
-    });
+    await waitFor(() => expect(ipOptionLabels().length).toBe(3));
     expect(screen.getByPlaceholderText("8799")).toBeTruthy();
 
     // Select an IP BEFORE starting, then start the service.
-    fireEvent.change(screen.getByRole("combobox", { name: "remote.ipLabel" }), {
-      target: { value: "100.100.83.2" },
-    });
+    selectIp("100.100.83.2");
     expect(appSettings["vlx-share-ip"]).toBe("100.100.83.2");
     fireEvent.change(screen.getByPlaceholderText("remote.passwordPlaceholder"), {
       target: { value: "pw" },
