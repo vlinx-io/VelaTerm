@@ -66,7 +66,12 @@ pub enum ShellKind {
     /// POSIX shells such as bash, zsh, sh, and dash.
     Posix,
     Fish,
+    /// Windows PowerShell 5.1 (`powershell.exe`), which passes native-command arguments through
+    /// unmodified and therefore needs quotes escaped by hand.
     PowerShell,
+    /// PowerShell 6+ (`pwsh`), which re-quotes native-command arguments itself. Hand-escaping a value
+    /// here double-escapes it, so the two dialects need opposite treatment; see [`value_ref`].
+    Pwsh,
     Cmd,
 }
 
@@ -79,7 +84,9 @@ pub fn shell_kind(path: &str) -> ShellKind {
         .to_ascii_lowercase();
     // Ignore the `.exe` suffix on Windows.
     let base = base.strip_suffix(".exe").unwrap_or(&base);
-    if base.contains("powershell") || base.contains("pwsh") {
+    if base.contains("pwsh") {
+        ShellKind::Pwsh
+    } else if base.contains("powershell") {
         ShellKind::PowerShell
     } else if base.contains("fish") {
         ShellKind::Fish
@@ -235,6 +242,9 @@ pub(crate) fn value_ref(shell: ShellKind, env: &str) -> String {
     match shell {
         ShellKind::Posix | ShellKind::Fish => format!("\"${env}\""),
         ShellKind::PowerShell => format!("$($env:{env} -replace '\"', '\\\"')"),
+        // pwsh re-quotes the argument itself, so the value is passed as-is; escaping here would
+        // reach the agent as literal backslashes and produce the very error the arm above prevents.
+        ShellKind::Pwsh => format!("\"$env:{env}\""),
         ShellKind::Cmd => format!("\"%{env}%\""),
     }
 }
@@ -245,7 +255,7 @@ pub(crate) fn value_ref(shell: ShellKind, env: &str) -> String {
 /// is independent of the `--settings` fix.
 fn prompt_ref(shell: ShellKind, env: &str) -> String {
     match shell {
-        ShellKind::PowerShell => format!("\"$env:{env}\""),
+        ShellKind::PowerShell | ShellKind::Pwsh => format!("\"$env:{env}\""),
         _ => value_ref(shell, env),
     }
 }
@@ -543,7 +553,7 @@ fn valid_resume_id(id: &str) -> Option<&str> {
 /// metacharacters so they can be embedded safely in quoted strings and cmd.exe blocks.
 fn not_found_message(shell: ShellKind, bin: &str) -> String {
     match shell {
-        ShellKind::PowerShell => format!(
+        ShellKind::PowerShell | ShellKind::Pwsh => format!(
             "[VelaTerm] {bin} not found on PATH. Your shell profile may be blocked - run: \
              Set-ExecutionPolicy -Scope CurrentUser RemoteSigned, then reopen the session."
         ),
@@ -580,7 +590,7 @@ fn report_not_found_with(shell: ShellKind, msg: &str) -> String {
             "curl -fsS -m 2 \"${NOTFOUND_URL_ENV}\" >/dev/null 2>&1; \
              or wget -qO- -T 2 \"${NOTFOUND_URL_ENV}\" >/dev/null 2>&1; echo '{msg}'"
         ),
-        ShellKind::PowerShell => format!(
+        ShellKind::PowerShell | ShellKind::Pwsh => format!(
             "try {{ Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 $env:{NOTFOUND_URL_ENV} | Out-Null }} \
              catch {{}}; Write-Host '{msg}'"
         ),
@@ -604,7 +614,7 @@ fn clear_prefix(shell: ShellKind) -> &'static str {
         // `printf` interprets \033 inside single quotes as ESC in bash, zsh, dash, and fish.
         ShellKind::Posix | ShellKind::Fish => "printf '\\033[3J\\033[2J\\033[H'; ",
         // Build ESC from `[char]27` for compatibility with Windows PowerShell 5.1 and PowerShell 7+.
-        ShellKind::PowerShell => {
+        ShellKind::PowerShell | ShellKind::Pwsh => {
             "[Console]::Write([char]27 + '[3J' + [char]27 + '[2J' + [char]27 + '[H'); "
         }
         // cmd.exe's built-in `cls` becomes a clear-screen sequence through ConPTY.
@@ -640,7 +650,7 @@ fn launch_cmd(shell: ShellKind, bin: &str, args: &str) -> String {
             "{clear}if command -v {bin} >/dev/null 2>&1; then {inner}; else {report}; fi"
         ),
         ShellKind::Fish => format!("{clear}if type -q {bin}; {inner}; else; {report}; end"),
-        ShellKind::PowerShell => format!(
+        ShellKind::PowerShell | ShellKind::Pwsh => format!(
             "{clear}if (Get-Command {bin} -ErrorAction SilentlyContinue) {{ {inner} }} else {{ {report} }}"
         ),
         ShellKind::Cmd => format!("{clear}where {bin} >nul 2>nul & if errorlevel 1 ({report}) else ({inner})"),
@@ -712,7 +722,7 @@ fn launch_cmd_at(shell: ShellKind, path: &str, args: &str) -> String {
             let report = report_not_found_with(shell, &sq_posix(&path_missing_message(path)));
             format!("{clear}if test -x '{p}'; {inner}; else; {report}; end")
         }
-        ShellKind::PowerShell => {
+        ShellKind::PowerShell | ShellKind::Pwsh => {
             let p = sq_pwsh(path);
             let inner = if args.is_empty() {
                 format!("& '{p}'")
@@ -1489,6 +1499,56 @@ mod tests {
              if command -v opencode >/dev/null 2>&1; then opencode; else"
         ));
         assert!(bare.contains("\"$VLX_NOTFOUND_URL\""));
+    }
+
+    /// `pwsh` and `powershell.exe` need OPPOSITE escaping for a native-command argument, so they must not
+    /// classify to the same kind. Windows PowerShell passes the value through verbatim and needs every `"`
+    /// hand-escaped; pwsh re-quotes the argument itself, so that same escaping arrives as literal
+    /// backslashes and the agent reports `Invalid JSON provided to --settings`. Both behaviours were
+    /// measured on Windows against 5.1.26100 and 7.6.5.
+    #[test]
+    fn shell_kind_separates_windows_powershell_from_pwsh() {
+        assert_eq!(
+            shell_kind(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"),
+            ShellKind::PowerShell
+        );
+        assert_eq!(
+            shell_kind(r"C:\Program Files\PowerShell\7\pwsh.exe"),
+            ShellKind::Pwsh
+        );
+        assert_eq!(shell_kind("pwsh"), ShellKind::Pwsh);
+        assert_eq!(shell_kind("powershell"), ShellKind::PowerShell);
+    }
+
+    /// The regression this fix exists for: a compact-JSON value must reach the agent unmangled on BOTH
+    /// PowerShell dialects, and that requires different text in each.
+    #[test]
+    fn value_ref_escapes_for_windows_powershell_but_not_for_pwsh() {
+        // Windows PowerShell 5.1 hand-escapes, because it passes the value through untouched.
+        assert_eq!(
+            value_ref(ShellKind::PowerShell, "VLX_CLAUDE_SETTINGS"),
+            r#"$($env:VLX_CLAUDE_SETTINGS -replace '"', '\"')"#
+        );
+        // pwsh must NOT hand-escape; a backslash here survives into the argument itself.
+        assert_eq!(
+            value_ref(ShellKind::Pwsh, "VLX_CLAUDE_SETTINGS"),
+            r#""$env:VLX_CLAUDE_SETTINGS""#
+        );
+        assert!(!value_ref(ShellKind::Pwsh, "X").contains('\\'));
+    }
+
+    /// A prompt is one argument on both dialects. Windows PowerShell still splits a prompt containing `"`
+    /// (a pre-existing limitation noted on `prompt_ref`); pwsh does not, so quoting is enough for both.
+    #[test]
+    fn prompt_ref_quotes_on_both_powershell_dialects() {
+        assert_eq!(
+            prompt_ref(ShellKind::PowerShell, "VLX_PROMPT"),
+            r#""$env:VLX_PROMPT""#
+        );
+        assert_eq!(
+            prompt_ref(ShellKind::Pwsh, "VLX_PROMPT"),
+            r#""$env:VLX_PROMPT""#
+        );
     }
 
     #[test]
