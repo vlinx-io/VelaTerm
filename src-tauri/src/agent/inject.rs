@@ -1721,7 +1721,13 @@ mod tests {
             shell_kind("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"),
             ShellKind::PowerShell
         );
-        assert_eq!(shell_kind("pwsh"), ShellKind::PowerShell);
+        // The two dialects are separate variants: they pass native-command arguments under opposite
+        // rules, so anything that collapses them reintroduces the --settings mangling on pwsh 7.
+        assert_eq!(shell_kind("pwsh"), ShellKind::Pwsh);
+        assert_eq!(
+            shell_kind("C:\\Program Files\\PowerShell\\7\\pwsh.exe"),
+            ShellKind::Pwsh
+        );
         assert_eq!(shell_kind("C:\\Windows\\System32\\cmd.exe"), ShellKind::Cmd);
     }
 
