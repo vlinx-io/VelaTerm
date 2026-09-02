@@ -56,7 +56,21 @@ const ko: typeof en = {
   "titlebar.mirrored": "미러링 중", // Mirrored
   "titlebar.mirroredHint":
     "미러링이 켜져 있습니다. 탭, 분할, 활성 세션이 호스트를 따릅니다. 스위치는 호스트에 있습니다.", // Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.
+  "titlebar.mirroredBy": (n: number) => `${n}대가 미러링 중`, // Mirrored by {n}
+  "titlebar.mirroredByHint": (n: number) =>
+    `원격 클라이언트 ${n}대가 연결되어 있습니다. 탭, 분할, 활성 세션이 공유되며 양쪽 모두 바꿀 수 있습니다.`, // {n} remote clients are connected. Tabs, splits, and the active session are shared, and either side can rearrange them.
+  "titlebar.clientsTitle": "연결된 클라이언트", // Attached clients
+  "titlebar.clientUnnamed": "이름 없는 클라이언트", // Unnamed client
+  "titlebar.clientSince": (time: string) => `${time}부터`, // since {time}
   "titlebar.share": "공유", // Share
+  // ── Alt-triggered menu bar (Windows/Linux) ──
+  "menubar.file": "파일", // File
+  "menubar.terminal": "터미널", // Terminal
+  "menubar.help": "도움말", // Help
+  "menubar.newTerminal": "새 터미널", // New Terminal
+  "menubar.visitWebsite": "웹사이트 방문", // Visit Website
+  "menubar.sendFeedback": "피드백 보내기", // Send Feedback
+  "menubar.clearBadges": "알림 배지 지우기", // Clear Notification Badges
   "share.title": "VelaTerm 공유", // Share VelaTerm
   "share.subtitle":
     "VelaTerm은 작은 팀이 만들고 있습니다. 마음에 드셨다면 주변에 VelaTerm을 공유해 주세요. 더 많은 분이 저희를 알게 되는 것은 팀에 정말 큰 힘이 됩니다. 감사합니다! ❤️", // We're a small team behind VelaTerm. If you enjoy it, please share VelaTerm with others…
@@ -65,7 +79,8 @@ const ko: typeof en = {
   "share.wechatMoments": "WeChat 모멘트",
   "share.weibo": "Weibo",
   "share.xiaohongshu": "샤오홍슈",
-  "share.xiaohongshuAction": "게시 문구와 링크를 복사하고 샤오홍슈 크리에이터 센터 열기",
+  "share.xiaohongshuAction":
+    "게시 문구와 링크를 복사하고 샤오홍슈 크리에이터 센터 열기",
   "share.wechatQrTitle": "WeChat 모멘트에 공유",
   "share.wechatQrHint":
     "WeChat으로 QR 코드를 스캔해 링크를 연 다음 모멘트에 공유를 선택하세요.",
@@ -94,11 +109,13 @@ const ko: typeof en = {
   "settings.cliInstalledAt": (path: string) => `${path}에 설치됨`,
   "settings.cliConflict": (path: string) =>
     `${path}에 다른 ‘vela’ 명령이 있습니다. VelaTerm은 덮어쓰지 않습니다.`,
-  "settings.cliHint": "VS Code의 `code`처럼 `vela <project-path>`를 PATH에 추가합니다.",
+  "settings.cliHint":
+    "VS Code의 `code`처럼 `vela <project-path>`를 PATH에 추가합니다.",
   "settings.agentArgsHint":
     "각 에이전트 유형의 새 세션에 적용되는 기본 실행 인자. 세션 생성·편집 시 설정한 개별 인자가 우선합니다. 비워두면 없음.", // Agent default launch args hint
   "settings.agentPathLabel": "실행 파일 경로(선택)", // Executable path (optional)
-  "settings.agentPathPlaceholder": "예: ~/.local/bin/claude — 비워두면 PATH에서 검색", // e.g. path — empty = find on PATH
+  "settings.agentPathPlaceholder":
+    "예: ~/.local/bin/claude — 비워두면 PATH에서 검색", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "설정하면 이 유형의 세션은 PATH에서 명령을 찾는 대신 이 전체 경로로 실행됩니다. 설치되어 있지만 셸 PATH에 없는 경우에 유용합니다. 원클릭 설치 성공 후 위치가 감지되면 자동으로 입력됩니다.", // Agent executable path hint
   "settings.appearance": "외관", // Appearance
@@ -124,6 +141,7 @@ const ko: typeof en = {
   "settings.maxLiveTabs": "Background limit", // Background limit
   "settings.defaultShell": "기본 셸", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.cleanImages": "붙여넣은 이미지 자동 정리",
   "settings.cleanImagesHint":
@@ -148,7 +166,8 @@ const ko: typeof en = {
   "spawn.effortLabel": "추론 강도", // Effort
   "spawn.modelDefault": "기본값", // Default
   "spawn.modelLoading": "모델 목록 불러오는 중…", // Listing models…
-  "spawn.modelListUnavailable": "모델 목록을 가져올 수 없음 — 위에 식별자를 입력하세요", // No model list available — type an identifier above
+  "spawn.modelListUnavailable":
+    "모델 목록을 가져올 수 없음 — 위에 식별자를 입력하세요", // No model list available — type an identifier above
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
@@ -190,14 +209,16 @@ const ko: typeof en = {
   "tree.openWorktreeDir": "Open worktree folder",
   "tree.deleteWorktreeMenu": "Delete worktree…", // TODO translate
   "tree.deleteWorktreeTitle": "Delete worktree", // TODO translate
-  "tree.deleteWorktreeBody": "Choose a worktree to remove. This deletes its working directory from disk.", // TODO translate
+  "tree.deleteWorktreeBody":
+    "Choose a worktree to remove. This deletes its working directory from disk.", // TODO translate
   "tree.deleteWorktreePlaceholder": "Select a worktree…", // TODO translate
   "tree.deleteWorktreeForce": "Force delete (discard uncommitted changes)", // TODO translate
   "tree.convertToNormalSession": "Convert to normal session", // TODO translate
   "tree.moveGroupToWorktree": "Worktree로 이동…",
   "tree.convertToNormalGroup": "Convert to normal group", // TODO translate
   "merge.title": "Merge branches", // TODO translate
-  "merge.desc": "Pick a source and a target branch; the source merges into the target.", // TODO translate
+  "merge.desc":
+    "Pick a source and a target branch; the source merges into the target.", // TODO translate
   "merge.notRepo": "This session's directory is not a git repository.", // TODO translate
   "merge.loadingBranches": "Loading branches…", // TODO translate
   "merge.loadingDiff": "Loading diff…", // TODO translate
@@ -205,12 +226,14 @@ const ko: typeof en = {
   "merge.targetLabel": "Target branch", // TODO translate
   "merge.selectBranch": "Select a branch…", // TODO translate
   "merge.swap": "Swap direction", // TODO translate
-  "merge.pickHint": "Pick both branches to preview the changes this merge brings in.", // TODO translate
+  "merge.pickHint":
+    "Pick both branches to preview the changes this merge brings in.", // TODO translate
   "merge.changes": (target: string) => `Changes brought into "${target}"`, // TODO translate
   "merge.noChanges": "No file changes.", // TODO translate
   "merge.sameBranch": "Source and target are the same branch.", // TODO translate
   "merge.branchGone": "A selected branch no longer exists. Pick again.", // TODO translate
-  "merge.upToDate": "The target branch already contains the source branch. Nothing to merge.", // TODO translate
+  "merge.upToDate":
+    "The target branch already contains the source branch. Nothing to merge.", // TODO translate
   "merge.targetNotCheckedOut": (target: string) =>
     `Target branch "${target}" isn't checked out in any worktree, so a local merge can't run. Check it out first.`, // TODO translate
   "merge.targetDirty":
@@ -218,11 +241,13 @@ const ko: typeof en = {
   "merge.sourceDirtyNote":
     "The source branch's working tree has uncommitted changes; they will be committed first.", // TODO translate
   "merge.commitMsgLabel": "Commit message", // TODO translate
-  "merge.commitMsgPlaceholder": "Describe this change (used as the commit message)", // TODO translate
+  "merge.commitMsgPlaceholder":
+    "Describe this change (used as the commit message)", // TODO translate
   "merge.apply": "Merge", // TODO translate
   "merge.commitAndApply": "Commit & merge", // TODO translate
   "merge.working": "Merging…", // TODO translate
-  "merge.doneMsg": (source: string, target: string) => `Merged "${source}" into "${target}".`, // TODO translate
+  "merge.doneMsg": (source: string, target: string) =>
+    `Merged "${source}" into "${target}".`, // TODO translate
   "merge.conflictMsg": (target: string) =>
     `Merge has conflicts. Resolve them in the terminal of "${target}"'s worktree, then commit:`, // TODO translate
   "merge.close": "Close", // TODO translate
@@ -277,7 +302,8 @@ const ko: typeof en = {
     "open your desktop's Settings ▸ Notifications and allow VelaTerm.", // TODO translate
   "settings.notifyStepsBrowser":
     "click the site-permission icon in the address bar and set Notifications to Allow.", // TODO translate
-  "settings.notifyUnsupported": "Notifications aren't available in this environment.", // TODO translate
+  "settings.notifyUnsupported":
+    "Notifications aren't available in this environment.", // TODO translate
   "settings.notifyOpenSettings": "Open System Settings", // TODO translate
   // Shortcut categories
   "settings.catShortcuts": "단축키", // Shortcuts
@@ -315,8 +341,7 @@ const ko: typeof en = {
   "remote.ipLabel": "IP", // IP address
   "remote.ipAuto": "자동 (첫 번째 LAN 주소)", // Automatic (first LAN address)
   "remote.ipVpn": "VPN", // VPN
-  "remote.qrHint":
-    "휴대폰으로 스캔하면 선택한 주소로 페어링 링크가 열립니다.", // Scan with your phone to open the pairing link on the selected address.
+  "remote.qrHint": "휴대폰으로 스캔하면 선택한 주소로 페어링 링크가 열립니다.", // Scan with your phone to open the pairing link on the selected address.
   "remote.fingerprintLabel": "인증서 지문 (SHA-256)", // Certificate fingerprint (SHA-256)
   "remote.fingerprintHint":
     "처음 연결할 때 브라우저가 인증서를 신뢰할 수 없다고 경고합니다(자체 서명 인증서에서는 정상). 이 지문을 대조해 이 컴퓨터에 연결 중인지 확인하세요.", // On first connect, browsers warn the certificate is untrusted…
@@ -336,7 +361,7 @@ const ko: typeof en = {
     "차단된 기기는 연결이 끊기고 다시 연결할 수 없습니다(새 페어링 링크 필요). 다른 기기에는 영향이 없습니다.", // Block hint
   "remote.devicesEmpty": "페어링된 기기가 없습니다", // No paired devices yet
   "remote.autoRestartHint":
-    "원격 액세스는 앱을 다시 열면 자동으로 다시 시작됩니다. \"서버 중지\"로 끌 수 있습니다.", // Remote access restarts automatically when the app is reopened. Stop Server turns this off.
+    '원격 액세스는 앱을 다시 열면 자동으로 다시 시작됩니다. "서버 중지"로 끌 수 있습니다.', // Remote access restarts automatically when the app is reopened. Stop Server turns this off.
   "remote.autostartFailed": "자동 시작 실패:", // Automatic start failed:
   "remote.mirror": "기기 간 레이아웃 미러링", // Mirror layout across devices
   "remote.mirrorHint":
@@ -346,7 +371,8 @@ const ko: typeof en = {
   "connect.title": "원격 서버에 연결", // Connect to Remote Server
   "connect.pairingPlaceholder": "페어링 링크 붙여넣기", // Paste pairing link
   "connect.confirmConnect": "지문 확인 후 연결", // Fingerprint matches, connect
-  "connect.desc": "원격 VelaTerm의 주소와 비밀번호를 입력하면 새 창에서 연결·조작합니다.", // Enter the address and password…
+  "connect.desc":
+    "원격 VelaTerm의 주소와 비밀번호를 입력하면 새 창에서 연결·조작합니다.", // Enter the address and password…
   "connect.addressPlaceholder": "IP 주소 (예: 192.168.1.100)", // IP address, e.g. 192.168.1.100
   "connect.portPlaceholder": "포트", // Port
   "connect.connecting": "연결 중…", // Connecting…
@@ -355,7 +381,8 @@ const ko: typeof en = {
   "connect.stageTransferring": "서버 전송 중…",
   "connect.stageStarting": "서버 시작 중…",
   "connect.sshFingerprintLabel": (kt: string) => `SSH 호스트 키 지문 (${kt})`,
-  "connect.sshHostNew": "이 호스트에 처음 연결합니다. 계속하기 전에 지문을 확인하세요.",
+  "connect.sshHostNew":
+    "이 호스트에 처음 연결합니다. 계속하기 전에 지문을 확인하세요.",
   "connect.sshHostChanged":
     "⚠ 이 호스트의 키가 변경되었습니다. 서버 재설치이거나 중간자 공격일 수 있습니다. 확실한 경우에만 계속하세요.",
   "connect.urlCertChanged":
@@ -418,6 +445,17 @@ const ko: typeof en = {
   "tree.closeScratch": "초안 닫기", // Close Scratch
   "tree.importProject": "프로젝트 가져오기", // Import Project
   "tree.createProject": "프로젝트 만들기",
+  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  "tree.newCollection": "새 컬렉션",
+  "tree.deleteCollection": "컬렉션 삭제",
+  "collection.title": "새 컬렉션",
+  "collection.name": "컬렉션 이름",
+  "collection.namePlaceholder": "research",
+  "collection.submit": "컬렉션 만들기",
+  "collection.tag": "폴더 없음",
+  "collection.deleteTitle": "컬렉션 삭제",
+  "collection.deleteBody": (name) =>
+    `컬렉션 "${name}"을(를) 삭제할까요? 안의 그룹과 세션도 모두 삭제되며 되돌릴 수 없습니다.`,
   "tree.cloneProject": "Git에서 클론", // Clone from Git
   "createProject.title": "프로젝트 만들기",
   "createProject.name": "프로젝트 이름",
@@ -449,7 +487,8 @@ const ko: typeof en = {
   "clone.stageFinalizing": "마무리 중…",
   "clone.stageImporting": "프로젝트 가져오는 중…",
   "clone.elapsed": (seconds: number) => `${seconds}초 경과`,
-  "clone.slowHint": "30초 동안 진행되지 않았습니다. 원격 컴퓨터의 네트워크 또는 프록시를 확인하거나 취소 후 다시 시도하세요.",
+  "clone.slowHint":
+    "30초 동안 진행되지 않았습니다. 원격 컴퓨터의 네트워크 또는 프록시를 확인하거나 취소 후 다시 시도하세요.",
   "clone.submit": "클론", // Clone
   "tree.globalSearch": "모든 세션 검색", // Search All Sessions
   "tree.archivedSessions": "보관된 세션", // Archived Sessions
@@ -514,14 +553,19 @@ const ko: typeof en = {
   "tree.cwdLabel": "작업 디렉터리 (비우면 프로젝트 루트)", // Working directory (leave empty for project root)
   "tree.initCmdLabel": "시작 명령 (선택)", // Startup command (optional)
   "tree.agentArgsLabel": "실행 인자 (선택)", // Launch args (optional)
+  // Working directory / Leave empty for the default
+  "tree.workingDirLabel": "작업 디렉터리",
+  "tree.workingDirPlaceholder": "비워 두면 기본 디렉터리",
   "preset.execPathLabel": "실행 파일(선택)",
   "preset.execPathPlaceholder": "/usr/local/bin/claude",
-  "preset.execPathHint": "비워 두면 에이전트에 설정된 명령을 사용합니다. 지정하면 이 세션만 호환 대체 프로그램으로 실행됩니다.",
+  "preset.execPathHint":
+    "비워 두면 에이전트에 설정된 명령을 사용합니다. 지정하면 이 세션만 호환 대체 프로그램으로 실행됩니다.",
   "preset.saveLabel": "프리셋으로 저장",
   "preset.namePlaceholder": "프리셋 이름",
   "preset.iconChoose": "아이콘 선택",
   "preset.iconClear": "제거",
-  "preset.iconHint": "정사각형 이미지가 가장 좋습니다. 나머지는 잘라서 64x64로 축소합니다.",
+  "preset.iconHint":
+    "정사각형 이미지가 가장 좋습니다. 나머지는 잘라서 64x64로 축소합니다.",
   "tree.permissionSkipLabel": "모든 권한 확인 건너뛰기", // Skip all permission confirmations
   "tree.permissionSkipHint":
     "시작 시 이 에이전트의 우회 플래그를 추가합니다(예: Claude의 --dangerously-skip-permissions, Codex는 샌드박스도 비활성화). 시작할 때마다 적용되므로 주의해서 사용하세요.",
@@ -577,9 +621,11 @@ const ko: typeof en = {
   // New worktree-session dialog
   "tree.newWorktreeSession": "새 worktree 세션…", // New Worktree Session…
   "worktree.worktreeNameLabel": "worktree 이름", // Worktree name
-  "worktree.worktreeNameHint": "worktree 디렉터리 이름과 브랜치 이름으로 사용됩니다.", // Used as the worktree directory and branch name.
+  "worktree.worktreeNameHint":
+    "worktree 디렉터리 이름과 브랜치 이름으로 사용됩니다.", // Used as the worktree directory and branch name.
   "worktree.createFailed": "worktree 생성 실패", // Couldn't create the worktree
-  "worktree.noRepoRoot": "이 프로젝트에는 사용할 수 있는 git 저장소 경로가 없습니다.", // This project has no usable git repository path.
+  "worktree.noRepoRoot":
+    "이 프로젝트에는 사용할 수 있는 git 저장소 경로가 없습니다.", // This project has no usable git repository path.
   // ── Worktree selector for custom session creation ──
   "worktreeSel.label": "Worktree",
   "worktreeSel.modeNone": "없음", // None
@@ -587,15 +633,19 @@ const ko: typeof en = {
   "worktreeSel.modeExisting": "기존", // Existing
   "worktreeSel.loading": "worktree 불러오는 중…", // Loading worktrees…
   "worktreeSel.empty": "이 저장소에 기존 worktree가 없습니다.", // No existing worktrees in this repository.
-  "worktreeSel.loadFailed": "worktree 목록을 가져올 수 없습니다 (git 저장소가 아닌가요?).", // Couldn't list worktrees (not a git repository?).
-  "group.worktreeHint": "이 그룹에서 만든 세션은 기본적으로 이 worktree를 사용합니다.", // Sessions created in this group will use this worktree by default.
+  "worktreeSel.loadFailed":
+    "worktree 목록을 가져올 수 없습니다 (git 저장소가 아닌가요?).", // Couldn't list worktrees (not a git repository?).
+  "group.worktreeHint":
+    "이 그룹에서 만든 세션은 기본적으로 이 worktree를 사용합니다.", // Sessions created in this group will use this worktree by default.
   "worktree.moveGroupTitle": "그룹을 Worktree로 이동",
-  "worktree.moveGroupHint": "이제부터 이 그룹에서 만드는 세션은 이 worktree를 사용합니다. 기존 세션은 현재 디렉터리를 유지합니다.",
+  "worktree.moveGroupHint":
+    "이제부터 이 그룹에서 만드는 세션은 이 worktree를 사용합니다. 기존 세션은 현재 디렉터리를 유지합니다.",
 
   // ── Archive panel ──
   "archive.title": "보관된 세션", // Archived Sessions
   "archive.empty1": "보관된 세션이 없습니다.", // No archived sessions.
-  "archive.empty2": "사이드바의 세션에서 우클릭 후 \"세션 보관\"을 누르면 여기에 들어옵니다.", // Right-click a session in the sidebar…
+  "archive.empty2":
+    '사이드바의 세션에서 우클릭 후 "세션 보관"을 누르면 여기에 들어옵니다.', // Right-click a session in the sidebar…
   "archive.restore": "일반 세션으로 복원", // Restore to normal session
   "archive.export": "전체 컨텍스트를 Markdown으로 내보내기", // Export full context as Markdown
   "archive.deleteForever": "영구 삭제 (녹화 포함)", // Delete permanently (with recording)
@@ -615,7 +665,8 @@ const ko: typeof en = {
 
   // ── Global session-content search ──
   "search.allPlaceholder": "모든 세션 내용 검색…", // Search across all session content…
-  "search.hint": "세션 내용을 검색합니다. 보관된 세션은 기본적으로 제외되며 '보관 세션 포함'을 선택하면 추가됩니다.", // Search session content. Archived sessions are excluded by default.
+  "search.hint":
+    "세션 내용을 검색합니다. 보관된 세션은 기본적으로 제외되며 '보관 세션 포함'을 선택하면 추가됩니다.", // Search session content. Archived sessions are excluded by default.
   "search.includeArchived": "보관 세션 포함", // Include archived
   "search.includeArchivedHint": "보관된 세션도 검색에 포함 (기본은 꺼짐)", // Also search archived sessions (off by default)
   "search.searching": "검색 중…", // Searching…
@@ -663,15 +714,19 @@ const ko: typeof en = {
   "browser.quickAccess": "빠른 실행", // Quick access
   "browser.loading": "로드 중…", // Loading…
   // Application-exit confirmation and dormant restored sessions.
-  "quit.title": "VelaTerm을 종료할까요?",  // Quit VelaTerm?
-  "quit.body": "실행 중인 터미널과 에이전트 세션이 모두 중지됩니다.",  // Any running terminal and agent sessions will be stopped.
-  "quit.saveWorkspace": "작업 공간 저장",  // Save workspace
-  "quit.saveWorkspaceHint": "다음에 같은 탭과 분할을 복원합니다. 터미널은 복원되지만 다시 실행되지는 않습니다.",  // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
-  "quit.confirm": "종료",  // Quit
-  "dormant.body": "저장된 작업 공간에서 복원했습니다. 아직 실행 중인 프로세스가 없습니다.",  // Restored from your saved workspace. No process is running yet.
-  "dormant.start": "시작",  // Start
-  "overlimit.title": (max) => `백그라운드 유지가 한도를 초과했습니다 (최대 ${max}개)`, // Background keep-alive over limit ({max})
-  "overlimit.body": "All background tabs are working or awaiting your reply. Choose one to end:", // All background tabs are working or awaiting your reply. Choose one to end:
+  "quit.title": "VelaTerm을 종료할까요?", // Quit VelaTerm?
+  "quit.body": "실행 중인 터미널과 에이전트 세션이 모두 중지됩니다.", // Any running terminal and agent sessions will be stopped.
+  "quit.saveWorkspace": "작업 공간 저장", // Save workspace
+  "quit.saveWorkspaceHint":
+    "다음에 같은 탭과 분할을 복원합니다. 터미널은 복원되지만 다시 실행되지는 않습니다.", // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
+  "quit.confirm": "종료", // Quit
+  "dormant.body":
+    "저장된 작업 공간에서 복원했습니다. 아직 실행 중인 프로세스가 없습니다.", // Restored from your saved workspace. No process is running yet.
+  "dormant.start": "시작", // Start
+  "overlimit.title": (max) =>
+    `백그라운드 유지가 한도를 초과했습니다 (최대 ${max}개)`, // Background keep-alive over limit ({max})
+  "overlimit.body":
+    "All background tabs are working or awaiting your reply. Choose one to end:", // All background tabs are working or awaiting your reply. Choose one to end:
   "overlimit.kill": "End Selected", // End Selected
   "overlimit.keep": "Keep for Now", // Keep for Now
   "overlimit.earliest": "earliest", // earliest
@@ -711,7 +766,8 @@ const ko: typeof en = {
   "agentInstall.docs": "설치 문서", // Install docs
   "agentInstall.needsNode": "Node.js / npm 필요", // Requires Node.js / npm
   "agentInstall.afterInstall": "설치 후:", // After install:
-  "agentInstall.pathSaved": (label: string) => `${label} 실행 파일 경로를 설정에 저장했습니다:`, // executable path saved to Settings
+  "agentInstall.pathSaved": (label: string) =>
+    `${label} 실행 파일 경로를 설정에 저장했습니다:`, // executable path saved to Settings
   "agentInstall.doneTitle": (label: string) => `${label} 설치 완료`, // {label} is installed
   "agentInstall.doneDesc": "이 세션을 재시작하면 바로 사용할 수 있습니다.", // Relaunch this session to start using it.
   "agentInstall.restartNow": "지금 재시작", // Relaunch now
@@ -737,9 +793,11 @@ const ko: typeof en = {
   "doc.outline": "개요", // Outline
   "doc.outlineEmpty": "제목 없음", // No headings
   "doc.saving": "저장 중…", // Saving…
-  "doc.overwriteConfirm": "같은 이름의 파일이 이미 있습니다. ‘덮어쓰기’를 누르면 대체합니다.", // A file with this name already exists. Click "Overwrite" to replace it.
+  "doc.overwriteConfirm":
+    "같은 이름의 파일이 이미 있습니다. ‘덮어쓰기’를 누르면 대체합니다.", // A file with this name already exists. Click "Overwrite" to replace it.
   "doc.saveTooltip": "저장", // Save
-  "doc.externalChanged": "디스크에서 파일이 수정되었습니다 (저장하지 않은 로컬 변경이 있습니다).", // The file was modified on disk…
+  "doc.externalChanged":
+    "디스크에서 파일이 수정되었습니다 (저장하지 않은 로컬 변경이 있습니다).", // The file was modified on disk…
   "doc.reloadDiscard": "다시 불러오기 (내 변경 버리기)", // Reload (discard my changes)
   "doc.externalChangedClean": "디스크에서 파일이 수정되었습니다.", // The file was modified on disk.
   "doc.reload": "다시 불러오기", // Reload
@@ -750,15 +808,18 @@ const ko: typeof en = {
   "doc.saveAndClose": "저장하고 닫기", // Save & Close
   "doc.closeNoSave": "저장하지 않고 닫기", // Close Without Saving
   "doc.conflictTitle": "저장 충돌", // Save Conflict
-  "doc.conflictBody": "디스크의 파일이 외부에서 수정되었습니다. 그래도 현재 내용으로 덮어쓸까요?", // The file on disk was modified externally…
+  "doc.conflictBody":
+    "디스크의 파일이 외부에서 수정되었습니다. 그래도 현재 내용으로 덮어쓸까요?", // The file on disk was modified externally…
   "doc.overwrite": "덮어쓰기", // Overwrite
   "doc.saveFailed": (err) => `저장 실패: ${err}`, // Save failed: {err}
   "doc.closeTab": "탭 닫기", // Close Tab
   "doc.truncatedReadonly": (size: string) =>
     `읽기 전용: 처음 10 MB만 표시 (전체 ${size}). 파일의 나머지를 덮어쓰지 않도록 저장이 비활성화되었습니다.`,
   "doc.imgLoading": (title, size) => `${title} (${size}) 불러오는 중…`, // Loading {title} ({size})…
-  "doc.imgBeingWritten": "파일이 기록되는 중입니다. 안정되면 자동으로 다시 불러옵니다.", // The file is being written; it will reload automatically once it settles.
-  "doc.imgDecodeFailed": "이 이미지를 표시할 수 없습니다 (지원되지 않거나 손상된 형식).", // Cannot display this image (unsupported or corrupted format).
+  "doc.imgBeingWritten":
+    "파일이 기록되는 중입니다. 안정되면 자동으로 다시 불러옵니다.", // The file is being written; it will reload automatically once it settles.
+  "doc.imgDecodeFailed":
+    "이 이미지를 표시할 수 없습니다 (지원되지 않거나 손상된 형식).", // Cannot display this image (unsupported or corrupted format).
   "doc.imgFit": "창에 맞춤", // Fit
   "doc.imgActual": "1:1", // 1:1
   "doc.exportPdf": "PDF로 내보내기", // Export PDF
@@ -786,7 +847,8 @@ const ko: typeof en = {
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
   "files.dblClickOpen": "두 번 클릭하여 열기",
-  "files.deleteConfirm": (name) => `"${name}"을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다.`, // Delete "{name}"? This can't be undone.
+  "files.deleteConfirm": (name) =>
+    `"${name}"을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다.`, // Delete "{name}"? This can't be undone.
 
   // ── File transfer (remote access) ──
   "transfer.uploadsTitle": "업로드", // Uploads
@@ -806,7 +868,8 @@ const ko: typeof en = {
   "statusbar.bgCount": (n, max) => `백그라운드 ${n}/${max}`, // Background {n}/{max}
   "statusbar.bgTooltip": (max) =>
     `백그라운드 유지 탭 수 (최대 ${max}. 초과 시 가장 오래된 비활성 탭을 자동 종료)`, // Background keep-alive tabs (limit {max}…)
-  "statusbar.bgEvicted": (name) => `백그라운드 탭 종료: ${name} (유지 한도 초과)`, // Ended background tab: {name} (over keep-alive limit)
+  "statusbar.bgEvicted": (name) =>
+    `백그라운드 탭 종료: ${name} (유지 한도 초과)`, // Ended background tab: {name} (over keep-alive limit)
   "statusbar.webTooltip": (url) => `브라우저 원격 접속 활성화: ${url}`, // Browser remote access enabled: {url}
   "statusbar.permAsk": "권한: 확인", // Perms: Ask
   "statusbar.permSkip": "권한: 건너뛰기", // Perms: Skip
@@ -815,14 +878,17 @@ const ko: typeof en = {
   "statusbar.permTooltip": "이 세션의 권한 모드 · 클릭하여 변경 (이 세션만)", // This session's permission mode · click to change (this session only)
   "statusbar.permMenuTitle": "이 세션의 권한", // This session's permissions
   "statusbar.permOptAsk": "매번 확인 (기본값)", // Ask each time (default)
-  "statusbar.permScopeHint": "현재 세션에만 적용됩니다. 전역 기본값은 설정 ▸ 에이전트에서 조정하세요.", // Applies to this session only. For global defaults, go to Settings ▸ Agents.
-  "statusbar.permRestartMsg": "권한이 변경되었습니다. 적용하려면 이 세션을 다시 시작해야 합니다. 다시 시작하면 현재 대화는 이어지지만 진행 중인 작업은 중단됩니다. 지금 다시 시작할까요?", // Permission changed. The session must restart to apply. Restart resumes the current conversation but interrupts any task in progress. Restart now?
+  "statusbar.permScopeHint":
+    "현재 세션에만 적용됩니다. 전역 기본값은 설정 ▸ 에이전트에서 조정하세요.", // Applies to this session only. For global defaults, go to Settings ▸ Agents.
+  "statusbar.permRestartMsg":
+    "권한이 변경되었습니다. 적용하려면 이 세션을 다시 시작해야 합니다. 다시 시작하면 현재 대화는 이어지지만 진행 중인 작업은 중단됩니다. 지금 다시 시작할까요?", // Permission changed. The session must restart to apply. Restart resumes the current conversation but interrupts any task in progress. Restart now?
   "statusbar.permRestartNow": "지금 다시 시작", // Restart now
   "statusbar.permRestartLater": "나중에", // Later
   "statusbar.permScopeTitle": "적용 대상?", // Apply to?
   "statusbar.permScopeSession": "이 세션만", // This session only
   "statusbar.permScopeGlobal": "전역 기본값", // Global default
-  "statusbar.permScopeGlobalHint": "이 세션에 즉시 적용되며, 이후 새로 만드는 동종 세션의 기본값이 됩니다 (설정과 동기화).", // Applies now to this session and becomes the default for future sessions of this kind (synced with Settings).
+  "statusbar.permScopeGlobalHint":
+    "이 세션에 즉시 적용되며, 이후 새로 만드는 동종 세션의 기본값이 됩니다 (설정과 동기화).", // Applies now to this session and becomes the default for future sessions of this kind (synced with Settings).
 
   // ── Store, notifications, and export ──
   "notify.working": "⏳ 작업 중…", // ⏳ Working…
@@ -835,13 +901,15 @@ const ko: typeof en = {
 
   // ── Error panel ──
   "err.renderTitle": "렌더링 오류", // Rendering Error
-  "err.renderDesc": "예기치 않은 오류가 발생했습니다. 아래 정보가 문제 파악에 도움이 됩니다.", // An unexpected error occurred…
+  "err.renderDesc":
+    "예기치 않은 오류가 발생했습니다. 아래 정보가 문제 파악에 도움이 됩니다.", // An unexpected error occurred…
   "err.reload": "다시 불러오기", // Reload
   "err.uncaughtTitle": "잡히지 않은 오류 발생", // Uncaught Error
   "err.uncaughtDesc": "아래 정보가 문제 파악에 도움이 됩니다.", // The information below can help locate the problem.
 
   // ── transport ──
-  "transport.noReplayInBrowser": "브라우저에서는 녹화 재생이 아직 지원되지 않습니다", // Recording playback is not yet supported in the browser
+  "transport.noReplayInBrowser":
+    "브라우저에서는 녹화 재생이 아직 지원되지 않습니다", // Recording playback is not yet supported in the browser
   "transport.imgUploadHttp": (status) => `이미지 업로드 실패 (${status})`, // Image upload failed ({status})
 
   // ── Login gate, directory selection, and connection banner ──
@@ -853,8 +921,10 @@ const ko: typeof en = {
   "login.wrongPassword": "비밀번호가 틀렸습니다", // Wrong password
   "login.rateLimited": "시도 횟수가 너무 많습니다. 1분 후 다시 시도해 주세요.", // Too many attempts. Please wait a minute and try again.
   "login.failed": "로그인 실패, 다시 시도하세요", // Login failed, please try again
-  "login.pairingRequired": "이 서버는 페어링 링크가 필요합니다. 데스크톱 앱의 '원격 액세스'에서 생성한 링크로 여세요.", // This server requires a pairing link
-  "login.authFailed": "인증에 실패했습니다. 액세스 비밀번호를 확인하세요. 링크를 다시 생성했다면 새 페어링 링크를 사용하세요.", // Authentication failed, check password or use a new pairing link
+  "login.pairingRequired":
+    "이 서버는 페어링 링크가 필요합니다. 데스크톱 앱의 '원격 액세스'에서 생성한 링크로 여세요.", // This server requires a pairing link
+  "login.authFailed":
+    "인증에 실패했습니다. 액세스 비밀번호를 확인하세요. 링크를 다시 생성했다면 새 페어링 링크를 사용하세요.", // Authentication failed, check password or use a new pairing link
   "dir.title": "프로젝트 디렉터리 선택", // Choose Project Directory
   "dir.pathPlaceholder": "검색하거나 경로를 입력하고 Enter로 이동 (~ 지원)", // Search, or type a path and press Enter (supports ~)
   "dir.up": "상위 폴더로", // Up one level
@@ -872,7 +942,8 @@ const ko: typeof en = {
   "conn.reconnectNow": "지금 다시 연결", // Reconnect now
   "conn.retrying": "다시 연결하는 중…", // Reconnecting…
   "conn.sshReconnecting": "SSH 연결이 끊어져 터널을 다시 구축하는 중…", // SSH link lost, rebuilding the tunnel…
-  "conn.sshDown": "SSH 연결이 끊어졌습니다. \"지금 다시 연결\"을 눌러 다시 시도하세요", // SSH link is down — press Reconnect now to try again
+  "conn.sshDown":
+    'SSH 연결이 끊어졌습니다. "지금 다시 연결"을 눌러 다시 시도하세요', // SSH link is down — press Reconnect now to try again
   "reqerr.title": "요청 실패", // Request failed
   "reqerr.dismiss": "닫기", // Dismiss
   // ── Error Log panel ──
@@ -886,7 +957,8 @@ const ko: typeof en = {
   "mobile.toDesktop": "데스크톱 버전으로 전환", // Switch to desktop
   "mobile.empty1": "세션이 없습니다.", // No sessions.
   "mobile.noMatch": "일치하는 세션이 없습니다", // No matching sessions
-  "mobile.empty2": "데스크톱 앱이나 PC 브라우저에서 만들면 여기 자동으로 나타납니다.", // Create one on the desktop app or a computer browser…
+  "mobile.empty2":
+    "데스크톱 앱이나 PC 브라우저에서 만들면 여기 자동으로 나타납니다.", // Create one on the desktop app or a computer browser…
   "mobile.back": "‹ 뒤로", // ‹ Back
   "mobile.selCopy": "복사", // Copy
   "mobile.selCancel": "취소", // Cancel
@@ -896,9 +968,12 @@ const ko: typeof en = {
   "transport.wsDisconnected": "WebSocket 연결이 끊어졌습니다", // WebSocket disconnected
   "transport.wsConnectFailed": "WebSocket 연결 실패", // WebSocket connection failed
   "transport.cmdFailed": "명령 실패", // Command failed
-  "transport.remoteCmdForbidden": (cmd: string) => `원격 클라이언트에서 사용할 수 없는 명령입니다: ${cmd}`, // Command not available to remote clients
-  "transport.remoteSettingForbidden": (key: string) => `원격 클라이언트가 쓸 수 없는 설정 키입니다: ${key}`, // Settings key not writable by remote clients
-  "transport.remotePathForbidden": (path: string) => `원격 클라이언트는 앱 데이터 디렉터리의 파일에 접근할 수 없습니다: ${path}`, // Remote clients cannot access files in the app data directory
+  "transport.remoteCmdForbidden": (cmd: string) =>
+    `원격 클라이언트에서 사용할 수 없는 명령입니다: ${cmd}`, // Command not available to remote clients
+  "transport.remoteSettingForbidden": (key: string) =>
+    `원격 클라이언트가 쓸 수 없는 설정 키입니다: ${key}`, // Settings key not writable by remote clients
+  "transport.remotePathForbidden": (path: string) =>
+    `원격 클라이언트는 앱 데이터 디렉터리의 파일에 접근할 수 없습니다: ${path}`, // Remote clients cannot access files in the app data directory
 
   // ── Crepe（위지윅 편집기 내장 UI）──
   "crepe.placeholder": "본문을 입력하거나 / 로 삽입 메뉴를 여세요", // Type text, or press / for the insert menu
@@ -970,7 +1045,8 @@ const ko: typeof en = {
   "updater.retry": "Try again", // TODO translate
   "updater.downloadFailed": (err) => `Update failed: ${err}`, // TODO translate
   "updater.hide": "Hide", // TODO translate
-  "updater.hideHint": "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
+  "updater.hideHint":
+    "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
   "updater.downloadManually": "Download manually", // TODO translate
   "updater.downloadManuallyHint": "Open the download page in your browser.", // TODO translate
   "updater.windowsNotice":

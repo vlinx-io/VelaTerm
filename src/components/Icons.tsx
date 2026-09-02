@@ -72,6 +72,8 @@ const Icons: Record<string, IconComponent> = {
   rename: I([r("path", { key: 1, d: "M3 11.5l6.4-6.4 2 2L5 13.5H3z" }), r("path", { key: 2, d: "M9.4 5.1l1.5-1.5a1 1 0 011.4 0l.6.6a1 1 0 010 1.4l-1.5 1.5" })]),
   trash: I([r("path", { key: 1, d: "M3.5 4.5h9M6 4.5V3.2A.7.7 0 016.7 2.5h2.6a.7.7 0 01.7.7V4.5M5 4.5l.5 8h5l.5-8" })]),
   dup: I([r("rect", { key: 1, x: 5, y: 5, width: 8, height: 8, rx: 1.5 }), r("path", { key: 2, d: "M3 10V4.5A1.5 1.5 0 014.5 3H10" })]),
+  // Virtual group: stacked plates, a container with nothing on disk behind it.
+  layers: I([r("path", { key: 1, d: "M8 2.5l5.5 2.9L8 8.3 2.5 5.4z" }), r("path", { key: 2, d: "M2.5 8.6L8 11.5l5.5-2.9" })]),
   newGroup: I([r("path", { key: 1, d: "M2 5.5A1.5 1.5 0 013.5 4h2.8l1.2 1.4h5A1.5 1.5 0 0114 6.9V8" }), r("path", { key: 2, d: "M11.5 10v4M9.5 12h4" })]),
   dotsV: I([r("circle", { key: 1, cx: 8, cy: 3.5, r: 1, fill: "currentColor", stroke: "none" }), r("circle", { key: 2, cx: 8, cy: 8, r: 1, fill: "currentColor", stroke: "none" }), r("circle", { key: 3, cx: 8, cy: 12.5, r: 1, fill: "currentColor", stroke: "none" })]),
   check: I(r("path", { key: 1, d: "M3.5 8.5l3 3 6-7" })),

@@ -15,7 +15,7 @@ use std::process::Stdio;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::models::SessionKind;
@@ -461,7 +461,7 @@ fn claude_settings() -> Option<Value> {
 
 /// One Codex account rate-limit window for Info. `window_minutes` identifies duration for labels; `resets_at` is a
 /// Unix timestamp, unlike Claude's ISO strings, and is formatted separately by the frontend.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexRateWindow {
     /// Used percentage from 0 to 100.
@@ -473,7 +473,7 @@ pub struct CodexRateWindow {
 }
 
 /// Codex account rate-limit snapshot read from the latest token_count event in the rollout tail.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexUsage {
     /// Primary short window, usually five hours.
@@ -482,19 +482,6 @@ pub struct CodexUsage {
     pub secondary: Option<CodexRateWindow>,
     /// Plan type such as free/plus/pro, passed through for optional display.
     pub plan_type: Option<String>,
-}
-
-/// Queries account rate limits from the latest Codex token_count rollout event. This is local and unthrottled.
-/// Missing rollout/snapshot errors so the frontend hides the section.
-pub fn codex_rate_limits(kind: SessionKind, agent_session_id: &str) -> Result<CodexUsage, String> {
-    if !matches!(kind, SessionKind::Codex) {
-        return Err("Only codex sessions support rate limits".to_string());
-    }
-    let path =
-        resume::find_codex_rollout(agent_session_id).ok_or("Codex rollout file not found")?;
-    let tail = read_tail(&path, CONTEXT_TAIL_BYTES)?;
-    last_codex_rate_limits(&tail)
-        .ok_or_else(|| "No rate_limits snapshot in codex rollout".to_string())
 }
 
 /// Actively reads current account limits through the installed Codex CLI app-server.

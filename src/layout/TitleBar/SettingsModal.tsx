@@ -417,6 +417,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const setRecordSessions = useTermStore((s) => s.setRecordSessions);
   const maxLiveTabs = useTermStore((s) => s.maxLiveTabs);
   const setMaxLiveTabs = useTermStore((s) => s.setMaxLiveTabs);
+  const usageAutoRefresh = useTermStore((s) => s.usageAutoRefresh);
+  const setUsageAutoRefresh = useTermStore((s) => s.setUsageAutoRefresh);
   const usageRefreshSec = useTermStore((s) => s.usageRefreshSec);
   const setUsageRefreshSec = useTermStore((s) => s.setUsageRefreshSec);
   const soundEnabled = useTermStore((s) => s.soundEnabled);
@@ -753,19 +755,30 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     onChange={(v) => setSpawnConfirm(v === "on")}
                   />
                 </Field>
-                <Field label={t("settings.usageRefresh")}>
-                  <Seg<string>
-                    value={String(usageRefreshSec)}
+                <Field label={t("settings.usageAuto")}>
+                  <Seg<"on" | "off">
+                    value={usageAutoRefresh ? "on" : "off"}
                     options={[
-                      ["0", t("common.off")],
-                      ["30", "30s"],
-                      ["60", "1m"],
-                      ["120", "2m"],
-                      ["300", "5m"],
+                      ["on", t("common.on")],
+                      ["off", t("common.off")],
                     ]}
-                    onChange={(v) => setUsageRefreshSec(Number(v))}
+                    onChange={(v) => setUsageAutoRefresh(v === "on")}
                   />
                 </Field>
+                {usageAutoRefresh && (
+                  <Field label={t("settings.usageRefresh")}>
+                    <Seg<string>
+                      value={String(usageRefreshSec)}
+                      options={[
+                        ["30", "30s"],
+                        ["60", "1m"],
+                        ["120", "2m"],
+                        ["300", "5m"],
+                      ]}
+                      onChange={(v) => setUsageRefreshSec(Number(v))}
+                    />
+                  </Field>
+                )}
                 <CleanImagesField />
               </>
             )}

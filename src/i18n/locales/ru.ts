@@ -66,7 +66,21 @@ const ru: typeof en = {
   "titlebar.mirrored": "Зеркало", // Mirrored
   "titlebar.mirroredHint":
     "Зеркалирование включено: вкладки, разделения и активная сессия следуют за хостом. Переключатель находится на хосте.", // Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.
+  "titlebar.mirroredBy": (n: number) => `Зеркалят: ${n}`, // Mirrored by {n}
+  "titlebar.mirroredByHint": (n: number) =>
+    `Подключено удалённых клиентов: ${n}. Вкладки, разделения и активная сессия общие, менять их может любая сторона.`, // {n} remote clients are connected. Tabs, splits, and the active session are shared, and either side can rearrange them.
+  "titlebar.clientsTitle": "Подключённые клиенты", // Attached clients
+  "titlebar.clientUnnamed": "Клиент без имени", // Unnamed client
+  "titlebar.clientSince": (time: string) => `с ${time}`, // since {time}
   "titlebar.share": "Поделиться", // Share
+  // ── Alt-triggered menu bar (Windows/Linux) ──
+  "menubar.file": "Файл", // File
+  "menubar.terminal": "Терминал", // Terminal
+  "menubar.help": "Справка", // Help
+  "menubar.newTerminal": "Новый терминал", // New Terminal
+  "menubar.visitWebsite": "Открыть сайт", // Visit Website
+  "menubar.sendFeedback": "Отправить отзыв", // Send Feedback
+  "menubar.clearBadges": "Очистить значки уведомлений", // Clear Notification Badges
   "share.title": "Поделиться VelaTerm", // Share VelaTerm
   "share.subtitle":
     "VelaTerm создаёт небольшая команда. Если вам нравится продукт, поделитесь им с другими. Для нас очень важно, чтобы больше людей узнали о VelaTerm и о нашей команде. Спасибо за поддержку! ❤️", // We're a small team behind VelaTerm. If you enjoy it, please share VelaTerm with others…
@@ -105,11 +119,13 @@ const ru: typeof en = {
   "settings.cliInstalledAt": (path: string) => `Установлена в ${path}`,
   "settings.cliConflict": (path: string) =>
     `В ${path} уже существует другая команда ‘vela’. VelaTerm не будет её перезаписывать.`,
-  "settings.cliHint": "Добавляет `vela <путь-к-проекту>` в PATH, как команда `code` в VS Code.",
+  "settings.cliHint":
+    "Добавляет `vela <путь-к-проекту>` в PATH, как команда `code` в VS Code.",
   "settings.agentArgsHint":
     "Аргументы запуска по умолчанию для новых сессий каждого типа агента. Аргументы, заданные для отдельной сессии при создании или редактировании, имеют приоритет. Оставьте пустым, чтобы не использовать.", // Agent default launch args hint
   "settings.agentPathLabel": "Путь к исполняемому файлу (необязательно)", // Executable path (optional)
-  "settings.agentPathPlaceholder": "напр. ~/.local/bin/claude — пусто = искать в PATH", // e.g. path — empty = find on PATH
+  "settings.agentPathPlaceholder":
+    "напр. ~/.local/bin/claude — пусто = искать в PATH", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "Если задан, сессии этого типа запускаются по этому полному пути вместо поиска команды в PATH. Полезно, когда агент установлен, но отсутствует в PATH оболочки. Заполняется автоматически после успешной установки в один клик, если место установки удалось определить.", // Agent executable path hint
   "settings.appearance": "Внешний вид", // Appearance
@@ -135,6 +151,7 @@ const ru: typeof en = {
   "settings.maxLiveTabs": "Background limit", // Background limit
   "settings.defaultShell": "Shell по умолчанию", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.cleanImages": "Автоочистка вставленных изображений",
   "settings.cleanImagesHint":
@@ -159,7 +176,8 @@ const ru: typeof en = {
   "spawn.effortLabel": "Усилие", // Effort
   "spawn.modelDefault": "По умолчанию", // Default
   "spawn.modelLoading": "Загрузка моделей…", // Listing models…
-  "spawn.modelListUnavailable": "Список моделей недоступен — введите идентификатор выше", // No model list available — type an identifier above
+  "spawn.modelListUnavailable":
+    "Список моделей недоступен — введите идентификатор выше", // No model list available — type an identifier above
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
@@ -201,14 +219,16 @@ const ru: typeof en = {
   "tree.openWorktreeDir": "Open worktree folder",
   "tree.deleteWorktreeMenu": "Delete worktree…", // TODO translate
   "tree.deleteWorktreeTitle": "Delete worktree", // TODO translate
-  "tree.deleteWorktreeBody": "Choose a worktree to remove. This deletes its working directory from disk.", // TODO translate
+  "tree.deleteWorktreeBody":
+    "Choose a worktree to remove. This deletes its working directory from disk.", // TODO translate
   "tree.deleteWorktreePlaceholder": "Select a worktree…", // TODO translate
   "tree.deleteWorktreeForce": "Force delete (discard uncommitted changes)", // TODO translate
   "tree.convertToNormalSession": "Convert to normal session", // TODO translate
   "tree.moveGroupToWorktree": "Переместить в worktree…",
   "tree.convertToNormalGroup": "Convert to normal group", // TODO translate
   "merge.title": "Merge branches", // TODO translate
-  "merge.desc": "Pick a source and a target branch; the source merges into the target.", // TODO translate
+  "merge.desc":
+    "Pick a source and a target branch; the source merges into the target.", // TODO translate
   "merge.notRepo": "This session's directory is not a git repository.", // TODO translate
   "merge.loadingBranches": "Loading branches…", // TODO translate
   "merge.loadingDiff": "Loading diff…", // TODO translate
@@ -216,12 +236,14 @@ const ru: typeof en = {
   "merge.targetLabel": "Target branch", // TODO translate
   "merge.selectBranch": "Select a branch…", // TODO translate
   "merge.swap": "Swap direction", // TODO translate
-  "merge.pickHint": "Pick both branches to preview the changes this merge brings in.", // TODO translate
+  "merge.pickHint":
+    "Pick both branches to preview the changes this merge brings in.", // TODO translate
   "merge.changes": (target: string) => `Changes brought into "${target}"`, // TODO translate
   "merge.noChanges": "No file changes.", // TODO translate
   "merge.sameBranch": "Source and target are the same branch.", // TODO translate
   "merge.branchGone": "A selected branch no longer exists. Pick again.", // TODO translate
-  "merge.upToDate": "The target branch already contains the source branch. Nothing to merge.", // TODO translate
+  "merge.upToDate":
+    "The target branch already contains the source branch. Nothing to merge.", // TODO translate
   "merge.targetNotCheckedOut": (target: string) =>
     `Target branch "${target}" isn't checked out in any worktree, so a local merge can't run. Check it out first.`, // TODO translate
   "merge.targetDirty":
@@ -229,11 +251,13 @@ const ru: typeof en = {
   "merge.sourceDirtyNote":
     "The source branch's working tree has uncommitted changes; they will be committed first.", // TODO translate
   "merge.commitMsgLabel": "Commit message", // TODO translate
-  "merge.commitMsgPlaceholder": "Describe this change (used as the commit message)", // TODO translate
+  "merge.commitMsgPlaceholder":
+    "Describe this change (used as the commit message)", // TODO translate
   "merge.apply": "Merge", // TODO translate
   "merge.commitAndApply": "Commit & merge", // TODO translate
   "merge.working": "Merging…", // TODO translate
-  "merge.doneMsg": (source: string, target: string) => `Merged "${source}" into "${target}".`, // TODO translate
+  "merge.doneMsg": (source: string, target: string) =>
+    `Merged "${source}" into "${target}".`, // TODO translate
   "merge.conflictMsg": (target: string) =>
     `Merge has conflicts. Resolve them in the terminal of "${target}"'s worktree, then commit:`, // TODO translate
   "merge.close": "Close", // TODO translate
@@ -288,7 +312,8 @@ const ru: typeof en = {
     "open your desktop's Settings ▸ Notifications and allow VelaTerm.", // TODO translate
   "settings.notifyStepsBrowser":
     "click the site-permission icon in the address bar and set Notifications to Allow.", // TODO translate
-  "settings.notifyUnsupported": "Notifications aren't available in this environment.", // TODO translate
+  "settings.notifyUnsupported":
+    "Notifications aren't available in this environment.", // TODO translate
   "settings.notifyOpenSettings": "Open System Settings", // TODO translate
   // Shortcut categories
   "settings.catShortcuts": "Горячие клавиши", // Shortcuts
@@ -302,7 +327,8 @@ const ru: typeof en = {
   "settings.scGlobalSearch": "Поиск по всем сеансам", // Search all sessions
   "settings.scSaveDoc": "Сохранить документ", // Save document
   "settings.scRecording": "Нажмите клавиши…", // Press keys…
-  "settings.scHint": "Нажмите на сочетание, затем нажмите новую комбинацию (нужен Cmd/Ctrl).", // hint
+  "settings.scHint":
+    "Нажмите на сочетание, затем нажмите новую комбинацию (нужен Cmd/Ctrl).", // hint
   "settings.scReset": "Сбросить по умолчанию", // Restore defaults
   "settings.scConflict": (label: string) => `Уже используется «${label}»`, // conflict
 
@@ -366,7 +392,8 @@ const ru: typeof en = {
   "connect.stagePreparing": "Подготовка сервера…",
   "connect.stageTransferring": "Передача сервера…",
   "connect.stageStarting": "Запуск сервера…",
-  "connect.sshFingerprintLabel": (kt: string) => `Отпечаток ключа хоста SSH (${kt})`,
+  "connect.sshFingerprintLabel": (kt: string) =>
+    `Отпечаток ключа хоста SSH (${kt})`,
   "connect.sshHostNew":
     "Первое подключение к этому хосту — проверьте отпечаток, прежде чем продолжить.",
   "connect.sshHostChanged":
@@ -387,7 +414,8 @@ const ru: typeof en = {
   "connect.mirror": "Зеркалировать раскладку на всех устройствах", // Mirror layout across devices
   "connect.mirrorHint":
     "Вкладки, разделения и активная сессия одинаковы на всех устройствах, подключённых к этому удалённому сервису. Выключено — каждое устройство сохраняет свою раскладку.", // Tabs, splits, and the active session stay the same on every device connected to this remote service. Off = each device keeps its own layout.
-  "connect.shareDesktopDb": "Использовать базу данных настольного приложения на удалённой машине",
+  "connect.shareDesktopDb":
+    "Использовать базу данных настольного приложения на удалённой машине",
   "connect.shareDesktopDbHint":
     "Общая база данных с настольным приложением на удалённой машине (лучше, когда версии совпадают). Выкл. = отдельная база данных.",
 
@@ -432,6 +460,17 @@ const ru: typeof en = {
   "tree.closeScratch": "Закрыть черновик", // Close Scratch
   "tree.importProject": "Импортировать проект", // Import Project
   "tree.createProject": "Создать проект",
+  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  "tree.newCollection": "Новая коллекция",
+  "tree.deleteCollection": "Удалить коллекцию",
+  "collection.title": "Новая коллекция",
+  "collection.name": "Название коллекции",
+  "collection.namePlaceholder": "research",
+  "collection.submit": "Создать коллекцию",
+  "collection.tag": "Без папки",
+  "collection.deleteTitle": "Удалить коллекцию",
+  "collection.deleteBody": (name) =>
+    `Удалить коллекцию «${name}»? Все её группы и сессии тоже будут удалены. Это действие нельзя отменить.`,
   "tree.cloneProject": "Клонировать из Git", // Clone from Git
   "createProject.title": "Создать проект",
   "createProject.name": "Название проекта",
@@ -463,7 +502,8 @@ const ru: typeof en = {
   "clone.stageFinalizing": "Завершение…",
   "clone.stageImporting": "Импорт проекта…",
   "clone.elapsed": (seconds: number) => `Прошло ${seconds} с`,
-  "clone.slowHint": "Нет прогресса в течение 30 секунд. Проверьте сеть или прокси удалённого компьютера; можно отменить и повторить попытку.",
+  "clone.slowHint":
+    "Нет прогресса в течение 30 секунд. Проверьте сеть или прокси удалённого компьютера; можно отменить и повторить попытку.",
   "clone.submit": "Клонировать", // Clone
   "tree.globalSearch": "Искать во всех сессиях", // Search All Sessions
   "tree.archivedSessions": "Архив сессий", // Archived Sessions
@@ -505,7 +545,8 @@ const ru: typeof en = {
   "mark.caution": "Внимание", // Caution
   "tree.clearAllNotifications":
     "Сбросить все индикаторы уведомлений (точки сессий и значок в Dock)", // Clear all notification badges…
-  "tree.noProjectsPre": "Проектов пока нет. Нажмите на значок папки или клавиши ", // No projects yet. Click the folder button, or press
+  "tree.noProjectsPre":
+    "Проектов пока нет. Нажмите на значок папки или клавиши ", // No projects yet. Click the folder button, or press
   "tree.noProjectsPost": ", чтобы импортировать каталог.", // to import a directory.
   "tree.openProject": "Открыть проект", // Open Project
   "tree.noAttention": "Нет сессий, соответствующих фильтру статуса", // No sessions match the status filter
@@ -529,14 +570,19 @@ const ru: typeof en = {
   "tree.cwdLabel": "Рабочий каталог (пусто = корень проекта)", // Working directory (leave empty for project root)
   "tree.initCmdLabel": "Команда запуска (необязательно)", // Startup command (optional)
   "tree.agentArgsLabel": "Аргументы запуска (необязательно)", // Launch args (optional)
+  // Working directory / Leave empty for the default
+  "tree.workingDirLabel": "Рабочий каталог",
+  "tree.workingDirPlaceholder": "Оставьте пустым для каталога по умолчанию",
   "preset.execPathLabel": "Исполняемый файл (необязательно)",
   "preset.execPathPlaceholder": "/usr/local/bin/claude",
-  "preset.execPathHint": "Оставьте пустым, чтобы использовать команду, настроенную для агента. Укажите путь, и только этот сеанс запустится с совместимой заменой.",
+  "preset.execPathHint":
+    "Оставьте пустым, чтобы использовать команду, настроенную для агента. Укажите путь, и только этот сеанс запустится с совместимой заменой.",
   "preset.saveLabel": "Сохранить как пресет",
   "preset.namePlaceholder": "Название пресета",
   "preset.iconChoose": "Выбрать значок",
   "preset.iconClear": "Убрать",
-  "preset.iconHint": "Лучше всего подходят квадратные изображения; остальные обрезаются и масштабируются до 64x64.",
+  "preset.iconHint":
+    "Лучше всего подходят квадратные изображения; остальные обрезаются и масштабируются до 64x64.",
   "tree.permissionSkipLabel": "Пропускать все подтверждения разрешений", // Skip all permission confirmations
   "tree.permissionSkipHint":
     "Запускает с флагом обхода этого агента (напр. Claude --dangerously-skip-permissions; Codex также отключает песочницу). Применяется при каждом запуске — используйте с осторожностью.",
@@ -592,9 +638,11 @@ const ru: typeof en = {
   // New worktree-session dialog
   "tree.newWorktreeSession": "Новая сессия worktree…", // New Worktree Session…
   "worktree.worktreeNameLabel": "Имя worktree", // Worktree name
-  "worktree.worktreeNameHint": "Используется как имя каталога worktree и ветки.", // Used as the worktree directory and branch name.
+  "worktree.worktreeNameHint":
+    "Используется как имя каталога worktree и ветки.", // Used as the worktree directory and branch name.
   "worktree.createFailed": "Не удалось создать worktree", // Couldn't create the worktree
-  "worktree.noRepoRoot": "У этого проекта нет пригодного пути к git-репозиторию.", // This project has no usable git repository path.
+  "worktree.noRepoRoot":
+    "У этого проекта нет пригодного пути к git-репозиторию.", // This project has no usable git repository path.
   // ── Worktree selector for custom session creation ──
   "worktreeSel.label": "Worktree",
   "worktreeSel.modeNone": "Без", // None
@@ -602,10 +650,13 @@ const ru: typeof en = {
   "worktreeSel.modeExisting": "Существующий", // Existing
   "worktreeSel.loading": "Загрузка worktree…", // Loading worktrees…
   "worktreeSel.empty": "В этом репозитории нет существующих worktree.", // No existing worktrees in this repository.
-  "worktreeSel.loadFailed": "Не удалось получить список worktree (не git-репозиторий?).", // Couldn't list worktrees (not a git repository?).
-  "group.worktreeHint": "Сессии, созданные в этой группе, по умолчанию будут использовать это worktree.", // Sessions created in this group will use this worktree by default.
+  "worktreeSel.loadFailed":
+    "Не удалось получить список worktree (не git-репозиторий?).", // Couldn't list worktrees (not a git repository?).
+  "group.worktreeHint":
+    "Сессии, созданные в этой группе, по умолчанию будут использовать это worktree.", // Sessions created in this group will use this worktree by default.
   "worktree.moveGroupTitle": "Переместить группу в worktree",
-  "worktree.moveGroupHint": "Сессии, созданные в этой группе с этого момента, будут использовать этот worktree. Уже существующие сохранят свой каталог.",
+  "worktree.moveGroupHint":
+    "Сессии, созданные в этой группе с этого момента, будут использовать этот worktree. Уже существующие сохранят свой каталог.",
 
   // ── Archive panel ──
   "archive.title": "Архив сессий", // Archived Sessions
@@ -615,7 +666,8 @@ const ru: typeof en = {
   "archive.restore": "Восстановить как обычную сессию", // Restore to normal session
   "archive.export": "Экспортировать полный контекст в Markdown", // Export full context as Markdown
   "archive.deleteForever": "Удалить навсегда (вместе с записью)", // Delete permanently (with recording)
-  "archive.pickOne": "Выберите архивную сессию слева, чтобы посмотреть стенограмму", // Select an archived session on the left…
+  "archive.pickOne":
+    "Выберите архивную сессию слева, чтобы посмотреть стенограмму", // Select an archived session on the left…
   "archive.recordingEnd": "--- Конец записи ---", // --- End of recording ---
   "archive.readRecordingFailed": (err) => `Не удалось прочитать запись: ${err}`, // Failed to read recording: {err}
   "archive.searchRecording": "Поиск в записи…", // Search in recording…
@@ -633,9 +685,11 @@ const ru: typeof en = {
 
   // ── Global session-content search ──
   "search.allPlaceholder": "Поиск по содержимому всех сессий…", // Search across all session content…
-  "search.hint": "Поиск по содержимому сессий. Архивные по умолчанию исключены — отметьте «Включая архив», чтобы добавить их.", // Search session content. Archived sessions are excluded by default.
+  "search.hint":
+    "Поиск по содержимому сессий. Архивные по умолчанию исключены — отметьте «Включая архив», чтобы добавить их.", // Search session content. Archived sessions are excluded by default.
   "search.includeArchived": "Включая архив", // Include archived
-  "search.includeArchivedHint": "Искать также в архивных сессиях (по умолчанию выкл.)", // Also search archived sessions (off by default)
+  "search.includeArchivedHint":
+    "Искать также в архивных сессиях (по умолчанию выкл.)", // Also search archived sessions (off by default)
   "search.searching": "Поиск…", // Searching…
   "search.noResults": "Совпадений не найдено", // No matches found
   "search.sessionCount": (n) =>
@@ -662,8 +716,7 @@ const ru: typeof en = {
   "tab.unsavedDot": "Несохранённые изменения", // Unsaved changes
   "tab.newTerminal": "Новый терминал", // New terminal
   "tab.newDocument": "Новый документ", // New document
-  "tab.bgTitle": (n) =>
-    `Фоновые вкладки: ${n} (процессы продолжают работать)`, // Background keep-alive tabs: {n}…
+  "tab.bgTitle": (n) => `Фоновые вкладки: ${n} (процессы продолжают работать)`, // Background keep-alive tabs: {n}…
   "tab.bgLabel": (n) => `Фон ${n}`, // Background {n}
   "tab.scratchFallback": "(временный терминал)", // (scratch terminal)
   "tab.killBgTab": "Завершить эту фоновую вкладку (её процессы завершатся)", // Kill this background tab…
@@ -678,22 +731,26 @@ const ru: typeof en = {
   "browser.back": "Назад", // Back
   "browser.forward": "Вперёд", // Forward
   "browser.reload": "Обновить", // Reload
-  "browser.desktopOnly": "Вкладки браузера открываются только в настольном приложении.", // Browser tabs open in the desktop app only.
+  "browser.desktopOnly":
+    "Вкладки браузера открываются только в настольном приложении.", // Browser tabs open in the desktop app only.
   "browser.stop": "Остановить загрузку", // Stop loading
   "browser.openExternal": "Открыть в системном браузере", // Open in system browser
   "browser.addressPlaceholder": "Введите URL или поисковый запрос", // Enter URL or search terms
   "browser.quickAccess": "Быстрый доступ", // Quick access
   "browser.loading": "Загрузка…", // Loading…
   // Application-exit confirmation and dormant restored sessions.
-  "quit.title": "Закрыть VelaTerm?",  // Quit VelaTerm?
-  "quit.body": "Все запущенные сеансы терминала и агента будут остановлены.",  // Any running terminal and agent sessions will be stopped.
-  "quit.saveWorkspace": "Сохранить рабочее пространство",  // Save workspace
-  "quit.saveWorkspaceHint": "В следующий раз откроются те же вкладки и разделения. Терминалы восстанавливаются, но не запускаются заново.",  // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
-  "quit.confirm": "Закрыть",  // Quit
-  "dormant.body": "Восстановлено из сохранённого рабочего пространства. Процесс ещё не запущен.",  // Restored from your saved workspace. No process is running yet.
-  "dormant.start": "Запустить",  // Start
+  "quit.title": "Закрыть VelaTerm?", // Quit VelaTerm?
+  "quit.body": "Все запущенные сеансы терминала и агента будут остановлены.", // Any running terminal and agent sessions will be stopped.
+  "quit.saveWorkspace": "Сохранить рабочее пространство", // Save workspace
+  "quit.saveWorkspaceHint":
+    "В следующий раз откроются те же вкладки и разделения. Терминалы восстанавливаются, но не запускаются заново.", // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
+  "quit.confirm": "Закрыть", // Quit
+  "dormant.body":
+    "Восстановлено из сохранённого рабочего пространства. Процесс ещё не запущен.", // Restored from your saved workspace. No process is running yet.
+  "dormant.start": "Запустить", // Start
   "overlimit.title": (max) => `Превышен лимит фоновых вкладок (${max})`, // Background keep-alive over limit ({max})
-  "overlimit.body": "All background tabs are working or awaiting your reply. Choose one to end:", // All background tabs are working or awaiting your reply. Choose one to end:
+  "overlimit.body":
+    "All background tabs are working or awaiting your reply. Choose one to end:", // All background tabs are working or awaiting your reply. Choose one to end:
   "overlimit.kill": "End Selected", // End Selected
   "overlimit.keep": "Keep for Now", // Keep for Now
   "overlimit.earliest": "earliest", // earliest
@@ -714,7 +771,8 @@ const ru: typeof en = {
   "term.redraw": "Перерисовать", // Redraw
   "term.mirrorTooltip":
     "Зеркальный режим (размером управляет другой клиент). Нажмите, чтобы подогнать PTY под это окно", // Mirroring (size controlled by another client)…
-  "term.mirrorBadge": (dims) => `⤢ Зеркало${dims} · нажмите, чтобы подогнать под окно`, // ⤢ Mirror{dims} · click to fit this window
+  "term.mirrorBadge": (dims) =>
+    `⤢ Зеркало${dims} · нажмите, чтобы подогнать под окно`, // ⤢ Mirror{dims} · click to fit this window
   "term.mirrorBadgeMobile": (dims) => `⤢ Зеркало${dims} · подогнать под окно`, // ⤢ Mirror{dims} · fit this window
   "term.imgUploadFailed": (n, lastError) =>
     `Не удалось загрузить ${n} ${plural(n, "изображение", "изображения", "изображений")}${lastError ? `: ${lastError}` : ""}`, // Image upload failed for {n} images…
@@ -733,7 +791,8 @@ const ru: typeof en = {
   "agentInstall.docs": "Документация", // Install docs
   "agentInstall.needsNode": "Требуется Node.js / npm", // Requires Node.js / npm
   "agentInstall.afterInstall": "После установки:", // After install:
-  "agentInstall.pathSaved": (label: string) => `Путь к исполняемому файлу ${label} сохранён в настройках:`, // executable path saved to Settings
+  "agentInstall.pathSaved": (label: string) =>
+    `Путь к исполняемому файлу ${label} сохранён в настройках:`, // executable path saved to Settings
   "agentInstall.doneTitle": (label: string) => `${label} установлен`, // {label} is installed
   "agentInstall.doneDesc": "Перезапустите эту сессию, чтобы начать работу.", // Relaunch this session to start using it.
   "agentInstall.restartNow": "Перезапустить сейчас", // Relaunch now
@@ -759,7 +818,8 @@ const ru: typeof en = {
   "doc.outline": "Структура", // Outline
   "doc.outlineEmpty": "Нет заголовков", // No headings
   "doc.saving": "Сохранение…", // Saving…
-  "doc.overwriteConfirm": "Файл с таким именем уже существует. Нажмите «Перезаписать», чтобы заменить его.", // A file with this name already exists. Click "Overwrite" to replace it.
+  "doc.overwriteConfirm":
+    "Файл с таким именем уже существует. Нажмите «Перезаписать», чтобы заменить его.", // A file with this name already exists. Click "Overwrite" to replace it.
   "doc.saveTooltip": "Сохранить", // Save
   "doc.externalChanged":
     "Файл изменён на диске (у вас есть несохранённые локальные изменения).", // The file was modified on disk…
@@ -783,7 +843,8 @@ const ru: typeof en = {
   "doc.imgLoading": (title, size) => `Загрузка ${title} (${size})…`, // Loading {title} ({size})…
   "doc.imgBeingWritten":
     "Файл сейчас записывается; он будет перезагружен автоматически, как только запись завершится.", // The file is being written; it will reload automatically once it settles.
-  "doc.imgDecodeFailed": "Не удаётся отобразить это изображение (неподдерживаемый или повреждённый формат).", // Cannot display this image (unsupported or corrupted format).
+  "doc.imgDecodeFailed":
+    "Не удаётся отобразить это изображение (неподдерживаемый или повреждённый формат).", // Cannot display this image (unsupported or corrupted format).
   "doc.imgFit": "Вписать", // Fit
   "doc.imgActual": "1:1", // 1:1
   "doc.exportPdf": "Экспорт в PDF", // Export PDF
@@ -812,7 +873,8 @@ const ru: typeof en = {
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
   "files.dblClickOpen": "Двойной клик, чтобы открыть",
-  "files.deleteConfirm": (name) => `Удалить «${name}»? Это действие нельзя отменить.`, // Delete "{name}"? This can't be undone.
+  "files.deleteConfirm": (name) =>
+    `Удалить «${name}»? Это действие нельзя отменить.`, // Delete "{name}"? This can't be undone.
 
   // ── File transfer (remote access) ──
   "transfer.uploadsTitle": "Загрузки на сервер", // Uploads
@@ -833,23 +895,29 @@ const ru: typeof en = {
   "statusbar.bgCount": (n, max) => `Фон ${n}/${max}`, // Background {n}/{max}
   "statusbar.bgTooltip": (max) =>
     `Фоновые вкладки (лимит ${max}; при превышении автоматически завершается самая старая неактивная)`, // Background keep-alive tabs (limit {max}…)
-  "statusbar.bgEvicted": (name) => `Фоновая вкладка завершена: ${name} (превышен лимит)`, // Ended background tab: {name} (over keep-alive limit)
-  "statusbar.webTooltip": (url) => `Удалённый доступ через браузер включён: ${url}`, // Browser remote access enabled: {url}
+  "statusbar.bgEvicted": (name) =>
+    `Фоновая вкладка завершена: ${name} (превышен лимит)`, // Ended background tab: {name} (over keep-alive limit)
+  "statusbar.webTooltip": (url) =>
+    `Удалённый доступ через браузер включён: ${url}`, // Browser remote access enabled: {url}
   "statusbar.permAsk": "Права: спрашивать", // Perms: Ask
   "statusbar.permSkip": "Права: пропускать", // Perms: Skip
   "statusbar.notifyOn": "Notify: On", // TODO translate
   "statusbar.notifyOff": "Notify: Off", // TODO translate
-  "statusbar.permTooltip": "Режим прав этой сессии · нажмите, чтобы изменить (только эта сессия)", // This session's permission mode · click to change (this session only)
+  "statusbar.permTooltip":
+    "Режим прав этой сессии · нажмите, чтобы изменить (только эта сессия)", // This session's permission mode · click to change (this session only)
   "statusbar.permMenuTitle": "Права этой сессии", // This session's permissions
   "statusbar.permOptAsk": "Спрашивать каждый раз (по умолчанию)", // Ask each time (default)
-  "statusbar.permScopeHint": "Применяется только к этой сессии. Для глобальных настроек перейдите в Настройки ▸ Агенты.", // Applies to this session only. For global defaults, go to Settings ▸ Agents.
-  "statusbar.permRestartMsg": "Права изменены. Чтобы применить, нужно перезапустить сессию. Перезапуск продолжит текущий диалог, но прервёт выполняемую задачу. Перезапустить сейчас?", // Permission changed. The session must restart to apply. Restart resumes the current conversation but interrupts any task in progress. Restart now?
+  "statusbar.permScopeHint":
+    "Применяется только к этой сессии. Для глобальных настроек перейдите в Настройки ▸ Агенты.", // Applies to this session only. For global defaults, go to Settings ▸ Agents.
+  "statusbar.permRestartMsg":
+    "Права изменены. Чтобы применить, нужно перезапустить сессию. Перезапуск продолжит текущий диалог, но прервёт выполняемую задачу. Перезапустить сейчас?", // Permission changed. The session must restart to apply. Restart resumes the current conversation but interrupts any task in progress. Restart now?
   "statusbar.permRestartNow": "Перезапустить", // Restart now
   "statusbar.permRestartLater": "Позже", // Later
   "statusbar.permScopeTitle": "Применить к?", // Apply to?
   "statusbar.permScopeSession": "Только эта сессия", // This session only
   "statusbar.permScopeGlobal": "Глобально по умолчанию", // Global default
-  "statusbar.permScopeGlobalHint": "Применяется сейчас к этой сессии и становится значением по умолчанию для будущих новых сессий этого типа (синхронизировано с настройками).", // Applies now to this session and becomes the default for future sessions of this kind (synced with Settings).
+  "statusbar.permScopeGlobalHint":
+    "Применяется сейчас к этой сессии и становится значением по умолчанию для будущих новых сессий этого типа (синхронизировано с настройками).", // Applies now to this session and becomes the default for future sessions of this kind (synced with Settings).
 
   // ── Store, notifications, and export ──
   "notify.working": "⏳ В работе…", // ⏳ Working…
@@ -871,7 +939,8 @@ const ru: typeof en = {
   // ── transport ──
   "transport.noReplayInBrowser":
     "Воспроизведение записей в браузере пока не поддерживается", // Recording playback is not yet supported in the browser
-  "transport.imgUploadHttp": (status) => `Не удалось загрузить изображение (${status})`, // Image upload failed ({status})
+  "transport.imgUploadHttp": (status) =>
+    `Не удалось загрузить изображение (${status})`, // Image upload failed ({status})
 
   // ── Login gate, directory selection, and connection banner ──
   "login.connecting": "Подключение…", // Connecting…
@@ -880,12 +949,16 @@ const ru: typeof en = {
   "login.passwordPlaceholder": "Пароль доступа", // Access password
   "login.connect": "Подключиться", // Connect
   "login.wrongPassword": "Неверный пароль", // Wrong password
-  "login.rateLimited": "Слишком много попыток. Подождите минуту и попробуйте снова.", // Too many attempts. Please wait a minute and try again.
+  "login.rateLimited":
+    "Слишком много попыток. Подождите минуту и попробуйте снова.", // Too many attempts. Please wait a minute and try again.
   "login.failed": "Не удалось войти, попробуйте ещё раз", // Login failed, please try again
-  "login.pairingRequired": "Этот сервер требует ссылку для сопряжения. Откройте ссылку, созданную в панели «Удалённый доступ» настольного приложения.", // This server requires a pairing link
-  "login.authFailed": "Ошибка аутентификации. Проверьте пароль доступа или откройте новую ссылку для сопряжения, если её создали заново.", // Authentication failed, check password or use a new pairing link
+  "login.pairingRequired":
+    "Этот сервер требует ссылку для сопряжения. Откройте ссылку, созданную в панели «Удалённый доступ» настольного приложения.", // This server requires a pairing link
+  "login.authFailed":
+    "Ошибка аутентификации. Проверьте пароль доступа или откройте новую ссылку для сопряжения, если её создали заново.", // Authentication failed, check password or use a new pairing link
   "dir.title": "Выбор каталога проекта", // Choose Project Directory
-  "dir.pathPlaceholder": "Поиск или введите путь и нажмите Enter (поддерживается ~)", // Search, or type a path and press Enter (supports ~)
+  "dir.pathPlaceholder":
+    "Поиск или введите путь и нажмите Enter (поддерживается ~)", // Search, or type a path and press Enter (supports ~)
   "dir.up": "На уровень вверх", // Up one level
   "dir.newFolder": "Новая папка", // New Folder
   "dir.newFolderPlaceholder": "Имя папки", // Folder name
@@ -901,7 +974,8 @@ const ru: typeof en = {
   "conn.reconnectNow": "Переподключиться сейчас", // Reconnect now
   "conn.retrying": "Переподключение…", // Reconnecting…
   "conn.sshReconnecting": "SSH-соединение потеряно, туннель восстанавливается…", // SSH link lost, rebuilding the tunnel…
-  "conn.sshDown": "SSH-соединение разорвано — нажмите «Переподключиться сейчас», чтобы повторить", // SSH link is down — press Reconnect now to try again
+  "conn.sshDown":
+    "SSH-соединение разорвано — нажмите «Переподключиться сейчас», чтобы повторить", // SSH link is down — press Reconnect now to try again
   "reqerr.title": "Ошибка запроса", // Request failed
   "reqerr.dismiss": "Закрыть", // Dismiss
   // ── Error Log panel ──
@@ -926,9 +1000,12 @@ const ru: typeof en = {
   "transport.wsDisconnected": "WebSocket отключён", // WebSocket disconnected
   "transport.wsConnectFailed": "Не удалось подключиться по WebSocket", // WebSocket connection failed
   "transport.cmdFailed": "Команда не выполнена", // Command failed
-  "transport.remoteCmdForbidden": (cmd: string) => `Команда недоступна для удалённых клиентов: ${cmd}`, // Command not available to remote clients
-  "transport.remoteSettingForbidden": (key: string) => `Ключ настроек недоступен для записи удалёнными клиентами: ${key}`, // Settings key not writable by remote clients
-  "transport.remotePathForbidden": (path: string) => `Удалённые клиенты не могут обращаться к файлам в каталоге данных приложения: ${path}`, // Remote clients cannot access files in the app data directory
+  "transport.remoteCmdForbidden": (cmd: string) =>
+    `Команда недоступна для удалённых клиентов: ${cmd}`, // Command not available to remote clients
+  "transport.remoteSettingForbidden": (key: string) =>
+    `Ключ настроек недоступен для записи удалёнными клиентами: ${key}`, // Settings key not writable by remote clients
+  "transport.remotePathForbidden": (path: string) =>
+    `Удалённые клиенты не могут обращаться к файлам в каталоге данных приложения: ${path}`, // Remote clients cannot access files in the app data directory
 
   // ── Crepe（WYSIWYG-редактор）──
   "crepe.placeholder": "Введите текст или нажмите / для меню вставки", // Type text, or press / for the insert menu
@@ -1000,7 +1077,8 @@ const ru: typeof en = {
   "updater.retry": "Try again", // TODO translate
   "updater.downloadFailed": (err) => `Update failed: ${err}`, // TODO translate
   "updater.hide": "Hide", // TODO translate
-  "updater.hideHint": "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
+  "updater.hideHint":
+    "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
   "updater.downloadManually": "Download manually", // TODO translate
   "updater.downloadManuallyHint": "Open the download page in your browser.", // TODO translate
   "updater.windowsNotice":

@@ -390,7 +390,7 @@ export function SpawnConfirmModal() {
 
         {/* Agent type and worktree toggle on one row. */}
         <div style={{ display: "flex", gap: 14, alignItems: "flex-end" }}>
-          <label style={{ display: "block" }}>
+          <div style={{ display: "block" }}>
             <div
               style={{
                 fontSize: 11,
@@ -401,7 +401,7 @@ export function SpawnConfirmModal() {
               {t("spawn.agentLabel")}
             </div>
             <Select value={kind} onChange={setKind} options={KIND_OPTIONS} width={150} mono />
-          </label>
+          </div>
 
           <label
             style={{
@@ -428,7 +428,7 @@ export function SpawnConfirmModal() {
             entered. Agents whose CLI has no effort flag get no effort selector. */}
         {showModel && spec && (
           <div style={{ display: "flex", gap: 14, alignItems: "flex-end" }}>
-            <label style={{ display: "block" }}>
+            <div style={{ display: "block" }}>
               <div
                 style={{
                   fontSize: 11,
@@ -463,10 +463,10 @@ export function SpawnConfirmModal() {
                   {listing ? t("spawn.modelLoading") : t("spawn.modelListUnavailable")}
                 </div>
               )}
-            </label>
+            </div>
 
             {spec.effort && (
-              <label style={{ display: "block" }}>
+              <div style={{ display: "block" }}>
                 <div
                   style={{
                     fontSize: 11,
@@ -483,7 +483,7 @@ export function SpawnConfirmModal() {
                   width={120}
                   mono
                 />
-              </label>
+              </div>
             )}
           </div>
         )}

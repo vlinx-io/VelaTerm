@@ -104,11 +104,18 @@ export interface PersistedSettings {
   /** Default state of the quit dialog's "save workspace" checkbox, remembered from the last exit.
    * Checked by default: losing the layout costs more than an unwanted snapshot. */
   saveWorkspaceOnQuit: boolean;
-  /** Usage auto-refresh interval in seconds; zero disables it. Applies to Claude and Codex in Info. */
+  /** Whether the backend keeps the account-usage snapshot fresh on its own. Off leaves the Info panel
+   * showing the last reading until someone presses its refresh button. */
+  usageAutoRefresh: boolean;
+  /** How often the backend refreshes that snapshot, in seconds. One poller serves every session and
+   * client, so this is the real query rate against Claude, Codex, and Grok. */
   usageRefreshSec: number;
   /** Image paste mode: upload writes a file path, while agent lets the agent read the clipboard and show
    * `[Image #x]`. Configurable only on local desktop clients; browser and remote clients always upload. */
   imagePasteMode: ImagePasteMode;
+  /** Whether the Info panel's Resources section shows the whole-machine group. Off hides those rows and
+   * stops sampling the machine, leaving only this session's own CPU and memory. */
+  showSystemResources: boolean;
 }
 const SETTINGS_DEFAULTS: PersistedSettings = {
   accent: "auto",
@@ -132,8 +139,10 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   agentDefaults: {},
   spawnConfirm: true,
   saveWorkspaceOnQuit: true,
+  usageAutoRefresh: true,
   usageRefreshSec: 300,
   imagePasteMode: "upload",
+  showSystemResources: true,
 };
 export function loadSettings(): PersistedSettings {
   try {

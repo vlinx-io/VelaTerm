@@ -16,6 +16,7 @@ pub(crate) mod dispatch;
 pub(crate) mod download;
 mod e2ee;
 pub(crate) mod mirror;
+pub(crate) mod presence;
 mod rate_limit;
 mod sniff;
 mod static_assets;

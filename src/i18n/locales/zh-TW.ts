@@ -56,7 +56,21 @@ const zhTW: typeof en = {
   "titlebar.mirrored": "鏡像中", // Mirrored
   "titlebar.mirroredHint":
     "鏡像已開啟：分頁、分割與目前工作階段跟隨主機。開關在主機端。", // Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.
+  "titlebar.mirroredBy": (n: number) => `被 ${n} 端鏡像`, // Mirrored by {n}
+  "titlebar.mirroredByHint": (n: number) =>
+    `有 ${n} 個遠端連著。分頁、分割和目前的工作階段是共用的，兩邊都能改。`, // {n} remote clients are connected. Tabs, splits, and the active session are shared, and either side can rearrange them.
+  "titlebar.clientsTitle": "已連線的用戶端", // Attached clients
+  "titlebar.clientUnnamed": "未命名用戶端", // Unnamed client
+  "titlebar.clientSince": (time: string) => `${time} 起`, // since {time}
   "titlebar.share": "分享", // Share
+  // ── Alt-triggered menu bar (Windows/Linux) ──
+  "menubar.file": "檔案", // File
+  "menubar.terminal": "終端機", // Terminal
+  "menubar.help": "說明", // Help
+  "menubar.newTerminal": "新增終端機", // New Terminal
+  "menubar.visitWebsite": "造訪官網", // Visit Website
+  "menubar.sendFeedback": "傳送意見回饋", // Send Feedback
+  "menubar.clearBadges": "清除通知標識", // Clear Notification Badges
   "share.title": "分享 VelaTerm", // Share VelaTerm
   "share.subtitle":
     "我們是 VelaTerm 背後的一個小團隊。如果你喜歡它，歡迎把 VelaTerm 分享給更多人。讓更多人知道我們，對我們真的很重要。謝謝你的支持！❤️", // We're a small team behind VelaTerm. If you enjoy it, please share VelaTerm with others…
@@ -93,7 +107,8 @@ const zhTW: typeof en = {
   "settings.cliInstalledAt": (path: string) => `已安裝至 ${path}`,
   "settings.cliConflict": (path: string) =>
     `${path} 已存在其他 ‘vela’ 指令，VelaTerm 不會覆寫它。`,
-  "settings.cliHint": "像 VS Code 的 `code` 一樣，將 `vela <專案路徑>` 加入 PATH。",
+  "settings.cliHint":
+    "像 VS Code 的 `code` 一樣，將 `vela <專案路徑>` 加入 PATH。",
   "settings.agentArgsHint":
     "各類型智能體新建工作階段時套用的預設啟動參數。新建或編輯單個工作階段時設定的參數會覆寫此處的預設。留空表示不帶參數。", // Agent default launch args hint
   "settings.agentPathLabel": "可執行檔路徑（可選）", // Executable path (optional)
@@ -123,6 +138,7 @@ const zhTW: typeof en = {
   "settings.maxLiveTabs": "背景保活上限", // Background limit
   "settings.defaultShell": "預設 Shell", // Default shell
   "settings.spawnConfirm": "派生前確認", // Confirm before spawn
+  "settings.usageAuto": "額度自動刷新", // Usage auto-refresh
   "settings.usageRefresh": "額度刷新", // Usage refresh
   "settings.cleanImages": "自動清理貼上的圖片",
   "settings.cleanImagesHint":
@@ -189,14 +205,16 @@ const zhTW: typeof en = {
   "tree.openWorktreeDir": "開啟 worktree 目錄",
   "tree.deleteWorktreeMenu": "刪除 worktree…",
   "tree.deleteWorktreeTitle": "刪除 worktree",
-  "tree.deleteWorktreeBody": "選擇要刪除的 worktree，會從磁碟上刪掉它的工作目錄。",
+  "tree.deleteWorktreeBody":
+    "選擇要刪除的 worktree，會從磁碟上刪掉它的工作目錄。",
   "tree.deleteWorktreePlaceholder": "選擇一個 worktree…",
   "tree.deleteWorktreeForce": "強制刪除（捨棄未提交的變更）",
   "tree.convertToNormalSession": "轉為普通會話",
   "tree.moveGroupToWorktree": "轉移到 Worktree…",
   "tree.convertToNormalGroup": "轉為普通群組",
   "merge.title": "合併分支",
-  "merge.desc": "選好來源分支與目標分支，把來源合併進目標；方向可用中間按鈕調換。",
+  "merge.desc":
+    "選好來源分支與目標分支，把來源合併進目標；方向可用中間按鈕調換。",
   "merge.notRepo": "該會話目錄不是 git 倉庫。",
   "merge.loadingBranches": "正在讀取分支…",
   "merge.loadingDiff": "正在載入差異…",
@@ -219,7 +237,8 @@ const zhTW: typeof en = {
   "merge.apply": "合併",
   "merge.commitAndApply": "提交並合併",
   "merge.working": "正在合併…",
-  "merge.doneMsg": (source: string, target: string) => `已把「${source}」合併進「${target}」。`,
+  "merge.doneMsg": (source: string, target: string) =>
+    `已把「${source}」合併進「${target}」。`,
   "merge.conflictMsg": (target: string) =>
     `合併出現衝突，請到「${target}」所在工作樹的終端機裡解決後提交：`,
   "merge.close": "關閉",
@@ -270,8 +289,7 @@ const zhTW: typeof en = {
     "開啟「系統設定 ▸ 通知 ▸ VelaTerm」，開啟「允許通知」（建議樣式選橫幅或提醒）。", // open System Settings ▸ Notifications ▸ VelaTerm and turn on Allow Notifications (Banners or Alerts recommended).
   "settings.notifyStepsWin":
     "開啟「設定 ▸ 系統 ▸ 通知」，啟用 VelaTerm，並確認「專注輔助 / 勿擾」沒有封鎖它。", // open Settings ▸ System ▸ Notifications, enable VelaTerm, and make sure Focus assist / Do not disturb isn't blocking it.
-  "settings.notifyStepsLinux":
-    "在桌面環境的「設定 ▸ 通知」裡允許 VelaTerm。", // open your desktop's Settings ▸ Notifications and allow VelaTerm.
+  "settings.notifyStepsLinux": "在桌面環境的「設定 ▸ 通知」裡允許 VelaTerm。", // open your desktop's Settings ▸ Notifications and allow VelaTerm.
   "settings.notifyStepsBrowser":
     "點擊網址列的站點權限圖示，把通知設為「允許」。", // click the site-permission icon in the address bar and set Notifications to Allow.
   "settings.notifyUnsupported": "目前環境不支援系統通知。", // Notifications aren't available in this environment.
@@ -312,8 +330,7 @@ const zhTW: typeof en = {
   "remote.ipLabel": "IP", // IP address
   "remote.ipAuto": "自動（第一個區域網路位址）", // Automatic (first LAN address)
   "remote.ipVpn": "VPN", // VPN
-  "remote.qrHint":
-    "用手機掃描即可在所選位址上開啟配對連結。", // Scan with your phone to open the pairing link on the selected address.
+  "remote.qrHint": "用手機掃描即可在所選位址上開啟配對連結。", // Scan with your phone to open the pairing link on the selected address.
   "remote.fingerprintLabel": "憑證指紋（SHA-256）", // Certificate fingerprint (SHA-256)
   "remote.fingerprintHint":
     "首次連線時瀏覽器會提示憑證不受信任，這是自簽憑證的正常現象；核對此指紋可確認連線的是本機。", // On first connect, browsers warn the certificate is untrusted…
@@ -415,6 +432,17 @@ const zhTW: typeof en = {
   "tree.closeScratch": "關閉草稿", // Close Scratch
   "tree.importProject": "匯入專案", // Import Project
   "tree.createProject": "建立專案",
+  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  "tree.newCollection": "新增集合",
+  "tree.deleteCollection": "刪除集合",
+  "collection.title": "新增集合",
+  "collection.name": "集合名稱",
+  "collection.namePlaceholder": "research",
+  "collection.submit": "建立集合",
+  "collection.tag": "無資料夾",
+  "collection.deleteTitle": "刪除集合",
+  "collection.deleteBody": (name) =>
+    `刪除集合「${name}」？其中的分組與工作階段也會一併刪除，且無法復原。`,
   "tree.cloneProject": "從 Git 複製", // Clone from Git
   "createProject.title": "建立專案",
   "createProject.name": "專案名稱",
@@ -446,7 +474,8 @@ const zhTW: typeof en = {
   "clone.stageFinalizing": "正在完成複製…",
   "clone.stageImporting": "正在匯入專案…",
   "clone.elapsed": (seconds: number) => `已用時 ${seconds} 秒`,
-  "clone.slowHint": "已連續 30 秒沒有進度，請檢查遠端機器的網路或 Proxy；你也可以取消後重試。",
+  "clone.slowHint":
+    "已連續 30 秒沒有進度，請檢查遠端機器的網路或 Proxy；你也可以取消後重試。",
   "clone.submit": "複製", // Clone
   "tree.globalSearch": "搜尋所有會話", // Search All Sessions
   "tree.archivedSessions": "已封存會話", // Archived Sessions
@@ -511,9 +540,13 @@ const zhTW: typeof en = {
   "tree.cwdLabel": "工作目錄（留空用專案根）", // Working directory (leave empty for project root)
   "tree.initCmdLabel": "啟動命令（可選）", // Startup command (optional)
   "tree.agentArgsLabel": "啟動參數（可選）", // Launch args (optional)
+  // Working directory / Leave empty for the default
+  "tree.workingDirLabel": "工作目錄",
+  "tree.workingDirPlaceholder": "留空則使用預設目錄",
   "preset.execPathLabel": "可執行檔（選填）",
   "preset.execPathPlaceholder": "/usr/local/bin/claude",
-  "preset.execPathHint": "留空則使用該智慧體已設定的指令。填了就只有這個工作階段用它，可以跑相容的替代程式。",
+  "preset.execPathHint":
+    "留空則使用該智慧體已設定的指令。填了就只有這個工作階段用它，可以跑相容的替代程式。",
   "preset.saveLabel": "儲存為預設組合",
   "preset.namePlaceholder": "為這個預設組合命名",
   "preset.iconChoose": "選擇圖示",
@@ -565,7 +598,8 @@ const zhTW: typeof en = {
 
   // Resume-session dialog
   "resume.title": "恢復會話", // Resume Session
-  "resume.desc": "選 agent 類型並填入該 agent 自身的 session id，開啟後續接原對話。", // Pick the agent type and enter the agent's own session id…
+  "resume.desc":
+    "選 agent 類型並填入該 agent 自身的 session id，開啟後續接原對話。", // Pick the agent type and enter the agent's own session id…
   "resume.agentType": "Agent 類型", // Agent type
   "resume.sessionIdPlaceholder": "對話 session id", // Conversation session id
   "resume.confirm": "恢復並開啟", // Resume & Open
@@ -586,7 +620,8 @@ const zhTW: typeof en = {
   "worktreeSel.loadFailed": "無法列出 worktree（不是 git 儲存庫？）。", // Couldn't list worktrees (not a git repository?).
   "group.worktreeHint": "在此分組下新建的會話將預設使用此 worktree。", // Sessions created in this group will use this worktree by default.
   "worktree.moveGroupTitle": "把分組轉移到 Worktree",
-  "worktree.moveGroupHint": "之後在這個分組裡新建的工作階段會用這個 worktree；已有的則留在原來的目錄。",
+  "worktree.moveGroupHint":
+    "之後在這個分組裡新建的工作階段會用這個 worktree；已有的則留在原來的目錄。",
 
   // ── Archive panel ──
   "archive.title": "已封存會話", // Archived Sessions
@@ -611,7 +646,8 @@ const zhTW: typeof en = {
 
   // ── Global session-content search ──
   "search.allPlaceholder": "搜尋所有會話內容…", // Search across all session content…
-  "search.hint": "搜尋會話內容。預設不含已封存會話，勾選「同時搜尋封存」可納入。", // Search session content. Archived sessions are excluded by default.
+  "search.hint":
+    "搜尋會話內容。預設不含已封存會話，勾選「同時搜尋封存」可納入。", // Search session content. Archived sessions are excluded by default.
   "search.includeArchived": "同時搜尋封存", // Include archived
   "search.includeArchivedHint": "把已封存會話也納入搜尋（預設不搜）", // Also search archived sessions (off by default)
   "search.searching": "搜尋中…", // Searching…
@@ -659,13 +695,14 @@ const zhTW: typeof en = {
   "browser.quickAccess": "快速存取", // Quick access
   "browser.loading": "載入中…", // Loading…
   // Application-exit confirmation and dormant restored sessions.
-  "quit.title": "結束 VelaTerm？",  // Quit VelaTerm?
-  "quit.body": "正在執行的終端機和 agent 工作階段都會被停止。",  // Any running terminal and agent sessions will be stopped.
-  "quit.saveWorkspace": "儲存工作區",  // Save workspace
-  "quit.saveWorkspaceHint": "下次開啟時還原相同的分頁和分割。終端機會還原出來，但不會自動重新啟動。",  // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
-  "quit.confirm": "結束",  // Quit
-  "dormant.body": "已從儲存的工作區還原，程序尚未啟動。",  // Restored from your saved workspace. No process is running yet.
-  "dormant.start": "啟動",  // Start
+  "quit.title": "結束 VelaTerm？", // Quit VelaTerm?
+  "quit.body": "正在執行的終端機和 agent 工作階段都會被停止。", // Any running terminal and agent sessions will be stopped.
+  "quit.saveWorkspace": "儲存工作區", // Save workspace
+  "quit.saveWorkspaceHint":
+    "下次開啟時還原相同的分頁和分割。終端機會還原出來，但不會自動重新啟動。", // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
+  "quit.confirm": "結束", // Quit
+  "dormant.body": "已從儲存的工作區還原，程序尚未啟動。", // Restored from your saved workspace. No process is running yet.
+  "dormant.start": "啟動", // Start
   "overlimit.title": (max) => `背景保活已超上限（${max} 個）`, // Background keep-alive over limit ({max})
   "overlimit.body": "所有背景分頁都在工作或等你回覆，請選擇要結束的分頁：", // All background tabs are working or awaiting your reply. Choose one to end:
   "overlimit.kill": "結束選取", // End Selected
@@ -692,7 +729,8 @@ const zhTW: typeof en = {
   "term.mirrorBadgeMobile": (dims) => `⤢ 鏡像${dims} · 適配本視窗`, // ⤢ Mirror{dims} · fit this window
   "term.imgUploadFailed": (n, lastError) =>
     `圖片上傳失敗 ${n} 張${lastError ? `：${lastError}` : ""}`, // Image upload failed for {n} images…
-  "term.imgClipboardUnavailable": "無法從剪貼簿讀取圖片，請重新複製圖片後再試。",
+  "term.imgClipboardUnavailable":
+    "無法從剪貼簿讀取圖片，請重新複製圖片後再試。",
   "term.starting": (agent) => `正在啟動 ${agent}…`, // Starting {agent}…
   "term.startFailed": (err) => `啟動失敗: ${err}`, // Failed to start: {err}
 
@@ -706,7 +744,8 @@ const zhTW: typeof en = {
   "agentInstall.docs": "安裝文件", // Install docs
   "agentInstall.needsNode": "需先安裝 Node.js / npm", // Requires Node.js / npm
   "agentInstall.afterInstall": "安裝後：", // After install:
-  "agentInstall.pathSaved": (label: string) => `已把 ${label} 的可執行檔路徑填入設定：`, // executable path saved to Settings
+  "agentInstall.pathSaved": (label: string) =>
+    `已把 ${label} 的可執行檔路徑填入設定：`, // executable path saved to Settings
   "agentInstall.doneTitle": (label: string) => `${label} 已安裝`, // {label} is installed
   "agentInstall.doneDesc": "重新啟動本工作階段即可開始使用。", // Relaunch this session to start using it.
   "agentInstall.restartNow": "立即重新啟動", // Relaunch now
@@ -796,7 +835,8 @@ const zhTW: typeof en = {
 
   // ── Status bar ──
   "statusbar.sessions": (n) => `${n} 會話`, // {n} sessions
-  "statusbar.filterTooltip": (label) => `點擊在左欄只看「${label}」會話（再點取消）`, // Click to show only "X" sessions…
+  "statusbar.filterTooltip": (label) =>
+    `點擊在左欄只看「${label}」會話（再點取消）`, // Click to show only "X" sessions…
   "statusbar.bgCount": (n, max) => `背景 ${n}/${max}`, // Background {n}/{max}
   "statusbar.bgTooltip": (max) =>
     `背景保活的分頁數（上限 ${max}，超限時自動結束最早的不活躍分頁）`, // Background keep-alive tabs (limit {max}…)
@@ -809,14 +849,17 @@ const zhTW: typeof en = {
   "statusbar.permTooltip": "本會話權限模式 · 點擊切換（僅影響本會話）", // This session's permission mode · click to change (this session only)
   "statusbar.permMenuTitle": "本會話權限", // This session's permissions
   "statusbar.permOptAsk": "逐步詢問（預設）", // Ask each time (default)
-  "statusbar.permScopeHint": "僅對當前會話生效。全域性設定，請前往「設定 ▸ 智能體」中調整。", // Applies to this session only. For global defaults, go to Settings ▸ Agents.
-  "statusbar.permRestartMsg": "權限已變更，需重啟本會話才生效。重啟會接續目前對話，但會中斷進行中的任務。現在重啟？", // Permission changed. The session must restart to apply. Restart resumes the current conversation but interrupts any task in progress. Restart now?
+  "statusbar.permScopeHint":
+    "僅對當前會話生效。全域性設定，請前往「設定 ▸ 智能體」中調整。", // Applies to this session only. For global defaults, go to Settings ▸ Agents.
+  "statusbar.permRestartMsg":
+    "權限已變更，需重啟本會話才生效。重啟會接續目前對話，但會中斷進行中的任務。現在重啟？", // Permission changed. The session must restart to apply. Restart resumes the current conversation but interrupts any task in progress. Restart now?
   "statusbar.permRestartNow": "立即重啟", // Restart now
   "statusbar.permRestartLater": "稍後", // Later
   "statusbar.permScopeTitle": "套用到？", // Apply to?
   "statusbar.permScopeSession": "僅目前會話", // This session only
   "statusbar.permScopeGlobal": "全域預設", // Global default
-  "statusbar.permScopeGlobalHint": "本會話立即採用，並設為日後新建同類會話的預設（與設定同步）。", // Applies now to this session and becomes the default for future sessions of this kind (synced with Settings).
+  "statusbar.permScopeGlobalHint":
+    "本會話立即採用，並設為日後新建同類會話的預設（與設定同步）。", // Applies now to this session and becomes the default for future sessions of this kind (synced with Settings).
 
   // ── Store, notifications, and export ──
   "notify.working": "⏳ 處理中…", // ⏳ Working…
@@ -847,8 +890,10 @@ const zhTW: typeof en = {
   "login.wrongPassword": "密碼錯誤", // Wrong password
   "login.rateLimited": "嘗試次數過多，請稍候一分鐘後再試。", // Too many attempts. Please wait a minute and try again.
   "login.failed": "登入失敗，請重試", // Login failed, please try again
-  "login.pairingRequired": "此服務要求使用配對連結存取。請用桌面端「遠端存取」產生的配對連結開啟。", // This server requires a pairing link
-  "login.authFailed": "認證失敗。請確認存取密碼；若配對連結已重新產生，請改用新連結。", // Authentication failed, check password or use a new pairing link
+  "login.pairingRequired":
+    "此服務要求使用配對連結存取。請用桌面端「遠端存取」產生的配對連結開啟。", // This server requires a pairing link
+  "login.authFailed":
+    "認證失敗。請確認存取密碼；若配對連結已重新產生，請改用新連結。", // Authentication failed, check password or use a new pairing link
   "dir.title": "選擇專案目錄", // Choose Project Directory
   "dir.pathPlaceholder": "搜尋，或輸入路徑後按 Enter 跳轉（支援 ~ 開頭）", // Search, or type a path and press Enter (supports ~)
   "dir.up": "上一層", // Up one level
@@ -890,9 +935,12 @@ const zhTW: typeof en = {
   "transport.wsDisconnected": "WebSocket 已斷線", // WebSocket disconnected
   "transport.wsConnectFailed": "WebSocket 連線失敗", // WebSocket connection failed
   "transport.cmdFailed": "命令失敗", // Command failed
-  "transport.remoteCmdForbidden": (cmd: string) => `遠端用戶端無法使用此命令：${cmd}`, // Command not available to remote clients
-  "transport.remoteSettingForbidden": (key: string) => `遠端用戶端無法寫入此設定鍵：${key}`, // Settings key not writable by remote clients
-  "transport.remotePathForbidden": (path: string) => `遠端用戶端無法存取應用程式資料目錄中的檔案：${path}`, // Remote clients cannot access files in the app data directory
+  "transport.remoteCmdForbidden": (cmd: string) =>
+    `遠端用戶端無法使用此命令：${cmd}`, // Command not available to remote clients
+  "transport.remoteSettingForbidden": (key: string) =>
+    `遠端用戶端無法寫入此設定鍵：${key}`, // Settings key not writable by remote clients
+  "transport.remotePathForbidden": (path: string) =>
+    `遠端用戶端無法存取應用程式資料目錄中的檔案：${path}`, // Remote clients cannot access files in the app data directory
 
   // ── Crepe (built-in WYSIWYG editor UI) ──
   "crepe.placeholder": "輸入內文，或鍵入 / 開啟插入選單", // Type text, or press / for the insert menu
@@ -948,12 +996,14 @@ const zhTW: typeof en = {
   "updater.upToDate": "目前已是最新版本。",
   "updater.failed": (err) => `檢查更新失敗：${err}`,
   "updater.available": "發現新版本",
-  "updater.versionLine": (version, current) => `版本 ${version} — 目前 ${current}`,
+  "updater.versionLine": (version, current) =>
+    `版本 ${version} — 目前 ${current}`,
   "updater.noNotes": "此版本沒有提供更新說明。",
   "updater.updateNow": "立即更新",
   "updater.later": "稍後",
   "updater.skipVersion": "略過此版本",
-  "updater.skipVersionHint": "不再提示這個版本。之後仍可從「檢查更新」手動安裝。",
+  "updater.skipVersionHint":
+    "不再提示這個版本。之後仍可從「檢查更新」手動安裝。",
   "updater.downloadingPct": (pct) => `正在下載… ${pct}%`,
   "updater.downloadingBytes": (mb) => `正在下載… ${mb} MB`,
   "updater.installing": "正在安裝…",

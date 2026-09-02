@@ -1,6 +1,6 @@
 //! System notification wrapper that requests permission on first use, then sends directly:
-//! - Main Tauri window: call local `native_notify` for clickable macOS notifications, falling back to
-//!   the official plugin.
+//! - Main Tauri window: call local `native_notify` for clickable native notifications (macOS
+//!   UNUserNotificationCenter, Windows WinRT toasts), falling back to the official plugin.
 //! - Remote window: unable to call application commands from its remote context, so emit
 //!   `vlx://remote-notify` for the local backend to relay; use the official plugin for permission checks.
 //! - Browser/mobile: use the Web Notification API.
@@ -17,17 +17,20 @@ import { isTauri, isRemoteWindow } from "./ipc/transport";
  */
 const useNativeNotify = isTauri || isRemoteWindow;
 
-/**
- * Whether the UI host is macOS, the only platform using clickable native notifications through
- * UNUserNotificationCenter. Windows and Linux use the official plugin. The Windows native WinRT path
- * embeds a `\x1f` separator in toast XML, which XML 1.0 rejects while send incorrectly reports success;
- * Linux has no native path. The plugin works on both but cannot navigate to a session when clicked.
- */
-const isMac = /Mac|iPhone|iPad/i.test(
+/** Coarse host platform from the user agent, matching detectOs in settingsBehaviorFields. */
+const UA =
   (typeof navigator !== "undefined" &&
     (navigator.userAgent || (navigator as unknown as { platform?: string }).platform)) ||
-    "",
-);
+  "";
+const isMac = /Mac|iPhone|iPad/i.test(UA);
+const isWindows = !isMac && /Win/i.test(UA);
+
+/**
+ * Whether a clickable native notification channel exists: macOS UNUserNotificationCenter, or Windows
+ * WinRT toasts. Both carry the window label and session ID so a click navigates to that session, which
+ * the official plugin cannot do. Linux has no native channel and always uses the plugin.
+ */
+const hasNativeChannel = isMac || isWindows;
 
 let granted: boolean | null = null;
 
@@ -160,8 +163,16 @@ export async function requestEffectiveNotifyPermission(): Promise<NotifyPermissi
   return requestNotifyPermission();
 }
 
-/** Best-effort macOS system sound name used by fallback notifications. */
-const FALLBACK_SOUND = "Ping";
+/**
+ * System sound name for plugin-based fallback notifications, per platform.
+ *
+ * The name is platform-specific and silently dropped when unknown. On Windows the plugin routes
+ * through notify-rust, which parses the name with `winrt_notification::Sound::from_str` and falls
+ * back to `None` on failure; `None` emits `<audio silent="true"/>`, so a macOS name such as "Ping"
+ * produces a visible but mute toast. Only "Default", "IM", "Mail", "Reminder", "SMS" and the
+ * loopable "Alarm*"/"Call*" names parse there, so Windows uses "Default".
+ */
+const FALLBACK_SOUND = isWindows ? "Default" : "Ping";
 
 /**
  * Send a system notification, quietly skipping it without permission or on failure. Callers decide
@@ -178,11 +189,10 @@ export async function notify(
     if (!ok) return;
     if (useNativeNotify) {
       if (isRemoteWindow) {
-        // Remote contexts cannot call native_notify, so on macOS emit `vlx://remote-notify` for the
-        // local backend to relay. Include the window label in the notification identifier so clicking
-        // activates that window, plus session metadata. Windows and Linux use the plugin below because
-        // they have no reliable native relay path.
-        if (sessionId && isMac) {
+        // Remote contexts cannot call native_notify, so emit `vlx://remote-notify` for the local
+        // backend to relay. Include the window label in the notification identifier so clicking
+        // activates that window, plus session metadata. Linux has no native relay and uses the plugin.
+        if (sessionId && hasNativeChannel) {
           try {
             const { emit } = await import("@tauri-apps/api/event");
             const { getCurrentWindow } = await import("@tauri-apps/api/window");
@@ -191,6 +201,7 @@ export async function notify(
               sessionId,
               title,
               body,
+              sound,
             });
             return;
           } catch {
@@ -207,10 +218,10 @@ export async function notify(
         });
         return;
       }
-      // In the main window, try clickable UNUserNotificationCenter notifications for macOS sessions.
-      // Fall back on false or invocation failure, including unbundled or unsigned development builds.
-      // Windows and Linux go directly through the official plugin.
-      if (sessionId && isMac) {
+      // In the main window, try the clickable native channel: UNUserNotificationCenter on macOS,
+      // WinRT toasts on Windows. Fall back on false or invocation failure, including unbundled or
+      // unsigned development builds. Linux goes directly through the official plugin.
+      if (sessionId && hasNativeChannel) {
         try {
           const native = await nativeInvoke<boolean>("native_notify", {
             sessionId,

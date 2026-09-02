@@ -25,7 +25,7 @@ import {
 } from "../store/settingsWatch";
 import { useTermStore } from "../store/termStore";
 import { watchSystemTheme } from "../theme";
-import type { SessionId } from "../types";
+import { projectRoot, type SessionId } from "../types";
 import { SessionListPage } from "./SessionListPage";
 import { TerminalPage } from "./TerminalPage";
 import "./mobile.css";
@@ -107,7 +107,7 @@ function MobileApp() {
   }, [openId, session]);
 
   const project = session ? projects.find((p) => p.id === session.projectId) : null;
-  const cwd = session ? (session.cwd ?? project?.rootPath ?? undefined) : undefined;
+  const cwd = session ? (session.cwd ?? projectRoot(project) ?? undefined) : undefined;
 
   return (
     <div className="m-app">

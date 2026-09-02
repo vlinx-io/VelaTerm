@@ -51,6 +51,17 @@ pub fn import_project(ctx: &AppCtx, root_path: &str) -> Result<Project, String> 
     Ok(project)
 }
 
+/// Creates a collection: a top-level sidebar container bound to no directory. Used for grouping sessions that
+/// do not belong to any single checkout, such as remote sessions or browser pages.
+pub fn create_virtual_project(ctx: &AppCtx, name: &str) -> Result<Project, String> {
+    let project = {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::create_virtual_project(&conn, name)?
+    };
+    ctx.emit(TREE_CHANGED, ());
+    Ok(project)
+}
+
 /// Clones a remote repository under `parent_dir` and imports it as a project. Derives the directory name from the
 /// repository when `folder_name` is empty and clones a specific `branch` when provided (see `git::clone_to`).
 pub fn clone_project(
@@ -768,68 +779,6 @@ pub fn agent_turn_stats(
     crate::agent::transcript::current_turn_stats(kind, &agent_id)
 }
 
-/// Queries live account rate limits for a Codex session, falling back to local rollout data.
-pub fn codex_usage(
-    ctx: &AppCtx,
-    session_id: &str,
-    live: bool,
-) -> Result<crate::agent::transcript::CodexUsage, String> {
-    let session = {
-        let conn = ctx.db().conn.lock().unwrap();
-        repo::get_session(&conn, session_id)?
-    }
-    .ok_or("Session not found")?;
-    if !matches!(session.kind, SessionKind::Codex) {
-        return Err("Only codex sessions support rate limits".to_string());
-    }
-
-    // app-server account/rateLimits/read fetches current account limits, while rollout is a historical snapshot.
-    // Prefer live data for initial, periodic, and manual refreshes; fall back when older CLIs or networking fail.
-    if live {
-        // Packaged macOS GUI PATH often omits global npm bins. Prefer user configuration, then installation
-        // detection for an absolute path, and only finally let Command resolve `codex` through process PATH.
-        let bin_path = crate::pty::manager::agent_bin_path(ctx, SessionKind::Codex)
-            .or_else(|| crate::agent::install::locate_installed_bin("codex"));
-        if let Ok(usage) = crate::agent::transcript::live_codex_rate_limits(bin_path.as_deref()) {
-            return Ok(usage);
-        }
-    }
-
-    if let Some(agent_id) = session.agent_session_id.as_deref() {
-        if let Ok(usage) = crate::agent::transcript::codex_rate_limits(session.kind, agent_id) {
-            return Ok(usage);
-        }
-    }
-
-    // Usage is account-level. If an older Codex session missed the startup capture window,
-    // do a conservative cwd-matched repair before falling back to the latest local snapshot.
-    if session.agent_session_id.is_none() {
-        if let Some(cwd) = session.cwd.as_deref().or(session.worktree_path.as_deref()) {
-            let created = session.created_at.max(0) as u64;
-            let since =
-                std::time::UNIX_EPOCH + std::time::Duration::from_secs(created.saturating_sub(10));
-            if let Some(agent_id) =
-                crate::agent::resume::capture_codex_session_since(Some(cwd), since)
-            {
-                let changed = {
-                    let conn = ctx.db().conn.lock().unwrap();
-                    repo::claim_codex_session_id(&conn, &session.id, &agent_id)?
-                };
-                if changed {
-                    ctx.emit(TREE_CHANGED, ());
-                }
-                if let Ok(usage) =
-                    crate::agent::transcript::codex_rate_limits(session.kind, &agent_id)
-                {
-                    return Ok(usage);
-                }
-            }
-        }
-    }
-
-    crate::agent::transcript::latest_codex_rate_limits()
-}
-
 /// Exports complete session context as Markdown. With desktop `dest_path`, writes to disk and returns None; without
 /// it on browser clients, returns Some(content) for a local frontend download.
 pub fn export_session_context(
@@ -984,10 +933,15 @@ fn mirror_enabled(ctx: &AppCtx) -> bool {
 }
 
 /// Current mirror mode plus the published layout, for a client aligning itself right after it connects.
+///
+/// `clients` and `clientList` ride along because alignment is the one moment a client has no event history:
+/// `clients://changed` only fires on the next connect or disconnect, which on a quiet host may be hours away.
 pub fn mirror_get(ctx: &AppCtx) -> serde_json::Value {
     let snap = crate::web::mirror::current();
     let mut out = snap.to_json();
     out["enabled"] = serde_json::Value::Bool(mirror_enabled(ctx));
+    out["clients"] = serde_json::Value::from(crate::web::presence::count());
+    out["clientList"] = serde_json::json!(crate::web::presence::list());
     out
 }
 

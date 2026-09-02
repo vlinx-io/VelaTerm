@@ -333,14 +333,18 @@ export interface ClaudeUsage {
   sevenDay: UsageWindow | null;
   /** Optional seven-day Opus-specific quota. */
   sevenDayOpus: UsageWindow | null;
+  /** Per-model weekly quotas (for example Fable), from the API's `limits` array. */
+  modelWeekly: ClaudeModelWindow[];
 }
 
-/**
- * Queries Claude account quota. `force` bypasses backend TTL for manual refresh; normal calls must use cache because
- * the endpoint is tightly rate-limited. Rejects unavailable states so callers hide the section.
- */
-export function claudeUsage(force = false): Promise<ClaudeUsage> {
-  return invoke<ClaudeUsage>("claude_usage", { force });
+/** A weekly quota scoped to one model. */
+export interface ClaudeModelWindow {
+  /** Model display name as the API reports it, such as "Fable 5". */
+  model: string;
+  /** Used percentage, 0-100. */
+  utilization: number;
+  /** Possibly empty ISO 8601 reset time. */
+  resetsAt: string | null;
 }
 
 /** One Codex primary short or secondary long rate-limit window. */
@@ -361,14 +365,6 @@ export interface CodexUsage {
   planType: string | null;
 }
 
-/**
- * Queries Codex account limits. `live=true` asks app-server and falls back to rollout; false reads only local snapshot
- * for high-frequency in-turn refreshes.
- */
-export function codexUsage(sessionId: string, live = false): Promise<CodexUsage> {
-  return invoke<CodexUsage>("codex_usage", { sessionId, live });
-}
-
 /** Grok SuperGrok usage pool (weekly by default; same source as Grok Build `/usage`). */
 export interface GrokUsage {
   /** Used percentage of the current pool, 0–100. */
@@ -385,12 +381,49 @@ export interface GrokUsage {
   onDemandCap: number | null;
 }
 
+/** Which account a usage row comes from; matches the session kinds that publish a quota. */
+export type UsageProvider = "claude" | "codex" | "grok";
+
+/** One provider's stored reading, kept with the reason the last attempt failed. */
+export interface UsageEntry<T> {
+  /** Last successful reading, kept while later attempts fail so the panel does not blink empty. */
+  data: T | null;
+  /** Last failure message. With `data` present it marks the numbers stale; without, it replaces them. */
+  error: string | null;
+  /** Unix milliseconds of the last successful reading. */
+  fetchedAt: number | null;
+  /** Unix milliseconds of the failure in `error`, null once a later attempt succeeds. */
+  errorAt: number | null;
+}
+
 /**
- * Queries Grok SuperGrok credit usage (weekly pool when available). `force` bypasses the backend TTL
- * cache for manual refresh. Requires `grok login` OIDC credentials under `~/.grok/auth.json`.
+ * The one account-usage copy the backend keeps for this machine.
+ *
+ * A single background poller fills it, so opening ten sessions costs exactly as many provider queries as
+ * opening one: none. Sessions read this snapshot and render the entry matching their kind.
  */
-export function grokUsage(force = false): Promise<GrokUsage> {
-  return invoke<GrokUsage>("grok_usage", { force });
+export interface UsageSnapshot {
+  claude: UsageEntry<ClaudeUsage>;
+  codex: UsageEntry<CodexUsage>;
+  grok: UsageEntry<GrokUsage>;
+  /** Whether automatic polling is on; the panel hides its countdown when it is off. */
+  auto: boolean;
+  /** Effective poll interval in seconds, used for the countdown to the next refresh. */
+  intervalSec: number;
+}
+
+/** Reads the stored snapshot. Pure memory on the backend: no network and no subprocess. */
+export function usageSnapshot(): Promise<UsageSnapshot> {
+  return invoke<UsageSnapshot>("usage_snapshot", {});
+}
+
+/**
+ * Refreshes now and returns the updated snapshot, which also reaches every other client as
+ * `usage://changed`. `provider` narrows the work to one source; omitting it refreshes every provider
+ * whose account exists on this machine. `force` additionally bypasses the backend's short TTL cache.
+ */
+export function usageRefresh(provider?: UsageProvider, force = false): Promise<UsageSnapshot> {
+  return invoke<UsageSnapshot>("usage_refresh", { provider, force });
 }
 
 /** Worktree path, new branch, and full base-branch ref. */

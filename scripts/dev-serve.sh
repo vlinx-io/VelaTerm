@@ -1,22 +1,25 @@
 #!/usr/bin/env bash
 #
-# dev-serve.sh <web|mobile> — plaintext development backend plus Vite HMR on random ports.
+# dev-serve.sh [label] — plaintext development backend plus Vite HMR on random ports.
 #
-# The modes differ only in binding:
-#   web: Vite on localhost and backend on 127.0.0.1 (`--local-http`) for a local browser.
-#   mobile: both on 0.0.0.0 (`--lan-http`) for a phone browser or shell over LAN.
+# Vite and the backend both bind 0.0.0.0 (`--lan-http`), so the same instance serves this machine and
+# anything else on the LAN: a second computer, a phone browser, or the phone shell. There is no
+# separate loopback-only variant; a browser here still reaches it over localhost.
 #
 # Clients connect to Vite, which proxies /ws and /api to the real backend while preserving HMR.
 #
 # Design:
-# 1. Random Vite/backend ports allow Tauri, Electron, and both modes to run concurrently.
-# 2. Each mode defaults to `.dev-data/<mode>` for safe parallel databases and starts with an empty tree.
+# 1. Random Vite/backend ports allow Tauri, Electron, and several web instances to run concurrently.
+# 2. Defaults to `.dev-data/web` for a safe parallel database that starts with an empty tree.
 # 3. Password defaults to `dev` and may be overridden with VELA_SERVE_PASSWORD.
 #
+# Plaintext over the LAN is a development-only setting: `--lan-http` refuses to start on a release
+# build (any identifier ending in `.release`), so this script cannot expose a production binary.
+#
 # Usage:
-#   pnpm dev:web                          # Local browser with HMR and an isolated empty database
-#   pnpm dev:mobile                       # Phone access with HMR and an isolated empty database
-#   VLX_DEV_DATA_DIR="$HOME/Library/Application Support/io.vlinx.vlxterm" pnpm dev:mobile
+#   pnpm dev:web                          # Browser with HMR and an isolated empty database
+#   pnpm dev:web uitest                   # Same, with an explicit label for dev:ls / dev:stop
+#   VLX_DEV_DATA_DIR="$HOME/Library/Application Support/io.vlinx.vlxterm" pnpm dev:web
 #                                         # Use the real database only when no other backend writes it
 #   VELA_SERVE_PASSWORD=mypw pnpm dev:web # Custom login password
 #
@@ -25,16 +28,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 
-MODE="${1:-web}"
-case "$MODE" in
-  web)    HTTP_FLAG="--local-http" ;;
-  mobile) HTTP_FLAG="--lan-http" ;;
-  *) echo "usage: $0 <web|mobile> [label]"; exit 1 ;;
-esac
+MODE="web"
+HTTP_FLAG="--lan-http"
 
-# Register a label from environment, second argument, or automatic generation for dev:ls/dev:stop.
+# Register a label from environment, first argument, or automatic generation for dev:ls/dev:stop.
 source "$(dirname "$0")/dev-lib.sh"
-LABEL="$(dev_label "$MODE" "${2:-}")"
+LABEL="$(dev_label "$MODE" "${1:-}")"
 
 PASSWORD="${VELA_SERVE_PASSWORD:-dev}"
 DATA_DIR="${VLX_DEV_DATA_DIR:-$ROOT/.dev-data/$MODE}"
@@ -45,8 +44,8 @@ free_port() { node -e 'const s=require("net").createServer();s.listen(0,"0.0.0.0
 BACKEND_PORT="$(free_port)"
 VITE_PORT="$(free_port)"
 
-# Mobile mode discovers the first non-loopback IPv4 using platform-specific methods; web uses localhost.
-# Fall back to 127.0.0.1 nonfatally when discovery fails.
+# Discover the first non-loopback IPv4 using platform-specific methods, so the printed URL is one that
+# other machines can also open. Fall back to 127.0.0.1 nonfatally when discovery fails.
 lan_ip() {
   case "$(uname -s)" in
     Darwin)
@@ -61,30 +60,27 @@ lan_ip() {
 }
 LAN_IP="$(lan_ip)"
 
-# Clients connect to Vite; mobile binds it to 0.0.0.0 and points HMR at the LAN address.
-if [ "$MODE" = "mobile" ]; then
-  CLIENT_HOST="$LAN_IP"
-  export VLX_VITE_HOST="0.0.0.0"
-  export VLX_VITE_HMR_HOST="$LAN_IP"
-else
-  CLIENT_HOST="localhost"
-fi
+# Clients connect to Vite. Bind it to 0.0.0.0 and point HMR at the LAN address: a page loaded over the
+# LAN IP must reconnect its HMR socket to that same host, not to the server's own idea of localhost.
+CLIENT_HOST="$LAN_IP"
+export VLX_VITE_HOST="0.0.0.0"
+export VLX_VITE_HMR_HOST="$LAN_IP"
 URL="http://${CLIENT_HOST}:${VITE_PORT}"
+LOCAL_URL="http://localhost:${VITE_PORT}"
 
 # Register the instance; cleanup removes it on exit.
 dev_write_instance "$LABEL" "$MODE" \
   "vitePort=$VITE_PORT" "backendPort=$BACKEND_PORT" "dataDir=$DATA_DIR" "url=$URL"
 
 echo "============================================================"
-echo " dev · ${MODE} mode (HMR)  ·  instance ${LABEL}"
-echo "   URL       : ${URL}"
+echo " dev · web mode (HMR)  ·  instance ${LABEL}"
+echo "   URL       : ${URL}      (also reachable from other devices on this network)"
+echo "   Local     : ${LOCAL_URL}"
 echo "   Password  : ${PASSWORD}"
 echo "   Data dir  : ${DATA_DIR}"
 echo "   Ports     : Vite ${VITE_PORT} / backend ${BACKEND_PORT} (both random, so instances run in parallel)"
-if [ "$MODE" = "mobile" ]; then
-  echo "   Pair link : vlxterm://pair?host=${CLIENT_HOST}&port=${VITE_PORT}&password=${PASSWORD}&name=dev"
-  echo "   (type the link into Add host in the phone app, or turn it into a QR code)"
-fi
+echo "   Pair link : vlxterm://pair?host=${CLIENT_HOST}&port=${VITE_PORT}&password=${PASSWORD}&name=dev"
+echo "   (type the link into Add host in the phone app, or turn it into a QR code)"
 echo " Ctrl+C stops both the backend and Vite; elsewhere, use pnpm dev:stop ${LABEL}"
 echo "============================================================"
 
@@ -104,21 +100,19 @@ VLX_VITE_PORT="$VITE_PORT" VLX_DEV_BACKEND="http://127.0.0.1:${BACKEND_PORT}" \
   pnpm exec vite &
 pids+=($!)
 
-# 3. In web mode, open a browser after Vite starts; mobile clients connect themselves.
-if [ "$MODE" = "web" ]; then
-  (
-    for _ in $(seq 1 60); do
-      if curl -s -o /dev/null "http://127.0.0.1:${VITE_PORT}/" 2>/dev/null; then
-        open "$URL" 2>/dev/null \
-          || xdg-open "$URL" 2>/dev/null \
-          || powershell.exe -NoProfile -Command "Start-Process '$URL'" 2>/dev/null \
-          || cmd.exe //c start "" "$URL" 2>/dev/null \
-          || true
-        break
-      fi
-      sleep 0.5
-    done
-  ) &
-fi
+# 3. Open a local browser once Vite answers. Other devices connect themselves using the LAN URL above.
+(
+  for _ in $(seq 1 60); do
+    if curl -s -o /dev/null "http://127.0.0.1:${VITE_PORT}/" 2>/dev/null; then
+      open "$LOCAL_URL" 2>/dev/null \
+        || xdg-open "$LOCAL_URL" 2>/dev/null \
+        || powershell.exe -NoProfile -Command "Start-Process '$LOCAL_URL'" 2>/dev/null \
+        || cmd.exe //c start "" "$LOCAL_URL" 2>/dev/null \
+        || true
+      break
+    fi
+    sleep 0.5
+  done
+) &
 
 wait

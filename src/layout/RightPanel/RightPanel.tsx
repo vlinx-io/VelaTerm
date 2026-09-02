@@ -8,7 +8,7 @@ import { useRef } from "react";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
 import { useTermStore } from "../../store/termStore";
-import { type Group, type Project, type Session } from "../../types";
+import { projectRoot, type Group, type Project, type Session } from "../../types";
 import { FilesTab } from "./FilesTab";
 import { GitTab } from "./git/GitTab";
 import { InfoTab } from "./InfoTab";
@@ -32,7 +32,8 @@ function ScopeInfo({ project, group }: { project: Project; group?: Group }) {
       <h4>{group ? "Group" : "Project"}</h4>
       {group && <KV k="group" v={group.name} />}
       <KV k="project" v={project.name} />
-      <KV k="path" v={project.rootPath} accent />
+      {/* Collections have no folder, so the path row is omitted rather than shown empty. */}
+      {projectRoot(project) && <KV k="path" v={project.rootPath} accent />}
     </div>
   );
 }

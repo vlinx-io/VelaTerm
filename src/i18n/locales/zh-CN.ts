@@ -55,7 +55,21 @@ const zhCN: typeof en = {
   "titlebar.mirrored": "镜像中", // Mirrored
   "titlebar.mirroredHint":
     "镜像已开启：标签页、分屏和当前会话跟随主机。开关在主机那边。", // Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.
+  "titlebar.mirroredBy": (n: number) => `被 ${n} 端镜像`, // Mirrored by {n}
+  "titlebar.mirroredByHint": (n: number) =>
+    `有 ${n} 个远程端连着。标签页、分屏和当前会话是共用的，两边都能改。`, // {n} remote clients are connected. Tabs, splits, and the active session are shared, and either side can rearrange them.
+  "titlebar.clientsTitle": "已连接的客户端", // Attached clients
+  "titlebar.clientUnnamed": "未命名客户端", // Unnamed client
+  "titlebar.clientSince": (time: string) => `${time} 起`, // since {time}
   "titlebar.share": "分享", // Share
+  // ── Alt-triggered menu bar (Windows/Linux) ──
+  "menubar.file": "文件", // File
+  "menubar.terminal": "终端", // Terminal
+  "menubar.help": "帮助", // Help
+  "menubar.newTerminal": "新建终端", // New Terminal
+  "menubar.visitWebsite": "访问官网", // Visit Website
+  "menubar.sendFeedback": "发送反馈", // Send Feedback
+  "menubar.clearBadges": "清除通知标识", // Clear Notification Badges
   "share.title": "分享 VelaTerm", // Share VelaTerm
   "share.subtitle":
     "我们是 VelaTerm 背后的一个小团队。如果你喜欢它，欢迎把 VelaTerm 分享给更多人。让更多人知道我们，对我们真的很重要。谢谢你的支持！❤️", // We're a small team behind VelaTerm. If you enjoy it, please share VelaTerm with others…
@@ -92,7 +106,8 @@ const zhCN: typeof en = {
   "settings.cliInstalledAt": (path: string) => `已安装到 ${path}`,
   "settings.cliConflict": (path: string) =>
     `${path} 已存在其他 ‘vela’ 命令，VelaTerm 不会覆盖它。`,
-  "settings.cliHint": "像 VS Code 的 `code` 一样，把 `vela <项目路径>` 添加到 PATH。",
+  "settings.cliHint":
+    "像 VS Code 的 `code` 一样，把 `vela <项目路径>` 添加到 PATH。",
   "settings.agentArgsHint":
     "各类型智能体新建会话时套用的默认启动参数。新建或编辑单个会话时设的参数会覆盖这里的默认。留空表示不带参数。",
   "settings.agentPathLabel": "可执行文件路径（可选）",
@@ -122,6 +137,7 @@ const zhCN: typeof en = {
   "settings.maxLiveTabs": "后台保活上限",
   "settings.defaultShell": "默认 Shell",
   "settings.spawnConfirm": "派生前确认",
+  "settings.usageAuto": "额度自动刷新",
   "settings.usageRefresh": "额度刷新",
   "settings.cleanImages": "自动清理粘贴图片",
   "settings.cleanImagesHint":
@@ -188,14 +204,16 @@ const zhCN: typeof en = {
   "tree.openWorktreeDir": "打开 worktree 目录",
   "tree.deleteWorktreeMenu": "删除 worktree…",
   "tree.deleteWorktreeTitle": "删除 worktree",
-  "tree.deleteWorktreeBody": "选择要删除的 worktree，会从磁盘上删掉它的工作目录。",
+  "tree.deleteWorktreeBody":
+    "选择要删除的 worktree，会从磁盘上删掉它的工作目录。",
   "tree.deleteWorktreePlaceholder": "选择一个 worktree…",
   "tree.deleteWorktreeForce": "强制删除（丢弃未提交的改动）",
   "tree.convertToNormalSession": "转为普通会话",
   "tree.moveGroupToWorktree": "转移到 Worktree…",
   "tree.convertToNormalGroup": "转为普通分组",
   "merge.title": "合并分支",
-  "merge.desc": "选好来源分支与目标分支，把来源合并进目标；方向可用中间按钮调换。",
+  "merge.desc":
+    "选好来源分支与目标分支，把来源合并进目标；方向可用中间按钮调换。",
   "merge.notRepo": "该会话目录不是 git 仓库。",
   "merge.loadingBranches": "正在读取分支…",
   "merge.loadingDiff": "正在加载差异…",
@@ -218,7 +236,8 @@ const zhCN: typeof en = {
   "merge.apply": "合并",
   "merge.commitAndApply": "提交并合并",
   "merge.working": "正在合并…",
-  "merge.doneMsg": (source: string, target: string) => `已把「${source}」合并进「${target}」。`,
+  "merge.doneMsg": (source: string, target: string) =>
+    `已把「${source}」合并进「${target}」。`,
   "merge.conflictMsg": (target: string) =>
     `合并出现冲突，请到「${target}」所在工作树的终端里解决后提交：`,
   "merge.close": "关闭",
@@ -269,8 +288,7 @@ const zhCN: typeof en = {
     "打开「系统设置 ▸ 通知 ▸ VelaTerm」，开启「允许通知」（建议样式选横幅或提醒）。",
   "settings.notifyStepsWin":
     "打开「设置 ▸ 系统 ▸ 通知」，启用 VelaTerm，并确认「专注助手 / 勿扰」没有屏蔽它。",
-  "settings.notifyStepsLinux":
-    "在桌面环境的「设置 ▸ 通知」里允许 VelaTerm。",
+  "settings.notifyStepsLinux": "在桌面环境的「设置 ▸ 通知」里允许 VelaTerm。",
   "settings.notifyStepsBrowser":
     "点击地址栏的站点权限图标，把通知设为「允许」。",
   "settings.notifyUnsupported": "当前环境不支持系统通知。",
@@ -311,8 +329,7 @@ const zhCN: typeof en = {
   "remote.ipLabel": "IP", // IP address
   "remote.ipAuto": "自动（第一个局域网地址）", // Automatic (first LAN address)
   "remote.ipVpn": "VPN", // VPN
-  "remote.qrHint":
-    "用手机扫码即可在所选地址上打开配对链接。", // Scan with your phone to open the pairing link on the selected address.
+  "remote.qrHint": "用手机扫码即可在所选地址上打开配对链接。", // Scan with your phone to open the pairing link on the selected address.
   "remote.fingerprintLabel": "证书指纹（SHA-256）",
   "remote.fingerprintHint":
     "首次连接时浏览器会提示证书不受信任，这是自签证书的正常现象；核对此指纹可确认连接的是本机。",
@@ -414,6 +431,17 @@ const zhCN: typeof en = {
   "tree.closeScratch": "关闭草稿",
   "tree.importProject": "导入项目",
   "tree.createProject": "创建项目",
+  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  "tree.newCollection": "新建集合",
+  "tree.deleteCollection": "删除集合",
+  "collection.title": "新建集合",
+  "collection.name": "集合名称",
+  "collection.namePlaceholder": "research",
+  "collection.submit": "创建集合",
+  "collection.tag": "无文件夹",
+  "collection.deleteTitle": "删除集合",
+  "collection.deleteBody": (name) =>
+    `删除集合“${name}”？其中的分组和会话也会一并删除，且无法撤销。`,
   "tree.cloneProject": "从 Git 克隆",
   "createProject.title": "创建项目",
   "createProject.name": "项目名称",
@@ -445,7 +473,8 @@ const zhCN: typeof en = {
   "clone.stageFinalizing": "正在完成克隆…",
   "clone.stageImporting": "正在导入项目…",
   "clone.elapsed": (seconds: number) => `已用时 ${seconds} 秒`,
-  "clone.slowHint": "已连续 30 秒没有进度，请检查远程机器的网络或代理；你也可以取消后重试。",
+  "clone.slowHint":
+    "已连续 30 秒没有进度，请检查远程机器的网络或代理；你也可以取消后重试。",
   "clone.submit": "克隆",
   "tree.globalSearch": "搜索所有会话",
   "tree.archivedSessions": "已归档会话",
@@ -510,9 +539,13 @@ const zhCN: typeof en = {
   "tree.cwdLabel": "工作目录（留空用项目根）",
   "tree.initCmdLabel": "启动命令（可选）",
   "tree.agentArgsLabel": "启动参数（可选）",
+  // Working directory / Leave empty for the default
+  "tree.workingDirLabel": "工作目录",
+  "tree.workingDirPlaceholder": "留空则用默认目录",
   "preset.execPathLabel": "可执行文件（可选）",
   "preset.execPathPlaceholder": "/usr/local/bin/claude",
-  "preset.execPathHint": "留空则用该智能体已配置的命令。填了就只有这个会话用它，可以跑兼容的替代程序。",
+  "preset.execPathHint":
+    "留空则用该智能体已配置的命令。填了就只有这个会话用它，可以跑兼容的替代程序。",
   "preset.saveLabel": "存为预设",
   "preset.namePlaceholder": "给这个预设起个名",
   "preset.iconChoose": "选择图标",
@@ -564,7 +597,8 @@ const zhCN: typeof en = {
 
   // Resume-session dialog
   "resume.title": "恢复会话",
-  "resume.desc": "选 agent 类型并填入该 agent 自身的 session id，打开后续接原对话。",
+  "resume.desc":
+    "选 agent 类型并填入该 agent 自身的 session id，打开后续接原对话。",
   "resume.agentType": "Agent 类型",
   "resume.sessionIdPlaceholder": "对话 session id",
   "resume.confirm": "恢复并打开",
@@ -585,7 +619,8 @@ const zhCN: typeof en = {
   "worktreeSel.loadFailed": "无法列出 worktree（不是 git 仓库？）。",
   "group.worktreeHint": "在该分组下新建的会话将默认使用此 worktree。",
   "worktree.moveGroupTitle": "把分组转移到 Worktree",
-  "worktree.moveGroupHint": "之后在这个分组里新建的会话会用这个 worktree；已有的会话还是留在原来的目录。",
+  "worktree.moveGroupHint":
+    "之后在这个分组里新建的会话会用这个 worktree；已有的会话还是留在原来的目录。",
 
   // ── Archive panel ──
   "archive.title": "已归档会话",
@@ -610,7 +645,8 @@ const zhCN: typeof en = {
 
   // ── Global session-content search ──
   "search.allPlaceholder": "搜索所有会话内容…",
-  "search.hint": "搜索会话内容。默认不含已归档会话，勾选「同时搜索归档」可纳入。",
+  "search.hint":
+    "搜索会话内容。默认不含已归档会话，勾选「同时搜索归档」可纳入。",
   "search.includeArchived": "同时搜索归档",
   "search.includeArchivedHint": "把已归档会话也纳入搜索（默认不搜）",
   "search.searching": "搜索中…",
@@ -658,13 +694,14 @@ const zhCN: typeof en = {
   "browser.quickAccess": "快速访问",
   "browser.loading": "加载中…",
   // Application-exit confirmation and dormant restored sessions.
-  "quit.title": "退出 VelaTerm？",  // Quit VelaTerm?
-  "quit.body": "正在运行的终端和 agent 会话都会被停止。",  // Any running terminal and agent sessions will be stopped.
-  "quit.saveWorkspace": "保存工作空间",  // Save workspace
-  "quit.saveWorkspaceHint": "下次打开时恢复相同的标签页和分屏。终端会恢复出来，但不会自动重启。",  // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
-  "quit.confirm": "退出",  // Quit
-  "dormant.body": "已从保存的工作空间恢复，进程还没有启动。",  // Restored from your saved workspace. No process is running yet.
-  "dormant.start": "启动",  // Start
+  "quit.title": "退出 VelaTerm？", // Quit VelaTerm?
+  "quit.body": "正在运行的终端和 agent 会话都会被停止。", // Any running terminal and agent sessions will be stopped.
+  "quit.saveWorkspace": "保存工作空间", // Save workspace
+  "quit.saveWorkspaceHint":
+    "下次打开时恢复相同的标签页和分屏。终端会恢复出来，但不会自动重启。", // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
+  "quit.confirm": "退出", // Quit
+  "dormant.body": "已从保存的工作空间恢复，进程还没有启动。", // Restored from your saved workspace. No process is running yet.
+  "dormant.start": "启动", // Start
   "overlimit.title": (max) => `后台保活已超上限（${max} 个）`,
   "overlimit.body": "所有后台标签都在工作或等你回复，请选择要结束的标签：",
   "overlimit.kill": "结束选中",
@@ -691,7 +728,8 @@ const zhCN: typeof en = {
   "term.mirrorBadgeMobile": (dims) => `⤢ 镜像${dims} · 适配本窗口`,
   "term.imgUploadFailed": (n, lastError) =>
     `图片上传失败 ${n} 张${lastError ? `：${lastError}` : ""}`,
-  "term.imgClipboardUnavailable": "无法从剪贴板读取图片，请重新复制图片后再试。",
+  "term.imgClipboardUnavailable":
+    "无法从剪贴板读取图片，请重新复制图片后再试。",
   "term.starting": (agent) => `正在启动 ${agent}…`,
   "term.startFailed": (err) => `启动失败: ${err}`,
 
@@ -705,7 +743,8 @@ const zhCN: typeof en = {
   "agentInstall.docs": "安装文档",
   "agentInstall.needsNode": "需先安装 Node.js / npm",
   "agentInstall.afterInstall": "安装后：",
-  "agentInstall.pathSaved": (label: string) => `已把 ${label} 的可执行文件路径填入设置：`,
+  "agentInstall.pathSaved": (label: string) =>
+    `已把 ${label} 的可执行文件路径填入设置：`,
   "agentInstall.doneTitle": (label: string) => `${label} 已安装`,
   "agentInstall.doneDesc": "重启本会话即可开始使用。",
   "agentInstall.restartNow": "立即重启",
@@ -795,7 +834,8 @@ const zhCN: typeof en = {
 
   // ── Status bar ──
   "statusbar.sessions": (n) => `${n} 会话`,
-  "statusbar.filterTooltip": (label) => `点击在左栏只看「${label}」会话（再点取消）`,
+  "statusbar.filterTooltip": (label) =>
+    `点击在左栏只看「${label}」会话（再点取消）`,
   "statusbar.bgCount": (n, max) => `后台 ${n}/${max}`,
   "statusbar.bgTooltip": (max) =>
     `后台保活的标签数（上限 ${max}，超限时自动结束最早的不活跃标签）`,
@@ -808,14 +848,17 @@ const zhCN: typeof en = {
   "statusbar.permTooltip": "本会话权限模式 · 点击切换（仅影响本会话）",
   "statusbar.permMenuTitle": "本会话权限",
   "statusbar.permOptAsk": "逐步询问（默认）",
-  "statusbar.permScopeHint": "仅对当前会话生效。全局性设置，请前往「设置 ▸ 智能体」中调整。",
-  "statusbar.permRestartMsg": "权限已更改，需重启本会话才生效。重启会续接当前对话，但会打断正在进行的任务。现在重启？",
+  "statusbar.permScopeHint":
+    "仅对当前会话生效。全局性设置，请前往「设置 ▸ 智能体」中调整。",
+  "statusbar.permRestartMsg":
+    "权限已更改，需重启本会话才生效。重启会续接当前对话，但会打断正在进行的任务。现在重启？",
   "statusbar.permRestartNow": "立即重启",
   "statusbar.permRestartLater": "稍后",
   "statusbar.permScopeTitle": "应用到？",
   "statusbar.permScopeSession": "仅当前会话",
   "statusbar.permScopeGlobal": "全局默认",
-  "statusbar.permScopeGlobalHint": "本会话立即采用，并设为以后新建同类会话的默认（与设置同步）。",
+  "statusbar.permScopeGlobalHint":
+    "本会话立即采用，并设为以后新建同类会话的默认（与设置同步）。",
 
   // ── Store, notifications, and export ──
   "notify.working": "⏳ 处理中…",
@@ -846,8 +889,10 @@ const zhCN: typeof en = {
   "login.wrongPassword": "密码错误",
   "login.rateLimited": "尝试次数过多，请稍等一分钟后重试。", // Too many attempts. Please wait a minute and try again.
   "login.failed": "登录失败，请重试",
-  "login.pairingRequired": "此服务要求使用配对链接访问。请用桌面端「远程访问」生成的配对链接打开。",
-  "login.authFailed": "认证失败。请确认访问密码；如果配对链接已重新生成，请改用新链接。",
+  "login.pairingRequired":
+    "此服务要求使用配对链接访问。请用桌面端「远程访问」生成的配对链接打开。",
+  "login.authFailed":
+    "认证失败。请确认访问密码；如果配对链接已重新生成，请改用新链接。",
   "dir.title": "选择项目目录",
   "dir.pathPlaceholder": "搜索，或输入路径后回车跳转（支持 ~ 开头）",
   "dir.up": "上一级",
@@ -889,9 +934,12 @@ const zhCN: typeof en = {
   "transport.wsDisconnected": "WebSocket 已断开",
   "transport.wsConnectFailed": "WebSocket 连接失败",
   "transport.cmdFailed": "命令失败",
-  "transport.remoteCmdForbidden": (cmd: string) => `远程客户端不可使用该命令：${cmd}`, // Command not available to remote clients
-  "transport.remoteSettingForbidden": (key: string) => `远程客户端不可写入该设置项：${key}`, // Settings key not writable by remote clients
-  "transport.remotePathForbidden": (path: string) => `远程客户端无法访问应用数据目录中的文件：${path}`, // Remote clients cannot access files in the app data directory
+  "transport.remoteCmdForbidden": (cmd: string) =>
+    `远程客户端不可使用该命令：${cmd}`, // Command not available to remote clients
+  "transport.remoteSettingForbidden": (key: string) =>
+    `远程客户端不可写入该设置项：${key}`, // Settings key not writable by remote clients
+  "transport.remotePathForbidden": (path: string) =>
+    `远程客户端无法访问应用数据目录中的文件：${path}`, // Remote clients cannot access files in the app data directory
 
   // ── Crepe (built-in WYSIWYG editor UI) ──
   "crepe.placeholder": "输入正文，或键入 / 唤起插入菜单",
@@ -947,12 +995,14 @@ const zhCN: typeof en = {
   "updater.upToDate": "当前已是最新版本。",
   "updater.failed": (err) => `检查更新失败：${err}`,
   "updater.available": "发现新版本",
-  "updater.versionLine": (version, current) => `版本 ${version} — 当前 ${current}`,
+  "updater.versionLine": (version, current) =>
+    `版本 ${version} — 当前 ${current}`,
   "updater.noNotes": "该版本没有提供更新说明。",
   "updater.updateNow": "立即更新",
   "updater.later": "稍后",
   "updater.skipVersion": "跳过此版本",
-  "updater.skipVersionHint": "不再提示这个版本。之后仍可从「检查更新」手动安装。",
+  "updater.skipVersionHint":
+    "不再提示这个版本。之后仍可从「检查更新」手动安装。",
   "updater.downloadingPct": (pct) => `正在下载… ${pct}%`,
   "updater.downloadingBytes": (mb) => `正在下载… ${mb} MB`,
   "updater.installing": "正在安装…",

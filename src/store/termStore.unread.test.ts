@@ -21,6 +21,10 @@ vi.mock("../ipc/sessionState", () => ({
   sessionStates,
 }));
 
+const { resolveSpawnMock } = vi.hoisted(() => ({
+  resolveSpawnMock: vi.fn().mockResolvedValue(true),
+}));
+
 const { notify } = vi.hoisted(() => ({ notify: vi.fn() }));
 vi.mock("../ipc/commands", () => ({
   createWorktree: vi.fn(),
@@ -28,6 +32,7 @@ vi.mock("../ipc/commands", () => ({
   ptyKill: vi.fn().mockResolvedValue(undefined),
   ptyWrite: vi.fn().mockResolvedValue(undefined),
   listShells: vi.fn().mockResolvedValue([]),
+  resolveSpawn: resolveSpawnMock,
 }));
 vi.mock("../ipc/tree", () => ({
   listTree: vi.fn().mockResolvedValue({ projects: [], groups: [], sessions: [] }),
@@ -219,6 +224,24 @@ describe("reporting a session as read", () => {
 
     expect(markSessionRead.mock.calls.map((c) => c[0]).sort()).toEqual(["a", "b"]);
     expect(useTermStore.getState().notifications).toEqual({});
+  });
+
+  it("also drops the spawn cards the Dock badge counts", () => {
+    // A spawn card nobody answered keeps the badge at one while showing no dot to click, which is the
+    // state the manual clear exists for. Declining the request settles it for other clients too.
+    useTermStore.setState({
+      notifications: { a: 1 },
+      pendingSpawns: [
+        { parentSessionId: "p1", prompt: "do the thing" },
+      ] as never,
+    });
+
+    useTermStore.getState().clearAllBadges();
+
+    expect(markSessionRead).toHaveBeenCalledWith("a");
+    expect(resolveSpawnMock).toHaveBeenCalledWith("p1", "do the thing", false);
+    expect(useTermStore.getState().notifications).toEqual({});
+    expect(useTermStore.getState().pendingSpawns).toEqual([]);
   });
 });
 

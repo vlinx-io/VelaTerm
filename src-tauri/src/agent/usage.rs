@@ -6,18 +6,19 @@
 //!   (same source as Grok Build `/usage`). Tokens come from `~/.grok/auth.json` (OIDC); expired
 //!   access tokens are refreshed via `auth.x.ai/oauth2/token`.
 //!
-//! Both endpoints are rate-limited or network-bound, so process-wide TTL caches sit under the Info
-//! panel refresh interval. Missing credentials return Err so the frontend hides the section.
+//! Both endpoints are rate-limited or network-bound, so process-wide TTL caches sit under the poller's
+//! interval to absorb repeated manual clicks. A failed request is reported as `FetchError`; keeping the
+//! last good reading is `usage_store`'s job, so nothing here hides a failure behind cached data.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// One usage window, such as five hours or seven days.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageWindow {
     /// Utilization percentage from 0 to 100.
@@ -27,7 +28,7 @@ pub struct UsageWindow {
 }
 
 /// Account-wide Claude usage snapshot, independent of a session.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeUsage {
     /// Five-hour rolling window.
@@ -36,6 +37,56 @@ pub struct ClaudeUsage {
     pub seven_day: Option<UsageWindow>,
     /// Optional seven-day Opus-specific quota available on some plans.
     pub seven_day_opus: Option<UsageWindow>,
+    /// Per-model weekly quotas from the `limits` array (for example Fable). Defaults to empty so
+    /// snapshots persisted before this field existed still deserialize.
+    #[serde(default)]
+    pub model_weekly: Vec<ModelWindow>,
+}
+
+/// A weekly quota scoped to one model, taken from a `limits[]` entry with `kind: "weekly_scoped"`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelWindow {
+    /// Model display name as the API reports it, such as "Fable 5".
+    pub model: String,
+    /// Utilization percentage from 0 to 100.
+    pub utilization: f64,
+    /// Optional ISO 8601 reset timestamp.
+    pub resets_at: Option<String>,
+}
+
+/// Why a provider request failed, with the server's retry hint when it sent one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FetchError {
+    /// Human-readable reason; surfaces in the Info panel tooltip.
+    pub message: String,
+    /// Seconds the server asked us to wait (`Retry-After` on HTTP 429), when present.
+    pub retry_after_secs: Option<u64>,
+}
+
+impl From<String> for FetchError {
+    fn from(message: String) -> Self {
+        Self { message, retry_after_secs: None }
+    }
+}
+
+/// Map a ureq failure to `FetchError`, reading `Retry-After` off a 429 so the poller can honor it.
+fn http_error(what: &str, e: ureq::Error) -> FetchError {
+    match e {
+        ureq::Error::Status(code, resp) => {
+            let retry_after_secs = resp
+                .header("retry-after")
+                .and_then(|v| v.trim().parse::<u64>().ok());
+            let message = match (code, retry_after_secs) {
+                (429, Some(s)) => format!("{what} rate limited (HTTP 429), retry after {s}s"),
+                (429, None) => format!("{what} rate limited (HTTP 429)"),
+                (401 | 403, _) => format!("{what} rejected the credentials (HTTP {code})"),
+                _ => format!("{what} returned HTTP {code}"),
+            };
+            FetchError { message, retry_after_secs }
+        }
+        other => FetchError::from(format!("{what} request failed: {other}")),
+    }
 }
 
 const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
@@ -50,9 +101,9 @@ static CACHE: Mutex<Option<(Instant, ClaudeUsage)>> = Mutex::new(None);
 /// Fetch Claude account usage.
 ///
 /// With `force=false`, return a fresh cache entry without contacting the endpoint. Expiration or
-/// `force=true` makes a real request. On failure, including 429, return stale cached data when available;
-/// otherwise return Err.
-pub fn claude_usage(force: bool) -> Result<ClaudeUsage, String> {
+/// `force=true` makes a real request. A failure is returned as is: the caller keeps its own last good
+/// reading, and returning cached data here would make a 429 look like a fresh success.
+pub fn claude_usage(force: bool) -> Result<ClaudeUsage, FetchError> {
     if !force {
         if let Some((t, cached)) = CACHE.lock().unwrap().as_ref() {
             if t.elapsed() < CACHE_TTL {
@@ -60,22 +111,13 @@ pub fn claude_usage(force: bool) -> Result<ClaudeUsage, String> {
             }
         }
     }
-    match fetch() {
-        Ok(u) => {
-            *CACHE.lock().unwrap() = Some((Instant::now(), u.clone()));
-            Ok(u)
-        }
-        Err(e) => {
-            if let Some((_, cached)) = CACHE.lock().unwrap().as_ref() {
-                return Ok(cached.clone());
-            }
-            Err(e)
-        }
-    }
+    let u = fetch()?;
+    *CACHE.lock().unwrap() = Some((Instant::now(), u.clone()));
+    Ok(u)
 }
 
 /// Read the token, call the endpoint, and parse the response.
-fn fetch() -> Result<ClaudeUsage, String> {
+fn fetch() -> Result<ClaudeUsage, FetchError> {
     let token = read_oauth_token()?;
     let body = ureq::get(USAGE_URL)
         .set("Authorization", &format!("Bearer {token}"))
@@ -83,16 +125,72 @@ fn fetch() -> Result<ClaudeUsage, String> {
         .set("Content-Type", "application/json")
         .timeout(Duration::from_secs(8))
         .call()
-        .map_err(|e| format!("usage endpoint request failed: {e}"))?
+        .map_err(|e| http_error("usage endpoint", e))?
         .into_string()
         .map_err(|e| format!("failed to read usage response: {e}"))?;
     let v: Value =
         serde_json::from_str(&body).map_err(|e| format!("failed to parse usage JSON: {e}"))?;
-    Ok(ClaudeUsage {
+    Ok(parse_claude_usage(&v))
+}
+
+/// Build the snapshot from the `oauth/usage` JSON body.
+fn parse_claude_usage(v: &Value) -> ClaudeUsage {
+    ClaudeUsage {
         five_hour: parse_window(v.get("five_hour")),
         seven_day: parse_window(v.get("seven_day")),
         seven_day_opus: parse_window(v.get("seven_day_opus")),
-    })
+        model_weekly: parse_model_weekly(v.get("limits")),
+    }
+}
+
+/// Collect per-model weekly quotas from `limits[]`.
+///
+/// Claude Code's own `/usage` screen reads the same array: entries shaped like
+/// `{kind: "weekly_scoped", scope: {model: {display_name}}, percent, resets_at}` become
+/// "Current week (<model>)" rows. Entries of other kinds or without a model scope are skipped.
+fn parse_model_weekly(v: Option<&Value>) -> Vec<ModelWindow> {
+    let Some(items) = v.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            if item.get("kind").and_then(Value::as_str) != Some("weekly_scoped") {
+                return None;
+            }
+            let model = item
+                .get("scope")?
+                .get("model")?
+                .get("display_name")?
+                .as_str()?
+                .trim();
+            if model.is_empty() {
+                return None;
+            }
+            let utilization = item
+                .get("percent")
+                .or_else(|| item.get("utilization"))
+                .and_then(Value::as_f64)?;
+            let resets_at = parse_reset_time(item.get("resets_at"));
+            Some(ModelWindow {
+                model: model.to_string(),
+                utilization,
+                resets_at,
+            })
+        })
+        .collect()
+}
+
+/// Read a `resets_at` field that the server sends either as an ISO string or as Unix seconds.
+///
+/// Claude Code's own usage screen accepts both shapes for `limits[]` entries, so keep the number
+/// path here too; a numeric value would otherwise silently drop the reset time from the row.
+fn parse_reset_time(v: Option<&Value>) -> Option<String> {
+    let v = v?;
+    if let Some(s) = v.as_str() {
+        return Some(s.to_string());
+    }
+    v.as_u64().map(unix_to_rfc3339_utc)
 }
 
 /// Parse `{utilization: f64, resets_at: "ISO"}`, returning None for missing/null fields.
@@ -172,7 +270,7 @@ fn extract_access_token(raw: &str) -> Result<String, String> {
 ///
 /// Prefer the unified weekly credits view (`/v1/billing?format=credits`), which matches Grok Build's
 /// own `/usage` screen. Fall back to the legacy monthly dollars payload when credits format is absent.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct GrokUsage {
     /// Used percentage of the current pool, 0–100.
@@ -198,9 +296,9 @@ static GROK_CACHE: Mutex<Option<(Instant, GrokUsage)>> = Mutex::new(None);
 
 /// Fetch Grok Build account credit usage.
 ///
-/// Cached like Claude: `force` bypasses TTL for manual refresh; network failure returns a still-valid
-/// cache entry when present so the panel does not flash empty on a blip.
-pub fn grok_usage(force: bool) -> Result<GrokUsage, String> {
+/// Cached like Claude: `force` bypasses TTL for manual refresh. A failure is returned as is so the store
+/// can mark the reading stale instead of mistaking cached data for a fresh success.
+pub fn grok_usage(force: bool) -> Result<GrokUsage, FetchError> {
     if !force {
         if let Some((t, cached)) = GROK_CACHE.lock().unwrap().as_ref() {
             if t.elapsed() < GROK_CACHE_TTL {
@@ -208,18 +306,9 @@ pub fn grok_usage(force: bool) -> Result<GrokUsage, String> {
             }
         }
     }
-    match fetch_grok_billing() {
-        Ok(u) => {
-            *GROK_CACHE.lock().unwrap() = Some((Instant::now(), u.clone()));
-            Ok(u)
-        }
-        Err(e) => {
-            if let Some((_, cached)) = GROK_CACHE.lock().unwrap().as_ref() {
-                return Ok(cached.clone());
-            }
-            Err(e)
-        }
-    }
+    let u = fetch_grok_billing()?;
+    *GROK_CACHE.lock().unwrap() = Some((Instant::now(), u.clone()));
+    Ok(u)
 }
 
 fn fetch_grok_billing() -> Result<GrokUsage, String> {
@@ -644,6 +733,50 @@ mod tests {
         let w = parse_window(Some(&v)).unwrap();
         assert_eq!(w.utilization, 26.0);
         assert_eq!(w.resets_at.as_deref(), Some("2026-06-21T10:00:00+00:00"));
+    }
+
+    #[test]
+    fn parse_model_weekly_reads_scoped_limits() {
+        let v: Value = serde_json::json!({
+            "five_hour": {"utilization": 6.0, "resets_at": "2026-09-02T09:39:00+00:00"},
+            "seven_day": {"utilization": 8.0, "resets_at": "2026-09-06T10:59:00+00:00"},
+            "seven_day_opus": null,
+            "limits": [
+                {"kind": "weekly_scoped", "scope": {"model": {"display_name": "Fable 5"}},
+                 "percent": 42.5, "resets_at": "2026-09-06T10:59:00+00:00"},
+                {"kind": "weekly_scoped", "scope": {}, "percent": 1.0},
+                {"kind": "session", "percent": 3.0},
+                {"kind": "weekly_scoped", "scope": {"model": {"display_name": "  "}}, "percent": 9.0},
+                {"kind": "weekly_scoped", "scope": {"model": {"display_name": "Claude Opus 4.8"}},
+                 "percent": 12.0, "resets_at": 1_788_000_000}
+            ]
+        });
+        let u = parse_claude_usage(&v);
+        assert_eq!(u.five_hour.unwrap().utilization, 6.0);
+        assert!(u.seven_day_opus.is_none());
+        assert_eq!(u.model_weekly.len(), 2);
+        assert_eq!(u.model_weekly[0].model, "Fable 5");
+        assert_eq!(u.model_weekly[0].utilization, 42.5);
+        assert_eq!(
+            u.model_weekly[0].resets_at.as_deref(),
+            Some("2026-09-06T10:59:00+00:00")
+        );
+        // A numeric `resets_at` becomes the same ISO text the string form already carries.
+        assert_eq!(u.model_weekly[1].model, "Claude Opus 4.8");
+        assert_eq!(
+            u.model_weekly[1].resets_at.as_deref(),
+            Some("2026-08-29T10:40:00Z")
+        );
+    }
+
+    #[test]
+    fn parse_model_weekly_missing_limits_is_empty_and_old_snapshots_deserialize() {
+        let v: Value = serde_json::json!({"five_hour": {"utilization": 1.0}});
+        assert!(parse_claude_usage(&v).model_weekly.is_empty());
+        // A snapshot persisted before `model_weekly` existed still loads.
+        let old = r#"{"fiveHour":{"utilization":1.0,"resetsAt":null},"sevenDay":null,"sevenDayOpus":null}"#;
+        let u: ClaudeUsage = serde_json::from_str(old).unwrap();
+        assert!(u.model_weekly.is_empty());
     }
 
     #[test]

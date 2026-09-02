@@ -197,6 +197,43 @@ pub fn import_project(conn: &Connection, root_path: &str) -> Result<Project, Str
     Ok(project)
 }
 
+/// Create a collection: a top-level sidebar container with no folder behind it. `root_path` is stored as an
+/// empty string, which every reader already treats as "no directory" — sessions created inside fall back to
+/// their own `cwd`, and the PTY layer turns an unspecified spawn directory into the home directory.
+/// Names are free-form here because nothing on disk is created, so duplicates are allowed.
+pub fn create_virtual_project(conn: &Connection, name: &str) -> Result<Project, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Group name must not be empty".to_string());
+    }
+    let project = Project {
+        id: new_id(),
+        name: trimmed.to_string(),
+        root_path: String::new(),
+        color: None,
+        sort_order: now_millis(),
+        collapsed: false,
+        mark: None,
+        created_at: now_secs(),
+    };
+
+    conn.execute(
+        "INSERT INTO projects (id, name, root_path, color, sort_order, collapsed, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)",
+        params![
+            project.id,
+            project.name,
+            project.root_path,
+            project.color,
+            project.sort_order,
+            project.created_at,
+        ],
+    )
+    .map_err(|e| format!("Failed to write project: {e}"))?;
+
+    Ok(project)
+}
+
 /// Create a group, top-level when parent_group_id is absent. Optional worktree fields establish the
 /// group's default session workspace and sidebar tag.
 ///
@@ -1937,6 +1974,29 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
         conn.execute_batch(crate::db::schema::SCHEMA).unwrap();
         conn
+    }
+
+    /// A collection stores an empty root and still lands in the tree beside folder-backed projects.
+    /// The empty root is what every reader keys on, so it must survive the round trip untouched.
+    #[test]
+    fn collections_store_an_empty_root_and_list_normally() {
+        let conn = mem_conn();
+        let created = create_virtual_project(&conn, "  Research  ").unwrap();
+        assert_eq!(created.name, "Research"); // Names are trimmed.
+        assert_eq!(created.root_path, "");
+
+        let tree = list_tree(&conn).unwrap();
+        assert_eq!(tree.projects.len(), 1);
+        assert_eq!(tree.projects[0].root_path, "");
+
+        // Importing a real directory must not collide with the empty root of a collection.
+        let dir = std::env::temp_dir();
+        let imported = import_project(&conn, dir.to_str().unwrap()).unwrap();
+        assert_ne!(imported.id, created.id);
+        assert!(!imported.root_path.is_empty());
+
+        // A blank name is rejected rather than creating an unnamed row.
+        assert!(create_virtual_project(&conn, "   ").is_err());
     }
 
     /// `move_node` must refuse to make a session its own ancestor: `move_node` is reachable over the

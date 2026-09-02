@@ -10,7 +10,7 @@
 :root {
   /* Place CJK fallbacks (PingFang, Microsoft YaHei, Noto) before generic monospace. Common monospace
      fonts lack CJK glyphs; otherwise browsers fall through to bitmap-serif SimSun beside Latin text. */
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, "VlxSymbols", "Symbola", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, "VlxSymbols", "Symbola", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", monospace;
   --r-sm: 5px; --r-md: 8px; --r-lg: 12px;
   --pane-gap: 3px;
   /* accent (overridden by [data-accent] and set inline by App.jsx) */
@@ -154,6 +154,29 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
 .tb-seg button { padding: 0 9px; height: 24px; color: var(--text-dim); }
 .tb-seg button.on { background: var(--accent-soft); color: var(--accent); }
 
+/* Alt-triggered menu bar (Windows/Linux only; macOS uses the system menu bar). Titles sit inline in the
+   title bar and each dropdown is positioned against its own title. */
+.menubar { display: flex; align-items: center; gap: 2px; margin-left: 10px; }
+.menubar-item { position: relative; }
+.menubar-title { height: 24px; padding: 0 8px; border-radius: var(--r-sm); color: var(--text-mid); font-size: 12px; }
+.menubar-title:hover { background: var(--bg-hover); color: var(--text); }
+.menubar-title:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.menubar-title.open { background: var(--bg-active); color: var(--text); }
+.menubar-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 300; min-width: 210px;
+  padding: 4px; display: flex; flex-direction: column;
+  background: var(--bg-2); border: 1px solid var(--border-strong);
+  border-radius: var(--r-md); box-shadow: var(--shadow);
+}
+.menubar-entry {
+  display: flex; align-items: center; justify-content: space-between; gap: 24px;
+  width: 100%; height: 26px; padding: 0 8px; border-radius: var(--r-sm);
+  color: var(--text-mid); font-size: 12px; text-align: left; white-space: nowrap;
+}
+.menubar-entry.active { background: var(--bg-hover); color: var(--text); }
+.menubar-accel { color: var(--text-dim); font-size: 11px; }
+.menubar-sep { height: 1px; margin: 4px 6px; background: var(--border); }
+
 /* Recent remote connections use flat transparent rows with hover highlighting, visually distinct from
    bordered inputs. The previous matching gray rounded boxes made history rows look editable. */
 .connect-recent-item { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 6px 8px; border: none; border-radius: var(--r-sm); background: none; color: var(--text-mid); font-family: var(--font-mono, monospace); font-size: 12px; cursor: pointer; text-align: left; }
@@ -199,6 +222,8 @@ svg { display: block; }
 .sidebar-tree-body { position: relative; flex: 1; min-height: 0; }
 .sidebar-tree-footer { height: 30px; flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 4px; padding: 3px 6px; border-top: 1px solid var(--border); background: var(--bg-1); }
 .sidebar-tree-footer .icon-btn { flex: none; }
+/* The create action sits at the left end, away from the view controls on the right. */
+.sidebar-tree-footer .sidebar-tree-new-collection { margin-right: auto; }
 .sidebar-tree-divider { z-index: 6; }
 .sidebar-tree-divider.horizontal { width: 1px; cursor: col-resize; }
 .sidebar-tree-divider.vertical { height: 1px; cursor: row-resize; }
@@ -448,6 +473,24 @@ svg { display: block; }
 .diffstat .fn { flex: 1; color: var(--text-mid); overflow: hidden; text-overflow: ellipsis; }
 .diffstat .n { font-size: 10.5px; }
 .insp-empty { font-size: 11.5px; color: var(--text-dim); padding: 2px 0; }
+/* Resources subgroup label: separates "this session" from "system" inside one section without the
+   heavier rule and spacing of a second section header. */
+.res-sub { margin: 9px 0 3px; font-size: 9.5px; letter-spacing: 0.8px; text-transform: uppercase; color: var(--text-faint); }
+.kv + .res-sub { margin-top: 11px; }
+/* Inline meter for the system rows, sized so the number beside it still fits on one line. */
+/* Meter rows: a fixed key column aligns every bar, and the number keeps the right edge. */
+.kv.meter .k { flex: none; width: 62px; }
+.kv.meter .v { flex: 1; display: flex; align-items: center; font-variant-numeric: tabular-nums; }
+.kv.meter .v .num { margin-left: auto; }
+.res-meter { flex: none; width: 44px; height: 4px; margin-right: 8px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.res-meter > i { display: block; height: 100%; border-radius: 2px; background: var(--accent); transition: width 0.3s linear; }
+.res-meter.warn > i { background: var(--yellow); }
+.res-meter.crit > i { background: var(--red); }
+/* Header checkbox that shows or hides the whole-machine group. It sits in the section title, so it
+   inherits the title's uppercase caption look and stays quiet until hovered. */
+.res-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-weight: 500; letter-spacing: 0.8px; color: var(--text-faint); cursor: pointer; user-select: none; }
+.res-toggle:hover { color: var(--text-dim); }
+.res-toggle input { width: 11px; height: 11px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .insp-refresh { background: none; border: none; padding: 0 2px; cursor: pointer; color: var(--text-dim); font-size: 12px; line-height: 1; }
 .insp-refresh:hover { color: var(--text); }
 

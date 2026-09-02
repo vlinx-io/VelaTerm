@@ -17,6 +17,7 @@ import { LeftSidebar } from "./layout/LeftSidebar/LeftSidebar";
 import { RightPanel } from "./layout/RightPanel/RightPanel";
 import { StatusBar } from "./layout/StatusBar/StatusBar";
 import { TitleBar } from "./layout/TitleBar/TitleBar";
+import { runMenuAction } from "./layout/TitleBar/appMenuActions";
 import { listShells } from "./ipc/commands";
 import {
   onMenuAction,
@@ -33,7 +34,7 @@ import {
 } from "./store/settingsWatch";
 import { getClientSource, isTauri } from "./ipc/transport";
 import { wsClient } from "./ipc/wsClient";
-import { checkForUpdates, startUpdateSchedule } from "./ipc/updater";
+import { startUpdateSchedule } from "./ipc/updater";
 import { env, platform } from "./platform";
 import { ConnectionBanner } from "./remote/ConnectionBanner";
 import { CloneProjectModal } from "./remote/CloneProjectModal";
@@ -42,6 +43,7 @@ import { DirectoryPickerModal } from "./remote/DirectoryPickerModal";
 import { SaveAsModal } from "./remote/SaveAsModal";
 import { startMirrorSync } from "./store/mirrorSync";
 import { useTermStore } from "./store/termStore";
+import { startUsageSync } from "./store/usageSync";
 import { watchSystemTheme } from "./theme";
 
 /** Isolated notification side-effect host. Changes to activeSessionId, notifications, and
@@ -154,29 +156,10 @@ function App() {
     const unlistenPresets = onPresetsChanged(() => {
       void useTermStore.getState().loadAgentPresets();
     });
-    // Handle macOS native menu actions, including split accelerators that may be consumed before
-    // WKWebView dispatches keydown. Re-dispatch those key equivalents through the shared shortcut
-    // matcher so user overrides retain the same semantics as ordinary DOM keyboard events.
-    const unlistenMenu = onMenuAction((action) => {
-      if (action === "settings") {
-        useTermStore.getState().setSettingsOpen(true);
-      } else if (action === "check-update") {
-        void checkForUpdates({ manual: true });
-      } else if (action === "share") {
-        useTermStore.getState().setShareOpen(true);
-      } else if (action === "split-right" || action === "split-down") {
-        document.dispatchEvent(
-          new KeyboardEvent("keydown", {
-            key: action === "split-down" ? "D" : "d",
-            code: "KeyD",
-            metaKey: true,
-            shiftKey: action === "split-down",
-            bubbles: true,
-            cancelable: true,
-          }),
-        );
-      }
-    });
+    // Handle macOS native menu actions, including the split accelerators that WKWebView may consume
+    // before dispatching keydown. The handlers are shared with the Alt-triggered menu bar drawn on
+    // Windows and Linux, so both menus raise exactly the same commands.
+    const unlistenMenu = onMenuAction((action) => runMenuAction(action));
     // Silently check for desktop updates shortly after startup and periodically thereafter. New versions
     // light the status bar; no-update and error results remain quiet.
     const stopUpdateSchedule = startUpdateSchedule();
@@ -186,6 +169,9 @@ function App() {
     // Preferences are backend-authoritative but were reconciled only at startup, so a change made in
     // another shell stayed invisible here until the next launch. Follow the broadcast instead.
     const stopSettingsWatch = startSettingsWatch();
+    // Account usage: read the machine-wide snapshot once, then follow the backend's broadcast. Sessions
+    // render from this one copy instead of each querying its provider.
+    const stopUsageSync = startUsageSync();
     // Authoritative session records: read the whole set once, then follow the broadcast. This is a
     // connection-level subscription, so a session this client has never opened still shows its state.
     void useTermStore.getState().syncSessionStates();
@@ -207,6 +193,7 @@ function App() {
       stopUpdateSchedule();
       stopMirrorSync();
       stopSettingsWatch();
+      stopUsageSync();
     };
     // Run once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps

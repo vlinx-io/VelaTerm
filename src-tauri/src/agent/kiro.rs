@@ -26,7 +26,16 @@ pub const AGENT_NAME: &str = "vlx-term";
 
 /// Substring identifying hook entries VelaTerm owns, so re-installing replaces them instead of accumulating
 /// duplicates while leaving the user's own hook entries in the cloned config untouched.
+///
+/// Matched through [`is_ours`], which normalizes separators first: the command embeds a real filesystem
+/// path, so on Windows it reads `vlx-term\hook.ps1` and a plain `contains` against this forward-slash
+/// form never matched — every re-install then appended another copy of our entries.
 const MARKER: &str = "vlx-term/hook.";
+
+/// Whether a hook command string is one VelaTerm wrote, regardless of the platform's path separator.
+fn is_ours(command: &str) -> bool {
+    command.replace('\\', "/").contains(MARKER)
+}
 
 /// Agent-config hook trigger paired with the `e=` value forwarded to the local hook server.
 ///
@@ -176,7 +185,7 @@ fn merge_hooks(base: &mut serde_json::Map<String, serde_json::Value>, script: &P
                 !item
                     .get("command")
                     .and_then(|c| c.as_str())
-                    .is_some_and(|c| c.contains(MARKER))
+                    .is_some_and(is_ours)
             })
             .collect();
         entries.push(serde_json::json!({
@@ -285,7 +294,7 @@ mod tests {
             .unwrap_or_else(|| panic!("missing trigger {trigger}"));
         let command = entries
             .iter()
-            .find_map(|e| e["command"].as_str().filter(|c| c.contains(MARKER)))
+            .find_map(|e| e["command"].as_str().filter(|c| is_ours(c)))
             .unwrap_or_else(|| panic!("no VelaTerm entry for {trigger}"));
         command
             .rsplit(' ')
@@ -345,7 +354,7 @@ mod tests {
             let entries = value["hooks"][trigger].as_array().expect("array");
             let ours = entries
                 .iter()
-                .filter(|e| e["command"].as_str().is_some_and(|c| c.contains(MARKER)))
+                .filter(|e| e["command"].as_str().is_some_and(is_ours))
                 .count();
             assert_eq!(ours, 1, "{trigger} must keep exactly one VelaTerm entry");
         }

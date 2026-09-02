@@ -89,12 +89,41 @@ fn find_tool(full: &Path, bundled: Option<&Path>, tool: &str) -> Option<PathBuf>
     None
 }
 
+/// Architecture prefix directories paired with the MSYSTEM value Git Bash expects for each. Only full
+/// trees carry one of these; the minimal bundle keeps every tool in `usr/bin`.
+const ARCH_PREFIXES: [(&str, &str); 3] = [
+    ("mingw64", "MINGW64"),
+    ("clangarm64", "CLANGARM64"),
+    ("mingw32", "MINGW32"),
+];
+
+/// MSYSTEM value for a Git Bash tree, or None for a minimal tree without an architecture prefix.
+///
+/// Git Bash keys its login profile on MSYSTEM: `/etc/msystem` defaults it to `MSYS` when the variable is
+/// absent, and `/etc/profile` prepends `<prefix>/bin` to PATH only for MINGW*/CLANG*/UCRT* values. A full
+/// tree keeps `git.exe` and `curl.exe` under that prefix and nowhere else, so a login shell started
+/// without MSYSTEM cannot see them. Minimal trees need no value because MSYS mode already covers
+/// `usr/bin`.
+pub fn msystem_for_tree(root: &Path) -> Option<&'static str> {
+    ARCH_PREFIXES.iter().find_map(|(prefix, msystem)| {
+        root.join(prefix)
+            .join("bin")
+            .join("git.exe")
+            .is_file()
+            .then_some(*msystem)
+    })
+}
+
+/// MSYSTEM for the tree owning `<root>/usr/bin/bash.exe`, covering bundled, downloaded, and
+/// user-selected system Git Bash because all three share that layout. None keeps the MSYS default.
+pub fn msystem_for_bash(bash: &Path) -> Option<&'static str> {
+    msystem_for_tree(bash.parent()?.parent()?.parent()?)
+}
+
 /// Whether a tree is full, determined by `git.exe` under its architecture prefix: mingw64, mingw32, or
 /// clangarm64. Full trees may be downloaded or bundled as a full release variant.
 fn is_full_tree(root: &Path) -> bool {
-    ["mingw64", "clangarm64", "mingw32"]
-        .iter()
-        .any(|prefix| root.join(prefix).join("bin").join("git.exe").is_file())
+    msystem_for_tree(root).is_some()
 }
 
 /// Whether a downloaded or full bundled Git Bash is ready, controlling download prompts/menu visibility.
@@ -102,11 +131,35 @@ pub fn full_installed(data_dir: &Path) -> bool {
     is_full_tree(&full_dir(data_dir)) || bundled_dir().is_some_and(is_full_tree)
 }
 
-/// Read the first version field from VLX_GITBASH_VERSION.txt, discarding variant/architecture, so full
-/// downloads match the bundle. Return None to fall back to the latest GitHub release.
-pub fn installed_min_version() -> Option<String> {
+/// Read one whitespace-separated field of VLX_GITBASH_VERSION.txt, which `fetch-gitbash.ps1` writes as
+/// `<version> <variant> <arch>`, for example `2.55.0.windows.2 full 64`.
+fn installed_min_field(index: usize) -> Option<String> {
     let v = std::fs::read_to_string(bundled_dir()?.join(VERSION_FILE)).ok()?;
-    v.split_whitespace().next().map(str::to_string)
+    v.split_whitespace().nth(index).map(str::to_string)
+}
+
+/// Read the version field so full downloads match the bundled tree. Return None to fall back to the
+/// latest GitHub release.
+pub fn installed_min_version() -> Option<String> {
+    installed_min_field(0)
+}
+
+/// Map the marker's architecture field to the PortableGit asset suffix. An absent or unrecognized field
+/// falls back to this build's own architecture, since each vlx-term build ships the matching tree.
+fn asset_suffix_for(arch: Option<&str>) -> &'static str {
+    match arch {
+        Some("arm64") => "arm64",
+        Some("32") => "32-bit",
+        Some("64") => "64-bit",
+        _ if cfg!(target_arch = "aarch64") => "arm64",
+        _ if cfg!(target_arch = "x86") => "32-bit",
+        _ => "64-bit",
+    }
+}
+
+/// PortableGit asset suffix for the architecture this install actually runs, read from the bundled marker.
+fn portable_git_asset_suffix() -> &'static str {
+    asset_suffix_for(installed_min_field(2).as_deref())
 }
 
 /// Full Git Bash download progress translated into frontend events by the command layer.
@@ -202,15 +255,17 @@ pub fn download_full(data_dir: &Path, progress: &dyn Fn(FullProgress)) -> Result
     Ok(())
 }
 
-/// Build the PortableGit 64-bit self-extractor URL from a version, or select the matching asset from the
-/// latest GitHub release when no bundled version is registered.
+/// Build the PortableGit self-extractor URL from a version, or select the matching asset from the latest
+/// GitHub release when no bundled version is registered. The architecture suffix follows the bundled tree
+/// (`64-bit`, `arm64`, `32-bit`) so an ARM install does not pull the emulated x64 package.
 #[cfg(windows)]
 fn portable_git_url(version: Option<&str>) -> Result<String, String> {
+    let suffix = portable_git_asset_suffix();
     if let Some(ver) = version {
         // Asset names remove the `.windows.N` suffix from versions such as 2.54.0.windows.1.
         let asset_ver = ver.split(".windows").next().unwrap_or(ver);
         return Ok(format!(
-            "https://github.com/git-for-windows/git/releases/download/v{ver}/PortableGit-{asset_ver}-64-bit.7z.exe"
+            "https://github.com/git-for-windows/git/releases/download/v{ver}/PortableGit-{asset_ver}-{suffix}.7z.exe"
         ));
     }
     // Fall back to assets from the latest release.
@@ -231,7 +286,7 @@ fn portable_git_url(version: Option<&str>) -> Result<String, String> {
         .and_then(|arr| {
             arr.iter().find_map(|asset| {
                 let name = asset.get("name")?.as_str()?;
-                if name.starts_with("PortableGit-") && name.ends_with("-64-bit.7z.exe") {
+                if name.starts_with("PortableGit-") && name.ends_with(&format!("-{suffix}.7z.exe")) {
                     asset
                         .get("browser_download_url")?
                         .as_str()
@@ -241,7 +296,7 @@ fn portable_git_url(version: Option<&str>) -> Result<String, String> {
                 }
             })
         })
-        .ok_or_else(|| "PortableGit 64-bit self-extractor not found in latest release".to_string())
+        .ok_or_else(|| format!("PortableGit {suffix} self-extractor not found in latest release"))
 }
 
 #[cfg(test)]
@@ -314,6 +369,53 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn msystem_follows_the_tree_architecture_prefix() {
+        let base = tmp("msystem");
+        // A minimal tree keeps every tool in usr/bin, so it needs no MSYSTEM override.
+        let min = base.join("min");
+        put_bash(&min);
+        assert_eq!(msystem_for_tree(&min), None);
+        assert_eq!(msystem_for_bash(&bash_in(&min)), None);
+
+        // A full x64 tree must run as MINGW64 or /etc/profile never puts mingw64/bin on PATH.
+        let full = base.join("full");
+        put_bash(&full);
+        std::fs::create_dir_all(full.join("mingw64/bin")).unwrap();
+        std::fs::write(full.join("mingw64/bin/git.exe"), b"git").unwrap();
+        assert_eq!(msystem_for_tree(&full), Some("MINGW64"));
+        assert_eq!(msystem_for_bash(&bash_in(&full)), Some("MINGW64"));
+
+        // ARM64 trees use the clangarm64 prefix and the matching MSYSTEM name.
+        let arm = base.join("arm");
+        put_bash(&arm);
+        std::fs::create_dir_all(arm.join("clangarm64/bin")).unwrap();
+        std::fs::write(arm.join("clangarm64/bin/git.exe"), b"git").unwrap();
+        assert_eq!(msystem_for_bash(&bash_in(&arm)), Some("CLANGARM64"));
+
+        // A path shallower than <root>/usr/bin/bash.exe has no tree to inspect.
+        assert_eq!(msystem_for_bash(Path::new("bash.exe")), None);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn asset_suffix_follows_the_marker_architecture() {
+        assert_eq!(asset_suffix_for(Some("64")), "64-bit");
+        assert_eq!(asset_suffix_for(Some("arm64")), "arm64");
+        assert_eq!(asset_suffix_for(Some("32")), "32-bit");
+        // An absent or unexpected field falls back to this build's own architecture.
+        let own = if cfg!(target_arch = "aarch64") {
+            "arm64"
+        } else if cfg!(target_arch = "x86") {
+            "32-bit"
+        } else {
+            "64-bit"
+        };
+        assert_eq!(asset_suffix_for(None), own);
+        assert_eq!(asset_suffix_for(Some("riscv")), own);
     }
 
     #[test]

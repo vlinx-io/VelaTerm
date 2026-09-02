@@ -24,7 +24,7 @@ fn home_dir() -> Option<PathBuf> {
 }
 
 /// Codex root: `CODEX_HOME` when set, otherwise `~/.codex`.
-fn codex_home() -> Option<PathBuf> {
+pub(crate) fn codex_home() -> Option<PathBuf> {
     if let Some(h) = std::env::var_os("CODEX_HOME") {
         return Some(PathBuf::from(h));
     }
@@ -32,7 +32,7 @@ fn codex_home() -> Option<PathBuf> {
 }
 
 /// Claude root at `~/.claude`.
-fn claude_home() -> Option<PathBuf> {
+pub(crate) fn claude_home() -> Option<PathBuf> {
     home_dir().map(|h| h.join(".claude"))
 }
 
@@ -205,6 +205,9 @@ fn capture_codex_candidates(
     matches
 }
 
+/// Newest matching Codex session captured since `since`, or None. Test-only: production capture goes
+/// through `spawn_codex_capture`, which polls candidates while the agent starts up.
+#[cfg(test)]
 fn capture_codex_session(
     codex_home: &Path,
     cwd: Option<&str>,
@@ -213,12 +216,6 @@ fn capture_codex_session(
     capture_codex_candidates(codex_home, cwd, since)
         .into_iter()
         .next()
-}
-
-/// Synchronous public capture used as a lightweight fallback by usage and manual-refresh paths.
-pub fn capture_codex_session_since(cwd: Option<&str>, since: SystemTime) -> Option<String> {
-    let home = codex_home()?;
-    capture_codex_session(&home, cwd, since)
 }
 
 // Pi capture.
@@ -260,12 +257,6 @@ fn capture_pi_candidates(
         }
     }
     matches
-}
-
-fn capture_pi_session(pi_home: &Path, cwd: Option<&str>, since: SystemTime) -> Option<String> {
-    capture_pi_candidates(pi_home, cwd, since, true)
-        .into_iter()
-        .next()
 }
 
 /// Repairs legacy Pi sessions before launch by preferring the oldest candidate, avoiding a newer empty reopen.
@@ -468,12 +459,9 @@ pub fn confirmed_missing(kind: SessionKind, id: &str) -> bool {
             }
             !codex_rollout_exists(&sessions, id)
         }
-        // OpenCode stores sessions internally, so verify with `opencode session list`. Claim absence only after a
-        // successful list excludes the ID. If the command is unavailable, attempt resume; invalid IDs fail quickly.
-        SessionKind::Opencode => match opencode_session_ids() {
-            Some(ids) => !ids.iter().any(|x| x == id),
-            None => false,
-        },
+        // OpenCode stores sessions internally, so probe the ID directly with `opencode export <id>`.
+        // Absence is claimed only on the explicit "Session not found" signal; anything else attempts resume.
+        SessionKind::Opencode => opencode_session_missing(id),
         // Copilot never needs absence fallback: an unknown resume UUID starts a new session under that UUID.
         SessionKind::Copilot => false,
         // Cline stores sessions in internal SQLite. Do not verify or downgrade initially; if invalid IDs prove to
@@ -574,26 +562,39 @@ fn find_grok_updates_in(sessions: &std::path::Path, id: &str) -> Option<std::pat
     None
 }
 
-/// Runs `opencode session list` and parses IDs from the first column (`ses_...`). Returns None if unavailable or nonzero.
+/// Whether OpenCode reports the session ID as absent.
 ///
-/// OpenCode emits plain text outside a TTY; NO_COLOR adds a safeguard, making a leading `ses_` token reliable.
-fn opencode_session_ids() -> Option<Vec<String>> {
-    let output = crate::host::command("opencode")
-        .args(["session", "list"])
-        .env("NO_COLOR", "1")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+/// `opencode session list` cannot answer this: it only lists sessions belonging to the current working directory,
+/// and the desktop app runs with the launcher's directory (`/` on macOS), so every ID looked absent and every
+/// resume silently started an empty session. `opencode export <id>` looks the ID up directly, independent of the
+/// working directory: exit 0 when it exists, exit 1 with `Session not found` when it does not.
+///
+/// Absence is claimed only on that explicit message. A missing binary, an older build without `export`, a locked
+/// database, or any other failure leaves the answer unknown and resume proceeds; a genuinely stale ID then fails
+/// fast on OpenCode's own side. Stdout is discarded because export writes the whole conversation as JSON.
+fn opencode_session_missing(id: &str) -> bool {
+    if id.is_empty() {
+        return false;
     }
-    let text = String::from_utf8_lossy(&output.stdout);
-    Some(
-        text.lines()
-            .filter_map(|l| l.split_whitespace().next())
-            .filter(|tok| tok.starts_with("ses_"))
-            .map(|s| s.to_string())
-            .collect(),
-    )
+    let Ok(output) = crate::host::command("opencode")
+        .args(["export", id])
+        .env("NO_COLOR", "1")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .stdin(std::process::Stdio::null())
+        .output()
+    else {
+        return false;
+    };
+    if output.status.success() {
+        return false;
+    }
+    opencode_reports_not_found(&String::from_utf8_lossy(&output.stderr))
+}
+
+/// Whether OpenCode's stderr carries its "Session not found" error, ignoring ANSI styling around it.
+fn opencode_reports_not_found(stderr: &str) -> bool {
+    stderr.to_ascii_lowercase().contains("session not found")
 }
 
 /// Whether `projects/*/<id>.jsonl` exists for a Claude transcript named by session ID.
@@ -657,6 +658,14 @@ mod tests {
     use super::*;
     use std::io::Write;
 
+    /// Newest candidate for a cwd. Only these tests want a single ID; production callers take the
+    /// full oldest-first list from `capture_pi_session_candidates_oldest_first_since`.
+    fn capture_pi_session(pi_home: &Path, cwd: Option<&str>, since: SystemTime) -> Option<String> {
+        capture_pi_candidates(pi_home, cwd, since, true)
+            .into_iter()
+            .next()
+    }
+
     fn write_file(path: &Path, contents: &str) {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
@@ -690,11 +699,17 @@ mod tests {
         std::fs::create_dir_all(&dir_b).unwrap();
         let home = tmp.join("pi");
 
+        // Build with serde_json so the path is escaped: a raw Windows path such as C:\Users\... turns
+        // \U into an invalid JSON escape, the line fails to parse, and the candidate is silently skipped.
         let meta = |id: &str, cwd: &Path| {
-            format!(
-                r#"{{"type":"session","version":3,"id":"{id}","timestamp":"2026-07-21T03:11:37.854Z","cwd":"{}"}}"#,
-                cwd.display()
-            )
+            serde_json::json!({
+                "type": "session",
+                "version": 3,
+                "id": id,
+                "timestamp": "2026-07-21T03:11:37.854Z",
+                "cwd": cwd.to_string_lossy(),
+            })
+            .to_string()
         };
         write_file(
             &home.join("sessions/--projA--/2026-07-21T03-10-00-000Z_pi-old.jsonl"),
@@ -780,11 +795,13 @@ mod tests {
         std::fs::create_dir_all(&dir_b).unwrap();
         let home = tmp.join("codex");
 
+        // serde_json escapes the path; see the note in the Pi test above.
         let meta = |id: &str, cwd: &Path| {
-            format!(
-                r#"{{"type":"session_meta","payload":{{"id":"{id}","cwd":"{}"}}}}"#,
-                cwd.display()
-            )
+            serde_json::json!({
+                "type": "session_meta",
+                "payload": { "id": id, "cwd": cwd.to_string_lossy() },
+            })
+            .to_string()
         };
         write_file(
             &home.join("sessions/2026/06/03/rollout-1-id-a.jsonl"),
@@ -838,12 +855,15 @@ mod tests {
                 waits += 1;
                 // The old implementation stopped after about eight seconds; simulate a later first message.
                 if waits == 30 {
+                    // serde_json escapes the path. Written by hand, a Windows path made this line
+                    // unparseable, the candidate never matched, and this test span forever.
                     write_file(
                         &rollout,
-                        &format!(
-                            r#"{{"type":"session_meta","payload":{{"id":"late-id","cwd":"{}"}}}}"#,
-                            cwd.display()
-                        ),
+                        &serde_json::json!({
+                            "type": "session_meta",
+                            "payload": { "id": "late-id", "cwd": cwd.to_string_lossy() },
+                        })
+                        .to_string(),
                     );
                 }
             },
@@ -927,6 +947,40 @@ mod tests {
     #[test]
     fn terminal_never_confirmed_missing() {
         assert!(!confirmed_missing(SessionKind::Terminal, "whatever"));
+    }
+
+    /// Only OpenCode's own "Session not found" counts as absence. The real message arrives wrapped in ANSI
+    /// styling; every other failure must stay unknown so resume is still attempted.
+    #[test]
+    fn opencode_absence_needs_the_not_found_message() {
+        assert!(opencode_reports_not_found(
+            "\u{1b}[91m\u{1b}[1mError: \u{1b}[0mSession not found: ses_abc\r\n"
+        ));
+        assert!(opencode_reports_not_found("Error: Session not found: ses_abc"));
+        assert!(!opencode_reports_not_found(""));
+        assert!(!opencode_reports_not_found("Unknown argument: export"));
+        assert!(!opencode_reports_not_found("Error: database is locked"));
+    }
+
+    /// An empty ID never reaches the CLI, so it is never reported as absent.
+    #[test]
+    fn opencode_empty_id_is_not_missing() {
+        assert!(!opencode_session_missing(""));
+        assert!(!confirmed_missing(SessionKind::Opencode, ""));
+    }
+
+    /// Read-only check against the OpenCode installed on this machine: a fabricated ID must be reported absent
+    /// regardless of the working directory, which is what `session list` got wrong.
+    /// `cargo test --lib -- --ignored opencode_absence_real_cli_smoke --nocapture`
+    #[test]
+    #[ignore = "depends on the opencode CLI installed on this machine"]
+    fn opencode_absence_real_cli_smoke() {
+        assert!(opencode_session_missing("ses_definitelynotreal1234"));
+        // Set VLX_TEST_OPENCODE_SESSION_ID to an ID that exists in any project to cover the other
+        // direction: an existing session must survive the check from an unrelated working directory.
+        if let Ok(real) = std::env::var("VLX_TEST_OPENCODE_SESSION_ID") {
+            assert!(!opencode_session_missing(&real));
+        }
     }
 
     /// Read-only smoke test against real `~/.codex/sessions`, validating nested traversal and first-line session_meta

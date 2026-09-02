@@ -42,14 +42,15 @@ body {
   user-select: text;
 }
 
-/* ─── IME pre-edit overlay: keep it within the terminal's right edge. ───
-   While composing, the uncommitted pre-edit text is drawn by xterm's .composition-view. It is
-   positioned absolutely at the cursor with white-space:nowrap, and the parent .xterm has no
-   overflow, so a long string runs straight past the terminal's right edge (xterm's own source still
-   carries a TODO about this). xterm sets only left (the cursor x), never right or width, so we add a
-   right bound to keep the width inside the terminal and allow wrapping: the pre-edit text now wraps
-   downward inside the terminal instead of overflowing sideways. This is a presentation-only fix and
-   does not change the text actually sent. */
+/* ─── IME pre-edit overlay: left entirely to xterm's stock styling. ───
+   Do not add a `right` (or any width) bound to `.composition-view`. It lives in `.xterm-helpers`,
+   which xterm.css gives only `position:absolute; top:0`; every child of that container is absolutely
+   positioned or non-rendering, so the container shrink-to-fits to zero width. Inside a zero-width
+   containing block, `left:<cursor x>` plus any `right` resolves to a negative width clamped to 0, and
+   the pre-edit string becomes invisible on every platform — which is exactly what an earlier attempt
+   at wrapping long pre-edit strings did here. VS Code ships these xterm rules untouched for the same
+   reason. Stock behaviour: the overlay sizes to its content and may run past the terminal's right
+   edge on a long string; that is the accepted trade-off. */
 /* ─── IME fix: WKWebView does not activate an IME for elements with opacity:0. ───
    xterm.css sets opacity:0 on the hidden textarea by default, so macOS WKWebView never fires
    compositionstart and the composing keystrokes of a Chinese or Japanese input method are sent to
@@ -60,11 +61,13 @@ body {
   color: transparent !important;
 }
 
+/* Repaint the pre-edit overlay in the terminal's own colours. xterm.css hard-codes white on pure
+   black, which does not match any theme: against this terminal's background it reads as a darker
+   rectangle sitting on the row, and under a light theme it would be a black bar. Colour only — no
+   background box, border, radius or padding, and no width bound (see the note above on `right`). */
 .xterm .composition-view {
-  right: 2px;
-  white-space: pre-wrap;
-  word-break: break-all;
-  overflow: hidden;
+  background: var(--bg-term);
+  color: var(--text);
 }
 
 /* ─── Context-menu items shared through ContextMenu. ─── */

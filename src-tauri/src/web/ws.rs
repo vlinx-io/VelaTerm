@@ -105,14 +105,17 @@ async fn handle_socket(
     let mut cipher: Option<Cipher> = None;
     // Self-reported device ID available only from E2EE; heartbeats use it to detect mid-connection revocation.
     let mut device_id: Option<String> = None;
+    // Self-reported display name available only from E2EE; the host's badge shows it to name this client.
+    let mut device_name: Option<String> = None;
     let mut pending_first: Option<String> = None;
     match ws_rx.next().await {
         Some(Ok(Message::Text(first))) => {
             if let Some(client_pub) = e2ee::parse_hello(&first) {
                 match handshake(&ctx, &mut ws_tx, &mut ws_rx, &client_pub, ip).await {
-                    Some((c, did)) => {
+                    Some((c, did, dname)) => {
                         cipher = Some(c);
                         device_id = did;
+                        device_name = dname;
                     }
                     None => return, // End the connection after handshake/authentication failure or revocation.
                 }
@@ -159,6 +162,21 @@ async fn handle_socket(
     let _ = out_tx.send(Message::Text(
         json!({"t": "hello", "source": conn_source}).to_string(),
     ));
+
+    // Announce the arrival. On a host this is the only sign that someone else is attached: the desktop talks
+    // over IPC and never appears in this list, so a non-empty list means somebody remote is on the other end.
+    // The identity travels with it so the host can name who that is; only `ip` is observed rather than
+    // self-reported, which is why none of it gates anything.
+    // The joining client is not listening yet and reads the list from its own `mirror_get` alignment instead.
+    ctx.app.emit(
+        crate::web::presence::CLIENTS_EVENT,
+        crate::web::presence::join(crate::web::presence::ClientInfo::arriving(
+            conn_source.clone(),
+            device_name.clone(),
+            device_id.clone(),
+            ip.to_string(),
+        )),
+    );
 
     // Writer task: serialize every outbound reply, event, and PTY binary frame to the socket. In E2EE mode,
     // text becomes base64 ciphertext and binary becomes raw ciphertext; control frames such as Close/Ping/Pong
@@ -208,6 +226,10 @@ async fn handle_socket(
         // UI mirror: the shared layout and the on/off switch both reach every client this way.
         crate::web::mirror::LAYOUT_EVENT,
         crate::web::mirror::MODE_EVENT,
+        // How many clients are attached; a follower shows it next to its own mirror badge.
+        crate::web::presence::CLIENTS_EVENT,
+        // Account usage is polled once per machine; every client is told when that copy changes.
+        crate::agent::usage_store::USAGE_EVENT,
     ] {
         event_ids.push(listen_forward(&ctx.app, name, out_tx.clone()));
     }
@@ -285,6 +307,12 @@ async fn handle_socket(
     for id in event_ids {
         ctx.app.unlisten(id);
     }
+    // Deregister before detaching so the host stops showing this client the moment the socket is gone,
+    // whether it closed cleanly, timed out as half-open, or was revoked mid-connection.
+    ctx.app.emit(
+        crate::web::presence::CLIENTS_EVENT,
+        crate::web::presence::leave(&conn_source),
+    );
     let mgr = ctx.app.pty();
     for (sid, sub) in pty_subs {
         mgr.detach(&ctx.app, &sid, sub, &conn_source);
@@ -294,8 +322,9 @@ async fn handle_socket(
 
 /// E2EE handshake after receiving the client public key: derive the shared key, return plaintext `e2ee_ready`,
 /// await encrypted `e2ee_auth`, validate it, then return encrypted `e2ee_authenticated`. Success returns a
-/// [`Cipher`]; decryption/authentication failure or disconnect returns None and ends the connection. Both a
-/// valid device token **and** the correct password are required.
+/// [`Cipher`] together with the self-reported device ID and name; decryption/authentication failure or
+/// disconnect returns None and ends the connection. Both a valid device token **and** the correct password
+/// are required.
 ///
 /// This surface is reachable unauthenticated on 0.0.0.0, so it is hardened against Argon2 DoS: a rate-limited
 /// IP is rejected before any credential work, the memory-hard password verify only runs for holders of the
@@ -307,7 +336,7 @@ async fn handshake(
     ws_rx: &mut SplitStream<WebSocket>,
     client_pub_b64: &str,
     ip: std::net::IpAddr,
-) -> Option<(Cipher, Option<String>)> {
+) -> Option<(Cipher, Option<String>, Option<String>)> {
     let cipher = ctx.e2ee_keys.derive(client_pub_b64).ok()?;
     // Send ready in plaintext so the client knows the shared key is available for encrypted authentication.
     ws_tx
@@ -356,8 +385,9 @@ async fn handshake(
             .register_device(device_id.as_deref(), device_name.as_deref());
         let ct = cipher.encrypt_text(e2ee::MSG_AUTHENTICATED)?;
         ws_tx.send(Message::Text(ct)).await.ok()?;
-        // Return device_id so the main loop can detect revocation during later heartbeats.
-        Some((cipher, device_id))
+        // Return device_id so the main loop can detect revocation during later heartbeats, and the name
+        // so the presence registry can show who just attached.
+        Some((cipher, device_id, device_name))
     } else {
         attempt.failure();
         // Return an encrypted error, proving key exchange succeeded but identity failed, then close.

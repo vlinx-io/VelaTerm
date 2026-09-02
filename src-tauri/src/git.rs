@@ -874,7 +874,33 @@ fn ensure_worktrees_ignored(repo_dir: &str) {
 }
 
 /// Remove a worktree; force permits removal despite local changes.
+/// Absolute path of the repository that owns `worktree_path`, or None when it cannot be determined.
+///
+/// `--git-common-dir` resolves to the main repository's `.git`, whose parent is that repository's root.
+fn main_repo_of(worktree_path: &str) -> Option<String> {
+    let out = crate::host::command("git")
+        .arg("-C")
+        .arg(worktree_path)
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let common = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if common.is_empty() {
+        return None;
+    }
+    let root = std::path::Path::new(&common).parent()?;
+    Some(root.to_string_lossy().to_string())
+}
+
 pub fn worktree_remove(path: &str, force: bool) -> Result<(), String> {
+    // Run git from the main repository, never from inside the worktree being deleted. `git -C <dir>`
+    // makes <dir> the git process's working directory, and Windows refuses to delete a directory that
+    // is any process's cwd, so pointing it at the worktree fails with "Permission denied" there. POSIX
+    // allows it, which is why this only ever broke on Windows.
+    let run_from = main_repo_of(path).unwrap_or_else(|| path.to_string());
     let mut args: Vec<&str> = vec!["worktree", "remove"];
     if force {
         args.push("--force");
@@ -882,7 +908,7 @@ pub fn worktree_remove(path: &str, force: bool) -> Result<(), String> {
     args.push(path);
     let out = crate::host::command("git")
         .arg("-C")
-        .arg(path)
+        .arg(&run_from)
         .args(&args)
         .output()
         .map_err(|e| format!("Failed to run git worktree remove: {e}"))?;

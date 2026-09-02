@@ -59,19 +59,34 @@ pub fn cancel_quit(state: State<crate::QuitState>) {
 
 /// VS Code-style shell command management. Native macOS settings/menu actions query, install, or
 /// uninstall `vela` directly so browser/remote clients cannot modify the host PATH.
+/// All three touch the filesystem — walking PATH directories, writing or removing the launcher — so they
+/// run on the blocking pool even though each is normally quick.
 #[tauri::command]
-pub fn vela_command_status() -> crate::agent::spawn_cli::UserCliStatus {
-    crate::agent::spawn_cli::user_cli_status()
+pub async fn vela_command_status() -> crate::agent::spawn_cli::UserCliStatus {
+    tauri::async_runtime::spawn_blocking(crate::agent::spawn_cli::user_cli_status)
+        .await
+        // A join failure means the probe never ran; report "not installed" rather than a stale claim.
+        .unwrap_or(crate::agent::spawn_cli::UserCliStatus {
+            installed: false,
+            path: None,
+            conflict: None,
+        })
 }
 
 #[tauri::command]
-pub fn install_vela_command() -> Result<crate::agent::spawn_cli::UserCliStatus, String> {
-    crate::agent::spawn_cli::install_user_cli().map_err(|e| e.to_string())
+pub async fn install_vela_command() -> Result<crate::agent::spawn_cli::UserCliStatus, String> {
+    tauri::async_runtime::spawn_blocking(crate::agent::spawn_cli::install_user_cli)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn uninstall_vela_command() -> Result<crate::agent::spawn_cli::UserCliStatus, String> {
-    crate::agent::spawn_cli::uninstall_user_cli().map_err(|e| e.to_string())
+pub async fn uninstall_vela_command() -> Result<crate::agent::spawn_cli::UserCliStatus, String> {
+    tauri::async_runtime::spawn_blocking(crate::agent::spawn_cli::uninstall_user_cli)
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 // ─────────────────────────── Unified desktop dispatch ───────────────────────────
@@ -256,9 +271,19 @@ pub fn pty_kill(
 
 // ─────────────────────────── Replay, Git Bash, and tree management ───────────────────────────
 /// Return a session's runtime working directory for split-pane inheritance.
+///
+/// Runs on the blocking pool: reading a cwd means `lsof` on macOS, an actual subprocess whose cost is
+/// not bounded by anything this side controls, and `/proc` on Linux.
 #[tauri::command]
-pub fn get_session_cwd(state: State<PtyManager>, session_id: String) -> Option<String> {
-    state.cwd(&session_id)
+pub async fn get_session_cwd(
+    state: State<'_, PtyManager>,
+    session_id: String,
+) -> Result<Option<String>, String> {
+    // Look the PID up here — an in-memory map read — so no State borrow has to cross into the closure.
+    let pid = state.cwd_pid(&session_id);
+    tauri::async_runtime::spawn_blocking(move || pid.and_then(crate::pty::manager::process_cwd))
+        .await
+        .map_err(|e| format!("Failed to read working directory: {e}"))
 }
 
 /// List shells available for terminal sessions (cmd, PowerShell, Git Bash, WSL, etc. on Windows).
@@ -291,9 +316,19 @@ pub struct GitbashStatus {
     pub full_installed: bool,
 }
 
-/// Query Git Bash state; non-Windows platforms always return false.
+/// Query Git Bash state; non-Windows platforms always return false. Probing means stat-ing files under
+/// the app data directory, so it runs on the blocking pool.
 #[tauri::command]
-pub fn gitbash_status(app: AppHandle) -> GitbashStatus {
+pub async fn gitbash_status(app: AppHandle) -> GitbashStatus {
+    tauri::async_runtime::spawn_blocking(move || gitbash_status_blocking(app))
+        .await
+        .unwrap_or(GitbashStatus {
+            available: false,
+            full_installed: false,
+        })
+}
+
+fn gitbash_status_blocking(app: AppHandle) -> GitbashStatus {
     #[cfg(windows)]
     {
         let dd = app.path().app_data_dir().ok();
@@ -324,7 +359,15 @@ pub fn gitbash_status(app: AppHandle) -> GitbashStatus {
 /// `gitbash://download`（{phase:"download",received,total} / {phase:"extract"}）、
 /// `gitbash://download-done` and `gitbash://download-error`. Only Windows downloads anything.
 #[tauri::command]
-pub fn download_full_gitbash(app: AppHandle) -> Result<(), String> {
+pub async fn download_full_gitbash(app: AppHandle) -> Result<(), String> {
+    // The download itself already runs on its own thread; this hop keeps the preceding data-directory
+    // lookup and installed-state probe — both filesystem work — off the main thread as well.
+    tauri::async_runtime::spawn_blocking(move || download_full_gitbash_blocking(app))
+        .await
+        .map_err(|e| format!("failed to start the Git Bash download: {e}"))?
+}
+
+fn download_full_gitbash_blocking(app: AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
         use tauri::Emitter;
@@ -379,8 +422,11 @@ pub fn download_full_gitbash(app: AppHandle) -> Result<(), String> {
 
 /// Stream a terminal recording in chunks to a read-only xterm. Return an empty replay, not an error,
 /// when the session has never produced a recording.
+///
+/// Reading runs on the blocking pool: a recording is a whole session's output and can reach tens of
+/// megabytes, so looping over it on the main thread would freeze the window for the entire replay.
 #[tauri::command]
-pub fn read_recording(
+pub async fn read_recording(
     app: AppHandle,
     session_id: String,
     on_chunk: Channel<InvokeResponseBody>,
@@ -389,43 +435,57 @@ pub fn read_recording(
         .path()
         .app_data_dir()
         .map_err(|e| format!("Failed to get data directory: {e}"))?;
-    let path = data_dir
-        .join("recordings")
-        .join(format!("{session_id}.log"));
-    if !path.exists() {
-        return Ok(());
-    }
-    let mut file =
-        std::fs::File::open(&path).map_err(|e| format!("Failed to open recording: {e}"))?;
-    let mut buf = [0u8; 65536];
-    loop {
-        match file.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => {
-                on_chunk
-                    .send(InvokeResponseBody::Raw(buf[..n].to_vec()))
-                    .map_err(|e| format!("Failed to send replay chunk: {e}"))?;
-            }
-            Err(e) => return Err(format!("Failed to read recording: {e}")),
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = data_dir
+            .join("recordings")
+            .join(format!("{session_id}.log"));
+        if !path.exists() {
+            return Ok(());
         }
-    }
-    Ok(())
+        let mut file =
+            std::fs::File::open(&path).map_err(|e| format!("Failed to open recording: {e}"))?;
+        let mut buf = [0u8; 65536];
+        loop {
+            match file.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    on_chunk
+                        .send(InvokeResponseBody::Raw(buf[..n].to_vec()))
+                        .map_err(|e| format!("Failed to send replay chunk: {e}"))?;
+                }
+                Err(e) => return Err(format!("Failed to read recording: {e}")),
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Failed to read recording: {e}"))?
 }
 
 // ─────────────────────────── Image persistence (direct frontend number[] bytes) ────────────────
 
 /// Save a pasted/dropped image to a temporary file and return its absolute path for an agent. Desktop
 /// calls this directly; browser/remote invokes the same files implementation over WebSocket.
+/// Runs on the blocking pool: a pasted screenshot is easily several megabytes, and writing it from the
+/// main thread stalls the window right at the moment the user is typing into the prompt.
 #[tauri::command]
-pub fn save_pasted_image(bytes: Vec<u8>, ext: String) -> Result<String, String> {
-    files::save_pasted_image(&bytes, &ext)
+pub async fn save_pasted_image(bytes: Vec<u8>, ext: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || files::save_pasted_image(&bytes, &ext))
+        .await
+        .map_err(|e| format!("Failed to save image: {e}"))?
 }
 
 /// Persist a Markdown image under a sibling `assets/` directory and return its document-relative path,
 /// unlike temporary absolute-path agent images.
 #[tauri::command]
-pub fn save_doc_image(doc_path: String, bytes: Vec<u8>, ext: String) -> Result<String, String> {
-    files::save_doc_image(&doc_path, &bytes, &ext)
+pub async fn save_doc_image(
+    doc_path: String,
+    bytes: Vec<u8>,
+    ext: String,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || files::save_doc_image(&doc_path, &bytes, &ext))
+        .await
+        .map_err(|e| format!("Failed to save image: {e}"))?
 }
 
 // ─────────────────────────── Browser remote-access host management ───────────────────────────
@@ -433,25 +493,42 @@ pub fn save_doc_image(doc_path: String, bytes: Vec<u8>, ext: String) -> Result<S
 /// Generate a browser pairing link with shared token and server public key in the URL fragment.
 /// `address` chooses the interface IP; rotate replaces the token, invalidates old links, and clears devices.
 #[tauri::command]
-pub fn web_pairing_create(
+pub async fn web_pairing_create(
     app: AppHandle,
     address: Option<String>,
     rotate: Option<bool>,
 ) -> Result<PairingInfo, String> {
-    crate::command_core::web_pairing_create(&AppCtx::Tauri(app), address, rotate.unwrap_or(false))
+    // Rotation persists the new token to SQLite, so this is a disk write, not just a string build.
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::command_core::web_pairing_create(
+            &AppCtx::Tauri(app),
+            address,
+            rotate.unwrap_or(false),
+        )
+    })
+    .await
+    .map_err(|e| format!("failed to create the pairing link: {e}"))?
 }
 
 /// List paired devices that have actually connected for the management panel.
 #[tauri::command]
-pub fn web_devices_list(app: AppHandle) -> Vec<DeviceEntry> {
-    crate::command_core::web_devices_list(&AppCtx::Tauri(app))
+pub async fn web_devices_list(app: AppHandle) -> Vec<DeviceEntry> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::command_core::web_devices_list(&AppCtx::Tauri(app))
+    })
+    .await
+    .unwrap_or_default()
 }
 
 /// Remove a device registration display entry. Shared links can still reconnect; rotate to revoke all.
 /// Errors when the revocation cannot be persisted (it would silently return after the next restart).
 #[tauri::command]
-pub fn web_device_revoke(app: AppHandle, device_id: String) -> Result<bool, String> {
-    crate::command_core::web_device_revoke(&AppCtx::Tauri(app), &device_id)
+pub async fn web_device_revoke(app: AppHandle, device_id: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::command_core::web_device_revoke(&AppCtx::Tauri(app), &device_id)
+    })
+    .await
+    .map_err(|e| format!("failed to revoke the device: {e}"))?
 }
 
 // ─────────────────────────── Remote connection window ───────────────────────────
@@ -618,10 +695,12 @@ pub async fn probe_remote_fingerprint(
 }
 
 /// After user confirmation, store this host:port fingerprint as TOFU trust. Unchanged fingerprints
-/// become known; only changes warn. This is an in-memory SQLite write with no network I/O.
+/// become known; only changes warn. No network I/O, but the row lands in the on-disk SQLite database,
+/// so the write runs on the blocking pool. The handle is taken as `AppHandle` rather than `State<Db>`
+/// because a `State` borrow cannot cross into `spawn_blocking`.
 #[tauri::command]
-pub fn url_trust_fingerprint(
-    db: State<'_, Db>,
+pub async fn url_trust_fingerprint(
+    app: AppHandle,
     pairing_url: String,
     fingerprint: String,
 ) -> Result<(), String> {
@@ -631,8 +710,13 @@ pub fn url_trust_fingerprint(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let conn = db.conn.lock().unwrap();
-    repo::upsert_url_host_key(&conn, &host_port, &fingerprint, now)
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<Db>();
+        let conn = db.conn.lock().unwrap();
+        repo::upsert_url_host_key(&conn, &host_port, &fingerprint, now)
+    })
+    .await
+    .map_err(|e| format!("failed to store the fingerprint: {e}"))?
 }
 
 // ─────────────────────────── Developer tools ───────────────────────────

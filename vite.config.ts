@@ -5,12 +5,12 @@ import tailwindcss from "@tailwindcss/vite";
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
-// Vite dev-server port: 1420 by default. dev:tauri, dev:web, dev:mobile, and dev:electron each pass a random
+// Vite dev-server port: 1420 by default. dev:tauri, dev:web, and dev:electron each pass a random
 // available port through VLX_VITE_PORT, allowing multiple modes and worktrees to run concurrently without collisions.
 // @ts-expect-error process is a nodejs global
 const vitePort = Number(process.env.VLX_VITE_PORT) || 1420;
 
-// Host binding: mobile mode uses VLX_VITE_HOST=0.0.0.0 so the phone can connect. Otherwise, retain
+// Host binding: dev:web sets VLX_VITE_HOST=0.0.0.0 so other devices on the LAN can connect. Otherwise, retain
 // TAURI_DEV_HOST for Tauri testing on a physical device; if neither is set, listen only on localhost.
 // @ts-expect-error process is a nodejs global
 const bindHost = process.env.VLX_VITE_HOST || host || false;
@@ -21,7 +21,7 @@ const bindHost = process.env.VLX_VITE_HOST || host || false;
 // @ts-expect-error process is a nodejs global
 const hmrHost = process.env.VLX_VITE_HMR_HOST;
 
-// Backend used for browser/mobile UI debugging; /ws and /api are proxied here. dev:web and dev:mobile point
+// Backend used for browser UI debugging; /ws and /api are proxied here. dev:web points
 // VLX_DEV_BACKEND at their own randomly assigned plaintext backend. Port 8799 remains the default for the
 // legacy manual workflow.
 // @ts-expect-error process is a nodejs global

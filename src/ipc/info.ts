@@ -211,6 +211,28 @@ export function processStats(pid: number): Promise<ProcStats | null> {
   return invoke<ProcStats | null>("process_stats", { pid });
 }
 
+/** Whole-machine resource usage. For a remote session this describes the remote host, not this laptop. */
+export interface SystemStats {
+  /** 0-100 across all cores, unlike ProcStats.cpu which sums per-core percentages. */
+  cpu: number;
+  cores: number;
+  memUsed: number;
+  memTotal: number;
+  swapUsed: number;
+  swapTotal: number;
+  /** macOS kernel memory pressure level; null on other platforms. */
+  pressure: "normal" | "warning" | "critical" | null;
+  /** macOS memory pressure as 0-100, higher meaning more pressure; null on other platforms. */
+  pressurePct: number | null;
+  /** Linux 1/5/15-minute load averages; null on other platforms. */
+  load: [number, number, number] | null;
+}
+
+/** Sample whole-machine CPU, memory, swap, and the platform's saturation signal (pressure or load). */
+export function systemStats(): Promise<SystemStats> {
+  return invoke<SystemStats>("system_stats", {});
+}
+
 /** Open a directory with the system default application/file manager; silently no-op in browsers. */
 export function openDir(path: string): Promise<void> {
   return openPath(path);

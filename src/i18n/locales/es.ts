@@ -47,7 +47,8 @@ const es: typeof en = {
     `Versiones no coinciden: frontend v${frontend} ≠ backend v${backend}: recompila o redespliega sincronizado.`, // Version mismatch
 
   "titlebar.hotReloadedAt": (time) => `Recarga en caliente a las ${time}`, // Hot reloaded at {time}
-  "titlebar.themeSystem": (resolved) => `Seguir al sistema (actualmente ${resolved})`, // Follow system (currently {resolved})
+  "titlebar.themeSystem": (resolved) =>
+    `Seguir al sistema (actualmente ${resolved})`, // Follow system (currently {resolved})
   "titlebar.themeDark": "Oscuro", // Dark
   "titlebar.themeLight": "Claro", // Light
   "titlebar.browser": "Navegador integrado", // Built-in Browser
@@ -56,7 +57,21 @@ const es: typeof en = {
   "titlebar.mirrored": "Reflejado", // Mirrored
   "titlebar.mirroredHint":
     "La duplicación está activada: las pestañas, las divisiones y la sesión activa siguen al anfitrión. El interruptor está en el anfitrión.", // Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.
+  "titlebar.mirroredBy": (n: number) => `Reflejado por ${n}`, // Mirrored by {n}
+  "titlebar.mirroredByHint": (n: number) =>
+    `${n} cliente${n === 1 ? "" : "s"} remoto${n === 1 ? " está conectado" : "s están conectados"}. Las pestañas, las divisiones y la sesión activa se comparten, y cualquiera de los dos lados puede reorganizarlas.`, // {n} remote clients are connected. Tabs, splits, and the active session are shared, and either side can rearrange them.
+  "titlebar.clientsTitle": "Clientes conectados", // Attached clients
+  "titlebar.clientUnnamed": "Cliente sin nombre", // Unnamed client
+  "titlebar.clientSince": (time: string) => `desde ${time}`, // since {time}
   "titlebar.share": "Compartir", // Share
+  // ── Alt-triggered menu bar (Windows/Linux) ──
+  "menubar.file": "Archivo", // File
+  "menubar.terminal": "Terminal",
+  "menubar.help": "Ayuda", // Help
+  "menubar.newTerminal": "Nuevo terminal", // New Terminal
+  "menubar.visitWebsite": "Visitar el sitio web", // Visit Website
+  "menubar.sendFeedback": "Enviar comentarios", // Send Feedback
+  "menubar.clearBadges": "Borrar indicadores de notificación", // Clear Notification Badges
   "share.title": "Compartir VelaTerm", // Share VelaTerm
   "share.subtitle":
     "Somos el pequeño equipo que está detrás de VelaTerm. Si te gusta, comparte VelaTerm con otras personas. Ayudarnos a que más gente nos conozca significa muchísimo para nuestro equipo. ¡Gracias por tu apoyo! ❤️", // We're a small team behind VelaTerm. If you enjoy it, please share VelaTerm with others…
@@ -95,11 +110,13 @@ const es: typeof en = {
   "settings.cliInstalledAt": (path: string) => `Instalado en ${path}`,
   "settings.cliConflict": (path: string) =>
     `Ya existe otro comando ‘vela’ en ${path}. VelaTerm no lo sobrescribirá.`,
-  "settings.cliHint": "Añade `vela <ruta-del-proyecto>` al PATH, como el comando `code` de VS Code.",
+  "settings.cliHint":
+    "Añade `vela <ruta-del-proyecto>` al PATH, como el comando `code` de VS Code.",
   "settings.agentArgsHint":
     "Argumentos de inicio predeterminados aplicados a las nuevas sesiones de cada tipo de agente. Los argumentos por sesión definidos al crear o editar tienen prioridad. Dejar vacío para ninguno.", // Agent default launch args hint
   "settings.agentPathLabel": "Ruta del ejecutable (opcional)", // Executable path (optional)
-  "settings.agentPathPlaceholder": "p. ej. ~/.local/bin/claude — vacío = buscar en PATH", // e.g. path — empty = find on PATH
+  "settings.agentPathPlaceholder":
+    "p. ej. ~/.local/bin/claude — vacío = buscar en PATH", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "Si se define, las sesiones de este tipo se inician con esta ruta completa en lugar de buscar el comando en el PATH. Útil cuando el agente está instalado pero no en el PATH del shell. Se rellena automáticamente tras una instalación con un clic si se detecta la ubicación.", // Agent executable path hint
   "settings.appearance": "Apariencia", // Appearance
@@ -125,6 +142,7 @@ const es: typeof en = {
   "settings.maxLiveTabs": "Background limit", // Background limit
   "settings.defaultShell": "Shell predeterminada", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.cleanImages": "Limpiar imágenes pegadas automáticamente",
   "settings.cleanImagesHint":
@@ -149,7 +167,8 @@ const es: typeof en = {
   "spawn.effortLabel": "Esfuerzo", // Effort
   "spawn.modelDefault": "Predeterminado", // Default
   "spawn.modelLoading": "Cargando modelos…", // Listing models…
-  "spawn.modelListUnavailable": "Sin lista de modelos — escribe un identificador arriba", // No model list available — type an identifier above
+  "spawn.modelListUnavailable":
+    "Sin lista de modelos — escribe un identificador arriba", // No model list available — type an identifier above
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
@@ -182,7 +201,8 @@ const es: typeof en = {
   "git.commitPlaceholder": "Mensaje del commit",
   "git.amend": "Enmendar el último commit",
   "git.amendCommit": "Enmendar commit",
-  "git.commitCount": (n: number) => (n === 1 ? "Confirmar 1 archivo" : `Confirmar ${n} archivos`),
+  "git.commitCount": (n: number) =>
+    n === 1 ? "Confirmar 1 archivo" : `Confirmar ${n} archivos`,
   "git.commitNoFiles": "Este commit no cambia archivos",
   "git.noCommits": "Aún no hay commits",
   "git.loadMore": "Cargar más",
@@ -191,14 +211,16 @@ const es: typeof en = {
   "tree.openWorktreeDir": "Open worktree folder",
   "tree.deleteWorktreeMenu": "Delete worktree…", // TODO translate
   "tree.deleteWorktreeTitle": "Delete worktree", // TODO translate
-  "tree.deleteWorktreeBody": "Choose a worktree to remove. This deletes its working directory from disk.", // TODO translate
+  "tree.deleteWorktreeBody":
+    "Choose a worktree to remove. This deletes its working directory from disk.", // TODO translate
   "tree.deleteWorktreePlaceholder": "Select a worktree…", // TODO translate
   "tree.deleteWorktreeForce": "Force delete (discard uncommitted changes)", // TODO translate
   "tree.convertToNormalSession": "Convert to normal session", // TODO translate
   "tree.moveGroupToWorktree": "Mover a un worktree…",
   "tree.convertToNormalGroup": "Convert to normal group", // TODO translate
   "merge.title": "Merge branches", // TODO translate
-  "merge.desc": "Pick a source and a target branch; the source merges into the target.", // TODO translate
+  "merge.desc":
+    "Pick a source and a target branch; the source merges into the target.", // TODO translate
   "merge.notRepo": "This session's directory is not a git repository.", // TODO translate
   "merge.loadingBranches": "Loading branches…", // TODO translate
   "merge.loadingDiff": "Loading diff…", // TODO translate
@@ -206,12 +228,14 @@ const es: typeof en = {
   "merge.targetLabel": "Target branch", // TODO translate
   "merge.selectBranch": "Select a branch…", // TODO translate
   "merge.swap": "Swap direction", // TODO translate
-  "merge.pickHint": "Pick both branches to preview the changes this merge brings in.", // TODO translate
+  "merge.pickHint":
+    "Pick both branches to preview the changes this merge brings in.", // TODO translate
   "merge.changes": (target: string) => `Changes brought into "${target}"`, // TODO translate
   "merge.noChanges": "No file changes.", // TODO translate
   "merge.sameBranch": "Source and target are the same branch.", // TODO translate
   "merge.branchGone": "A selected branch no longer exists. Pick again.", // TODO translate
-  "merge.upToDate": "The target branch already contains the source branch. Nothing to merge.", // TODO translate
+  "merge.upToDate":
+    "The target branch already contains the source branch. Nothing to merge.", // TODO translate
   "merge.targetNotCheckedOut": (target: string) =>
     `Target branch "${target}" isn't checked out in any worktree, so a local merge can't run. Check it out first.`, // TODO translate
   "merge.targetDirty":
@@ -219,11 +243,13 @@ const es: typeof en = {
   "merge.sourceDirtyNote":
     "The source branch's working tree has uncommitted changes; they will be committed first.", // TODO translate
   "merge.commitMsgLabel": "Commit message", // TODO translate
-  "merge.commitMsgPlaceholder": "Describe this change (used as the commit message)", // TODO translate
+  "merge.commitMsgPlaceholder":
+    "Describe this change (used as the commit message)", // TODO translate
   "merge.apply": "Merge", // TODO translate
   "merge.commitAndApply": "Commit & merge", // TODO translate
   "merge.working": "Merging…", // TODO translate
-  "merge.doneMsg": (source: string, target: string) => `Merged "${source}" into "${target}".`, // TODO translate
+  "merge.doneMsg": (source: string, target: string) =>
+    `Merged "${source}" into "${target}".`, // TODO translate
   "merge.conflictMsg": (target: string) =>
     `Merge has conflicts. Resolve them in the terminal of "${target}"'s worktree, then commit:`, // TODO translate
   "merge.close": "Close", // TODO translate
@@ -278,7 +304,8 @@ const es: typeof en = {
     "open your desktop's Settings ▸ Notifications and allow VelaTerm.", // TODO translate
   "settings.notifyStepsBrowser":
     "click the site-permission icon in the address bar and set Notifications to Allow.", // TODO translate
-  "settings.notifyUnsupported": "Notifications aren't available in this environment.", // TODO translate
+  "settings.notifyUnsupported":
+    "Notifications aren't available in this environment.", // TODO translate
   "settings.notifyOpenSettings": "Open System Settings", // TODO translate
   // Shortcut categories
   "settings.catShortcuts": "Atajos", // Shortcuts
@@ -292,7 +319,8 @@ const es: typeof en = {
   "settings.scGlobalSearch": "Buscar en todas las sesiones", // Search all sessions
   "settings.scSaveDoc": "Guardar documento", // Save document
   "settings.scRecording": "Pulsa las teclas…", // Press keys…
-  "settings.scHint": "Haz clic en un atajo y pulsa una nueva combinación (se requiere Cmd/Ctrl).", // hint
+  "settings.scHint":
+    "Haz clic en un atajo y pulsa una nueva combinación (se requiere Cmd/Ctrl).", // hint
   "settings.scReset": "Restaurar valores predeterminados", // Restore defaults
   "settings.scConflict": (label: string) => `Ya lo usa "${label}"`, // conflict
 
@@ -305,7 +333,8 @@ const es: typeof en = {
   "remote.urlsHint":
     "Abre la dirección que esté en el mismo WiFi / subred que tu dispositivo (con varias interfaces de red, elige la correcta; las direcciones VPN/túnel aparecen al final y normalmente no son accesibles desde otros dispositivos):", // Open the address on the same WiFi / subnet…
   "remote.copyUrl": "Clic para copiar la dirección", // Click to copy address
-  "remote.moreUrls": (n: number) => (n > 1 ? `${n} enlaces más` : `${n} enlace más`), // N more urls
+  "remote.moreUrls": (n: number) =>
+    n > 1 ? `${n} enlaces más` : `${n} enlace más`, // N more urls
   "remote.lessUrls": "Mostrar menos", // Show less
   "remote.stop": "Detener servidor", // Stop Server
   "remote.passwordPlaceholder": "Establecer contraseña de acceso", // Set access password
@@ -356,7 +385,8 @@ const es: typeof en = {
   "connect.stagePreparing": "Preparando servidor…",
   "connect.stageTransferring": "Transfiriendo servidor…",
   "connect.stageStarting": "Iniciando servidor…",
-  "connect.sshFingerprintLabel": (kt: string) => `Huella de la clave del host SSH (${kt})`,
+  "connect.sshFingerprintLabel": (kt: string) =>
+    `Huella de la clave del host SSH (${kt})`,
   "connect.sshHostNew":
     "Primera conexión a este host: verifica la huella antes de continuar.",
   "connect.sshHostChanged":
@@ -377,7 +407,8 @@ const es: typeof en = {
   "connect.mirror": "Reflejar el diseño en todos los dispositivos", // Mirror layout across devices
   "connect.mirrorHint":
     "Las pestañas, las divisiones y la sesión activa se mantienen iguales en todos los dispositivos conectados a este servicio remoto. Sin marcar, cada dispositivo conserva su propio diseño.", // Tabs, splits, and the active session stay the same on every device connected to this remote service. Off = each device keeps its own layout.
-  "connect.shareDesktopDb": "Usar la base de datos de la app de escritorio remota",
+  "connect.shareDesktopDb":
+    "Usar la base de datos de la app de escritorio remota",
   "connect.shareDesktopDbHint":
     "Comparte una base de datos con la app de escritorio del equipo remoto (mejor si ambas tienen la misma versión). Desactivado = base de datos independiente.",
 
@@ -421,6 +452,17 @@ const es: typeof en = {
   "tree.closeScratch": "Cerrar borrador", // Close Scratch
   "tree.importProject": "Importar proyecto", // Import Project
   "tree.createProject": "Crear proyecto",
+  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  "tree.newCollection": "Nueva colección",
+  "tree.deleteCollection": "Eliminar colección",
+  "collection.title": "Nueva colección",
+  "collection.name": "Nombre de la colección",
+  "collection.namePlaceholder": "research",
+  "collection.submit": "Crear colección",
+  "collection.tag": "Sin carpeta",
+  "collection.deleteTitle": "Eliminar colección",
+  "collection.deleteBody": (name) =>
+    `¿Eliminar la colección "${name}"? También se eliminarán sus grupos y sesiones. Esto no se puede deshacer.`,
   "tree.cloneProject": "Clonar desde Git", // Clone from Git
   "createProject.title": "Crear proyecto",
   "createProject.name": "Nombre del proyecto",
@@ -428,7 +470,8 @@ const es: typeof en = {
   "createProject.into": "Crear en",
   "createProject.choose": "Elegir…",
   "createProject.noParent": "Elige una carpeta principal",
-  "createProject.invalidName": "Introduce un único nombre de carpeta sin / ni \\.",
+  "createProject.invalidName":
+    "Introduce un único nombre de carpeta sin / ni \\.",
   "createProject.creating": "Creando…",
   "createProject.submit": "Crear proyecto",
   "clone.title": "Clonar repositorio Git", // Clone Git Repository
@@ -452,7 +495,8 @@ const es: typeof en = {
   "clone.stageFinalizing": "Finalizando…",
   "clone.stageImporting": "Importando proyecto…",
   "clone.elapsed": (seconds: number) => `${seconds} s transcurridos`,
-  "clone.slowHint": "No hay progreso desde hace 30 segundos. Comprueba la red o el proxy del equipo remoto; puedes cancelar y volver a intentarlo.",
+  "clone.slowHint":
+    "No hay progreso desde hace 30 segundos. Comprueba la red o el proxy del equipo remoto; puedes cancelar y volver a intentarlo.",
   "clone.submit": "Clonar", // Clone
   "tree.globalSearch": "Buscar en todas las sesiones", // Search All Sessions
   "tree.archivedSessions": "Sesiones archivadas", // Archived Sessions
@@ -494,7 +538,8 @@ const es: typeof en = {
   "mark.caution": "Precaución", // Caution
   "tree.clearAllNotifications":
     "Borrar todas las insignias de notificación (puntos de sesión e insignia del Dock)", // Clear all notification badges…
-  "tree.noProjectsPre": "Aún no hay proyectos. Haz clic en el icono de carpeta o pulsa ", // No projects yet. Click the folder button, or press
+  "tree.noProjectsPre":
+    "Aún no hay proyectos. Haz clic en el icono de carpeta o pulsa ", // No projects yet. Click the folder button, or press
   "tree.noProjectsPost": " para importar un directorio.", // to import a directory.
   "tree.openProject": "Abrir proyecto", // Open Project
   "tree.noAttention": "Ninguna sesión coincide con el filtro de estado", // No sessions match the status filter
@@ -518,14 +563,19 @@ const es: typeof en = {
   "tree.cwdLabel": "Directorio de trabajo (vacío = raíz del proyecto)", // Working directory (leave empty for project root)
   "tree.initCmdLabel": "Comando de inicio (opcional)", // Startup command (optional)
   "tree.agentArgsLabel": "Argumentos de inicio (opcional)", // Launch args (optional)
+  // Working directory / Leave empty for the default
+  "tree.workingDirLabel": "Directorio de trabajo",
+  "tree.workingDirPlaceholder": "Déjalo vacío para usar el predeterminado",
   "preset.execPathLabel": "Ejecutable (opcional)",
   "preset.execPathPlaceholder": "/usr/local/bin/claude",
-  "preset.execPathHint": "Déjalo vacío para usar el comando configurado del agente. Indícalo para que solo esta sesión use un reemplazo compatible.",
+  "preset.execPathHint":
+    "Déjalo vacío para usar el comando configurado del agente. Indícalo para que solo esta sesión use un reemplazo compatible.",
   "preset.saveLabel": "Guardar como preajuste",
   "preset.namePlaceholder": "Nombra este preajuste",
   "preset.iconChoose": "Elegir icono",
   "preset.iconClear": "Quitar",
-  "preset.iconHint": "Las imágenes cuadradas funcionan mejor; el resto se recorta y escala a 64x64.",
+  "preset.iconHint":
+    "Las imágenes cuadradas funcionan mejor; el resto se recorta y escala a 64x64.",
   "tree.permissionSkipLabel": "Omitir todas las confirmaciones de permiso", // Skip all permission confirmations
   "tree.permissionSkipHint":
     "Inicia con el indicador de omisión de este agente (p. ej. Claude --dangerously-skip-permissions; Codex también desactiva su sandbox). Se aplica en cada inicio; úsalo con cuidado.",
@@ -558,7 +608,8 @@ const es: typeof en = {
   "info.name": "Nombre", // Name
   "info.type": "Tipo", // Type
   "info.status": "Estado", // Status
-  "info.notYetCaptured": "Aún no generado (se captura tras la primera ejecución)", // Not yet generated (captured after first run)
+  "info.notYetCaptured":
+    "Aún no generado (se captura tras la primera ejecución)", // Not yet generated (captured after first run)
   "info.sessionId": "ID de sesión", // Session ID
   "info.cwd": "Directorio", // Working dir
   "info.initCmd": "Comando", // Startup cmd
@@ -581,9 +632,11 @@ const es: typeof en = {
   // New worktree-session dialog
   "tree.newWorktreeSession": "Nueva sesión de worktree…", // New Worktree Session…
   "worktree.worktreeNameLabel": "Nombre del worktree", // Worktree name
-  "worktree.worktreeNameHint": "Se usa como nombre del directorio y la rama del worktree.", // Used as the worktree directory and branch name.
+  "worktree.worktreeNameHint":
+    "Se usa como nombre del directorio y la rama del worktree.", // Used as the worktree directory and branch name.
   "worktree.createFailed": "No se pudo crear el worktree", // Couldn't create the worktree
-  "worktree.noRepoRoot": "Este proyecto no tiene una ruta de repositorio git utilizable.", // This project has no usable git repository path.
+  "worktree.noRepoRoot":
+    "Este proyecto no tiene una ruta de repositorio git utilizable.", // This project has no usable git repository path.
   // ── Worktree selector for custom session creation ──
   "worktreeSel.label": "Worktree",
   "worktreeSel.modeNone": "Ninguno", // None
@@ -591,10 +644,13 @@ const es: typeof en = {
   "worktreeSel.modeExisting": "Existente", // Existing
   "worktreeSel.loading": "Cargando worktrees…", // Loading worktrees…
   "worktreeSel.empty": "No hay worktrees existentes en este repositorio.", // No existing worktrees in this repository.
-  "worktreeSel.loadFailed": "No se pudieron listar los worktrees (¿no es un repositorio git?).", // Couldn't list worktrees (not a git repository?).
-  "group.worktreeHint": "Las sesiones creadas en este grupo usarán este worktree de forma predeterminada.", // Sessions created in this group will use this worktree by default.
+  "worktreeSel.loadFailed":
+    "No se pudieron listar los worktrees (¿no es un repositorio git?).", // Couldn't list worktrees (not a git repository?).
+  "group.worktreeHint":
+    "Las sesiones creadas en este grupo usarán este worktree de forma predeterminada.", // Sessions created in this group will use this worktree by default.
   "worktree.moveGroupTitle": "Mover el grupo a un worktree",
-  "worktree.moveGroupHint": "Las sesiones que crees en este grupo a partir de ahora usarán este worktree. Las que ya existen conservan su directorio actual.",
+  "worktree.moveGroupHint":
+    "Las sesiones que crees en este grupo a partir de ahora usarán este worktree. Las que ya existen conservan su directorio actual.",
 
   // ── Archive panel ──
   "archive.title": "Sesiones archivadas", // Archived Sessions
@@ -604,7 +660,8 @@ const es: typeof en = {
   "archive.restore": "Restaurar como sesión normal", // Restore to normal session
   "archive.export": "Exportar contexto completo como Markdown", // Export full context as Markdown
   "archive.deleteForever": "Eliminar permanentemente (incluida la grabación)", // Delete permanently (with recording)
-  "archive.pickOne": "Selecciona una sesión archivada a la izquierda para ver su transcripción", // Select an archived session on the left…
+  "archive.pickOne":
+    "Selecciona una sesión archivada a la izquierda para ver su transcripción", // Select an archived session on the left…
   "archive.recordingEnd": "--- Fin de la grabación ---", // --- End of recording ---
   "archive.readRecordingFailed": (err) => `Error al leer la grabación: ${err}`, // Failed to read recording: {err}
   "archive.searchRecording": "Buscar en la grabación…", // Search in recording…
@@ -620,14 +677,18 @@ const es: typeof en = {
 
   // ── Global session-content search ──
   "search.allPlaceholder": "Buscar en todo el contenido de las sesiones…", // Search across all session content…
-  "search.hint": "Busca en el contenido de las sesiones. Las archivadas se excluyen por defecto; marca «Incluir archivadas» para añadirlas.", // Search session content. Archived sessions are excluded by default.
+  "search.hint":
+    "Busca en el contenido de las sesiones. Las archivadas se excluyen por defecto; marca «Incluir archivadas» para añadirlas.", // Search session content. Archived sessions are excluded by default.
   "search.includeArchived": "Incluir archivadas", // Include archived
-  "search.includeArchivedHint": "Buscar también en sesiones archivadas (desactivado por defecto)", // Also search archived sessions (off by default)
+  "search.includeArchivedHint":
+    "Buscar también en sesiones archivadas (desactivado por defecto)", // Also search archived sessions (off by default)
   "search.searching": "Buscando…", // Searching…
   "search.noResults": "No se encontraron coincidencias", // No matches found
   "search.sessionCount": (n) => (n === 1 ? "1 sesión" : `${n} sesiones`), // n sessions
-  "search.matchCount": (n) => (n === 1 ? "1 coincidencia" : `${n} coincidencias`), // n matches
-  "search.pickSession": "Selecciona una sesión a la izquierda para ver sus coincidencias", // Select a session on the left to see its matches
+  "search.matchCount": (n) =>
+    n === 1 ? "1 coincidencia" : `${n} coincidencias`, // n matches
+  "search.pickSession":
+    "Selecciona una sesión a la izquierda para ver sus coincidencias", // Select a session on the left to see its matches
   "search.openSession": "Abrir sesión", // Open session
   "search.backToResults": "Volver a los resultados", // Back to results
   "search.archivedBadge": "Archivada", // Archived
@@ -647,10 +708,12 @@ const es: typeof en = {
   "tab.unsavedDot": "Cambios sin guardar", // Unsaved changes
   "tab.newTerminal": "Nuevo terminal", // New terminal
   "tab.newDocument": "Nuevo documento", // New document
-  "tab.bgTitle": (n) => `Pestañas en segundo plano: ${n} (procesos aún en ejecución)`, // Background keep-alive tabs: {n}…
+  "tab.bgTitle": (n) =>
+    `Pestañas en segundo plano: ${n} (procesos aún en ejecución)`, // Background keep-alive tabs: {n}…
   "tab.bgLabel": (n) => `Fondo ${n}`, // Background {n}
   "tab.scratchFallback": "(terminal temporal)", // (scratch terminal)
-  "tab.killBgTab": "Terminar esta pestaña en segundo plano (sus procesos finalizarán)", // Kill this background tab…
+  "tab.killBgTab":
+    "Terminar esta pestaña en segundo plano (sus procesos finalizarán)", // Kill this background tab…
   "tab.newBrowserTab": "Nueva pestaña", // New Tab
   "tab.refreshFile": "Recargar archivo", // Refresh File
   "tab.closeOthers": "Cerrar otras pestañas", // Close Other Tabs
@@ -662,22 +725,27 @@ const es: typeof en = {
   "browser.back": "Atrás", // Back
   "browser.forward": "Adelante", // Forward
   "browser.reload": "Recargar", // Reload
-  "browser.desktopOnly": "Las pestañas del navegador solo se abren en la aplicación de escritorio.", // Browser tabs open in the desktop app only.
+  "browser.desktopOnly":
+    "Las pestañas del navegador solo se abren en la aplicación de escritorio.", // Browser tabs open in the desktop app only.
   "browser.stop": "Detener la carga", // Stop loading
   "browser.openExternal": "Abrir en el navegador del sistema", // Open in system browser
   "browser.addressPlaceholder": "Introduce una URL o términos de búsqueda", // Enter URL or search terms
   "browser.quickAccess": "Acceso rápido", // Quick access
   "browser.loading": "Cargando…", // Loading…
   // Application-exit confirmation and dormant restored sessions.
-  "quit.title": "¿Salir de VelaTerm?",  // Quit VelaTerm?
-  "quit.body": "Se detendrán todas las sesiones de terminal y de agente en ejecución.",  // Any running terminal and agent sessions will be stopped.
-  "quit.saveWorkspace": "Guardar espacio de trabajo",  // Save workspace
-  "quit.saveWorkspaceHint": "Abrir las mismas pestañas y divisiones la próxima vez. Las terminales se restauran, pero no se reinician.",  // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
-  "quit.confirm": "Salir",  // Quit
-  "dormant.body": "Restaurado desde el espacio de trabajo guardado. Todavía no hay ningún proceso en ejecución.",  // Restored from your saved workspace. No process is running yet.
-  "dormant.start": "Iniciar",  // Start
+  "quit.title": "¿Salir de VelaTerm?", // Quit VelaTerm?
+  "quit.body":
+    "Se detendrán todas las sesiones de terminal y de agente en ejecución.", // Any running terminal and agent sessions will be stopped.
+  "quit.saveWorkspace": "Guardar espacio de trabajo", // Save workspace
+  "quit.saveWorkspaceHint":
+    "Abrir las mismas pestañas y divisiones la próxima vez. Las terminales se restauran, pero no se reinician.", // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
+  "quit.confirm": "Salir", // Quit
+  "dormant.body":
+    "Restaurado desde el espacio de trabajo guardado. Todavía no hay ningún proceso en ejecución.", // Restored from your saved workspace. No process is running yet.
+  "dormant.start": "Iniciar", // Start
   "overlimit.title": (max) => `Límite de segundo plano superado (${max})`, // Background keep-alive over limit ({max})
-  "overlimit.body": "All background tabs are working or awaiting your reply. Choose one to end:", // All background tabs are working or awaiting your reply. Choose one to end:
+  "overlimit.body":
+    "All background tabs are working or awaiting your reply. Choose one to end:", // All background tabs are working or awaiting your reply. Choose one to end:
   "overlimit.kill": "End Selected", // End Selected
   "overlimit.keep": "Keep for Now", // Keep for Now
   "overlimit.earliest": "earliest", // earliest
@@ -698,8 +766,10 @@ const es: typeof en = {
   "term.redraw": "Redibujar", // Redraw
   "term.mirrorTooltip":
     "Mostrando en espejo (el tamaño lo controla otro cliente). Haz clic para ajustar el PTY a esta ventana", // Mirroring (size controlled by another client)…
-  "term.mirrorBadge": (dims) => `⤢ Espejo${dims} · clic para ajustar a esta ventana`, // ⤢ Mirror{dims} · click to fit this window
-  "term.mirrorBadgeMobile": (dims) => `⤢ Espejo${dims} · ajustar a esta ventana`, // ⤢ Mirror{dims} · fit this window
+  "term.mirrorBadge": (dims) =>
+    `⤢ Espejo${dims} · clic para ajustar a esta ventana`, // ⤢ Mirror{dims} · click to fit this window
+  "term.mirrorBadgeMobile": (dims) =>
+    `⤢ Espejo${dims} · ajustar a esta ventana`, // ⤢ Mirror{dims} · fit this window
   "term.imgUploadFailed": (n, lastError) =>
     `Error al subir ${n} imagen${n === 1 ? "" : "es"}${lastError ? `: ${lastError}` : ""}`, // Image upload failed for {n} images…
   "term.imgClipboardUnavailable":
@@ -717,7 +787,8 @@ const es: typeof en = {
   "agentInstall.docs": "Documentación", // Install docs
   "agentInstall.needsNode": "Requiere Node.js / npm", // Requires Node.js / npm
   "agentInstall.afterInstall": "Después de instalar:", // After install:
-  "agentInstall.pathSaved": (label: string) => `Ruta del ejecutable de ${label} guardada en Ajustes:`, // executable path saved to Settings
+  "agentInstall.pathSaved": (label: string) =>
+    `Ruta del ejecutable de ${label} guardada en Ajustes:`, // executable path saved to Settings
   "agentInstall.doneTitle": (label: string) => `${label} está instalado`, // {label} is installed
   "agentInstall.doneDesc": "Reinicia esta sesión para empezar a usarlo.", // Relaunch this session to start using it.
   "agentInstall.restartNow": "Reiniciar ahora", // Relaunch now
@@ -743,7 +814,8 @@ const es: typeof en = {
   "doc.outline": "Esquema", // Outline
   "doc.outlineEmpty": "Sin encabezados", // No headings
   "doc.saving": "Guardando…", // Saving…
-  "doc.overwriteConfirm": "Ya existe un archivo con ese nombre. Pulsa «Sobrescribir» para reemplazarlo.", // A file with this name already exists. Click "Overwrite" to replace it.
+  "doc.overwriteConfirm":
+    "Ya existe un archivo con ese nombre. Pulsa «Sobrescribir» para reemplazarlo.", // A file with this name already exists. Click "Overwrite" to replace it.
   "doc.saveTooltip": "Guardar", // Save
   "doc.externalChanged":
     "El archivo fue modificado en el disco (tienes cambios locales sin guardar).", // The file was modified on disk…
@@ -767,7 +839,8 @@ const es: typeof en = {
   "doc.imgLoading": (title, size) => `Cargando ${title} (${size})…`, // Loading {title} ({size})…
   "doc.imgBeingWritten":
     "El archivo se está escribiendo; se recargará automáticamente cuando se estabilice.", // The file is being written; it will reload automatically once it settles.
-  "doc.imgDecodeFailed": "No se puede mostrar esta imagen (formato no compatible o archivo dañado).", // Cannot display this image (unsupported or corrupted format).
+  "doc.imgDecodeFailed":
+    "No se puede mostrar esta imagen (formato no compatible o archivo dañado).", // Cannot display this image (unsupported or corrupted format).
   "doc.imgFit": "Ajustar", // Fit
   "doc.imgActual": "1:1", // 1:1
   "doc.exportPdf": "Exportar PDF", // Export PDF
@@ -796,7 +869,8 @@ const es: typeof en = {
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
   "files.dblClickOpen": "Doble clic para abrir",
-  "files.deleteConfirm": (name) => `¿Eliminar "${name}"? Esto no se puede deshacer.`, // Delete "{name}"? This can't be undone.
+  "files.deleteConfirm": (name) =>
+    `¿Eliminar "${name}"? Esto no se puede deshacer.`, // Delete "{name}"? This can't be undone.
 
   // ── File transfer (remote access) ──
   "transfer.uploadsTitle": "Subidas", // Uploads
@@ -816,23 +890,29 @@ const es: typeof en = {
   "statusbar.bgCount": (n, max) => `Fondo ${n}/${max}`, // Background {n}/{max}
   "statusbar.bgTooltip": (max) =>
     `Pestañas en segundo plano (límite ${max}; al superarlo se termina automáticamente la pestaña inactiva más antigua)`, // Background keep-alive tabs (limit {max}…)
-  "statusbar.bgEvicted": (name) => `Pestaña en segundo plano terminada: ${name} (límite superado)`, // Ended background tab: {name} (over keep-alive limit)
-  "statusbar.webTooltip": (url) => `Acceso remoto por navegador activado: ${url}`, // Browser remote access enabled: {url}
+  "statusbar.bgEvicted": (name) =>
+    `Pestaña en segundo plano terminada: ${name} (límite superado)`, // Ended background tab: {name} (over keep-alive limit)
+  "statusbar.webTooltip": (url) =>
+    `Acceso remoto por navegador activado: ${url}`, // Browser remote access enabled: {url}
   "statusbar.permAsk": "Permisos: Preguntar", // Perms: Ask
   "statusbar.permSkip": "Permisos: Omitir", // Perms: Skip
   "statusbar.notifyOn": "Notify: On", // TODO translate
   "statusbar.notifyOff": "Notify: Off", // TODO translate
-  "statusbar.permTooltip": "Modo de permisos de esta sesión · haz clic para cambiar (solo esta sesión)", // This session's permission mode · click to change (this session only)
+  "statusbar.permTooltip":
+    "Modo de permisos de esta sesión · haz clic para cambiar (solo esta sesión)", // This session's permission mode · click to change (this session only)
   "statusbar.permMenuTitle": "Permisos de esta sesión", // This session's permissions
   "statusbar.permOptAsk": "Preguntar cada vez (predeterminado)", // Ask each time (default)
-  "statusbar.permScopeHint": "Se aplica solo a esta sesión. Para los ajustes globales, ve a Ajustes ▸ Agentes.", // Applies to this session only. For global defaults, go to Settings ▸ Agents.
-  "statusbar.permRestartMsg": "Permiso cambiado. La sesión debe reiniciarse para aplicarlo. El reinicio reanuda la conversación actual, pero interrumpe cualquier tarea en curso. ¿Reiniciar ahora?", // Permission changed. The session must restart to apply. Restart resumes the current conversation but interrupts any task in progress. Restart now?
+  "statusbar.permScopeHint":
+    "Se aplica solo a esta sesión. Para los ajustes globales, ve a Ajustes ▸ Agentes.", // Applies to this session only. For global defaults, go to Settings ▸ Agents.
+  "statusbar.permRestartMsg":
+    "Permiso cambiado. La sesión debe reiniciarse para aplicarlo. El reinicio reanuda la conversación actual, pero interrumpe cualquier tarea en curso. ¿Reiniciar ahora?", // Permission changed. The session must restart to apply. Restart resumes the current conversation but interrupts any task in progress. Restart now?
   "statusbar.permRestartNow": "Reiniciar ahora", // Restart now
   "statusbar.permRestartLater": "Más tarde", // Later
   "statusbar.permScopeTitle": "¿Aplicar a?", // Apply to?
   "statusbar.permScopeSession": "Solo esta sesión", // This session only
   "statusbar.permScopeGlobal": "Predeterminado global", // Global default
-  "statusbar.permScopeGlobalHint": "Se aplica ahora a esta sesión y pasa a ser el valor predeterminado para futuras sesiones de este tipo (sincronizado con Ajustes).", // Applies now to this session and becomes the default for future sessions of this kind (synced with Settings).
+  "statusbar.permScopeGlobalHint":
+    "Se aplica ahora a esta sesión y pasa a ser el valor predeterminado para futuras sesiones de este tipo (sincronizado con Ajustes).", // Applies now to this session and becomes the default for future sessions of this kind (synced with Settings).
 
   // ── Store, notifications, and export ──
   "notify.working": "⏳ Procesando…", // ⏳ Working…
@@ -849,7 +929,8 @@ const es: typeof en = {
     "Ocurrió un error inesperado. La información de abajo puede ayudar a localizar el problema.", // An unexpected error occurred…
   "err.reload": "Recargar", // Reload
   "err.uncaughtTitle": "Error no capturado", // Uncaught Error
-  "err.uncaughtDesc": "La información de abajo puede ayudar a localizar el problema.", // The information below can help locate the problem.
+  "err.uncaughtDesc":
+    "La información de abajo puede ayudar a localizar el problema.", // The information below can help locate the problem.
 
   // ── transport ──
   "transport.noReplayInBrowser":
@@ -859,14 +940,18 @@ const es: typeof en = {
   // ── Login gate, directory selection, and connection banner ──
   "login.connecting": "Conectando…", // Connecting…
   "login.remoteAccess": "Acceso remoto", // Remote Access
-  "login.desc": "Introduce la contraseña de acceso para conectarte a este terminal.", // Enter the access password to connect to this terminal.
+  "login.desc":
+    "Introduce la contraseña de acceso para conectarte a este terminal.", // Enter the access password to connect to this terminal.
   "login.passwordPlaceholder": "Contraseña de acceso", // Access password
   "login.connect": "Conectar", // Connect
   "login.wrongPassword": "Contraseña incorrecta", // Wrong password
-  "login.rateLimited": "Demasiados intentos. Espera un minuto y vuelve a intentarlo.", // Too many attempts. Please wait a minute and try again.
+  "login.rateLimited":
+    "Demasiados intentos. Espera un minuto y vuelve a intentarlo.", // Too many attempts. Please wait a minute and try again.
   "login.failed": "Error de inicio de sesión, inténtalo de nuevo", // Login failed, please try again
-  "login.pairingRequired": "Este servidor requiere un enlace de emparejamiento. Abre el enlace generado en el panel de Acceso remoto de la app de escritorio.", // This server requires a pairing link
-  "login.authFailed": "Error de autenticación. Comprueba la contraseña de acceso o abre un nuevo enlace de emparejamiento si se ha regenerado.", // Authentication failed, check password or use a new pairing link
+  "login.pairingRequired":
+    "Este servidor requiere un enlace de emparejamiento. Abre el enlace generado en el panel de Acceso remoto de la app de escritorio.", // This server requires a pairing link
+  "login.authFailed":
+    "Error de autenticación. Comprueba la contraseña de acceso o abre un nuevo enlace de emparejamiento si se ha regenerado.", // Authentication failed, check password or use a new pairing link
   "dir.title": "Elegir directorio del proyecto", // Choose Project Directory
   "dir.pathPlaceholder": "Busca, o escribe una ruta y pulsa Enter (admite ~)", // Search, or type a path and press Enter (supports ~)
   "dir.up": "Subir un nivel", // Up one level
@@ -884,7 +969,8 @@ const es: typeof en = {
   "conn.reconnectNow": "Reconectar ahora", // Reconnect now
   "conn.retrying": "Reconectando…", // Reconnecting…
   "conn.sshReconnecting": "Enlace SSH perdido, reconstruyendo el túnel…", // SSH link lost, rebuilding the tunnel…
-  "conn.sshDown": "El enlace SSH está caído — pulsa «Reconectar ahora» para reintentar", // SSH link is down — press Reconnect now to try again
+  "conn.sshDown":
+    "El enlace SSH está caído — pulsa «Reconectar ahora» para reintentar", // SSH link is down — press Reconnect now to try again
   "reqerr.title": "Error en la solicitud", // Request failed
   "reqerr.dismiss": "Cerrar", // Dismiss
   // ── Error Log panel ──
@@ -909,9 +995,12 @@ const es: typeof en = {
   "transport.wsDisconnected": "WebSocket desconectado", // WebSocket disconnected
   "transport.wsConnectFailed": "Fallo de conexión WebSocket", // WebSocket connection failed
   "transport.cmdFailed": "El comando falló", // Command failed
-  "transport.remoteCmdForbidden": (cmd: string) => `Comando no disponible para clientes remotos: ${cmd}`, // Command not available to remote clients
-  "transport.remoteSettingForbidden": (key: string) => `Clave de configuración no modificable por clientes remotos: ${key}`, // Settings key not writable by remote clients
-  "transport.remotePathForbidden": (path: string) => `Los clientes remotos no pueden acceder a archivos del directorio de datos de la aplicación: ${path}`, // Remote clients cannot access files in the app data directory
+  "transport.remoteCmdForbidden": (cmd: string) =>
+    `Comando no disponible para clientes remotos: ${cmd}`, // Command not available to remote clients
+  "transport.remoteSettingForbidden": (key: string) =>
+    `Clave de configuración no modificable por clientes remotos: ${key}`, // Settings key not writable by remote clients
+  "transport.remotePathForbidden": (path: string) =>
+    `Los clientes remotos no pueden acceder a archivos del directorio de datos de la aplicación: ${path}`, // Remote clients cannot access files in the app data directory
 
   // ── Crepe（editor WYSIWYG）──
   "crepe.placeholder": "Escribe texto, o pulsa / para el menú de inserción", // Type text, or press / for the insert menu
@@ -983,7 +1072,8 @@ const es: typeof en = {
   "updater.retry": "Try again", // TODO translate
   "updater.downloadFailed": (err) => `Update failed: ${err}`, // TODO translate
   "updater.hide": "Hide", // TODO translate
-  "updater.hideHint": "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
+  "updater.hideHint":
+    "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
   "updater.downloadManually": "Download manually", // TODO translate
   "updater.downloadManuallyHint": "Open the download page in your browser.", // TODO translate
   "updater.windowsNotice":

@@ -16,11 +16,18 @@ vi.mock("../ipc/commands", () => ({
   markMirrorDetach: vi.fn(),
 }));
 vi.mock("../ipc/tree", () => ({
-  listTree: vi.fn().mockResolvedValue({ projects: [], groups: [], sessions: [] }),
+  listTree: vi
+    .fn()
+    .mockResolvedValue({ projects: [], groups: [], sessions: [] }),
 }));
 vi.mock("../notify", () => ({ notify: vi.fn() }));
-vi.mock("../ipc/browser", () => ({ setBrowserUrl: vi.fn().mockResolvedValue(undefined) }));
-vi.mock("../ipc/transport", () => ({ isTauri: true, getClientSource: () => "desktop" }));
+vi.mock("../ipc/browser", () => ({
+  setBrowserUrl: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("../ipc/transport", () => ({
+  isTauri: true,
+  getClientSource: () => "desktop",
+}));
 vi.mock("../platform", () => {
   const env = {
     kind: "tauri",
@@ -31,7 +38,10 @@ vi.mock("../platform", () => {
     hasNativeHost: true,
     isMac: false,
   };
-  return { env, platform: { env, dialog: { pickDirectory: vi.fn(), saveFile: vi.fn() } } };
+  return {
+    env,
+    platform: { env, dialog: { pickDirectory: vi.fn(), saveFile: vi.fn() } },
+  };
 });
 
 // `vi.mock` factories are hoisted above the file body, so everything they close over is hoisted too.
@@ -40,13 +50,17 @@ const h = vi.hoisted(() => ({
   mirrorGet: vi.fn(),
   mirrorPush: vi.fn(),
   /** Captured event callbacks, so a test can play the part of the backend broadcast. */
-  cbs: { layout: null, mode: null } as {
+  cbs: { layout: null, mode: null, clients: null } as {
     layout: ((snap: unknown) => void) | null;
     mode: ((enabled: boolean) => void) | null;
+    clients: ((count: number, clients: unknown[]) => void) | null;
   },
 }));
 vi.mock("../mobile/detect", () => ({ isMobileView: h.isMobileView }));
-vi.mock("../ipc/mirror", () => ({ mirrorGet: h.mirrorGet, mirrorPush: h.mirrorPush }));
+vi.mock("../ipc/mirror", () => ({
+  mirrorGet: h.mirrorGet,
+  mirrorPush: h.mirrorPush,
+}));
 vi.mock("../ipc/events", () => ({
   onMirrorLayout: (cb: (snap: unknown) => void) => {
     h.cbs.layout = cb;
@@ -60,6 +74,12 @@ vi.mock("../ipc/events", () => ({
       h.cbs.mode = null;
     });
   },
+  onRemoteClients: (cb: (count: number, clients: unknown[]) => void) => {
+    h.cbs.clients = cb;
+    return Promise.resolve(() => {
+      h.cbs.clients = null;
+    });
+  },
 }));
 
 const mobile = { isMobileView: h.isMobileView };
@@ -71,6 +91,8 @@ const mirrorPush = h.mirrorPush as unknown as ReturnType<typeof vi.fn>;
 /** Emit a broadcast as the backend would; the sync module registers these on start. */
 const emitLayout = (snap: MirrorSnapshot) => h.cbs.layout!(snap);
 const emitMode = (enabled: boolean) => h.cbs.mode!(enabled);
+const emitClients = (count: number, clients: unknown[] = []) =>
+  h.cbs.clients!(count, clients);
 
 import { markMirrorDetach } from "../ipc/commands";
 import { buildMirrorLayout } from "./mirrorLayout";
@@ -140,7 +162,11 @@ function seedSnapshotSource(tab: string) {
       },
     ],
     sidebarTreeTabs: [
-      { id: "t1", root: { kind: "leaf", paneId: "sp-main", viewId: "main" }, activeViewId: "main" },
+      {
+        id: "t1",
+        root: { kind: "leaf", paneId: "sp-main", viewId: "main" },
+        activeViewId: "main",
+      },
     ],
     primarySidebarTreeViewId: "main",
     activeSidebarTreeViewId: "main",
@@ -162,7 +188,9 @@ beforeEach(() => {
   vi.useFakeTimers();
   mirrorGet.mockReset();
   mirrorPush.mockReset();
-  mirrorPush.mockImplementation(() => Promise.resolve({ rev: 1, source: "desktop", state: null }));
+  mirrorPush.mockImplementation(() =>
+    Promise.resolve({ rev: 1, source: "desktop", state: null }),
+  );
   vi.mocked(markMirrorDetach).mockClear();
   mobile.isMobileView.mockReturnValue(false);
   h.cbs.layout = null;
@@ -178,7 +206,13 @@ afterEach(() => {
 
 /** Mirror on, nothing published yet. */
 function alignEnabledEmpty() {
-  mirrorGet.mockResolvedValue({ enabled: true, rev: 0, source: "", state: null });
+  mirrorGet.mockResolvedValue({
+    clients: 0,
+    enabled: true,
+    rev: 0,
+    source: "",
+    state: null,
+  });
 }
 
 describe("startMirrorSync alignment", () => {
@@ -189,12 +223,19 @@ describe("startMirrorSync alignment", () => {
 
     expect(useTermStore.getState().mirrorEnabled).toBe(true);
     expect(mirrorPush).toHaveBeenCalledTimes(1);
-    expect((mirrorPush.mock.calls[0][0] as { center: { openTabs: string[] } }).center.openTabs).toEqual(["A"]);
+    expect(
+      (mirrorPush.mock.calls[0][0] as { center: { openTabs: string[] } }).center
+        .openTabs,
+    ).toEqual(["A"]);
     stop();
   });
 
   it("follows the published arrangement instead when one exists", async () => {
-    mirrorGet.mockResolvedValue({ enabled: true, ...peerLayout("B", 4) });
+    mirrorGet.mockResolvedValue({
+      clients: 0,
+      enabled: true,
+      ...peerLayout("B", 4),
+    });
     const stop = start();
     await settle();
 
@@ -214,7 +255,13 @@ describe("startMirrorSync alignment", () => {
   });
 
   it("neither follows nor publishes while mirror mode is off", async () => {
-    mirrorGet.mockResolvedValue({ enabled: false, rev: 0, source: "", state: null });
+    mirrorGet.mockResolvedValue({
+      clients: 0,
+      enabled: false,
+      rev: 0,
+      source: "",
+      state: null,
+    });
     const stop = start();
     await settle();
     useTermStore.setState({ activeTabId: "Z" });
@@ -238,7 +285,10 @@ describe("publishing local changes", () => {
     vi.advanceTimersByTime(500);
 
     expect(mirrorPush).toHaveBeenCalledTimes(1);
-    expect((mirrorPush.mock.calls[0][0] as { center: { focusedPaneId: string } }).center.focusedPaneId).toBe("p-3");
+    expect(
+      (mirrorPush.mock.calls[0][0] as { center: { focusedPaneId: string } })
+        .center.focusedPaneId,
+    ).toBe("p-3");
     stop();
   });
 
@@ -249,7 +299,10 @@ describe("publishing local changes", () => {
     mirrorPush.mockClear();
 
     // Terminal width is local, and runtime status is shared by its own channel; neither is layout.
-    useTermStore.setState({ leftWidth: 320, runtimes: { A: { status: "running" } } });
+    useTermStore.setState({
+      leftWidth: 320,
+      runtimes: { A: { status: "running" } },
+    });
     vi.advanceTimersByTime(500);
 
     expect(mirrorPush).not.toHaveBeenCalled();
@@ -353,11 +406,21 @@ describe("following a peer", () => {
   });
 
   it("realigns when the host switches mirror mode back on", async () => {
-    mirrorGet.mockResolvedValue({ enabled: false, rev: 0, source: "", state: null });
+    mirrorGet.mockResolvedValue({
+      clients: 0,
+      enabled: false,
+      rev: 0,
+      source: "",
+      state: null,
+    });
     const stop = start();
     await settle();
 
-    mirrorGet.mockResolvedValue({ enabled: true, ...peerLayout("B", 3) });
+    mirrorGet.mockResolvedValue({
+      clients: 0,
+      enabled: true,
+      ...peerLayout("B", 3),
+    });
     emitMode(true);
     await settle();
 
@@ -376,7 +439,11 @@ describe("following a peer", () => {
     // The service restarted (or mirror mode was cycled), so its counter is back near zero. A client
     // holding on to the old high-water mark would dismiss everything that follows as stale.
     emitMode(false);
-    mirrorGet.mockResolvedValue({ enabled: true, ...peerLayout("C", 1) });
+    mirrorGet.mockResolvedValue({
+      clients: 0,
+      enabled: true,
+      ...peerLayout("C", 1),
+    });
     emitMode(true);
     await settle();
 
@@ -394,5 +461,73 @@ describe("following a peer", () => {
     cb(peerLayout("B", 9));
 
     expect(useTermStore.getState().openTabs).toEqual(["A"]);
+  });
+});
+
+describe("attached client count", () => {
+  it("takes the count from alignment and then follows the broadcast", async () => {
+    // Alignment is the only place a client that just started learns the count: the broadcast fires on
+    // the next connect or disconnect, which on a quiet host may never come.
+    mirrorGet.mockResolvedValue({
+      clients: 2,
+      enabled: true,
+      rev: 0,
+      source: "",
+      state: null,
+    });
+    const stop = start();
+    await settle();
+    expect(useTermStore.getState().remoteClients).toBe(2);
+
+    emitClients(1);
+    expect(useTermStore.getState().remoteClients).toBe(1);
+
+    emitClients(0);
+    expect(useTermStore.getState().remoteClients).toBe(0);
+    stop();
+  });
+
+  it("keeps the attached clients themselves, not just how many", async () => {
+    // The badge names who is attached, so the list has to survive both the alignment reply and the
+    // broadcast; a count alone would leave the host unable to tell one peer from another.
+    const phone = {
+      source: "ws-1",
+      name: "iOS · Safari",
+      deviceId: "d1",
+      ip: "10.0.0.5",
+      since: 100,
+    };
+    mirrorGet.mockResolvedValue({
+      clients: 1,
+      clientList: [phone],
+      enabled: true,
+      rev: 0,
+      source: "",
+      state: null,
+    });
+    const stop = start();
+    await settle();
+    expect(useTermStore.getState().remoteClientList).toEqual([phone]);
+
+    emitClients(0, []);
+    expect(useTermStore.getState().remoteClientList).toEqual([]);
+    stop();
+  });
+
+  it("still reports the count while mirroring is off", async () => {
+    // The host badge is gated on mirroring, but the count itself is not: switching mirroring back on must
+    // not have to wait for the next connect before the badge can appear.
+    mirrorGet.mockResolvedValue({
+      clients: 3,
+      enabled: false,
+      rev: 0,
+      source: "",
+      state: null,
+    });
+    const stop = start();
+    await settle();
+
+    expect(useTermStore.getState().remoteClients).toBe(3);
+    stop();
   });
 });

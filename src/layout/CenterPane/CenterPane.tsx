@@ -8,6 +8,7 @@ import { useT } from "../../i18n";
 import { IS_PLAIN_BROWSER } from "../../hooks/shortcutRegistry";
 import { isMac } from "../../ipc/transport";
 import { useTermStore } from "../../store/termStore";
+import { projectRoot } from "../../types";
 import {
   collectSessionIds,
   computeDividers,
@@ -146,7 +147,7 @@ export function CenterPane() {
   const handleSplit = useCallback(
     (paneId: string, id: string, dir: "horizontal" | "vertical") => {
       focusPane(paneId, id);
-      void splitNew(dir);
+      void splitNew(dir, "pane-button");
     },
     [focusPane, splitNew],
   );
@@ -204,7 +205,8 @@ export function CenterPane() {
           const session = sessionsById.get(id) ?? ephemeralSessions[id];
           if (!session) return null;
           const project = projectsById.get(session.projectId);
-          const cwd = session.cwd ?? project?.rootPath ?? undefined;
+          // A collection has no folder, so its empty rootPath must not become the spawn directory.
+          const cwd = session.cwd ?? projectRoot(project) ?? undefined;
           const epoch = epochs[id] ?? 0;
           const info = visibleBySession.get(id);
           const visible = !!info;

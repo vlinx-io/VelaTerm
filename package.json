@@ -1,7 +1,7 @@
 {
   "name": "velaterm",
   "private": true,
-  "version": "0.1.105",
+  "version": "0.1.106",
   "description": "VelaTerm — a terminal multiplexer GUI that manages terminals and AI agent sessions in one project/group/session tree",
   "author": "VLINX Software",
   "type": "module",
@@ -12,8 +12,7 @@
     "dev:tauri": "node scripts/run-sh.cjs dev-desktop.sh",
     "dev:desktop": "node scripts/run-sh.cjs dev-desktop.sh",
     "dev:electron": "node scripts/run-sh.cjs dev-electron.sh",
-    "dev:web": "node scripts/run-sh.cjs dev-serve.sh web",
-    "dev:mobile": "node scripts/run-sh.cjs dev-serve.sh mobile",
+    "dev:web": "node scripts/run-sh.cjs dev-serve.sh",
     "dev:server": "node scripts/run-sh.cjs dev-server.sh",
     "dev:ls": "node ./scripts/dev-instances.cjs ls",
     "dev:stop": "node ./scripts/dev-instances.cjs stop",

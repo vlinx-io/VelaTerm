@@ -84,12 +84,23 @@ export type SizeMode = "fit" | "mirror";
 // xterm caches measured glyph widths. Creating it before asynchronous JetBrains Mono loading records
 // fallback widths, leaving spaced-out text after the real font appears until a resize. Wait once at
 // module scope, with a timeout that permits fallback rendering, and share readiness across terminals.
+//
+// Faces load lazily per unicode-range, so the Latin probe alone leaves the box drawing / block element face
+// (styles/fonts.css, U+2500-259F) unloaded. Probe it with a block glyph in both regular and bold: the DOM
+// renderer pads each character with `letter-spacing = cell width - measured width`, and a width measured
+// against the Consolas fallback stays cached after the real face arrives, leaving a seam after every block.
 let fontsReady = false;
 const fontsReadyPromise: Promise<void> = (async () => {
   try {
-    if (!document.fonts.check('16px "JetBrains Mono"')) {
+    const probes: [string, string][] = [
+      ['16px "JetBrains Mono"', " "],
+      ['16px "JetBrains Mono"', "█"],
+      ['bold 16px "JetBrains Mono"', "█"],
+    ];
+    const pending = probes.filter(([font, text]) => !document.fonts.check(font, text));
+    if (pending.length > 0) {
       await Promise.race([
-        document.fonts.load('16px "JetBrains Mono"').then(() => undefined),
+        Promise.all(pending.map(([font, text]) => document.fonts.load(font, text))).then(() => undefined),
         new Promise<void>((resolve) => setTimeout(resolve, 1500)),
       ]);
     }
@@ -383,6 +394,22 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
     container.addEventListener("keydown", onUserInputSignal, true);
     container.addEventListener("compositionstart", onUserInputSignal, true);
     container.addEventListener("compositionupdate", onUserInputSignal, true);
+
+    // Release the hidden textarea's geometry once composing ends. While composing, xterm stretches it to
+    // the pre-edit overlay's bounds so the OS can anchor its candidate window, but it never shrinks it
+    // again: the invisible element keeps covering the row the pre-edit occupied and wins hit testing
+    // there (the helper layer sits above the rows), so clicks and drag-selection over that row stop
+    // reaching the terminal. Measured after a 200-character composition: textarea 1560x20, and
+    // elementFromPoint over that row returns the textarea. Clearing the inline values restores xterm's
+    // 0x0 default from xterm.css while leaving left/top alone, where the next composition starts anyway.
+    const onCompositionEndReset = () => {
+      const ta = container.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea");
+      if (!ta) return;
+      ta.style.width = "";
+      ta.style.height = "";
+      ta.style.lineHeight = "";
+    };
+    container.addEventListener("compositionend", onCompositionEndReset, true);
 
     let disposed = false;
     let unlistenExit: UnlistenFn | undefined;
@@ -903,6 +930,7 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       container.removeEventListener("keydown", onUserInputSignal, true);
       container.removeEventListener("compositionstart", onUserInputSignal, true);
       container.removeEventListener("compositionupdate", onUserInputSignal, true);
+      container.removeEventListener("compositionend", onCompositionEndReset, true);
       imeFix?.dispose();
       writeParsedSub.dispose();
       dataSub.dispose();

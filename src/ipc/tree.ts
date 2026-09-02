@@ -20,6 +20,12 @@ export function importProject(rootPath: string): Promise<Project> {
   return invoke<Project>("import_project", { rootPath });
 }
 
+/** Create a collection: a top-level container with no folder behind it, for grouping sessions that belong
+ * to no single checkout. Its rootPath comes back empty. */
+export function createVirtualProject(name: string): Promise<Project> {
+  return invoke<Project>("create_virtual_project", { name });
+}
+
 /** Clone a remote repository under parentDir and import it as a project. Derive an empty folderName
  * from the repository URL and use the default branch when branch is empty. */
 export function cloneProject(

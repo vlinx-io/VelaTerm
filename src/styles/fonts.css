@@ -26,3 +26,43 @@
   src: url("../assets/fonts/vlx-symbols.woff2") format("woff2");
   unicode-range: U+23E9-23FA;
 }
+
+/*
+ * jetbrains-mono-boxdraw: box drawing U+2500-257F and block elements U+2580-259F taken from the original
+ * JetBrains Mono, which the @fontsource/jetbrains-mono subsets omit (their unicode-range stops at Latin, Greek,
+ * Cyrillic, and Vietnamese).
+ *
+ * Why it matters: xterm's DOM renderer pads every cell with letter-spacing = cellWidth - measured glyph width.
+ * Cell width comes from the primary font (JetBrains Mono, 0.6 em advance). When these code points fall through
+ * to a system font with a different advance, such as Consolas on Windows (0.55 em), each block glyph is padded
+ * on its right and TUI pixel art (the Claude Code mascot, progress bars, box borders) shows a seam after every
+ * cell. Menlo and SF Mono on macOS happen to share the 0.6 em advance, which is why the defect only appeared on
+ * Windows. Serving the glyphs from JetBrains Mono itself makes the advance match by construction on every
+ * platform. U+2588 spans the full ascent-to-descent height, so blocks also tile vertically at lineHeight 1.
+ *
+ * The glyph ink additionally overshoots the advance box by 0.04 em on the left and right (advance unchanged).
+ * Cells sit at fractional pixel offsets whenever the measured advance is not an integer, and two glyphs meeting
+ * exactly at such a boundary leave a faint antialiasing seam even with matching metrics; the overlap hides it.
+ *
+ * Only weights 400 and 700 are shipped (about 3 KB each); 500 and 600 resolve to the nearest declared face.
+ * usePtySession's font readiness gate probes this face with a block glyph so xterm never measures it against
+ * the fallback. Source: JetBrains Mono 2.304 under OFL 1.1 (see ../assets/fonts/LICENSE-jetbrains-mono.txt).
+ * Regenerate with scripts/build-boxdraw-font.cjs (usage in its header).
+ */
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../assets/fonts/jetbrains-mono-boxdraw-400.woff2") format("woff2");
+  unicode-range: U+2500-259F;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../assets/fonts/jetbrains-mono-boxdraw-700.woff2") format("woff2");
+  unicode-range: U+2500-259F;
+}

@@ -369,6 +369,17 @@ impl PtyManager {
                     // Start Git Bash as a login shell so `/etc/profile` configures utilities and UTF-8 locale.
                     inject::ShellKind::Posix => {
                         cmd.arg("-l");
+                        // That profile also keys PATH on MSYSTEM, which `git-bash.exe` normally sets and a
+                        // direct `usr/bin/bash.exe` launch does not. Without it `/etc/msystem` falls back to
+                        // MSYS, whose branch never prepends `<mingw64|clangarm64>/bin` — exactly where a full
+                        // tree keeps git.exe and curl.exe — so `git` reported command-not-found even on the
+                        // full build. Derive the value from the tree owning this bash; minimal trees keep
+                        // every tool in `usr/bin` and stay on the MSYS default.
+                        if let Some(msystem) =
+                            crate::agent::gitbash::msystem_for_bash(std::path::Path::new(&shell))
+                        {
+                            cmd.env("MSYSTEM", msystem);
+                        }
                     }
                     // Agent sessions start PowerShell with a process-local execution-policy bypass so npm `.ps1`
                     // shims and interactive profiles can load. Plain terminals preserve the native policy.
@@ -382,8 +393,10 @@ impl PtyManager {
                 }
             }
         }
-        // Normalize the working directory. Empty means unspecified; a stale path falls back to the home directory
-        // to avoid process-creation failures. Codex rollout capture also uses the result for cwd matching.
+        // Normalize the working directory. A stale path falls back to the home directory to avoid
+        // process-creation failures. Unspecified (empty or absent, as for a session in a collection with no
+        // folder behind it) also means home rather than this process's own directory, which on a desktop launch
+        // is `/` and is never what the user meant. Codex rollout capture also uses the result for cwd matching.
         let spawn_cwd = match cwd.filter(|d| !d.is_empty()) {
             Some(d) if std::path::Path::new(&d).is_dir() => Some(d),
             Some(stale) => {
@@ -391,7 +404,7 @@ impl PtyManager {
                 eprintln!("persisted cwd not found, falling back: {stale:?} -> {fb:?}");
                 fb
             }
-            None => None,
+            None => home_dir().filter(|h| std::path::Path::new(h).is_dir()),
         };
         if let Some(dir) = &spawn_cwd {
             cmd.cwd(dir);
@@ -1288,14 +1301,19 @@ impl PtyManager {
 
     /// Queries a session's current working directory from its shell PID so split panes can inherit it.
     pub fn cwd(&self, id: &str) -> Option<String> {
-        let pid = {
-            let map = self.sessions.lock().unwrap();
-            map.get(id)?.pid
-        };
+        process_cwd(self.cwd_pid(id)?)
+    }
+
+    /// Look up only the PID, leaving the actual cwd read to the caller. Callers on the main thread use
+    /// this to hand `process_cwd` — which shells out to `lsof` on macOS — to the blocking pool.
+    pub fn cwd_pid(&self, id: &str) -> Option<u32> {
+        let map = self.sessions.lock().unwrap();
+        let pid = map.get(id)?.pid;
         if pid == 0 {
-            return None;
+            None
+        } else {
+            Some(pid)
         }
-        process_cwd(pid)
     }
 
     /// Terminates and removes a session. Marks it intentional before EOF so the reader suppresses natural-exit events.
@@ -1683,7 +1701,7 @@ fn spawn_idle_heal(
 }
 
 /// Queries a process's current working directory across platforms.
-pub(crate) fn process_cwd(pid: u32) -> Option<String> {
+pub fn process_cwd(pid: u32) -> Option<String> {
     #[cfg(target_os = "macos")]
     {
         // macOS has no `/proc`; use `lsof` to inspect the cwd descriptor.

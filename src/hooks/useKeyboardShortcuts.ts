@@ -24,6 +24,7 @@ import { env } from "../platform";
 import { useTermStore } from "../store/termStore";
 import {
   DEFAULT_BINDINGS,
+  hasMod,
   matchCombo,
   type ShortcutAction,
 } from "./shortcutRegistry";
@@ -38,8 +39,8 @@ export function useKeyboardShortcuts() {
     };
 
     const handler = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
+      // Only this client's own mod key counts: on macOS that is Cmd, and Ctrl stays terminal input.
+      if (!hasMod(e)) return;
 
       // ── Fixed shortcut 1: Cmd+1–9 selects the nth tab ──
       const tabIdx = digitIndex(e);
@@ -136,7 +137,7 @@ export function useKeyboardShortcuts() {
         const { activeSessionId, splitNew } = useTermStore.getState();
         if (activeSessionId) {
           e.preventDefault();
-          void splitNew("vertical");
+          void splitNew("vertical", "shortcut");
         }
         return;
       }
@@ -144,7 +145,7 @@ export function useKeyboardShortcuts() {
         const { activeSessionId, splitNew } = useTermStore.getState();
         if (activeSessionId) {
           e.preventDefault();
-          void splitNew("horizontal");
+          void splitNew("horizontal", "shortcut");
         }
         return;
       }

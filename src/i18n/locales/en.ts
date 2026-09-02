@@ -55,7 +55,21 @@ const en = {
   "titlebar.mirrored": "Mirrored",
   "titlebar.mirroredHint":
     "Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.",
+  "titlebar.mirroredBy": (n: number) => `Mirrored by ${n}`,
+  "titlebar.mirroredByHint": (n: number) =>
+    `${n} remote client${n === 1 ? " is" : "s are"} connected. Tabs, splits, and the active session are shared, and either side can rearrange them.`,
+  "titlebar.clientsTitle": "Attached clients",
+  "titlebar.clientUnnamed": "Unnamed client",
+  "titlebar.clientSince": (time: string) => `since ${time}`,
   "titlebar.share": "Share",
+  // ── Alt-triggered menu bar (Windows/Linux) ──
+  "menubar.file": "File",
+  "menubar.terminal": "Terminal",
+  "menubar.help": "Help",
+  "menubar.newTerminal": "New Terminal",
+  "menubar.visitWebsite": "Visit Website",
+  "menubar.sendFeedback": "Send Feedback",
+  "menubar.clearBadges": "Clear Notification Badges",
   "share.title": "Share VelaTerm",
   "share.subtitle":
     "We're a small team behind VelaTerm. If you enjoy it, please share VelaTerm with others. Helping more people discover us means a great deal to our team. Thank you for your support! ❤️",
@@ -64,7 +78,8 @@ const en = {
   "share.wechatMoments": "WeChat Moments",
   "share.weibo": "Weibo",
   "share.xiaohongshu": "Xiaohongshu",
-  "share.xiaohongshuAction": "Copy the post text and open Xiaohongshu Creator Center",
+  "share.xiaohongshuAction":
+    "Copy the post text and open Xiaohongshu Creator Center",
   "share.wechatQrTitle": "Share to WeChat Moments",
   "share.wechatQrHint":
     "Scan with WeChat, open the link, then choose Share to Moments.",
@@ -93,11 +108,13 @@ const en = {
   "settings.cliInstalledAt": (path: string) => `Installed at ${path}`,
   "settings.cliConflict": (path: string) =>
     `A different 'vela' command already exists at ${path}. VelaTerm will not overwrite it.`,
-  "settings.cliHint": "Adds `vela <project-path>` to your PATH, like VS Code's `code` command.",
+  "settings.cliHint":
+    "Adds `vela <project-path>` to your PATH, like VS Code's `code` command.",
   "settings.agentArgsHint":
     "Default launch args applied to new sessions of each agent type. Per-session args set when creating or editing a session override these. Leave blank for none.",
   "settings.agentPathLabel": "Executable path (optional)",
-  "settings.agentPathPlaceholder": "e.g. ~/.local/bin/claude — empty = find on PATH",
+  "settings.agentPathPlaceholder":
+    "e.g. ~/.local/bin/claude — empty = find on PATH",
   "settings.agentPathHint":
     "When set, sessions of this type launch via this full path instead of looking the command up on PATH. Useful when the agent is installed but not on your shell's PATH. Filled automatically after a successful one-click install when the location can be detected.",
   "settings.appearance": "Appearance",
@@ -123,6 +140,7 @@ const en = {
   "settings.maxLiveTabs": "Background limit",
   "settings.defaultShell": "Default shell",
   "settings.spawnConfirm": "Confirm before spawn",
+  "settings.usageAuto": "Usage auto-refresh",
   "settings.usageRefresh": "Usage refresh",
   "settings.cleanImages": "Auto-clean pasted images",
   "settings.cleanImagesHint":
@@ -147,7 +165,8 @@ const en = {
   "spawn.effortLabel": "Effort",
   "spawn.modelDefault": "Default",
   "spawn.modelLoading": "Listing models…",
-  "spawn.modelListUnavailable": "No model list available — type an identifier above",
+  "spawn.modelListUnavailable":
+    "No model list available — type an identifier above",
   "spawn.launch": "Launch",
   "spawn.remaining": (n: number) => `${n} more pending`,
   "spawn.notifyTitle": "Spawn session awaiting confirmation",
@@ -181,7 +200,8 @@ const en = {
   "git.commitPlaceholder": "Commit message",
   "git.amend": "Amend last commit",
   "git.amendCommit": "Amend",
-  "git.commitCount": (n: number) => (n === 1 ? "Commit 1 file" : `Commit ${n} files`),
+  "git.commitCount": (n: number) =>
+    n === 1 ? "Commit 1 file" : `Commit ${n} files`,
   "git.commitNoFiles": "No file changes in this commit",
   "git.noCommits": "No commits yet",
   "git.loadMore": "Load more",
@@ -190,14 +210,16 @@ const en = {
   "tree.openWorktreeDir": "Open worktree folder",
   "tree.deleteWorktreeMenu": "Delete worktree…",
   "tree.deleteWorktreeTitle": "Delete worktree",
-  "tree.deleteWorktreeBody": "Choose a worktree to remove. This deletes its working directory from disk.",
+  "tree.deleteWorktreeBody":
+    "Choose a worktree to remove. This deletes its working directory from disk.",
   "tree.deleteWorktreePlaceholder": "Select a worktree…",
   "tree.deleteWorktreeForce": "Force delete (discard uncommitted changes)",
   "tree.convertToNormalSession": "Convert to normal session",
   "tree.moveGroupToWorktree": "Move to Worktree…",
   "tree.convertToNormalGroup": "Convert to normal group",
   "merge.title": "Merge branches",
-  "merge.desc": "Pick a source and a target branch; the source merges into the target.",
+  "merge.desc":
+    "Pick a source and a target branch; the source merges into the target.",
   "merge.notRepo": "This session's directory is not a git repository.",
   "merge.loadingBranches": "Loading branches…",
   "merge.loadingDiff": "Loading diff…",
@@ -205,12 +227,14 @@ const en = {
   "merge.targetLabel": "Target branch",
   "merge.selectBranch": "Select a branch…",
   "merge.swap": "Swap direction",
-  "merge.pickHint": "Pick both branches to preview the changes this merge brings in.",
+  "merge.pickHint":
+    "Pick both branches to preview the changes this merge brings in.",
   "merge.changes": (target: string) => `Changes brought into "${target}"`,
   "merge.noChanges": "No file changes.",
   "merge.sameBranch": "Source and target are the same branch.",
   "merge.branchGone": "A selected branch no longer exists. Pick again.",
-  "merge.upToDate": "The target branch already contains the source branch. Nothing to merge.",
+  "merge.upToDate":
+    "The target branch already contains the source branch. Nothing to merge.",
   "merge.targetNotCheckedOut": (target: string) =>
     `Target branch "${target}" isn't checked out in any worktree, so a local merge can't run. Check it out first.`,
   "merge.targetDirty":
@@ -218,11 +242,13 @@ const en = {
   "merge.sourceDirtyNote":
     "The source branch's working tree has uncommitted changes; they will be committed first.",
   "merge.commitMsgLabel": "Commit message",
-  "merge.commitMsgPlaceholder": "Describe this change (used as the commit message)",
+  "merge.commitMsgPlaceholder":
+    "Describe this change (used as the commit message)",
   "merge.apply": "Merge",
   "merge.commitAndApply": "Commit & merge",
   "merge.working": "Merging…",
-  "merge.doneMsg": (source: string, target: string) => `Merged "${source}" into "${target}".`,
+  "merge.doneMsg": (source: string, target: string) =>
+    `Merged "${source}" into "${target}".`,
   "merge.conflictMsg": (target: string) =>
     `Merge has conflicts. Resolve them in the terminal of "${target}"'s worktree, then commit:`,
   "merge.close": "Close",
@@ -277,7 +303,8 @@ const en = {
     "open your desktop's Settings ▸ Notifications and allow VelaTerm.",
   "settings.notifyStepsBrowser":
     "click the site-permission icon in the address bar and set Notifications to Allow.",
-  "settings.notifyUnsupported": "Notifications aren't available in this environment.",
+  "settings.notifyUnsupported":
+    "Notifications aren't available in this environment.",
   "settings.notifyOpenSettings": "Open System Settings",
   // Shortcut categories
   "settings.catShortcuts": "Shortcuts",
@@ -291,7 +318,8 @@ const en = {
   "settings.scGlobalSearch": "Search all sessions",
   "settings.scSaveDoc": "Save document",
   "settings.scRecording": "Press keys…",
-  "settings.scHint": "Click a shortcut, then press a new combination (Cmd/Ctrl required).",
+  "settings.scHint":
+    "Click a shortcut, then press a new combination (Cmd/Ctrl required).",
   "settings.scReset": "Restore defaults",
   "settings.scConflict": (label: string) => `Already used by "${label}"`,
 
@@ -355,7 +383,8 @@ const en = {
   "connect.stagePreparing": "Preparing server…",
   "connect.stageTransferring": "Transferring server…",
   "connect.stageStarting": "Starting server…",
-  "connect.sshFingerprintLabel": (kt: string) => `SSH host key fingerprint (${kt})`,
+  "connect.sshFingerprintLabel": (kt: string) =>
+    `SSH host key fingerprint (${kt})`,
   "connect.sshHostNew":
     "First time connecting to this host — verify the fingerprint before continuing.",
   "connect.sshHostChanged":
@@ -420,6 +449,16 @@ const en = {
   "tree.closeScratch": "Close Scratch",
   "tree.importProject": "Import Project",
   "tree.createProject": "Create Project",
+  "tree.newCollection": "New Collection",
+  "tree.deleteCollection": "Delete Collection",
+  "collection.title": "New Collection",
+  "collection.name": "Collection name",
+  "collection.namePlaceholder": "research",
+  "collection.submit": "Create Collection",
+  "collection.tag": "No folder",
+  "collection.deleteTitle": "Delete Collection",
+  "collection.deleteBody": (name: string) =>
+    `Delete collection "${name}"? All its groups and sessions will also be deleted. This cannot be undone.`,
   "tree.cloneProject": "Clone from Git",
   "createProject.title": "Create Project",
   "createProject.name": "Project name",
@@ -482,7 +521,8 @@ const en = {
   "tree.viewSplitRight": "Split tree view right",
   "tree.viewSplitDown": "Split tree view down",
   "tree.viewAdd": "Copy current tree view to a new tab",
-  "tree.viewCount": (n: number) => (n === 1 ? "1 tree view" : `${n} tree views`),
+  "tree.viewCount": (n: number) =>
+    n === 1 ? "1 tree view" : `${n} tree views`,
   "mark.menu": "Mark",
   "mark.urgent": "Urgent",
   "mark.important": "Important",
@@ -518,14 +558,18 @@ const en = {
   "tree.cwdLabel": "Working directory (leave empty for project root)",
   "tree.initCmdLabel": "Startup command (optional)",
   "tree.agentArgsLabel": "Launch args (optional)",
+  "tree.workingDirLabel": "Working directory",
+  "tree.workingDirPlaceholder": "Leave empty for the default",
   "preset.execPathLabel": "Executable (optional)",
   "preset.execPathPlaceholder": "/usr/local/bin/claude",
-  "preset.execPathHint": "Leave empty to use the agent's configured command. Set it to run a drop-in replacement for this session only.",
+  "preset.execPathHint":
+    "Leave empty to use the agent's configured command. Set it to run a drop-in replacement for this session only.",
   "preset.saveLabel": "Save as a preset",
   "preset.namePlaceholder": "Name this preset",
   "preset.iconChoose": "Choose icon",
   "preset.iconClear": "Remove",
-  "preset.iconHint": "Square images work best; anything else is cropped and scaled to 64x64.",
+  "preset.iconHint":
+    "Square images work best; anything else is cropped and scaled to 64x64.",
   "tree.permissionSkipLabel": "Skip all permission confirmations",
   "tree.permissionSkipHint":
     "Launches with this agent's bypass flag (e.g. Claude --dangerously-skip-permissions; Codex also disables its sandbox). Applies on every launch — use with care.",
@@ -582,7 +626,8 @@ const en = {
   // New worktree-session dialog
   "tree.newWorktreeSession": "New Worktree Session…",
   "worktree.worktreeNameLabel": "Worktree name",
-  "worktree.worktreeNameHint": "Used as the worktree directory and branch name.",
+  "worktree.worktreeNameHint":
+    "Used as the worktree directory and branch name.",
   "worktree.createFailed": "Couldn't create the worktree",
   "worktree.noRepoRoot": "This project has no usable git repository path.",
   // ── Worktree selector for custom session creation ──
@@ -593,9 +638,11 @@ const en = {
   "worktreeSel.loading": "Loading worktrees…",
   "worktreeSel.empty": "No existing worktrees in this repository.",
   "worktreeSel.loadFailed": "Couldn't list worktrees (not a git repository?).",
-  "group.worktreeHint": "Sessions created in this group will use this worktree by default.",
+  "group.worktreeHint":
+    "Sessions created in this group will use this worktree by default.",
   "worktree.moveGroupTitle": "Move Group to Worktree",
-  "worktree.moveGroupHint": "Sessions created in this group from now on will use this worktree. Sessions already in it keep their current directory.",
+  "worktree.moveGroupHint":
+    "Sessions created in this group from now on will use this worktree. Sessions already in it keep their current directory.",
 
   // ── Archive panel ──
   "archive.title": "Archived Sessions",
@@ -605,13 +652,16 @@ const en = {
   "archive.restore": "Restore to normal session",
   "archive.export": "Export full context as Markdown",
   "archive.deleteForever": "Delete permanently (with recording)",
-  "archive.pickOne": "Select an archived session on the left to view its transcript",
+  "archive.pickOne":
+    "Select an archived session on the left to view its transcript",
   "archive.recordingEnd": "--- End of recording ---",
-  "archive.readRecordingFailed": (err: string) => `Failed to read recording: ${err}`,
+  "archive.readRecordingFailed": (err: string) =>
+    `Failed to read recording: ${err}`,
   "archive.searchRecording": "Search in recording…",
   "archive.searchTranscript": "Search transcript…",
   "archive.searchPlaceholder": "Search archived content…",
-  "archive.msgCountAll": (n: number) => (n === 1 ? "1 message" : `${n} messages`),
+  "archive.msgCountAll": (n: number) =>
+    n === 1 ? "1 message" : `${n} messages`,
   "archive.msgCountFiltered": (shown: number, total: number) =>
     `${shown} / ${total} messages`,
   "archive.you": "You",
@@ -622,9 +672,11 @@ const en = {
 
   // ── Global session-content search ──
   "search.allPlaceholder": "Search across all session content…",
-  "search.hint": "Search session content. Archived sessions are excluded by default — tick 'Include archived' to add them.",
+  "search.hint":
+    "Search session content. Archived sessions are excluded by default — tick 'Include archived' to add them.",
   "search.includeArchived": "Include archived",
-  "search.includeArchivedHint": "Also search archived sessions (off by default)",
+  "search.includeArchivedHint":
+    "Also search archived sessions (off by default)",
   "search.searching": "Searching…",
   "search.noResults": "No matches found",
   "search.sessionCount": (n: number) =>
@@ -677,12 +729,16 @@ const en = {
   "quit.title": "Quit VelaTerm?",
   "quit.body": "Any running terminal and agent sessions will be stopped.",
   "quit.saveWorkspace": "Save workspace",
-  "quit.saveWorkspaceHint": "Reopen the same tabs and splits next time. Terminals are restored but not restarted.",
+  "quit.saveWorkspaceHint":
+    "Reopen the same tabs and splits next time. Terminals are restored but not restarted.",
   "quit.confirm": "Quit",
-  "dormant.body": "Restored from your saved workspace. No process is running yet.",
+  "dormant.body":
+    "Restored from your saved workspace. No process is running yet.",
   "dormant.start": "Start",
-  "overlimit.title": (max: number) => `Background keep-alive over limit (${max})`,
-  "overlimit.body": "All background tabs are working or awaiting your reply. Choose one to end:",
+  "overlimit.title": (max: number) =>
+    `Background keep-alive over limit (${max})`,
+  "overlimit.body":
+    "All background tabs are working or awaiting your reply. Choose one to end:",
   "overlimit.kill": "End Selected",
   "overlimit.keep": "Keep for Now",
   "overlimit.earliest": "earliest",
@@ -703,8 +759,10 @@ const en = {
   "term.redraw": "Redraw",
   "term.mirrorTooltip":
     "Mirroring (size controlled by another client). Click to resize the PTY to this window",
-  "term.mirrorBadge": (dims: string) => `⤢ Mirror${dims} · click to fit this window`,
-  "term.mirrorBadgeMobile": (dims: string) => `⤢ Mirror${dims} · fit this window`,
+  "term.mirrorBadge": (dims: string) =>
+    `⤢ Mirror${dims} · click to fit this window`,
+  "term.mirrorBadgeMobile": (dims: string) =>
+    `⤢ Mirror${dims} · fit this window`,
   "term.imgUploadFailed": (n: number, lastError: string) =>
     `Image upload failed for ${n} image${n === 1 ? "" : "s"}${lastError ? `: ${lastError}` : ""}`,
   "term.imgClipboardUnavailable":
@@ -722,7 +780,8 @@ const en = {
   "agentInstall.docs": "Install docs",
   "agentInstall.needsNode": "Requires Node.js / npm",
   "agentInstall.afterInstall": "After install:",
-  "agentInstall.pathSaved": (label: string) => `${label} executable path saved to Settings:`,
+  "agentInstall.pathSaved": (label: string) =>
+    `${label} executable path saved to Settings:`,
   "agentInstall.doneTitle": (label: string) => `${label} is installed`,
   "agentInstall.doneDesc": "Relaunch this session to start using it.",
   "agentInstall.restartNow": "Relaunch now",
@@ -749,7 +808,8 @@ const en = {
   "doc.outline": "Outline",
   "doc.outlineEmpty": "No headings",
   "doc.saving": "Saving…",
-  "doc.overwriteConfirm": "A file with this name already exists. Click “Overwrite” to replace it.",
+  "doc.overwriteConfirm":
+    "A file with this name already exists. Click “Overwrite” to replace it.",
   "doc.saveTooltip": "Save",
   "doc.externalChanged":
     "The file was modified on disk (you have unsaved local changes).",
@@ -770,10 +830,12 @@ const en = {
   "doc.closeTab": "Close Tab",
   "doc.truncatedReadonly": (size: string) =>
     `Read-only: showing the first 10 MB of ${size}. Saving is disabled to avoid overwriting the rest of the file.`,
-  "doc.imgLoading": (title: string, size: string) => `Loading ${title} (${size})…`,
+  "doc.imgLoading": (title: string, size: string) =>
+    `Loading ${title} (${size})…`,
   "doc.imgBeingWritten":
     "The file is being written; it will reload automatically once it settles.",
-  "doc.imgDecodeFailed": "Cannot display this image (unsupported or corrupted format).",
+  "doc.imgDecodeFailed":
+    "Cannot display this image (unsupported or corrupted format).",
   "doc.imgFit": "Fit",
   "doc.imgActual": "1:1",
   "doc.exportPdf": "Export PDF",
@@ -811,7 +873,8 @@ const en = {
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
   "files.dblClickOpen": "Double-click to open",
-  "files.deleteConfirm": (name: string) => `Delete "${name}"? This can't be undone.`,
+  "files.deleteConfirm": (name: string) =>
+    `Delete "${name}"? This can't be undone.`,
 
   // ── File transfer (remote access) ──
   "transfer.uploadsTitle": "Uploads",
@@ -825,7 +888,8 @@ const en = {
   "transfer.foldersUnsupported": "Folders can't be uploaded.",
 
   // ── Status bar ──
-  "statusbar.sessions": (n: number) => (n === 1 ? "1 session" : `${n} sessions`),
+  "statusbar.sessions": (n: number) =>
+    n === 1 ? "1 session" : `${n} sessions`,
   "statusbar.filterTooltip": (label: string) =>
     `Click to show only "${label}" sessions in the sidebar (click again to clear)`,
   "statusbar.bgCount": (n: number, max: number) => `Background ${n}/${max}`,
@@ -833,22 +897,27 @@ const en = {
     `Background keep-alive tabs (limit ${max}; the oldest inactive one is ended automatically when exceeded)`,
   "statusbar.bgEvicted": (name: string) =>
     `Ended background tab: ${name} (over keep-alive limit)`,
-  "statusbar.webTooltip": (url: string) => `Browser remote access enabled: ${url}`,
+  "statusbar.webTooltip": (url: string) =>
+    `Browser remote access enabled: ${url}`,
   "statusbar.permAsk": "Perms: Ask",
   "statusbar.permSkip": "Perms: Skip",
   "statusbar.notifyOn": "Notify: On",
   "statusbar.notifyOff": "Notify: Off",
-  "statusbar.permTooltip": "This session's permission mode · click to change (this session only)",
+  "statusbar.permTooltip":
+    "This session's permission mode · click to change (this session only)",
   "statusbar.permMenuTitle": "This session's permissions",
   "statusbar.permOptAsk": "Ask each time (default)",
-  "statusbar.permScopeHint": "Applies to this session only. For global defaults, go to Settings ▸ Agents.",
-  "statusbar.permRestartMsg": "Permission changed. The session must restart to apply. Restart resumes the current conversation but interrupts any task in progress. Restart now?",
+  "statusbar.permScopeHint":
+    "Applies to this session only. For global defaults, go to Settings ▸ Agents.",
+  "statusbar.permRestartMsg":
+    "Permission changed. The session must restart to apply. Restart resumes the current conversation but interrupts any task in progress. Restart now?",
   "statusbar.permRestartNow": "Restart now",
   "statusbar.permRestartLater": "Later",
   "statusbar.permScopeTitle": "Apply to?",
   "statusbar.permScopeSession": "This session only",
   "statusbar.permScopeGlobal": "Global default",
-  "statusbar.permScopeGlobalHint": "Applies now to this session and becomes the default for future sessions of this kind (synced with Settings).",
+  "statusbar.permScopeGlobalHint":
+    "Applies now to this session and becomes the default for future sessions of this kind (synced with Settings).",
 
   // ── Bottom bar ──
   "bottombar.running": "Running",
@@ -879,7 +948,8 @@ const en = {
   // ── transport ──
   "transport.noReplayInBrowser":
     "Recording playback is not yet supported in the browser",
-  "transport.imgUploadHttp": (status: number) => `Image upload failed (${status})`,
+  "transport.imgUploadHttp": (status: number) =>
+    `Image upload failed (${status})`,
 
   // ── Login gate, directory selection, and connection banner ──
   "login.connecting": "Connecting…",
@@ -890,8 +960,10 @@ const en = {
   "login.wrongPassword": "Wrong password",
   "login.rateLimited": "Too many attempts. Please wait a minute and try again.",
   "login.failed": "Login failed, please try again",
-  "login.pairingRequired": "This server requires a pairing link. Open the pairing link from the desktop app's Remote Access panel.",
-  "login.authFailed": "Authentication failed. Check the access password, or open a new pairing link if the link was regenerated.",
+  "login.pairingRequired":
+    "This server requires a pairing link. Open the pairing link from the desktop app's Remote Access panel.",
+  "login.authFailed":
+    "Authentication failed. Check the access password, or open a new pairing link if the link was regenerated.",
   "dir.title": "Choose Project Directory",
   "dir.pathPlaceholder": "Search, or type a path and press Enter (supports ~)",
   "dir.up": "Up one level",
@@ -934,9 +1006,12 @@ const en = {
   "transport.wsDisconnected": "WebSocket disconnected",
   "transport.wsConnectFailed": "WebSocket connection failed",
   "transport.cmdFailed": "Command failed",
-  "transport.remoteCmdForbidden": (cmd: string) => `Command not available to remote clients: ${cmd}`,
-  "transport.remoteSettingForbidden": (key: string) => `Settings key not writable by remote clients: ${key}`,
-  "transport.remotePathForbidden": (path: string) => `Remote clients cannot access files in the app data directory: ${path}`,
+  "transport.remoteCmdForbidden": (cmd: string) =>
+    `Command not available to remote clients: ${cmd}`,
+  "transport.remoteSettingForbidden": (key: string) =>
+    `Settings key not writable by remote clients: ${key}`,
+  "transport.remotePathForbidden": (path: string) =>
+    `Remote clients cannot access files in the app data directory: ${path}`,
 
   // ── Crepe (built-in WYSIWYG editor UI) ──
   "crepe.placeholder": "Type text, or press / for the insert menu",
@@ -990,7 +1065,8 @@ const en = {
   "updater.retry": "Try again",
   "updater.downloadFailed": (err: string) => `Update failed: ${err}`,
   "updater.hide": "Hide",
-  "updater.hideHint": "Keep downloading in the background. Progress stays in the status bar.",
+  "updater.hideHint":
+    "Keep downloading in the background. Progress stays in the status bar.",
   "updater.downloadManually": "Download manually",
   "updater.downloadManuallyHint": "Open the download page in your browser.",
   "updater.windowsNotice":

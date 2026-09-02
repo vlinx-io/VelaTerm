@@ -262,6 +262,10 @@ pub fn dispatch(
         // ── Tree management orchestrated by command_core ──
         "list_tree" => to_value(core::list_tree(app)?),
         "import_project" => to_value(core::import_project(app, &req_str(args, "rootPath")?)?),
+        // Collections take a name only, never a path, so no remote path gate applies here.
+        "create_virtual_project" => {
+            to_value(core::create_virtual_project(app, &req_str(args, "name")?)?)
+        }
         "clone_project" => {
             // New clients supply operationId for progress filtering and cancellation; generate one for old clients.
             let operation_id =
@@ -557,17 +561,17 @@ pub fn dispatch(
             to_value(core::agent_context_info(app, &req_str(args, "sessionId")?)?)
         }
         "agent_turn_stats" => to_value(core::agent_turn_stats(app, &req_str(args, "sessionId")?)?),
-        "claude_usage" => {
+        // Account-level quotas: one stored copy per machine, refreshed by the background poller in
+        // `usage_store`. Clients read it here and never query a provider themselves.
+        "usage_snapshot" => to_value(crate::agent::usage_store::snapshot(app)),
+        // Manual refresh from the panel's ↻ button. `provider` narrows the work to one source;
+        // omitting it refreshes every provider whose account is present on this machine.
+        "usage_refresh" => {
+            let provider = opt_str(args, "provider")
+                .as_deref()
+                .and_then(crate::agent::usage_store::Provider::parse);
             let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
-            to_value(crate::agent::usage::claude_usage(force)?)
-        }
-        "codex_usage" => {
-            let live = args.get("live").and_then(Value::as_bool).unwrap_or(false);
-            to_value(core::codex_usage(app, &req_str(args, "sessionId")?, live)?)
-        }
-        "grok_usage" => {
-            let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
-            to_value(crate::agent::usage::grok_usage(force)?)
+            to_value(crate::agent::usage_store::refresh(app, provider, force))
         }
         "read_agent_transcript" => to_value(core::read_agent_transcript(
             app,
@@ -723,6 +727,7 @@ pub fn dispatch(
                 .ok_or("Missing pid")? as u32;
             to_value(crate::procstat::subtree_stats(pid))
         }
+        "system_stats" => to_value(crate::procstat::system_stats()),
         "create_worktree" => to_value(git::worktree_add(
             &req_str(args, "repoRoot")?,
             &req_str(args, "name")?,

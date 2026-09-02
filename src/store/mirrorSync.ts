@@ -19,14 +19,18 @@
 //! Phones do not participate at all: the narrow two-level navigation is a different shape of UI, and copying
 //! a desktop split tree onto it helps nobody.
 
-import { onMirrorLayout, onMirrorMode } from "../ipc/events";
+import { onMirrorLayout, onMirrorMode, onRemoteClients } from "../ipc/events";
 import { mirrorGet, mirrorPush } from "../ipc/mirror";
 import { getClientSource, isTauri } from "../ipc/transport";
 import { wsClient } from "../ipc/wsClient";
 import { isMobileView } from "../mobile/detect";
 import { markMirrorDetach } from "../ipc/commands";
 import { settleFirstMirrorAlign } from "./mirrorAlign";
-import { buildMirrorLayout, layoutSessionIds, sanitizeMirrorLayout } from "./mirrorLayout";
+import {
+  buildMirrorLayout,
+  layoutSessionIds,
+  sanitizeMirrorLayout,
+} from "./mirrorLayout";
 import { useTermStore } from "./termStore";
 
 /** Coalescing window for local edits. Long enough to swallow a drag's worth of resize events, short enough
@@ -137,9 +141,9 @@ export function startMirrorSync(): () => void {
     // them. Desktop unmount otherwise means kill, which would let a remote client end a process merely by
     // closing its own tab; the mark downgrades that unmount to a detach.
     const incoming = layoutSessionIds(layout);
-    const leaving = [...layoutSessionIds(buildMirrorLayout(store.getState()))].filter(
-      (id) => !incoming.has(id),
-    );
+    const leaving = [
+      ...layoutSessionIds(buildMirrorLayout(store.getState())),
+    ].filter((id) => !incoming.has(id));
     if (leaving.length) markMirrorDetach(leaving);
     applying = true;
     try {
@@ -166,6 +170,11 @@ export function startMirrorSync(): () => void {
           return;
         }
         alignAttempt = 0;
+        // Before the enabled check: the host badge needs the count even in the moment mirroring is off,
+        // and this reply is the only place a freshly started client learns it.
+        store
+          .getState()
+          .setRemoteClients(status.clients ?? 0, status.clientList ?? []);
         store.getState().setMirrorEnabled(status.enabled);
         if (!status.enabled) {
           settleFirstMirrorAlign(false);
@@ -212,10 +221,17 @@ export function startMirrorSync(): () => void {
     // Our own push has not reported its revision yet, so we cannot tell whether this frame is newer or
     // older than what we just sent. Hold it and decide once the push resolves.
     if (pushing) {
-      if (!deferred || snap.rev > deferred.rev) deferred = { state: snap.state, rev: snap.rev };
+      if (!deferred || snap.rev > deferred.rev)
+        deferred = { state: snap.state, rev: snap.rev };
       return;
     }
     apply(snap.state, snap.rev);
+  }).then((un) => (stopped ? un() : unlisteners.push(un)));
+  // Who else is attached. It rides along here rather than in its own module because it exists for the same
+  // reason mirroring does: on a host, a peer's rearranging is invisible until you know a peer is there.
+  void onRemoteClients((count, clients) => {
+    if (stopped) return;
+    store.getState().setRemoteClients(count, clients);
   }).then((un) => (stopped ? un() : unlisteners.push(un)));
   void onMirrorMode((enabled) => {
     if (stopped) return;

@@ -1,7 +1,7 @@
 //! Vela-style application header with branding, theme toggle, appearance settings, and panel controls.
 //! The window retains native decorations; this row sits below the system title bar.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
 import { getBackendVersion } from "../../ipc/commands";
@@ -11,6 +11,7 @@ import { env } from "../../platform";
 import { useTermStore } from "../../store/termStore";
 import { resolveTheme } from "../../theme";
 import { ShareModal } from "../../components/ShareModal";
+import { AppMenuBar } from "./AppMenuBar";
 import { ConnectRemotePanel } from "./ConnectRemotePanel";
 import { RemoteAccessPanel } from "./RemoteAccessPanel";
 import { SettingsModal } from "./SettingsModal";
@@ -48,9 +49,40 @@ export function TitleBar() {
   const rightCollapsed = useTermStore((s) => s.rightCollapsed);
   const toggleRight = useTermStore((s) => s.toggleRight);
   // Mirror mode is switched on the host only. Without a marker, a followed client sees its tabs and
-  // splits rearrange with no visible cause; the badge names where those changes come from. Hidden on the
-  // host, which already shows the switch in its remote-access panel.
+  // splits rearrange with no visible cause; the badge names where those changes come from.
   const mirrorEnabled = useTermStore((s) => s.mirrorEnabled);
+  // The host needs the same warning for the opposite reason: mirroring is two-way, so an attached client
+  // rearranges the host's window too. The switch alone does not say whether anyone is actually on the
+  // other end, so the host badge waits for a real connection. Zero clients means nothing is being driven
+  // from anywhere else, and a badge then would be noise.
+  const remoteClients = useTermStore((s) => s.remoteClients);
+  // A count says somebody is there; the list says who, which is the next thing a host asks before letting
+  // a peer move its tabs. The badge opens it.
+  const remoteClientList = useTermStore((s) => s.remoteClientList);
+  const [clientsOpen, setClientsOpen] = useState(false);
+  const clientsRef = useRef<HTMLSpanElement | null>(null);
+  // Dismiss the client list the way any popover should: a click anywhere else, or Escape.
+  useEffect(() => {
+    if (!clientsOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!clientsRef.current?.contains(e.target as Node))
+        setClientsOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setClientsOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [clientsOpen]);
+  // The badge disappears once the last client leaves, taking the list with it. Reset the flag so the badge
+  // does not come back already open when somebody else connects.
+  useEffect(() => {
+    if (remoteClients === 0) setClientsOpen(false);
+  }, [remoteClients]);
 
   // Store-level settings visibility is shared by the gear and the macOS native Settings menu.
   const settingsOpen = useTermStore((s) => s.settingsOpen);
@@ -122,8 +154,7 @@ export function TitleBar() {
   };
 
   const remoteInfo = (window as any).__VLX_REMOTE__ as
-    | { address: string }
-    | undefined;
+    { address: string } | undefined;
 
   return (
     <div className="titlebar">
@@ -169,7 +200,9 @@ export function TitleBar() {
           </span>
         ) : (
           <span
-            title={__BUILD_TIME__ ? t("titlebar.builtAt", __BUILD_TIME__) : undefined}
+            title={
+              __BUILD_TIME__ ? t("titlebar.builtAt", __BUILD_TIME__) : undefined
+            }
             style={{
               marginLeft: 2,
               fontSize: 9.5,
@@ -199,6 +232,95 @@ export function TitleBar() {
             }}
           >
             Remote · {remoteInfo.address}
+          </span>
+        )}
+        {mirrorEnabled && (isTauri || env.isElectron) && remoteClients > 0 && (
+          <span ref={clientsRef} style={{ position: "relative" }}>
+            <button
+              onClick={() => setClientsOpen((v) => !v)}
+              title={t("titlebar.mirroredByHint", remoteClients)}
+              style={{
+                marginLeft: 6,
+                fontSize: 9.5,
+                fontWeight: 700,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+                padding: "1px 6px",
+                borderRadius: 4,
+                border: "none",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                color: "var(--bg-0)",
+                background: "var(--yellow)",
+              }}
+            >
+              ⤢ {t("titlebar.mirroredBy", remoteClients)}
+            </button>
+            {clientsOpen && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 6px)",
+                  left: 6,
+                  zIndex: 200,
+                  minWidth: 220,
+                  maxWidth: 320,
+                  padding: "10px 12px",
+                  background: "var(--bg-2)",
+                  border: "1px solid var(--border-strong)",
+                  borderRadius: "var(--r-md)",
+                  boxShadow: "var(--shadow)",
+                  textAlign: "left",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 10,
+                    letterSpacing: "1px",
+                    textTransform: "uppercase",
+                    fontWeight: 600,
+                    color: "var(--text-dim)",
+                    marginBottom: 6,
+                  }}
+                >
+                  {t("titlebar.clientsTitle")}
+                </div>
+                {remoteClientList.length === 0 ? (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      lineHeight: 1.5,
+                      color: "var(--text-dim)",
+                    }}
+                  >
+                    {t("titlebar.mirroredByHint", remoteClients)}
+                  </div>
+                ) : (
+                  remoteClientList.map((c) => (
+                    <div key={c.source} style={{ padding: "4px 0" }}>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "var(--text)",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {c.name || t("titlebar.clientUnnamed")}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: "var(--text-dim)" }}>
+                        {c.ip} ·{" "}
+                        {t(
+                          "titlebar.clientSince",
+                          new Date(c.since * 1000).toLocaleTimeString(),
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
           </span>
         )}
         {mirrorEnabled && !(isTauri || env.isElectron) && (
@@ -241,6 +363,10 @@ export function TitleBar() {
           </span>
         )}
       </div>
+
+      {/* Windows/Linux have no native menu bar; this one appears on a bare Alt press. */}
+      <AppMenuBar />
+
       <span className="tb-spacer" />
 
       <div className="tb-seg">
@@ -248,7 +374,9 @@ export function TitleBar() {
           className={theme === "system" ? "on" : ""}
           title={t(
             "titlebar.themeSystem",
-            resolved === "dark" ? t("titlebar.themeDark") : t("titlebar.themeLight"),
+            resolved === "dark"
+              ? t("titlebar.themeDark")
+              : t("titlebar.themeLight"),
           )}
           onClick={() => setTheme("system")}
         >
@@ -344,7 +472,9 @@ export function TitleBar() {
       <div className="tb-pair">
         <button
           className="tb-btn"
-          title={leftCollapsed ? t("titlebar.showLeft") : t("titlebar.hideLeft")}
+          title={
+            leftCollapsed ? t("titlebar.showLeft") : t("titlebar.hideLeft")
+          }
           onClick={toggleLeft}
         >
           {leftCollapsed ? (
@@ -356,7 +486,9 @@ export function TitleBar() {
 
         <button
           className="tb-btn"
-          title={rightCollapsed ? t("titlebar.showRight") : t("titlebar.hideRight")}
+          title={
+            rightCollapsed ? t("titlebar.showRight") : t("titlebar.hideRight")
+          }
           onClick={toggleRight}
         >
           {rightCollapsed ? (

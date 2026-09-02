@@ -1,9 +1,14 @@
 //! Backend event listeners routed through the transport adapter: Tauri events on desktop, WebSocket relay in browsers.
 
-import { isRemoteWindow, listen, listenNative, type UnlistenFn } from "./transport";
-import type { MirrorSnapshot } from "./mirror";
+import {
+  isRemoteWindow,
+  listen,
+  listenNative,
+  type UnlistenFn,
+} from "./transport";
+import type { MirrorSnapshot, RemoteClient } from "./mirror";
 import type { SessionStateBatch } from "./sessionState";
-import type { KillReason } from "./commands";
+import type { KillReason, UsageSnapshot } from "./commands";
 import type { AgentKind } from "../types";
 
 // PTY output bypasses the event channel and travels directly through spawnPty's binary Channel / WS binary frames; see transport.ts.
@@ -39,13 +44,15 @@ export function onPtyKilled(
   sessionId: string,
   cb: (ev: PtyKilled) => void,
 ): Promise<UnlistenFn> {
-  return listen<Partial<PtyKilled> | null>(`pty://killed/${sessionId}`, (payload) =>
-    cb({
-      source: payload?.source ?? "",
-      // An unknown reason has to read as `close`: keeping a pane for a session that never comes back
-      // leaves a dead terminal on screen, which is worse than closing one the user meant to restart.
-      reason: payload?.reason === "restart" ? "restart" : "close",
-    }),
+  return listen<Partial<PtyKilled> | null>(
+    `pty://killed/${sessionId}`,
+    (payload) =>
+      cb({
+        source: payload?.source ?? "",
+        // An unknown reason has to read as `close`: keeping a pane for a session that never comes back
+        // leaves a dead terminal on screen, which is worse than closing one the user meant to restart.
+        reason: payload?.reason === "restart" ? "restart" : "close",
+      }),
   );
 }
 
@@ -72,7 +79,21 @@ export type StatusSignal =
   | { kind: "title"; title: string }
   | {
       kind: "agent";
-      agent: "claude" | "codex" | "opencode" | "copilot" | "cursor" | "antigravity" | "cline" | "pi" | "crush" | "kimi" | "kiro" | "grok" | "zoo" | null;
+      agent:
+        | "claude"
+        | "codex"
+        | "opencode"
+        | "copilot"
+        | "cursor"
+        | "antigravity"
+        | "cline"
+        | "pi"
+        | "crush"
+        | "kimi"
+        | "kiro"
+        | "grok"
+        | "zoo"
+        | null;
       stateSource?: "hooks" | "legacy";
     }
   | { kind: "hook_ready" }
@@ -175,6 +196,16 @@ export function onPresetsChanged(cb: () => void): Promise<UnlistenFn> {
 }
 
 /**
+ * Listen for the account-usage snapshot the backend keeps for this machine. One background poller writes
+ * it, so every window, browser client, and session shows the same numbers without querying providers.
+ */
+export function onUsageChanged(
+  cb: (snap: UsageSnapshot) => void,
+): Promise<UnlistenFn> {
+  return listen<UsageSnapshot>("usage://changed", (payload) => cb(payload));
+}
+
+/**
  * Listen for application preferences written by any client. The payload lists the key names that were
  * written and deliberately carries **no values**: `remoteAccess.*` and `gitea.token` are stripped from a
  * remote client's `get_app_settings` reply, and a broadcast carrying values would bypass that filter.
@@ -214,6 +245,25 @@ export function onMirrorLayout(
   cb: (snap: MirrorSnapshot) => void,
 ): Promise<UnlistenFn> {
   return listen<MirrorSnapshot>("mirror://layout", cb);
+}
+
+/**
+ * Listen for a remote client connecting or disconnecting.
+ *
+ * The host never counts itself — it uses IPC, not a WebSocket — so on a host this is the number of other
+ * windows attached to its service.
+ */
+export function onRemoteClients(
+  cb: (count: number, clients: RemoteClient[]) => void,
+): Promise<UnlistenFn> {
+  return listen<{ count: number; clients?: RemoteClient[] }>(
+    "clients://changed",
+    (payload) =>
+      cb(
+        typeof payload?.count === "number" ? payload.count : 0,
+        Array.isArray(payload?.clients) ? payload.clients : [],
+      ),
+  );
 }
 
 /** Listen for the host switching mirror mode on or off. */
@@ -258,6 +308,7 @@ export type MenuAction =
   | "settings"
   | "check-update"
   | "share"
+  | "clear-badges"
   | "split-right"
   | "split-down";
 

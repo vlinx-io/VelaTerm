@@ -56,7 +56,21 @@ const vi: typeof en = {
   "titlebar.mirrored": "Đang phản chiếu", // Mirrored
   "titlebar.mirroredHint":
     "Phản chiếu đang bật: thẻ, khung chia và phiên đang mở đi theo máy chủ. Công tắc nằm ở máy chủ.", // Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.
+  "titlebar.mirroredBy": (n: number) => `${n} máy đang phản chiếu`, // Mirrored by {n}
+  "titlebar.mirroredByHint": (n: number) =>
+    `Có ${n} máy khách từ xa đang kết nối. Thẻ, khung chia và phiên đang mở được dùng chung, bên nào cũng sắp xếp lại được.`, // {n} remote clients are connected. Tabs, splits, and the active session are shared, and either side can rearrange them.
+  "titlebar.clientsTitle": "Máy khách đang kết nối", // Attached clients
+  "titlebar.clientUnnamed": "Máy khách chưa đặt tên", // Unnamed client
+  "titlebar.clientSince": (time: string) => `từ ${time}`, // since {time}
   "titlebar.share": "Chia sẻ",
+  // ── Alt-triggered menu bar (Windows/Linux) ──
+  "menubar.file": "Tệp", // File
+  "menubar.terminal": "Terminal",
+  "menubar.help": "Trợ giúp", // Help
+  "menubar.newTerminal": "Terminal mới", // New Terminal
+  "menubar.visitWebsite": "Truy cập trang web", // Visit Website
+  "menubar.sendFeedback": "Gửi phản hồi", // Send Feedback
+  "menubar.clearBadges": "Xóa huy hiệu thông báo", // Clear Notification Badges
   "share.title": "Chia sẻ VelaTerm",
   "share.subtitle":
     "VelaTerm được xây dựng bởi một đội ngũ nhỏ. Nếu bạn yêu thích sản phẩm, hãy chia sẻ VelaTerm với mọi người. Việc giúp nhiều người biết đến chúng tôi hơn có ý nghĩa rất lớn với cả đội. Cảm ơn bạn đã ủng hộ! ❤️",
@@ -95,11 +109,13 @@ const vi: typeof en = {
   "settings.cliInstalledAt": (path: string) => `Đã cài tại ${path}`,
   "settings.cliConflict": (path: string) =>
     `Đã có một lệnh ‘vela’ khác tại ${path}. VelaTerm sẽ không ghi đè.`,
-  "settings.cliHint": "Thêm `vela <đường-dẫn-dự-án>` vào PATH, giống lệnh `code` của VS Code.",
+  "settings.cliHint":
+    "Thêm `vela <đường-dẫn-dự-án>` vào PATH, giống lệnh `code` của VS Code.",
   "settings.agentArgsHint":
     "Đối số khởi chạy mặc định áp dụng cho phiên mới của từng loại tác nhân. Đối số riêng đặt khi tạo hoặc sửa phiên sẽ ghi đè chúng. Để trống nếu không dùng.",
   "settings.agentPathLabel": "Đường dẫn tệp thực thi (tùy chọn)",
-  "settings.agentPathPlaceholder": "vd. ~/.local/bin/claude — để trống = tìm trong PATH",
+  "settings.agentPathPlaceholder":
+    "vd. ~/.local/bin/claude — để trống = tìm trong PATH",
   "settings.agentPathHint":
     "Khi được đặt, phiên loại này sẽ khởi chạy bằng đường dẫn đầy đủ thay vì tìm lệnh trong PATH. Hữu ích khi tác nhân đã được cài nhưng không có trong PATH của shell. Tự động điền sau khi cài đặt một lần thành công nếu xác định được vị trí.",
   "settings.appearance": "Giao diện",
@@ -125,6 +141,7 @@ const vi: typeof en = {
   "settings.maxLiveTabs": "Giới hạn nền",
   "settings.defaultShell": "Shell mặc định",
   "settings.spawnConfirm": "Xác nhận trước khi tạo phiên",
+  "settings.usageAuto": "Tự động làm mới mức sử dụng",
   "settings.usageRefresh": "Làm mới mức sử dụng",
   "settings.cleanImages": "Tự dọn ảnh đã dán",
   "settings.cleanImagesHint":
@@ -149,7 +166,8 @@ const vi: typeof en = {
   "spawn.effortLabel": "Effort",
   "spawn.modelDefault": "Mặc định", // Default
   "spawn.modelLoading": "Đang tải danh sách mô hình…", // Listing models…
-  "spawn.modelListUnavailable": "Không có danh sách mô hình — nhập định danh ở trên", // No model list available — type an identifier above
+  "spawn.modelListUnavailable":
+    "Không có danh sách mô hình — nhập định danh ở trên", // No model list available — type an identifier above
   "spawn.launch": "Khởi chạy",
   "spawn.remaining": (n: number) => `Còn ${n} yêu cầu đang chờ`,
   "spawn.notifyTitle": "Phiên được tạo đang chờ xác nhận",
@@ -191,14 +209,16 @@ const vi: typeof en = {
   "tree.openWorktreeDir": "Mở thư mục worktree",
   "tree.deleteWorktreeMenu": "Xóa worktree…",
   "tree.deleteWorktreeTitle": "Xóa worktree",
-  "tree.deleteWorktreeBody": "Chọn một worktree để xóa. Thư mục làm việc của nó sẽ bị xóa khỏi ổ đĩa.",
+  "tree.deleteWorktreeBody":
+    "Chọn một worktree để xóa. Thư mục làm việc của nó sẽ bị xóa khỏi ổ đĩa.",
   "tree.deleteWorktreePlaceholder": "Chọn một worktree…",
   "tree.deleteWorktreeForce": "Buộc xóa (hủy thay đổi chưa commit)",
   "tree.convertToNormalSession": "Chuyển thành phiên thường",
   "tree.moveGroupToWorktree": "Chuyển sang worktree…",
   "tree.convertToNormalGroup": "Chuyển thành nhóm thường",
   "merge.title": "Hợp nhất nhánh",
-  "merge.desc": "Chọn nhánh nguồn và nhánh đích; nhánh nguồn sẽ được hợp nhất vào nhánh đích.",
+  "merge.desc":
+    "Chọn nhánh nguồn và nhánh đích; nhánh nguồn sẽ được hợp nhất vào nhánh đích.",
   "merge.notRepo": "Thư mục của phiên này không phải kho Git.",
   "merge.loadingBranches": "Đang tải nhánh…",
   "merge.loadingDiff": "Đang tải khác biệt…",
@@ -206,7 +226,8 @@ const vi: typeof en = {
   "merge.targetLabel": "Nhánh đích",
   "merge.selectBranch": "Chọn nhánh…",
   "merge.swap": "Đảo hướng",
-  "merge.pickHint": "Chọn cả hai nhánh để xem trước các thay đổi được hợp nhất.",
+  "merge.pickHint":
+    "Chọn cả hai nhánh để xem trước các thay đổi được hợp nhất.",
   "merge.changes": (target: string) => `Thay đổi được đưa vào “${target}”`,
   "merge.noChanges": "Không có thay đổi tệp.",
   "merge.sameBranch": "Nhánh nguồn và đích giống nhau.",
@@ -223,7 +244,8 @@ const vi: typeof en = {
   "merge.apply": "Hợp nhất",
   "merge.commitAndApply": "Commit và hợp nhất",
   "merge.working": "Đang hợp nhất…",
-  "merge.doneMsg": (source: string, target: string) => `Đã hợp nhất “${source}” vào “${target}”.`,
+  "merge.doneMsg": (source: string, target: string) =>
+    `Đã hợp nhất “${source}” vào “${target}”.`,
   "merge.conflictMsg": (target: string) =>
     `Hợp nhất bị xung đột. Hãy xử lý trong terminal của worktree “${target}”, rồi commit:`,
   "merge.close": "Đóng",
@@ -290,7 +312,8 @@ const vi: typeof en = {
   "settings.scGlobalSearch": "Tìm mọi phiên",
   "settings.scSaveDoc": "Lưu tài liệu",
   "settings.scRecording": "Nhấn phím…",
-  "settings.scHint": "Nhấp vào phím tắt, rồi nhấn tổ hợp mới (bắt buộc Cmd/Ctrl).",
+  "settings.scHint":
+    "Nhấp vào phím tắt, rồi nhấn tổ hợp mới (bắt buộc Cmd/Ctrl).",
   "settings.scReset": "Khôi phục mặc định",
   "settings.scConflict": (label: string) => `Đã được dùng bởi “${label}”`,
 
@@ -333,7 +356,7 @@ const vi: typeof en = {
     "Thiết bị bị chặn sẽ mất kết nối và không thể kết nối lại (cần liên kết ghép đôi mới). Các thiết bị khác không bị ảnh hưởng.",
   "remote.devicesEmpty": "Chưa có thiết bị ghép đôi",
   "remote.autoRestartHint":
-    "Truy cập từ xa sẽ tự khởi động lại khi mở lại ứng dụng. \"Dừng máy chủ\" sẽ tắt tính năng này.", // Remote access restarts automatically when the app is reopened. Stop Server turns this off.
+    'Truy cập từ xa sẽ tự khởi động lại khi mở lại ứng dụng. "Dừng máy chủ" sẽ tắt tính năng này.', // Remote access restarts automatically when the app is reopened. Stop Server turns this off.
   "remote.autostartFailed": "Tự động khởi động thất bại:", // Automatic start failed:
   "remote.mirror": "Đồng bộ bố cục giữa các thiết bị", // Mirror layout across devices
   "remote.mirrorHint":
@@ -350,7 +373,8 @@ const vi: typeof en = {
   "connect.stagePreparing": "Đang chuẩn bị máy chủ…",
   "connect.stageTransferring": "Đang truyền máy chủ…",
   "connect.stageStarting": "Đang khởi động máy chủ…",
-  "connect.sshFingerprintLabel": (kt: string) => `Dấu vân tay khóa máy chủ SSH (${kt})`,
+  "connect.sshFingerprintLabel": (kt: string) =>
+    `Dấu vân tay khóa máy chủ SSH (${kt})`,
   "connect.sshHostNew":
     "Đây là lần đầu kết nối tới máy chủ này — hãy xác minh dấu vân tay trước khi tiếp tục.",
   "connect.sshHostChanged":
@@ -414,6 +438,17 @@ const vi: typeof en = {
   "tree.closeScratch": "Đóng bản nháp",
   "tree.importProject": "Nhập dự án",
   "tree.createProject": "Tạo dự án",
+  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  "tree.newCollection": "Bộ sưu tập mới",
+  "tree.deleteCollection": "Xóa bộ sưu tập",
+  "collection.title": "Bộ sưu tập mới",
+  "collection.name": "Tên bộ sưu tập",
+  "collection.namePlaceholder": "research",
+  "collection.submit": "Tạo bộ sưu tập",
+  "collection.tag": "Không có thư mục",
+  "collection.deleteTitle": "Xóa bộ sưu tập",
+  "collection.deleteBody": (name) =>
+    `Xóa bộ sưu tập "${name}"? Mọi nhóm và phiên bên trong cũng bị xóa. Không thể hoàn tác.`,
   "tree.cloneProject": "Sao chép từ Git",
   "createProject.title": "Tạo dự án",
   "createProject.name": "Tên dự án",
@@ -445,7 +480,8 @@ const vi: typeof en = {
   "clone.stageFinalizing": "Đang hoàn tất…",
   "clone.stageImporting": "Đang nhập dự án…",
   "clone.elapsed": (seconds: number) => `Đã qua ${seconds} giây`,
-  "clone.slowHint": "Không có tiến độ trong 30 giây. Hãy kiểm tra mạng hoặc proxy của máy từ xa; bạn có thể hủy rồi thử lại.",
+  "clone.slowHint":
+    "Không có tiến độ trong 30 giây. Hãy kiểm tra mạng hoặc proxy của máy từ xa; bạn có thể hủy rồi thử lại.",
   "clone.submit": "Sao chép",
   "tree.globalSearch": "Tìm mọi phiên",
   "tree.archivedSessions": "Phiên đã lưu trữ",
@@ -509,14 +545,19 @@ const vi: typeof en = {
   "tree.cwdLabel": "Thư mục làm việc (để trống để dùng gốc dự án)",
   "tree.initCmdLabel": "Lệnh khởi động (tùy chọn)",
   "tree.agentArgsLabel": "Đối số khởi chạy (tùy chọn)",
+  // Working directory / Leave empty for the default
+  "tree.workingDirLabel": "Thư mục làm việc",
+  "tree.workingDirPlaceholder": "Để trống để dùng mặc định",
   "preset.execPathLabel": "Tệp thực thi (tùy chọn)",
   "preset.execPathPlaceholder": "/usr/local/bin/claude",
-  "preset.execPathHint": "Để trống để dùng lệnh đã cấu hình của tác nhân. Điền vào để chỉ phiên này chạy một bản thay thế tương thích.",
+  "preset.execPathHint":
+    "Để trống để dùng lệnh đã cấu hình của tác nhân. Điền vào để chỉ phiên này chạy một bản thay thế tương thích.",
   "preset.saveLabel": "Lưu thành cấu hình sẵn",
   "preset.namePlaceholder": "Đặt tên cho cấu hình",
   "preset.iconChoose": "Chọn biểu tượng",
   "preset.iconClear": "Gỡ bỏ",
-  "preset.iconHint": "Ảnh vuông là tốt nhất; ảnh khác sẽ được cắt và thu về 64x64.",
+  "preset.iconHint":
+    "Ảnh vuông là tốt nhất; ảnh khác sẽ được cắt và thu về 64x64.",
   "tree.permissionSkipLabel": "Bỏ qua mọi xác nhận quyền",
   "tree.permissionSkipHint":
     "Khởi chạy với cờ bỏ qua của tác nhân này (vd. Claude --dangerously-skip-permissions; Codex cũng tắt sandbox). Áp dụng ở mọi lần khởi chạy — hãy thận trọng.",
@@ -575,9 +616,11 @@ const vi: typeof en = {
   "worktreeSel.loading": "Đang tải worktree…",
   "worktreeSel.empty": "Không có worktree sẵn có trong kho này.",
   "worktreeSel.loadFailed": "Không thể liệt kê worktree (không phải kho Git?).",
-  "group.worktreeHint": "Các phiên được tạo trong nhóm này mặc định sẽ dùng worktree này.",
+  "group.worktreeHint":
+    "Các phiên được tạo trong nhóm này mặc định sẽ dùng worktree này.",
   "worktree.moveGroupTitle": "Chuyển nhóm sang worktree",
-  "worktree.moveGroupHint": "Các phiên tạo trong nhóm này từ giờ sẽ dùng worktree này. Các phiên đã có vẫn giữ thư mục hiện tại.",
+  "worktree.moveGroupHint":
+    "Các phiên tạo trong nhóm này từ giờ sẽ dùng worktree này. Các phiên đã có vẫn giữ thư mục hiện tại.",
 
   // Lưu trữ và tìm kiếm
   "archive.title": "Phiên đã lưu trữ",
@@ -587,9 +630,11 @@ const vi: typeof en = {
   "archive.restore": "Khôi phục thành phiên thường",
   "archive.export": "Xuất toàn bộ ngữ cảnh dưới dạng Markdown",
   "archive.deleteForever": "Xóa vĩnh viễn (kèm bản ghi)",
-  "archive.pickOne": "Chọn một phiên đã lưu trữ bên trái để xem bản ghi hội thoại",
+  "archive.pickOne":
+    "Chọn một phiên đã lưu trữ bên trái để xem bản ghi hội thoại",
   "archive.recordingEnd": "--- Hết bản ghi ---",
-  "archive.readRecordingFailed": (err: string) => `Không đọc được bản ghi: ${err}`,
+  "archive.readRecordingFailed": (err: string) =>
+    `Không đọc được bản ghi: ${err}`,
   "archive.searchRecording": "Tìm trong bản ghi…",
   "archive.searchTranscript": "Tìm trong bản ghi hội thoại…",
   "archive.searchPlaceholder": "Tìm nội dung đã lưu trữ…",
@@ -602,7 +647,8 @@ const vi: typeof en = {
   "archive.emptyTranscript": "Bản ghi hội thoại trống",
   "archive.loadingTranscript": "Đang tải bản ghi hội thoại…",
   "search.allPlaceholder": "Tìm trong nội dung của mọi phiên…",
-  "search.hint": "Tìm nội dung phiên. Phiên đã lưu trữ mặc định bị loại trừ — chọn “Bao gồm đã lưu trữ” để thêm chúng.",
+  "search.hint":
+    "Tìm nội dung phiên. Phiên đã lưu trữ mặc định bị loại trừ — chọn “Bao gồm đã lưu trữ” để thêm chúng.",
   "search.includeArchived": "Bao gồm đã lưu trữ",
   "search.includeArchivedHint": "Tìm cả phiên đã lưu trữ (mặc định tắt)",
   "search.searching": "Đang tìm…",
@@ -651,15 +697,19 @@ const vi: typeof en = {
   "browser.quickAccess": "Truy cập nhanh",
   "browser.loading": "Đang tải…",
   // Application-exit confirmation and dormant restored sessions.
-  "quit.title": "Thoát VelaTerm?",  // Quit VelaTerm?
-  "quit.body": "Mọi phiên terminal và agent đang chạy sẽ bị dừng.",  // Any running terminal and agent sessions will be stopped.
-  "quit.saveWorkspace": "Lưu không gian làm việc",  // Save workspace
-  "quit.saveWorkspaceHint": "Lần sau mở lại đúng các thẻ và khung chia này. Terminal được khôi phục nhưng không tự khởi động lại.",  // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
-  "quit.confirm": "Thoát",  // Quit
-  "dormant.body": "Đã khôi phục từ không gian làm việc đã lưu. Chưa có tiến trình nào chạy.",  // Restored from your saved workspace. No process is running yet.
-  "dormant.start": "Khởi động",  // Start
-  "overlimit.title": (max: number) => `Số thẻ duy trì nền vượt giới hạn (${max})`,
-  "overlimit.body": "Tất cả thẻ nền đang làm việc hoặc chờ bạn trả lời. Chọn một thẻ để kết thúc:",
+  "quit.title": "Thoát VelaTerm?", // Quit VelaTerm?
+  "quit.body": "Mọi phiên terminal và agent đang chạy sẽ bị dừng.", // Any running terminal and agent sessions will be stopped.
+  "quit.saveWorkspace": "Lưu không gian làm việc", // Save workspace
+  "quit.saveWorkspaceHint":
+    "Lần sau mở lại đúng các thẻ và khung chia này. Terminal được khôi phục nhưng không tự khởi động lại.", // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
+  "quit.confirm": "Thoát", // Quit
+  "dormant.body":
+    "Đã khôi phục từ không gian làm việc đã lưu. Chưa có tiến trình nào chạy.", // Restored from your saved workspace. No process is running yet.
+  "dormant.start": "Khởi động", // Start
+  "overlimit.title": (max: number) =>
+    `Số thẻ duy trì nền vượt giới hạn (${max})`,
+  "overlimit.body":
+    "Tất cả thẻ nền đang làm việc hoặc chờ bạn trả lời. Chọn một thẻ để kết thúc:",
   "overlimit.kill": "Kết thúc mục đã chọn",
   "overlimit.keep": "Tạm thời giữ lại",
   "overlimit.earliest": "sớm nhất",
@@ -671,7 +721,8 @@ const vi: typeof en = {
   "term.paste": "Dán",
   "term.pasteUseShortcut": "Dán (nhấn ⌘V)",
   "term.selectAll": "Chọn tất cả",
-  "term.autoCopied": (n: number) => `Đã tự sao chép ${n} ký tự · nhấn ⌘V để dán`,
+  "term.autoCopied": (n: number) =>
+    `Đã tự sao chép ${n} ký tự · nhấn ⌘V để dán`,
   "term.clear": "Xóa",
   "term.searchMenu": "Tìm kiếm…",
   "term.splitRight": "Chia sang phải",
@@ -680,8 +731,10 @@ const vi: typeof en = {
   "term.redraw": "Vẽ lại",
   "term.mirrorTooltip":
     "Đang phản chiếu (kích thước do máy khách khác điều khiển). Nhấp để đổi kích thước PTY theo cửa sổ này",
-  "term.mirrorBadge": (dims: string) => `⤢ Phản chiếu${dims} · nhấp để vừa cửa sổ`,
-  "term.mirrorBadgeMobile": (dims: string) => `⤢ Phản chiếu${dims} · vừa cửa sổ`,
+  "term.mirrorBadge": (dims: string) =>
+    `⤢ Phản chiếu${dims} · nhấp để vừa cửa sổ`,
+  "term.mirrorBadgeMobile": (dims: string) =>
+    `⤢ Phản chiếu${dims} · vừa cửa sổ`,
   "term.imgUploadFailed": (n: number, lastError: string) =>
     `Tải lên ${n} ảnh thất bại${lastError ? `: ${lastError}` : ""}`,
   "term.imgClipboardUnavailable":
@@ -697,7 +750,8 @@ const vi: typeof en = {
   "agentInstall.docs": "Tài liệu cài đặt",
   "agentInstall.needsNode": "Yêu cầu Node.js / npm",
   "agentInstall.afterInstall": "Sau khi cài:",
-  "agentInstall.pathSaved": (label: string) => `Đường dẫn tệp thực thi ${label} đã được lưu vào Cài đặt:`,
+  "agentInstall.pathSaved": (label: string) =>
+    `Đường dẫn tệp thực thi ${label} đã được lưu vào Cài đặt:`,
   "agentInstall.doneTitle": (label: string) => `Đã cài đặt ${label}`,
   "agentInstall.doneDesc": "Khởi chạy lại phiên này để bắt đầu sử dụng.",
   "agentInstall.restartNow": "Khởi chạy lại ngay",
@@ -744,10 +798,12 @@ const vi: typeof en = {
   "doc.closeTab": "Đóng thẻ",
   "doc.truncatedReadonly": (size: string) =>
     `Chỉ đọc: đang hiển thị 10 MB đầu của ${size}. Tính năng lưu bị tắt để tránh ghi đè phần còn lại.`,
-  "doc.imgLoading": (title: string, size: string) => `Đang tải ${title} (${size})…`,
+  "doc.imgLoading": (title: string, size: string) =>
+    `Đang tải ${title} (${size})…`,
   "doc.imgBeingWritten":
     "Tệp đang được ghi; tệp sẽ tự động tải lại khi ổn định.",
-  "doc.imgDecodeFailed": "Không thể hiển thị ảnh này (định dạng không hỗ trợ hoặc bị hỏng).",
+  "doc.imgDecodeFailed":
+    "Không thể hiển thị ảnh này (định dạng không hỗ trợ hoặc bị hỏng).",
   "doc.imgFit": "Vừa khung",
   "doc.imgActual": "1:1",
   "doc.exportPdf": "Xuất PDF",
@@ -805,22 +861,27 @@ const vi: typeof en = {
     `Thẻ được duy trì ở nền (giới hạn ${max}; thẻ không hoạt động cũ nhất tự động kết thúc khi vượt giới hạn)`,
   "statusbar.bgEvicted": (name: string) =>
     `Đã kết thúc thẻ nền: ${name} (vượt giới hạn duy trì)`,
-  "statusbar.webTooltip": (url: string) => `Đã bật truy cập từ xa qua trình duyệt: ${url}`,
+  "statusbar.webTooltip": (url: string) =>
+    `Đã bật truy cập từ xa qua trình duyệt: ${url}`,
   "statusbar.permAsk": "Quyền: Hỏi",
   "statusbar.permSkip": "Quyền: Bỏ qua",
   "statusbar.notifyOn": "Thông báo: Bật",
   "statusbar.notifyOff": "Thông báo: Tắt",
-  "statusbar.permTooltip": "Chế độ quyền của phiên này · nhấp để đổi (chỉ phiên này)",
+  "statusbar.permTooltip":
+    "Chế độ quyền của phiên này · nhấp để đổi (chỉ phiên này)",
   "statusbar.permMenuTitle": "Quyền của phiên này",
   "statusbar.permOptAsk": "Luôn hỏi (mặc định)",
-  "statusbar.permScopeHint": "Chỉ áp dụng cho phiên này. Để đặt mặc định chung, vào Cài đặt ▸ Tác nhân.",
-  "statusbar.permRestartMsg": "Quyền đã thay đổi. Phiên phải khởi động lại để áp dụng. Khởi động lại sẽ tiếp tục cuộc hội thoại hiện tại nhưng làm gián đoạn tác vụ đang chạy. Khởi động lại ngay?",
+  "statusbar.permScopeHint":
+    "Chỉ áp dụng cho phiên này. Để đặt mặc định chung, vào Cài đặt ▸ Tác nhân.",
+  "statusbar.permRestartMsg":
+    "Quyền đã thay đổi. Phiên phải khởi động lại để áp dụng. Khởi động lại sẽ tiếp tục cuộc hội thoại hiện tại nhưng làm gián đoạn tác vụ đang chạy. Khởi động lại ngay?",
   "statusbar.permRestartNow": "Khởi động lại ngay",
   "statusbar.permRestartLater": "Để sau",
   "statusbar.permScopeTitle": "Áp dụng cho?",
   "statusbar.permScopeSession": "Chỉ phiên này",
   "statusbar.permScopeGlobal": "Mặc định chung",
-  "statusbar.permScopeGlobalHint": "Áp dụng ngay cho phiên này và trở thành mặc định cho các phiên cùng loại trong tương lai (đồng bộ với Cài đặt).",
+  "statusbar.permScopeGlobalHint":
+    "Áp dụng ngay cho phiên này và trở thành mặc định cho các phiên cùng loại trong tương lai (đồng bộ với Cài đặt).",
 
   // Thanh dưới, thông báo và lỗi
   "bottombar.running": "Đang chạy",
@@ -843,9 +904,9 @@ const vi: typeof en = {
   "err.reload": "Tải lại",
   "err.uncaughtTitle": "Lỗi chưa được xử lý",
   "err.uncaughtDesc": "Thông tin bên dưới có thể giúp xác định vấn đề.",
-  "transport.noReplayInBrowser":
-    "Trình duyệt chưa hỗ trợ phát lại bản ghi",
-  "transport.imgUploadHttp": (status: number) => `Tải ảnh lên thất bại (${status})`,
+  "transport.noReplayInBrowser": "Trình duyệt chưa hỗ trợ phát lại bản ghi",
+  "transport.imgUploadHttp": (status: number) =>
+    `Tải ảnh lên thất bại (${status})`,
 
   // Đăng nhập, thư mục và kết nối
   "login.connecting": "Đang kết nối…",
@@ -856,10 +917,13 @@ const vi: typeof en = {
   "login.wrongPassword": "Sai mật khẩu",
   "login.rateLimited": "Quá nhiều lần thử. Vui lòng đợi một phút rồi thử lại.", // Too many attempts. Please wait a minute and try again.
   "login.failed": "Đăng nhập thất bại, vui lòng thử lại",
-  "login.pairingRequired": "Máy chủ này yêu cầu liên kết ghép đôi. Hãy mở liên kết từ bảng Truy cập từ xa của ứng dụng máy tính.",
-  "login.authFailed": "Xác thực thất bại. Hãy kiểm tra mật khẩu truy cập, hoặc mở liên kết ghép nối mới nếu liên kết đã được tạo lại.", // Authentication failed, check password or use a new pairing link
+  "login.pairingRequired":
+    "Máy chủ này yêu cầu liên kết ghép đôi. Hãy mở liên kết từ bảng Truy cập từ xa của ứng dụng máy tính.",
+  "login.authFailed":
+    "Xác thực thất bại. Hãy kiểm tra mật khẩu truy cập, hoặc mở liên kết ghép nối mới nếu liên kết đã được tạo lại.", // Authentication failed, check password or use a new pairing link
   "dir.title": "Chọn thư mục dự án",
-  "dir.pathPlaceholder": "Tìm kiếm hoặc nhập đường dẫn rồi nhấn Enter (hỗ trợ ~)",
+  "dir.pathPlaceholder":
+    "Tìm kiếm hoặc nhập đường dẫn rồi nhấn Enter (hỗ trợ ~)",
   "dir.up": "Lên một cấp",
   "dir.newFolder": "Thư mục mới",
   "dir.newFolderPlaceholder": "Tên thư mục",
@@ -897,9 +961,12 @@ const vi: typeof en = {
   "transport.wsDisconnected": "WebSocket đã ngắt kết nối",
   "transport.wsConnectFailed": "Kết nối WebSocket thất bại",
   "transport.cmdFailed": "Lệnh thất bại",
-  "transport.remoteCmdForbidden": (cmd: string) => `Lệnh không khả dụng cho máy khách từ xa: ${cmd}`, // Command not available to remote clients
-  "transport.remoteSettingForbidden": (key: string) => `Khóa cài đặt không thể ghi bởi máy khách từ xa: ${key}`, // Settings key not writable by remote clients
-  "transport.remotePathForbidden": (path: string) => `Máy khách từ xa không thể truy cập tệp trong thư mục dữ liệu của ứng dụng: ${path}`, // Remote clients cannot access files in the app data directory
+  "transport.remoteCmdForbidden": (cmd: string) =>
+    `Lệnh không khả dụng cho máy khách từ xa: ${cmd}`, // Command not available to remote clients
+  "transport.remoteSettingForbidden": (key: string) =>
+    `Khóa cài đặt không thể ghi bởi máy khách từ xa: ${key}`, // Settings key not writable by remote clients
+  "transport.remotePathForbidden": (path: string) =>
+    `Máy khách từ xa không thể truy cập tệp trong thư mục dữ liệu của ứng dụng: ${path}`, // Remote clients cannot access files in the app data directory
 
   // Trình soạn thảo WYSIWYG
   "crepe.placeholder": "Nhập văn bản hoặc nhấn / để mở menu chèn",
@@ -954,7 +1021,8 @@ const vi: typeof en = {
   "updater.retry": "Thử lại",
   "updater.downloadFailed": (err: string) => `Cập nhật thất bại: ${err}`,
   "updater.hide": "Ẩn",
-  "updater.hideHint": "Tiếp tục tải trong nền. Tiến trình vẫn hiển thị trên thanh trạng thái.",
+  "updater.hideHint":
+    "Tiếp tục tải trong nền. Tiến trình vẫn hiển thị trên thanh trạng thái.",
   "updater.downloadManually": "Tải xuống thủ công",
   "updater.downloadManuallyHint": "Mở trang tải xuống trong trình duyệt.",
   "updater.windowsNotice":

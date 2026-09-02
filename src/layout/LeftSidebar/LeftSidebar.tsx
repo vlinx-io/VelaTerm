@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ContextMenu, type MenuItem } from "../../components/ContextMenu";
+import { FormModal } from "../../components/FormModal";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
 import {
@@ -13,6 +14,8 @@ import {
 import { isWorktreeGone } from "../../hooks/useGitBranch";
 import {
   countByAgentState,
+  isVirtualProject,
+  projectRoot,
   type AgentState,
   type NodeKind,
 } from "../../types";
@@ -186,6 +189,7 @@ function SidebarTreePane({
   onActivate,
   onSplitDown,
   onClose,
+  onNewCollection,
   treeHandlers,
 }: {
   view: SidebarTreeView;
@@ -195,6 +199,7 @@ function SidebarTreePane({
   onActivate: () => void;
   onSplitDown: () => void;
   onClose: () => void;
+  onNewCollection: () => void;
   treeHandlers: Omit<TreeHandlers, "view" | "isPrimary">;
 }) {
   const t = useT();
@@ -250,6 +255,18 @@ function SidebarTreePane({
         <TreeScrollbar wrapRef={treeWrapRef} />
       </div>
       <div className="sidebar-tree-footer">
+        {/* Creation action, kept apart from the two view controls on the right. */}
+        <button
+          className="icon-btn sm sidebar-tree-new-collection"
+          title={t("tree.newCollection")}
+          aria-label={t("tree.newCollection")}
+          onClick={(event) => {
+            event.stopPropagation();
+            onNewCollection();
+          }}
+        >
+          <Icons.layers size={14} />
+        </button>
         <button
           className="icon-btn sm sidebar-tree-refresh"
           title={t("tree.refreshStatusFilter")}
@@ -370,6 +387,7 @@ export function LeftSidebar() {
   const shortcutOverrides = useTermStore((s) => s.shortcutOverrides);
   const width = useTermStore((s) => s.leftWidth);
   const importProject = useTermStore((s) => s.importProject);
+  const addVirtualProject = useTermStore((s) => s.addVirtualProject);
   const setCloneModalOpen = useTermStore((s) => s.setCloneModalOpen);
   const renameNode = useTermStore((s) => s.renameNode);
   const openSession = useTermStore((s) => s.openSession);
@@ -393,8 +411,12 @@ export function LeftSidebar() {
   const setArchiveOpen = useTermStore((s) => s.setArchiveOpen);
   const globalSearchOpen = useTermStore((s) => s.globalSearchOpen);
   const setGlobalSearchOpen = useTermStore((s) => s.setGlobalSearchOpen);
-  const hasNotifications = useTermStore((s) => Object.keys(s.notifications).length > 0);
-  const clearAllNotifications = useTermStore((s) => s.clearAllNotifications);
+  // Mirror what the Dock badge counts, not just the session dots: when an unanswered spawn card is the
+  // only thing left, the badge shows a number while the button that clears it stays hidden.
+  const hasBadges = useTermStore(
+    (s) => Object.keys(s.notifications).length + s.pendingSpawns.length > 0,
+  );
+  const clearAllBadges = useTermStore((s) => s.clearAllBadges);
 
   // Keep shallow component mocks and pre-migration in-memory states renderable while the store initializes.
   const views: SidebarTreeView[] = sidebarTreeViews?.length
@@ -469,6 +491,8 @@ export function LeftSidebar() {
     viewId: string;
   } | null>(null);
   const [renameVal, setRenameVal] = useState("");
+  // Name prompt for a collection; the sidebar owns it because the footer button has no node to hang a dialog on.
+  const [collectionOpen, setCollectionOpen] = useState(false);
   const startRename = (node: TreeNodeRef) => {
     const viewId = menu?.viewId ?? effectiveActiveViewId;
     setRenaming({ id: node.id, kind: node.kind, viewId });
@@ -574,6 +598,10 @@ export function LeftSidebar() {
     const rename: MenuItem = { label: t("common.rename"), onClick: () => startRename(node) };
 
     if (node.kind === "project") {
+      // A collection is stored as a project row but has no folder, so this menu names it a collection.
+      const virtual = isVirtualProject(
+        useTermStore.getState().projects.find((p) => p.id === node.projectId),
+      );
       // Match group layout: Session section (including persistent browser/Resume), then project actions.
       return [
         ...newSessionItems(node.projectId, null, null, { withBrowser: true }),
@@ -585,7 +613,7 @@ export function LeftSidebar() {
         buildMarkItem("project", node.id),
         rename,
         {
-          label: t("tree.removeProject"),
+          label: virtual ? t("tree.deleteCollection") : t("tree.removeProject"),
           danger: true,
           onClick: () => openDialog({ type: "confirmDelete", node, worktreePaths: [] }),
         },
@@ -596,9 +624,7 @@ export function LeftSidebar() {
       const st = useTermStore.getState();
       const group = st.groups.find((g) => g.id === node.id);
       const gitRepoDir =
-        group?.worktreePath ||
-        (st.projects.find((p) => p.id === node.projectId)?.rootPath ?? "").trim() ||
-        null;
+        group?.worktreePath || projectRoot(st.projects.find((p) => p.id === node.projectId));
       // Populate Git actions only for repository directories and pass the group ID to MergeModal. Omit
       // the entire section and separator when empty to avoid duplicate separators.
       const gitItems = buildGitItems({
@@ -614,10 +640,15 @@ export function LeftSidebar() {
         },
         // Move to Worktree binds the group to a worktree, new or existing, and re-points a group that already
         // has one. Sessions already in the group keep their own directory; later ones start in the worktree.
-        {
-          label: t("tree.moveGroupToWorktree"),
-          onClick: () => openDialog({ type: "moveGroupWorktree", groupId: node.id }),
-        },
+        // It needs a repository above the group, which a collection does not have.
+        ...(gitRepoDir
+          ? [
+              {
+                label: t("tree.moveGroupToWorktree"),
+                onClick: () => openDialog({ type: "moveGroupWorktree", groupId: node.id }),
+              },
+            ]
+          : []),
         // Convert to Regular Group appears only after the bound worktree directory is deleted. It clears
         // the binding; deleting a worktree and converting the group are separate operations.
         ...(isWorktreeGone(group?.worktreePath)
@@ -700,11 +731,11 @@ export function LeftSidebar() {
         <button className="icon-btn sm" title={t("tree.archivedSessions")} onClick={() => setArchiveOpen(true)}>
           <Icons.archive size={14} />
         </button>
-        {hasNotifications && (
+        {hasBadges && (
           <button
             className="icon-btn sm"
             title={t("tree.clearAllNotifications")}
-            onClick={clearAllNotifications}
+            onClick={clearAllBadges}
           >
             <Icons.bellOff size={13} />
           </button>
@@ -728,6 +759,7 @@ export function LeftSidebar() {
                 onActivate={() => setActiveTreeView?.(view.id)}
                 onSplitDown={() => splitTreeView?.("vertical", view.id)}
                 onClose={() => deleteTreeView?.(view.id)}
+                onNewCollection={() => setCollectionOpen(true)}
                 treeHandlers={{
                   onContext: (node, x, y) => {
                     setActiveTreeView?.(view.id);
@@ -770,6 +802,27 @@ export function LeftSidebar() {
           y={newSessionMenu.y}
           items={newSessionMenu.items}
           onClose={() => setNewSessionMenu(null)}
+        />
+      )}
+
+      {collectionOpen && (
+        <FormModal
+          title={t("collection.title")}
+          fields={[
+            {
+              key: "name",
+              label: t("collection.name"),
+              placeholder: t("collection.namePlaceholder"),
+              required: true,
+              autoFocus: true,
+            },
+          ]}
+          submitLabel={t("collection.submit")}
+          onCancel={() => setCollectionOpen(false)}
+          onSubmit={(values) => {
+            setCollectionOpen(false);
+            void addVirtualProject(values.name.trim());
+          }}
         />
       )}
 

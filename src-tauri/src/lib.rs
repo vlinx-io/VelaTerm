@@ -143,12 +143,15 @@ fn queue_open_project(app: &tauri::AppHandle, args: &[String], cwd: &str) {
 #[cfg(feature = "gui")]
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)] // window_label/session_id are used only by the macOS native channel.
+#[allow(dead_code)] // window_label/session_id are used only by the native notification channels.
 struct RemoteNotify {
     window_label: String,
     session_id: String,
     title: String,
     body: String,
+    /// Whether to play the system alert sound. Absent in older frontends, which default to silent.
+    #[serde(default)]
+    sound: bool,
 }
 
 /// Hidden Codex notify entry point that forwards event JSON to the local hook service and exits.
@@ -329,11 +332,16 @@ fn native_notify_auth_status() -> String {
 
 /// Request macOS notification permission and return authorization; non-macOS returns false.
 #[cfg(feature = "gui")]
+///
+/// Runs on the blocking pool: the macOS call waits for the user to answer the permission dialog, up to
+/// a minute. On the main thread that freezes every window until they click.
 #[tauri::command]
-fn native_notify_request_auth() -> bool {
+async fn native_notify_request_auth() -> bool {
     #[cfg(target_os = "macos")]
     {
-        notify_native::request_authorization()
+        tauri::async_runtime::spawn_blocking(notify_native::request_authorization)
+            .await
+            .unwrap_or(false)
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -483,6 +491,11 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 let settings_item = MenuItemBuilder::with_id("settings", "Settings…")
                     .accelerator("CmdOrCtrl+,")
                     .build(app)?;
+                // Manual way out of a Dock badge that outlived what raised it: an unread marker for a
+                // session that is gone, or a spawn card whose window closed before anyone answered it.
+                let clear_badges_item =
+                    MenuItemBuilder::with_id("clear-badges", "Clear Notification Badges")
+                        .build(app)?;
                 let install_vela_item = MenuItemBuilder::with_id(
                     "install-vela-command",
                     "Install 'vela' Command in PATH…",
@@ -503,6 +516,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                     .item(&check_update_item)
                     .separator()
                     .item(&settings_item)
+                    .item(&clear_badges_item)
                     .separator()
                     .item(&install_vela_item)
                     .item(&uninstall_vela_item)
@@ -562,7 +576,12 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                     let id = event.id().0.as_str();
                     match id {
                         // Forward custom application and terminal commands to the frontend.
-                        "settings" | "check-update" | "share" | "split-right" | "split-down" => {
+                        "settings"
+                        | "check-update"
+                        | "share"
+                        | "clear-badges"
+                        | "split-right"
+                        | "split-down" => {
                             // Deliver to the focused window only: remote SSH windows listen for
                             // menu://action natively, and a global emit would make every open window
                             // react to one menu click (e.g. splitting panes in all of them).
@@ -740,6 +759,11 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 });
             }
 
+            // One background poller keeps the account-usage snapshot fresh for every session, window,
+            // and browser client. It only touches providers whose account material exists on this
+            // machine, and honours the usage settings live.
+            agent::usage_store::start(AppCtx::Tauri(app.handle().clone()));
+
             // Install macOS session-aware notification click handling; unsupported builds skip it.
             #[cfg(target_os = "macos")]
             notify_native::install(app.handle().clone());
@@ -764,7 +788,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                         p.session_id.clone(),
                         p.title.clone(),
                         p.body.clone(),
-                        false, // RemoteNotify currently has no sound field; default to silent.
+                        p.sound,
                     );
                     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
                     let shown = false;
@@ -1361,6 +1385,10 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
         Err(e) => eprintln!("  remote access auto-start failed: {e}"),
     }
 
+    // Same account-usage poller as the desktop entry point: headless serves browser and mobile clients,
+    // which read the stored snapshot instead of querying providers themselves.
+    agent::usage_store::start(ctx.clone());
+
     println!("  press Ctrl+C (or send SIGTERM) to quit");
 
     // Wait for cross-platform Ctrl+C and Unix SIGTERM used by systemd stop.
@@ -1420,10 +1448,16 @@ mod tests {
 
     #[test]
     fn open_project_args_resolve_relative_path_and_reject_bad_arity() {
+        // The thread name is the test's full path (`tests::open_project_args_...`). Windows forbids `:`
+        // in file names, so using it verbatim failed with InvalidFilename before it could be created.
+        let thread = std::thread::current()
+            .name()
+            .unwrap_or("test")
+            .replace(':', "-");
         let base = std::env::temp_dir().join(format!(
             "vela-open-args-{}-{}",
             std::process::id(),
-            std::thread::current().name().unwrap_or("test")
+            thread
         ));
         let project = base.join("project");
         std::fs::create_dir_all(&project).unwrap();

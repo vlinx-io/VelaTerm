@@ -1,5 +1,6 @@
 //! Right-side Info tab: basic session details and uptime, model/context, Claude/Codex/Grok quotas,
-//! current-turn statistics, and process-tree CPU/memory usage at the bottom. Extracted from RightPanel;
+//! current-turn statistics, and a Resources section at the bottom holding this session's process-tree
+//! CPU/memory alongside whole-machine CPU, memory, and saturation. Extracted from RightPanel;
 //! usage helpers are private to this tab, while the shared KV row lives in parts.
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -10,24 +11,18 @@ import { useGitBranch } from "../../hooks/useGitBranch";
 import {
   agentContextInfo,
   agentTurnStats,
-  claudeUsage,
-  codexUsage,
-  grokUsage,
+  usageRefresh,
   type AgentContextInfo,
   type AgentTurnStats,
-  type ClaudeUsage,
-  type CodexUsage,
-  type GrokUsage,
+  type UsageProvider,
+  type UsageSnapshot,
 } from "../../ipc/commands";
-import { processStats, type ProcStats } from "../../ipc/info";
-import { effectiveStatus, type Session, type SessionKind } from "../../types";
+import { processStats, systemStats, type ProcStats, type SystemStats } from "../../ipc/info";
+import { type Session, type SessionKind } from "../../types";
 import { useTermStore } from "../../store/termStore";
 import { usageBrandIconEl } from "../../components/brandIcons";
 import { kindIconEl } from "../sessionViewers/sessionMeta";
 import { KV } from "./parts";
-
-/** Stop automatic quota reads after this many consecutive failures; manual refresh resets the breaker. */
-const USAGE_MAX_FAILS = 3;
 
 /** Format uptime as 12s, 4m 12s, 1h 3m, or 2d 5h. */
 function fmtUptime(ms: number): string {
@@ -56,21 +51,142 @@ function UptimeKV({ startedAt }: { startedAt: number | undefined }) {
   return <KV k="uptime" v={startedAt ? fmtUptime(now - startedAt) : "—"} />;
 }
 
-/** Resources leaf: sample CPU and memory for the session's PID tree every three seconds and rerender
- * only this section. `processStats` runs through desktop_call on the blocking thread pool. Polling
- * occurs only while this component is mounted and stops when the panel is hidden. */
+/** Color a 0-100 percentage by severity, matching the quota rows: red at 90%, yellow at 70%. */
+function loadTone(pct: number): "ok" | "warn" | "crit" {
+  if (pct >= 90) return "crit";
+  if (pct >= 70) return "warn";
+  return "ok";
+}
+
+/** Small inline bar that gives the system rows a shape to read at a glance instead of bare numbers. */
+function Meter({ pct, tone }: { pct: number; tone: "ok" | "warn" | "crit" }) {
+  const w = Math.max(0, Math.min(100, pct));
+  return (
+    <span className={`res-meter ${tone}`}>
+      <i style={{ width: `${w}%` }} />
+    </span>
+  );
+}
+
+/** KV row whose value is a meter plus text. The key column is fixed width so every bar in the group
+ * starts at the same x and the group reads as one small chart rather than four ragged rows. */
+function MeterKV({
+  k,
+  pct,
+  tone,
+  text,
+  title,
+}: {
+  k: string;
+  pct: number;
+  tone: "ok" | "warn" | "crit";
+  text: string;
+  title?: string;
+}) {
+  return (
+    <div className="kv meter" title={title}>
+      <span className="k">{k}</span>
+      <span className="v">
+        <Meter pct={pct} tone={tone} />
+        <span className="num">{text}</span>
+      </span>
+    </div>
+  );
+}
+
+/** Whole-machine rows. Which saturation signal appears is decided by the backend, not by sniffing the
+ * platform here: macOS sends the kernel's memory pressure level, Linux sends load averages. */
+function SystemRows({ sys }: { sys: SystemStats | null }) {
+  if (!sys) {
+    return (
+      <>
+        <KV k="cpu" v="—" />
+        <KV k="memory" v="—" />
+      </>
+    );
+  }
+  const memPct = sys.memTotal > 0 ? (sys.memUsed / sys.memTotal) * 100 : 0;
+  const level = sys.pressure === "critical" ? "crit" : sys.pressure === "warning" ? "warn" : "ok";
+  // On macOS the kernel's verdict outranks the used/total ratio, which reads alarmingly high there
+  // because compressed and cached pages count as used.
+  const memTone = sys.pressure ? level : loadTone(memPct);
+  // A load average equal to the core count means the machine is exactly saturated, so normalize by cores.
+  const load1Pct = sys.load && sys.cores > 0 ? (sys.load[0] / sys.cores) * 100 : 0;
+  return (
+    <>
+      <MeterKV
+        k="cpu"
+        pct={sys.cpu}
+        tone={loadTone(sys.cpu)}
+        text={`${sys.cpu.toFixed(0)}%`}
+        title={`${sys.cores} logical cores`}
+      />
+      <MeterKV
+        k="memory"
+        pct={memPct}
+        tone={memTone}
+        text={`${fmtBytes(sys.memUsed)} / ${fmtBytes(sys.memTotal)}`}
+      />
+      {sys.pressure && (
+        <MeterKV
+          k="pressure"
+          pct={sys.pressurePct ?? 0}
+          tone={level}
+          text={sys.pressurePct != null ? `${Math.round(sys.pressurePct)}% · ${sys.pressure}` : sys.pressure}
+          title="macOS memory pressure: the kernel's own level, with the share of memory it counts as unavailable"
+        />
+      )}
+      {sys.load && (
+        <MeterKV
+          k="load"
+          pct={load1Pct}
+          tone={loadTone(load1Pct)}
+          text={sys.load.map((n) => n.toFixed(2)).join("  ")}
+          title={`1 / 5 / 15 minute load average over ${sys.cores} cores`}
+        />
+      )}
+      {sys.swapTotal > 0 && sys.swapUsed > 0 && (
+        <MeterKV
+          k="swap"
+          pct={(sys.swapUsed / sys.swapTotal) * 100}
+          tone={loadTone((sys.swapUsed / sys.swapTotal) * 100)}
+          text={`${fmtBytes(sys.swapUsed)} / ${fmtBytes(sys.swapTotal)}`}
+        />
+      )}
+    </>
+  );
+}
+
+/** Resources leaf: sample this session's PID tree and the whole machine every three seconds and rerender
+ * only this section. Both calls run through desktop_call on the blocking thread pool. Polling occurs only
+ * while this component is mounted and stops when the panel is hidden.
+ *
+ * The two groups answer different questions — "what is this session costing" and "how loaded is the box" —
+ * so they are labeled subgroups of one Resources section rather than two sections that would read as
+ * unrelated. For a remote session both describe the remote host, which is what the session actually runs on.
+ * The machine group is optional: users who only care about their own session hide it from the header
+ * checkbox, which also stops the machine-wide sampling.
+ */
 function ResourcesSection({ pid }: { pid: number | undefined }) {
   const [stats, setStats] = useState<ProcStats | null>(null);
+  const [sys, setSys] = useState<SystemStats | null>(null);
+  // Persisted per user, so the choice survives restarts and applies to every session's Info panel.
+  const showSystem = useTermStore((s) => s.showSystemResources);
+  const setShowSystem = useTermStore((s) => s.setShowSystemResources);
   useEffect(() => {
-    if (pid == null) {
-      setStats(null);
-      return;
-    }
     let cancelled = false;
-    const sample = () =>
-      processStats(pid)
-        .then((s) => !cancelled && setStats(s))
-        .catch(() => !cancelled && setStats(null));
+    const sample = () => {
+      if (pid == null) setStats(null);
+      else
+        processStats(pid)
+          .then((s) => !cancelled && setStats(s))
+          .catch(() => !cancelled && setStats(null));
+      // Hiding the group also stops sampling the machine: the rows are the only consumer of this call.
+      if (showSystem)
+        systemStats()
+          .then((s) => !cancelled && setSys(s))
+          .catch(() => !cancelled && setSys(null));
+    };
     sample();
     // Three seconds still appears live to users while reducing sampling cost by one-third versus 2s.
     const t = setInterval(sample, 3000);
@@ -78,13 +194,30 @@ function ResourcesSection({ pid }: { pid: number | undefined }) {
       cancelled = true;
       clearInterval(t);
     };
-  }, [pid]);
+  }, [pid, showSystem]);
 
   return (
     <div className="insp-section">
-      <h4>Resources</h4>
+      <h4 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span>Resources</span>
+        <label className="res-toggle" title="Show whole-machine CPU, memory, and saturation">
+          <input
+            type="checkbox"
+            checked={showSystem}
+            onChange={(e) => setShowSystem(e.target.checked)}
+          />
+          system
+        </label>
+      </h4>
+      <div className="res-sub">this session</div>
       <KV k="cpu" v={stats ? `${stats.cpu.toFixed(1)}%` : "—"} />
       <KV k="memory" v={stats ? fmtBytes(stats.rssBytes) : "—"} />
+      {showSystem && (
+        <>
+          <div className="res-sub">system</div>
+          <SystemRows sys={sys} />
+        </>
+      )}
     </div>
   );
 }
@@ -181,18 +314,8 @@ function UsageRow({
   );
 }
 
-/** Placeholder for loading or failed quota reads, with the full error on hover. Once the circuit
- * breaker stops automatic refresh, prompt the user to click refresh while retaining the error tooltip. */
-function UsageHint({
-  busy,
-  err,
-  gaveUp,
-}: {
-  busy: boolean;
-  err: string | null;
-  gaveUp: boolean;
-}) {
-  const note = gaveUp ? "auto-refresh paused · click ↻ to retry" : err;
+/** Placeholder for a quota the backend has not read yet or could not read, with the full error on hover. */
+function UsageHint({ busy, err }: { busy: boolean; err: string | null }) {
   return (
     <div className="kv">
       <span className="k" style={{ color: "var(--text-faint)" }}>
@@ -211,10 +334,78 @@ function UsageHint({
             whiteSpace: "nowrap",
           }}
         >
-          {note}
+          {err}
         </span>
       )}
     </div>
+  );
+}
+
+/**
+ * "Fable 5" / "Claude Opus 4.8" -> "fable" / "opus": the family name only, matching the existing
+ * "7d · opus" row label. The API sends display names with or without the "Claude " prefix, so drop it
+ * before taking the first word, or every model would come out labelled "claude".
+ */
+function modelShortName(display: string): string {
+  const name = display.trim().replace(/^claude\s+/i, "");
+  return name.split(/\s+/)[0]?.toLowerCase() || display.trim().toLowerCase();
+}
+
+/** Rows for one provider's stored reading, or null when it holds no window worth showing yet. */
+function usageRows(provider: UsageProvider, snap: UsageSnapshot | null): React.ReactNode {
+  if (!snap) return null;
+  if (provider === "claude") {
+    const u = snap.claude.data;
+    if (!u || (!u.fiveHour && !u.sevenDay)) return null;
+    return (
+      <>
+        {u.fiveHour && <UsageRow label="5h" pct={u.fiveHour.utilization} reset={u.fiveHour.resetsAt} />}
+        {u.sevenDay && <UsageRow label="7d" pct={u.sevenDay.utilization} reset={u.sevenDay.resetsAt} />}
+        {u.sevenDayOpus && (
+          <UsageRow label="7d · opus" pct={u.sevenDayOpus.utilization} reset={u.sevenDayOpus.resetsAt} />
+        )}
+        {(u.modelWeekly ?? [])
+          .filter((w) => !(u.sevenDayOpus && modelShortName(w.model) === "opus"))
+          .map((w) => (
+            <UsageRow
+              key={w.model}
+              label={`7d · ${modelShortName(w.model)}`}
+              pct={w.utilization}
+              reset={w.resetsAt}
+            />
+          ))}
+      </>
+    );
+  }
+  if (provider === "codex") {
+    const u = snap.codex.data;
+    if (!u || (!u.primary && !u.secondary)) return null;
+    return (
+      <>
+        {u.primary && (
+          <UsageRow
+            label={codexWindowLabel(u.primary.windowMinutes)}
+            pct={u.primary.usedPercent}
+            reset={u.primary.resetsAt}
+          />
+        )}
+        {u.secondary && (
+          <UsageRow
+            label={codexWindowLabel(u.secondary.windowMinutes)}
+            pct={u.secondary.usedPercent}
+            reset={u.secondary.resetsAt}
+          />
+        )}
+      </>
+    );
+  }
+  const u = snap.grok.data;
+  if (!u) return null;
+  return (
+    <>
+      <UsageRow label={u.windowLabel || "7d"} pct={u.usedPercent} reset={u.periodEnd} />
+      {u.buildPercent != null && <UsageRow label="build" pct={u.buildPercent} />}
+    </>
   );
 }
 
@@ -226,11 +417,16 @@ function providerLabel(kind: SessionKind): string {
 }
 
 /** Quota section with a Usage title, branded source matching sidebar colors, refresh countdown, and
- * refresh button. Keep the last-updated time in a tooltip to preserve a compact layout. */
+ * refresh button. Keep the last-updated time in a tooltip to preserve a compact layout.
+ *
+ * `error` set while rows are showing means the latest poll failed and the numbers are from `usageAt`;
+ * a stale marker says so, with the reason on hover, instead of letting old numbers pass as current. */
 function UsageSection({
   kind,
   usageAt,
   usageBusy,
+  error,
+  errorAt,
   refreshSec,
   spinTick,
   onRefresh,
@@ -239,6 +435,8 @@ function UsageSection({
   kind: SessionKind;
   usageAt: number | null;
   usageBusy: boolean;
+  error: string | null;
+  errorAt: number | null;
   refreshSec: number;
   spinTick: number;
   onRefresh: () => void;
@@ -246,9 +444,15 @@ function UsageSection({
 }) {
   // Keep the one-second countdown tick local so only this section rerenders.
   const now = useNowTick();
+  // Count down from the last attempt, not the last success: a failing poller still retries on schedule.
+  const lastAttempt = Math.max(usageAt ?? 0, errorAt ?? 0) || null;
   const nextLeft =
-    usageAt != null && refreshSec > 0 ? Math.max(0, usageAt + refreshSec * 1000 - now) : null;
+    lastAttempt != null && refreshSec > 0 ? Math.max(0, lastAttempt + refreshSec * 1000 - now) : null;
   const tip = usageAt != null ? `Updated ${fmtUpdatedAt(usageAt)}` : "Refresh";
+  const stale = error != null && usageAt != null;
+  const staleTip = stale
+    ? `Refresh failed${errorAt != null ? ` at ${fmtUpdatedAt(errorAt)}` : ""}: ${error}\nShowing reading from ${fmtUpdatedAt(usageAt)}`
+    : "";
   return (
     <div className="insp-section">
       <h4 style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -272,6 +476,29 @@ function UsageSection({
           {usageBrandIconEl(kind, 11) ?? kindIconEl(kind, 11)}
           {providerLabel(kind)}
         </span>
+        {stale && (
+          <span
+            title={staleTip}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 3,
+              fontWeight: 600,
+              letterSpacing: 0.3,
+              textTransform: "none",
+              fontSize: 9,
+              lineHeight: 1.5,
+              padding: "1px 6px",
+              borderRadius: 999,
+              background: "color-mix(in srgb, var(--orange, #d8954a) 18%, transparent)",
+              color: "var(--orange, #d8954a)",
+              cursor: "help",
+            }}
+          >
+            <Icons.info size={10} />
+            stale
+          </span>
+        )}
         {nextLeft != null && (
           <span
             title={tip}
@@ -316,14 +543,12 @@ function UsageSection({
 
 export function InfoTab({ session, cwd }: { session: Session; cwd: string | null }) {
   const runtime = useTermStore((s) => s.runtimes[session.id]);
-  const display = effectiveStatus(runtime);
   const branch = useGitBranch(cwd);
   const isAgent = session.kind !== "terminal";
   const isClaude = session.kind === "claude";
   const isCodex = session.kind === "codex";
   const isGrok = session.kind === "grok";
   const hasContext = isClaude || isCodex || isGrok;
-  const hasUsage = isClaude || isCodex || isGrok;
 
   // Model/context usage comes from Claude/Codex transcripts or Grok session signals. Refresh on
   // session changes, work-state changes at turn end, and tool changes after each call.
@@ -375,154 +600,71 @@ export function InfoTab({ session, cwd }: { session: Session; cwd: string | null
     };
   }, [session.id, session.agentSessionId, hasContext, isClaude, agentState]);
 
-  // Account-level quotas: Claude/Grok use HTTP endpoints; Codex prefers live app-server then rollout.
-  const usageRefreshSec = useTermStore((s) => s.usageRefreshSec);
-  const [claudeUse, setClaudeUse] = useState<ClaudeUsage | null>(null);
-  const [codexUse, setCodexUse] = useState<CodexUsage | null>(null);
-  const [grokUse, setGrokUse] = useState<GrokUsage | null>(null);
+  // Account-level quotas come from the backend's single stored snapshot: one poller per machine keeps it
+  // fresh and broadcasts changes, so this panel only reads it. Which entry to show follows the session kind.
+  const usage = useTermStore((s) => s.usage);
+  const provider: UsageProvider | null = isClaude
+    ? "claude"
+    : isCodex
+      ? "codex"
+      : isGrok
+        ? "grok"
+        : null;
+  const entry = provider && usage ? usage[provider] : null;
+  const rows = provider ? usageRows(provider, usage) : null;
   const [usageBusy, setUsageBusy] = useState(false);
-  const [usageAt, setUsageAt] = useState<number | null>(null);
-  const [usageErr, setUsageErr] = useState<string | null>(null);
-  // Trip the breaker after USAGE_MAX_FAILS; success or manual refresh resets the failure count.
-  const [usageFail, setUsageFail] = useState(0);
-  const usageGaveUp = usageFail >= USAGE_MAX_FAILS;
   // Increment on refresh to remount the spinner and reliably restart its animation.
   const [spinTick, setSpinTick] = useState(0);
-  // Ignore late results from the previous session or an older overlapping refresh.
-  const usageRequestRef = useRef(0);
   const previousAgentStateRef = useRef(agentState);
+  const spinHoldRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Manual refresh: ask the backend to refetch this one provider now and bypass its short TTL cache. The
+  // updated snapshot reaches every client through `usage://changed`, this one included.
+  const refreshUsage = useCallback(() => {
+    if (!provider) return;
+    setSpinTick((n) => n + 1);
+    setUsageBusy(true);
+    // Keep the spinner visible for at least two rotations: a cached answer can return in milliseconds,
+    // which would otherwise look like nothing happened.
+    const start = Date.now();
+    void usageRefresh(provider, true)
+      .then((snap) => useTermStore.getState().setUsage(snap))
+      .catch(() => {})
+      .finally(() => {
+        if (spinHoldRef.current) clearTimeout(spinHoldRef.current);
+        spinHoldRef.current = setTimeout(
+          () => setUsageBusy(false),
+          Math.max(0, 1100 - (Date.now() - start)),
+        );
+      });
+  }, [provider]);
+
+  // The spinner hold above outlives a fast refresh, so drop it when the panel goes away rather than
+  // letting it set state on an unmounted component.
   useEffect(
     () => () => {
-      usageRequestRef.current += 1;
+      if (spinHoldRef.current) clearTimeout(spinHoldRef.current);
     },
     [],
   );
 
-  // Fetch quota from the source for this session type; force bypasses Claude/Grok backend caches.
-  const loadUsage = useCallback(
-    (force: boolean) => {
-      const request = ++usageRequestRef.current;
-      const isCurrent = () => usageRequestRef.current === request;
-      // Remount by spinTick and keep the spinner visible for at least two rotations. Claude can return
-      // in milliseconds and Codex almost instantly, making a single rotation imperceptible.
-      setSpinTick((n) => n + 1);
-      // Manual forced refresh resets the failure count and circuit breaker for another attempt.
-      if (force) setUsageFail(0);
-      const start = Date.now();
-      const stop = () => {
-        const wait = Math.max(0, 1100 - (Date.now() - start));
-        setTimeout(() => isCurrent() && setUsageBusy(false), wait);
-      };
-      if (isClaude) {
-        setUsageBusy(true);
-        claudeUsage(force)
-          .then((u) => {
-            if (!isCurrent()) return;
-            setClaudeUse(u);
-            setUsageAt(Date.now());
-            setUsageErr(null);
-            setUsageFail(0);
-          })
-          .catch((e) => {
-            if (!isCurrent()) return;
-            setClaudeUse(null);
-            setUsageErr(String(e));
-            setUsageFail((n) => n + 1);
-          })
-          .finally(stop);
-      } else if (isCodex) {
-        setUsageBusy(true);
-        // Show the local rollout snapshot first instead of making the panel wait for app-server startup/network.
-        // Then replace it with the authoritative live value. The backend live call still falls back to rollout,
-        // while preserving a snapshot already shown here if that second call fails transiently.
-        let localShown = false;
-        codexUsage(session.id)
-          .then((u) => {
-            if (!isCurrent()) return;
-            localShown = true;
-            setCodexUse(u);
-            setUsageAt(Date.now());
-            setUsageErr(null);
-            setUsageFail(0);
-          })
-          .catch(() => {})
-          .then(() => codexUsage(session.id, true))
-          .then((u) => {
-            if (!isCurrent()) return;
-            setCodexUse(u);
-            setUsageAt(Date.now());
-            setUsageErr(null);
-            setUsageFail(0);
-          })
-          .catch((e) => {
-            if (!isCurrent()) return;
-            if (!localShown) setCodexUse(null);
-            setUsageErr(String(e));
-            setUsageFail((n) => n + 1);
-          })
-          .finally(stop);
-      } else if (isGrok) {
-        setUsageBusy(true);
-        grokUsage(force)
-          .then((u) => {
-            if (!isCurrent()) return;
-            setGrokUse(u);
-            setUsageAt(Date.now());
-            setUsageErr(null);
-            setUsageFail(0);
-          })
-          .catch((e) => {
-            if (!isCurrent()) return;
-            setGrokUse(null);
-            setUsageErr(String(e));
-            setUsageFail((n) => n + 1);
-          })
-          .finally(stop);
-      }
-    },
-    [isClaude, isCodex, isGrok, session.id],
-  );
-
-  // On session or type changes, clear stale data from the other source, reset failures, and fetch now.
+  // Codex writes its final rate-limit snapshot just after the turn-end event, and a finished turn is
+  // exactly when the numbers moved. Reconcile once after that short write window instead of leaving the
+  // panel stale until the next poll, which is five minutes away by default.
   useEffect(() => {
-    if (!isClaude) setClaudeUse(null);
-    if (!isCodex) setCodexUse(null);
-    if (!isGrok) setGrokUse(null);
-    if (hasUsage) {
-      setUsageAt(null);
-      setUsageFail(0);
-      loadUsage(false);
-    }
-  }, [loadUsage, isClaude, isCodex, isGrok, hasUsage]);
+    const previous = previousAgentStateRef.current;
+    previousAgentStateRef.current = agentState;
+    if (!isCodex || previous !== "working" || agentState === "working") return;
+    const t = setTimeout(() => {
+      void usageRefresh("codex")
+        .then((snap) => useTermStore.getState().setUsage(snap))
+        .catch(() => {});
+    }, 750);
+    return () => clearTimeout(t);
+  }, [agentState, isCodex]);
 
-  // Schedule refresh only for positive intervals. Backend caching protects Claude/Grok limits; stop after trip.
-  useEffect(() => {
-    if (!hasUsage || usageRefreshSec <= 0 || usageGaveUp) return;
-    const t = setInterval(() => loadUsage(false), usageRefreshSec * 1000);
-    return () => clearInterval(t);
-  }, [loadUsage, hasUsage, usageRefreshSec, usageGaveUp]);
-
-  // Codex local reads are unthrottled, so refresh immediately on turn/tool changes unless tripped. A local read
-  // failure is not an account-endpoint failure and must not trip the automatic-refresh circuit breaker.
-  useEffect(() => {
-    if (!isCodex || usageGaveUp) return;
-    let cancelled = false;
-    codexUsage(session.id)
-      .then((u) => {
-        if (cancelled) return;
-        setCodexUse(u);
-        setUsageAt(Date.now());
-        setUsageErr(null);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [isCodex, session.id, agentState, currentTool, usageGaveUp]);
-
-  // Grok signals.json updates as the turn progresses; reread context when tools/state change without
-  // re-hitting the rate-limited billing endpoint (account usage still follows usageRefreshSec).
+  // Grok signals.json updates as the turn progresses; reread context when tools/state change. Account
+  // usage is untouched here — that stays with the backend poller.
   useEffect(() => {
     if (!isGrok || !session.agentSessionId) return;
     let cancelled = false;
@@ -536,17 +678,6 @@ export function InfoTab({ session, cwd }: { session: Session; cwd: string | null
     };
   }, [isGrok, session.id, session.agentSessionId, agentState, currentTool]);
 
-  // Codex can emit its turn-end lifecycle event just before the final token_count snapshot reaches the rollout.
-  // Reconcile once after that short write window so a missed local read does not remain stale until the next
-  // configured interval (five minutes by default).
-  useEffect(() => {
-    const previous = previousAgentStateRef.current;
-    previousAgentStateRef.current = agentState;
-    if (!isCodex || previous !== "working" || agentState === "working" || usageGaveUp) return;
-    const t = setTimeout(() => loadUsage(false), 750);
-    return () => clearTimeout(t);
-  }, [agentState, isCodex, loadUsage, usageGaveUp]);
-
   // `started` is the process start time. Leaf components own their one-second ticks so InfoTab does
   // not rerender as a whole every second.
   const startedAt = runtime?.startedAt;
@@ -556,8 +687,6 @@ export function InfoTab({ session, cwd }: { session: Session; cwd: string | null
       <div className="insp-section">
         <h4>{isAgent ? "Agent" : "Process"}</h4>
         <KV k="session" v={session.name} />
-        <KV k="type" v={isAgent ? "code agent" : "shell"} />
-        <KV k="status" v={display} />
         <KV k="cwd" v={cwd || "—"} />
         <KV k="branch" v={branch || "—"} accent />
         {isAgent ? (
@@ -588,92 +717,18 @@ export function InfoTab({ session, cwd }: { session: Session; cwd: string | null
         </div>
       )}
 
-      {isClaude && (
+      {provider && (
         <UsageSection
           kind={session.kind}
-          usageAt={usageAt}
+          usageAt={entry?.fetchedAt ?? null}
           usageBusy={usageBusy}
-          refreshSec={usageRefreshSec}
+          error={entry?.error ?? null}
+          errorAt={entry?.errorAt ?? null}
+          refreshSec={usage?.auto ? usage.intervalSec : 0}
           spinTick={spinTick}
-          onRefresh={() => loadUsage(true)}
+          onRefresh={refreshUsage}
         >
-          {claudeUse && (claudeUse.fiveHour || claudeUse.sevenDay) ? (
-            <>
-              {claudeUse.fiveHour && (
-                <UsageRow label="5h" pct={claudeUse.fiveHour.utilization} reset={claudeUse.fiveHour.resetsAt} />
-              )}
-              {claudeUse.sevenDay && (
-                <UsageRow label="7d" pct={claudeUse.sevenDay.utilization} reset={claudeUse.sevenDay.resetsAt} />
-              )}
-              {claudeUse.sevenDayOpus && (
-                <UsageRow
-                  label="7d · opus"
-                  pct={claudeUse.sevenDayOpus.utilization}
-                  reset={claudeUse.sevenDayOpus.resetsAt}
-                />
-              )}
-            </>
-          ) : (
-            <UsageHint busy={usageBusy} err={usageErr} gaveUp={usageGaveUp} />
-          )}
-        </UsageSection>
-      )}
-
-      {isCodex && (
-        <UsageSection
-          kind={session.kind}
-          usageAt={usageAt}
-          usageBusy={usageBusy}
-          refreshSec={usageRefreshSec}
-          spinTick={spinTick}
-          onRefresh={() => loadUsage(true)}
-        >
-          {codexUse && (codexUse.primary || codexUse.secondary) ? (
-            <>
-              {codexUse.primary && (
-                <UsageRow
-                  label={codexWindowLabel(codexUse.primary.windowMinutes)}
-                  pct={codexUse.primary.usedPercent}
-                  reset={codexUse.primary.resetsAt}
-                />
-              )}
-              {codexUse.secondary && (
-                <UsageRow
-                  label={codexWindowLabel(codexUse.secondary.windowMinutes)}
-                  pct={codexUse.secondary.usedPercent}
-                  reset={codexUse.secondary.resetsAt}
-                />
-              )}
-            </>
-          ) : (
-            <UsageHint busy={usageBusy} err={usageErr} gaveUp={usageGaveUp} />
-          )}
-        </UsageSection>
-      )}
-
-      {isGrok && (
-        <UsageSection
-          kind={session.kind}
-          usageAt={usageAt}
-          usageBusy={usageBusy}
-          refreshSec={usageRefreshSec}
-          spinTick={spinTick}
-          onRefresh={() => loadUsage(true)}
-        >
-          {grokUse ? (
-            <>
-              <UsageRow
-                label={grokUse.windowLabel || "7d"}
-                pct={grokUse.usedPercent}
-                reset={grokUse.periodEnd}
-              />
-              {grokUse.buildPercent != null && (
-                <UsageRow label="build" pct={grokUse.buildPercent} />
-              )}
-            </>
-          ) : (
-            <UsageHint busy={usageBusy} err={usageErr} gaveUp={usageGaveUp} />
-          )}
+          {rows ?? <UsageHint busy={usageBusy} err={entry?.error ?? null} />}
         </UsageSection>
       )}
 

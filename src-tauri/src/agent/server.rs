@@ -1043,19 +1043,22 @@ mod tests {
         (dir, name, abs)
     }
 
+    /// Build a /view request body with serde_json so paths are escaped. Hand-written JSON broke on
+    /// Windows: a raw `C:\Users\...` turns `\U` into an invalid escape and the body fails to parse.
+    fn view_body(session_id: &str, path: &str, cwd: &str) -> String {
+        serde_json::json!({ "sessionId": session_id, "path": path, "cwd": cwd }).to_string()
+    }
+
     #[test]
     fn parse_view_resolves_relative_path_against_cwd() {
         let (dir, name, abs) = view_fixture("rel");
-        let body = format!(
-            r#"{{"sessionId":"s1","path":"{name}","cwd":"{}"}}"#,
-            dir.display()
-        );
+        let body = view_body("s1", &name, &dir.to_string_lossy());
         let req = parse_view("/view?t=tok", &body, "tok").expect("a relative path should resolve against cwd");
         assert_eq!(req.session_id, "s1");
         assert_eq!(req.path, abs, "the canonicalized absolute path should be returned");
 
         // Use absolute paths directly without joining cwd.
-        let body_abs = format!(r#"{{"sessionId":"s1","path":"{abs}","cwd":"/elsewhere"}}"#);
+        let body_abs = view_body("s1", &abs, "/elsewhere");
         let req2 = parse_view("/view?t=tok", &body_abs, "tok").unwrap();
         assert_eq!(req2.path, abs);
         let _ = std::fs::remove_dir_all(&dir);
@@ -1083,25 +1086,16 @@ mod tests {
     #[test]
     fn parse_view_rejects_invalid() {
         let (dir, name, _abs) = view_fixture("invalid");
-        let good = format!(
-            r#"{{"sessionId":"s1","path":"{name}","cwd":"{}"}}"#,
-            dir.display()
-        );
+        let good = view_body("s1", &name, &dir.to_string_lossy());
         // Invalid token.
         assert!(parse_view("/view?t=wrong", &good, "tok").is_err());
         assert!(parse_view("/view", &good, "tok").is_err(), "missing token");
         // Missing file.
-        let missing = format!(
-            r#"{{"sessionId":"s1","path":"missing.md","cwd":"{}"}}"#,
-            dir.display()
-        );
+        let missing = view_body("s1", "missing.md", &dir.to_string_lossy());
         let err = parse_view("/view?t=tok", &missing, "tok").unwrap_err();
         assert!(err.contains("does not exist"), "got: {err}");
         // Path is a directory.
-        let isdir = format!(
-            r#"{{"sessionId":"s1","path":"{0}","cwd":"{0}"}}"#,
-            dir.display()
-        );
+        let isdir = view_body("s1", &dir.to_string_lossy(), &dir.to_string_lossy());
         let err = parse_view("/view?t=tok", &isdir, "tok").unwrap_err();
         assert!(err.contains("Not a regular file"), "got: {err}");
         // Missing/empty fields and invalid JSON.
@@ -1162,10 +1156,7 @@ mod tests {
 
         let (dir, name, abs) = view_fixture("http");
         let url = format!("http://127.0.0.1:{port}/view?t=tok");
-        let body = format!(
-            r#"{{"sessionId":"s9","path":"{name}","cwd":"{}"}}"#,
-            dir.display()
-        );
+        let body = view_body("s9", &name, &dir.to_string_lossy());
         assert_eq!(post_status(&url, &body), 200);
         let req = rx
             .recv_timeout(Duration::from_secs(3))
@@ -1174,10 +1165,7 @@ mod tests {
         assert_eq!(req.path, abs);
 
         // A missing file returns 404 and does not invoke the callback.
-        let missing = format!(
-            r#"{{"sessionId":"s9","path":"missing.md","cwd":"{}"}}"#,
-            dir.display()
-        );
+        let missing = view_body("s9", "missing.md", &dir.to_string_lossy());
         assert_eq!(post_status(&url, &missing), 404);
         assert!(
             rx.recv_timeout(Duration::from_millis(300)).is_err(),

@@ -33,6 +33,8 @@ import {
 } from "../hooks/useGitBranch";
 import { type SelNode, useTermStore } from "../store/termStore";
 import {
+  isVirtualProject,
+  projectRoot,
   type NodeKind,
   type Session,
   type SessionKind,
@@ -286,6 +288,24 @@ export function useSessionMenu(): SessionMenu {
     };
   };
 
+  /** Directory a worktree would be created from: the parent session's, the group's, then the project's. Null inside
+   *  a collection with no worktree above it, which is what hides the worktree entries. */
+  const worktreeRepoRoot = (
+    projectId: string,
+    groupId: string | null,
+    parentSessionId: string | null,
+  ): string | null => {
+    const st = useTermStore.getState();
+    const parent = parentSessionId ? st.sessions.find((s) => s.id === parentSessionId) : null;
+    const group = groupId ? st.groups.find((g) => g.id === groupId) : null;
+    return (
+      parent?.cwd ||
+      group?.worktreePath ||
+      projectRoot(st.projects.find((p) => p.id === projectId)) ||
+      null
+    );
+  };
+
   // Create/open immediately after kind selection, using an explicit name or generated Kind N and persisting agent arguments.
   const handleNewSession = async (
     projectId: string,
@@ -298,6 +318,8 @@ export function useSessionMenu(): SessionMenu {
       name?: string;
       agentArgs?: string;
       permissionMode?: string | null;
+      /** Explicit working directory from the launch dialog; empty/absent leaves the backend default. */
+      cwd?: string | null;
       /** Preset this session came from; display data only. */
       agentPresetId?: string | null;
       /** Executable overriding the kind's default, copied from a preset or typed by the user. */
@@ -366,9 +388,12 @@ export function useSessionMenu(): SessionMenu {
       permissionMode: rawPerm || null,
       agentPresetId: opts?.agentPresetId ?? null,
       agentPath: opts?.agentPath ?? null,
+      // A group worktree wins over a typed directory, because the session belongs to that worktree.
       ...(wt
         ? { cwd: wt.cwd, worktreePath: wt.worktreePath, worktreeBaseRef: wt.worktreeBaseRef }
-        : {}),
+        : opts?.cwd?.trim()
+          ? { cwd: opts.cwd.trim() }
+          : {}),
     });
     if (created) openSession(created.id);
   };
@@ -664,18 +689,23 @@ export function useSessionMenu(): SessionMenu {
       ],
     },
     // New Worktree Session shares the custom dialog but opens in new-worktree mode; users can change to existing/none.
-    {
-      label: t("tree.newWorktreeSession"),
-      icon: <Icons.branch size={14} />,
-      onClick: () =>
-        setDialog({
-          type: "newAgentSession",
-          projectId,
-          groupId,
-          parentSessionId,
-          initialWtMode: "new",
-        }),
-    },
+    // It needs a repository to branch from, so it is omitted inside a collection that has none.
+    ...(worktreeRepoRoot(projectId, groupId, parentSessionId)
+      ? [
+          {
+            label: t("tree.newWorktreeSession"),
+            icon: <Icons.branch size={14} />,
+            onClick: () =>
+              setDialog({
+                type: "newAgentSession",
+                projectId,
+                groupId,
+                parentSessionId,
+                initialWtMode: "new",
+              }),
+          } as MenuItem,
+        ]
+      : []),
     // Resume remains adjacent to creation actions in the Session section.
     {
       label: t("tree.resumeSession"),
@@ -1184,6 +1214,7 @@ export function useSessionMenu(): SessionMenu {
             agentArgs,
             permissionMode,
             worktree,
+            cwd,
             execPath,
             agentPresetId,
             savePreset,
@@ -1245,6 +1276,7 @@ export function useSessionMenu(): SessionMenu {
                   name,
                   agentArgs,
                   permissionMode,
+                  cwd,
                   agentPresetId: presetId,
                   agentPath: execPath,
                 },
@@ -1264,6 +1296,9 @@ export function useSessionMenu(): SessionMenu {
         <ConfirmDelete
           name={dialog.node.name}
           kind={dialog.node.kind}
+          collection={isVirtualProject(
+            useTermStore.getState().projects.find((p) => p.id === dialog.node.id),
+          )}
           worktreePaths={dialog.worktreePaths}
           onCancel={() => setDialog(null)}
           onConfirm={(removeWt) => {

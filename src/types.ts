@@ -48,6 +48,7 @@ export type NodeKind = "project" | "group" | "session";
 export interface Project {
   id: string;
   name: string;
+  /** Absolute project directory, or empty for a collection — a top-level container bound to no folder. */
   rootPath: string;
   color?: string | null;
   sortOrder: number;
@@ -55,6 +56,18 @@ export interface Project {
   /** Optional emoji marker shown before the name in the sidebar; see `Session.mark`. */
   mark?: string | null;
   createdAt: number;
+}
+
+/** The project's directory, or null when it is a collection. Use this instead of reading `rootPath` directly,
+ *  since a collection's empty string would otherwise flow into cwd, Git probes, and path labels. */
+export function projectRoot(p: Project | null | undefined): string | null {
+  const root = p?.rootPath?.trim();
+  return root ? root : null;
+}
+
+/** True for a collection: a top-level container with no folder behind it. */
+export function isVirtualProject(p: Project | null | undefined): boolean {
+  return !!p && !p.rootPath.trim();
 }
 
 export interface Group {

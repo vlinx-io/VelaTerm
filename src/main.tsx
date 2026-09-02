@@ -6,7 +6,8 @@ import "@fontsource/jetbrains-mono/500.css";
 import "@fontsource/jetbrains-mono/600.css";
 import "@fontsource/jetbrains-mono/700.css";
 import "@fontsource/jetbrains-mono/400-italic.css";
-// Embedded symbol fallback (U+23E9–23FA, about 1.5 KB) supplies media glyphs missing from JetBrains Mono.
+// Embedded symbol fallback (U+23E9–23FA, about 1.5 KB) supplies media glyphs missing from JetBrains Mono, and
+// box drawing / block elements (U+2500–259F) come from JetBrains Mono itself so they match the cell width.
 import "./styles/fonts.css";
 import "./styles/index.css";
 import App from "./App";

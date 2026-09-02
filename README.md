@@ -76,15 +76,14 @@ Other development modes:
 
 ```bash
 pnpm dev:web          # headless backend + Vite, driven from a normal browser
-pnpm dev:mobile       # same, with the mobile layout
 pnpm dev:electron     # the Electron shell instead of Tauri
 pnpm dev:ls           # list running dev instances
 pnpm dev:stop <label> # stop one instance by label
 ```
 
-Every dev instance picks a random port and carries a label, so several can run side by side. The web
-and mobile modes default to an isolated database under `.dev-data/`, leaving your real session tree
-untouched.
+Every dev instance picks a random port and carries a label, so several can run side by side. `dev:web`
+binds `0.0.0.0`, so it also prints a LAN address that another computer or a phone can open, and it
+defaults to an isolated database under `.dev-data/`, leaving your real session tree untouched.
 
 Build and test:
 

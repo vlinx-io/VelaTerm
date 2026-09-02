@@ -11,6 +11,7 @@ import {
   ptyWrite,
   resolveSpawn,
   type ShellOption,
+  type UsageSnapshot,
 } from "../ipc/commands";
 import {
   markSessionRead,
@@ -25,6 +26,7 @@ import { env } from "../platform";
 import { genId } from "../genId";
 import type { SpawnRequest, StatusSignal } from "../ipc/events";
 import type { MirrorLayout } from "./mirrorLayout";
+import type { RemoteClient } from "../ipc/mirror";
 import { whenFirstMirrorAlign } from "./mirrorAlign";
 import { notify } from "../notify";
 import type { ScreenDetection } from "../terminal/screenDetect";
@@ -100,10 +102,15 @@ import {
   type TermRenderer,
 } from "./settings";
 import { docKindOf, makeDocTab, type DocTab } from "./docTab";
+import { traceSplit, type SplitSource } from "./splitTrace";
 
 // Re-export the public API after moving implementations to settings/docTab, preserving existing import paths.
 export { DEFAULT_MAX_LIVE_TABS } from "./settings";
-export type { AgentDefaultConfig, ImagePasteMode, TermRenderer } from "./settings";
+export type {
+  AgentDefaultConfig,
+  ImagePasteMode,
+  TermRenderer,
+} from "./settings";
 export { docKindOf } from "./docTab";
 export type { DocKind, DocTab } from "./docTab";
 
@@ -134,12 +141,16 @@ function pickEvictTab(
     if (!pt) return false;
     return collectSessionIds(pt).some((sid) => {
       const st = effectiveStatus(runtimes[sid]);
-      return st === "working" || st === "asking" || st === "waiting" || sid in notifications;
+      return (
+        st === "working" ||
+        st === "asking" ||
+        st === "waiting" ||
+        sid in notifications
+      );
     });
   };
   return liveTabs.find((tid) => !isActive(tid)) ?? null;
 }
-
 
 /** Local-storage key for frontend-only tab, split, and activation layout. */
 const LAYOUT_KEY = "vlx-layout";
@@ -233,10 +244,13 @@ function loadStatusFilter(candidate: unknown): AgentState[] | null {
 
 /** Restore the ID snapshot captured when a status filter was switched on. */
 function loadIdSnapshot(candidate: unknown): Record<string, true> | null {
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate))
+    return null;
   const out: Record<string, true> = {};
   let count = 0;
-  for (const [id, value] of Object.entries(candidate as Record<string, unknown>)) {
+  for (const [id, value] of Object.entries(
+    candidate as Record<string, unknown>,
+  )) {
     if (value !== true || !id) continue;
     out[id.slice(0, 100)] = true;
     if (++count >= SIDEBAR_VIEW_MAP_LIMIT) break;
@@ -246,11 +260,16 @@ function loadIdSnapshot(candidate: unknown): Record<string, true> | null {
 }
 
 /** Restore a per-view collapse map, dropping anything that is not an explicit boolean. */
-function loadCollapsedOverrides(candidate: unknown): Record<string, boolean> | null {
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+function loadCollapsedOverrides(
+  candidate: unknown,
+): Record<string, boolean> | null {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate))
+    return null;
   const out: Record<string, boolean> = {};
   let count = 0;
-  for (const [id, value] of Object.entries(candidate as Record<string, unknown>)) {
+  for (const [id, value] of Object.entries(
+    candidate as Record<string, unknown>,
+  )) {
     if (typeof value !== "boolean" || !id) continue;
     out[id.slice(0, 100)] = value;
     if (++count >= SIDEBAR_VIEW_MAP_LIMIT) break;
@@ -267,7 +286,8 @@ function loadSidebarPane(
 ): SidebarViewPaneNode | null {
   if (!candidate || typeof candidate !== "object") return null;
   const node = candidate as Partial<SidebarViewPaneNode>;
-  const paneId = typeof node.paneId === "string" ? node.paneId.slice(0, 100) : "";
+  const paneId =
+    typeof node.paneId === "string" ? node.paneId.slice(0, 100) : "";
   if (!paneId || usedPaneIds.has(paneId)) return null;
   usedPaneIds.add(paneId);
   if (node.kind === "leaf") {
@@ -276,10 +296,18 @@ function loadSidebarPane(
     usedViewIds.add(viewId);
     return { kind: "leaf", paneId, viewId };
   }
-  if (node.kind !== "split" || (node.dir !== "horizontal" && node.dir !== "vertical")) return null;
-  const split = node as Partial<Extract<SidebarViewPaneNode, { kind: "split" }>>;
+  if (
+    node.kind !== "split" ||
+    (node.dir !== "horizontal" && node.dir !== "vertical")
+  )
+    return null;
+  const split = node as Partial<
+    Extract<SidebarViewPaneNode, { kind: "split" }>
+  >;
   const rawFirst = Array.isArray(split.sizes) ? Number(split.sizes[0]) : 50;
-  const first = Number.isFinite(rawFirst) ? Math.max(10, Math.min(90, rawFirst)) : 50;
+  const first = Number.isFinite(rawFirst)
+    ? Math.max(10, Math.min(90, rawFirst))
+    : 50;
   const a = loadSidebarPane(split.a, validViewIds, usedViewIds, usedPaneIds);
   const b = loadSidebarPane(split.b, validViewIds, usedViewIds, usedPaneIds);
   if (!a || !b) return null;
@@ -299,42 +327,62 @@ function loadSidebarViews() {
   try {
     const raw = localStorage.getItem(SIDEBAR_VIEWS_KEY);
     if (!raw) return fallback;
-    const saved = JSON.parse(raw) as Partial<PersistedSidebarViewsV1 | PersistedSidebarViewsV2>;
-    if ((saved.version !== 1 && saved.version !== 2)
-      || !Array.isArray(saved.views)
-      || saved.views.length === 0) {
+    const saved = JSON.parse(raw) as Partial<
+      PersistedSidebarViewsV1 | PersistedSidebarViewsV2
+    >;
+    if (
+      (saved.version !== 1 && saved.version !== 2) ||
+      !Array.isArray(saved.views) ||
+      saved.views.length === 0
+    ) {
       return fallback;
     }
     const seen = new Set<string>();
     const views: SidebarTreeView[] = [];
     for (const candidate of saved.views) {
-      if (!candidate || typeof candidate.id !== "string" || seen.has(candidate.id)) continue;
+      if (
+        !candidate ||
+        typeof candidate.id !== "string" ||
+        seen.has(candidate.id)
+      )
+        continue;
       const id = candidate.id.slice(0, 100);
       if (!id) continue;
       seen.add(id);
       // A status filter only means something together with the ID snapshot taken when it was switched on, because
       // live statuses are gone after a restart. Payloads without that snapshot (older versions) start unfiltered.
       const statusFilterIds = loadIdSnapshot(candidate.statusFilterIds);
-      const statusFilter = statusFilterIds ? loadStatusFilter(candidate.statusFilter) : null;
+      const statusFilter = statusFilterIds
+        ? loadStatusFilter(candidate.statusFilter)
+        : null;
       views.push({
         id,
-        name: typeof candidate.name === "string" && candidate.name.trim()
-          ? candidate.name.replace(/[\u0000-\u001F\u007F-\u009F]/g, "").trim().slice(0, 80)
-          : t("tree.viewUntitled"),
-        treeFilter: typeof candidate.treeFilter === "string"
-          ? candidate.treeFilter.slice(0, 500)
-          : "",
+        name:
+          typeof candidate.name === "string" && candidate.name.trim()
+            ? candidate.name
+                .replace(/[\u0000-\u001F\u007F-\u009F]/g, "")
+                .trim()
+                .slice(0, 80)
+            : t("tree.viewUntitled"),
+        treeFilter:
+          typeof candidate.treeFilter === "string"
+            ? candidate.treeFilter.slice(0, 500)
+            : "",
         statusFilter,
         statusFilterIds: statusFilter ? statusFilterIds : null,
-        markFilter: typeof candidate.markFilter === "string" && candidate.markFilter.trim()
-          ? candidate.markFilter.trim().slice(0, 16)
-          : null,
-        collapsedOverrides: loadCollapsedOverrides(candidate.collapsedOverrides),
+        markFilter:
+          typeof candidate.markFilter === "string" &&
+          candidate.markFilter.trim()
+            ? candidate.markFilter.trim().slice(0, 16)
+            : null,
+        collapsedOverrides: loadCollapsedOverrides(
+          candidate.collapsedOverrides,
+        ),
       });
     }
     if (views.length === 0) return fallback;
     const primaryId = views.some((view) => view.id === saved.primaryId)
-      ? saved.primaryId as string
+      ? (saved.primaryId as string)
       : views[0].id;
     // The main tree keeps its old behavior: it always starts unfiltered and follows the shared collapse state in the
     // database. Only split-off panes come back exactly as the user left them.
@@ -349,7 +397,7 @@ function loadSidebarViews() {
       };
     }
     const activeId = views.some((view) => view.id === saved.activeId)
-      ? saved.activeId as string
+      ? (saved.activeId as string)
       : primaryId;
     let tabs: SidebarTreeTab[];
     if (saved.version === 1) {
@@ -394,7 +442,8 @@ function loadSidebarViews() {
     tabs = tabs.map((tab) =>
       collectSidebarViewIds(tab.root).includes(activeId)
         ? { ...tab, activeViewId: activeId }
-        : tab);
+        : tab,
+    );
     return {
       views,
       tabs,
@@ -762,6 +811,19 @@ interface TermStore {
    */
   mirrorEnabled: boolean;
   /**
+   * How many remote clients are attached to this service right now, as reported by the backend.
+   *
+   * The host does not appear in its own count: it talks over IPC and opens no WebSocket. So on a host any
+   * non-zero value means somebody else is on the other end — which, with mirroring on, is somebody whose
+   * tab and split changes land in this window.
+   */
+  remoteClients: number;
+  /**
+   * Who those clients are, in arrival order. Empty while nobody is attached, and entries carry no name on
+   * the plaintext connection paths, which report no identity.
+   */
+  remoteClientList: RemoteClient[];
+  /**
    * The session a peer's layout just activated here, or null. Its terminal view skips its one automatic
    * focus and clears this, so a peer switching tabs rearranges the window without pulling the keyboard
    * away from whoever is typing in it.
@@ -825,7 +887,10 @@ interface TermStore {
   /** Whether the cross-platform Git clone dialog is open. */
   cloneModalOpen: boolean;
   /** Browser-mode Save As request. `DocView` creates it and `SaveAsModal` resolves the selected path. */
-  saveAsRequest: { defaultName: string; resolve: (path: string | null) => void } | null;
+  saveAsRequest: {
+    defaultName: string;
+    resolve: (path: string | null) => void;
+  } | null;
 
   // Sidebar multi-selection.
   selection: SelNode[];
@@ -886,10 +951,17 @@ interface TermStore {
   spawnConfirm: boolean;
   /** Default state of the quit dialog's "save workspace" checkbox, remembered from the last exit. */
   saveWorkspaceOnQuit: boolean;
-  /** Usage auto-refresh interval in seconds; zero disables it. */
+  /** Whether the backend keeps the shared account-usage snapshot fresh on its own. */
+  usageAutoRefresh: boolean;
+  /** How often the backend refreshes that snapshot, in seconds. */
   usageRefreshSec: number;
+  /** The backend's one account-usage copy, filled by `usage://changed` and read by the Info panel.
+   * Null until the first read returns; sessions never query providers themselves. */
+  usage: UsageSnapshot | null;
   /** Image-paste mode, configurable only in the local desktop app. */
   imagePasteMode: ImagePasteMode;
+  /** Whether the Info panel's Resources section shows the whole-machine group. */
+  showSystemResources: boolean;
 
   /** Saved agent launch configurations shown in the new-session menu, in menu order. */
   agentPresets: AgentPreset[];
@@ -903,6 +975,10 @@ interface TermStore {
   importProjectPath: (rootPath: string) => Promise<void>;
   /** Handles `vela <path>` by importing or reusing, expanding, selecting, and revealing the project. */
   openProjectPath: (rootPath: string) => Promise<void>;
+  /** Creates a collection: a top-level container bound to no folder, then selects and reveals it. */
+  addVirtualProject: (name: string) => Promise<void>;
+  /** Expands, selects, and reveals a just-created or just-imported project, clearing sidebar filters. */
+  revealFreshProject: (projectId: string) => Promise<void>;
   setDirPickerOpen: (open: boolean) => void;
   /** Opens or closes the create-project dialog. */
   setCreateProjectModalOpen: (open: boolean) => void;
@@ -928,7 +1004,10 @@ interface TermStore {
     projectId: string,
     parentGroupId: string | null,
     name: string,
-    worktree?: { worktreePath?: string | null; worktreeBaseRef?: string | null },
+    worktree?: {
+      worktreePath?: string | null;
+      worktreeBaseRef?: string | null;
+    },
   ) => Promise<void>;
   addSession: (input: tree.CreateSessionInput) => Promise<Session | null>;
   /** Forks current conversation history into a sibling session and opens it without changing the source. */
@@ -955,7 +1034,11 @@ interface TermStore {
   takePendingPrompt: (id: SessionId) => string | undefined;
   renameNode: (kind: NodeKind, id: string, name: string) => Promise<void>;
   /** Sets or clears a node's emoji marker; passing null clears it. */
-  setNodeMark: (kind: NodeKind, id: string, mark: string | null) => Promise<void>;
+  setNodeMark: (
+    kind: NodeKind,
+    id: string,
+    mark: string | null,
+  ) => Promise<void>;
   updateSession: (id: string, input: tree.UpdateSessionInput) => Promise<void>;
   /** Converts a node back to a normal session/group after its worktree is deleted, clearing session cwd too. */
   clearNodeWorktree: (kind: NodeKind, id: string) => Promise<void>;
@@ -1015,7 +1098,11 @@ interface TermStore {
   openSession: (id: SessionId, opts?: { newTab?: boolean }) => void;
   setActiveTab: (tabId: SessionId) => void;
   /** Reorders a tab before or after a target; invalid or unchanged moves are no-ops. */
-  reorderTab: (tabId: string, targetId: string, side: "before" | "after") => void;
+  reorderTab: (
+    tabId: string,
+    targetId: string,
+    side: "before" | "after",
+  ) => void;
   closeTab: (tabId: SessionId) => void;
   /**
    * Closes a background tab without restoring it, removing its tree so unmount kills or detaches the process.
@@ -1058,7 +1145,11 @@ interface TermStore {
     patch: Partial<Pick<BrowserTab, "url" | "title" | "loading">>,
   ) => void;
   focusPane: (paneId: string, sessionId: SessionId) => void;
-  splitNew: (direction: "horizontal" | "vertical") => Promise<void>;
+  /** Create a split pane. `source` only feeds the diagnostic trail in splitTrace. */
+  splitNew: (
+    direction: "horizontal" | "vertical",
+    source?: SplitSource,
+  ) => Promise<void>;
   closePane: () => void;
   closeSession: (sessionId: SessionId) => void;
   collapseToFocused: () => void;
@@ -1066,13 +1157,21 @@ interface TermStore {
    * target override is used for drag-and-drop placement. */
   persistSession: (
     id: SessionId,
-    override?: { projectId: string; groupId: string | null; parentSessionId: string | null },
+    override?: {
+      projectId: string;
+      groupId: string | null;
+      parentSessionId: string | null;
+    },
   ) => Promise<void>;
   /** Persists a `browser-` draft as a Browser tree node with a new node ID, reloading the current URL while
    * preserving shared persistent login state. */
   persistBrowserDraft: (
     tabId: string,
-    override?: { projectId: string; groupId: string | null; parentSessionId: string | null },
+    override?: {
+      projectId: string;
+      groupId: string | null;
+      parentSessionId: string | null;
+    },
   ) => Promise<void>;
   /** Renames an ephemeral session, browser, or document draft in memory only. */
   renameScratch: (id: SessionId, name: string) => void;
@@ -1102,6 +1201,8 @@ interface TermStore {
   clearNotification: (id: SessionId) => void;
   /** Reports every marked session as read, clearing all dots and the Dock badge everywhere. */
   clearAllNotifications: () => void;
+  /** Clears everything the Dock badge counts: unread markers and undecided spawn cards. */
+  clearAllBadges: () => void;
   /** Merges a batch of authoritative session records from the backend into local state. */
   applySessionStates: (batch: SessionStateBatch) => void;
   /** Marks a session unread locally and pops one system notification for that rising edge. */
@@ -1114,6 +1215,8 @@ interface TermStore {
   toggleRight: () => void;
   /** Record the host's mirror-mode switch. Turning it off leaves the current arrangement in place. */
   setMirrorEnabled: (enabled: boolean) => void;
+  /** Record how many remote clients the backend currently has attached. */
+  setRemoteClients: (count: number, clients?: RemoteClient[]) => void;
   /** Adopt an arrangement published by another client. Never spawns or kills anything by itself. */
   applyMirrorLayout: (layout: MirrorLayout) => void;
   resizeLeft: (deltaX: number) => void;
@@ -1161,7 +1264,11 @@ interface TermStore {
    * Records one node's collapse state inside a split-off projection. The primary view keeps using
    * `toggleCollapsed`, which writes the shared state to the database.
    */
-  setSidebarTreeViewCollapsed: (id: string, nodeId: string, collapsed: boolean) => void;
+  setSidebarTreeViewCollapsed: (
+    id: string,
+    nodeId: string,
+    collapsed: boolean,
+  ) => void;
   setTreeFilter: (q: string) => void;
   /**
    * Replaces the primary sidebar's status filter with one state. Selecting that sole state again
@@ -1188,8 +1295,14 @@ interface TermStore {
   setSaveWorkspaceOnQuit: (v: boolean) => void;
   /** Sets persisted image-paste mode for subsequent local desktop pastes. */
   setImagePasteMode: (v: ImagePasteMode) => void;
-  /** Sets persisted usage-refresh interval in seconds; zero disables it. */
+  /** Shows or hides the whole-machine rows in the Info panel's Resources section. */
+  setShowSystemResources: (v: boolean) => void;
+  /** Turns the backend's automatic usage polling on or off. */
+  setUsageAutoRefresh: (v: boolean) => void;
+  /** Sets how often the backend refreshes the usage snapshot, in seconds. */
   setUsageRefreshSec: (v: number) => void;
+  /** Stores a usage snapshot received from the backend. */
+  setUsage: (snap: UsageSnapshot) => void;
   /** Sets the persisted terminal renderer for new terminals. */
   setTermRenderer: (v: TermRenderer) => void;
   setRedrawOnReveal: (v: boolean) => void;
@@ -1222,14 +1335,22 @@ interface TermStore {
 
   // Center area: split resizing and scratch tabs.
   /** Updates split-node percentages, which sum to 100. */
-  resizePane: (tabId: SessionId, splitPaneId: string, sizes: [number, number]) => void;
+  resizePane: (
+    tabId: SessionId,
+    splitPaneId: string,
+    sizes: [number, number],
+  ) => void;
   /** Opens an unpersisted scratch terminal tab with optional shell, cwd, and title. */
   newScratchTab: (opts?: {
     shell?: string | null;
     cwd?: string | null;
     name?: string;
     /** Project-tree target used to avoid inheriting an unrelated active session directory. */
-    target?: { projectId: string; groupId?: string | null; sessionId?: string | null };
+    target?: {
+      projectId: string;
+      groupId?: string | null;
+      sessionId?: string | null;
+    };
   }) => void;
   /** Changes an ephemeral terminal's in-memory shell; callers restart it to apply. */
   setEphemeralShell: (id: SessionId, shell: string | null) => void;
@@ -1336,8 +1457,10 @@ function persistAndApplyVisual(getState: () => TermStore) {
     agentDefaults: s.agentDefaults,
     spawnConfirm: s.spawnConfirm,
     saveWorkspaceOnQuit: s.saveWorkspaceOnQuit,
+    usageAutoRefresh: s.usageAutoRefresh,
     usageRefreshSec: s.usageRefreshSec,
     imagePasteMode: s.imagePasteMode,
+    showSystemResources: s.showSystemResources,
   };
   saveSettings(ps);
   applyVisual(visualOf(ps));
@@ -1353,25 +1476,36 @@ function saveSidebarViewsTick(getState: () => TermStore) {
       version: 2,
       // Status/marker filtering and the collapse map are written only for split-off panes. The main tree stores
       // just its search text, as it always did, so a restart gives it back unfiltered.
-      views: state.sidebarTreeViews.map(({
-        id,
-        name,
-        treeFilter,
-        statusFilter,
-        statusFilterIds,
-        markFilter,
-        collapsedOverrides,
-      }) => (id === state.primarySidebarTreeViewId
-        ? {
-            id,
-            name,
-            treeFilter,
-            statusFilter: null,
-            statusFilterIds: null,
-            markFilter: null,
-            collapsedOverrides: null,
-          }
-        : { id, name, treeFilter, statusFilter, statusFilterIds, markFilter, collapsedOverrides })),
+      views: state.sidebarTreeViews.map(
+        ({
+          id,
+          name,
+          treeFilter,
+          statusFilter,
+          statusFilterIds,
+          markFilter,
+          collapsedOverrides,
+        }) =>
+          id === state.primarySidebarTreeViewId
+            ? {
+                id,
+                name,
+                treeFilter,
+                statusFilter: null,
+                statusFilterIds: null,
+                markFilter: null,
+                collapsedOverrides: null,
+              }
+            : {
+                id,
+                name,
+                treeFilter,
+                statusFilter,
+                statusFilterIds,
+                markFilter,
+                collapsedOverrides,
+              },
+      ),
       tabs: state.sidebarTreeTabs,
       primaryId: state.primarySidebarTreeViewId,
       activeId: state.activeSidebarTreeViewId,
@@ -1388,7 +1522,10 @@ function saveSidebarViewsTick(getState: () => TermStore) {
 function primaryViewAliases(
   views: SidebarTreeView[],
   primaryId: string,
-): Pick<TermStore, "treeFilter" | "statusFilter" | "statusFilterIds" | "markFilter"> {
+): Pick<
+  TermStore,
+  "treeFilter" | "statusFilter" | "statusFilterIds" | "markFilter"
+> {
   const primary = views.find((view) => view.id === primaryId) ?? views[0];
   return {
     treeFilter: primary.treeFilter,
@@ -1403,7 +1540,10 @@ function primaryViewAliases(
  * looking identical while owning its state from that point on.
  */
 function snapshotCollapsed(
-  state: Pick<TermStore, "projects" | "groups" | "sessions" | "ephemeralSessions">,
+  state: Pick<
+    TermStore,
+    "projects" | "groups" | "sessions" | "ephemeralSessions"
+  >,
   source: SidebarTreeView,
 ): Record<string, boolean> {
   const overrides = source.collapsedOverrides;
@@ -1429,7 +1569,9 @@ function statusSnapshot(
   for (const session of state.sessions) {
     const effective = effectiveStatus(state.runtimes[session.id]);
     const unread = session.id in state.notifications;
-    if (filters.some((filter) => matchesAgentState(filter, effective, unread))) {
+    if (
+      filters.some((filter) => matchesAgentState(filter, effective, unread))
+    ) {
       ids[session.id] = true;
     }
   }
@@ -1467,7 +1609,10 @@ function notifyAgentsColorScheme(getState: () => TermStore) {
  * Derives a display label for a terminal shell. Match a nonempty path to discovered shell labels, falling
  * back to the executable basename. Empty uses the backend-marked default, then the first option.
  */
-export function shellDisplayName(shells: ShellOption[], effShell: string | null): string {
+export function shellDisplayName(
+  shells: ShellOption[],
+  effShell: string | null,
+): string {
   if (effShell) {
     const hit = shells.find((s) => s.path === effShell);
     if (hit) return hit.label;
@@ -1481,7 +1626,10 @@ export function shellDisplayName(shells: ShellOption[], effShell: string | null)
 /**
  * Returns the next terminal name by incrementing the highest existing suffix across persisted and scratch sessions.
  */
-function nextTerminalName(sessions: Session[], ephemeral: Record<string, Session>): string {
+function nextTerminalName(
+  sessions: Session[],
+  ephemeral: Record<string, Session>,
+): string {
   const label = t("kind.terminal");
   const re = new RegExp(`^${label} (\\d+)$`);
   const maxN = [...sessions, ...Object.values(ephemeral)]
@@ -1495,8 +1643,9 @@ function nextTerminalName(sessions: Session[], ephemeral: Record<string, Session
 
 const initialSidebarViews = loadSidebarViews();
 const initialPrimarySidebarView =
-  initialSidebarViews.views.find((view) => view.id === initialSidebarViews.primaryId) ??
-  initialSidebarViews.views[0];
+  initialSidebarViews.views.find(
+    (view) => view.id === initialSidebarViews.primaryId,
+  ) ?? initialSidebarViews.views[0];
 
 export const useTermStore = create<TermStore>((set, get) => ({
   projects: [],
@@ -1531,6 +1680,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
   browserTabs: {},
 
   mirrorEnabled: false,
+  remoteClients: 0,
+  remoteClientList: [],
   mirrorFocusSessionId: null,
 
   leftCollapsed: false,
@@ -1568,6 +1719,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
   cleanPastedImages: loadCleanPastedImages(),
   recordSessions: loadRecordSessions(),
   shells: [],
+  usage: null,
 
   ...loadSettings(),
 
@@ -1586,7 +1738,11 @@ export const useTermStore = create<TermStore>((set, get) => ({
     // of terminals only to unmount them, and mounting is what starts a process: on a session whose shell is
     // already gone that is a real spawn, which a browser client's unmount detaches from rather than kills.
     // So wait for the first alignment to conclude, and leave the restore alone once a peer's layout won.
-    if (!layoutRestored && platform.env.isBrowser && (await whenFirstMirrorAlign())) {
+    if (
+      !layoutRestored &&
+      platform.env.isBrowser &&
+      (await whenFirstMirrorAlign())
+    ) {
       layoutRestored = true;
     }
     set((state) => {
@@ -1676,8 +1832,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
       }
       const sidebarTreeViews = state.sidebarTreeViews;
       const primaryView =
-        sidebarTreeViews.find((view) => view.id === state.primarySidebarTreeViewId) ??
-        sidebarTreeViews[0];
+        sidebarTreeViews.find(
+          (view) => view.id === state.primarySidebarTreeViewId,
+        ) ?? sidebarTreeViews[0];
       return {
         projects: t.projects,
         groups: t.groups,
@@ -1713,16 +1870,25 @@ export const useTermStore = create<TermStore>((set, get) => ({
 
   openProjectPath: async (rootPath) => {
     const project = await tree.importProject(rootPath);
-    await tree.setCollapsed("project", project.id, false).catch(() => {});
+    await get().revealFreshProject(project.id);
+  },
+
+  addVirtualProject: async (name) => {
+    const project = await tree.createVirtualProject(name);
+    await get().revealFreshProject(project.id);
+  },
+
+  revealFreshProject: async (projectId) => {
+    await tree.setCollapsed("project", projectId, false).catch(() => {});
     await get().loadTree();
     set((state) => ({
       projects: state.projects.map((p) =>
-        p.id === project.id ? { ...p, collapsed: false } : p,
+        p.id === projectId ? { ...p, collapsed: false } : p,
       ),
-      selection: [{ id: project.id, kind: "project" }],
-      selectionAnchor: project.id,
-      inspectTarget: { id: project.id, kind: "project" },
-      revealProjectId: project.id,
+      selection: [{ id: projectId, kind: "project" }],
+      selectionAnchor: projectId,
+      inspectTarget: { id: projectId, kind: "project" },
+      revealProjectId: projectId,
       leftCollapsed: false,
       archiveOpen: false,
       // Reveal requests clear the primary projection's conditions before the one-shot target is consumed.
@@ -1735,7 +1901,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
               statusFilterIds: null,
               markFilter: null,
             }
-          : view),
+          : view,
+      ),
       treeFilter: "",
       statusFilter: null,
       statusFilterIds: null,
@@ -1787,19 +1954,31 @@ export const useTermStore = create<TermStore>((set, get) => ({
       let { projects, groups, sessions } = state;
       if (input.parentSessionId) {
         sessions = sessions.map((s) =>
-          s.id === input.parentSessionId && s.collapsed ? { ...s, collapsed: false } : s,
+          s.id === input.parentSessionId && s.collapsed
+            ? { ...s, collapsed: false }
+            : s,
         );
       } else if (input.groupId) {
         groups = groups.map((g) =>
-          g.id === input.groupId && g.collapsed ? { ...g, collapsed: false } : g,
+          g.id === input.groupId && g.collapsed
+            ? { ...g, collapsed: false }
+            : g,
         );
       } else {
         projects = projects.map((p) =>
-          p.id === input.projectId && p.collapsed ? { ...p, collapsed: false } : p,
+          p.id === input.projectId && p.collapsed
+            ? { ...p, collapsed: false }
+            : p,
         );
       }
       // Suppress one automatic sidebar reveal when this newly created session becomes active.
-      return { projects, groups, sessions: [...sessions, session], runtimes, revealSuppressId: session.id };
+      return {
+        projects,
+        groups,
+        sessions: [...sessions, session],
+        runtimes,
+        revealSuppressId: session.id,
+      };
     });
     // Persist expansion and reload authoritative tree data in the background after the terminal can open.
     const expand = input.parentSessionId
@@ -1907,7 +2086,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
       changesPath: opts?.path ?? null,
       changesCommit: opts?.commit ?? null,
     }),
-  closeChanges: () => set({ changesCwd: null, changesPath: null, changesCommit: null }),
+  closeChanges: () =>
+    set({ changesCwd: null, changesPath: null, changesCommit: null }),
 
   executeSpawn: async (req) => {
     const state = get();
@@ -1933,14 +2113,14 @@ export const useTermStore = create<TermStore>((set, get) => ({
                     : parent.kind === "crush"
                       ? "crush"
                       : parent.kind === "kimi"
-                      ? "kimi"
-                      : parent.kind === "kiro"
-                        ? "kiro"
-                      : parent.kind === "grok"
-                        ? "grok"
-                      : parent.kind === "zoo"
-                        ? "zoo"
-                      : "claude";
+                        ? "kimi"
+                        : parent.kind === "kiro"
+                          ? "kiro"
+                          : parent.kind === "grok"
+                            ? "grok"
+                            : parent.kind === "zoo"
+                              ? "zoo"
+                              : "claude";
     const kind = ((req.kind ?? null) || fallbackKind) as Session["kind"];
     const name = req.prompt.trim().slice(0, 24) || t("store.subtask");
 
@@ -1965,7 +2145,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
     // defaults, which is what the "new agent session" menu applies, so a spawned child is never more
     // restricted than a hand-created one.
     const kindDefaults = get().agentDefaults[kind] ?? {};
-    const permissionMode = parent.permissionMode || kindDefaults.permissionMode || null;
+    const permissionMode =
+      parent.permissionMode || kindDefaults.permissionMode || null;
     const inheritedArgs = kind === parent.kind ? parent.agentArgs : null;
     let agentArgs = (inheritedArgs || kindDefaults.args || "").trim() || "";
     // Apply model/effort overrides from the spawn confirmation dialog: strip the flag being overridden
@@ -2056,7 +2237,11 @@ export const useTermStore = create<TermStore>((set, get) => ({
       await tree.deleteNode(n.kind, n.id).catch(() => {});
     }
     await get().loadTree();
-    set((state) => ({ ...reconcileTabs(state), selection: [], selectionAnchor: null }));
+    set((state) => ({
+      ...reconcileTabs(state),
+      selection: [],
+      selectionAnchor: null,
+    }));
     saveLayoutTick();
   },
 
@@ -2075,7 +2260,11 @@ export const useTermStore = create<TermStore>((set, get) => ({
       await tree.setSessionArchived(id, true).catch(() => {});
     }
     await get().loadTree();
-    set((state) => ({ ...reconcileTabs(state), selection: [], selectionAnchor: null }));
+    set((state) => ({
+      ...reconcileTabs(state),
+      selection: [],
+      selectionAnchor: null,
+    }));
     saveLayoutTick();
   },
 
@@ -2130,12 +2319,24 @@ export const useTermStore = create<TermStore>((set, get) => ({
     await get().loadTree();
   },
 
-  moveMany: async (ids, targetProjectId, targetGroupId, targetParentSessionId) => {
+  moveMany: async (
+    ids,
+    targetProjectId,
+    targetGroupId,
+    targetParentSessionId,
+  ) => {
     // Move sequentially with increasing sort order, then reload once. Avoid concurrent refresh races and rerender loops.
     let order = Date.now();
     for (const id of ids) {
       await tree
-        .moveNode("session", id, targetProjectId, targetGroupId, targetParentSessionId, order++)
+        .moveNode(
+          "session",
+          id,
+          targetProjectId,
+          targetGroupId,
+          targetParentSessionId,
+          order++,
+        )
         .catch(() => {});
     }
     await get().loadTree();
@@ -2225,7 +2426,12 @@ export const useTermStore = create<TermStore>((set, get) => ({
         // Only desktop shells can host native child browser views.
         if (!isTauri && !env.isElectron) return { notifications };
         if (state.browserTabs[id]) {
-          return { notifications, activeTabId: id, activeSessionId: null, focusedPaneId: null };
+          return {
+            notifications,
+            activeTabId: id,
+            activeSessionId: null,
+            focusedPaneId: null,
+          };
         }
         const tab: BrowserTab = {
           id,
@@ -2262,7 +2468,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
       // Single-tab reuse prefers the active reusable session tab, then the most recent one. Reusable means a
       // pane-tree session tab that is not pinned; document, browser, explicit-new-tab, and scratch tabs survive.
       const isReusableTab = (t: SessionId | null): t is SessionId =>
-        t != null && state.paneTrees[t] != null && !state.pinnedTabs.includes(t);
+        t != null &&
+        state.paneTrees[t] != null &&
+        !state.pinnedTabs.includes(t);
       // Terminal sessions do not displace the agent main slot. They open pinned like scratch terminals; only
       // agent sessions reuse the single agent slot.
       const openedSess = sess ?? state.ephemeralSessions[id];
@@ -2314,7 +2522,12 @@ export const useTermStore = create<TermStore>((set, get) => ({
         let liveEvictNotice = state.liveEvictNotice;
         let liveEvictAsk = false;
         while (liveTabs.length > state.maxLiveTabs) {
-          const evicted = pickEvictTab(liveTabs, paneTrees, state.runtimes, notifications);
+          const evicted = pickEvictTab(
+            liveTabs,
+            paneTrees,
+            state.runtimes,
+            notifications,
+          );
           if (!evicted) {
             liveEvictAsk = true;
             break;
@@ -2355,7 +2568,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
           notifications,
           liveTabs: state.liveTabs.filter((t) => t !== inLive.tabId),
           openTabs: [...state.openTabs, inLive.tabId],
-          pinnedTabs: pin ? [...state.pinnedTabs, inLive.tabId] : state.pinnedTabs,
+          pinnedTabs: pin
+            ? [...state.pinnedTabs, inLive.tabId]
+            : state.pinnedTabs,
           activeTabId: inLive.tabId,
           lastActiveSessionTabId: inLive.tabId,
           activeSessionId: id,
@@ -2382,7 +2597,11 @@ export const useTermStore = create<TermStore>((set, get) => ({
     set((state) => {
       if (state.docTabs[tabId] || state.browserTabs[tabId]) {
         // Document/browser tabs have no session or focused pane, naturally disabling session-only controls.
-        return { activeTabId: tabId, activeSessionId: null, focusedPaneId: null };
+        return {
+          activeTabId: tabId,
+          activeSessionId: null,
+          focusedPaneId: null,
+        };
       }
       const t = state.paneTrees[tabId];
       const leaf = t ? firstLeaf(t) : null;
@@ -2401,7 +2620,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
     let changed = false;
     set((state) => {
       if (tabId === targetId) return {};
-      if (!state.openTabs.includes(tabId) || !state.openTabs.includes(targetId)) return {};
+      if (!state.openTabs.includes(tabId) || !state.openTabs.includes(targetId))
+        return {};
       // Remove the dragged tab, then insert it before or after the target's current position.
       const openTabs = state.openTabs.filter((t) => t !== tabId);
       const at = openTabs.indexOf(targetId) + (side === "after" ? 1 : 0);
@@ -2456,7 +2676,17 @@ export const useTermStore = create<TermStore>((set, get) => ({
             : (openTabs.find((t) => paneTrees[t]) ?? null);
       }
       const pinnedTabs = state.pinnedTabs.filter((t) => t !== tabId);
-      return { openTabs, paneTrees, docTabs, browserTabs, pinnedTabs, activeTabId, lastActiveSessionTabId, activeSessionId, focusedPaneId };
+      return {
+        openTabs,
+        paneTrees,
+        docTabs,
+        browserTabs,
+        pinnedTabs,
+        activeTabId,
+        lastActiveSessionTabId,
+        activeSessionId,
+        focusedPaneId,
+      };
     });
     get().pruneEphemeral();
     saveLayoutTick();
@@ -2466,12 +2696,17 @@ export const useTermStore = create<TermStore>((set, get) => ({
   openDocTab: (path) => {
     set((state) => {
       // Focus and reload an already-open canonical path because another `view` request asks for current content.
-      const existing = Object.values(state.docTabs).find((d) => d.path === path);
+      const existing = Object.values(state.docTabs).find(
+        (d) => d.path === path,
+      );
       if (existing) {
         return {
           docTabs: {
             ...state.docTabs,
-            [existing.id]: { ...existing, reloadNonce: existing.reloadNonce + 1 },
+            [existing.id]: {
+              ...existing,
+              reloadNonce: existing.reloadNonce + 1,
+            },
           },
           activeTabId: existing.id,
           activeSessionId: null,
@@ -2494,7 +2729,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
     set((state) => {
       // Drafts are not path-deduplicated; assign a unique Untitled title.
       const drafts = new Set(
-        Object.values(state.docTabs).filter((d) => d.isNew).map((d) => d.title),
+        Object.values(state.docTabs)
+          .filter((d) => d.isNew)
+          .map((d) => d.title),
       );
       let title = "Untitled";
       for (let n = 2; drafts.has(title); n++) title = `Untitled-${n}`;
@@ -2540,7 +2777,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
         ? {
             docTabs: {
               ...state.docTabs,
-              [id]: { ...state.docTabs[id], reloadNonce: state.docTabs[id].reloadNonce + 1 },
+              [id]: {
+                ...state.docTabs[id],
+                reloadNonce: state.docTabs[id].reloadNonce + 1,
+              },
             },
           }
         : {},
@@ -2549,14 +2789,21 @@ export const useTermStore = create<TermStore>((set, get) => ({
   setDocTabMode: (id, mode) =>
     set((state) =>
       state.docTabs[id]
-        ? { docTabs: { ...state.docTabs, [id]: { ...state.docTabs[id], mode } } }
+        ? {
+            docTabs: { ...state.docTabs, [id]: { ...state.docTabs[id], mode } },
+          }
         : {},
     ),
 
   setDocTabDirty: (id, dirty) =>
     set((state) =>
       state.docTabs[id]
-        ? { docTabs: { ...state.docTabs, [id]: { ...state.docTabs[id], dirty } } }
+        ? {
+            docTabs: {
+              ...state.docTabs,
+              [id]: { ...state.docTabs[id], dirty },
+            },
+          }
         : {},
     ),
 
@@ -2568,7 +2815,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
       return;
     }
     set((state) => ({
-      docTabs: { ...state.docTabs, [id]: { ...state.docTabs[id], pendingClose: true } },
+      docTabs: {
+        ...state.docTabs,
+        [id]: { ...state.docTabs[id], pendingClose: true },
+      },
     }));
   },
 
@@ -2605,11 +2855,17 @@ export const useTermStore = create<TermStore>((set, get) => ({
   applyBrowserState: (id, patch) => {
     set((state) =>
       state.browserTabs[id]
-        ? { browserTabs: { ...state.browserTabs, [id]: { ...state.browserTabs[id], ...patch } } }
+        ? {
+            browserTabs: {
+              ...state.browserTabs,
+              [id]: { ...state.browserTabs[id], ...patch },
+            },
+          }
         : {},
     );
     // Persist the last URL for tree-bound browser tabs with a debounce; independent `browser-` tabs are drafts.
-    if (!patch.url || patch.url === "about:blank" || id.startsWith("browser-")) return;
+    if (!patch.url || patch.url === "about:blank" || id.startsWith("browser-"))
+      return;
     const sess = get().sessions.find((s) => s.id === id);
     if (sess?.kind !== "browser") return;
     clearTimeout(browserUrlTimers.get(id));
@@ -2623,7 +2879,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
         void setBrowserUrl(id, url).catch(() => {});
         // Update local sessions immediately to avoid duplicate writes during the debounce window.
         set((state) => ({
-          sessions: state.sessions.map((s) => (s.id === id ? { ...s, browserUrl: url } : s)),
+          sessions: state.sessions.map((s) =>
+            s.id === id ? { ...s, browserUrl: url } : s,
+          ),
         }));
       }, 1000),
     );
@@ -2670,7 +2928,12 @@ export const useTermStore = create<TermStore>((set, get) => ({
       const paneTrees = { ...state.paneTrees };
 
       // If active, transfer focus to a neighboring visible tab.
-      let { activeTabId, activeSessionId, focusedPaneId, lastActiveSessionTabId } = state;
+      let {
+        activeTabId,
+        activeSessionId,
+        focusedPaneId,
+        lastActiveSessionTabId,
+      } = state;
       if (activeTabId === tabId) {
         const nextTab = openTabs[idx] ?? openTabs[idx - 1] ?? null;
         activeTabId = nextTab;
@@ -2696,7 +2959,12 @@ export const useTermStore = create<TermStore>((set, get) => ({
       let liveEvictNotice = state.liveEvictNotice;
       let liveEvictAsk = false;
       while (liveTabs.length > state.maxLiveTabs) {
-        const evicted = pickEvictTab(liveTabs, paneTrees, state.runtimes, state.notifications);
+        const evicted = pickEvictTab(
+          liveTabs,
+          paneTrees,
+          state.runtimes,
+          state.notifications,
+        );
         if (!evicted) {
           liveEvictAsk = true;
           break;
@@ -2740,7 +3008,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
     saveLayoutTick();
   },
 
-  splitNew: async (direction) => {
+  splitNew: async (direction, source = "unknown") => {
     const { activeTabId, focusedPaneId, activeSessionId } = get();
     if (!activeTabId || !focusedPaneId || !activeSessionId) return;
     const focused =
@@ -2779,6 +3047,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
       createdAt: Math.floor(Date.now() / 1000),
     };
 
+    traceSplit(
+      source,
+      `${direction} split ${id} from ${activeSessionId} in tab ${activeTabId}`,
+    );
     set((state) => {
       const curTree = state.paneTrees[activeTabId];
       if (!curTree) return {};
@@ -2885,7 +3157,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
     // Placement uses an explicit drag target or preserves the ephemeral session's existing parent/project.
     const projectId = override?.projectId ?? eph.projectId;
     const groupId = override ? override.groupId : (eph.groupId ?? null);
-    const parentSessionId = override ? override.parentSessionId : (eph.parentSessionId ?? null);
+    const parentSessionId = override
+      ? override.parentSessionId
+      : (eph.parentSessionId ?? null);
     // Persist the existing ID so the PTY continues running without restart or context loss.
     const created = await tree.persistSession({
       id,
@@ -2918,11 +3192,12 @@ export const useTermStore = create<TermStore>((set, get) => ({
     const st = get();
     // Project priority: drag override, active session project, then first project; abort when none exists.
     const active = st.activeSessionId
-      ? st.sessions.find((s) => s.id === st.activeSessionId) ??
+      ? (st.sessions.find((s) => s.id === st.activeSessionId) ??
         st.ephemeralSessions[st.activeSessionId] ??
-        null
+        null)
       : null;
-    const projectId = override?.projectId ?? active?.projectId ?? st.projects[0]?.id ?? null;
+    const projectId =
+      override?.projectId ?? active?.projectId ?? st.projects[0]?.id ?? null;
     if (!projectId) return;
     const groupId = override?.groupId ?? null;
     const parentSessionId = override?.parentSessionId ?? null;
@@ -2941,7 +3216,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
       void setBrowserUrl(node.id, url).catch(() => {});
       // Update local `browserUrl` because the backend setter does not broadcast a tree change.
       set((state) => ({
-        sessions: state.sessions.map((s) => (s.id === node.id ? { ...s, browserUrl: url } : s)),
+        sessions: state.sessions.map((s) =>
+          s.id === node.id ? { ...s, browserUrl: url } : s,
+        ),
       }));
     }
     get().closeTab(tabId); // Close the draft and destroy its child WebView.
@@ -2961,10 +3238,20 @@ export const useTermStore = create<TermStore>((set, get) => ({
         };
       }
       if (state.browserTabs[id]) {
-        return { browserTabs: { ...state.browserTabs, [id]: { ...state.browserTabs[id], title: nm } } };
+        return {
+          browserTabs: {
+            ...state.browserTabs,
+            [id]: { ...state.browserTabs[id], title: nm },
+          },
+        };
       }
       if (state.docTabs[id]) {
-        return { docTabs: { ...state.docTabs, [id]: { ...state.docTabs[id], title: nm } } };
+        return {
+          docTabs: {
+            ...state.docTabs,
+            [id]: { ...state.docTabs[id], title: nm },
+          },
+        };
       }
       return {};
     });
@@ -3030,10 +3317,12 @@ export const useTermStore = create<TermStore>((set, get) => ({
         if (!legacy) break;
         // Accept structured hook/notify state directly; full-authority locking is handled below.
         next.agentState = signal.state;
-        if (prev.agent === "codex" && signal.authoritative) next.agentHookReady = true;
+        if (prev.agent === "codex" && signal.authoritative)
+          next.agentHookReady = true;
         // Legacy Codex notify reports only waiting and cannot lock authority. Lifecycle hooks mark every phase
         // authoritative, after which screen/busy fallbacks cannot overwrite Stop's waiting state.
-        if (prev.agent !== "codex" || signal.authoritative) next.authoritative = true;
+        if (prev.agent !== "codex" || signal.authoritative)
+          next.authoritative = true;
         // Track working outside reactive state for screen-transition prerequisites without defeating deduplication.
         if (signal.state === "working") {
           next.everWorked = true;
@@ -3078,7 +3367,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
           next.agentStateSource = signal.stateSource ?? "legacy";
           next.authoritative = signal.stateSource === "hooks";
           next.agentState = null;
-          next.agentHookReady = signal.stateSource === "hooks" ? false : undefined;
+          next.agentHookReady =
+            signal.stateSource === "hooks" ? false : undefined;
           next.busy = false;
         } else if (!signal.agent) {
           next.agentState = null;
@@ -3128,11 +3418,15 @@ export const useTermStore = create<TermStore>((set, get) => ({
 
     // Value-level deduplication blocks unchanged signal storms without replacing runtimes or rerendering subscribers.
     const dirty = Object.entries(next).some(
-      ([k, v]) => !Object.is((prev as unknown as Record<string, unknown>)[k], v),
+      ([k, v]) =>
+        !Object.is((prev as unknown as Record<string, unknown>)[k], v),
     );
     if (dirty) {
       set((state) => ({
-        runtimes: { ...state.runtimes, [id]: { ...state.runtimes[id], ...next } },
+        runtimes: {
+          ...state.runtimes,
+          [id]: { ...state.runtimes[id], ...next },
+        },
       }));
     }
 
@@ -3153,7 +3447,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
     // same moment as popping is what keeps one result from interrupting the user twice.
     if (id in get().notifications) return;
     notifyRaw(get(), id, title, body);
-    set((state) => ({ notifications: { ...state.notifications, [id]: Date.now() } }));
+    set((state) => ({
+      notifications: { ...state.notifications, [id]: Date.now() },
+    }));
   },
 
   applyScreenDetection: (id, screen) => {
@@ -3190,7 +3486,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
       if (state === "working") updates.everWorked = true;
       // Skip store updates when screen-detection results match current values.
       const dirty = Object.entries(updates).some(
-        ([k, v]) => !Object.is((rt as unknown as Record<string, unknown>)[k], v),
+        ([k, v]) =>
+          !Object.is((rt as unknown as Record<string, unknown>)[k], v),
       );
       if (dirty) {
         set((s) => ({
@@ -3214,7 +3511,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
     if (screen.visibleWorking) return setScreenState("working");
 
     // The screen is the sole remaining source.
-    if (screen.state === "working" && !screen.visibleWorking && !rt.everWorked) return;
+    if (screen.state === "working" && !screen.visibleWorking && !rt.everWorked)
+      return;
     if (screen.state === "waiting" && !rt.everWorked) return;
     return setScreenState(screen.state);
   },
@@ -3257,6 +3555,24 @@ export const useTermStore = create<TermStore>((set, get) => ({
     set({ notifications: {} });
   },
 
+  clearAllBadges: () => {
+    // The Dock badge counts two things: unread session markers and spawn cards nobody has answered yet.
+    // Clearing only the first leaves a badge the user cannot reach, because a spawn card that lost its
+    // window (client closed mid-prompt, request for a session that no longer exists) is never drawn
+    // anywhere, so there is no card left to click. This is the manual way out of that state.
+    const { notifications, pendingSpawns } = get();
+    for (const id of Object.keys(notifications))
+      void markSessionRead(id).catch(() => {});
+    // Settle each dropped request as declined, the same answer cancelSpawn gives, so another client
+    // holding the same card resolves it here instead of spawning the task after this one dismissed it.
+    for (const req of pendingSpawns)
+      void resolveSpawn(req.parentSessionId, req.prompt, false).catch(() => {});
+    set({ notifications: {}, pendingSpawns: [] });
+    // Push zero straight to the platform as well. The badge effect only reacts to a changed count, and
+    // a stale badge left over from a previous run (macOS keeps it across quits) never sees a change.
+    void platform.badge.setCount(0);
+  },
+
   applySessionStates: (batch) => {
     // Sessions with a terminal running here. A process ending must never replace one of those with a
     // placeholder: the user still wants to read what it printed before it died.
@@ -3278,7 +3594,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
       // Sessions the layout will render. A record about anything else says nothing about what to mount.
       const laidOut = new Set<string>();
       for (const tabId of Object.keys(state.paneTrees)) {
-        for (const sid of collectSessionIds(state.paneTrees[tabId])) laidOut.add(sid);
+        for (const sid of collectSessionIds(state.paneTrees[tabId]))
+          laidOut.add(sid);
       }
       for (const [id, record] of Object.entries(batch)) {
         if (!record) continue;
@@ -3298,7 +3615,11 @@ export const useTermStore = create<TermStore>((set, get) => ({
         // what starts a process. A client that had not opened a session could not tell "not running" from
         // "running, just not opened here", so it mounted — which is how a browser connecting to a desktop
         // that had merely *restored* a workspace launched every one of those sessions for real.
-        if (!displayed.has(id) && laidOut.has(id) && record.alive !== undefined) {
+        if (
+          !displayed.has(id) &&
+          laidOut.has(id) &&
+          record.alive !== undefined
+        ) {
           if (record.alive && dormantSessions[id]) {
             delete dormantSessions[id];
             dormantDirty = true;
@@ -3346,7 +3667,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
         get(),
         id,
         undefined,
-        agentNotifyText(state && NOTIFY_STATES.includes(state) ? state : "waiting"),
+        agentNotifyText(
+          state && NOTIFY_STATES.includes(state) ? state : "waiting",
+        ),
       );
     }
   },
@@ -3392,9 +3715,26 @@ export const useTermStore = create<TermStore>((set, get) => ({
 
   setMirrorEnabled: (enabled) => set({ mirrorEnabled: enabled }),
 
+  setRemoteClients: (count, clients) =>
+    set({ remoteClients: Math.max(0, count), remoteClientList: clients ?? [] }),
+
   applyMirrorLayout: (layout) => {
     const c = layout.center;
     const displayed = new Set(liveTerminalIds());
+    // A peer's arrangement replaces the local pane trees wholesale, so a split created in another window
+    // simply shows up here. Record the ones this client did not already have (see splitTrace).
+    {
+      const before = new Set<SessionId>();
+      for (const tabTree of Object.values(get().paneTrees))
+        for (const sid of collectSessionIds(tabTree)) before.add(sid);
+      const arrived: SessionId[] = [];
+      for (const tabTree of Object.values(c.paneTrees))
+        for (const sid of collectSessionIds(tabTree))
+          if (sid.startsWith("eph-") && !before.has(sid)) arrived.push(sid);
+      if (arrived.length) {
+        traceSplit("mirror", `peer layout brought ${arrived.join(", ")}`);
+      }
+    }
     set((s) => ({
       // A leaf arriving from a peer is not a request to start anything. If the backend says no process
       // stands behind that session, render a placeholder: mounting a terminal is what starts one, and
@@ -3404,7 +3744,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
       dormantSessions: Object.values(c.paneTrees).reduce(
         (acc, tree) => {
           for (const sid of collectSessionIds(tree)) {
-            if (!displayed.has(sid) && s.runtimes[sid]?.alive === false) acc[sid] = true;
+            if (!displayed.has(sid) && s.runtimes[sid]?.alive === false)
+              acc[sid] = true;
           }
           return acc;
         },
@@ -3444,7 +3785,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
       // Only an activation that actually changes which session is active can steal focus, so repeated
       // frames from a peer's drag leave an already-consumed marker alone.
       mirrorFocusSessionId:
-        c.activeSessionId !== s.activeSessionId ? c.activeSessionId : s.mirrorFocusSessionId,
+        c.activeSessionId !== s.activeSessionId
+          ? c.activeSessionId
+          : s.mirrorFocusSessionId,
     }));
     // A mirrored arrangement counts as the layout for this session. Without this, a first `loadTree`
     // still in flight would take its restore branch and replace the peer's layout with this client's
@@ -3456,7 +3799,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
     if (layout.left.views.length) saveSidebarViewsTick(get);
   },
   resizeLeft: (deltaX) =>
-    set((s) => ({ leftWidth: clamp(s.leftWidth + deltaX, LEFT_MIN, LEFT_MAX) })),
+    set((s) => ({
+      leftWidth: clamp(s.leftWidth + deltaX, LEFT_MIN, LEFT_MAX),
+    })),
   resizeRight: (deltaX) =>
     set((s) => ({
       rightWidth: clamp(s.rightWidth - deltaX, RIGHT_MIN, RIGHT_MAX),
@@ -3516,9 +3861,12 @@ export const useTermStore = create<TermStore>((set, get) => ({
         ) ?? state.sidebarTreeViews[0];
       if (!source) return {};
       const tab = state.sidebarTreeTabs.find((candidate) =>
-        collectSidebarViewIds(candidate.root).includes(source.id));
+        collectSidebarViewIds(candidate.root).includes(source.id),
+      );
       if (!tab) return {};
-      const usedNames = new Set(state.sidebarTreeViews.map((view) => view.name));
+      const usedNames = new Set(
+        state.sidebarTreeViews.map((view) => view.name),
+      );
       let index = state.sidebarTreeViews.length + 1;
       let name = t("tree.viewDefaultName", index);
       while (usedNames.has(name)) {
@@ -3529,7 +3877,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
         ...source,
         id,
         name,
-        statusFilterIds: source.statusFilterIds ? { ...source.statusFilterIds } : null,
+        statusFilterIds: source.statusFilterIds
+          ? { ...source.statusFilterIds }
+          : null,
         // Start from what the source pane shows right now, then keep expanding and collapsing to itself.
         collapsedOverrides: snapshotCollapsed(state, source),
       };
@@ -3539,10 +3889,16 @@ export const useTermStore = create<TermStore>((set, get) => ({
           candidate.id === tab.id
             ? {
                 ...candidate,
-                root: splitSidebarView(candidate.root, source.id, direction, id),
+                root: splitSidebarView(
+                  candidate.root,
+                  source.id,
+                  direction,
+                  id,
+                ),
                 activeViewId: id,
               }
-            : candidate),
+            : candidate,
+        ),
         activeSidebarTreeViewId: id,
       };
     });
@@ -3551,17 +3907,25 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
   deleteSidebarTreeView: (id) => {
     set((state) => {
-      if (id === state.primarySidebarTreeViewId || state.sidebarTreeViews.length <= 1) return {};
+      if (
+        id === state.primarySidebarTreeViewId ||
+        state.sidebarTreeViews.length <= 1
+      )
+        return {};
       const tabIndex = state.sidebarTreeTabs.findIndex((tab) =>
-        collectSidebarViewIds(tab.root).includes(id));
+        collectSidebarViewIds(tab.root).includes(id),
+      );
       if (tabIndex < 0) return {};
-      const sidebarTreeViews = state.sidebarTreeViews.filter((view) => view.id !== id);
+      const sidebarTreeViews = state.sidebarTreeViews.filter(
+        (view) => view.id !== id,
+      );
       const sourceTab = state.sidebarTreeTabs[tabIndex];
       const remainingRoot = removeSidebarView(sourceTab.root, id);
       if (!remainingRoot) return {};
       const memberIds = collectSidebarViewIds(remainingRoot);
       const fallbackId =
-        memberIds.includes(sourceTab.activeViewId) && sourceTab.activeViewId !== id
+        memberIds.includes(sourceTab.activeViewId) &&
+        sourceTab.activeViewId !== id
           ? sourceTab.activeViewId
           : firstSidebarViewId(remainingRoot);
       return {
@@ -3569,9 +3933,12 @@ export const useTermStore = create<TermStore>((set, get) => ({
         sidebarTreeTabs: state.sidebarTreeTabs.map((tab) =>
           tab.id === sourceTab.id
             ? { ...tab, root: remainingRoot, activeViewId: fallbackId }
-            : tab),
+            : tab,
+        ),
         activeSidebarTreeViewId:
-          state.activeSidebarTreeViewId === id ? fallbackId : state.activeSidebarTreeViewId,
+          state.activeSidebarTreeViewId === id
+            ? fallbackId
+            : state.activeSidebarTreeViewId,
       };
     });
     saveSidebarViewsTick(get);
@@ -3584,7 +3951,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
         sidebarTreeTabs: state.sidebarTreeTabs.map((tab) =>
           collectSidebarViewIds(tab.root).includes(id)
             ? { ...tab, activeViewId: id }
-            : tab),
+            : tab,
+        ),
       };
     });
     saveSidebarViewsTick(get);
@@ -3594,14 +3962,16 @@ export const useTermStore = create<TermStore>((set, get) => ({
       sidebarTreeTabs: state.sidebarTreeTabs.map((tab) =>
         tab.id === tabId
           ? { ...tab, root: setSidebarSplitSizes(tab.root, splitPaneId, sizes) }
-          : tab),
+          : tab,
+      ),
     }));
     saveSidebarViewsTick(get);
   },
   setSidebarTreeViewFilter: (id, q) => {
     set((state) => ({
       sidebarTreeViews: state.sidebarTreeViews.map((view) =>
-        view.id === id ? { ...view, treeFilter: q } : view),
+        view.id === id ? { ...view, treeFilter: q } : view,
+      ),
       ...(id === state.primarySidebarTreeViewId ? { treeFilter: q } : {}),
     }));
     saveSidebarViewsTick(get);
@@ -3617,7 +3987,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
       const statusFilterIds = statusSnapshot(state, statusFilter);
       return {
         sidebarTreeViews: state.sidebarTreeViews.map((view) =>
-          view.id === id ? { ...view, statusFilter, statusFilterIds } : view),
+          view.id === id ? { ...view, statusFilter, statusFilterIds } : view,
+        ),
         ...(id === state.primarySidebarTreeViewId
           ? { statusFilter, statusFilterIds }
           : {}),
@@ -3643,7 +4014,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
       const statusFilterIds = next;
       return {
         sidebarTreeViews: state.sidebarTreeViews.map((view) =>
-          view.id === id ? { ...view, statusFilterIds } : view),
+          view.id === id ? { ...view, statusFilterIds } : view,
+        ),
         ...(id === state.primarySidebarTreeViewId ? { statusFilterIds } : {}),
       };
     });
@@ -3655,7 +4027,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
       const statusFilterIds = statusSnapshot(state, current.statusFilter);
       return {
         sidebarTreeViews: state.sidebarTreeViews.map((view) =>
-          view.id === id ? { ...view, statusFilterIds } : view),
+          view.id === id ? { ...view, statusFilterIds } : view,
+        ),
         ...(id === state.primarySidebarTreeViewId ? { statusFilterIds } : {}),
       };
     });
@@ -3664,20 +4037,24 @@ export const useTermStore = create<TermStore>((set, get) => ({
     set((state) => {
       const current = state.sidebarTreeViews.find((view) => view.id === id);
       if (!current?.statusFilter) return {};
-      const session = state.sessions.find((candidate) => candidate.id === sessionId);
+      const session = state.sessions.find(
+        (candidate) => candidate.id === sessionId,
+      );
       if (!session) return {};
       const effective = effectiveStatus(state.runtimes[sessionId]);
       const unread = sessionId in state.notifications;
       const matches = current.statusFilter.some((filter) =>
-        matchesAgentState(filter, effective, unread));
+        matchesAgentState(filter, effective, unread),
+      );
       const previous = current.statusFilterIds ?? {};
-      if (matches === (sessionId in previous)) return {}; // Snapshot already agrees with the live status.
+      if (matches === sessionId in previous) return {}; // Snapshot already agrees with the live status.
       const statusFilterIds = { ...previous };
       if (matches) statusFilterIds[sessionId] = true;
       else delete statusFilterIds[sessionId];
       return {
         sidebarTreeViews: state.sidebarTreeViews.map((view) =>
-          view.id === id ? { ...view, statusFilterIds } : view),
+          view.id === id ? { ...view, statusFilterIds } : view,
+        ),
         ...(id === state.primarySidebarTreeViewId ? { statusFilterIds } : {}),
       };
     });
@@ -3690,7 +4067,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
       const markFilter = !mark || current.markFilter === mark ? null : mark;
       return {
         sidebarTreeViews: state.sidebarTreeViews.map((view) =>
-          view.id === id ? { ...view, markFilter } : view),
+          view.id === id ? { ...view, markFilter } : view,
+        ),
         ...(id === state.primarySidebarTreeViewId ? { markFilter } : {}),
       };
     });
@@ -3700,28 +4078,40 @@ export const useTermStore = create<TermStore>((set, get) => ({
     set((state) => {
       const current = state.sidebarTreeViews.find((view) => view.id === id);
       if (!current) return {};
-      const collapsedOverrides = { ...(current.collapsedOverrides ?? {}), [nodeId]: collapsed };
+      const collapsedOverrides = {
+        ...(current.collapsedOverrides ?? {}),
+        [nodeId]: collapsed,
+      };
       return {
         sidebarTreeViews: state.sidebarTreeViews.map((view) =>
-          view.id === id ? { ...view, collapsedOverrides } : view),
+          view.id === id ? { ...view, collapsedOverrides } : view,
+        ),
       };
     });
     saveSidebarViewsTick(get);
   },
   // Global and mobile controls always route to the designated primary projection.
-  setTreeFilter: (q) => get().setSidebarTreeViewFilter(get().primarySidebarTreeViewId, q),
+  setTreeFilter: (q) =>
+    get().setSidebarTreeViewFilter(get().primarySidebarTreeViewId, q),
   setStatusFilter: (st) => {
     const primaryId = get().primarySidebarTreeViewId;
     set((state) => {
-      const current = state.sidebarTreeViews.find((view) => view.id === primaryId);
+      const current = state.sidebarTreeViews.find(
+        (view) => view.id === primaryId,
+      );
       if (!current) return {};
       const alreadySoleSelection =
         current.statusFilter?.length === 1 && current.statusFilter[0] === st;
-      const statusFilter: AgentState[] | null = alreadySoleSelection ? null : [st];
+      const statusFilter: AgentState[] | null = alreadySoleSelection
+        ? null
+        : [st];
       const statusFilterIds = statusSnapshot(state, statusFilter);
       return {
         sidebarTreeViews: state.sidebarTreeViews.map((view) =>
-          view.id === primaryId ? { ...view, statusFilter, statusFilterIds } : view),
+          view.id === primaryId
+            ? { ...view, statusFilter, statusFilterIds }
+            : view,
+        ),
         statusFilter,
         statusFilterIds,
       };
@@ -3775,10 +4165,21 @@ export const useTermStore = create<TermStore>((set, get) => ({
     set({ imagePasteMode: v });
     persistAndApplyVisual(get);
   },
-  setUsageRefreshSec: (v) => {
-    set({ usageRefreshSec: Math.max(0, Math.round(v)) });
+  setShowSystemResources: (v) => {
+    set({ showSystemResources: v });
     persistAndApplyVisual(get);
   },
+  setUsageAutoRefresh: (v) => {
+    set({ usageAutoRefresh: v });
+    persistAndApplyVisual(get);
+  },
+  // The backend poller floors the interval at 30 s, so clamp here too rather than storing a value it
+  // would silently ignore. Switching polling off is the `usageAutoRefresh` toggle, not a zero here.
+  setUsageRefreshSec: (v) => {
+    set({ usageRefreshSec: Math.max(30, Math.round(v)) });
+    persistAndApplyVisual(get);
+  },
+  setUsage: (snap) => set({ usage: snap }),
   setTermRenderer: (v) => {
     set({ termRenderer: v });
     persistAndApplyVisual(get);
@@ -3808,7 +4209,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
     persistAndApplyVisual(get);
   },
   setUiFontSize: (v) => {
-    set({ uiFontSize: v == null ? null : Math.max(10, Math.min(20, Math.round(v))) });
+    set({
+      uiFontSize: v == null ? null : Math.max(10, Math.min(20, Math.round(v))),
+    });
     persistAndApplyVisual(get);
   },
   setTermFontFamily: (v) => {
@@ -3820,7 +4223,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
     persistAndApplyVisual(get);
   },
   setShortcut: (action, combo) => {
-    set((s) => ({ shortcutOverrides: { ...s.shortcutOverrides, [action]: combo } }));
+    set((s) => ({
+      shortcutOverrides: { ...s.shortcutOverrides, [action]: combo },
+    }));
     persistAndApplyVisual(get);
   },
   resetShortcuts: () => {
@@ -3829,7 +4234,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
   setAgentDefault: (kind, patch) => {
     set((s) => {
-      const merged: AgentDefaultConfig = { ...(s.agentDefaults[kind] ?? {}), ...patch };
+      const merged: AgentDefaultConfig = {
+        ...(s.agentDefaults[kind] ?? {}),
+        ...patch,
+      };
       // Normalize empty arguments/paths and default permissions as unset to keep storage compact.
       const clean: AgentDefaultConfig = {};
       const args = merged.args?.trim();
@@ -3873,7 +4281,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
       const t = state.paneTrees[tabId];
       if (!t) return {};
       return {
-        paneTrees: { ...state.paneTrees, [tabId]: setSizes(t, splitPaneId, sizes) },
+        paneTrees: {
+          ...state.paneTrees,
+          [tabId]: setSizes(t, splitPaneId, sizes),
+        },
       };
     });
     saveLayoutTick();
@@ -3883,9 +4294,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
     const st = get();
     const { activeSessionId, inspectTarget } = st;
     const targetSession = opts?.target?.sessionId
-      ? st.sessions.find((s) => s.id === opts.target?.sessionId) ??
+      ? (st.sessions.find((s) => s.id === opts.target?.sessionId) ??
         st.ephemeralSessions[opts.target.sessionId] ??
-        null
+        null)
       : null;
     const targetGroup = opts?.target?.groupId
       ? st.groups.find((g) => g.id === opts.target?.groupId)
@@ -3907,9 +4318,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
           : undefined;
     // Otherwise follow the active session's project and working directory, matching split behavior.
     const active = activeSessionId
-      ? st.sessions.find((s) => s.id === activeSessionId) ??
+      ? (st.sessions.find((s) => s.id === activeSessionId) ??
         st.ephemeralSessions[activeSessionId] ??
-        null
+        null)
       : null;
     const project =
       targetProject ??
@@ -3939,13 +4350,21 @@ export const useTermStore = create<TermStore>((set, get) => ({
     cwd = cwd ?? project?.rootPath ?? null;
     const id = `eph-${genId()}`;
     // Use the global default shell when scratch creation does not specify one.
-    const effShell = (opts?.shell === undefined ? st.defaultShell : opts.shell) || null;
+    const effShell =
+      (opts?.shell === undefined ? st.defaultShell : opts.shell) || null;
     const ephemeral: Session = {
       id,
-      projectId: opts?.target?.projectId ?? overrideProject?.id ?? active?.projectId ?? project?.id ?? "",
+      projectId:
+        opts?.target?.projectId ??
+        overrideProject?.id ??
+        active?.projectId ??
+        project?.id ??
+        "",
       groupId: opts?.target
         ? (opts.target.groupId ?? targetSession?.groupId ?? null)
-        : (overrideGroup?.id ?? (overrideProject ? null : active?.groupId) ?? null),
+        : (overrideGroup?.id ??
+          (overrideProject ? null : active?.groupId) ??
+          null),
       name: opts?.name ?? nextTerminalName(st.sessions, st.ephemeralSessions),
       kind: "terminal",
       shell: effShell,
@@ -3982,7 +4401,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
       const s = state.ephemeralSessions[id];
       if (!s) return {};
       return {
-        ephemeralSessions: { ...state.ephemeralSessions, [id]: { ...s, shell: shell || null } },
+        ephemeralSessions: {
+          ...state.ephemeralSessions,
+          [id]: { ...s, shell: shell || null },
+        },
       };
     }),
 
@@ -4026,7 +4448,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
       s.selection.length === sel.length &&
       (sel.length === 0 || s.selection[0]?.id === sel[0]?.id);
     if (!same) {
-      useTermStore.setState({ selection: sel, selectionAnchor: s.activeSessionId });
+      useTermStore.setState({
+        selection: sel,
+        selectionAnchor: s.activeSessionId,
+      });
     }
     // Clear project/group inspection whenever the active session changes, even while the right panel is unmounted,
     // so scratch-directory selection cannot use stale inspection state.

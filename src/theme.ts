@@ -52,8 +52,21 @@ export interface VisualSettings {
 const CJK_FALLBACK =
   '"PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC"';
 
+/**
+ * Monospace fonts that ship with the OS, tried before the CJK fallback.
+ * Menlo and SF Mono cover macOS; "Cascadia Mono" and Consolas cover Windows, where neither exists. Cascadia Mono
+ * carries braille U+2800-28FF, which the bundled JetBrains Mono webfont omits. Without a monospace fallback such
+ * code points fall through to "Microsoft YaHei", a proportional font whose full-width glyphs overflow the fixed
+ * xterm cell and smear box art into stripes.
+ *
+ * Box drawing U+2500-257F and block elements U+2580-259F are no longer left to these fallbacks: styles/fonts.css
+ * serves them from JetBrains Mono itself. A fallback with a narrower advance (Consolas is 0.55 em against
+ * JetBrains Mono's 0.6 em) leaves a letter-spacing seam after every block cell in xterm's DOM renderer.
+ */
+const SYS_MONO_FALLBACK = 'ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas';
+
 export const DEFAULT_MONO_STACK =
-  `"JetBrains Mono", ui-monospace, "SF Mono", Menlo, "VlxSymbols", "Symbola", ${CJK_FALLBACK}, monospace`;
+  `"JetBrains Mono", ${SYS_MONO_FALLBACK}, "VlxSymbols", "Symbola", ${CJK_FALLBACK}, monospace`;
 
 /**
  * Build a font-family string with fallbacks from a primary font name:
@@ -67,7 +80,7 @@ export function fontStack(family: string | null | undefined): string {
   if (!f) return DEFAULT_MONO_STACK;
   if (f.includes(",")) return f;
   const quoted = /\s/.test(f) ? `"${f}"` : f;
-  return `${quoted}, ui-monospace, "SF Mono", Menlo, "VlxSymbols", "Symbola", ${CJK_FALLBACK}, monospace`;
+  return `${quoted}, ${SYS_MONO_FALLBACK}, "VlxSymbols", "Symbola", ${CJK_FALLBACK}, monospace`;
 }
 
 export const XTERM_THEME: Record<ResolvedTheme, ITheme> = {

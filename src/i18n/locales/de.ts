@@ -56,7 +56,21 @@ const de: typeof en = {
   "titlebar.mirrored": "Gespiegelt", // Mirrored
   "titlebar.mirroredHint":
     "Spiegelung ist aktiv: Tabs, Splits und die aktive Sitzung folgen dem Host. Der Schalter liegt auf dem Host.", // Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.
+  "titlebar.mirroredBy": (n: number) => `Gespiegelt von ${n}`, // Mirrored by {n}
+  "titlebar.mirroredByHint": (n: number) =>
+    `${n} Remote-Client${n === 1 ? " ist" : "s sind"} verbunden. Tabs, Splits und die aktive Sitzung sind gemeinsam, und beide Seiten können sie umstellen.`, // {n} remote clients are connected. Tabs, splits, and the active session are shared, and either side can rearrange them.
+  "titlebar.clientsTitle": "Verbundene Clients", // Attached clients
+  "titlebar.clientUnnamed": "Unbenannter Client", // Unnamed client
+  "titlebar.clientSince": (time: string) => `seit ${time}`, // since {time}
   "titlebar.share": "Teilen", // Share
+  // ── Alt-triggered menu bar (Windows/Linux) ──
+  "menubar.file": "Datei", // File
+  "menubar.terminal": "Terminal",
+  "menubar.help": "Hilfe", // Help
+  "menubar.newTerminal": "Neues Terminal", // New Terminal
+  "menubar.visitWebsite": "Website besuchen", // Visit Website
+  "menubar.sendFeedback": "Feedback senden", // Send Feedback
+  "menubar.clearBadges": "Benachrichtigungsmarkierungen löschen", // Clear Notification Badges
   "share.title": "VelaTerm teilen", // Share VelaTerm
   "share.subtitle":
     "Hinter VelaTerm steht ein kleines Team. Wenn es dir gefällt, teile VelaTerm bitte mit anderen. Dass dadurch mehr Menschen von uns erfahren, bedeutet unserem Team sehr viel. Danke für deine Unterstützung! ❤️", // We're a small team behind VelaTerm. If you enjoy it, please share VelaTerm with others…
@@ -95,11 +109,13 @@ const de: typeof en = {
   "settings.cliInstalledAt": (path: string) => `Installiert unter ${path}`,
   "settings.cliConflict": (path: string) =>
     `Unter ${path} existiert bereits ein anderer ‘vela’-Befehl. VelaTerm überschreibt ihn nicht.`,
-  "settings.cliHint": "Fügt `vela <Projektpfad>` wie den VS-Code-Befehl `code` zum PATH hinzu.",
+  "settings.cliHint":
+    "Fügt `vela <Projektpfad>` wie den VS-Code-Befehl `code` zum PATH hinzu.",
   "settings.agentArgsHint":
     "Standard-Startargumente für neue Sitzungen jedes Agententyps. Beim Erstellen oder Bearbeiten pro Sitzung gesetzte Argumente haben Vorrang. Leer lassen für keine.", // Agent default launch args hint
   "settings.agentPathLabel": "Pfad zur ausführbaren Datei (optional)", // Executable path (optional)
-  "settings.agentPathPlaceholder": "z. B. ~/.local/bin/claude — leer = über PATH suchen", // e.g. path — empty = find on PATH
+  "settings.agentPathPlaceholder":
+    "z. B. ~/.local/bin/claude — leer = über PATH suchen", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
     "Wenn gesetzt, starten Sitzungen dieses Typs über diesen vollständigen Pfad, statt den Befehl im PATH zu suchen. Nützlich, wenn der Agent installiert ist, aber nicht im PATH der Shell liegt. Wird nach erfolgreicher Ein-Klick-Installation automatisch ausgefüllt, wenn der Ort erkannt wird.", // Agent executable path hint
   "settings.appearance": "Darstellung", // Appearance
@@ -125,6 +141,7 @@ const de: typeof en = {
   "settings.maxLiveTabs": "Background limit", // Background limit
   "settings.defaultShell": "Standard-Shell", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.cleanImages": "Eingefügte Bilder automatisch bereinigen",
   "settings.cleanImagesHint":
@@ -149,7 +166,8 @@ const de: typeof en = {
   "spawn.effortLabel": "Aufwand", // Effort
   "spawn.modelDefault": "Standard", // Default
   "spawn.modelLoading": "Modelle werden geladen…", // Listing models…
-  "spawn.modelListUnavailable": "Keine Modellliste verfügbar — Kennung oben eintippen", // No model list available — type an identifier above
+  "spawn.modelListUnavailable":
+    "Keine Modellliste verfügbar — Kennung oben eintippen", // No model list available — type an identifier above
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
@@ -182,7 +200,8 @@ const de: typeof en = {
   "git.commitPlaceholder": "Commit-Nachricht",
   "git.amend": "Letzten Commit ändern",
   "git.amendCommit": "Commit ändern",
-  "git.commitCount": (n: number) => (n === 1 ? "1 Datei committen" : `${n} Dateien committen`),
+  "git.commitCount": (n: number) =>
+    n === 1 ? "1 Datei committen" : `${n} Dateien committen`,
   "git.commitNoFiles": "Keine Dateiänderungen in diesem Commit",
   "git.noCommits": "Noch keine Commits",
   "git.loadMore": "Mehr laden",
@@ -191,14 +210,16 @@ const de: typeof en = {
   "tree.openWorktreeDir": "Open worktree folder",
   "tree.deleteWorktreeMenu": "Delete worktree…", // TODO translate
   "tree.deleteWorktreeTitle": "Delete worktree", // TODO translate
-  "tree.deleteWorktreeBody": "Choose a worktree to remove. This deletes its working directory from disk.", // TODO translate
+  "tree.deleteWorktreeBody":
+    "Choose a worktree to remove. This deletes its working directory from disk.", // TODO translate
   "tree.deleteWorktreePlaceholder": "Select a worktree…", // TODO translate
   "tree.deleteWorktreeForce": "Force delete (discard uncommitted changes)", // TODO translate
   "tree.convertToNormalSession": "Convert to normal session", // TODO translate
   "tree.moveGroupToWorktree": "Zu Worktree verschieben…",
   "tree.convertToNormalGroup": "Convert to normal group", // TODO translate
   "merge.title": "Merge branches", // TODO translate
-  "merge.desc": "Pick a source and a target branch; the source merges into the target.", // TODO translate
+  "merge.desc":
+    "Pick a source and a target branch; the source merges into the target.", // TODO translate
   "merge.notRepo": "This session's directory is not a git repository.", // TODO translate
   "merge.loadingBranches": "Loading branches…", // TODO translate
   "merge.loadingDiff": "Loading diff…", // TODO translate
@@ -206,12 +227,14 @@ const de: typeof en = {
   "merge.targetLabel": "Target branch", // TODO translate
   "merge.selectBranch": "Select a branch…", // TODO translate
   "merge.swap": "Swap direction", // TODO translate
-  "merge.pickHint": "Pick both branches to preview the changes this merge brings in.", // TODO translate
+  "merge.pickHint":
+    "Pick both branches to preview the changes this merge brings in.", // TODO translate
   "merge.changes": (target: string) => `Changes brought into "${target}"`, // TODO translate
   "merge.noChanges": "No file changes.", // TODO translate
   "merge.sameBranch": "Source and target are the same branch.", // TODO translate
   "merge.branchGone": "A selected branch no longer exists. Pick again.", // TODO translate
-  "merge.upToDate": "The target branch already contains the source branch. Nothing to merge.", // TODO translate
+  "merge.upToDate":
+    "The target branch already contains the source branch. Nothing to merge.", // TODO translate
   "merge.targetNotCheckedOut": (target: string) =>
     `Target branch "${target}" isn't checked out in any worktree, so a local merge can't run. Check it out first.`, // TODO translate
   "merge.targetDirty":
@@ -219,11 +242,13 @@ const de: typeof en = {
   "merge.sourceDirtyNote":
     "The source branch's working tree has uncommitted changes; they will be committed first.", // TODO translate
   "merge.commitMsgLabel": "Commit message", // TODO translate
-  "merge.commitMsgPlaceholder": "Describe this change (used as the commit message)", // TODO translate
+  "merge.commitMsgPlaceholder":
+    "Describe this change (used as the commit message)", // TODO translate
   "merge.apply": "Merge", // TODO translate
   "merge.commitAndApply": "Commit & merge", // TODO translate
   "merge.working": "Merging…", // TODO translate
-  "merge.doneMsg": (source: string, target: string) => `Merged "${source}" into "${target}".`, // TODO translate
+  "merge.doneMsg": (source: string, target: string) =>
+    `Merged "${source}" into "${target}".`, // TODO translate
   "merge.conflictMsg": (target: string) =>
     `Merge has conflicts. Resolve them in the terminal of "${target}"'s worktree, then commit:`, // TODO translate
   "merge.close": "Close", // TODO translate
@@ -278,7 +303,8 @@ const de: typeof en = {
     "open your desktop's Settings ▸ Notifications and allow VelaTerm.", // TODO translate
   "settings.notifyStepsBrowser":
     "click the site-permission icon in the address bar and set Notifications to Allow.", // TODO translate
-  "settings.notifyUnsupported": "Notifications aren't available in this environment.", // TODO translate
+  "settings.notifyUnsupported":
+    "Notifications aren't available in this environment.", // TODO translate
   "settings.notifyOpenSettings": "Open System Settings", // TODO translate
   // Shortcut categories
   "settings.catShortcuts": "Tastenkürzel", // Shortcuts
@@ -292,7 +318,8 @@ const de: typeof en = {
   "settings.scGlobalSearch": "Alle Sitzungen durchsuchen", // Search all sessions
   "settings.scSaveDoc": "Dokument speichern", // Save document
   "settings.scRecording": "Tasten drücken…", // Press keys…
-  "settings.scHint": "Klicke ein Kürzel an und drücke eine neue Kombination (Cmd/Strg erforderlich).", // hint
+  "settings.scHint":
+    "Klicke ein Kürzel an und drücke eine neue Kombination (Cmd/Strg erforderlich).", // hint
   "settings.scReset": "Standard wiederherstellen", // Restore defaults
   "settings.scConflict": (label: string) => `Bereits belegt von „${label}“`, // conflict
 
@@ -356,7 +383,8 @@ const de: typeof en = {
   "connect.stagePreparing": "Server wird vorbereitet…",
   "connect.stageTransferring": "Server wird übertragen…",
   "connect.stageStarting": "Server wird gestartet…",
-  "connect.sshFingerprintLabel": (kt: string) => `SSH-Hostschlüssel-Fingerabdruck (${kt})`,
+  "connect.sshFingerprintLabel": (kt: string) =>
+    `SSH-Hostschlüssel-Fingerabdruck (${kt})`,
   "connect.sshHostNew":
     "Erste Verbindung zu diesem Host — überprüfen Sie den Fingerabdruck, bevor Sie fortfahren.",
   "connect.sshHostChanged":
@@ -421,6 +449,17 @@ const de: typeof en = {
   "tree.closeScratch": "Entwurf schließen", // Close Scratch
   "tree.importProject": "Projekt importieren", // Import Project
   "tree.createProject": "Projekt erstellen",
+  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  "tree.newCollection": "Neue Sammlung",
+  "tree.deleteCollection": "Sammlung löschen",
+  "collection.title": "Neue Sammlung",
+  "collection.name": "Name der Sammlung",
+  "collection.namePlaceholder": "research",
+  "collection.submit": "Sammlung erstellen",
+  "collection.tag": "Kein Ordner",
+  "collection.deleteTitle": "Sammlung löschen",
+  "collection.deleteBody": (name) =>
+    `Sammlung „${name}“ löschen? Alle enthaltenen Gruppen und Sitzungen werden ebenfalls gelöscht. Das lässt sich nicht rückgängig machen.`,
   "tree.cloneProject": "Von Git klonen", // Clone from Git
   "createProject.title": "Projekt erstellen",
   "createProject.name": "Projektname",
@@ -428,7 +467,8 @@ const de: typeof en = {
   "createProject.into": "Erstellen in",
   "createProject.choose": "Auswählen…",
   "createProject.noParent": "Übergeordneten Ordner auswählen",
-  "createProject.invalidName": "Geben Sie einen einzelnen Ordnernamen ohne / oder \\ ein.",
+  "createProject.invalidName":
+    "Geben Sie einen einzelnen Ordnernamen ohne / oder \\ ein.",
   "createProject.creating": "Wird erstellt…",
   "createProject.submit": "Projekt erstellen",
   "clone.title": "Git-Repository klonen", // Clone Git Repository
@@ -452,7 +492,8 @@ const de: typeof en = {
   "clone.stageFinalizing": "Wird abgeschlossen…",
   "clone.stageImporting": "Projekt wird importiert…",
   "clone.elapsed": (seconds: number) => `${seconds} s vergangen`,
-  "clone.slowHint": "Seit 30 Sekunden kein Fortschritt. Prüfen Sie Netzwerk oder Proxy des Remote-Rechners; Sie können abbrechen und erneut versuchen.",
+  "clone.slowHint":
+    "Seit 30 Sekunden kein Fortschritt. Prüfen Sie Netzwerk oder Proxy des Remote-Rechners; Sie können abbrechen und erneut versuchen.",
   "clone.submit": "Klonen", // Clone
   "tree.globalSearch": "Alle Sitzungen durchsuchen", // Search All Sessions
   "tree.archivedSessions": "Archivierte Sitzungen", // Archived Sessions
@@ -494,7 +535,8 @@ const de: typeof en = {
   "mark.caution": "Achtung", // Caution
   "tree.clearAllNotifications":
     "Alle Benachrichtigungsmarken löschen (Sitzungspunkte und Dock-Badge)", // Clear all notification badges…
-  "tree.noProjectsPre": "Noch keine Projekte. Klicken Sie auf das Ordnersymbol oder drücken Sie ", // No projects yet. Click the folder button, or press
+  "tree.noProjectsPre":
+    "Noch keine Projekte. Klicken Sie auf das Ordnersymbol oder drücken Sie ", // No projects yet. Click the folder button, or press
   "tree.noProjectsPost": ", um ein Verzeichnis zu importieren.", // to import a directory.
   "tree.openProject": "Projekt öffnen", // Open Project
   "tree.noAttention": "Keine Sitzungen entsprechen dem Statusfilter", // No sessions match the status filter
@@ -518,14 +560,19 @@ const de: typeof en = {
   "tree.cwdLabel": "Arbeitsverzeichnis (leer = Projektwurzel)", // Working directory (leave empty for project root)
   "tree.initCmdLabel": "Startbefehl (optional)", // Startup command (optional)
   "tree.agentArgsLabel": "Startargumente (optional)", // Launch args (optional)
+  // Working directory / Leave empty for the default
+  "tree.workingDirLabel": "Arbeitsverzeichnis",
+  "tree.workingDirPlaceholder": "Leer lassen für das Standardverzeichnis",
   "preset.execPathLabel": "Programmdatei (optional)",
   "preset.execPathPlaceholder": "/usr/local/bin/claude",
-  "preset.execPathHint": "Leer lassen, um den konfigurierten Befehl des Agenten zu verwenden. Mit Angabe läuft nur diese Sitzung mit einem kompatiblen Ersatz.",
+  "preset.execPathHint":
+    "Leer lassen, um den konfigurierten Befehl des Agenten zu verwenden. Mit Angabe läuft nur diese Sitzung mit einem kompatiblen Ersatz.",
   "preset.saveLabel": "Als Vorlage speichern",
   "preset.namePlaceholder": "Vorlage benennen",
   "preset.iconChoose": "Symbol wählen",
   "preset.iconClear": "Entfernen",
-  "preset.iconHint": "Quadratische Bilder eignen sich am besten; andere werden zugeschnitten und auf 64x64 skaliert.",
+  "preset.iconHint":
+    "Quadratische Bilder eignen sich am besten; andere werden zugeschnitten und auf 64x64 skaliert.",
   "tree.permissionSkipLabel": "Alle Berechtigungsabfragen überspringen", // Skip all permission confirmations
   "tree.permissionSkipHint":
     "Startet mit dem Bypass-Flag dieses Agenten (z. B. Claude --dangerously-skip-permissions; Codex deaktiviert zudem seine Sandbox). Gilt bei jedem Start – mit Vorsicht verwenden.",
@@ -581,9 +628,11 @@ const de: typeof en = {
   // New worktree-session dialog
   "tree.newWorktreeSession": "Neue Worktree-Sitzung…", // New Worktree Session…
   "worktree.worktreeNameLabel": "Worktree-Name", // Worktree name
-  "worktree.worktreeNameHint": "Wird als Worktree-Verzeichnis und Branch-Name verwendet.", // Used as the worktree directory and branch name.
+  "worktree.worktreeNameHint":
+    "Wird als Worktree-Verzeichnis und Branch-Name verwendet.", // Used as the worktree directory and branch name.
   "worktree.createFailed": "Worktree konnte nicht erstellt werden", // Couldn't create the worktree
-  "worktree.noRepoRoot": "Dieses Projekt hat keinen nutzbaren Git-Repository-Pfad.", // This project has no usable git repository path.
+  "worktree.noRepoRoot":
+    "Dieses Projekt hat keinen nutzbaren Git-Repository-Pfad.", // This project has no usable git repository path.
   // ── Worktree selector for custom session creation ──
   "worktreeSel.label": "Worktree",
   "worktreeSel.modeNone": "Keiner", // None
@@ -591,10 +640,13 @@ const de: typeof en = {
   "worktreeSel.modeExisting": "Vorhanden", // Existing
   "worktreeSel.loading": "Worktrees werden geladen…", // Loading worktrees…
   "worktreeSel.empty": "Keine vorhandenen Worktrees in diesem Repository.", // No existing worktrees in this repository.
-  "worktreeSel.loadFailed": "Worktrees konnten nicht aufgelistet werden (kein Git-Repository?).", // Couldn't list worktrees (not a git repository?).
-  "group.worktreeHint": "In dieser Gruppe erstellte Sitzungen verwenden standardmäßig dieses Worktree.", // Sessions created in this group will use this worktree by default.
+  "worktreeSel.loadFailed":
+    "Worktrees konnten nicht aufgelistet werden (kein Git-Repository?).", // Couldn't list worktrees (not a git repository?).
+  "group.worktreeHint":
+    "In dieser Gruppe erstellte Sitzungen verwenden standardmäßig dieses Worktree.", // Sessions created in this group will use this worktree by default.
   "worktree.moveGroupTitle": "Gruppe zu Worktree verschieben",
-  "worktree.moveGroupHint": "Ab jetzt in dieser Gruppe erstellte Sitzungen verwenden dieses Worktree. Bereits vorhandene behalten ihr aktuelles Verzeichnis.",
+  "worktree.moveGroupHint":
+    "Ab jetzt in dieser Gruppe erstellte Sitzungen verwenden dieses Worktree. Bereits vorhandene behalten ihr aktuelles Verzeichnis.",
 
   // ── Archive panel ──
   "archive.title": "Archivierte Sitzungen", // Archived Sessions
@@ -604,14 +656,17 @@ const de: typeof en = {
   "archive.restore": "Als normale Sitzung wiederherstellen", // Restore to normal session
   "archive.export": "Vollständigen Kontext als Markdown exportieren", // Export full context as Markdown
   "archive.deleteForever": "Endgültig löschen (samt Aufzeichnung)", // Delete permanently (with recording)
-  "archive.pickOne": "Links eine archivierte Sitzung wählen, um das Transkript zu sehen", // Select an archived session on the left…
+  "archive.pickOne":
+    "Links eine archivierte Sitzung wählen, um das Transkript zu sehen", // Select an archived session on the left…
   "archive.recordingEnd": "--- Ende der Aufzeichnung ---", // --- End of recording ---
-  "archive.readRecordingFailed": (err) => `Aufzeichnung konnte nicht gelesen werden: ${err}`, // Failed to read recording: {err}
+  "archive.readRecordingFailed": (err) =>
+    `Aufzeichnung konnte nicht gelesen werden: ${err}`, // Failed to read recording: {err}
   "archive.searchRecording": "In Aufzeichnung suchen…", // Search in recording…
   "archive.searchTranscript": "Transkript durchsuchen…", // Search transcript…
   "archive.searchPlaceholder": "Archivierte Inhalte durchsuchen…", // Search archived content…
   "archive.msgCountAll": (n) => (n === 1 ? "1 Nachricht" : `${n} Nachrichten`), // {n} messages
-  "archive.msgCountFiltered": (shown, total) => `${shown} / ${total} Nachrichten`, // {shown} / {total} messages
+  "archive.msgCountFiltered": (shown, total) =>
+    `${shown} / ${total} Nachrichten`, // {shown} / {total} messages
   "archive.you": "Du", // You
   "archive.toolsUsed": (tools) => `Werkzeuge: ${tools}`, // Tools: {tools}
   "archive.noMatch": "Keine passenden Nachrichten", // No matching messages
@@ -620,14 +675,17 @@ const de: typeof en = {
 
   // ── Global session-content search ──
   "search.allPlaceholder": "Gesamten Sitzungsinhalt durchsuchen…", // Search across all session content…
-  "search.hint": "Durchsuchen Sie Sitzungsinhalte. Archivierte Sitzungen sind standardmäßig ausgeschlossen — „Archivierte einbeziehen“ aktivieren, um sie hinzuzufügen.", // Search session content. Archived sessions are excluded by default.
+  "search.hint":
+    "Durchsuchen Sie Sitzungsinhalte. Archivierte Sitzungen sind standardmäßig ausgeschlossen — „Archivierte einbeziehen“ aktivieren, um sie hinzuzufügen.", // Search session content. Archived sessions are excluded by default.
   "search.includeArchived": "Archivierte einbeziehen", // Include archived
-  "search.includeArchivedHint": "Auch archivierte Sitzungen durchsuchen (standardmäßig aus)", // Also search archived sessions (off by default)
+  "search.includeArchivedHint":
+    "Auch archivierte Sitzungen durchsuchen (standardmäßig aus)", // Also search archived sessions (off by default)
   "search.searching": "Suche…", // Searching…
   "search.noResults": "Keine Treffer gefunden", // No matches found
   "search.sessionCount": (n) => (n === 1 ? "1 Sitzung" : `${n} Sitzungen`), // n sessions
   "search.matchCount": (n) => (n === 1 ? "1 Treffer" : `${n} Treffer`), // n matches
-  "search.pickSession": "Wählen Sie links eine Sitzung, um ihre Treffer zu sehen", // Select a session on the left to see its matches
+  "search.pickSession":
+    "Wählen Sie links eine Sitzung, um ihre Treffer zu sehen", // Select a session on the left to see its matches
   "search.openSession": "Sitzung öffnen", // Open session
   "search.backToResults": "Zurück zu den Ergebnissen", // Back to results
   "search.archivedBadge": "Archiviert", // Archived
@@ -662,22 +720,26 @@ const de: typeof en = {
   "browser.back": "Zurück", // Back
   "browser.forward": "Vorwärts", // Forward
   "browser.reload": "Neu laden", // Reload
-  "browser.desktopOnly": "Browser-Tabs lassen sich nur in der Desktop-App öffnen.", // Browser tabs open in the desktop app only.
+  "browser.desktopOnly":
+    "Browser-Tabs lassen sich nur in der Desktop-App öffnen.", // Browser tabs open in the desktop app only.
   "browser.stop": "Laden abbrechen", // Stop loading
   "browser.openExternal": "Im System-Browser öffnen", // Open in system browser
   "browser.addressPlaceholder": "URL oder Suchbegriffe eingeben", // Enter URL or search terms
   "browser.quickAccess": "Schnellzugriff", // Quick access
   "browser.loading": "Lädt…", // Loading…
   // Application-exit confirmation and dormant restored sessions.
-  "quit.title": "VelaTerm beenden?",  // Quit VelaTerm?
-  "quit.body": "Alle laufenden Terminal- und Agent-Sitzungen werden beendet.",  // Any running terminal and agent sessions will be stopped.
-  "quit.saveWorkspace": "Arbeitsbereich speichern",  // Save workspace
-  "quit.saveWorkspaceHint": "Beim nächsten Start dieselben Tabs und Teilungen öffnen. Terminals werden wiederhergestellt, aber nicht neu gestartet.",  // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
-  "quit.confirm": "Beenden",  // Quit
-  "dormant.body": "Aus dem gespeicherten Arbeitsbereich wiederhergestellt. Es läuft noch kein Prozess.",  // Restored from your saved workspace. No process is running yet.
-  "dormant.start": "Starten",  // Start
+  "quit.title": "VelaTerm beenden?", // Quit VelaTerm?
+  "quit.body": "Alle laufenden Terminal- und Agent-Sitzungen werden beendet.", // Any running terminal and agent sessions will be stopped.
+  "quit.saveWorkspace": "Arbeitsbereich speichern", // Save workspace
+  "quit.saveWorkspaceHint":
+    "Beim nächsten Start dieselben Tabs und Teilungen öffnen. Terminals werden wiederhergestellt, aber nicht neu gestartet.", // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
+  "quit.confirm": "Beenden", // Quit
+  "dormant.body":
+    "Aus dem gespeicherten Arbeitsbereich wiederhergestellt. Es läuft noch kein Prozess.", // Restored from your saved workspace. No process is running yet.
+  "dormant.start": "Starten", // Start
   "overlimit.title": (max) => `Hintergrund-Limit überschritten (${max})`, // Background keep-alive over limit ({max})
-  "overlimit.body": "All background tabs are working or awaiting your reply. Choose one to end:", // All background tabs are working or awaiting your reply. Choose one to end:
+  "overlimit.body":
+    "All background tabs are working or awaiting your reply. Choose one to end:", // All background tabs are working or awaiting your reply. Choose one to end:
   "overlimit.kill": "End Selected", // End Selected
   "overlimit.keep": "Keep for Now", // Keep for Now
   "overlimit.earliest": "earliest", // earliest
@@ -717,7 +779,8 @@ const de: typeof en = {
   "agentInstall.docs": "Anleitung", // Install docs
   "agentInstall.needsNode": "Erfordert Node.js / npm", // Requires Node.js / npm
   "agentInstall.afterInstall": "Nach der Installation:", // After install:
-  "agentInstall.pathSaved": (label: string) => `Pfad zur ausführbaren Datei von ${label} in den Einstellungen gespeichert:`, // executable path saved to Settings
+  "agentInstall.pathSaved": (label: string) =>
+    `Pfad zur ausführbaren Datei von ${label} in den Einstellungen gespeichert:`, // executable path saved to Settings
   "agentInstall.doneTitle": (label: string) => `${label} ist installiert`, // {label} is installed
   "agentInstall.doneDesc": "Starten Sie diese Sitzung neu, um loszulegen.", // Relaunch this session to start using it.
   "agentInstall.restartNow": "Jetzt neu starten", // Relaunch now
@@ -743,7 +806,8 @@ const de: typeof en = {
   "doc.outline": "Gliederung", // Outline
   "doc.outlineEmpty": "Keine Überschriften", // No headings
   "doc.saving": "Speichert…", // Saving…
-  "doc.overwriteConfirm": "Eine Datei mit diesem Namen existiert bereits. Zum Ersetzen auf „Überschreiben“ klicken.", // A file with this name already exists. Click "Overwrite" to replace it.
+  "doc.overwriteConfirm":
+    "Eine Datei mit diesem Namen existiert bereits. Zum Ersetzen auf „Überschreiben“ klicken.", // A file with this name already exists. Click "Overwrite" to replace it.
   "doc.saveTooltip": "Speichern", // Save
   "doc.externalChanged":
     "Die Datei wurde auf der Festplatte geändert (Sie haben ungespeicherte lokale Änderungen).", // The file was modified on disk…
@@ -767,7 +831,8 @@ const de: typeof en = {
   "doc.imgLoading": (title, size) => `${title} (${size}) wird geladen…`, // Loading {title} ({size})…
   "doc.imgBeingWritten":
     "Die Datei wird gerade geschrieben; sie wird automatisch neu geladen, sobald sie stabil ist.", // The file is being written; it will reload automatically once it settles.
-  "doc.imgDecodeFailed": "Dieses Bild kann nicht angezeigt werden (nicht unterstütztes oder beschädigtes Format).", // Cannot display this image (unsupported or corrupted format).
+  "doc.imgDecodeFailed":
+    "Dieses Bild kann nicht angezeigt werden (nicht unterstütztes oder beschädigtes Format).", // Cannot display this image (unsupported or corrupted format).
   "doc.imgFit": "Einpassen", // Fit
   "doc.imgActual": "1:1", // 1:1
   "doc.exportPdf": "Als PDF exportieren", // Export PDF
@@ -796,7 +861,8 @@ const de: typeof en = {
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
   "files.dblClickOpen": "Zum Öffnen doppelklicken",
-  "files.deleteConfirm": (name) => `„${name}" löschen? Dies kann nicht rückgängig gemacht werden.`, // Delete "{name}"? This can't be undone.
+  "files.deleteConfirm": (name) =>
+    `„${name}" löschen? Dies kann nicht rückgängig gemacht werden.`, // Delete "{name}"? This can't be undone.
 
   // ── File transfer (remote access) ──
   "transfer.uploadsTitle": "Uploads", // Uploads
@@ -816,23 +882,28 @@ const de: typeof en = {
   "statusbar.bgCount": (n, max) => `Hintergrund ${n}/${max}`, // Background {n}/{max}
   "statusbar.bgTooltip": (max) =>
     `Hintergrund-Tabs (Limit ${max}; bei Überschreitung wird der älteste inaktive Tab automatisch beendet)`, // Background keep-alive tabs (limit {max}…)
-  "statusbar.bgEvicted": (name) => `Hintergrund-Tab beendet: ${name} (Limit überschritten)`, // Ended background tab: {name} (over keep-alive limit)
+  "statusbar.bgEvicted": (name) =>
+    `Hintergrund-Tab beendet: ${name} (Limit überschritten)`, // Ended background tab: {name} (over keep-alive limit)
   "statusbar.webTooltip": (url) => `Browser-Fernzugriff aktiviert: ${url}`, // Browser remote access enabled: {url}
   "statusbar.permAsk": "Rechte: Fragen", // Perms: Ask
   "statusbar.permSkip": "Rechte: Überspringen", // Perms: Skip
   "statusbar.notifyOn": "Notify: On", // TODO translate
   "statusbar.notifyOff": "Notify: Off", // TODO translate
-  "statusbar.permTooltip": "Berechtigungsmodus dieser Sitzung · zum Ändern klicken (nur diese Sitzung)", // This session's permission mode · click to change (this session only)
+  "statusbar.permTooltip":
+    "Berechtigungsmodus dieser Sitzung · zum Ändern klicken (nur diese Sitzung)", // This session's permission mode · click to change (this session only)
   "statusbar.permMenuTitle": "Berechtigungen dieser Sitzung", // This session's permissions
   "statusbar.permOptAsk": "Jedes Mal fragen (Standard)", // Ask each time (default)
-  "statusbar.permScopeHint": "Gilt nur für diese Sitzung. Für globale Standardwerte gehen Sie zu Einstellungen ▸ Agenten.", // Applies to this session only. For global defaults, go to Settings ▸ Agents.
-  "statusbar.permRestartMsg": "Berechtigung geändert. Die Sitzung muss neu gestartet werden, damit dies wirkt. Der Neustart setzt das aktuelle Gespräch fort, unterbricht aber laufende Aufgaben. Jetzt neu starten?", // Permission changed. The session must restart to apply. Restart resumes the current conversation but interrupts any task in progress. Restart now?
+  "statusbar.permScopeHint":
+    "Gilt nur für diese Sitzung. Für globale Standardwerte gehen Sie zu Einstellungen ▸ Agenten.", // Applies to this session only. For global defaults, go to Settings ▸ Agents.
+  "statusbar.permRestartMsg":
+    "Berechtigung geändert. Die Sitzung muss neu gestartet werden, damit dies wirkt. Der Neustart setzt das aktuelle Gespräch fort, unterbricht aber laufende Aufgaben. Jetzt neu starten?", // Permission changed. The session must restart to apply. Restart resumes the current conversation but interrupts any task in progress. Restart now?
   "statusbar.permRestartNow": "Jetzt neu starten", // Restart now
   "statusbar.permRestartLater": "Später", // Later
   "statusbar.permScopeTitle": "Anwenden auf?", // Apply to?
   "statusbar.permScopeSession": "Nur diese Sitzung", // This session only
   "statusbar.permScopeGlobal": "Globaler Standard", // Global default
-  "statusbar.permScopeGlobalHint": "Gilt jetzt für diese Sitzung und wird zum Standard für künftige neue Sitzungen dieser Art (mit Einstellungen synchronisiert).", // Applies now to this session and becomes the default for future sessions of this kind (synced with Settings).
+  "statusbar.permScopeGlobalHint":
+    "Gilt jetzt für diese Sitzung und wird zum Standard für künftige neue Sitzungen dieser Art (mit Einstellungen synchronisiert).", // Applies now to this session and becomes the default for future sessions of this kind (synced with Settings).
 
   // ── Store, notifications, and export ──
   "notify.working": "⏳ Arbeitet…", // ⏳ Working…
@@ -854,21 +925,27 @@ const de: typeof en = {
   // ── transport ──
   "transport.noReplayInBrowser":
     "Wiedergabe von Aufzeichnungen wird im Browser noch nicht unterstützt", // Recording playback is not yet supported in the browser
-  "transport.imgUploadHttp": (status) => `Bild-Upload fehlgeschlagen (${status})`, // Image upload failed ({status})
+  "transport.imgUploadHttp": (status) =>
+    `Bild-Upload fehlgeschlagen (${status})`, // Image upload failed ({status})
 
   // ── Login gate, directory selection, and connection banner ──
   "login.connecting": "Verbinde…", // Connecting…
   "login.remoteAccess": "Fernzugriff", // Remote Access
-  "login.desc": "Geben Sie das Zugangspasswort ein, um sich mit diesem Terminal zu verbinden.", // Enter the access password to connect to this terminal.
+  "login.desc":
+    "Geben Sie das Zugangspasswort ein, um sich mit diesem Terminal zu verbinden.", // Enter the access password to connect to this terminal.
   "login.passwordPlaceholder": "Zugangspasswort", // Access password
   "login.connect": "Verbinden", // Connect
   "login.wrongPassword": "Falsches Passwort", // Wrong password
-  "login.rateLimited": "Zu viele Versuche. Bitte eine Minute warten und erneut versuchen.", // Too many attempts. Please wait a minute and try again.
+  "login.rateLimited":
+    "Zu viele Versuche. Bitte eine Minute warten und erneut versuchen.", // Too many attempts. Please wait a minute and try again.
   "login.failed": "Anmeldung fehlgeschlagen, bitte erneut versuchen", // Login failed, please try again
-  "login.pairingRequired": "Dieser Server erfordert einen Kopplungslink. Öffnen Sie den im Fernzugriff-Bereich der Desktop-App erzeugten Link.", // This server requires a pairing link
-  "login.authFailed": "Authentifizierung fehlgeschlagen. Prüfen Sie das Zugangspasswort, oder öffnen Sie einen neuen Kopplungslink, falls der Link neu erstellt wurde.", // Authentication failed, check password or use a new pairing link
+  "login.pairingRequired":
+    "Dieser Server erfordert einen Kopplungslink. Öffnen Sie den im Fernzugriff-Bereich der Desktop-App erzeugten Link.", // This server requires a pairing link
+  "login.authFailed":
+    "Authentifizierung fehlgeschlagen. Prüfen Sie das Zugangspasswort, oder öffnen Sie einen neuen Kopplungslink, falls der Link neu erstellt wurde.", // Authentication failed, check password or use a new pairing link
   "dir.title": "Projektverzeichnis wählen", // Choose Project Directory
-  "dir.pathPlaceholder": "Suchen oder Pfad eingeben und Enter drücken (unterstützt ~)", // Search, or type a path and press Enter (supports ~)
+  "dir.pathPlaceholder":
+    "Suchen oder Pfad eingeben und Enter drücken (unterstützt ~)", // Search, or type a path and press Enter (supports ~)
   "dir.up": "Eine Ebene nach oben", // Up one level
   "dir.newFolder": "Neuer Ordner", // New Folder
   "dir.newFolderPlaceholder": "Ordnername", // Folder name
@@ -883,8 +960,10 @@ const de: typeof en = {
   "conn.reconnecting": "Verbindung getrennt, verbinde erneut…", // Connection lost, reconnecting…
   "conn.reconnectNow": "Jetzt neu verbinden", // Reconnect now
   "conn.retrying": "Verbinde erneut…", // Reconnecting…
-  "conn.sshReconnecting": "SSH-Verbindung unterbrochen, Tunnel wird neu aufgebaut…", // SSH link lost, rebuilding the tunnel…
-  "conn.sshDown": "SSH-Verbindung getrennt — zum erneuten Versuch „Jetzt neu verbinden“ drücken", // SSH link is down — press Reconnect now to try again
+  "conn.sshReconnecting":
+    "SSH-Verbindung unterbrochen, Tunnel wird neu aufgebaut…", // SSH link lost, rebuilding the tunnel…
+  "conn.sshDown":
+    "SSH-Verbindung getrennt — zum erneuten Versuch „Jetzt neu verbinden“ drücken", // SSH link is down — press Reconnect now to try again
   "reqerr.title": "Anfrage fehlgeschlagen", // Request failed
   "reqerr.dismiss": "Schließen", // Dismiss
   // ── Error Log panel ──
@@ -909,9 +988,12 @@ const de: typeof en = {
   "transport.wsDisconnected": "WebSocket getrennt", // WebSocket disconnected
   "transport.wsConnectFailed": "WebSocket-Verbindung fehlgeschlagen", // WebSocket connection failed
   "transport.cmdFailed": "Befehl fehlgeschlagen", // Command failed
-  "transport.remoteCmdForbidden": (cmd: string) => `Befehl für Remote-Clients nicht verfügbar: ${cmd}`, // Command not available to remote clients
-  "transport.remoteSettingForbidden": (key: string) => `Einstellungsschlüssel für Remote-Clients nicht schreibbar: ${key}`, // Settings key not writable by remote clients
-  "transport.remotePathForbidden": (path: string) => `Remote-Clients können nicht auf Dateien im App-Datenverzeichnis zugreifen: ${path}`, // Remote clients cannot access files in the app data directory
+  "transport.remoteCmdForbidden": (cmd: string) =>
+    `Befehl für Remote-Clients nicht verfügbar: ${cmd}`, // Command not available to remote clients
+  "transport.remoteSettingForbidden": (key: string) =>
+    `Einstellungsschlüssel für Remote-Clients nicht schreibbar: ${key}`, // Settings key not writable by remote clients
+  "transport.remotePathForbidden": (path: string) =>
+    `Remote-Clients können nicht auf Dateien im App-Datenverzeichnis zugreifen: ${path}`, // Remote clients cannot access files in the app data directory
 
   // ── Crepe（WYSIWYG-Editor）──
   "crepe.placeholder": "Text eingeben oder / für das Einfügemenü drücken", // Type text, or press / for the insert menu
@@ -983,7 +1065,8 @@ const de: typeof en = {
   "updater.retry": "Try again", // TODO translate
   "updater.downloadFailed": (err) => `Update failed: ${err}`, // TODO translate
   "updater.hide": "Hide", // TODO translate
-  "updater.hideHint": "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
+  "updater.hideHint":
+    "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
   "updater.downloadManually": "Download manually", // TODO translate
   "updater.downloadManuallyHint": "Open the download page in your browser.", // TODO translate
   "updater.windowsNotice":

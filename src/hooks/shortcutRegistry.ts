@@ -1,8 +1,9 @@
 //! Customizable global shortcut registry + combo key encode/decode utilities.
 //!
 //! Design:
-//! - "mod" is a cross-platform modifier abstraction: Cmd (metaKey) on macOS, Ctrl on other platforms.
-//!   Both `e.metaKey || e.ctrlKey` count as mod, consistent with useKeyboardShortcuts.
+//! - "mod" is a cross-platform modifier abstraction: Cmd (metaKey) on desktop macOS, Ctrl everywhere
+//!   else (including plain browsers on macOS, which bind Ctrl+Alt). Only the modifier the current
+//!   shell actually binds counts as mod - see hasMod().
 //! - Combos are encoded as strings in canonical order: `mod[+shift][+alt]+<letter>` (lowercase).
 //!   e.g. "mod+t", "mod+w", "mod+shift+f", "mod+shift+b". mod is always included; main key is
 //!   limited to a single letter (A-Z). Numeric keys and +/-/0 are reserved for structural shortcuts
@@ -49,6 +50,21 @@ export const IS_MAC =
  * them (desktop Windows/Linux WebView2 gets its browser accelerators disabled at the COM level).
  */
 export const IS_PLAIN_BROWSER = env.isBrowser && !env.isRemoteWindow;
+
+/** Whether "mod" means Cmd on this client. Desktop macOS binds Cmd; every other shell binds Ctrl. */
+const MOD_IS_CMD = IS_MAC && !IS_PLAIN_BROWSER;
+
+/**
+ * Whether the event carries this client's mod modifier, and only that one.
+ *
+ * Accepting "metaKey || ctrlKey" everywhere would make Ctrl+letter fire the macOS Cmd bindings: on a
+ * Mac, Ctrl+D (EOF) opened a split, Ctrl+W (delete word) closed a pane, and Ctrl+F/Ctrl+T/Ctrl+O were
+ * swallowed the same way. Those are shell keys and must stay shell keys, so require exactly the
+ * modifier the platform binds and reject the other one.
+ */
+export function hasMod(e: KeyboardEvent): boolean {
+  return MOD_IS_CMD ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+}
 
 /**
  * Default keybindings per platform:
@@ -114,10 +130,10 @@ function isLetter(e: KeyboardEvent, letter: string): boolean {
 
 /**
  * Check whether a keyboard event matches a combo.
- * Requirements: mod (meta or ctrl) pressed, shift/alt state matches exactly, main key matches.
+ * Requirements: this client's mod held (see hasMod), shift/alt state matches exactly, main key matches.
  */
 export function matchCombo(e: KeyboardEvent, combo: string): boolean {
-  if (!(e.metaKey || e.ctrlKey)) return false;
+  if (!hasMod(e)) return false;
   const c = parseCombo(combo);
   if (!c.key) return false;
   if (e.shiftKey !== c.shift) return false;
@@ -127,11 +143,11 @@ export function matchCombo(e: KeyboardEvent, combo: string): boolean {
 
 /**
  * Record a combo string from a keyboard event.
- * Must have mod held and main key is a single letter A-Z, otherwise returns null.
+ * Must have this client's mod held (see hasMod) and main key is a single letter A-Z, else null.
  * Prefers physical key code (e.code "KeyX") over e.key for layout-independence.
  */
 export function comboFromEvent(e: KeyboardEvent): string | null {
-  if (!(e.metaKey || e.ctrlKey)) return null;
+  if (!hasMod(e)) return null;
   let letter: string | null = null;
   const m = /^Key([A-Z])$/.exec(e.code);
   if (m) letter = m[1].toLowerCase();

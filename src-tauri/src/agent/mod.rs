@@ -24,3 +24,4 @@ pub mod server;
 pub mod spawn_cli;
 pub mod transcript;
 pub mod usage;
+pub mod usage_store;

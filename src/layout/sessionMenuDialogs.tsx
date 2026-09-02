@@ -16,9 +16,12 @@ import {
   listWorktrees,
   type WorktreeEntry,
 } from "../ipc/commands";
+import { invoke } from "../ipc/transport";
+import { env, platform } from "../platform";
 import { useTermStore } from "../store/termStore";
 import {
   effectiveStatus,
+  projectRoot,
   type NodeKind,
   type SessionKind,
   supportsPermissionToggle,
@@ -39,6 +42,7 @@ import type { AgentPreset } from "../types";
 export function ConfirmDelete({
   name,
   kind,
+  collection,
   batchCount,
   worktreePaths = [],
   onConfirm,
@@ -46,6 +50,8 @@ export function ConfirmDelete({
 }: {
   name: string;
   kind: NodeKind;
+  /** Wording only: a collection is a project row with no folder and reads as a collection to the user. */
+  collection?: boolean;
   batchCount?: number;
   worktreePaths?: string[];
   onConfirm: (removeWorktree: boolean) => void;
@@ -58,14 +64,18 @@ export function ConfirmDelete({
   const title = isBatch
     ? t("tree.batchDeleteTitle")
     : kind === "project"
-      ? t("tree.deleteProjectTitle")
+      ? collection
+        ? t("collection.deleteTitle")
+        : t("tree.deleteProjectTitle")
       : kind === "group"
         ? t("tree.deleteGroupTitle")
         : t("tree.deleteSessionTitle");
   const body = isBatch
     ? t("tree.batchDeleteBody", batchCount)
     : kind === "project"
-      ? t("tree.deleteProjectBody", name)
+      ? collection
+        ? t("collection.deleteBody", name)
+        : t("tree.deleteProjectBody", name)
       : kind === "group"
         ? t("tree.deleteGroupBody", name)
         : t("tree.deleteSessionBody", name);
@@ -836,7 +846,7 @@ export function NewGroup({
       ? st.groups.find((g) => g.id === parentGroupId)
       : null;
     const project = st.projects.find((p) => p.id === projectId);
-    return parentGroup?.worktreePath || project?.rootPath || null;
+    return parentGroup?.worktreePath || projectRoot(project) || null;
   });
   const wt = useWorktreeChoice(repoRoot);
 
@@ -910,11 +920,14 @@ export function NewGroup({
           />
         </label>
 
-        <WorktreeChoiceField
-          wt={wt}
-          namePlaceholder={name.trim() || undefined}
-          hint={t("group.worktreeHint")}
-        />
+        {/* Worktree binding needs a repository above the group; a collection has none, so the field is omitted. */}
+        {repoRoot && (
+          <WorktreeChoiceField
+            wt={wt}
+            namePlaceholder={name.trim() || undefined}
+            hint={t("group.worktreeHint")}
+          />
+        )}
 
         {/* Worktree creation failure: a localised title plus the backend's raw detail. */}
         {error && (
@@ -988,7 +1001,7 @@ export function MoveGroupToWorktree({
       ? st.groups.find((x) => x.id === g.parentGroupId)
       : null;
     const project = st.projects.find((p) => p.id === g?.projectId);
-    return parentGroup?.worktreePath || project?.rootPath || null;
+    return parentGroup?.worktreePath || projectRoot(project) || null;
   });
   const wt = useWorktreeChoice(repoRoot, "new");
 
@@ -1112,6 +1125,8 @@ export function NewAgentSession({
     worktree: WorktreeChoice;
     /** Executable overriding the kind's default; empty keeps that default. */
     execPath: string;
+    /** Working directory for the session; empty means the backend default. Ignored in worktree modes. */
+    cwd: string;
     /** Preset this configuration came from, or null when a built-in kind was chosen directly. */
     agentPresetId: string | null;
     /** Set when the user asked to keep this configuration, so the caller saves it before creating. */
@@ -1151,9 +1166,27 @@ export function NewAgentSession({
       ? st.sessions.find((s) => s.id === parentSessionId)
       : null;
     const project = st.projects.find((p) => p.id === projectId);
-    return parent?.cwd || project?.rootPath || null;
+    return parent?.cwd || projectRoot(project) || null;
   });
   const wt = useWorktreeChoice(repoRoot, initialWtMode);
+
+  // Working directory for this session. It starts at the repository above it — the parent session's directory or
+  // the project root — and falls back to the home directory inside a collection, which has no folder. The user can
+  // point it anywhere; worktree modes override it with the worktree path, so the field hides in those modes.
+  const [cwd, setCwd] = useState(repoRoot ?? "");
+  useEffect(() => {
+    if (repoRoot) return;
+    let alive = true;
+    invoke<string | null>("home_dir")
+      .then((h) => {
+        // Do not overwrite a directory the user already typed while this was in flight.
+        if (alive && h) setCwd((cur) => cur || h);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [repoRoot]);
 
   // Default session name uses the highest same-kind project number plus one.
   const autoName = (k: SessionKind): string => {
@@ -1225,6 +1258,7 @@ export function NewAgentSession({
         agentArgs: normalizeArgDashes(agentArgs),
         permissionMode: permSupported && skipPerm ? "skip" : null,
         worktree,
+        cwd: cwd.trim(),
         execPath: execPath.trim(),
         agentPresetId: presetId,
         savePreset: savePreset
@@ -1323,7 +1357,40 @@ export function NewAgentSession({
           />
         </label>
 
-        <WorktreeChoiceField wt={wt} namePlaceholder={autoName(kind)} />
+        {/* Working directory. A worktree mode supplies its own directory, so the field only shows in none mode. */}
+        {wt.mode === "none" && (
+          <label style={{ display: "block", marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+              {t("tree.workingDirLabel")}
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                className="vlx-input"
+                autoCapitalize="none"
+                spellCheck={false}
+                placeholder={t("tree.workingDirPlaceholder")}
+                value={cwd}
+                onChange={(e) => setCwd(e.target.value)}
+                style={{ flex: 1, minWidth: 0 }}
+              />
+              {(env.isTauri || env.isElectron) && (
+                <button
+                  className="vlx-btn"
+                  onClick={() => {
+                    void platform.dialog.pickDirectory().then((picked) => {
+                      if (picked) setCwd(picked);
+                    });
+                  }}
+                >
+                  {t("createProject.choose")}
+                </button>
+              )}
+            </div>
+          </label>
+        )}
+
+        {/* No repository above this session (a collection) means no worktree to create or bind. */}
+        {repoRoot && <WorktreeChoiceField wt={wt} namePlaceholder={autoName(kind)} />}
 
         <label style={{ display: "block" }}>
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>

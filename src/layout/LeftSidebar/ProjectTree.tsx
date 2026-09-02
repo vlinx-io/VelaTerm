@@ -13,6 +13,7 @@ import {
 } from "../../store/termStore";
 import {
   effectiveStatus,
+  isVirtualProject,
   type Group,
   type NodeKind,
   type Project,
@@ -1193,8 +1194,13 @@ export function ProjectTree(h: TreeHandlers) {
             >
               <Chevron open={row.expanded} />
             </span>
-            <span className="ic" style={{ color: "var(--text-dim)" }}>
-              <Icons.project size={15} />
+            {/* A collection has no folder behind it, so it carries its own icon and hover label. */}
+            <span
+              className="ic"
+              style={{ color: "var(--text-dim)" }}
+              title={isVirtualProject(p) ? t("collection.tag") : p.rootPath}
+            >
+              {isVirtualProject(p) ? <Icons.layers size={15} /> : <Icons.project size={15} />}
             </span>
             {renaming ? (
               renameInput

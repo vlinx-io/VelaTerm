@@ -31,6 +31,21 @@ async function loadRegistry() {
   return await import("./shortcutRegistry");
 }
 
+/** Build a minimal keyboard-event stand-in for matchCombo/comboFromEvent. */
+function keyEvent(
+  key: string,
+  mods: { meta?: boolean; ctrl?: boolean; shift?: boolean; alt?: boolean } = {},
+): KeyboardEvent {
+  return {
+    key,
+    code: `Key${key.toUpperCase()}`,
+    metaKey: !!mods.meta,
+    ctrlKey: !!mods.ctrl,
+    shiftKey: !!mods.shift,
+    altKey: !!mods.alt,
+  } as KeyboardEvent;
+}
+
 describe("shortcut defaults per shell", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -112,5 +127,29 @@ describe("shortcut defaults per shell", () => {
     expect(DEFAULT_BINDINGS.splitRight).toBe("mod+alt+d");
     expect(DEFAULT_BINDINGS.splitDown).toBe("mod+alt+e");
     expect(formatCombo("mod+alt+d")).toBe("Ctrl+Alt+D");
+  });
+
+  it("macOS desktop treats only Cmd as mod, leaving Ctrl+letter to the shell", async () => {
+    vi.stubGlobal("navigator", MAC_NAVIGATOR);
+    const { matchCombo, comboFromEvent } = await loadRegistry();
+
+    // Ctrl+D is EOF and Ctrl+W deletes a word; neither may trigger the Cmd bindings.
+    expect(matchCombo(keyEvent("d", { ctrl: true }), "mod+d")).toBe(false);
+    expect(matchCombo(keyEvent("w", { ctrl: true }), "mod+w")).toBe(false);
+    expect(comboFromEvent(keyEvent("d", { ctrl: true }))).toBeNull();
+    // Cmd still works, and Cmd+Ctrl is not the binding either.
+    expect(matchCombo(keyEvent("d", { meta: true }), "mod+d")).toBe(true);
+    expect(matchCombo(keyEvent("d", { meta: true, ctrl: true }), "mod+d")).toBe(false);
+    expect(comboFromEvent(keyEvent("d", { meta: true }))).toBe("mod+d");
+  });
+
+  it("non-macOS shells treat only Ctrl as mod", async () => {
+    vi.stubGlobal("navigator", WIN_NAVIGATOR);
+    const { matchCombo } = await loadRegistry();
+
+    expect(matchCombo(keyEvent("d", { ctrl: true, alt: true }), "mod+alt+d")).toBe(true);
+    expect(matchCombo(keyEvent("d", { meta: true, alt: true }), "mod+alt+d")).toBe(false);
+    // Bare Ctrl+D matches nothing because the defaults all carry Alt.
+    expect(matchCombo(keyEvent("d", { ctrl: true }), "mod+alt+d")).toBe(false);
   });
 });
