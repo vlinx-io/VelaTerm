@@ -123,8 +123,8 @@ pub fn subtree_stats(pid: u32) -> Option<ProcStats> {
     Some(ProcStats { cpu, rss_bytes })
 }
 
-/// Machine-wide CPU, memory, and swap, plus the platform's own saturation signal: macOS reports the
-/// kernel's memory pressure level, Linux reports load average. Windows has neither, so both are None.
+/// Machine-wide CPU, memory, and swap, plus platform saturation signals. macOS reports both the
+/// kernel's memory pressure level and load average; Linux reports load average; Windows reports neither.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemStats {
@@ -141,7 +141,7 @@ pub struct SystemStats {
     /// macOS only: memory pressure as 0-100, the same figure `memory_pressure -Q` reports as free
     /// percentage, inverted so higher means more pressure. None elsewhere.
     pub pressure_pct: Option<f32>,
-    /// Linux only: 1, 5, and 15 minute load averages. None elsewhere.
+    /// macOS and Linux: 1, 5, and 15 minute load averages. None elsewhere.
     pub load: Option<[f64; 3]>,
 }
 
@@ -211,15 +211,14 @@ fn memory_pressure() -> (Option<&'static str>, Option<f32>) {
     (None, None)
 }
 
-/// Load average, which only Linux reports meaningfully. macOS has one too, but its memory pressure
-/// level is the signal users actually read there, and Windows has no load average at all.
-#[cfg(target_os = "linux")]
+/// Load average on Unix platforms that expose the metric through sysinfo. Windows has no equivalent.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn load_average() -> Option<[f64; 3]> {
     let la = System::load_average();
     Some([la.one, la.five, la.fifteen])
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn load_average() -> Option<[f64; 3]> {
     None
 }
@@ -252,4 +251,3 @@ pub fn system_stats() -> SystemStats {
     guard.last = Some(out.clone());
     out
 }
-

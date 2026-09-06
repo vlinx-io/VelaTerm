@@ -466,7 +466,13 @@ svg { display: block; }
 
 .insp-section { padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .insp-section h4 { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; margin-bottom: 10px; }
+/* Right-aligned qualifier in a section title (the agent name, the pid): reads as part of the caption,
+   so it keeps the title's size and letter-spacing but drops the uppercasing that would mangle a name. */
+.insp-head-tag { margin-left: auto; font-size: 11px; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kv { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 11.5px; }
+/* Secondary value sharing a row with the primary one (uptime beside the start time). */
+.kv .v .kv-sub { margin-left: 7px; color: var(--text-dim); }
+.kv .v .kv-sub::before { content: "\00b7"; margin-right: 7px; color: var(--text-faint); }
 .kv .k { color: var(--text-dim); } .kv .v { color: var(--text); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kv .v.accent { color: var(--accent); }
 .diffstat { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 11.5px; }

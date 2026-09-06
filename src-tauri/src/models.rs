@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 ///   injected to obtain authoritative lifecycle state. OpenCode uses local plugin events; Copilot uses
 ///   command hooks under `~/.copilot/hooks/`; Cursor merges hooks into `~/.cursor/hooks.json`; Cline uses
 ///   scripts under `<data_dir>/cline/hooks/` through `CLINE_HOOKS_DIR` without user-config changes; Pi
-///   loads a TypeScript extension through `-e <absolute path>` and supports native `--fork`; Antigravity
+///   loads a TypeScript extension through `-e <absolute path>` and supports native `--fork`; OMP loads its own
+///   extension the same way and additionally reports an asking state; Antigravity
 ///   merges command hooks into global Gemini hooks and resumes with `--conversation=<id>`; Kiro clones the
 ///   user's default agent into a shadow config at `~/.kiro/agents/vlx-term.json`, merges its hooks in, and
 ///   launches with `--agent vlx-term`; Crush uses a
@@ -28,6 +29,10 @@ pub enum SessionKind {
     Antigravity,
     Cline,
     Pi,
+    /// OMP (oh-my-pi, `omp`), a fork of Pi. It loads a TypeScript extension through `-e <absolute path>`,
+    /// resumes with `--resume <id>`, forks with `--fork <id>`, and unlike Pi does prompt for tool approval,
+    /// which `--yolo` bypasses.
+    Omp,
     /// Moonshot AI Kimi Code CLI (`kimi`), with K3 available by default and official lifecycle hooks.
     Kimi,
     /// Kiro CLI (`kiro-cli chat`), driven by lifecycle hooks in a shadow agent config and resumed with
@@ -57,6 +62,7 @@ impl SessionKind {
             SessionKind::Antigravity => "antigravity",
             SessionKind::Cline => "cline",
             SessionKind::Pi => "pi",
+            SessionKind::Omp => "omp",
             SessionKind::Kimi => "kimi",
             SessionKind::Kiro => "kiro",
             SessionKind::Grok => "grok",
@@ -77,6 +83,7 @@ impl SessionKind {
             "antigravity" => SessionKind::Antigravity,
             "cline" => SessionKind::Cline,
             "pi" => SessionKind::Pi,
+            "omp" => SessionKind::Omp,
             "kimi" => SessionKind::Kimi,
             "kiro" => SessionKind::Kiro,
             "grok" => SessionKind::Grok,
@@ -180,7 +187,7 @@ pub struct Session {
     /// confirmations. At launch, `inject::permission_flag` maps this to agent-specific flags such as
     /// Claude `--dangerously-skip-permissions`, Codex
     /// `--dangerously-bypass-approvals-and-sandbox`、copilot `--allow-all-tools`、cursor
-    /// `--force`; OpenCode/Pi have no flag, while Cline injects `--auto-approve true/false` in both modes.
+    /// `--force`; OMP `--yolo`; OpenCode/Pi have no flag, while Cline injects `--auto-approve true/false` in both modes.
     /// Persisted independently of `agent_args`.
     pub permission_mode: Option<String>,
     /// Agent preset this session was created from, used only to show its name and icon. The preset's

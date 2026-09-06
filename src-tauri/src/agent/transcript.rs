@@ -726,6 +726,17 @@ pub fn source_path(kind: SessionKind, agent_session_id: &str) -> Option<std::pat
     }
 }
 
+/// Parses a transcript whose path is already known, avoiding the per-kind directory lookup that `read`
+/// performs. Callers that cache the resolved path (the search index) use this on refresh.
+pub fn read_at(kind: SessionKind, path: &Path) -> Result<Vec<TranscriptMessage>, String> {
+    match kind {
+        SessionKind::Claude => parse_file(path, parse_claude_line),
+        SessionKind::Codex => parse_file(path, parse_codex_line),
+        SessionKind::Grok => parse_grok_file(path),
+        _ => Err("Transcript parsing is not supported for this session kind".to_string()),
+    }
+}
+
 /// Reads and parses an agent transcript by kind. Missing/deleted/unsupported sources return Err so the frontend can
 /// fall back to raw recording playback.
 pub fn read(kind: SessionKind, agent_session_id: &str) -> Result<Vec<TranscriptMessage>, String> {
@@ -761,6 +772,8 @@ pub fn read(kind: SessionKind, agent_session_id: &str) -> Result<Vec<TranscriptM
         }
         // Pi uses flat JSONL with a header and tree entries, but its parser is not integrated; archives use recording playback.
         SessionKind::Pi => Err("Transcript view is not supported for pi sessions yet".to_string()),
+        // OMP inherited Pi's flat JSONL format, and like Pi it has no parser yet; archives use recording playback.
+        SessionKind::Omp => Err("Transcript view is not supported for omp sessions yet".to_string()),
         // Crush uses an internal database under ~/.local/share/crush; archives fall back to recording playback.
         SessionKind::Crush => {
             Err("Transcript view is not supported for crush sessions yet".to_string())

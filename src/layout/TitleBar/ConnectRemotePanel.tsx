@@ -90,8 +90,8 @@ export function ConnectRemotePanel({
   // Database mode defaults to independent; opting in shares the remote desktop release's vlx-term.db.
   // The hidden checkbox keeps this false unless showSharedDb is enabled.
   const [sharedDb, setSharedDb] = useState(false);
-  // Mirror mode for the service started on the remote machine. That machine is headless and has no panel
-  // of its own, so the choice travels with the connection. Hidden behind the same Option/Alt reveal.
+  // Mirror mode: follow the remote desktop app (attach to it when running, else use its database, else a
+  // separate one). Always offered; restored from history for a previously used host.
   const [mirror, setMirror] = useState(false);
   // SSH progress from backend `ssh://progress`: stage code and optional percentage.
   const [progress, setProgress] = useState<{ stage: string; percent: number | null } | null>(null);
@@ -262,9 +262,9 @@ export function ConnectRemotePanel({
         password: pw ?? null,
         remember: rememberPw,
         // Hidden shared-database controls always use an independent database, ignoring restored history.
-        sharedDb: showSharedDb && sharedDb,
-        // Same for mirror mode: without the hidden controls the remote service starts with it off.
-        mirror: showSharedDb && mirror,
+        // Mirror mode decides the data mode itself, so the switch is irrelevant while it is on.
+        sharedDb: showSharedDb && !mirror && sharedDb,
+        mirror,
       });
       onClose(); // Connection succeeded and the auto-login window is open.
     } catch (e) {
@@ -287,7 +287,7 @@ export function ConnectRemotePanel({
     setShowAllHosts(false);
     setSshHost(h.target);
     setSharedDb(showSharedDb && h.sharedDb);
-    setMirror(showSharedDb && h.mirror);
+    setMirror(h.mirror);
     setProbe(null);
     setError("");
     setPwHost(null);
@@ -528,25 +528,13 @@ export function ConnectRemotePanel({
             </>
           )}
 
-          {/* SSH mode: two switches for the service this connection starts on the remote machine. The data
-              mode defaults to a separate database; when checked, the remote desktop release's database is
-              reused instead (the same vlx-term.db). Mirror mode defaults off and, when checked, keeps tabs,
-              splits, and the active session identical across every client of that remote service — the same
-              switch the remote-access panel offers, which that headless machine has no way to show. Each one
-              explains itself in a note once checked. Both are hidden and appear only when the panel is
-              opened by Option/Alt-clicking the Connect remote button in the title bar. */}
-          {mode === "ssh" && !probe && showSharedDb && (
+          {/* SSH mode: mirror mode, always offered. Checked, the connection follows the remote desktop app
+              the way a URL connection does: it attaches to the running app, or opens the app's database when
+              the app is not running, or a separate database when there is none. The data-mode switch below
+              only matters without mirror mode, so it hides while mirror is checked; it stays behind the
+              Option/Alt reveal because a separate database is the right default for a plain connection. */}
+          {mode === "ssh" && !probe && (
             <>
-              <label style={rememberRowStyle}>
-                <input
-                  type="checkbox"
-                  checked={sharedDb}
-                  onChange={(e) => setSharedDb(e.target.checked)}
-                  style={{ cursor: "pointer" }}
-                />
-                {t("connect.shareDesktopDb")}
-              </label>
-              {sharedDb && <div style={hintStyle}>{t("connect.shareDesktopDbHint")}</div>}
               <label style={rememberRowStyle}>
                 <input
                   type="checkbox"
@@ -557,6 +545,20 @@ export function ConnectRemotePanel({
                 {t("connect.mirror")}
               </label>
               {mirror && <div style={hintStyle}>{t("connect.mirrorHint")}</div>}
+              {showSharedDb && !mirror && (
+                <>
+                  <label style={rememberRowStyle}>
+                    <input
+                      type="checkbox"
+                      checked={sharedDb}
+                      onChange={(e) => setSharedDb(e.target.checked)}
+                      style={{ cursor: "pointer" }}
+                    />
+                    {t("connect.shareDesktopDb")}
+                  </label>
+                  {sharedDb && <div style={hintStyle}>{t("connect.shareDesktopDbHint")}</div>}
+                </>
+              )}
             </>
           )}
 

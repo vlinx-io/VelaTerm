@@ -19,6 +19,8 @@ import { useT } from "../../i18n";
 import { useTermStore } from "../../store/termStore";
 import { SearchConsole, summarizeResults, useContentSearch, useSearchNav } from "../GlobalSearch/searchKit";
 import { SessionContentViewer } from "../sessionViewers/SessionContentViewer";
+import { MemoryLink } from "../Memory/navigation";
+import { MemoryIcon } from "../Memory/MemoryRoute";
 import { fmtArchivedAt, KindIcon, locationOf } from "../sessionViewers/sessionMeta";
 
 export function ArchivePanel() {
@@ -78,6 +80,7 @@ export function ArchivePanel() {
       >
         <Icons.restart size={13} />
       </button>
+      <MemoryLink route={`compile/${s.id}`} className="icon-btn sm" title={`${t("memory.add")} · ${t("common.experimental")}`} aria-label={t("memory.add")} onClick={(e) => { e.stopPropagation(); if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) close(); }}><MemoryIcon size={13} /></MemoryLink>
       {canExportContext(s) && (
         <button
           className="icon-btn sm"
@@ -191,7 +194,6 @@ export function ArchivePanel() {
           <SearchConsole
             nav={nav}
             results={results}
-            query={query}
             sessionById={sessionById}
             projects={projects}
             groups={groups}

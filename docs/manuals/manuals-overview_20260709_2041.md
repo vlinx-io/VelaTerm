@@ -23,6 +23,9 @@ Created: 2026-07-09 20:41
 2. **Tabs behave like a browser**: a tab you switch away from stays alive in the background (its process keeps running); closing a tab is what actually ends the process — and even then, an agent conversation can be resumed.
 3. **Archiving is not deleting**: archive finished work to tidy the tree; transcripts stay readable, restorable, and exportable at any time.
 
+Additional manuals for the experimental features: [Global Memory](global-memory_20260905_2027.md) and
+[Code Graph & Memory References](codegraph_20260905_2027.md).
+
 ## About the screenshots
 
 Manual screenshots live in `docs/assets/manuals/` (the remote guide's are in `docs/assets/remote-guide/`). They were captured against a development environment with demo data, in English UI (the product default) and dark theme; account usage figures, paths, and similar details in some screenshots are sample values.

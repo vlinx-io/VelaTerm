@@ -10,8 +10,8 @@
 //! usePtySession blocks these Ctrl+Alt combinations from xterm so it cannot emit stray Escape bytes.
 //! This listener runs in document capture phase before xterm/editors. The shortcut recorder runs even
 //! earlier on window capture and stops propagation while recording.
-//! Plain-browser clients (URL remote access) use the Ctrl+Alt defaults on every OS: browser-reserved
-//! combos such as ⌘D/⌘T/⌘W/⌘F never reach the page, so the Cmd bindings would be dead keys.
+//! Plain-browser clients (URL remote access) use Ctrl+Alt for most actions. macOS browser splits
+//! use Cmd+D / Cmd+Shift+D, cancelling the browser default when an active session can split.
 
 /** Custom document-save event name; detail is the document-tab ID and DocView listens for it. */
 export const DOC_SAVE_EVENT = "vlx:doc-save";
@@ -39,12 +39,9 @@ export function useKeyboardShortcuts() {
     };
 
     const handler = (e: KeyboardEvent) => {
-      // Only this client's own mod key counts: on macOS that is Cmd, and Ctrl stays terminal input.
-      if (!hasMod(e)) return;
-
       // ── Fixed shortcut 1: Cmd+1–9 selects the nth tab ──
       const tabIdx = digitIndex(e);
-      if (tabIdx >= 0) {
+      if (hasMod(e) && tabIdx >= 0) {
         const { openTabs, setActiveTab } = useTermStore.getState();
         if (tabIdx < openTabs.length) {
           e.preventDefault();
@@ -55,7 +52,7 @@ export function useKeyboardShortcuts() {
 
       // ── Fixed shortcut 2: Cmd++/-/0 changes or resets terminal font size ──
       // Apply only to active session tabs; document/browser tabs retain their own handling.
-      {
+      if (hasMod(e)) {
         const isPlus = e.key === "+" || e.key === "=" || e.code === "Equal";
         const isMinus = e.key === "-" || e.key === "_" || e.code === "Minus";
         const isZero = e.key === "0" || e.code === "Digit0";

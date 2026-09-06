@@ -1,3 +1,25 @@
+## v0.1.107 — 2026-09-05
+
+- 🧠 Globales Gedächtnis (experimentell): Claude oder Codex fasst Ihre Unterhaltungen zu einem nach Themen geordneten, gemeinsamen Wiki zusammen
+- 🕸️ Code-Graph (experimentell): Arbeitsverzeichnis indizieren, Beziehungen zwischen Symbolen durchsuchen und mit Gedächtniseinträgen verknüpfen
+- 🔎 Agenten können Code und Gedächtnis während einer Sitzung mit `vknowledge` abfragen
+- 🖥️ SSH kann die entfernte Desktop-App spiegeln: gleiche Tabs, gleiche Teilungen und dieselbe aktive Sitzung auf beiden Rechnern
+- 🪟 SSH-Gegenstellen dürfen jetzt auch Windows-Rechner sein
+- 📥 Vorhandene Codex-, Claude- und OpenCode-Sitzungen aus einem Projektordner importieren
+- 🤖 Neuer Agent: OMP
+- 🎚️ `vspawn` kann Modell und Denkaufwand einer untergeordneten Sitzung festlegen
+- 🌿 `vspawn-tree` funktioniert auch in Sammlungen, und laufende Worktree-Sitzungen zeigen ein Branch-Symbol
+- 🔤 Die Suche findet zuerst ganze Wörter und hebt genau das hervor, was sie gefunden hat
+- 🖱️ Ein Klick mit der mittleren Maustaste schließt einen Tab
+- ⌨️ macOS-Browser: ⌘D und ⌘⇧D teilen den Bereich
+- 💬 Die Eingabe per IME verschiebt die Ansicht nicht mehr, und der Cursor bleibt während der Komposition sichtbar
+- 🪓 Eine Teilung aus dem Menü wirkt nur auf das fokussierte Fenster, und jede Teilung wird in `logs/split.log` protokolliert
+- 📁 Die Ordnerauswahl für Remote-Verbindungen behält den eingegebenen Pfad bei
+- ℹ️ Info-Panel: Startzeit und Laufzeit in einer Zeile, unter macOS zusätzlich die Systemlast
+- 🔑 Passwortfelder zeigen nicht mehr die browsereigene Anzeigen-Schaltfläche
+
+---
+
 ## v0.1.106 — 2026-09-02
 
 ### Arbeitsbereich

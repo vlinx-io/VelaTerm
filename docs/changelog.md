@@ -1,9 +1,31 @@
 # Changelog
 
-> Created: 2026-07-09 16:10 · Updated: 2026-09-02
+> Created: 2026-07-09 16:10 · Updated: 2026-09-05
 
 All notable changes to VelaTerm are documented here, newest first.
 v0.1.91 is the first public release; earlier version numbers were internal iterations and are not covered.
+
+---
+
+## v0.1.107 — 2026-09-05
+
+- 🧠 Global Memory (experimental): Claude or Codex turns your conversations into a shared wiki organized by topic
+- 🕸️ Code Graph (experimental): index a working directory, browse symbol relationships, and link them to memories
+- 🔎 Agents can look up code and memory during a session with `vknowledge`
+- 🖥️ SSH can mirror the remote desktop app: same tabs, splits, and active session on both machines
+- 🪟 SSH remote machines can now be Windows
+- 📥 Import existing Codex, Claude, and OpenCode sessions from a project folder
+- 🤖 New agent: OMP
+- 🎚️ `vspawn` can pick the model and reasoning effort for a child session
+- 🌿 `vspawn-tree` works in collections, and running worktree sessions show a branch icon
+- 🔤 Search matches whole words first and highlights exactly what it matched
+- 🖱️ Middle-click a tab to close it
+- ⌨️ macOS browsers: ⌘D and ⌘⇧D split panes
+- 💬 IME composition no longer shifts the view, and the caret stays visible while composing
+- 🪓 A split from the menu only affects the focused window, and every split is written to `logs/split.log`
+- 📁 The remote folder picker keeps the path you type
+- ℹ️ Info panel: start time and uptime share one row, and macOS shows load average
+- 🔑 Password fields no longer show the browser's own reveal button
 
 ---
 

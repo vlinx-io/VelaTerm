@@ -13,6 +13,9 @@ import { UpdateModal } from "./components/UpdateModal";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotifications } from "./hooks/useNotifications";
 import { CenterPane } from "./layout/CenterPane/CenterPane";
+import { MemoryRoute } from "./layout/Memory/MemoryRoute";
+import { KnowledgeRoute } from "./layout/Knowledge/KnowledgeRoute";
+import { ImportSessionsRoute } from "./layout/ImportSessions";
 import { LeftSidebar } from "./layout/LeftSidebar/LeftSidebar";
 import { RightPanel } from "./layout/RightPanel/RightPanel";
 import { StatusBar } from "./layout/StatusBar/StatusBar";
@@ -234,6 +237,9 @@ function App() {
         )}
       </div>
       <StatusBar />
+      <ImportSessionsRoute />
+      <MemoryRoute />
+      <KnowledgeRoute />
       <DirectoryPickerModal />
       <CreateProjectModal />
       <CloneProjectModal />

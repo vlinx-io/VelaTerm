@@ -71,6 +71,8 @@ export function detectAgentScreen(
       return detectCline(text);
     case "pi":
       return detectPi(text);
+    case "omp":
+      return detectOmp(text);
     case "crush":
       return detectCrush(text);
     case "kimi":
@@ -132,6 +134,14 @@ function detectCline(_text: string): ScreenDetection {
 // Pi's command-line extension reports authoritative input/agent_start working and agent_end waiting events. Return
 // neutral screen state. Pi has no permission-confirmation mechanism and therefore no asking state.
 function detectPi(_text: string): ScreenDetection {
+  return { state: "working", visibleBlocker: false, visibleIdle: false, visibleWorking: false, skip: false };
+}
+
+// OMP detection (neutral fallback).
+//
+// OMP's command-line extension reports authoritative input/agent_start working, tool_approval_requested asking,
+// and agent_end waiting events, so screen state stays neutral.
+function detectOmp(_text: string): ScreenDetection {
   return { state: "working", visibleBlocker: false, visibleIdle: false, visibleWorking: false, skip: false };
 }
 

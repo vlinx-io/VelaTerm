@@ -32,6 +32,12 @@ pub const OPENCODE_CONFIG_ENV: &str = "OPENCODE_CONFIG_CONTENT";
 /// and adds it to the injected environment (see `agent/pi.rs`); the extension reads the injected `VLX_*`
 /// values to report events.
 pub const PI_EXT_ENV: &str = "VLX_PI_EXT";
+/// Holds the absolute path to OMP's state-bridge extension, loaded through `omp -e "$VLX_OMP_EXT"`.
+/// OMP is a fork of Pi and takes the same `-e` option, but its extension contract differs, so it gets its
+/// own source (`resources/vlx-omp-notify.ts`, extracted by `agent/omp.rs`) and its own variable rather than
+/// sharing Pi's. The quoting rationale is identical: an environment reference survives spaces in macOS data
+/// directories such as `~/Library/Application Support/…`.
+pub const OMP_EXT_ENV: &str = "VLX_OMP_EXT";
 /// Holds the initial task prompt for a spawned child session. The launch command references it as a
 /// positional prompt (`claude "$VLX_INIT_PROMPT"` / `codex "$VLX_INIT_PROMPT"`), so the new session
 /// starts with its task and does not depend on timing a later UI write.
@@ -305,6 +311,7 @@ fn extra_args_fragment(extra: Option<&str>) -> String {
 /// - Grok: `--always-approve`
 /// - OpenCode: no CLI flag; permissions are configured in its settings
 /// - Pi: no permission-confirmation mechanism by design
+/// - OMP: `--yolo` (an alias of `--auto-approve`); unlike Pi it does prompt for tool approval
 /// - Terminal and Browser: not applicable
 ///
 /// **Cline is reversed**: it natively approves everything, unlike the other agents. Both modes therefore
@@ -340,6 +347,8 @@ pub fn permission_flag(kind: SessionKind, mode: Option<&str>) -> Option<&'static
         SessionKind::Crush => Some("--yolo"),
         // Kimi Code uses `--yolo` to bypass all tool confirmations.
         SessionKind::Kimi => Some("--yolo"),
+        // OMP's `--yolo` is an alias of `--auto-approve`; both skip every approval prompt.
+        SessionKind::Omp => Some("--yolo"),
         // Kiro trusts every tool for the session. Whether its terminal UI still asks for one confirmation
         // up front is unverified on a real machine.
         SessionKind::Kiro => Some("--trust-all-tools"),
@@ -654,9 +663,10 @@ pub fn prepare(
 /// `app_settings` at launch time (see `pty/manager.rs::agent_bin_path`). A nonempty value launches the
 /// absolute path without consulting `PATH`; otherwise the command name is resolved normally.
 ///
-/// `pi_ext_path` is the absolute path to Pi's state-bridge extension, derived by the manager from the data
-/// directory (see `agent/pi.rs`). `Some` stores the path in `env` and loads it with `-e "$VLX_PI_EXT"`;
-/// `None` omits the extension, allowing Pi to run without authoritative state reporting.
+/// `agent_ext_path` is the absolute path to the state-bridge extension of whichever agent loads one through
+/// `-e`, derived by the manager from the data directory: Pi (see `agent/pi.rs`) or OMP (see `agent/omp.rs`).
+/// `Some` stores the path in `env` and loads it with `-e "$VLX_PI_EXT"` / `-e "$VLX_OMP_EXT"`; `None` omits the
+/// extension, letting that agent run without authoritative state reporting.
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub fn prepare_with_args(
@@ -670,7 +680,7 @@ pub fn prepare_with_args(
     init_prompt: Option<&str>,
     extra_args: Option<&str>,
     bin_path: Option<&str>,
-    pi_ext_path: Option<&str>,
+    agent_ext_path: Option<&str>,
 ) -> AgentSpawn {
     prepare_with_args_capabilities(
         kind,
@@ -683,7 +693,7 @@ pub fn prepare_with_args(
         init_prompt,
         extra_args,
         bin_path,
-        pi_ext_path,
+        agent_ext_path,
         // Only the manager installs the Kiro shadow agent, so every other caller launches without `--agent`.
         None,
         true,
@@ -705,7 +715,7 @@ pub fn prepare_with_args_capabilities(
     init_prompt: Option<&str>,
     extra_args: Option<&str>,
     bin_path: Option<&str>,
-    pi_ext_path: Option<&str>,
+    agent_ext_path: Option<&str>,
     kiro_agent: Option<&str>,
     codex_hooks_supported: bool,
 ) -> AgentSpawn {
@@ -946,7 +956,7 @@ pub fn prepare_with_args_capabilities(
             // Pi: `pi [--session <id> | --fork <id>] -e "$VLX_PI_EXT" [custom args] ["$VLX_INIT_PROMPT"]`.
             // Pi's official `-e` option loads a local extension for this launch only; built-in jiti transpiles
             // `.ts` without compilation, and the user's `~/.pi` configuration remains untouched. The extension
-            // reports via injected `VLX_*` values. Its path comes from `pi_ext_path` and is referenced through
+            // reports via injected `VLX_*` values. Its path comes from `agent_ext_path` and is referenced through
             // `VLX_PI_EXT` to handle spaces safely; without it, Pi runs with screen detection as the fallback.
             // `--session <id>` resumes in place, while `--fork <source-id>` uses Pi's native fork support and
             // takes precedence. The prompt is the final positional argument for new sessions. Pi intentionally
@@ -958,7 +968,7 @@ pub fn prepare_with_args_capabilities(
                 Some(rid) => args.push(format!("--session {rid}")),
                 None => {}
             }
-            if let Some(ext) = pi_ext_path {
+            if let Some(ext) = agent_ext_path {
                 env.push((PI_EXT_ENV.to_string(), ext.to_string()));
                 args.push(format!("-e {}", prompt_ref(shell, PI_EXT_ENV)));
             }
@@ -973,6 +983,42 @@ pub fn prepare_with_args_capabilities(
                 }
             }
             let launch = launch(shell, "pi", bin_path, &args.join(" "));
+            AgentSpawn {
+                env,
+                launch: Some(launch),
+            }
+        }
+        SessionKind::Omp => {
+            // OMP: `omp [--resume <id> | --fork <id>] -e "$VLX_OMP_EXT" [custom args] ["$VLX_INIT_PROMPT"]`.
+            // OMP is a fork of Pi and shares its `-e` option, which loads a local extension for this launch only
+            // and leaves the user's `~/.omp` configuration untouched. The extension reports through the injected
+            // `VLX_*` values; its path arrives in `agent_ext_path` and is referenced through `VLX_OMP_EXT` so
+            // spaces are safe. Without it OMP falls back to screen detection.
+            // `--resume <id>` reopens a session in place (`--session` is its alias) and `--fork <source-id>` uses
+            // OMP's native fork, which takes precedence. The prompt is the final positional argument for new
+            // sessions. Unlike Pi, OMP does ask before running tools, so `--yolo` arrives through `extra_args`.
+            let mut env = Vec::new();
+            let mut args: Vec<String> = Vec::new();
+            match resume {
+                Some(rid) if fork => args.push(format!("--fork {rid}")),
+                Some(rid) => args.push(format!("--resume {rid}")),
+                None => {}
+            }
+            if let Some(ext) = agent_ext_path {
+                env.push((OMP_EXT_ENV.to_string(), ext.to_string()));
+                args.push(format!("-e {}", prompt_ref(shell, OMP_EXT_ENV)));
+            }
+            // Custom arguments follow built-in flags and precede the initial prompt.
+            if let Some(extra) = normalize_extra_args(extra_args) {
+                args.push(extra);
+            }
+            if resume.is_none() {
+                if let Some(p) = init_prompt.map(str::trim).filter(|s| !s.is_empty()) {
+                    env.push((INIT_PROMPT_ENV.to_string(), p.to_string()));
+                    args.push(prompt_ref(shell, INIT_PROMPT_ENV));
+                }
+            }
+            let launch = launch(shell, "omp", bin_path, &args.join(" "));
             AgentSpawn {
                 env,
                 launch: Some(launch),
@@ -1121,6 +1167,7 @@ pub fn prepare_with_args_capabilities(
             | SessionKind::Antigravity
             | SessionKind::Cline
             | SessionKind::Pi
+            | SessionKind::Omp
             | SessionKind::Crush
             | SessionKind::Kimi
             | SessionKind::Kiro
@@ -1771,6 +1818,105 @@ mod tests {
         );
         assert_launch_inner(&a.launch.unwrap(), "opencode --session ses_abc");
         assert!(!a.env.iter().any(|(k, _)| k == INIT_PROMPT_ENV));
+    }
+
+    #[test]
+    fn prepare_omp_loads_extension_via_env_ref() {
+        // OMP takes Pi's `-e` option but its own variable, so the two extensions never collide in one shell.
+        let a = prepare_with_args(
+            SessionKind::Omp,
+            "/bin/zsh",
+            "/exe",
+            &ep(),
+            "s",
+            None,
+            false,
+            None,
+            None,
+            None,
+            Some("/Users/me/Library/Application Support/io.vlinx.vlxterm/omp/vlx-omp-notify.ts"),
+        );
+        assert_launch_inner(&a.launch.unwrap(), "omp -e \"$VLX_OMP_EXT\"");
+        assert!(a.env.iter().any(|(k, v)| k == OMP_EXT_ENV
+            && v == "/Users/me/Library/Application Support/io.vlinx.vlxterm/omp/vlx-omp-notify.ts"));
+        assert!(
+            !a.env.iter().any(|(k, _)| k == PI_EXT_ENV),
+            "OMP must not set Pi's variable"
+        );
+        assert!(
+            a.env.iter().any(|(k, _)| k == NOTFOUND_URL_ENV),
+            "a local agent should have the not-installed reporting URL injected"
+        );
+    }
+
+    #[test]
+    fn prepare_omp_with_resume_uses_resume_flag() {
+        // OMP spells resume `--resume <id>`, unlike Pi's `--session <id>`.
+        let a = prepare_with_args(
+            SessionKind::Omp,
+            "/bin/zsh",
+            "/exe",
+            &ep(),
+            "s",
+            Some("01a06eda-d280-729e-82c5-ed649f4bd523"),
+            false,
+            None,
+            None,
+            None,
+            Some("/data/omp/vlx-omp-notify.ts"),
+        );
+        assert_launch_inner(
+            &a.launch.unwrap(),
+            "omp --resume 01a06eda-d280-729e-82c5-ed649f4bd523 -e \"$VLX_OMP_EXT\"",
+        );
+    }
+
+    #[test]
+    fn prepare_omp_fork_uses_fork_flag() {
+        // A first fork launch uses `--fork <source-id>`, which takes precedence over `--resume`.
+        let a = prepare_with_args(
+            SessionKind::Omp,
+            "/bin/zsh",
+            "/exe",
+            &ep(),
+            "s",
+            Some("01a06eda-d280-729e-82c5-ed649f4bd523"),
+            true,
+            None,
+            None,
+            None,
+            Some("/data/omp/vlx-omp-notify.ts"),
+        );
+        assert_launch_inner(
+            &a.launch.unwrap(),
+            "omp --fork 01a06eda-d280-729e-82c5-ed649f4bd523 -e \"$VLX_OMP_EXT\"",
+        );
+    }
+
+    #[test]
+    fn prepare_omp_appends_init_prompt_positional() {
+        // The environment-backed initial prompt is the final positional argument, after the permission flag.
+        let a = prepare_with_args(
+            SessionKind::Omp,
+            "/bin/zsh",
+            "/exe",
+            &ep(),
+            "s",
+            None,
+            false,
+            Some("Refactor the foo module for me"),
+            merge_permission_flag(SessionKind::Omp, Some("skip"), None).as_deref(),
+            None,
+            Some("/data/omp/vlx-omp-notify.ts"),
+        );
+        assert_launch_inner(
+            &a.launch.unwrap(),
+            "omp -e \"$VLX_OMP_EXT\" --yolo \"$VLX_INIT_PROMPT\"",
+        );
+        assert!(a
+            .env
+            .iter()
+            .any(|(k, v)| k == INIT_PROMPT_ENV && v == "Refactor the foo module for me"));
     }
 
     #[test]

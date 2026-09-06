@@ -215,6 +215,7 @@ async fn handle_socket(
         "spawn://request",
         "spawn://resolved",
         "view://request",
+        "knowledge://changed",
         crate::host::TREE_CHANGED,
         crate::host::PRESETS_CHANGED,
         // Preferences are backend-authoritative; this tells every client to re-read them mid-run.

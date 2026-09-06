@@ -3,6 +3,10 @@
 //! Connect by SSH, detect the remote system, provision `vela-server`, start `--serve --local-http`,
 //! establish `ssh -L` forwarding, and open an auto-login client.
 //!
+//! Linux, macOS, and Windows remotes are all supported. The remote command language is decided by the
+//! probe, not by the OS: `uname` answers on Linux, macOS, and a Cygwin/MSYS sshd, while Microsoft's
+//! OpenSSH service has no POSIX tools and is driven through PowerShell instead. See [`RemoteShell`].
+//!
 //! Design: use OpenSSH and its agent/config ecosystem rather than implementing SSH. Windows prefers
 //! bundled OpenSSH over unreliable PATH installs. Unix reuses a ControlMaster socket so authentication
 //! occurs once; broken Windows multiplexing uses independent connections. Probe host keys with
@@ -26,6 +30,14 @@ pub type Progress<'a> = &'a (dyn Fn(&str, Option<u8>) + Sync);
 
 /// Stable prefix marking rejected key authentication so the frontend can prompt for a password and retry.
 pub const AUTH_REQUIRED_TAG: &str = "__VLX_SSH_AUTH_REQUIRED__";
+
+/// Remote no-op used to verify authentication before the remote system is known.
+///
+/// It must succeed under every login shell we may land in. `true` does not: a Windows remote running
+/// Microsoft's OpenSSH executes the command through cmd.exe, which reports `'true' is not recognized`
+/// and returns 1, so the connection failed before anything could be probed. `exit 0` is a builtin in sh,
+/// cmd.exe, and PowerShell alike.
+const NOOP_REMOTE_CMD: &str = "exit 0";
 
 // ─────────────────────────── OpenSSH tool resolution (bundled first) ───────────────────────────
 
@@ -112,6 +124,20 @@ pub fn has_password(identifier: &str, kind: &str, account: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Command language of the remote login shell, which decides how every remote command is written.
+///
+/// A Windows remote can answer with either one: Microsoft's OpenSSH service runs cmd/PowerShell and has
+/// no POSIX tools, while a Cygwin/MSYS sshd answers `uname` and offers a full POSIX toolbox. Detection
+/// therefore records the shell separately from the OS instead of deriving one from the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RemoteShell {
+    /// sh-compatible login shell (Linux, macOS, and Cygwin/MSYS on Windows).
+    Posix,
+    /// Windows PowerShell, driven through `-EncodedCommand` so no quoting reaches cmd.exe.
+    Powershell,
+}
+
 /// Detected remote system information.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,8 +146,147 @@ pub struct RemoteSystem {
     pub os: String,
     /// Normalized architecture: x86_64 or aarch64.
     pub arch: String,
-    /// Raw uname output for diagnostics.
+    /// Raw probe output for diagnostics.
     pub raw: String,
+    /// Command language used for every remote command on this host.
+    pub shell: RemoteShell,
+}
+
+impl RemoteSystem {
+    /// Whether the remote runs Windows, where the server artifact carries an `.exe` suffix.
+    fn is_windows(&self) -> bool {
+        self.os == "windows"
+    }
+
+    /// Remote binary path written in the detected shell's own syntax.
+    fn bin_path(&self, version: &str) -> String {
+        let exe = if self.is_windows() { ".exe" } else { "" };
+        match self.shell {
+            RemoteShell::Posix => format!("$HOME/.velaterm/versions/{version}/vela-server{exe}"),
+            RemoteShell::Powershell => {
+                format!("$env:USERPROFILE\\.velaterm\\versions\\{version}\\vela-server{exe}")
+            }
+        }
+    }
+
+    /// Remote service state path (`run.json`) written in the detected shell's own syntax.
+    fn run_json(&self) -> String {
+        match self.shell {
+            RemoteShell::Posix => "$HOME/.velaterm/run.json".to_string(),
+            RemoteShell::Powershell => "$env:USERPROFILE\\.velaterm\\run.json".to_string(),
+        }
+    }
+}
+
+/// Fallback system used by entry points that only carry `(host, session)` and never saw a probe result.
+/// Linux plus a POSIX shell reproduces the behavior that existed before Windows remotes were supported.
+fn default_system() -> RemoteSystem {
+    RemoteSystem {
+        os: "linux".to_string(),
+        arch: "x86_64".to_string(),
+        raw: String::new(),
+        shell: RemoteShell::Posix,
+    }
+}
+
+/// Per-session detected system, so disconnect/kill/tunnel-rebuild paths can speak the right shell without
+/// re-probing. Registered right after detection and removed on disconnect.
+static SESSION_SYS: OnceLock<Mutex<HashMap<String, RemoteSystem>>> = OnceLock::new();
+
+fn session_sys_map() -> &'static Mutex<HashMap<String, RemoteSystem>> {
+    SESSION_SYS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Record a session's detected system for later shell-specific commands.
+fn set_session_sys(session: &str, sys: &RemoteSystem) {
+    session_sys_map()
+        .lock()
+        .unwrap()
+        .insert(session.to_string(), sys.clone());
+}
+
+/// Read a session's detected system, falling back to Linux/POSIX when it was never registered.
+fn session_sys(session: &str) -> RemoteSystem {
+    session_sys_map()
+        .lock()
+        .unwrap()
+        .get(session)
+        .cloned()
+        .unwrap_or_else(default_system)
+}
+
+/// Forget a session's detected system on disconnect.
+fn clear_session_sys(session: &str) {
+    session_sys_map().lock().unwrap().remove(session);
+}
+
+/// What the tunnel of a session points at: the headless service this client started, or the remote
+/// desktop app's own local link (see `web::local_link`). The two differ in who owns the process, so the
+/// tunnel-rebuild check and the disconnect semantics differ too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ServiceTarget {
+    /// `vela-server --serve` started (or reused) by this client and recorded in run.json.
+    Headless,
+    /// The desktop app running on the remote machine, reached through its local-link port. The process is
+    /// not ours: disconnecting only drops the tunnel, never the desktop.
+    DesktopLink,
+}
+
+/// Per-session service target, registered when the connection is established and read by tunnel rebuild
+/// and disconnect. Sessions never registered default to `Headless`, which reproduces earlier behavior.
+static SESSION_TARGET: OnceLock<Mutex<HashMap<String, ServiceTarget>>> = OnceLock::new();
+
+fn session_target_map() -> &'static Mutex<HashMap<String, ServiceTarget>> {
+    SESSION_TARGET.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn set_session_target(session: &str, target: ServiceTarget) {
+    session_target_map()
+        .lock()
+        .unwrap()
+        .insert(session.to_string(), target);
+}
+
+fn session_target(session: &str) -> ServiceTarget {
+    session_target_map()
+        .lock()
+        .unwrap()
+        .get(session)
+        .copied()
+        .unwrap_or(ServiceTarget::Headless)
+}
+
+fn clear_session_target(session: &str) {
+    session_target_map().lock().unwrap().remove(session);
+}
+
+/// Wrap a PowerShell script as `-EncodedCommand` so the command line carries only base64 characters.
+///
+/// The remote login shell may be cmd.exe or PowerShell and each quotes differently; base64 passes through
+/// both untouched. PowerShell requires UTF-16LE before base64.
+fn ps_encoded(script: &str) -> String {
+    format!(
+        "powershell -NoProfile -NonInteractive -EncodedCommand {}",
+        ps_b64(script)
+    )
+}
+
+/// Encode a PowerShell script as the base64 UTF-16LE blob `-EncodedCommand` expects.
+fn ps_b64(script: &str) -> String {
+    use base64::Engine;
+    let mut bytes = Vec::with_capacity(script.len() * 2);
+    for u in script.encode_utf16() {
+        bytes.extend_from_slice(&u.to_le_bytes());
+    }
+    base64::engine::general_purpose::STANDARD.encode(&bytes)
+}
+
+/// Run a script written for the detected shell, encoding it first when that shell is PowerShell.
+fn shell_exec(t: &dyn SshTransport, sys: &RemoteSystem, script: &str) -> Result<String, String> {
+    match sys.shell {
+        RemoteShell::Posix => t.exec(script),
+        RemoteShell::Powershell => t.exec(&ps_encoded(script)),
+    }
 }
 
 /// Host-key comparison against known_hosts.
@@ -218,8 +383,10 @@ pub fn open_master(host: &str, session: &str, strict: bool) -> Result<(), String
     // BatchMode disables prompts in the non-TTY core path; PTY handles interactive authentication.
     cmd.args(["-o", "BatchMode=yes"]);
     cmd.arg(target);
-    // Run only `true`; ControlPersist keeps the resulting master in the background.
-    cmd.arg("true");
+    // Run a no-op only to prove authentication; ControlPersist keeps the resulting master in the
+    // background. `exit 0` rather than `true` because a Windows remote runs this through cmd.exe, which
+    // has no `true` and would fail the whole connection before the system is ever probed.
+    cmd.arg(NOOP_REMOTE_CMD);
     run_capture(cmd, "establish SSH control connection")?;
     Ok(())
 }
@@ -278,8 +445,8 @@ pub fn open_master_pty(
         cmd.arg(a);
     }
     cmd.arg(target);
-    // Run only `true`; ControlPersist retains the master.
-    cmd.arg("true");
+    // Run a no-op only to prove authentication; ControlPersist retains the master. See NOOP_REMOTE_CMD.
+    cmd.arg(NOOP_REMOTE_CMD);
 
     let mut child = pair.slave.spawn_command(cmd).map_err(|e| {
         format!("establish SSH control connection failed to run (ssh missing locally?): {e}")
@@ -409,13 +576,55 @@ fn run_capture(mut cmd: Command, what: &str) -> Result<String, String> {
 
 // ─────────────────────────── Remote system detection ───────────────────────────
 
-/// Detect/normalize Unix OS and architecture with `uname -sm`; remote Windows needs separate commands.
+/// Detect the remote system, trying the POSIX probe first and the PowerShell probe second.
+///
+/// `uname -sm` answers on Linux, macOS, and a Cygwin/MSYS sshd on Windows, and its output already names
+/// the shell we should keep using. A Microsoft OpenSSH host has no `uname`: the attempt fails (cmd.exe
+/// reports an unknown command), so the fallback asks PowerShell for the OS and processor architecture.
 pub fn probe_system(t: &dyn SshTransport) -> Result<RemoteSystem, String> {
-    let raw = t.exec("uname -sm")?;
-    parse_uname(&raw).ok_or_else(|| format!("cannot parse remote uname output: {raw:?}"))
+    let posix = t.exec("uname -sm");
+    if let Ok(raw) = &posix {
+        if let Some(sys) = parse_uname(raw) {
+            return Ok(sys);
+        }
+    }
+    // PowerShell reports the native architecture in PROCESSOR_ARCHITEW6432 when itself running under WOW64.
+    let script = "$ErrorActionPreference='Stop'; \
+                  $a=$env:PROCESSOR_ARCHITECTURE; \
+                  if($env:PROCESSOR_ARCHITEW6432){$a=$env:PROCESSOR_ARCHITEW6432}; \
+                  Write-Output \"Windows_NT $a\"";
+    let win = t.exec(&ps_encoded(script)).map_err(|e| {
+        // Report both failures: neither shell answered, so the host is not a supported remote.
+        let posix_err = posix.err().unwrap_or_default();
+        format!("cannot detect the remote system (uname: {posix_err}; powershell: {e})")
+    })?;
+    parse_windows_probe(&win)
+        .ok_or_else(|| format!("cannot parse remote PowerShell probe output: {win:?}"))
 }
 
-/// Parse uname output into normalized OS/architecture.
+/// Parse the PowerShell probe (`Windows_NT <PROCESSOR_ARCHITECTURE>`) into a normalized system.
+fn parse_windows_probe(raw: &str) -> Option<RemoteSystem> {
+    let mut it = raw.split_whitespace();
+    let sys = it.next()?;
+    if !sys.eq_ignore_ascii_case("Windows_NT") {
+        return None;
+    }
+    let arch = match it.next()?.to_ascii_lowercase().as_str() {
+        "amd64" | "x86_64" => "x86_64".to_string(),
+        "arm64" | "aarch64" => "aarch64".to_string(),
+        // Preserve unknown architectures (x86 for instance) so the supply step reports them clearly.
+        other => other.to_string(),
+    };
+    Some(RemoteSystem {
+        os: "windows".to_string(),
+        arch,
+        raw: raw.to_string(),
+        shell: RemoteShell::Powershell,
+    })
+}
+
+/// Parse uname output into normalized OS/architecture. A Cygwin/MSYS answer means Windows reached through
+/// a POSIX shell, which keeps every POSIX command available.
 fn parse_uname(raw: &str) -> Option<RemoteSystem> {
     let mut it = raw.split_whitespace();
     let sys = it.next()?;
@@ -436,6 +645,7 @@ fn parse_uname(raw: &str) -> Option<RemoteSystem> {
         os: os.to_string(),
         arch: arch.to_string(),
         raw: raw.to_string(),
+        shell: RemoteShell::Posix,
     })
 }
 
@@ -530,14 +740,25 @@ fn known_hosts_status(hostname: &str, port: Option<&str>, fingerprint: &str) -> 
 
 // ─────────────────────────── Remote integrity checks ───────────────────────────
 
-/// Calculate a lowercase SHA-256 remotely using Linux sha256sum or macOS shasum; missing file/tool is Err.
-pub fn remote_sha256(t: &dyn SshTransport, remote_path: &str) -> Result<String, String> {
-    // Double-quote paths to allow $HOME expansion without word splitting; single-quote awk's `$1`.
-    let cmd = format!(
-        "sha256sum \"{p}\" 2>/dev/null | awk '{{print $1}}' || shasum -a 256 \"{p}\" | awk '{{print $1}}'",
-        p = remote_path
-    );
-    let out = t.exec(&cmd)?;
+/// Calculate a lowercase SHA-256 remotely using Linux sha256sum, macOS shasum, or PowerShell Get-FileHash;
+/// missing file/tool is Err.
+pub fn remote_sha256(
+    t: &dyn SshTransport,
+    sys: &RemoteSystem,
+    remote_path: &str,
+) -> Result<String, String> {
+    let cmd = match sys.shell {
+        // Double-quote paths to allow $HOME expansion without word splitting; single-quote awk's `$1`.
+        RemoteShell::Posix => format!(
+            "sha256sum \"{p}\" 2>/dev/null | awk '{{print $1}}' || shasum -a 256 \"{p}\" | awk '{{print $1}}'",
+            p = remote_path
+        ),
+        RemoteShell::Powershell => format!(
+            "$ErrorActionPreference='Stop'; (Get-FileHash -Algorithm SHA256 -LiteralPath \"{p}\").Hash",
+            p = remote_path
+        ),
+    };
+    let out = shell_exec(t, sys, &cmd)?;
     let hex = out.split_whitespace().next().unwrap_or("").to_string();
     if hex.len() == 64 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
         Ok(hex.to_ascii_lowercase())
@@ -603,26 +824,40 @@ pub fn trust_host(host: &str, was_changed: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Remote binary path: `$HOME/.velaterm/versions/<version>/vela-server`.
-fn remote_bin_path(version: &str) -> String {
-    format!("$HOME/.velaterm/versions/{version}/vela-server")
-}
-
 /// Create the remote `~/.velaterm/{versions/<version>,data,bin}` layout.
-pub fn ensure_remote_layout(t: &dyn SshTransport, version: &str) -> Result<(), String> {
+pub fn ensure_remote_layout(
+    t: &dyn SshTransport,
+    sys: &RemoteSystem,
+    version: &str,
+) -> Result<(), String> {
     if !valid_version(version) {
         return Err(format!("Invalid version: {version}"));
     }
-    let cmd = format!("mkdir -p \"$HOME/.velaterm/versions/{version}\" \"$HOME/.velaterm/data\" \"$HOME/.velaterm/bin\"");
-    t.exec(&cmd).map(|_| ())
+    let cmd = match sys.shell {
+        RemoteShell::Posix => format!(
+            "mkdir -p \"$HOME/.velaterm/versions/{version}\" \"$HOME/.velaterm/data\" \"$HOME/.velaterm/bin\""
+        ),
+        RemoteShell::Powershell => format!(
+            "$ErrorActionPreference='Stop'; \
+             $b=\"$env:USERPROFILE\\.velaterm\"; \
+             foreach($p in @(\"$b\\versions\\{version}\",\"$b\\data\",\"$b\\bin\")){{ \
+               New-Item -ItemType Directory -Force -Path $p | Out-Null }}"
+        ),
+    };
+    shell_exec(t, sys, &cmd).map(|_| ())
 }
 
 /// Whether the remote version has an integrity-valid binary with the expected SHA-256.
-pub fn remote_binary_ok(t: &dyn SshTransport, version: &str, expected_sha256: &str) -> bool {
+pub fn remote_binary_ok(
+    t: &dyn SshTransport,
+    sys: &RemoteSystem,
+    version: &str,
+    expected_sha256: &str,
+) -> bool {
     if !valid_version(version) {
         return false;
     }
-    match remote_sha256(t, &remote_bin_path(version)) {
+    match remote_sha256(t, sys, &sys.bin_path(version)) {
         Ok(h) => h.eq_ignore_ascii_case(expected_sha256),
         Err(_) => false,
     }
@@ -632,6 +867,7 @@ pub fn remote_binary_ok(t: &dyn SshTransport, version: &str, expected_sha256: &s
 /// mismatched temporary files so partial data never appears installed. This integrity flow is transport-neutral.
 pub fn push_binary(
     t: &dyn SshTransport,
+    sys: &RemoteSystem,
     version: &str,
     local_bin: &Path,
     expected_sha256: &str,
@@ -643,38 +879,70 @@ pub fn push_binary(
     if !local_bin.is_file() {
         return Err(format!("local binary not found: {}", local_bin.display()));
     }
-    ensure_remote_layout(t, version)?;
+    ensure_remote_layout(t, sys, version)?;
 
-    // Upload paths are home-relative and bypass shell expansion.
+    // Upload paths are home-relative and bypass shell expansion. Forward slashes are correct for both
+    // sftp-server implementations, including the Windows one.
     let tmp_rel = format!(".velaterm/versions/{version}/.vela-server.tmp");
-    let tmp_abs = format!("$HOME/{tmp_rel}");
+    let tmp_abs = match sys.shell {
+        RemoteShell::Posix => format!("$HOME/{tmp_rel}"),
+        RemoteShell::Powershell => format!(
+            "$env:USERPROFILE\\.velaterm\\versions\\{version}\\.vela-server.tmp"
+        ),
+    };
 
     // The transport owns byte transfer and transfer progress.
     t.upload(local_bin, &tmp_rel, progress)?;
 
     // Verify the temporary file remotely.
-    let got = remote_sha256(t, &tmp_abs)?;
+    let got = remote_sha256(t, sys, &tmp_abs)?;
     if !got.eq_ignore_ascii_case(expected_sha256) {
-        let _ = t.exec(&format!("rm -f \"{tmp_abs}\""));
+        let _ = shell_exec(t, sys, &remove_file_cmd(sys, &tmp_abs));
         return Err(format!(
             "remote hash mismatch (refusing to place): expected {expected_sha256}, got {got}"
         ));
     }
 
-    // Atomically install and make executable.
-    let final_abs = remote_bin_path(version);
-    t.exec(&format!(
-        "mv -f \"{tmp_abs}\" \"{final_abs}\" && chmod +x \"{final_abs}\""
-    ))?;
+    // Atomically install; only POSIX needs an executable bit.
+    let final_abs = sys.bin_path(version);
+    let install = match sys.shell {
+        RemoteShell::Posix => format!("mv -f \"{tmp_abs}\" \"{final_abs}\" && chmod +x \"{final_abs}\""),
+        RemoteShell::Powershell => format!(
+            "$ErrorActionPreference='Stop'; Move-Item -Force -LiteralPath \"{tmp_abs}\" -Destination \"{final_abs}\""
+        ),
+    };
+    shell_exec(t, sys, &install)?;
     Ok(())
 }
 
-/// Verify the remote binary with --version, briefly retrying ETXTBSY after upload handles close.
-fn wait_remote_executable(t: &dyn SshTransport, version: &str) -> Result<(), String> {
-    let cmd = format!("\"{}\" --version", remote_bin_path(version));
+/// Delete one remote file, ignoring a missing path, in the detected shell's own syntax.
+fn remove_file_cmd(sys: &RemoteSystem, path: &str) -> String {
+    match sys.shell {
+        RemoteShell::Posix => format!("rm -f \"{path}\""),
+        RemoteShell::Powershell => {
+            format!("Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath \"{path}\"")
+        }
+    }
+}
+
+/// Verify the remote binary with --version, briefly retrying ETXTBSY (POSIX) or a still-held file handle
+/// (Windows) right after the upload closes.
+fn wait_remote_executable(
+    t: &dyn SshTransport,
+    sys: &RemoteSystem,
+    version: &str,
+) -> Result<(), String> {
+    let bin = sys.bin_path(version);
+    let cmd = match sys.shell {
+        RemoteShell::Posix => format!("\"{bin}\" --version"),
+        // A native command's nonzero exit is not a PowerShell error, so surface it explicitly.
+        RemoteShell::Powershell => format!(
+            "$ErrorActionPreference='Stop'; & \"{bin}\" --version; if($LASTEXITCODE -ne 0){{ exit $LASTEXITCODE }}"
+        ),
+    };
     let mut last = String::new();
     for _ in 0..8 {
-        match t.exec(&cmd) {
+        match shell_exec(t, sys, &cmd) {
             Ok(_) => return Ok(()),
             Err(e) => last = e,
         }
@@ -729,11 +997,6 @@ pub(crate) fn pick_local_port(host: &str) -> Result<u16, String> {
     free_local_port()
 }
 
-/// Remote service state path: `$HOME/.velaterm/run.json`.
-fn remote_run_json() -> &'static str {
-    "$HOME/.velaterm/run.json"
-}
-
 /// Remote state persisted in run.json for reconnect reuse/reclamation.
 #[derive(Debug, Clone, serde::Deserialize)]
 struct RunState {
@@ -751,20 +1014,123 @@ struct RunState {
     mirror: bool,
 }
 
-/// Return the POSIX-shell data-directory expression by mode/OS. Isolated mode uses
-/// `$HOME/.velaterm/data`; shared mode explicitly targets the remote desktop release directory:
-///   - Linux：`${XDG_DATA_HOME:-$HOME/.local/share}/io.vlinx.vlxterm.release`
-///   - macOS: `$HOME/Library/Application Support/io.vlinx.vlxterm.release`.
-/// Explicit paths are required because the server's independent identifier would not resolve to desktop data.
-fn serve_data_dir_expr(os: &str, shared_db: bool) -> String {
-    if !shared_db {
-        return "$HOME/.velaterm/data".to_string();
-    }
-    match os {
-        "macos" => "$HOME/Library/Application Support/io.vlinx.vlxterm.release".to_string(),
+/// Data-directory expressions by mode/OS/shell, returned as `(create, argument)`.
+///
+/// Both halves normally hold the same text. They differ only for Windows reached through a POSIX shell
+/// (Cygwin/MSYS): the shell creates the directory under its own POSIX path, while `vela-server.exe` is a
+/// native Windows program that understands only `C:\…`, so the argument runs through `cygpath -w`.
+///
+/// Isolated mode uses `~/.velaterm/data`; shared mode explicitly targets the remote desktop release
+/// directory, which the server's own identifier would never resolve to:
+///   - Linux: `${XDG_DATA_HOME:-$HOME/.local/share}/io.vlinx.vlxterm.release`
+///   - macOS: `$HOME/Library/Application Support/io.vlinx.vlxterm.release`
+///   - Windows: `%APPDATA%\io.vlinx.vlxterm.release`
+fn serve_data_dir_expr(os: &str, shell: RemoteShell, shared_db: bool) -> (String, String) {
+    let same = |s: &str| (s.to_string(), s.to_string());
+    match (shell, os, shared_db) {
+        (RemoteShell::Powershell, _, false) => same("$env:USERPROFILE\\.velaterm\\data"),
+        (RemoteShell::Powershell, _, true) => same("$env:APPDATA\\io.vlinx.vlxterm.release"),
+        (RemoteShell::Posix, "windows", false) => (
+            "$HOME/.velaterm/data".to_string(),
+            "$(cygpath -w \"$HOME/.velaterm/data\")".to_string(),
+        ),
+        (RemoteShell::Posix, "windows", true) => (
+            // %APPDATA% is already a Windows path here, so create it through cygpath and pass it verbatim.
+            "$(cygpath -u \"$APPDATA\")/io.vlinx.vlxterm.release".to_string(),
+            "$APPDATA\\io.vlinx.vlxterm.release".to_string(),
+        ),
+        (RemoteShell::Posix, _, false) => same("$HOME/.velaterm/data"),
+        (RemoteShell::Posix, "macos", true) => {
+            same("$HOME/Library/Application Support/io.vlinx.vlxterm.release")
+        }
         // Linux and other Unix fallback.
-        _ => "${XDG_DATA_HOME:-$HOME/.local/share}/io.vlinx.vlxterm.release".to_string(),
+        (RemoteShell::Posix, _, true) => {
+            same("${XDG_DATA_HOME:-$HOME/.local/share}/io.vlinx.vlxterm.release")
+        }
     }
+}
+
+/// Shell-native path of the remote desktop release data directory, for file probes run by the shell
+/// itself (as opposed to the argument handed to `vela-server`, see `serve_data_dir_expr`).
+fn desktop_data_dir_expr(sys: &RemoteSystem) -> String {
+    serve_data_dir_expr(&sys.os, sys.shell, true).0
+}
+
+/// Join a file name onto a shell-native directory expression with that shell's separator.
+fn shell_join(sys: &RemoteSystem, dir: &str, name: &str) -> String {
+    match sys.shell {
+        RemoteShell::Posix => format!("{dir}/{name}"),
+        RemoteShell::Powershell => format!("{dir}\\{name}"),
+    }
+}
+
+/// Remote command that prints a file's content, or nothing when it does not exist.
+fn read_file_cmd(sys: &RemoteSystem, path: &str) -> String {
+    match sys.shell {
+        RemoteShell::Posix => format!("cat \"{path}\" 2>/dev/null"),
+        RemoteShell::Powershell => format!(
+            "$ErrorActionPreference='SilentlyContinue'; Get-Content -Raw -LiteralPath \"{path}\""
+        ),
+    }
+}
+
+/// Remote command that prints `alive` when `pid` is a running process of the given kind. Windows reuses
+/// PIDs quickly, so there the process name must also match one of `names` (case-insensitive prefixes).
+fn pid_alive_cmd(sys: &RemoteSystem, pid: u32, names: &[&str]) -> String {
+    match sys.shell {
+        RemoteShell::Posix => format!("kill -0 {pid} 2>/dev/null && echo alive"),
+        RemoteShell::Powershell => {
+            let cond = names
+                .iter()
+                .map(|n| format!("$q.ProcessName -like '{n}*'"))
+                .collect::<Vec<_>>()
+                .join(" -or ");
+            format!(
+                "$ErrorActionPreference='SilentlyContinue'; \
+                 $q=Get-Process -Id {pid} -ErrorAction SilentlyContinue; \
+                 if($q -and ({cond})){{ Write-Output 'alive' }}"
+            )
+        }
+    }
+}
+
+/// Read the remote desktop app's local link (see `web::local_link`) and confirm its process is alive.
+///
+/// None when the desktop app is not installed, not running, or too old to publish a link; the caller
+/// then falls back to a headless service. The forwarded port is health-checked afterwards, which also
+/// covers a stale record whose PID happens to be reused by an unrelated process on POSIX.
+fn read_local_link(t: &dyn SshTransport, sys: &RemoteSystem) -> Option<crate::web::local_link::LocalLink> {
+    let path = shell_join(sys, &desktop_data_dir_expr(sys), crate::web::local_link::FILENAME);
+    let out = shell_exec(t, sys, &read_file_cmd(sys, &path)).ok()?;
+    let link = crate::web::local_link::parse(&out)?;
+    let alive = shell_exec(t, sys, &pid_alive_cmd(sys, link.pid, &["velaterm", "vlx-term"]))
+        .map(|o| o.trim() == "alive")
+        .unwrap_or(false);
+    if alive {
+        Some(link)
+    } else {
+        None
+    }
+}
+
+/// Remote command that prints `yes` when the desktop release database exists.
+fn desktop_db_probe_cmd(sys: &RemoteSystem) -> String {
+    let db = shell_join(sys, &desktop_data_dir_expr(sys), "vlx-term.db");
+    match sys.shell {
+        RemoteShell::Posix => format!("test -f \"{db}\" && echo yes"),
+        RemoteShell::Powershell => format!(
+            "$ErrorActionPreference='SilentlyContinue'; \
+             if(Test-Path -LiteralPath \"{db}\" -PathType Leaf){{ Write-Output 'yes' }}"
+        ),
+    }
+}
+
+/// Whether the remote desktop app has a database to share. Mirror mode reuses it when present so the
+/// session tree matches the desktop's; otherwise the service falls back to its isolated database.
+fn desktop_db_exists(t: &dyn SshTransport, sys: &RemoteSystem) -> bool {
+    shell_exec(t, sys, &desktop_db_probe_cmd(sys))
+        .map(|o| o.trim() == "yes")
+        .unwrap_or(false)
 }
 
 /// Start detached remote `vela-server --serve --local-http` and persist pid/port/password/version/shared_db/
@@ -773,10 +1139,10 @@ fn serve_data_dir_expr(os: &str, shared_db: bool) -> String {
 /// Pass the alphanumeric random password through VELA_SERVE_PASSWORD, never remote process argv.
 fn start_detached_serve(
     t: &dyn SshTransport,
+    sys: &RemoteSystem,
     version: &str,
     password: &str,
     rport: u16,
-    os: &str,
     shared_db: bool,
     mirror: bool,
 ) -> Result<u32, String> {
@@ -786,29 +1152,97 @@ fn start_detached_serve(
     if password.is_empty() || !password.chars().all(|c| c.is_ascii_alphanumeric()) {
         return Err("serve password must be a non-empty alphanumeric random string".to_string());
     }
-    let bin = remote_bin_path(version);
-    let run = remote_run_json();
-    let data_dir_expr = serve_data_dir_expr(os, shared_db);
+    let remote_cmd = serve_script(sys, version, password, rport, shared_db, mirror);
+    let out = shell_exec(t, sys, &remote_cmd)?;
+    out.lines()
+        .rev()
+        .find_map(|l| l.trim().parse::<u32>().ok())
+        .ok_or_else(|| format!("remote serve start returned no valid PID: {out:?}"))
+}
+
+/// Build the remote script that starts the detached service and writes run.json, echoing its PID last.
+/// Kept separate from execution so its exact shape is unit-testable.
+fn serve_script(
+    sys: &RemoteSystem,
+    version: &str,
+    password: &str,
+    rport: u16,
+    shared_db: bool,
+    mirror: bool,
+) -> String {
+    let bin = sys.bin_path(version);
+    let run = sys.run_json();
+    let (data_dir_mk, data_dir_arg) = serve_data_dir_expr(&sys.os, sys.shell, shared_db);
     // Embed shared_db and mirror directly as JSON true/false literals.
     let shared_json = if shared_db { "true" } else { "false" };
     let mirror_json = if mirror { "true" } else { "false" };
     // The remote machine is headless and has no panel, so the mirror choice travels as a startup flag.
     let mirror_arg = if mirror { "1" } else { "0" };
-    // nohup, closed stdin, redirected logs, and `&` detach from SSH. Persist `$!` state under
-    // ~/.velaterm regardless of the selected data directory, then echo the PID.
-    let remote_cmd = format!(
-        "mkdir -p \"{data_dir_expr}\"; \
-         nohup env VELA_SERVE_PASSWORD='{password}' \"{bin}\" --serve --local-http --port {rport} \
-           --data-dir \"{data_dir_expr}\" --mirror {mirror_arg} </dev/null >\"$HOME/.velaterm/server.log\" 2>&1 & \
-         P=$!; \
-         printf '{{\"pid\":%d,\"port\":%d,\"password\":\"%s\",\"version\":\"%s\",\"shared_db\":{shared_json},\"mirror\":{mirror_json}}}\\n' \"$P\" {rport} '{password}' '{version}' > \"{run}\"; \
-         echo \"$P\""
-    );
-    let out = t.exec(&remote_cmd)?;
-    out.lines()
-        .rev()
-        .find_map(|l| l.trim().parse::<u32>().ok())
-        .ok_or_else(|| format!("remote serve start returned no valid PID: {out:?}"))
+    match sys.shell {
+        // nohup, closed stdin, redirected logs, and `&` detach from SSH. Persist `$!` state under
+        // ~/.velaterm regardless of the selected data directory, then echo the PID.
+        RemoteShell::Posix => format!(
+            "mkdir -p \"{data_dir_mk}\"; \
+             nohup env VELA_SERVE_PASSWORD='{password}' \"{bin}\" --serve --local-http --port {rport} \
+               --data-dir \"{data_dir_arg}\" --mirror {mirror_arg} </dev/null >\"$HOME/.velaterm/server.log\" 2>&1 & \
+             P=$!; \
+             printf '{{\"pid\":%d,\"port\":%d,\"password\":\"%s\",\"version\":\"%s\",\"shared_db\":{shared_json},\"mirror\":{mirror_json}}}\\n' \"$P\" {rport} '{password}' '{version}' > \"{run}\"; \
+             echo \"$P\""
+        ),
+        // Windows starts the service in two stages, because `nohup … &` has two separate Windows problems
+        // to solve and no single Start-Process call solves either one.
+        //
+        // 1. **The SSH session kills everything it spawned.** Microsoft's OpenSSH puts the session in a job
+        //    object and terminates it on disconnect, and job membership is inherited, so every descendant
+        //    dies with the session however it was launched. (Measured: the server wrote its startup log,
+        //    then vanished the moment the SSH command returned.)
+        // 2. **Redirection turns on handle inheritance.** `Start-Process` with any `-RedirectStandard*`
+        //    creates the process with inheritance enabled, so the server receives every other inheritable
+        //    handle the login shell holds — the SSH channel's pipes among them — and keeps that channel
+        //    open for its whole life. (Measured: the client hung on a command that had already finished.)
+        //
+        // Stage one therefore does not spawn the service itself: it asks WMI to, through
+        // `Win32_Process.Create`. The new process is created by the WMI service rather than by us, so it
+        // belongs to no job of ours and inherits none of our handles, while still running under our own
+        // token — `%USERPROFILE%` and `%APPDATA%` still resolve to this user's directories. It lands in
+        // session 0 with no console, which is exactly right for a headless server.
+        //
+        // That WMI-created PowerShell is stage two: free of both problems, it starts the server with its
+        // log redirections and writes run.json. Stage one waits for run.json to appear and reports the PID
+        // recorded in it, so the returned PID is the server's own rather than any intermediate process's.
+        //
+        // The password is set on stage two's environment and inherited by the server, never placed in the
+        // server's argv. Windows PowerShell 5.1 does not quote array elements of -ArgumentList, so the
+        // server arguments travel as one prebuilt string; a user profile path containing spaces would
+        // otherwise split the --data-dir value.
+        RemoteShell::Powershell => {
+            let inner = format!(
+                "$ErrorActionPreference='Stop'; \
+                 $b=\"$env:USERPROFILE\\.velaterm\"; \
+                 $d=\"{data_dir_arg}\"; \
+                 New-Item -ItemType Directory -Force -Path $d | Out-Null; \
+                 $env:VELA_SERVE_PASSWORD='{password}'; \
+                 $al='--serve --local-http --port {rport} --data-dir \"'+$d+'\" --mirror {mirror_arg}'; \
+                 $p=Start-Process -FilePath \"{bin}\" -ArgumentList $al -WindowStyle Hidden -PassThru \
+                     -RedirectStandardOutput \"$b\\server.log\" -RedirectStandardError \"$b\\server.err.log\"; \
+                 $j='{{\"pid\":'+$p.Id+',\"port\":{rport},\"password\":\"{password}\",\"version\":\"{version}\",\"shared_db\":{shared_json},\"mirror\":{mirror_json}}}'; \
+                 Set-Content -LiteralPath \"{run}\" -Value $j -Encoding ASCII"
+            );
+            let inner_b64 = ps_b64(&inner);
+            format!(
+                "$ErrorActionPreference='Stop'; \
+                 $run=\"{run}\"; \
+                 Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath $run; \
+                 $r=Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{ \
+                     CommandLine = 'powershell -NoProfile -NonInteractive -EncodedCommand {inner_b64}' }}; \
+                 if($r.ReturnValue -ne 0){{ throw ('could not spawn the service host (Win32_Process.Create returned ' + $r.ReturnValue + ')') }}; \
+                 for($i=0;$i -lt 200;$i++){{ if(Test-Path -LiteralPath $run){{ break }}; Start-Sleep -Milliseconds 100 }}; \
+                 $t=Get-Content -Raw -LiteralPath $run; \
+                 if(-not $t){{ throw 'the remote service did not start (see .velaterm\\server.err.log)' }}; \
+                 Write-Output ($t | ConvertFrom-Json).pid"
+            )
+        }
+    }
 }
 
 /// Start persistent `ssh -N -L` forwarding independently from the remote service. Register the child,
@@ -844,10 +1278,11 @@ fn openssh_open_forward(host: &str, session: &str, rport: u16) -> Result<u16, St
     Ok(lport)
 }
 
-/// Read run.json and `kill -0` to find a live remote service. Remove stale state and return None otherwise.
-fn detect_running(t: &dyn SshTransport) -> Option<RunState> {
-    let run = remote_run_json();
-    let out = t.exec(&format!("cat \"{run}\" 2>/dev/null")).ok()?;
+/// Read run.json and check the recorded PID to find a live remote service. Remove stale state and return
+/// None otherwise.
+fn detect_running(t: &dyn SshTransport, sys: &RemoteSystem) -> Option<RunState> {
+    let run = sys.run_json();
+    let out = shell_exec(t, sys, &read_file_cmd(sys, &run)).ok()?;
     if out.trim().is_empty() {
         return None;
     }
@@ -856,31 +1291,46 @@ fn detect_running(t: &dyn SshTransport) -> Option<RunState> {
     if !valid_version(&rs.version) || !rs.password.chars().all(|c| c.is_ascii_alphanumeric()) {
         return None;
     }
-    let alive = t
-        .exec(&format!("kill -0 {} 2>/dev/null && echo alive", rs.pid))
+    // Windows reuses PIDs quickly, so there the process must actually be vela-server.
+    let alive = shell_exec(t, sys, &pid_alive_cmd(sys, rs.pid, &["vela-server"]))
         .map(|o| o.trim() == "alive")
         .unwrap_or(false);
     if alive {
         Some(rs)
     } else {
-        let _ = t.exec(&format!("rm -f \"{run}\""));
+        let _ = shell_exec(t, sys, &remove_file_cmd(sys, &run));
         None
     }
 }
 
-/// Shared remote command that extracts a numeric PID from run.json, kills it, and removes the state file.
-fn kill_service_cmd() -> String {
-    let run = remote_run_json();
-    format!(
-        "P=$(sed -n 's/.*\"pid\":\\([0-9]\\{{1,\\}}\\).*/\\1/p' \"{run}\" 2>/dev/null); \
-         [ -n \"$P\" ] && kill \"$P\" 2>/dev/null; rm -f \"{run}\""
-    )
+/// Shared remote command that extracts the PID from run.json, kills it, and removes the state file.
+fn kill_service_cmd(sys: &RemoteSystem) -> String {
+    let run = sys.run_json();
+    match sys.shell {
+        RemoteShell::Posix => format!(
+            "P=$(sed -n 's/.*\"pid\":\\([0-9]\\{{1,\\}}\\).*/\\1/p' \"{run}\" 2>/dev/null); \
+             [ -n \"$P\" ] && kill \"$P\" 2>/dev/null; rm -f \"{run}\""
+        ),
+        RemoteShell::Powershell => format!(
+            "$ErrorActionPreference='SilentlyContinue'; \
+             $t=Get-Content -Raw -LiteralPath \"{run}\"; \
+             if($t){{ $o=$t | ConvertFrom-Json; \
+               if($o.pid){{ Stop-Process -Id $o.pid -Force -ErrorAction SilentlyContinue }} }}; \
+             Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath \"{run}\""
+        ),
+    }
 }
 
 /// Explicitly stop the persistent remote service after the user chooses close. This direct entry is
 /// OpenSSH-only; active transports use the same command through exec.
 pub fn kill_remote_service(host: &str, session: &str) {
-    let _ = run_remote(host, session, &kill_service_cmd());
+    let sys = session_sys(session);
+    let cmd = kill_service_cmd(&sys);
+    let wrapped = match sys.shell {
+        RemoteShell::Posix => cmd,
+        RemoteShell::Powershell => ps_encoded(&cmd),
+    };
+    let _ = run_remote(host, session, &wrapped);
 }
 
 /// Poll the local forwarding port until the remote service actually responds over HTTP or times out.
@@ -999,8 +1449,26 @@ impl SshTransport for OpensshTransport {
 
     fn upload(&self, local: &Path, remote_rel: &str, progress: Progress) -> Result<(), String> {
         let (target, port) = split_ssh_target(&self.host);
-        // The SCP path after `:` is home-relative and does not use shell expansion.
-        let tmp_abs = format!("$HOME/{remote_rel}");
+        // The SCP path after `:` is home-relative and does not use shell expansion. The size probe below
+        // runs through the login shell instead, so it needs that shell's own path syntax.
+        let sys = session_sys(&self.session);
+        let tmp_abs = match sys.shell {
+            RemoteShell::Posix => format!("$HOME/{remote_rel}"),
+            RemoteShell::Powershell => {
+                format!("$env:USERPROFILE\\{}", remote_rel.replace('/', "\\"))
+            }
+        };
+        let size_cmd = match sys.shell {
+            // Use Linux stat syntax then macOS/BSD fallback; report zero if neither works.
+            RemoteShell::Posix => format!(
+                "stat -c %s \"{tmp_abs}\" 2>/dev/null || stat -f %z \"{tmp_abs}\" 2>/dev/null || echo 0"
+            ),
+            RemoteShell::Powershell => ps_encoded(&format!(
+                "$ErrorActionPreference='SilentlyContinue'; \
+                 $i=Get-Item -LiteralPath \"{tmp_abs}\"; \
+                 if($i){{ Write-Output $i.Length }} else {{ Write-Output 0 }}"
+            )),
+        };
         let total = std::fs::metadata(local).map(|m| m.len()).unwrap_or(0);
 
         let mut scp = ssh_command("scp");
@@ -1046,12 +1514,7 @@ impl SshTransport for OpensshTransport {
                 Err(e) => return Err(format!("scp wait failed: {e}")),
             }
             if total > 0 {
-                // Use Linux stat syntax then macOS/BSD fallback; report zero if neither works.
-                if let Ok(out) = run_remote(
-                    &self.host,
-                    &self.session,
-                    &format!("stat -c %s \"{tmp_abs}\" 2>/dev/null || stat -f %z \"{tmp_abs}\" 2>/dev/null || echo 0"),
-                ) {
+                if let Ok(out) = run_remote(&self.host, &self.session, &size_cmd) {
                     if let Ok(cur) = out.trim().parse::<u64>() {
                         let pct = (cur.min(total) * 99 / total) as u8;
                         progress("transfer", Some(pct));
@@ -1116,13 +1579,19 @@ fn transports() -> &'static Mutex<HashMap<String, Box<dyn SshTransport>>> {
 pub fn disconnect(host: &str, session: &str, kill_remote: bool) {
     // Remove the monitor first so it cannot rebuild during disconnect.
     unwatch_tunnel(session);
+    // The remote desktop app is never ours to stop: a session attached through its local link only
+    // drops the tunnel, whatever the caller asked for.
+    let kill_remote = kill_remote && session_target(session) == ServiceTarget::Headless;
     // Remove the object under lock, then perform network I/O without blocking the registry.
     let removed = transports().lock().unwrap().remove(session);
     if let Some(t) = removed {
         if kill_remote {
-            let _ = t.exec(&kill_service_cmd());
+            let sys = session_sys(session);
+            let _ = shell_exec(t.as_ref(), &sys, &kill_service_cmd(&sys));
         }
         t.close();
+        clear_session_sys(session);
+        clear_session_target(session);
         return;
     }
     // Fallback for missing active state, applicable only to OpenSSH.
@@ -1131,6 +1600,8 @@ pub fn disconnect(host: &str, session: &str, kill_remote: bool) {
     }
     stop_serve(session);
     close_master(host, session);
+    clear_session_sys(session);
+    clear_session_target(session);
 }
 
 // ─────────────────────────── Tunnel monitoring and automatic rebuild ───────────────────────────
@@ -1201,19 +1672,26 @@ fn rebuild_tunnel(
         // A rejected remembered password is stale; retrying cannot help.
         open_master_pty(host, session, true, &pw).map_err(RebuildErr::Fatal)?;
     }
-    // 2. Verify the remote service through run.json and kill -0.
+    // 2. Verify the remote service is still there: run.json plus a liveness check for a headless
+    // service, the local-link record for the remote desktop app.
     let t = OpensshTransport {
         host: host.to_string(),
         session: session.to_string(),
     };
-    let Some(rs) = detect_running(&t) else {
-        return Err(RebuildErr::Fatal(
-            "remote server is no longer running".to_string(),
-        ));
+    let sys = session_sys(session);
+    let rport = match session_target(session) {
+        ServiceTarget::Headless => detect_running(&t, &sys).map(|rs| rs.port).ok_or_else(|| {
+            RebuildErr::Fatal("remote server is no longer running".to_string())
+        })?,
+        // The desktop may have restarted on a new port with a new password, which the window's stored
+        // credentials cannot follow; only the same record is transparently recoverable.
+        ServiceTarget::DesktopLink => read_local_link(&t, &sys).map(|l| l.port).ok_or_else(|| {
+            RebuildErr::Fatal("remote desktop app is no longer running".to_string())
+        })?,
     };
     // 3. Reap the dead tunnel child and rebuild on the original port.
     stop_serve(session);
-    let lport = openssh_open_forward(host, session, rs.port).map_err(RebuildErr::Retryable)?;
+    let lport = openssh_open_forward(host, session, rport).map_err(RebuildErr::Retryable)?;
     if lport != want_port {
         // If another process owns the stable port, destroy the useless new forwarding child.
         stop_serve(session);
@@ -1363,6 +1841,12 @@ pub struct ConnectResult {
     pub password: String,
     /// Whether an existing persistent remote service and its sessions were reused.
     pub reused: bool,
+    /// Whether the tunnel leads to the remote desktop app itself (its local link) rather than to a
+    /// headless service. The window then closes like a URL connection: leave, never stop anything.
+    pub desktop_link: bool,
+    /// Data mode actually in effect: true when the remote desktop release database is in use, either
+    /// through the desktop app or through a headless service opened on it.
+    pub shared_db: bool,
 }
 
 /// Generate a one-time 64-hex-character password safe for the serve environment.
@@ -1380,8 +1864,11 @@ fn random_password() -> String {
 /// Requires confirmed known_hosts trust. Auto uses agent/keys and marks rejection for a password prompt;
 /// Password uses the transport's supported implementation.
 ///
-/// shared_db selects isolated ~/.velaterm/data or the remote desktop release database, and mirror decides
-/// whether the started service mirrors its UI layout across every client connected to it.
+/// Without mirror, shared_db selects isolated ~/.velaterm/data or the remote desktop release database for
+/// the headless service this client starts. With mirror the target is chosen for the caller, in this
+/// order: the remote desktop app itself when it is running (its local link), else a headless service on
+/// the desktop database when that database exists, else a headless service on the isolated database; a
+/// headless service then runs with mirror mode on, so its own clients still mirror one another.
 pub fn connect(
     app_data_dir: &Path,
     host: &str,
@@ -1425,18 +1912,47 @@ fn connect_inner(
     let session = t.session();
     progress("probe", None);
     let sys = probe_system(t)?;
-    // Linux/macOS share POSIX orchestration with hash/stat differences handled internally. Reject remote
-    // Windows until its cmd/PowerShell path is implemented.
-    if sys.os != "linux" && sys.os != "macos" {
+    // Linux, macOS, and Windows are supported; each shell's command differences are handled by the
+    // builders above. Anything else (BSD, Solaris, …) has no published vela-server artifact.
+    if sys.os != "linux" && sys.os != "macos" && sys.os != "windows" {
         return Err(format!(
-            "currently supports Linux and macOS remotes; detected remote is {} ({})",
+            "currently supports Linux, macOS and Windows remotes; detected remote is {} ({})",
             sys.os, sys.raw
         ));
     }
+    // Every later step needs the detected shell, including disconnect and tunnel rebuild, which only carry
+    // the session key.
+    set_session_sys(session, &sys);
     let version = crate::VERSION;
 
+    // Mirror mode means following the remote desktop app. When that app is running, attach to its
+    // local link (see `web::local_link`) and skip provisioning entirely: the tunnel then leads into the
+    // desktop's own process, so sessions, layout, and presence are the desktop's. A headless service
+    // that an earlier connection left behind is left alone; stopping it would end its sessions.
+    let mut shared_db = shared_db;
+    if mirror {
+        progress("probe", None);
+        if let Some(link) = read_local_link(t, &sys) {
+            set_session_target(session, ServiceTarget::DesktopLink);
+            progress("forward", None);
+            let local_port = t.open_forward(link.port)?;
+            return Ok(ConnectResult {
+                session: session.to_string(),
+                local_port,
+                password: link.password,
+                reused: true,
+                desktop_link: true,
+                shared_db: true,
+            });
+        }
+        // No running desktop: the closest thing to following it is a headless service on its database,
+        // which only exists when the desktop app has been used on that machine.
+        shared_db = desktop_db_exists(t, &sys);
+    }
+    set_session_target(session, ServiceTarget::Headless);
+
     // Detect a persistent service retained from an earlier disconnect or abnormal exit.
-    if let Some(rs) = detect_running(t) {
+    if let Some(rs) = detect_running(t, &sys) {
         // Reuse only when version, data mode, and mirror mode all match; otherwise restart, both to avoid
         // exposing the wrong DB and because mirror mode is fixed at startup for a service with no panel.
         if rs.version == version && rs.shared_db == shared_db && rs.mirror == mirror {
@@ -1448,10 +1964,12 @@ fn connect_inner(
                 local_port,
                 password: rs.password,
                 reused: true,
+                desktop_link: false,
+                shared_db,
             });
         }
         // Stop mismatched version/mode and restart below with current settings.
-        let _ = t.exec(&kill_service_cmd());
+        let _ = shell_exec(t, &sys, &kill_service_cmd(&sys));
     }
 
     progress("supply", None);
@@ -1470,16 +1988,16 @@ fn connect_inner(
     let sha = crate::server_supply::cached_sha256(&local_bin)?;
 
     // Skip upload for an integrity-valid remote binary; otherwise verify and atomically install it.
-    if !remote_binary_ok(t, version, &sha) {
-        push_binary(t, version, &local_bin, &sha, progress)?;
+    if !remote_binary_ok(t, &sys, version, &sha) {
+        push_binary(t, &sys, version, &local_bin, &sha, progress)?;
     }
     // Retry executable verification around transient ETXTBSY immediately after SCP.
     progress("start", None);
-    wait_remote_executable(t, version)?;
+    wait_remote_executable(t, &sys, version)?;
 
     let password = random_password();
     let rport = remote_serve_port(session);
-    start_detached_serve(t, version, &password, rport, &sys.os, shared_db, mirror)?;
+    start_detached_serve(t, &sys, version, &password, rport, shared_db, mirror)?;
     progress("forward", None);
     let local_port = t.open_forward(rport)?;
     Ok(ConnectResult {
@@ -1487,6 +2005,8 @@ fn connect_inner(
         local_port,
         password,
         reused: false,
+        desktop_link: false,
+        shared_db,
     })
 }
 
@@ -1494,16 +2014,66 @@ fn connect_inner(
 mod tests {
     use super::*;
 
+    /// Build a system value for command-shape tests without touching the network.
+    fn sys_of(os: &str, arch: &str, shell: RemoteShell) -> RemoteSystem {
+        RemoteSystem {
+            os: os.to_string(),
+            arch: arch.to_string(),
+            raw: String::new(),
+            shell,
+        }
+    }
+
     #[test]
     fn parse_uname_linux_and_macos() {
         let l = parse_uname("Linux x86_64").unwrap();
         assert_eq!((l.os.as_str(), l.arch.as_str()), ("linux", "x86_64"));
+        assert_eq!(l.shell, RemoteShell::Posix);
         let m = parse_uname("Darwin arm64").unwrap();
         assert_eq!((m.os.as_str(), m.arch.as_str()), ("macos", "aarch64"));
         let a = parse_uname("Linux amd64").unwrap();
         assert_eq!(a.arch, "x86_64");
         assert!(parse_uname("").is_none());
         assert!(parse_uname("Plan9").is_none()); // Missing architecture field.
+    }
+
+    #[test]
+    fn parse_uname_cygwin_is_windows_over_a_posix_shell() {
+        // A Cygwin/MSYS sshd answers uname, so Windows is reached with the whole POSIX toolbox available.
+        let c = parse_uname("CYGWIN_NT-10.0-19045 x86_64").unwrap();
+        assert_eq!((c.os.as_str(), c.arch.as_str()), ("windows", "x86_64"));
+        assert_eq!(c.shell, RemoteShell::Posix);
+        let m = parse_uname("MINGW64_NT-10.0 x86_64").unwrap();
+        assert_eq!(m.os, "windows");
+        assert_eq!(m.shell, RemoteShell::Posix);
+    }
+
+    #[test]
+    fn parse_windows_probe_reads_processor_architecture() {
+        let w = parse_windows_probe("Windows_NT AMD64").unwrap();
+        assert_eq!((w.os.as_str(), w.arch.as_str()), ("windows", "x86_64"));
+        assert_eq!(w.shell, RemoteShell::Powershell);
+        let a = parse_windows_probe("Windows_NT ARM64").unwrap();
+        assert_eq!(a.arch, "aarch64");
+        // An unknown architecture is preserved so the supply step can name it in its error.
+        assert_eq!(parse_windows_probe("Windows_NT x86").unwrap().arch, "x86");
+        assert!(parse_windows_probe("Linux x86_64").is_none());
+        assert!(parse_windows_probe("").is_none());
+    }
+
+    #[test]
+    fn ps_encoded_is_pure_base64_utf16le() {
+        let wrapped = ps_encoded("hi");
+        let b64 = wrapped
+            .strip_prefix("powershell -NoProfile -NonInteractive -EncodedCommand ")
+            .expect("the wrapper should carry the standard PowerShell flags");
+        use base64::Engine;
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .expect("the argument should be valid base64");
+        assert_eq!(raw, vec![b'h', 0, b'i', 0], "PowerShell requires UTF-16LE");
+        // No quoting reaches cmd.exe, which is the entire point of -EncodedCommand.
+        assert!(!b64.contains(' ') && !b64.contains('"') && !b64.contains('\''));
     }
 
     #[test]
@@ -1536,25 +2106,188 @@ mod tests {
     #[test]
     fn remote_bin_path_shape() {
         assert_eq!(
-            remote_bin_path("0.1.73"),
+            sys_of("linux", "x86_64", RemoteShell::Posix).bin_path("0.1.73"),
             "$HOME/.velaterm/versions/0.1.73/vela-server"
+        );
+        // Windows carries the .exe suffix in both shells, with each shell's own path syntax.
+        assert_eq!(
+            sys_of("windows", "x86_64", RemoteShell::Posix).bin_path("0.1.73"),
+            "$HOME/.velaterm/versions/0.1.73/vela-server.exe"
+        );
+        assert_eq!(
+            sys_of("windows", "x86_64", RemoteShell::Powershell).bin_path("0.1.73"),
+            "$env:USERPROFILE\\.velaterm\\versions\\0.1.73\\vela-server.exe"
+        );
+    }
+
+    #[test]
+    fn run_json_path_by_shell() {
+        assert_eq!(
+            sys_of("linux", "x86_64", RemoteShell::Posix).run_json(),
+            "$HOME/.velaterm/run.json"
+        );
+        assert_eq!(
+            sys_of("windows", "x86_64", RemoteShell::Powershell).run_json(),
+            "$env:USERPROFILE\\.velaterm\\run.json"
         );
     }
 
     #[test]
     fn serve_data_dir_expr_by_os_and_mode() {
-        // Isolated mode is always ~/.velaterm/data regardless of OS.
-        assert_eq!(serve_data_dir_expr("linux", false), "$HOME/.velaterm/data");
-        assert_eq!(serve_data_dir_expr("macos", false), "$HOME/.velaterm/data");
+        let posix = RemoteShell::Posix;
+        // Isolated mode is always ~/.velaterm/data on Unix regardless of OS.
+        assert_eq!(
+            serve_data_dir_expr("linux", posix, false),
+            ("$HOME/.velaterm/data".into(), "$HOME/.velaterm/data".into())
+        );
+        assert_eq!(
+            serve_data_dir_expr("macos", posix, false),
+            ("$HOME/.velaterm/data".into(), "$HOME/.velaterm/data".into())
+        );
         // Shared mode uses each OS's desktop release data directory.
         assert_eq!(
-            serve_data_dir_expr("linux", true),
+            serve_data_dir_expr("linux", posix, true).1,
             "${XDG_DATA_HOME:-$HOME/.local/share}/io.vlinx.vlxterm.release"
         );
         assert_eq!(
-            serve_data_dir_expr("macos", true),
+            serve_data_dir_expr("macos", posix, true).1,
             "$HOME/Library/Application Support/io.vlinx.vlxterm.release"
         );
+        // Native Windows uses %USERPROFILE% / %APPDATA% and needs no conversion.
+        let ps = RemoteShell::Powershell;
+        assert_eq!(
+            serve_data_dir_expr("windows", ps, false),
+            (
+                "$env:USERPROFILE\\.velaterm\\data".into(),
+                "$env:USERPROFILE\\.velaterm\\data".into()
+            )
+        );
+        assert_eq!(
+            serve_data_dir_expr("windows", ps, true).1,
+            "$env:APPDATA\\io.vlinx.vlxterm.release"
+        );
+        // Windows behind a POSIX shell creates the directory with a POSIX path but hands the native
+        // vela-server.exe a Windows one.
+        let (mk, arg) = serve_data_dir_expr("windows", posix, false);
+        assert_eq!(mk, "$HOME/.velaterm/data");
+        assert_eq!(arg, "$(cygpath -w \"$HOME/.velaterm/data\")");
+        let (mk, arg) = serve_data_dir_expr("windows", posix, true);
+        assert_eq!(mk, "$(cygpath -u \"$APPDATA\")/io.vlinx.vlxterm.release");
+        assert_eq!(arg, "$APPDATA\\io.vlinx.vlxterm.release");
+    }
+
+    #[test]
+    fn local_link_probe_targets_the_desktop_release_directory() {
+        // The link and the database both live in the desktop release data directory, written in the
+        // detected shell's own syntax so the shell itself can read them.
+        let mac = sys_of("macos", "aarch64", RemoteShell::Posix);
+        let link = shell_join(&mac, &desktop_data_dir_expr(&mac), crate::web::local_link::FILENAME);
+        assert_eq!(
+            link,
+            "$HOME/Library/Application Support/io.vlinx.vlxterm.release/vlx-local-link.json"
+        );
+        assert_eq!(
+            read_file_cmd(&mac, &link),
+            "cat \"$HOME/Library/Application Support/io.vlinx.vlxterm.release/vlx-local-link.json\" 2>/dev/null"
+        );
+        assert_eq!(
+            desktop_db_probe_cmd(&mac),
+            "test -f \"$HOME/Library/Application Support/io.vlinx.vlxterm.release/vlx-term.db\" && echo yes"
+        );
+        let win = sys_of("windows", "x86_64", RemoteShell::Powershell);
+        let db = desktop_db_probe_cmd(&win);
+        assert!(db.contains("Test-Path -LiteralPath \"$env:APPDATA\\io.vlinx.vlxterm.release\\vlx-term.db\""));
+        // Cygwin reaches the same directory through cygpath, with POSIX separators.
+        let cyg = sys_of("windows", "x86_64", RemoteShell::Posix);
+        assert_eq!(
+            shell_join(&cyg, &desktop_data_dir_expr(&cyg), "vlx-term.db"),
+            "$(cygpath -u \"$APPDATA\")/io.vlinx.vlxterm.release/vlx-term.db"
+        );
+    }
+
+    #[test]
+    fn pid_alive_cmd_checks_the_process_name_only_on_windows() {
+        let posix = pid_alive_cmd(&sys_of("linux", "x86_64", RemoteShell::Posix), 77, &["velaterm"]);
+        assert_eq!(posix, "kill -0 77 2>/dev/null && echo alive");
+        // Windows reuses PIDs quickly, so the desktop's two possible names are both accepted and nothing else.
+        let win = pid_alive_cmd(
+            &sys_of("windows", "x86_64", RemoteShell::Powershell),
+            77,
+            &["velaterm", "vlx-term"],
+        );
+        assert!(win.contains("Get-Process -Id 77"));
+        assert!(win.contains("$q.ProcessName -like 'velaterm*' -or $q.ProcessName -like 'vlx-term*'"));
+        let server = pid_alive_cmd(&sys_of("windows", "x86_64", RemoteShell::Powershell), 9, &["vela-server"]);
+        assert!(server.contains("($q.ProcessName -like 'vela-server*')"));
+    }
+
+    #[test]
+    fn session_target_defaults_to_headless_and_is_cleared_on_disconnect() {
+        let s = "target-test-session";
+        assert_eq!(session_target(s), ServiceTarget::Headless);
+        set_session_target(s, ServiceTarget::DesktopLink);
+        assert_eq!(session_target(s), ServiceTarget::DesktopLink);
+        clear_session_target(s);
+        assert_eq!(session_target(s), ServiceTarget::Headless);
+    }
+
+    #[test]
+    fn serve_script_posix_detaches_and_records_state() {
+        let sys = sys_of("linux", "x86_64", RemoteShell::Posix);
+        let s = serve_script(&sys, "0.1.73", "pw123", 42000, false, true);
+        assert!(s.contains("nohup env VELA_SERVE_PASSWORD='pw123'"));
+        // Detaching every stream is what lets the SSH command return while the server keeps running.
+        assert!(s.contains("</dev/null"));
+        assert!(s.contains("--mirror 1"));
+        assert!(s.contains("\"$HOME/.velaterm/run.json\""));
+    }
+
+    #[test]
+    fn serve_script_windows_launches_in_two_stages() {
+        let sys = sys_of("windows", "x86_64", RemoteShell::Powershell);
+        let s = serve_script(&sys, "0.1.73", "pw123", 42000, false, false);
+        // Stage one must hand the launch to WMI. Spawning it ourselves would put the server in the SSH
+        // session's job object (killed on disconnect) and, with redirection, leak the channel's handles
+        // into it (the client would hang).
+        assert!(
+            s.contains("Invoke-CimMethod -ClassName Win32_Process -MethodName Create"),
+            "the first stage must spawn through WMI, not directly"
+        );
+        assert!(!s.contains("Start-Process -FilePath 'powershell'"));
+        assert!(s.contains("CommandLine = 'powershell -NoProfile -NonInteractive -EncodedCommand "));
+        // Stage two carries the real launch, so the password and log redirection live inside its blob.
+        let b64 = s
+            .split("-EncodedCommand ")
+            .nth(1)
+            .and_then(|t| t.split('\'').next())
+            .expect("the first stage should embed the second stage's encoded script");
+        use base64::Engine;
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .expect("the embedded stage should be valid base64");
+        let inner: String = raw
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect::<Vec<_>>()
+            .iter()
+            .filter_map(|u| char::from_u32(*u as u32))
+            .collect();
+        assert!(inner.contains("$env:VELA_SERVE_PASSWORD='pw123'"));
+        assert!(inner.contains("-RedirectStandardOutput \"$b\\server.log\""));
+        assert!(inner.contains("vela-server.exe"));
+        assert!(inner.contains("--mirror 0"));
+        // The PID handed back must be the server's own, read out of run.json rather than any wrapper's.
+        assert!(s.contains("Write-Output ($t | ConvertFrom-Json).pid"));
+    }
+
+    #[test]
+    fn kill_service_cmd_targets_the_right_run_json() {
+        let posix = kill_service_cmd(&sys_of("linux", "x86_64", RemoteShell::Posix));
+        assert!(posix.contains("$HOME/.velaterm/run.json"));
+        assert!(posix.contains("kill \"$P\""));
+        let win = kill_service_cmd(&sys_of("windows", "x86_64", RemoteShell::Powershell));
+        assert!(win.contains("$env:USERPROFILE\\.velaterm\\run.json"));
+        assert!(win.contains("Stop-Process -Id $o.pid"));
     }
 
     /// Ignored real-host end-to-end test: connect, detect, provision, SCP, serve, forward, and verify the
@@ -1677,6 +2410,64 @@ mod tests {
         close_master(&host, &r3.session);
     }
 
+    /// Ignored real-host end-to-end test against a Windows remote: probe, provision `vela-server.exe`,
+    /// start the detached service, forward, and log in through the tunnel.
+    ///
+    /// Point VLX_TEST_SSH_WIN_HOST at a Windows machine. Both server flavors are covered by the same
+    /// test because the probe decides which one runs: a Microsoft OpenSSH host takes the PowerShell path,
+    /// a Cygwin/MSYS sshd the POSIX one.
+    #[test]
+    #[ignore = "requires VLX_TEST_SSH_WIN_HOST; run with cargo test -- --ignored"]
+    fn integration_connect_against_windows_host() {
+        let host = match std::env::var("VLX_TEST_SSH_WIN_HOST") {
+            Ok(h) if !h.is_empty() => h,
+            _ => return,
+        };
+        let tmp = std::env::temp_dir().join("vlx-ssh-it-win");
+        let _ = std::fs::create_dir_all(&tmp);
+
+        // Confirm the probe really found Windows before judging anything that follows.
+        let session = uuid::Uuid::new_v4().simple().to_string()[..12].to_string();
+        let probe_t = OpensshTransport::connect(&host, &session, SshAuth::Auto, &|_, _| {})
+            .expect("connecting to the Windows host should succeed");
+        let sys = probe_system(&probe_t).expect("probing the remote system should succeed");
+        close_master(&host, &session);
+        assert_eq!(sys.os, "windows", "the probe should report Windows: {sys:?}");
+
+        let r = connect(
+            &tmp,
+            &host,
+            SshAuth::Auto,
+            false,
+            false,
+            &|_: &str, _: Option<u8>| {},
+        )
+        .expect("connect should succeed");
+        let base = format!("http://127.0.0.1:{}", r.local_port);
+        let root_status = ureq::get(&base)
+            .timeout(Duration::from_secs(8))
+            .call()
+            .map(|resp| resp.status())
+            .unwrap_or(0);
+        let login_body = format!("{{\"password\":\"{}\"}}", r.password);
+        let login_status = ureq::post(&format!("{base}/api/login"))
+            .timeout(Duration::from_secs(8))
+            .set("Content-Type", "application/json")
+            .send_string(&login_body)
+            .map(|resp| resp.status())
+            .unwrap_or_else(|e| match e {
+                ureq::Error::Status(code, _) => code,
+                _ => 0,
+            });
+        // Leave the machine as it was found: stop the service, not just the tunnel.
+        disconnect(&host, &r.session, true);
+        assert_eq!(root_status, 200, "the root page on the forwarded port should return 200");
+        assert_eq!(
+            login_status, 200,
+            "/api/login with the random password should return 200, logging into the backend automatically"
+        );
+    }
+
     /// Ignored real-host PTY password-auth regression test requiring host/password environment variables.
     #[test]
     #[ignore = "requires VLX_TEST_SSH_HOST and VLX_TEST_SSH_PASSWORD; run with cargo test -- --ignored"]
@@ -1710,3 +2501,4 @@ mod tests {
         close_master(&host, &session);
     }
 }
+

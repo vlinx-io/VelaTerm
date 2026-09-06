@@ -1,6 +1,6 @@
 # Session Spawning & Git Collaboration
 
-Created: 2026-07-09 20:41
+Created: 2026-07-09 20:41 · Updated: 2026-09-03 15:12
 
 > Two features that work as a pair: spawning subtasks into independent child sessions with `vspawn` (optionally in isolated git worktrees), and a graphical merge to bring parallel branches back together. Together they make "several agents working the same repo in parallel" an everyday workflow.
 
@@ -21,6 +21,18 @@ What you get is a real session in the tree — its own process, fully interactiv
 
 The two terminal commands are injected into every session's PATH automatically — zero install.
 
+Both commands use the directory where they are invoked as the child's starting directory and worktree repository.
+When launching a task for another repository, pass `--cwd <path>` explicitly, e.g.
+`vspawn-tree --cwd /work/project "fix the parser"`. This is especially important in a collection, which has no
+project directory of its own. The agent skills add `--cwd` automatically when the conversation identifies one
+unambiguous repository.
+
+Both commands also take `--model <name>` and `--effort <level>` for the child session, e.g.
+`vspawn --model opus --effort high "port the parser"`. Model names and effort levels belong to the agent that will
+run, and VelaTerm turns them into that agent's own flags (`--effort` for Claude and Kiro, `--reasoning-effort` for
+Grok, `--thinking` for Cline, and so on); an agent whose CLI has no effort setting simply ignores the level.
+Without these flags the child inherits the parent session's launch arguments, which is the previous behaviour.
+
 > **Prerequisite for agent skills:** enable **Vela Skills** in Settings ▸ General. This installs `vspawn`, `vspawn-tree`, and `vopen` into both `~/.claude/skills/` and the Codex skills directory (`$CODEX_HOME/skills` when set, otherwise `~/.codex/skills`); they're kept up to date automatically on app upgrades. After enabling, start a new Claude or Codex thread so the agent picks them up. Without this, only the terminal-typed `vspawn` / `vspawn-tree` commands work.
 
 ## 3. Confirm before spawn
@@ -29,7 +41,7 @@ By default every spawn first shows a confirmation card (top-right, non-modal, do
 
 ![Spawn confirmation card](../assets/manuals/spawn-confirm.png)
 
-- Three editable fields: the **prompt** (multi-line), the **agent type** (defaults to the parent's), and **separate git worktree**.
+- Editable fields: the **prompt** (multi-line), the **agent type** (defaults to the parent's), **separate git worktree**, plus **model** and **reasoning effort** for agents that offer them. A model or effort passed on the command line arrives preselected here, so you can still change it before launching.
 - "Launch" starts the child session; "Cancel" drops the request. When an agent spawns several at once, cards are handled one at a time (the remaining count shows on the card).
 - If you'd rather skip confirmation entirely, turn off "Confirm before spawn" in Settings ▸ Behavior.
 

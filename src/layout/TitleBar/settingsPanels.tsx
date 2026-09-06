@@ -206,6 +206,8 @@ const AGENT_DEFAULT_KINDS: {
   // `inject::permission_flag`). `yolo` is display-only here; the backend injects the actual flag.
   { kind: "cline", label: "Cline", yolo: "--auto-approve true", permVia: "flag" },
   { kind: "pi", label: "Pi", yolo: "", permVia: "none" },
+  // OMP forked from Pi but kept approval prompts; `--yolo` (its alias for `--auto-approve`) skips them.
+  { kind: "omp", label: "OMP", yolo: "--yolo", permVia: "flag" },
   // Crush injects `--yolo` only in skip mode; default mode retains native staged approval.
   { kind: "crush", label: "Crush", yolo: "--yolo", permVia: "flag" },
   { kind: "kimi", label: "Kimi Code (K3)", yolo: "--yolo", permVia: "flag" },

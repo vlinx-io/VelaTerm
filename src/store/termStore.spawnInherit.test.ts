@@ -5,9 +5,14 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../ipc/commands", () => ({
+const commandMocks = vi.hoisted(() => ({
   createWorktree: vi.fn(),
   getSessionCwd: vi.fn().mockResolvedValue(null),
+}));
+
+vi.mock("../ipc/commands", () => ({
+  createWorktree: commandMocks.createWorktree,
+  getSessionCwd: commandMocks.getSessionCwd,
   ptyKill: vi.fn().mockResolvedValue(undefined),
   ptyWrite: vi.fn().mockResolvedValue(undefined),
   listShells: vi.fn().mockResolvedValue([]),
@@ -65,6 +70,38 @@ beforeEach(() => {
 });
 
 describe("spawned child launch configuration", () => {
+  it("creates and persists a worktree from the vspawn invocation directory", async () => {
+    commandMocks.createWorktree.mockResolvedValue({
+      path: "/repo/.vlx-worktrees/task-a1b2c3",
+      branch: "vlx/task-a1b2c3",
+      baseRef: "refs/heads/main",
+    });
+    const addSession = vi.fn().mockResolvedValue(null);
+    useTermStore.setState({
+      sessions: [{ ...parent, cwd: null } as Session],
+      projects: [{ id: "proj-1", rootPath: "" }],
+      agentDefaults: {},
+      addSession,
+    } as never);
+
+    await useTermStore.getState().executeSpawn({
+      parentSessionId: "parent-1",
+      prompt: "task",
+      worktree: true,
+      cwd: "/repo",
+    });
+
+    expect(commandMocks.createWorktree).toHaveBeenCalledWith("/repo", "task");
+    expect(commandMocks.getSessionCwd).not.toHaveBeenCalled();
+    expect(addSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: "/repo/.vlx-worktrees/task-a1b2c3",
+        worktreePath: "/repo/.vlx-worktrees/task-a1b2c3",
+        worktreeBaseRef: "refs/heads/main",
+      }),
+    );
+  });
+
   it("inherits the parent's permission mode and arguments when it runs the same agent", async () => {
     const input = await spawnInput({}, {});
     expect(input.permissionMode).toBe("skip");

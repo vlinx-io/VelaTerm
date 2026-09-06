@@ -88,6 +88,7 @@ export type StatusSignal =
         | "antigravity"
         | "cline"
         | "pi"
+        | "omp"
         | "crush"
         | "kimi"
         | "kiro"
@@ -129,6 +130,8 @@ export interface SpawnRequest {
   prompt: string;
   kind?: AgentKind | "terminal" | null;
   worktree?: boolean | null;
+  /** Directory from which vspawn was invoked; used as the child cwd and worktree repository context. */
+  cwd?: string | null;
   /** Model override chosen in the spawn confirmation dialog; null inherits from parent or defaults. */
   model?: string | null;
   /** Effort override chosen in the spawn confirmation dialog; null inherits from parent or defaults. */

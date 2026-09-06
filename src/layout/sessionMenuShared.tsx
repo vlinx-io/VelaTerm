@@ -20,6 +20,7 @@ export const AGENT_ARGS_KINDS: SessionKind[] = [
   "antigravity",
   "cline",
   "pi",
+  "omp",
   "crush",
   "kimi",
   "kiro",
@@ -40,6 +41,7 @@ export const RESUMABLE_KINDS: { kind: SessionKind; label: string }[] = [
   { kind: "antigravity", label: "Antigravity" },
   { kind: "cline", label: "Cline" },
   { kind: "pi", label: "Pi" },
+  { kind: "omp", label: "OMP" },
   { kind: "crush", label: "Crush" },
   { kind: "kimi", label: "Kimi Code (K3)" },
   { kind: "kiro", label: "Kiro" },
@@ -65,6 +67,7 @@ export function kindLabel(kind: SessionKind): string {
   if (kind === "antigravity") return "Antigravity";
   if (kind === "cline") return "Cline";
   if (kind === "pi") return "Pi";
+  if (kind === "omp") return "OMP";
   if (kind === "crush") return "Crush";
   if (kind === "kimi") return "Kimi Code (K3)";
   if (kind === "kiro") return "Kiro";

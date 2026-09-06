@@ -174,6 +174,18 @@ export async function emitNative(name: string, payload?: unknown): Promise<void>
 }
 
 /**
+ * Invokes a native command on the local desktop process regardless of transport mode.
+ *
+ * The counterpart to `listenNative`, for commands that must reach the process hosting this window rather than
+ * the server it displays — split diagnostics, for instance, which belong to the local window's own log file.
+ * Falls back to the regular transport when there is no local Tauri host, as in a plain browser.
+ */
+export function invokeNative<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const native = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  return native ? tauriInvoke<T>(cmd, args) : invoke<T>(cmd, args);
+}
+
+/**
  * Listens through the native Tauri event bus regardless of transport mode. Remote windows
  * (`__VLX_FORCE_BROWSER__`) route `listen` over the WebSocket relay to the remote server, which never
  * carries events emitted by the local desktop process — such as `menu://action`. Use this for those

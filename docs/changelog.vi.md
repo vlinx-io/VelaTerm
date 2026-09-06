@@ -1,3 +1,25 @@
+## v0.1.107 — 2026-09-05
+
+- 🧠 Bộ nhớ toàn cục (thử nghiệm): Claude hoặc Codex biến các cuộc hội thoại thành một wiki dùng chung, sắp xếp theo chủ đề
+- 🕸️ Đồ thị mã nguồn (thử nghiệm): lập chỉ mục một thư mục làm việc, duyệt quan hệ giữa các ký hiệu và liên kết chúng với bộ nhớ
+- 🔎 Tác nhân có thể tra cứu mã nguồn và bộ nhớ ngay trong phiên bằng `vknowledge`
+- 🖥️ SSH có thể phản chiếu ứng dụng máy tính ở máy từ xa: cùng thẻ, cùng khung chia và cùng phiên đang hoạt động trên cả hai máy
+- 🪟 Máy từ xa của kết nối SSH giờ có thể là Windows
+- 📥 Nhập các phiên Codex, Claude và OpenCode đã có trong thư mục dự án
+- 🤖 Tác nhân mới: OMP
+- 🎚️ `vspawn` cho phép chọn mô hình và mức độ suy luận cho phiên con
+- 🌿 `vspawn-tree` dùng được trong collection, và các phiên worktree đang chạy hiển thị biểu tượng nhánh
+- 🔤 Tìm kiếm ưu tiên khớp trọn từ và làm nổi bật đúng phần đã khớp
+- 🖱️ Nhấn chuột giữa vào thẻ để đóng thẻ đó
+- ⌨️ Trình duyệt trên macOS: ⌘D và ⌘⇧D chia khung
+- 💬 Gõ bằng bộ gõ không còn làm màn hình xê dịch, và con trỏ hiện rõ trong chuỗi đang soạn
+- 🪓 Lệnh chia khung từ menu chỉ tác động lên cửa sổ đang được chọn, và mọi lần chia đều được ghi vào `logs/split.log`
+- 📁 Hộp thoại chọn thư mục từ xa giữ nguyên đường dẫn bạn nhập
+- ℹ️ Bảng thông tin: thời điểm khởi động và thời gian chạy nằm trên cùng một dòng, macOS có thêm tải trung bình
+- 🔑 Ô mật khẩu không còn hiện nút hiển thị của chính trình duyệt
+
+---
+
 ## v0.1.106 — 2026-09-02
 
 ### Không gian làm việc

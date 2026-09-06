@@ -37,6 +37,7 @@ function kindLabel(kind: SessionKind): string {
   if (kind === "antigravity") return "Antigravity";
   if (kind === "cline") return "Cline";
   if (kind === "pi") return "Pi";
+  if (kind === "omp") return "OMP";
   if (kind === "crush") return "Crush";
   if (kind === "kimi") return "Kimi Code (K3)";
   if (kind === "kiro") return "Kiro";

@@ -1,0 +1,55 @@
+.knowledge-shell { width: min(1640px,97vw); height: 94vh; }
+.knowledge-shell .btn { padding: 6px 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elevated); color: var(--text-primary); cursor: pointer; font: inherit; }
+.knowledge-shell .btn-primary { color: var(--accent); border-color: var(--accent); }
+.knowledge-shell .btn:disabled { opacity: .5; cursor: default; }
+.knowledge-shell .input { border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; color: var(--text-primary); background: var(--bg-elevated); }
+.knowledge-shell a:focus-visible,.knowledge-shell button:focus-visible,.knowledge-shell input:focus-visible,.knowledge-shell select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.knowledge-setup { margin: 18px 24px; padding: 18px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); }
+.knowledge-setup p { line-height: 1.7; color: var(--text-secondary); }
+.knowledge-roots { display: flex; gap: 8px; overflow-x: auto; padding: 12px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.knowledge-roots a { padding: 7px 10px; white-space: nowrap; border: 1px solid var(--border); border-radius: 6px; color: var(--text-secondary); }
+.knowledge-roots a.active { color: var(--accent); border-color: var(--accent); }
+.knowledge-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 24px; border-bottom: 1px solid var(--border); }
+.knowledge-state { white-space: nowrap; border-radius: 20px; border: 1px solid var(--border); padding: 3px 8px; font-size: 11px; color: var(--text-secondary); }
+.knowledge-state.review,.knowledge-state.failed,.knowledge-state.unavailable { color: var(--status-error); }
+.knowledge-state.current,.knowledge-state.ready { color: var(--accent); }
+.knowledge-body { flex: 1; display: flex; min-height: 0; }
+.knowledge-sidebar { width: 275px; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+.knowledge-sidebar form { display: flex; padding: 12px; gap: 6px; }
+.knowledge-results { flex: 1; overflow: auto; }
+.knowledge-node { display: block; padding: 13px 15px; border-bottom: 1px solid var(--border); }
+.knowledge-node.active { background: var(--bg-elevated); box-shadow: inset 3px 0 var(--accent); }
+.knowledge-node strong,.knowledge-node small { display: block; overflow-wrap: anywhere; }
+.knowledge-node small { margin-top: 6px; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.knowledge-main { flex: 1; min-width: 0; overflow: auto; }
+.knowledge-symbol { padding: 20px; }
+.knowledge-symbol-heading h2 { font-size: 19px; overflow-wrap: anywhere; margin: 0 0 8px; }
+.knowledge-symbol-heading p { color: var(--text-muted); overflow-wrap: anywhere; }
+.knowledge-note { color: var(--text-muted); font-size: 12px; line-height: 1.7; }
+.knowledge-warning { color: var(--status-error); padding: 8px 20px; line-height: 1.7; }
+.knowledge-graph { display: grid; grid-template-columns: minmax(140px,1fr) minmax(220px,2fr) minmax(140px,1fr); gap: 18px; align-items: start; margin: 20px 0; }
+.knowledge-graph h3 { font-size: 12px; color: var(--text-secondary); margin: 0 0 12px; }
+.knowledge-edge { position: relative; display: block; border: 1px solid var(--border); border-radius: 7px; padding: 10px; margin-bottom: 10px; background: var(--bg-elevated); }
+.knowledge-edge strong,.knowledge-edge small { display: block; overflow-wrap: anywhere; }
+.knowledge-edge small { font-size: 10px; margin-top: 5px; color: var(--text-muted); }
+.knowledge-edge-metadata { max-height: 50px; overflow: auto; }
+.knowledge-edges.incoming .knowledge-edge::after { content: "→"; position: absolute; left: 100%; top: 16px; color: var(--accent); }
+.knowledge-edges.outgoing .knowledge-edge::before { content: "→"; position: absolute; right: 100%; top: 16px; color: var(--accent); }
+.knowledge-source { min-width: 0; }
+.knowledge-source pre { margin: 0; padding: 12px 0; overflow: auto; max-height: 600px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-elevated); font: 11px/1.8 var(--font-mono,monospace); tab-size: 4; }
+.knowledge-source pre>div { display: flex; }
+.knowledge-source code { padding-right: 12px; }
+.knowledge-line { color: var(--text-muted); user-select: none; text-align: right; min-width: 38px; padding-right: 12px; flex-shrink: 0; }
+.knowledge-memories { border-top: 1px solid var(--border); padding-top: 14px; }
+.knowledge-memory { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 10px 0; }
+.knowledge-memory>a:first-child { flex: 1; }
+.knowledge-link-editor { border: 1px solid var(--border); padding: 18px; border-radius: 8px; margin-top: 18px; }
+.knowledge-link-editor select { margin-top: 8px; display: block; }
+.knowledge-link-editor .memory-markdown { max-height: 300px; overflow: auto; }
+.knowledge-footer { padding: 12px 24px; color: var(--text-muted); border-top: 1px solid var(--border); font-size: 11px; line-height: 1.7; }
+.knowledge-reference { display: flex; gap: 12px; align-items: flex-start; margin: 14px 0; }
+.knowledge-reference a { flex: 1; min-width: 0; }
+.knowledge-reference small { display: block; color: var(--text-muted); margin-top: 6px; overflow-wrap: anywhere; }
+.knowledge-mobile-back { display: none; }
+@media(max-width: 1000px) { .knowledge-sidebar { width: 220px; } .knowledge-graph { grid-template-columns: 1fr; } .knowledge-edges { display: flex; gap: 10px; flex-wrap: wrap; } .knowledge-edges h3 { width: 100%; } .knowledge-edge { flex: 1 1 150px; } .knowledge-edges .knowledge-edge::after,.knowledge-edges .knowledge-edge::before { display: none; } }
+@media(max-width: 600px) { .knowledge-shell { width: 98vw; height: 97vh; } .knowledge-body:not(.has-node) .knowledge-main { display: none; } .knowledge-body.has-node .knowledge-sidebar { display: none; } .knowledge-sidebar { width: 100%; } .knowledge-mobile-back { display: block; margin-bottom: 15px; } .knowledge-toolbar,.knowledge-roots,.knowledge-footer { padding: 10px 12px; } .knowledge-symbol { padding: 14px; } }

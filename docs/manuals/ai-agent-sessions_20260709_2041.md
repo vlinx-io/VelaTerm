@@ -39,6 +39,10 @@ The mental model in one line: **each agent session node in the tree = one ongoin
 
 **Manual resume**: if you have an agent session id from elsewhere (say, a conversation you ran in a plain terminal), use "Resume Session…" at the bottom of the New Session menu — pick the type, paste the id, and that conversation joins the tree as a proper session node.
 
+**Import existing sessions**: open a project directory, right-click the project, then choose **Import Sessions**. VelaTerm lists Codex, Claude and OpenCode conversations whose working directory matches that project. Search by title, agent name or native session ID, select individual rows or all visible available rows, then click **Import**. Importing adds the conversations to the project tree; open a node to continue it with the original agent session ID. It does not copy or rewrite the native history.
+
+Sessions already present anywhere in VelaTerm, including archived sessions, are marked **Already imported** and cannot be selected again. If a history source cannot be read, the dialog displays a warning while retaining results from the other sources. The dialog and search have a copyable URL and survive refresh. Native histories are read on the machine running the VelaTerm backend; when connected remotely, this is the remote machine. Subdirectories and separate worktrees must be opened as their own projects to import their sessions.
+
 ## 4. Fork: branch off the current conversation
 
 Right-click a claude / codex / pi session that has a conversation → "Fork Session". You get a sibling node that branches off the **current history** of the source conversation, leaving the source untouched — think git branch. Great for "same context, try two approaches".

@@ -5,28 +5,30 @@ export type SessionId = string;
 export type SessionStatus = "idle" | "running" | "exited" | "error";
 
 /** AI agent kind detected within a session. */
-export type AgentKind = "claude" | "codex" | "opencode" | "copilot" | "cursor" | "antigravity" | "cline" | "pi" | "crush" | "kimi" | "kiro" | "grok" | "zoo";
+export type AgentKind = "claude" | "codex" | "opencode" | "copilot" | "cursor" | "antigravity" | "cline" | "pi" | "omp" | "crush" | "kimi" | "kiro" | "grok" | "zoo";
 
 /**
  * Session kind, which determines launch behavior.
  * - terminal: plain terminal.
- * - claude / codex / opencode / copilot / cursor / antigravity / cline / pi: agents launched locally by
+ * - claude / codex / opencode / copilot / cursor / antigravity / cline / pi / omp: agents launched locally by
  *   vlx-term with authoritative status reporting injected through official Claude/Codex hooks, opencode plugin
  *   events, Copilot CLI hook files, Cursor CLI hook files, Antigravity (agy) command hooks merged into the
- *   user's global hooks.json, Cline CLI scripts injected through CLINE_HOOKS_DIR, Pi `-e` extension events, or a
+ *   user's global hooks.json, Cline CLI scripts injected through CLINE_HOOKS_DIR, Pi and OMP `-e` extension
+ *   events, or a
  *   PreToolUse hook injected through Crush's shadow configuration. Crush exposes only PreToolUse and therefore
  *   reports working only; idle state comes from screen detection.
  */
-export type SessionKind = "terminal" | "claude" | "codex" | "opencode" | "copilot" | "cursor" | "antigravity" | "cline" | "pi" | "crush" | "kimi" | "kiro" | "grok" | "zoo" | "browser";
+export type SessionKind = "terminal" | "claude" | "codex" | "opencode" | "copilot" | "cursor" | "antigravity" | "cline" | "pi" | "omp" | "crush" | "kimi" | "kiro" | "grok" | "zoo" | "browser";
 
 /** Agent kinds with a two-state permission-mode toggle. Selecting Skip passes that agent's flag for bypassing
  *  every permission confirmation at launch. opencode controls permissions through configuration and has no
  *  equivalent CLI flag; Pi has no permission-confirmation mechanism; terminal/browser have no such concept.
+ *  OMP, unlike the Pi it forked from, does confirm tool calls and bypasses them with `--yolo`.
  *  Cline's direction is reversed because it is fully automatic by default: both states inject an explicit flag
  *  (`--auto-approve false` for default and `--auto-approve true` for skip; see backend
  *  inject::permission_flag), while presenting the same two-state semantics to users. This is the single source
  *  shared by the Edit Session dialog and bottom status-bar permission toggle, preventing constant drift. */
-export const PERMISSION_TOGGLE_KINDS: SessionKind[] = ["claude", "codex", "copilot", "cursor", "antigravity", "cline", "crush", "kimi", "kiro", "grok", "zoo"];
+export const PERMISSION_TOGGLE_KINDS: SessionKind[] = ["claude", "codex", "copilot", "cursor", "antigravity", "cline", "omp", "crush", "kimi", "kiro", "grok", "zoo"];
 export function supportsPermissionToggle(kind: SessionKind): boolean {
   return PERMISSION_TOGGLE_KINDS.includes(kind);
 }

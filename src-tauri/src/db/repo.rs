@@ -982,9 +982,9 @@ pub fn fork_session(conn: &Connection, source_id: &str) -> Result<Session, Strin
 
     if !matches!(
         source.kind,
-        SessionKind::Claude | SessionKind::Codex | SessionKind::Pi
+        SessionKind::Claude | SessionKind::Codex | SessionKind::Pi | SessionKind::Omp
     ) {
-        return Err("Only claude / codex / pi sessions support fork".to_string());
+        return Err("Only claude / codex / pi / omp sessions support fork".to_string());
     }
     let anchor = source
         .agent_session_id

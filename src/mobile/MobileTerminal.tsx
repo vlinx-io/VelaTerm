@@ -138,6 +138,8 @@ export function MobileTerminal({
                         ? "Cline"
                         : session.kind === "pi"
                           ? "Pi"
+                          : session.kind === "omp"
+                          ? "OMP"
                           : session.kind === "crush"
                             ? "Crush"
                             : session.kind === "kimi"

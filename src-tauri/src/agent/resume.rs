@@ -5,6 +5,8 @@
 //!   `session_meta` line contains payload ID and cwd; match files created after launch with the session cwd.
 //! - **Pi** normally reports through an extension, with a disk fallback scanning session headers under
 //!   `~/.pi/agent/sessions` and matching cwd plus launch time.
+//! - **OMP** works the same way against `~/.omp/agent/sessions`; its files carry the header on the second line
+//!   rather than the first, so the parser scans the opening lines instead of reading exactly one.
 //! - **Existence checks** verify conversation files before resume and fall back to a fresh launch only when absence
 //!   is certain, avoiding hangs from invalid resume IDs.
 
@@ -31,8 +33,11 @@ pub(crate) fn codex_home() -> Option<PathBuf> {
     home_dir().map(|h| h.join(".codex"))
 }
 
-/// Claude root at `~/.claude`.
+/// Claude root: `CLAUDE_CONFIG_DIR` when set, otherwise `~/.claude`.
 pub(crate) fn claude_home() -> Option<PathBuf> {
+    if let Some(h) = std::env::var_os("CLAUDE_CONFIG_DIR") {
+        return Some(PathBuf::from(h));
+    }
     home_dir().map(|h| h.join(".claude"))
 }
 
@@ -44,6 +49,11 @@ fn cursor_home() -> Option<PathBuf> {
 /// Pi root at `~/.pi/agent`, with sessions beneath `sessions/`.
 fn pi_home() -> Option<PathBuf> {
     home_dir().map(|h| h.join(".pi").join("agent"))
+}
+
+/// OMP root at `~/.omp/agent`, with sessions beneath `sessions/`, mirroring the Pi layout it forked from.
+fn omp_home() -> Option<PathBuf> {
+    home_dir().map(|h| h.join(".omp").join("agent"))
 }
 
 // Shared utilities.
@@ -127,6 +137,24 @@ fn read_pi_meta(path: &Path) -> Option<(String, Option<String>)> {
     let mut line = String::new();
     reader.read_line(&mut line).ok()?;
     parse_pi_meta(&line)
+}
+
+/// How many opening lines of an OMP session file may precede its `session` header.
+///
+/// OMP writes a padded `title` record first so the title can later be rewritten in place, which puts the header
+/// on the second line. A small window absorbs any further preamble a future version adds without reading whole
+/// files during a scan.
+const OMP_META_SCAN_LINES: usize = 8;
+
+/// Reads and parses an OMP session file's header, which the same shape as Pi's but not necessarily on line one.
+fn read_omp_meta(path: &Path) -> Option<(String, Option<String>)> {
+    let file = std::fs::File::open(path).ok()?;
+    let reader = std::io::BufReader::new(file);
+    reader
+        .lines()
+        .take(OMP_META_SCAN_LINES)
+        .map_while(Result::ok)
+        .find_map(|line| parse_pi_meta(&line))
 }
 
 /// Extracts the first genuine user message from a Codex rollout.
@@ -226,6 +254,19 @@ fn capture_pi_candidates(
     since: SystemTime,
     newest_first: bool,
 ) -> Vec<String> {
+    capture_pi_family_candidates(pi_home, cwd, since, newest_first, read_pi_meta)
+}
+
+/// Shared scan for the Pi session layout, which OMP inherited: `<root>/sessions/<cwd-dir>/<ts>_<uuid>.jsonl`
+/// with a JSON header naming the session ID and cwd. `read_meta` is the only difference between the two, since
+/// OMP does not keep its header on the first line.
+fn capture_pi_family_candidates(
+    pi_home: &Path,
+    cwd: Option<&str>,
+    since: SystemTime,
+    newest_first: bool,
+    read_meta: fn(&Path) -> Option<(String, Option<String>)>,
+) -> Vec<String> {
     let sessions = pi_home.join("sessions");
     let threshold = since.checked_sub(Duration::from_secs(2)).unwrap_or(since);
 
@@ -244,7 +285,7 @@ fn capture_pi_candidates(
 
     let mut matches = Vec::new();
     for (_, path) in cands {
-        let Some((id, meta_cwd)) = read_pi_meta(&path) else {
+        let Some((id, meta_cwd)) = read_meta(&path) else {
             continue;
         };
         match cwd {
@@ -319,17 +360,18 @@ fn wait_for_codex_session(
     }
 }
 
-/// Waits for a Pi session file, returning its ID on match or None when the PTY ends.
+/// Waits for a Pi or OMP session file, returning its ID on match or None when the PTY ends.
 fn wait_for_pi_session(
     pi_home: &Path,
     cwd: Option<&str>,
     since: SystemTime,
+    read_meta: fn(&Path) -> Option<(String, Option<String>)>,
     mut is_running: impl FnMut() -> bool,
     mut sleep: impl FnMut(Duration),
     mut try_claim: impl FnMut(&str) -> bool,
 ) -> bool {
     loop {
-        for id in capture_pi_candidates(pi_home, cwd, since, true) {
+        for id in capture_pi_family_candidates(pi_home, cwd, since, true, read_meta) {
             if try_claim(&id) {
                 return true;
             }
@@ -394,20 +436,30 @@ pub fn spawn_codex_capture(app: AppCtx, vlx_sid: String, cwd: Option<String>, pi
     });
 }
 
-/// Recovers a Pi session ID from disk when the extension fails to report it.
+/// Recovers a Pi or OMP session ID from disk when the extension fails to report it.
+///
+/// `kind` must be `SessionKind::Pi` or `SessionKind::Omp`; anything else returns without scanning, because only
+/// those two use this on-disk layout.
 pub fn spawn_pi_capture(
     app: AppCtx,
     vlx_sid: String,
     cwd: Option<String>,
     pid: u32,
     should_capture: bool,
+    kind: SessionKind,
 ) {
     let since = SystemTime::now();
     std::thread::spawn(move || {
         if !should_capture {
             return;
         }
-        let Some(home) = pi_home() else {
+        let (root, read_meta): (Option<PathBuf>, fn(&Path) -> Option<(String, Option<String>)>) =
+            match kind {
+                SessionKind::Pi => (pi_home(), read_pi_meta),
+                SessionKind::Omp => (omp_home(), read_omp_meta),
+                _ => return,
+            };
+        let Some(home) = root else {
             return;
         };
         let effective_cwd = cwd.or_else(|| crate::pty::manager::process_cwd(pid));
@@ -416,13 +468,15 @@ pub fn spawn_pi_capture(
             &home,
             effective_cwd.as_deref(),
             since,
+            read_meta,
             || app.pty().is_running(&vlx_sid),
             std::thread::sleep,
             |id| {
                 let db = app.db();
                 match db.conn.lock() {
-                    Ok(conn) => repo::claim_agent_session_id(&conn, &vlx_sid, id, SessionKind::Pi)
-                        .unwrap_or(false),
+                    Ok(conn) => {
+                        repo::claim_agent_session_id(&conn, &vlx_sid, id, kind).unwrap_or(false)
+                    }
                     Err(_) => false,
                 }
             },
@@ -519,6 +573,16 @@ pub fn confirmed_missing(kind: SessionKind, id: &str) -> bool {
         // only when the sessions root is readable and no JSONL filename contains the ID.
         SessionKind::Pi => {
             let Some(sessions) = pi_home().map(|h| h.join("sessions")) else {
+                return false;
+            };
+            if !sessions.is_dir() {
+                return false;
+            }
+            !pi_session_exists(&sessions, id)
+        }
+        // OMP inherited Pi's filename layout, so the same UUID-in-filename check applies under `~/.omp/agent`.
+        SessionKind::Omp => {
+            let Some(sessions) = omp_home().map(|h| h.join("sessions")) else {
                 return false;
             };
             if !sessions.is_dir() {

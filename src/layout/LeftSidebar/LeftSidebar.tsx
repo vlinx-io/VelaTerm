@@ -7,6 +7,8 @@ import { ContextMenu, type MenuItem } from "../../components/ContextMenu";
 import { FormModal } from "../../components/FormModal";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
+import { knowledgeUrl } from "../Knowledge/navigation";
+import { memoryNavigate } from "../Memory/navigation";
 import {
   type SidebarTreeView,
   useTermStore,
@@ -525,7 +527,7 @@ export function LeftSidebar() {
       groupId = node.groupId;
       parent = node.id;
     }
-    // Put New Terminal Session first in every project/group/session hover-add menu, and in group context
+    // Put New Terminal first in every project/group/session hover-add menu, and in project/group context
     // menus, for convenient center-pane draft terminals.
     setNewSessionMenu({ x, y, items: newSessionItems(projectId, groupId, parent, { withTerminal: true }) });
   };
@@ -604,13 +606,18 @@ export function LeftSidebar() {
       );
       // Match group layout: Session section (including persistent browser/Resume), then project actions.
       return [
-        ...newSessionItems(node.projectId, null, null, { withBrowser: true }),
+        ...newSessionItems(node.projectId, null, null, { withBrowser: true, withTerminal: true }),
         sep,
         {
           label: t("tree.newGroup"),
           onClick: () => openDialog({ type: "newGroup", projectId: node.projectId, parentGroupId: null }),
         },
         buildMarkItem("project", node.id),
+        {
+          label: `${t("knowledge.title")} · ${t("common.experimental")}`,
+          href: knowledgeUrl(node.projectId),
+          onClick: (event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); memoryNavigate(knowledgeUrl(node.projectId)); } },
+        },
         rename,
         {
           label: virtual ? t("tree.deleteCollection") : t("tree.removeProject"),

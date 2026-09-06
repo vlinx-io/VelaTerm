@@ -21,6 +21,12 @@ describe("modelSpec table", () => {
     // argument their CLI rejects.
     expect(AGENT_MODEL_SPECS.crush.effort).toBeNull();
     expect(AGENT_MODEL_SPECS.codex.effort).toBeNull();
+    // OMP forked from Pi but added a graded --thinking flag, so the two must not share a spec.
+    expect(AGENT_MODEL_SPECS.pi.effort).toBeNull();
+    expect(AGENT_MODEL_SPECS.omp.effort?.flag).toBe("--thinking");
+    expect(AGENT_MODEL_SPECS.omp.effort?.values).toContain("xhigh");
+    // `auto` is OMP's unset behaviour, which the dialog already offers as "Default".
+    expect(AGENT_MODEL_SPECS.omp.effort?.values).not.toContain("auto");
   });
 
   it("offers Claude's 1M-context aliases, which the old fixed list could not reach", () => {

@@ -10,7 +10,7 @@
 //!   the right. `useTranscriptCache` resolves missing role/time by messageIndex. Within one session, the
 //!   preview remains mounted and cached and merely scrolls to the next hit.
 
-import { memo, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import Icons from "../../components/Icons";
@@ -242,7 +242,6 @@ function roleAndTime(
 export function SearchConsole({
   nav,
   results,
-  query,
   sessionById,
   projects,
   groups,
@@ -254,8 +253,6 @@ export function SearchConsole({
   /** Navigation controller created by the host with useSearchNav. */
   nav: SearchNav;
   results: SessionSearchHit[];
-  /** Current literal query used for highlighting and recording findNext. */
-  query: string;
   /** Complete Session by ID for viewer selection and breadcrumb resolution. */
   sessionById: Map<string, Session>;
   projects: { id: string; name: string }[];
@@ -271,10 +268,6 @@ export function SearchConsole({
   const t = useT();
   const { flat, activeIndex, setActiveIndex, next, prev } = nav;
   const { cache, ensure } = useTranscriptCache();
-  // Defer the query used for tree and preview highlighting so expensive rerenders become interruptible
-  // background work while the host field remains bound to live input. Request debounce alone cannot defer
-  // this frontend work.
-  const deferredQuery = useDeferredValue(query);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const activeRowRef = useRef<HTMLDivElement | null>(null);
 
@@ -546,7 +539,7 @@ export function SearchConsole({
                           overflow: "hidden",
                         }}
                       >
-                        {highlightMatches(fm.match.snippet, deferredQuery)}
+                        {highlightMatches(fm.match.snippet, fm.match.matched)}
                       </div>
                     </div>
                   );
@@ -593,7 +586,7 @@ export function SearchConsole({
 
         {/* Preview body. */}
         <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
-          <Preview active={active} query={deferredQuery} sessionById={sessionById} cache={cache} />
+          <Preview active={active} sessionById={sessionById} cache={cache} />
         </div>
       </div>
     </div>
@@ -601,16 +594,15 @@ export function SearchConsole({
 }
 
 /** Right-side preview keyed only by sessionId so navigating within a session does not remount it. Memoization
- * protects the console's heaviest transcript highlighting/recording-seek work; deferredQuery remains stable
- * during typing, allowing unchanged active/session/cache inputs to skip rerenders. */
+ * protects the console's heaviest transcript highlighting/recording-seek work; while the user types, results
+ * and therefore `active` stay unchanged until the debounced request lands, so rerenders are skipped. The
+ * highlighted literals come from the active hit itself (SearchMatch.matched), not from the raw query. */
 const Preview = memo(function Preview({
   active,
-  query,
   sessionById,
   cache,
 }: {
   active: FlatMatch | null;
-  query: string;
   sessionById: Map<string, Session>;
   cache: Map<string, TranscriptMessage[]>;
 }) {
@@ -626,7 +618,7 @@ const Preview = memo(function Preview({
         key={active.sessionId}
         session={sess}
         source="recording"
-        initialQuery={query}
+        highlightTerms={active.match.matched}
         scrollToOrdinal={active.match.ordinal}
       />
     );
@@ -642,7 +634,7 @@ const Preview = memo(function Preview({
       key={active.sessionId}
       session={sess}
       source="transcript"
-      initialQuery={query}
+      highlightTerms={active.match.matched}
       preloadedMessages={msgs}
       scrollToMessageIndex={active.match.messageIndex ?? undefined}
       scrollToOrdinal={active.match.ordinal}

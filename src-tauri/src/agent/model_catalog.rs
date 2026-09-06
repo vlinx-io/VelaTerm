@@ -34,6 +34,9 @@ fn list_args(agent: &str) -> Option<&'static [&'static str]> {
         "antigravity" => Some(&["models"]),
         "cursor" => Some(&["--list-models"]),
         "pi" => Some(&["--list-models"]),
+        // OMP renders a box-drawn table grouped by provider, which no line parser survives; `--json` gives the
+        // same catalogue as data. Verified against omp v18.1.10.
+        "omp" => Some(&["models", "--json"]),
         // Kiro keeps model selection under its chat subcommand rather than at the top level.
         "kiro" => Some(&["chat", "--list-models"]),
         _ => None,
@@ -106,6 +109,10 @@ fn run_capture(mut cmd: Command) -> Result<String, String> {
 
 /// Normalise one CLI's listing output into bare model identifiers, preserving the order the CLI used.
 fn parse(agent: &str, text: &str) -> Vec<String> {
+    // OMP answers with JSON rather than lines, so it is handled whole rather than line by line.
+    if agent == "omp" {
+        return parse_omp_json(text);
+    }
     let mut out: Vec<String> = Vec::new();
     for raw in text.lines() {
         let line = raw.trim();
@@ -155,6 +162,46 @@ fn parse(agent: &str, text: &str) -> Vec<String> {
     out
 }
 
+/// Pull the selectors out of `omp models --json`.
+///
+/// The payload is `{"models":[{"provider":…,"id":…,"selector":"provider/id",…},…]}`. `selector` is exactly what
+/// `--model` accepts, so it is preferred; `provider` and `id` are joined only if a future build drops the field.
+fn parse_omp_json(text: &str) -> Vec<String> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Vec::new();
+    };
+    // Accept a bare array too, so a change of envelope does not empty the dialog.
+    let items = v
+        .get("models")
+        .and_then(|m| m.as_array())
+        .or_else(|| v.as_array());
+    let Some(items) = items else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for item in items {
+        let selector = match item.get("selector").and_then(|s| s.as_str()) {
+            Some(s) => s.to_string(),
+            None => {
+                let provider = item.get("provider").and_then(|p| p.as_str()).unwrap_or_default();
+                let id = item.get("id").and_then(|i| i.as_str()).unwrap_or_default();
+                if provider.is_empty() || id.is_empty() {
+                    continue;
+                }
+                format!("{provider}/{id}")
+            }
+        };
+        if !looks_like_id(&selector) || out.iter().any(|m| m == &selector) {
+            continue;
+        }
+        out.push(selector);
+        if out.len() >= MAX_MODELS {
+            break;
+        }
+    }
+    out
+}
+
 /// Whether a token is shaped like a model identifier rather than table decoration or prose.
 fn looks_like_id(s: &str) -> bool {
     s.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
@@ -165,6 +212,33 @@ fn looks_like_id(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn omp_json_yields_selectors() {
+        // Shape captured from `omp models --json` on v18.1.10.
+        let text = r#"{"models":[
+            {"provider":"openai","id":"gpt-5.6-sol","selector":"openai/gpt-5.6-sol","name":"GPT-5.6"},
+            {"provider":"anthropic","id":"claude-opus-5","selector":"anthropic/claude-opus-5","name":"Opus 5"},
+            {"provider":"openai","id":"gpt-5.6-sol","selector":"openai/gpt-5.6-sol","name":"dup"}
+        ]}"#;
+        assert_eq!(
+            parse("omp", text),
+            vec!["openai/gpt-5.6-sol", "anthropic/claude-opus-5"],
+            "duplicates should collapse and the selector should be used verbatim"
+        );
+    }
+
+    #[test]
+    fn omp_json_falls_back_to_provider_and_id() {
+        let text = r#"{"models":[{"provider":"openai","id":"gpt-5.6-sol"}]}"#;
+        assert_eq!(parse("omp", text), vec!["openai/gpt-5.6-sol"]);
+    }
+
+    #[test]
+    fn omp_non_json_output_yields_nothing() {
+        // A CLI error printed on stdout must empty the list rather than reach the dialog as a fake model.
+        assert!(parse("omp", "Error: not authenticated").is_empty());
+    }
 
     #[test]
     fn pi_table_becomes_provider_slash_model() {

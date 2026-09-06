@@ -177,7 +177,20 @@ pub fn dispatch(
     {
         return Err(format!("remote_cmd_forbidden:{cmd}"));
     }
+    if cmd.starts_with("memory_") {
+        return crate::memory::dispatch(app, cmd, args);
+    }
+    if cmd.starts_with("knowledge_") {
+        crate::knowledge::guard_paths(app,cmd,args,|path|guard_remote_path(app,origin,path))?;
+        return crate::knowledge::dispatch(app, cmd, args);
+    }
     match cmd {
+        "record_split_trace" => {
+            let entry = serde_json::from_value(
+                args.get("entry").cloned().ok_or("missing_split_trace_entry")?,
+            ).map_err(|_| "invalid_split_trace_entry")?;
+            to_value(crate::split_trace::record(app, source, entry)?)
+        }
         // ── PTY control (`pty_spawn` is handled in ws.rs) ──
         "pty_write" => {
             // Input does not participate in resize-owner arbitration and needs no source identifier.
@@ -321,6 +334,12 @@ pub fn dispatch(
         "delete_agent_preset" => to_value(core::delete_agent_preset(app, &req_str(args, "id")?)?),
         "reorder_agent_presets" => {
             to_value(core::reorder_agent_presets(app, &req_str_vec(args, "ids")?)?)
+        }
+        "discover_agent_sessions" => to_value(crate::agent::history::discover(app, &req_str(args, "projectId")?)?),
+        "import_agent_sessions" => {
+            let selected = serde_json::from_value(args.get("sessions").cloned().ok_or("Missing sessions")?)
+                .map_err(|e| format!("Invalid sessions: {e}"))?;
+            to_value(crate::agent::history::import(app, &req_str(args, "projectId")?, selected)?)
         }
         "create_session" => to_value(core::create_session(
             app,

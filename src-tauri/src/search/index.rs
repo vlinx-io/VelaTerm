@@ -42,12 +42,50 @@ struct BuildResult {
     indexed_len: u64,
     /// Source-file mtime in seconds.
     indexed_mtime: Option<i64>,
+    /// Resolved transcript path, persisted so later refreshes stat it directly; None for recordings.
+    source_path: Option<String>,
     rows: Vec<FtsRow>,
 }
 
-/// Whether session_fts exists; missing FTS5/trigram support degrades search as a whole.
+/// Whether both index tables exist; missing FTS5/trigram support degrades search as a whole.
 fn fts_ready(conn: &rusqlite::Connection) -> bool {
-    table_exists(conn, "session_fts")
+    table_exists(conn, "session_fts") && table_exists(conn, "session_words")
+}
+
+/// Remove one session's rows from both index tables; `source` limits it to one track, None clears all.
+fn delete_rows(
+    tx: &rusqlite::Transaction,
+    session_id: &str,
+    source: Option<&str>,
+) -> Result<(), String> {
+    match source {
+        Some(src) => {
+            tx.execute(
+                "DELETE FROM session_words WHERE rowid IN \
+                 (SELECT rowid FROM session_fts WHERE session_id = ?1 AND source = ?2)",
+                params![session_id, src],
+            )
+            .map_err(|e| format!("Failed to clear word rows: {e}"))?;
+            tx.execute(
+                "DELETE FROM session_fts WHERE session_id = ?1 AND source = ?2",
+                params![session_id, src],
+            )
+            .map_err(|e| format!("Failed to clear fts rows: {e}"))?;
+        }
+        None => {
+            tx.execute(
+                "DELETE FROM session_words WHERE session_id = ?1",
+                params![session_id],
+            )
+            .map_err(|e| format!("Failed to clear word rows: {e}"))?;
+            tx.execute(
+                "DELETE FROM session_fts WHERE session_id = ?1",
+                params![session_id],
+            )
+            .map_err(|e| format!("Failed to clear fts rows: {e}"))?;
+        }
+    }
+    Ok(())
 }
 
 /// Current Unix time in seconds.
@@ -129,12 +167,13 @@ fn build_full(session: &Session, recordings_dir: &Path) -> Option<BuildResult> {
     // Prefer a transcript when agentSessionId resolves to a readable, parseable file.
     if let Some(agent_id) = nonempty_agent_id(session) {
         if let Some(path) = transcript::source_path(session.kind, agent_id) {
-            if let Ok(messages) = transcript::read(session.kind, agent_id) {
+            if let Ok(messages) = transcript::read_at(session.kind, &path) {
                 let (indexed_len, indexed_mtime) = stat_len_mtime(&path);
                 return Some(BuildResult {
                     source: SRC_TRANSCRIPT,
                     indexed_len,
                     indexed_mtime,
+                    source_path: Some(path.to_string_lossy().into_owned()),
                     rows: transcript_rows(&messages),
                 });
             }
@@ -151,13 +190,15 @@ fn build_full(session: &Session, recordings_dir: &Path) -> Option<BuildResult> {
             source: SRC_RECORDING,
             indexed_len,
             indexed_mtime,
+            source_path: None,
             rows: recording_rows(&lines, 0),
         });
     }
     None
 }
 
-/// Batch-insert FTS rows inside the lock as part of a caller-managed short transaction.
+/// Batch-insert FTS rows inside the lock as part of a caller-managed short transaction. Each fragment goes
+/// into the trigram table and, under the same rowid, into the word table with jieba boundaries marked.
 fn insert_rows(
     tx: &rusqlite::Transaction,
     session_id: &str,
@@ -169,6 +210,9 @@ fn insert_rows(
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )
         .map_err(|e| format!("Failed to prepare fts insert: {e}"))?;
+    let mut words_stmt = tx
+        .prepare("INSERT INTO session_words(rowid, words, session_id) VALUES (?1, ?2, ?3)")
+        .map_err(|e| format!("Failed to prepare word insert: {e}"))?;
     for r in rows {
         stmt.execute(params![
             r.text,
@@ -180,26 +224,44 @@ fn insert_rows(
             r.ts,
         ])
         .map_err(|e| format!("Failed to insert fts row: {e}"))?;
+        let rowid = tx.last_insert_rowid();
+        words_stmt
+            .execute(params![
+                rowid,
+                super::tokenize::boundary_marked(&r.text),
+                session_id
+            ])
+            .map_err(|e| format!("Failed to insert word row: {e}"))?;
     }
     Ok(())
 }
 
-/// Upsert one refresh checkpoint inside the lock.
+/// Upsert one refresh checkpoint inside the lock. `source_path` is the resolved transcript file for the
+/// transcript track and None for recordings.
 fn upsert_state(
     tx: &rusqlite::Transaction,
     session_id: &str,
     source: &str,
     indexed_len: u64,
     indexed_mtime: Option<i64>,
+    source_path: Option<&str>,
 ) -> Result<(), String> {
     tx.execute(
-        "INSERT INTO search_index_state(session_id, source, indexed_len, indexed_mtime, indexed_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5) \
+        "INSERT INTO search_index_state(session_id, source, indexed_len, indexed_mtime, indexed_at, source_path) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
          ON CONFLICT(session_id, source) DO UPDATE SET \
            indexed_len = excluded.indexed_len, \
            indexed_mtime = excluded.indexed_mtime, \
-           indexed_at = excluded.indexed_at",
-        params![session_id, source, indexed_len as i64, indexed_mtime, now_secs()],
+           indexed_at = excluded.indexed_at, \
+           source_path = excluded.source_path",
+        params![
+            session_id,
+            source,
+            indexed_len as i64,
+            indexed_mtime,
+            now_secs(),
+            source_path,
+        ],
     )
     .map_err(|e| format!("Failed to upsert search state: {e}"))?;
     Ok(())
@@ -224,11 +286,7 @@ pub fn reindex_session(db: &Db, recordings_dir: &Path, session: &Session) -> Res
         .transaction()
         .map_err(|e| format!("Failed to begin index tx: {e}"))?;
     // Remove both old tracks and checkpoints before writing the newly selected full track.
-    tx.execute(
-        "DELETE FROM session_fts WHERE session_id = ?1",
-        params![session.id],
-    )
-    .map_err(|e| format!("Failed to clear fts rows: {e}"))?;
+    delete_rows(&tx, &session.id, None)?;
     tx.execute(
         "DELETE FROM search_index_state WHERE session_id = ?1",
         params![session.id],
@@ -236,7 +294,14 @@ pub fn reindex_session(db: &Db, recordings_dir: &Path, session: &Session) -> Res
     .map_err(|e| format!("Failed to clear search state: {e}"))?;
     if let Some(b) = built {
         insert_rows(&tx, &session.id, &b.rows)?;
-        upsert_state(&tx, &session.id, b.source, b.indexed_len, b.indexed_mtime)?;
+        upsert_state(
+            &tx,
+            &session.id,
+            b.source,
+            b.indexed_len,
+            b.indexed_mtime,
+            b.source_path.as_deref(),
+        )?;
     }
     tx.commit()
         .map_err(|e| format!("Failed to commit index tx: {e}"))?;
@@ -256,8 +321,7 @@ pub fn drop_sessions(db: &Db, ids: &[String]) -> Result<(), String> {
         .transaction()
         .map_err(|e| format!("Failed to begin drop tx: {e}"))?;
     for id in ids {
-        tx.execute("DELETE FROM session_fts WHERE session_id = ?1", params![id])
-            .map_err(|e| format!("Failed to drop fts rows: {e}"))?;
+        delete_rows(&tx, id, None)?;
         tx.execute(
             "DELETE FROM search_index_state WHERE session_id = ?1",
             params![id],
@@ -273,10 +337,115 @@ pub fn drop_sessions(db: &Db, ids: &[String]) -> Result<(), String> {
 struct StateRow {
     indexed_len: u64,
     indexed_mtime: Option<i64>,
+    /// Transcript path recorded at the last index; None for recordings or rows written before the column existed.
+    source_path: Option<String>,
+}
+
+/// Resolve a session's transcript path for refresh. Prefer the path recorded at the last index when the file
+/// still exists there, so a refresh costs one stat per session. Fall back to the per-kind directory lookup
+/// only when nothing is recorded or the recorded file is gone; that lookup walks the agent's whole session tree
+/// (measured at about 1.5 s for 450 Codex sessions) and is what made every search slow.
+fn resolve_transcript_path(session: &Session, prev: Option<&StateRow>) -> Option<std::path::PathBuf> {
+    let agent_id = nonempty_agent_id(session)?;
+    if let Some(p) = prev.and_then(|st| st.source_path.as_deref()) {
+        let path = std::path::PathBuf::from(p);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    transcript::source_path(session.kind, agent_id)
+}
+
+/// Rows fetched per backfill round; small enough that the lock is released between rounds.
+const BACKFILL_BATCH: usize = 500;
+
+/// Serialises backfill rounds so a search and the startup warm-up never segment the same rows twice.
+static BACKFILL_GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Give every `session_fts` row a `session_words` companion. Normally a no-op; after the word table is first
+/// created it segments the existing trigram rows in batches without re-reading any transcript, and it also
+/// repairs a row pair that an interrupted write left half-written. Segmentation runs outside the lock; the
+/// insert re-checks that the fragment still exists and has no companion yet, so a concurrent reindex or a
+/// second backfill cannot produce duplicates.
+pub fn backfill_words(db: &Db) -> Result<(), String> {
+    let _gate = BACKFILL_GATE.lock().unwrap();
+    // Row counts are a cheap scan; the per-row NOT EXISTS probe below costs about 100 ms over 30k rows,
+    // too much to pay on every search when nothing is missing. Writes always pair the two tables inside
+    // one transaction, so equal counts mean every row has its companion.
+    {
+        let conn = db.conn.lock().unwrap();
+        let count = |table: &str| -> Result<i64, String> {
+            conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .map_err(|e| format!("Failed to count {table}: {e}"))
+        };
+        if count("session_fts")? == count("session_words")? {
+            return Ok(());
+        }
+    }
+    let mut done = 0usize;
+    loop {
+        let batch: Vec<(i64, String, String)> = {
+            let conn = db.conn.lock().unwrap();
+            let mut stmt = conn
+                .prepare(
+                    "SELECT f.rowid, f.text, f.session_id FROM session_fts f \
+                     WHERE NOT EXISTS (SELECT 1 FROM session_words w WHERE w.rowid = f.rowid) \
+                     LIMIT ?1",
+                )
+                .map_err(|e| format!("Failed to prepare word backfill: {e}"))?;
+            let rows = stmt
+                .query_map(params![BACKFILL_BATCH as i64], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                })
+                .map_err(|e| format!("Failed to query word backfill: {e}"))?;
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r.map_err(|e| format!("Failed to read word backfill row: {e}"))?);
+            }
+            out
+        };
+        if batch.is_empty() {
+            break;
+        }
+        let marked: Vec<(i64, String, String)> = batch
+            .into_iter()
+            .map(|(rowid, text, sid)| (rowid, super::tokenize::boundary_marked(&text), sid))
+            .collect();
+
+        let mut conn = db.conn.lock().unwrap();
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Failed to begin word backfill tx: {e}"))?;
+        {
+            let mut ins = tx
+                .prepare(
+                    "INSERT INTO session_words(rowid, words, session_id) \
+                     SELECT ?1, ?2, ?3 \
+                     WHERE EXISTS (SELECT 1 FROM session_fts WHERE rowid = ?1) \
+                       AND NOT EXISTS (SELECT 1 FROM session_words WHERE rowid = ?1)",
+                )
+                .map_err(|e| format!("Failed to prepare word backfill insert: {e}"))?;
+            for (rowid, words, sid) in &marked {
+                ins.execute(params![rowid, words, sid])
+                    .map_err(|e| format!("Failed to backfill word row: {e}"))?;
+            }
+        }
+        tx.commit()
+            .map_err(|e| format!("Failed to commit word backfill tx: {e}"))?;
+        done += marked.len();
+        if marked.len() < BACKFILL_BATCH {
+            break;
+        }
+    }
+    if done > 0 {
+        println!("search index: segmented {done} existing fragments into the word index");
+    }
+    Ok(())
 }
 
 /// Refresh sessions whose content is newer than their checkpoint before search. Most are skipped quickly;
-/// changed transcripts rebuild fully while recordings append their tail. Also remove orphaned index rows.
+/// changed transcripts rebuild fully while recordings append their tail. Also remove orphaned index rows and
+/// complete the word index for any trigram row that lacks a companion.
 pub fn refresh_stale(db: &Db, recordings_dir: &Path) -> Result<(), String> {
     // Snapshot sessions and checkpoints under the lock, then release it before expensive work.
     let (sessions, states, orphan_ids) = {
@@ -294,7 +463,8 @@ pub fn refresh_stale(db: &Db, recordings_dir: &Path) -> Result<(), String> {
         {
             let mut stmt = conn
                 .prepare(
-                    "SELECT session_id, source, indexed_len, indexed_mtime FROM search_index_state",
+                    "SELECT session_id, source, indexed_len, indexed_mtime, source_path \
+                     FROM search_index_state",
                 )
                 .map_err(|e| format!("Failed to read search state: {e}"))?;
             let rows = stmt
@@ -304,11 +474,12 @@ pub fn refresh_stale(db: &Db, recordings_dir: &Path) -> Result<(), String> {
                         row.get::<_, String>(1)?,
                         row.get::<_, i64>(2)?,
                         row.get::<_, Option<i64>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
                     ))
                 })
                 .map_err(|e| format!("Failed to query search state: {e}"))?;
             for r in rows {
-                let (sid, source, len, mtime) =
+                let (sid, source, len, mtime, source_path) =
                     r.map_err(|e| format!("Failed to read state row: {e}"))?;
                 if !live.contains(&sid) {
                     orphan.insert(sid.clone());
@@ -318,6 +489,7 @@ pub fn refresh_stale(db: &Db, recordings_dir: &Path) -> Result<(), String> {
                     StateRow {
                         indexed_len: len.max(0) as u64,
                         indexed_mtime: mtime,
+                        source_path,
                     },
                 );
             }
@@ -329,23 +501,28 @@ pub fn refresh_stale(db: &Db, recordings_dir: &Path) -> Result<(), String> {
     if !orphan_ids.is_empty() {
         drop_sessions(db, &orphan_ids)?;
     }
+    backfill_words(db)?;
+
+    // Checkpoints written before source_path existed get the path recorded without re-indexing, in one
+    // transaction at the end, so the first refresh after upgrading costs a directory lookup per session
+    // rather than a full re-parse of every transcript.
+    let mut path_backfill: Vec<(String, String)> = Vec::new();
 
     // Per session: check freshness, extract unlocked, then append/rebuild under the lock.
     for s in &sessions {
-        // Select the same track and source path as build_full.
-        let transcript_path = nonempty_agent_id(s)
-            .and_then(|aid| transcript::source_path(s.kind, aid).map(|p| (aid.to_string(), p)));
-
-        if let Some((_aid, path)) = transcript_path.as_ref() {
+        // Select the same track as build_full, but reuse the recorded path instead of looking it up again.
+        let st = states.get(&(s.id.clone(), SRC_TRANSCRIPT.to_string()));
+        if let Some(path) = resolve_transcript_path(s, st) {
             // Rebuild a transcript fully when length or mtime changes.
-            let (len, mtime) = stat_len_mtime(path);
-            let st = states.get(&(s.id.clone(), SRC_TRANSCRIPT.to_string()));
+            let (len, mtime) = stat_len_mtime(&path);
             let stale = match st {
                 None => true,
                 Some(prev) => prev.indexed_len != len || prev.indexed_mtime != mtime,
             };
             if stale {
-                reindex_transcript(db, s)?;
+                reindex_transcript(db, s, &path)?;
+            } else if st.is_some_and(|prev| prev.source_path.is_none()) {
+                path_backfill.push((s.id.clone(), path.to_string_lossy().into_owned()));
             }
             continue;
         }
@@ -373,34 +550,49 @@ pub fn refresh_stale(db: &Db, recordings_dir: &Path) -> Result<(), String> {
             _ => {}
         }
     }
+
+    if !path_backfill.is_empty() {
+        let mut conn = db.conn.lock().unwrap();
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("Failed to begin path backfill tx: {e}"))?;
+        for (sid, path) in &path_backfill {
+            tx.execute(
+                "UPDATE search_index_state SET source_path = ?1 WHERE session_id = ?2 AND source = ?3",
+                params![path, sid, SRC_TRANSCRIPT],
+            )
+            .map_err(|e| format!("Failed to record transcript path: {e}"))?;
+        }
+        tx.commit()
+            .map_err(|e| format!("Failed to commit path backfill tx: {e}"))?;
+    }
     Ok(())
 }
 
-/// Rebuild a complete transcript index with unlocked parsing and a short locked transaction.
-fn reindex_transcript(db: &Db, session: &Session) -> Result<(), String> {
-    let Some(agent_id) = nonempty_agent_id(session) else {
-        return Ok(());
-    };
-    let Some(path) = transcript::source_path(session.kind, agent_id) else {
-        return Ok(());
-    };
-    let Ok(messages) = transcript::read(session.kind, agent_id) else {
+/// Rebuild a complete transcript index from an already resolved `path`, with unlocked parsing and a short
+/// locked transaction. The path is recorded in the checkpoint so the next refresh can stat it directly.
+fn reindex_transcript(db: &Db, session: &Session, path: &Path) -> Result<(), String> {
+    let Ok(messages) = transcript::read_at(session.kind, path) else {
         return Ok(()); // Preserve the old index and retry later after a read failure.
     };
-    let (indexed_len, indexed_mtime) = stat_len_mtime(&path);
+    let (indexed_len, indexed_mtime) = stat_len_mtime(path);
     let rows = transcript_rows(&messages);
+    let source_path = path.to_string_lossy().into_owned();
 
     let mut conn = db.conn.lock().unwrap();
     let tx = conn
         .transaction()
         .map_err(|e| format!("Failed to begin transcript tx: {e}"))?;
-    tx.execute(
-        "DELETE FROM session_fts WHERE session_id = ?1 AND source = ?2",
-        params![session.id, SRC_TRANSCRIPT],
-    )
-    .map_err(|e| format!("Failed to clear transcript rows: {e}"))?;
+    delete_rows(&tx, &session.id, Some(SRC_TRANSCRIPT))?;
     insert_rows(&tx, &session.id, &rows)?;
-    upsert_state(&tx, &session.id, SRC_TRANSCRIPT, indexed_len, indexed_mtime)?;
+    upsert_state(
+        &tx,
+        &session.id,
+        SRC_TRANSCRIPT,
+        indexed_len,
+        indexed_mtime,
+        Some(&source_path),
+    )?;
     tx.commit()
         .map_err(|e| format!("Failed to commit transcript tx: {e}"))?;
     Ok(())
@@ -417,13 +609,9 @@ fn reindex_recording_full(db: &Db, rec: &Path, session_id: &str) -> Result<(), S
     let tx = conn
         .transaction()
         .map_err(|e| format!("Failed to begin recording tx: {e}"))?;
-    tx.execute(
-        "DELETE FROM session_fts WHERE session_id = ?1 AND source = ?2",
-        params![session_id, SRC_RECORDING],
-    )
-    .map_err(|e| format!("Failed to clear recording rows: {e}"))?;
+    delete_rows(&tx, session_id, Some(SRC_RECORDING))?;
     insert_rows(&tx, session_id, &rows)?;
-    upsert_state(&tx, session_id, SRC_RECORDING, indexed_len, indexed_mtime)?;
+    upsert_state(&tx, session_id, SRC_RECORDING, indexed_len, indexed_mtime, None)?;
     tx.commit()
         .map_err(|e| format!("Failed to commit recording tx: {e}"))?;
     Ok(())
@@ -472,7 +660,7 @@ fn reindex_recording_incremental(
         .transaction()
         .map_err(|e| format!("Failed to begin incremental tx: {e}"))?;
     insert_rows(&tx, session_id, &rows)?;
-    upsert_state(&tx, session_id, SRC_RECORDING, new_indexed_len, mtime)?;
+    upsert_state(&tx, session_id, SRC_RECORDING, new_indexed_len, mtime, None)?;
     tx.commit()
         .map_err(|e| format!("Failed to commit incremental tx: {e}"))?;
     Ok(())
@@ -614,6 +802,124 @@ mod tests {
                 .unwrap();
             assert_eq!(max, 2);
         }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Refresh reads a transcript through the path recorded in search_index_state and records the path it
+    /// indexed, so no per-session directory lookup runs. The agent ID here exists nowhere under ~/.claude,
+    /// so the only way the rows can appear is through the recorded path.
+    #[test]
+    fn refresh_uses_recorded_transcript_path() {
+        let db = temp_db();
+        let dir = std::env::temp_dir().join(format!("vlx-cached-path-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sid = "sess-cached";
+        let agent_id = "00000000-cached-path-test-0000";
+        let transcript = dir.join(format!("{agent_id}.jsonl"));
+        std::fs::write(
+            &transcript,
+            concat!(
+                "{\"type\":\"user\",\"timestamp\":\"t1\",\"message\":{\"content\":\"cached deploy question\"}}\n",
+                "{\"type\":\"assistant\",\"timestamp\":\"t2\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"cached deploy answer\"}]}}\n",
+            ),
+        )
+        .unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT OR IGNORE INTO projects(id, name, root_path, sort_order, created_at) VALUES ('p','p','/p',0,0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO sessions(id, project_id, name, kind, agent_session_id, sort_order, created_at) \
+                 VALUES (?1,'p',?1,'claude',?2,0,0)",
+                params![sid, agent_id],
+            )
+            .unwrap();
+            // A checkpoint whose length differs from the file marks the transcript stale on the next refresh.
+            conn.execute(
+                "INSERT INTO search_index_state(session_id, source, indexed_len, indexed_at, source_path) \
+                 VALUES (?1,'transcript',0,0,?2)",
+                params![sid, transcript.to_string_lossy()],
+            )
+            .unwrap();
+        }
+
+        refresh_stale(&db, &dir).unwrap();
+        assert_eq!(count_rows(&db, sid), 2);
+        {
+            let conn = db.conn.lock().unwrap();
+            let (len, path): (i64, Option<String>) = conn
+                .query_row(
+                    "SELECT indexed_len, source_path FROM search_index_state WHERE session_id = ?1",
+                    params![sid],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(len as u64, std::fs::metadata(&transcript).unwrap().len());
+            assert_eq!(path.as_deref(), Some(transcript.to_string_lossy().as_ref()));
+        }
+
+        // Once the recorded file is gone, the lookup falls back to the directory scan, finds nothing, and the
+        // old rows are preserved rather than dropped.
+        std::fs::remove_file(&transcript).unwrap();
+        refresh_stale(&db, &dir).unwrap();
+        assert_eq!(count_rows(&db, sid), 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A trigram row without a word companion (the state of every row when the word table is first created)
+    /// gets one on refresh without any transcript being read, and the word index then finds it.
+    #[test]
+    fn refresh_backfills_word_index_from_existing_rows() {
+        let db = temp_db();
+        let dir = std::env::temp_dir().join(format!("vlx-backfill-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sid = "sess-backfill";
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "INSERT OR IGNORE INTO projects(id, name, root_path, sort_order, created_at) VALUES ('p','p','/p',0,0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO sessions(id, project_id, name, kind, sort_order, created_at) VALUES (?1,'p',?1,'terminal',0,0)",
+                params![sid],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO session_fts(text, session_id, source, message_index, ordinal) \
+                 VALUES ('打开终端搜索功能', ?1, 'recording', NULL, 0)",
+                params![sid],
+            )
+            .unwrap();
+        }
+
+        refresh_stale(&db, &dir).unwrap();
+        // Running it again must not duplicate the companion.
+        refresh_stale(&db, &dir).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let words: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_words WHERE session_id = ?1",
+                params![sid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(words, 1);
+        let found: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM session_words WHERE session_words MATCH '\"终端 搜索\"'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(found, 1);
+        drop(conn);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

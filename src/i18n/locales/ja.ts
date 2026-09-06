@@ -3,6 +3,120 @@
 import type en from "./en";
 
 const ja: typeof en = {
+  // Project code intelligence and memory associations.
+  "knowledge.title": "コードグラフ",
+  "knowledge.intro": "コードの関係を調べ、保存された設計判断と関連付けます。",
+  "knowledge.setup": "このバックエンドに CodeGraph をインストールすると、プロジェクトのインデックスを有効にできます。",
+  "knowledge.downloadNotice": "検証済みの CodeGraph ランタイムを GitHub からダウンロードします。コードの解析はこのマシン内で行われ、テレメトリーと更新確認は無効です。",
+  "knowledge.install": "CodeGraph をダウンロード",
+  "knowledge.installing": "ダウンロードしてインストール中…",
+  "knowledge.directory": "作業ディレクトリ",
+  "knowledge.enable": "インデックスを有効化",
+  "knowledge.disable": "インデックスを無効化",
+  "knowledge.sync": "同期",
+  "knowledge.ready": "利用可能",
+  "knowledge.disabled": "無効",
+  "knowledge.indexing": "インデックス作成中…",
+  "knowledge.syncing": "同期中…",
+  "knowledge.failed": "失敗",
+  "knowledge.symbols": "シンボル",
+  "knowledge.files": "ファイル",
+  "knowledge.edges": "関係",
+  "knowledge.search": "シンボルやファイルパスを検索…",
+  "knowledge.searchButton": "検索",
+  "knowledge.noResults": "一致するシンボルはありません。",
+  "knowledge.selectSymbol": "シンボルを選択すると、ソース、関係、関連するメモリを表示します。",
+  "knowledge.source": "ソース",
+  "knowledge.incoming": "入力側の関係",
+  "knowledge.outgoing": "出力側の関係",
+  "knowledge.noEdges": "インデックスに関係がありません。",
+  "knowledge.analysisNote": "関係は静的解析によるものであり、不完全または不確かな場合があります。",
+  "knowledge.changed": "検索中にファイルが変更されました。行番号の利用や確認の記録を行う前に、再度同期してください。",
+  "knowledge.truncated": "表示件数を制限しています。一部の関係やソース行は表示されていません。",
+  "knowledge.linkMemory": "メモリを関連付ける",
+  "knowledge.chooseMemory": "メモリの項目を選択",
+  "knowledge.noLinks": "コードとの関連付けはありません。シンボルの詳細からメモリを関連付けられます。",
+  "knowledge.inspect": "コードとメモリを確認",
+  "knowledge.unlink": "関連付けを削除",
+  "knowledge.codeReferences": "コードへの参照",
+  "knowledge.refresh": "再読み込み",
+  "knowledge.current": "変更なし",
+  "knowledge.review": "要確認",
+  "knowledge.unavailable": "利用不可",
+  "knowledge.reviewHelp": "このメモリと表示中のコードを照合してください。確認すると現在のファイルバージョンを記録します。メモリの本文は変更しません。",
+  "knowledge.confirmReview": "確認済みにする",
+  "knowledge.agentHint": "エージェントはこの作業ディレクトリで vknowledge search \"トピック\" を実行できます。有効なインデックスを同期し、コードとメモリを分けて返します。",
+  "knowledge.busy": "インデックス処理を実行中です。このページを閉じることも、インデックスを無効にして処理を停止することもできます。",
+  "knowledge.disabledHelp": "コードを検索するには、このディレクトリのインデックスを有効にしてください。無効にしてもインデックスとメモリの関連付けは保持されます。",
+  "knowledge.conflict": "コードまたはメモリが変更されました。両方を再読み込みしてから関連付けを保存してください。",
+  "knowledge.symbolMissing": "シンボルまたはソースを取得できません。同期してから再検索してください。",
+  "knowledge.directoryMissing": "作業ディレクトリが存在しないか、変更されています。プロジェクトとセッションのパスを確認してください。",
+  "knowledge.partial": "インデックスが不完全です。再度同期し、ソースファイルを読み取れるか確認してください。",
+  "knowledge.interrupted": "前回の処理は中断されました。同期して再試行してください。",
+  "knowledge.checksum": "ダウンロードのチェックサムが一致しません。ランタイムはインストールされていません。",
+  "knowledge.downloadFailed": "CodeGraph をダウンロードできません。バックエンドから GitHub への接続を確認して再試行してください。",
+  "knowledge.timeout": "インデックス処理がタイムアウトしました。リポジトリの規模を確認して再試行してください。",
+  "knowledge.error": "操作に失敗しました。バックエンドのディレクトリへのアクセス権とランタイムを確認して再試行してください。",
+
+  // Global Memory: a thematic LLM Wiki shared across sessions.
+  "memory.title": "グローバルメモリ",
+  "memory.add": "グローバルメモリに追加",
+  "memory.intro": "知識、決定事項、教訓を更新し続ける Wiki にまとめ、セッションを越えて共有します。",
+  "memory.entries": "メモリ記事",
+  "memory.emptyJobs": "整理履歴はまだありません。",
+  "memory.jobs": "整理履歴",
+  "memory.search": "メモリのタイトルと本文を検索…",
+  "memory.empty": "該当するメモリはありません。会話を追加して Wiki を作り始めましょう。",
+  "memory.emptyDetail": "記事を選択すると、内容、関連項目、出典を確認できます。",
+  "memory.new": "メモリを新規作成",
+  "memory.titleField": "タイトル",
+  "memory.summary": "概要",
+  "memory.content": "本文（Markdown）",
+  "memory.tags": "タグ（カンマ区切り）",
+  "memory.related": "関連メモリ",
+  "memory.backlinks": "この記事へのリンク",
+  "memory.sources": "出典",
+  "memory.history": "変更履歴",
+  "memory.restore": "この版を復元",
+  "memory.restoreConfirm": "この版を新しいバージョンとして復元しますか？現在の版も履歴に残ります。",
+  "memory.deleteConfirm": "このメモリと変更履歴を削除しますか？元のセッションは削除されません。",
+  "memory.export": "Markdown をエクスポート",
+  "memory.selectAgent": "エージェント",
+  "memory.model": "モデル（任意）",
+  "memory.modelHint": "空欄の場合、エージェントに設定されたモデルを使用します。",
+  "memory.compile": "整理して保存",
+  "memory.compileHelp": "選択したエージェントが会話をテーマ別に整理し、既存のメモリに統合します。会話のテキストと関連メモリは、設定済みのエージェントを通じてモデルに送信されます。",
+  "memory.unavailable": "未インストールまたは未設定",
+  "memory.allTags": "すべてのタグ",
+  "memory.updated": "更新日時順",
+  "memory.titleSort": "タイトル順",
+  "memory.sourceNote": "整理に使用した会話のテキストを保存したスナップショットです。元のセッションを削除しても閲覧できます。",
+  "memory.noKnowledge": "再利用できる知識が見つからなかったため、記事は変更されませんでした。",
+  "memory.running": "処理中",
+  "memory.completed": "完了",
+  "memory.failed": "失敗",
+  "memory.cancelled": "キャンセル済み",
+  "memory.extract": "テーマを抽出中",
+  "memory.merge": "知識を統合中",
+  "memory.commit": "メモリを保存中",
+  "memory.done": "保存済み",
+  "memory.closeHint": "整理中にこのウィンドウを閉じても処理は続きます。整理履歴で進捗を確認できます。",
+  "memory.conflict": "操作中にこのメモリが変更されました。再読み込みしてからやり直してください。今回の変更は保存されていません。",
+  "memory.duplicate": "同じタイトルのメモリが既にあります。その記事を開いて内容を統合してください。",
+  "memory.busy": "別の整理処理が実行中です。完了を待つか、整理履歴からキャンセルしてください。",
+  "memory.notFound": "このメモリ、出典、または処理は存在しません。",
+  "memory.noTranscript": "このセッションには読み取り可能な会話がありません。",
+  "memory.agentUnavailable": "選択したエージェントを利用できません。設定で実行ファイルのパスを確認してください。",
+  "memory.invalid": "無効な項目またはリンクがあります。タイトル、本文、関連メモリを確認してください。",
+  "memory.processFailed": "エージェントが整理を完了できませんでした。ログイン状態、モデル、CLI 設定を確認して再試行してください。",
+  "memory.timeout": "エージェントがタイムアウトしました。利用可能なモデルに変更するか、会話を短くして再試行してください。",
+  "memory.interrupted": "整理処理が中断されました。保存済みの出典スナップショットから再試行できます。",
+  "memory.tooLarge": "出典、コンテキスト、または出力が対応サイズを超えています。内容の切り詰めやメモリへの保存は行われていません。",
+  "memory.invalidOutput": "エージェントが無効な構造化データを返しました。保存は行われていません。再試行するか、別のエージェントを選択してください。",
+  "memory.loadError": "メモリを読み込めません。接続を確認して再試行してください。",
+  "memory.unsaved": "未保存の変更を破棄しますか？",
+  "memory.source": "出典スナップショット",
+
   // ── Common ──
   "common.cancel": "キャンセル", // Cancel
   "common.confirm": "OK", // OK
@@ -16,6 +130,7 @@ const ja: typeof en = {
   "common.selectAll": "すべて選択", // Select All
   "common.copied": "コピーしました", // Copied
   "common.retry": "再試行", // Retry
+  "common.experimental": "実験的機能",
   "common.refresh": "更新", // Refresh
   "common.loading": "読み込み中…", // Loading…
   "common.prev": "前へ", // Previous
@@ -402,16 +517,16 @@ const ja: typeof en = {
   "connect.showPassword": "パスワードを表示",
   "connect.hidePassword": "パスワードを非表示",
   "connect.urlPasswordPlaceholder": "ログインパスワード",
-  "connect.mirror": "デバイス間でレイアウトを同期", // Mirror layout across devices
+  "connect.mirror": "リモートのデスクトップ版をミラー", // Mirror the remote desktop app
   "connect.mirrorHint":
-    "このリモートサービスに接続したすべての端末で、タブ・分割・アクティブなセッションが一致します。オフなら各端末が自分のレイアウトを保ちます。", // Tabs, splits, and the active session stay the same on every device connected to this remote service. Off = each device keeps its own layout.
+    "タブ・分割・アクティブなセッションがリモート機のデスクトップ版と一致し、どちらで変更しても両方に反映されます。デスクトップ版が起動していない場合はそのデータベースを直接開き、データベースがなければ独立したデータベースを使います。", // Same tabs, splits, and active session as the desktop app on the remote machine; changes on either side show on both. If the desktop app is not running, this connection opens its database directly, or a separate database when there is none.
   "connect.shareDesktopDb": "リモートのデスクトップ版のデータベースを共用",
   "connect.shareDesktopDbHint":
     "リモートマシンのデスクトップ版と同じデータベースを共有します（両方を同じバージョンに揃えることを推奨）。オフにすると独立したデータベースを使用します。",
 
   // ── Sidebar ──
   "tree.newSession": "新規セッション", // New Session
-  "tree.newTerminalSession": "新規ターミナルセッション", // New Terminal Session
+  "tree.newTerminalSession": "新規ターミナル", // New Terminal
   "tree.newBrowserPage": "新規ブラウザページ", // New Browser Page
   "tree.newAgentSession": (agent) => `新規 ${agent} セッション`, // New {agent} Session
   "tree.newAgentSessionGroup": "その他のエージェントセッション", // More Agent Session
@@ -618,6 +733,13 @@ const ja: typeof en = {
   "info.createdAt": "作成日時", // Created at
 
   // Resume-session dialog
+  "importSessions.title": "セッションをインポート",
+  "importSessions.description": "作業ディレクトリがこのプロジェクトと一致する Codex、Claude、OpenCode の既存セッションを検索します。セッションを選択してプロジェクトに追加し、開くと会話を再開できます。",
+  "importSessions.search": "タイトル、エージェント、セッション ID で検索",
+  "importSessions.empty": "一致するセッションが見つかりません。",
+  "importSessions.imported": "インポート済み",
+  "importSessions.confirm": ({ count }: { count: number }) => `インポート（${count}）`,
+  "importSessions.success": ({ count }: { count: number }) => `${count} 件のセッションをプロジェクトに追加しました。`,
   "resume.title": "セッションを再開", // Resume Session
   "resume.desc":
     "エージェントの種類を選び、そのエージェント自身の session id を入力します。開くと元の会話を引き継ぎます。", // Pick the agent type and enter the agent's own session id…

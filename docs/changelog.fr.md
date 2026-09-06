@@ -1,3 +1,25 @@
+## v0.1.107 — 2026-09-05
+
+- 🧠 Mémoire globale (expérimental) : Claude ou Codex transforme vos conversations en un wiki partagé organisé par thème
+- 🕸️ Graphe de code (expérimental) : indexez un répertoire de travail, parcourez les relations entre symboles et reliez-les à vos mémoires
+- 🔎 Les agents peuvent interroger le code et la mémoire en cours de session avec `vknowledge`
+- 🖥️ SSH peut refléter l'application de bureau distante : mêmes onglets, mêmes divisions et même session active des deux côtés
+- 🪟 Les machines distantes SSH peuvent désormais tourner sous Windows
+- 📥 Importez les sessions Codex, Claude et OpenCode déjà présentes dans un dossier de projet
+- 🤖 Nouvel agent : OMP
+- 🎚️ `vspawn` permet de choisir le modèle et l'effort de raisonnement d'une session enfant
+- 🌿 `vspawn-tree` fonctionne dans les collections, et les sessions worktree en cours affichent une icône de branche
+- 🔤 La recherche privilégie les mots entiers et surligne exactement ce qu'elle a trouvé
+- 🖱️ Un clic du bouton central ferme un onglet
+- ⌨️ Navigateurs macOS : ⌘D et ⌘⇧D divisent les panneaux
+- 💬 La saisie avec une méthode d'entrée ne décale plus l'affichage, et le curseur reste visible pendant la composition
+- 🪓 Une division lancée depuis le menu n'affecte que la fenêtre active, et chaque division est consignée dans `logs/split.log`
+- 📁 Le sélecteur de dossier distant conserve le chemin que vous saisissez
+- ℹ️ Panneau Informations : heure de démarrage et durée d'exécution sur une même ligne, avec la charge moyenne sur macOS
+- 🔑 Les champs de mot de passe n'affichent plus le bouton d'affichage propre au navigateur
+
+---
+
 ## v0.1.106 — 2026-09-02
 
 ### Espace de travail

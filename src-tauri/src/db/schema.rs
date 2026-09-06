@@ -153,6 +153,7 @@ CREATE TABLE IF NOT EXISTS search_index_state (
   indexed_len   INTEGER NOT NULL DEFAULT 0,  -- Recording byte offset or transcript file length at indexing
   indexed_mtime INTEGER,                     -- Source-file mtime in seconds for change detection
   indexed_at    INTEGER NOT NULL,
+  source_path   TEXT,                        -- Resolved transcript path; skips directory walks on refresh
   PRIMARY KEY (session_id, source)
 );
 CREATE INDEX IF NOT EXISTS idx_search_state_session ON search_index_state(session_id);
@@ -178,6 +179,24 @@ CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(
   role          UNINDEXED,
   ts            UNINDEXED,
   tokenize = 'trigram remove_diacritics 1'
+);
+"#;
+
+/// Word-level companion index to `session_fts`. Each row shares its rowid with the `session_fts` row it
+/// mirrors, so a word hit joins back to the fragment's text and anchors without duplicating them.
+///
+/// `words` holds the fragment text with U+200B (zero-width space) inserted at jieba word boundaries. The
+/// unicode61 tokenizer treats U+200B as a separator, so CJK runs split into dictionary words instead of one
+/// token per run, while Latin identifiers still split on punctuation as usual. Porter stemming folds English
+/// inflections (spawned/spawning -> spawn). Stripping the U+200B characters restores the original text, which
+/// lets `highlight()` output map straight back onto it for snippets and matched literals.
+///
+/// Created together with `session_fts` by [`crate::db::init_search_index`]; see `search/tokenize.rs`.
+pub const SESSION_WORDS_DDL: &str = r#"
+CREATE VIRTUAL TABLE IF NOT EXISTS session_words USING fts5(
+  words,
+  session_id    UNINDEXED,
+  tokenize = 'porter unicode61 remove_diacritics 1'
 );
 "#;
 // Do **not** place idx_sessions_parent here. SCHEMA runs before migrate(), when legacy sessions tables do not yet

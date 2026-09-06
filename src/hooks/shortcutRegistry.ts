@@ -5,7 +5,8 @@
 //!   else (including plain browsers on macOS, which bind Ctrl+Alt). Only the modifier the current
 //!   shell actually binds counts as mod - see hasMod().
 //! - Combos are encoded as strings in canonical order: `mod[+shift][+alt]+<letter>` (lowercase).
-//!   e.g. "mod+t", "mod+w", "mod+shift+f", "mod+shift+b". mod is always included; main key is
+//!   An explicit `cmd` modifier supports macOS browser splits alongside existing Ctrl bindings.
+//!   e.g. "mod+t", "cmd+d", "cmd+shift+d". A primary modifier is required; main key is
 //!   limited to a single letter (A-Z). Numeric keys and +/-/0 are reserved for structural shortcuts
 //!   (Cmd/Ctrl+1~9 tab switching, Cmd/Ctrl++/- font size) and are not customizable, to avoid conflicts.
 //! - Only "primary function" shortcuts can be registered and customized here.
@@ -43,11 +44,9 @@ export const IS_MAC =
   /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent || "");
 
 /**
- * Whether this client is a plain browser (URL remote access). Browsers reserve Cmd/Ctrl letter
- * combos (⌘D bookmark, ⌘T new tab, ⌘W close tab, ⌘F find...) and never deliver them to the page,
- * so plain-browser clients must fall back to the Ctrl+Alt defaults even on macOS. Tauri/Electron
- * shells and remote-connection windows keep the Cmd bindings because their WebViews do not reserve
- * them (desktop Windows/Linux WebView2 gets its browser accelerators disabled at the COM level).
+ * Whether this client is a plain browser (URL remote access). Most actions use Ctrl+Alt to avoid
+ * browser commands such as new/close tab. macOS splits use explicit Cmd bindings; the global
+ * capture listener cancels the browser default when it handles a split.
  */
 export const IS_PLAIN_BROWSER = env.isBrowser && !env.isRemoteWindow;
 
@@ -69,16 +68,16 @@ export function hasMod(e: KeyboardEvent): boolean {
 /**
  * Default keybindings per platform:
  * - macOS (shell): Cmd+key (split up/down: Cmd+Shift+D, global search: Cmd+Shift+F).
- * - Windows/Linux and plain browsers on any OS: Ctrl+Alt+key. Bare Ctrl+letter is a shell
+ * - macOS plain browsers: Cmd+D / Cmd+Shift+D for splits, with Ctrl bindings for other actions.
+ * - Windows/Linux and other plain-browser actions: Ctrl+Alt+key. Bare Ctrl+letter is a shell
  *   reserved key (Ctrl+D=EOF, Ctrl+W=delete-word...), Ctrl+Shift is swallowed by IMEs, Alt is
- *   terminal Meta. Only Ctrl+Alt reliably reaches the web without conflicts — browsers consume
- *   Cmd/Ctrl letter combos before the page sees them (see IS_PLAIN_BROWSER).
+ *   terminal Meta. Ctrl+Alt avoids conflicts with browser tab commands.
  *   Split: D=right / E=up-down. Global search: G (global) vs inline search F.
  *   Save remains bare Ctrl+S (intercepted only on doc tabs; reserved as XOFF in terminals).
  *   When the terminal is focused, these Ctrl+Alt combos are intercepted by usePtySession's
  *   customKeyEventHandler to prevent xterm from treating them as Meta (see APP_ALT_KEYS).
  *   Users can override individual bindings via shortcutOverrides in settings.
- *   Recorded combos are platform-independent "mod[+shift][+alt]+key" strings.
+ *   Recorded combos use "mod[+shift][+alt]+key", or explicit "cmd" for macOS browser Cmd chords.
  */
 export const DEFAULT_BINDINGS: Record<ShortcutAction, string> =
   IS_MAC && !IS_PLAIN_BROWSER
@@ -98,14 +97,15 @@ export const DEFAULT_BINDINGS: Record<ShortcutAction, string> =
         newTab: "mod+alt+t",
         newBrowserTab: "mod+alt+b",
         closePane: "mod+alt+w",
-        splitRight: "mod+alt+d",
-        splitDown: "mod+alt+e",
+        splitRight: IS_MAC ? "cmd+d" : "mod+alt+d",
+        splitDown: IS_MAC ? "cmd+shift+d" : "mod+alt+e",
         search: "mod+alt+f",
         globalSearch: "mod+alt+g",
         saveDoc: "mod+s",
       };
 
 interface ParsedCombo {
+  cmd: boolean;
   shift: boolean;
   alt: boolean;
   /** Main key: a single lowercase letter. */
@@ -114,9 +114,10 @@ interface ParsedCombo {
 
 /** Parse a combo string into structured parts. Returns empty key on empty/invalid input. */
 function parseCombo(combo: string): ParsedCombo {
-  if (!combo) return { shift: false, alt: false, key: "" };
+  if (!combo) return { cmd: false, shift: false, alt: false, key: "" };
   const tokens = combo.split("+");
   return {
+    cmd: tokens[0] === "cmd",
     shift: tokens.includes("shift"),
     alt: tokens.includes("alt"),
     key: tokens[tokens.length - 1] ?? "",
@@ -130,11 +131,11 @@ function isLetter(e: KeyboardEvent, letter: string): boolean {
 
 /**
  * Check whether a keyboard event matches a combo.
- * Requirements: this client's mod held (see hasMod), shift/alt state matches exactly, main key matches.
+ * Requirements: the specified primary modifier, exact shift/alt state, and matching main key.
  */
 export function matchCombo(e: KeyboardEvent, combo: string): boolean {
-  if (!hasMod(e)) return false;
   const c = parseCombo(combo);
+  if (c.cmd ? !(IS_MAC && e.metaKey && !e.ctrlKey) : !hasMod(e)) return false;
   if (!c.key) return false;
   if (e.shiftKey !== c.shift) return false;
   if (e.altKey !== c.alt) return false;
@@ -143,17 +144,18 @@ export function matchCombo(e: KeyboardEvent, combo: string): boolean {
 
 /**
  * Record a combo string from a keyboard event.
- * Must have this client's mod held (see hasMod) and main key is a single letter A-Z, else null.
+ * Accept this client's mod or explicit Cmd on macOS browsers, with a single letter A-Z.
  * Prefers physical key code (e.code "KeyX") over e.key for layout-independence.
  */
 export function comboFromEvent(e: KeyboardEvent): string | null {
-  if (!hasMod(e)) return null;
+  const explicitCmd = IS_MAC && IS_PLAIN_BROWSER && e.metaKey && !e.ctrlKey;
+  if (!explicitCmd && !hasMod(e)) return null;
   let letter: string | null = null;
   const m = /^Key([A-Z])$/.exec(e.code);
   if (m) letter = m[1].toLowerCase();
   else if (/^[a-zA-Z]$/.test(e.key)) letter = e.key.toLowerCase();
   if (!letter) return null;
-  const parts = ["mod"];
+  const parts = [explicitCmd ? "cmd" : "mod"];
   if (e.shiftKey) parts.push("shift");
   if (e.altKey) parts.push("alt");
   parts.push(letter);
@@ -163,10 +165,10 @@ export function comboFromEvent(e: KeyboardEvent): string | null {
 /** Format a combo string for display: macOS uses symbols (⌘⇧F), others use + (Ctrl+Shift+F). */
 export function formatCombo(combo: string): string {
   const c = parseCombo(combo);
-  // Plain-browser clients bind to Ctrl+Alt even on macOS, so use the text form there.
-  const symbols = IS_MAC && !IS_PLAIN_BROWSER;
+  // Browser Cmd splits use symbols; existing browser Ctrl bindings retain the text form.
+  const symbols = IS_MAC && (c.cmd || !IS_PLAIN_BROWSER);
   const parts: string[] = [];
-  parts.push(symbols ? "\u2318" : "Ctrl");
+  parts.push(symbols ? "\u2318" : c.cmd ? "Cmd" : "Ctrl");
   if (c.shift) parts.push(symbols ? "\u21E7" : "Shift");
   if (c.alt) parts.push(symbols ? "\u2325" : "Alt");
   parts.push(c.key.toUpperCase());
@@ -207,7 +209,7 @@ export function appAltKeyCodes(
   const codes = new Set<string>();
   for (const action of Object.keys(DEFAULT_BINDINGS) as ShortcutAction[]) {
     const parsed = parseCombo(effectiveCombo(action, overrides));
-    if (parsed.alt && /^[a-z]$/.test(parsed.key)) {
+    if (!parsed.cmd && parsed.alt && /^[a-z]$/.test(parsed.key)) {
       codes.add(`Key${parsed.key.toUpperCase()}`);
     }
   }

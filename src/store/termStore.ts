@@ -2110,6 +2110,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
                   ? "cline"
                   : parent.kind === "pi"
                     ? "pi"
+                    : parent.kind === "omp"
+                    ? "omp"
                     : parent.kind === "crush"
                       ? "crush"
                       : parent.kind === "kimi"
@@ -2124,9 +2126,22 @@ export const useTermStore = create<TermStore>((set, get) => ({
     const kind = ((req.kind ?? null) || fallbackKind) as Session["kind"];
     const name = req.prompt.trim().slice(0, 24) || t("store.subtask");
 
-    // By default, create an isolated worktree in the parent's repository.
-    const repoRoot = parent.cwd || project?.rootPath || null;
-    let cwd: string | null = parent.cwd ?? project?.rootPath ?? null;
+    // Prefer the exact directory in which vspawn ran. This matters for sessions kept in a collection:
+    // neither the parent record nor its project has a directory, while the command itself may run inside a
+    // repository. Older clients do not send cwd, so ask the running parent before falling back to persisted data.
+    let liveParentCwd: string | null = null;
+    if (!req.cwd) {
+      try {
+        liveParentCwd = await getSessionCwd(parent.id);
+      } catch {
+        /* Fall back when the parent is not running or its cwd cannot be inspected. */
+      }
+    }
+    const spawnCwd =
+      req.cwd?.trim() || liveParentCwd || parent.cwd || project?.rootPath || null;
+    // By default, create an isolated worktree in the resolved spawn repository.
+    const repoRoot = spawnCwd;
+    let cwd: string | null = spawnCwd;
     let worktreePath: string | null = null;
     let worktreeBaseRef: string | null = null;
     if (req.worktree !== false && repoRoot) {
@@ -3047,15 +3062,14 @@ export const useTermStore = create<TermStore>((set, get) => ({
       createdAt: Math.floor(Date.now() / 1000),
     };
 
-    traceSplit(
-      source,
-      `${direction} split ${id} from ${activeSessionId} in tab ${activeTabId}`,
-    );
+    let created = false;
     set((state) => {
       const curTree = state.paneTrees[activeTabId];
       if (!curTree) return {};
       const newTree = splitAt(curTree, focusedPaneId, direction, id);
       const newLeaf = findBySession(newTree, id);
+      if (!newLeaf) return {};
+      created = true;
       return {
         paneTrees: { ...state.paneTrees, [activeTabId]: newTree },
         ephemeralSessions: { ...state.ephemeralSessions, [id]: ephemeral },
@@ -3064,6 +3078,13 @@ export const useTermStore = create<TermStore>((set, get) => ({
         focusedPaneId: newLeaf?.paneId ?? state.focusedPaneId,
       };
     });
+    if (created) {
+      traceSplit(
+        source,
+        `${direction} split ${id} from ${activeSessionId} in tab ${activeTabId}`,
+        { sessionIds: [id], parentSessionId: activeSessionId, tabId: activeTabId, direction },
+      );
+    }
     saveLayoutTick();
   },
 
@@ -3731,8 +3752,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
       for (const tabTree of Object.values(c.paneTrees))
         for (const sid of collectSessionIds(tabTree))
           if (sid.startsWith("eph-") && !before.has(sid)) arrived.push(sid);
-      if (arrived.length) {
-        traceSplit("mirror", `peer layout brought ${arrived.join(", ")}`);
+      for (let offset = 0; offset < arrived.length; offset += 200) {
+        const sessionIds = arrived.slice(offset, offset + 200);
+        traceSplit("mirror", `peer layout brought ${sessionIds.join(", ")}`, { sessionIds });
       }
     }
     set((s) => ({

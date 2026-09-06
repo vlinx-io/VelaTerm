@@ -42,15 +42,15 @@ body {
   user-select: text;
 }
 
-/* ─── IME pre-edit overlay: left entirely to xterm's stock styling. ───
-   Do not add a `right` (or any width) bound to `.composition-view`. It lives in `.xterm-helpers`,
-   which xterm.css gives only `position:absolute; top:0`; every child of that container is absolutely
-   positioned or non-rendering, so the container shrink-to-fits to zero width. Inside a zero-width
-   containing block, `left:<cursor x>` plus any `right` resolves to a negative width clamped to 0, and
-   the pre-edit string becomes invisible on every platform — which is exactly what an earlier attempt
-   at wrapping long pre-edit strings did here. VS Code ships these xterm rules untouched for the same
-   reason. Stock behaviour: the overlay sizes to its content and may run past the terminal's right
-   edge on a long string; that is the accepted trade-off. */
+/* ─── IME pre-edit overlay: give its containing block a real width. ───
+   `.composition-view` lives in `.xterm-helpers`, which xterm.css gives only `position:absolute; top:0`.
+   Every child of that container is absolutely positioned or non-rendering, so it shrink-to-fits to zero
+   width. Inside a zero-width containing block any `right` or percentage bound on the overlay resolves to
+   a negative width clamped to 0 and the pre-edit string disappears (issue #6). Stretching the container
+   to the terminal's width makes such bounds meaningful; its height stays 0, so hit testing is unchanged. */
+.xterm .xterm-helpers {
+  width: 100%;
+}
 /* ─── IME fix: WKWebView does not activate an IME for elements with opacity:0. ───
    xterm.css sets opacity:0 on the hidden textarea by default, so macOS WKWebView never fires
    compositionstart and the composing keystrokes of a Chinese or Japanese input method are sent to
@@ -61,13 +61,39 @@ body {
   color: transparent !important;
 }
 
-/* Repaint the pre-edit overlay in the terminal's own colours. xterm.css hard-codes white on pure
-   black, which does not match any theme: against this terminal's background it reads as a darker
-   rectangle sitting on the row, and under a light theme it would be a black bar. Colour only — no
-   background box, border, radius or padding, and no width bound (see the note above on `right`). */
+/* Pre-edit overlay: terminal colours, and wrapped inside the terminal's right edge.
+   Colours: xterm.css hard-codes white on pure black, which matches no theme. No background box, border,
+   radius or padding — an earlier attempt drew a framed box on the row and was reverted.
+   Width: xterm sets only `left` (the cursor x) and `white-space: nowrap`, so a long pre-edit string runs
+   past the terminal, and xterm stretches the hidden textarea to the overlay's bounds. Both then widen
+   `.pane`'s scrollable overflow (measured: overlay 1040px in a 910px pane), and the browser scrolls the
+   pane sideways to reveal the composition caret — the whole pane, header included, jumps left and snaps
+   back when composing ends (issue #59). Bounding the overlay at the right edge and wrapping keeps both
+   elements inside the pane, so there is nothing to scroll. Requires the `.xterm-helpers` width above.
+   Height: xterm pins an inline height of one cell; with wrapping the extra lines would spill out of that
+   box without background, drawn straight over the rows beneath. Letting the height follow the content
+   keeps every wrapped line on the overlay's background, and xterm sizes the textarea from the same
+   bounds. The inline line-height of one cell stays, so wrapped lines align with terminal rows. */
 .xterm .composition-view {
   background: var(--bg-term);
   color: var(--text);
+  right: 0;
+  height: auto !important;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Composition caret drawn by usePtySession inside the overlay. xterm's overlay is plain text with no
+   caret, the opaque overlay covers the terminal's own cursor, and the hidden textarea's native caret is
+   transparent (caret-color follows the transparent `color` above), so without this nothing marks the
+   caret while composing. Zero-width with a negative margin so it does not shift the following text. */
+.xterm .composition-view .vlx-ime-caret {
+  display: inline-block;
+  width: 0;
+  height: 1em;
+  border-left: 2px solid var(--text);
+  margin-right: -2px;
+  vertical-align: -0.15em;
 }
 
 /* ─── Context-menu items shared through ContextMenu. ─── */
@@ -156,4 +182,21 @@ body {
 }
 .vlx-status-pulse {
   animation: vlx-status-pulse 1s ease-in-out infinite;
+}
+
+/* Hide the browser's own password reveal / autofill buttons. PasswordField draws its own toggle,
+   and Edge (::-ms-reveal) plus WebKit's credential buttons would otherwise stack a second eye
+   icon next to it. */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+input[type="password"]::-webkit-credentials-auto-fill-button,
+input[type="password"]::-webkit-strong-password-auto-fill-button,
+input[type="password"]::-webkit-caps-lock-indicator {
+  display: none !important;
+  visibility: hidden;
+  pointer-events: none;
+  width: 0;
+  margin: 0;
 }

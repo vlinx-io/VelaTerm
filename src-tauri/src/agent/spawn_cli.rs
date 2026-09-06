@@ -18,6 +18,7 @@ const SHIMS: &[(&str, &str)] = &[
     ("vspawn", "--spawn"),
     ("vspawn-tree", "--spawn --worktree"),
     ("vopen", "--view"),
+    ("vknowledge", "--knowledge"),
 ];
 
 #[cfg(feature = "gui")]
@@ -43,6 +44,7 @@ const SKILLS: &[(&str, &str)] = &[
         include_str!("../../../skills/vspawn-tree/SKILL.md"),
     ),
     ("vopen", include_str!("../../../skills/vopen/SKILL.md")),
+    ("vknowledge", include_str!("../../../skills/vknowledge/SKILL.md")),
 ];
 
 /// Bin directory prepended to session PATH: `<data_dir>/bin`.

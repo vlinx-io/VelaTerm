@@ -3,6 +3,120 @@
 import type en from "./en";
 
 const zhTW: typeof en = {
+  // Project code intelligence and memory associations.
+  "knowledge.title": "程式碼圖譜",
+  "knowledge.intro": "查看程式碼關係，並連結已儲存的設計決策。",
+  "knowledge.setup": "在目前後端安裝 CodeGraph 後，即可啟用專案索引。",
+  "knowledge.downloadNotice": "從 GitHub 下載經過驗證的 CodeGraph 執行環境。程式碼索引在本機完成，遙測和更新檢查均已停用。",
+  "knowledge.install": "下載 CodeGraph",
+  "knowledge.installing": "正在下載並安裝…",
+  "knowledge.directory": "工作目錄",
+  "knowledge.enable": "啟用索引",
+  "knowledge.disable": "停用索引",
+  "knowledge.sync": "同步索引",
+  "knowledge.ready": "可用",
+  "knowledge.disabled": "已停用",
+  "knowledge.indexing": "正在建立索引…",
+  "knowledge.syncing": "正在同步…",
+  "knowledge.failed": "失敗",
+  "knowledge.symbols": "符號",
+  "knowledge.files": "檔案",
+  "knowledge.edges": "關係",
+  "knowledge.search": "搜尋符號或檔案路徑…",
+  "knowledge.searchButton": "搜尋",
+  "knowledge.noResults": "沒有符合的符號。",
+  "knowledge.selectSymbol": "選擇一個符號，查看原始碼、關係和相關記憶。",
+  "knowledge.source": "原始碼",
+  "knowledge.incoming": "傳入關係",
+  "knowledge.outgoing": "傳出關係",
+  "knowledge.noEdges": "索引中沒有相關關係。",
+  "knowledge.analysisNote": "關係來自靜態分析，可能不完整或存在不確定性。",
+  "knowledge.changed": "查詢期間檔案已變更。請再次同步，再使用行號或確認檢閱結果。",
+  "knowledge.truncated": "目前檢視已限制顯示數量，部分關係或原始碼行未顯示。",
+  "knowledge.linkMemory": "連結記憶",
+  "knowledge.chooseMemory": "選擇記憶條目",
+  "knowledge.noLinks": "尚無程式碼連結。可在符號詳細資料中連結記憶。",
+  "knowledge.inspect": "核對程式碼與記憶",
+  "knowledge.unlink": "移除連結",
+  "knowledge.codeReferences": "程式碼參照",
+  "knowledge.refresh": "重新整理",
+  "knowledge.current": "未變更",
+  "knowledge.review": "需要檢閱",
+  "knowledge.unavailable": "無法使用",
+  "knowledge.reviewHelp": "請將此記憶與顯示的程式碼核對。確認後僅記錄目前檔案版本，不修改記憶內文。",
+  "knowledge.confirmReview": "確認已檢閱",
+  "knowledge.agentHint": "代理程式可在此工作目錄執行 vknowledge search \"主題\"。查詢會同步已啟用的索引，並分別傳回程式碼和記憶。",
+  "knowledge.busy": "索引工作正在執行。可以關閉此頁面，或停用索引以停止工作。",
+  "knowledge.disabledHelp": "啟用此目錄的索引後即可查詢程式碼。停用會保留索引和記憶連結。",
+  "knowledge.conflict": "程式碼或記憶已變更。請重新載入後再儲存連結。",
+  "knowledge.symbolMissing": "符號或原始碼已無法使用。請同步索引後重新搜尋。",
+  "knowledge.directoryMissing": "工作目錄不存在或已變更。請檢查專案和工作階段的路徑。",
+  "knowledge.partial": "索引不完整。請再次同步，並確認原始碼檔案可以讀取。",
+  "knowledge.interrupted": "上一次工作已中斷。請同步索引以重試。",
+  "knowledge.checksum": "下載檔案的校驗值不符，未安裝執行環境。",
+  "knowledge.downloadFailed": "無法下載 CodeGraph。請檢查後端與 GitHub 的連線後重試。",
+  "knowledge.timeout": "索引工作逾時。請檢查儲存庫大小後重試。",
+  "knowledge.error": "操作失敗。請檢查後端的目錄存取權限和執行環境後重試。",
+
+  // Global Memory: a thematic LLM Wiki shared across sessions.
+  "memory.title": "全域記憶",
+  "memory.add": "加入全域記憶",
+  "memory.intro": "以持續更新的 Wiki 組織知識、決策與經驗，建立跨工作階段共享的長期記憶。",
+  "memory.entries": "記憶條目",
+  "memory.emptyJobs": "尚無整理紀錄。",
+  "memory.jobs": "整理紀錄",
+  "memory.search": "搜尋記憶標題與內文…",
+  "memory.empty": "沒有符合的記憶。可從工作階段加入內容，逐步建立你的 Wiki。",
+  "memory.emptyDetail": "選擇一個條目，查閱知識內容、關聯與來源。",
+  "memory.new": "新增記憶",
+  "memory.titleField": "標題",
+  "memory.summary": "摘要",
+  "memory.content": "內文（Markdown）",
+  "memory.tags": "標籤（以逗號分隔）",
+  "memory.related": "相關記憶",
+  "memory.backlinks": "連結至此條目的記憶",
+  "memory.sources": "來源",
+  "memory.history": "修訂紀錄",
+  "memory.restore": "還原此版本",
+  "memory.restoreConfirm": "將此修訂還原為新版本？目前版本仍會保留在歷史紀錄中。",
+  "memory.deleteConfirm": "刪除此記憶及其修訂紀錄？來源工作階段不受影響。",
+  "memory.export": "匯出 Markdown",
+  "memory.selectAgent": "代理程式",
+  "memory.model": "模型（選填）",
+  "memory.modelHint": "留空時使用代理程式已設定的模型。",
+  "memory.compile": "整理並儲存",
+  "memory.compileHelp": "所選代理程式會依主題整理此工作階段，並與現有記憶合併。對話文字與相關記憶將透過你設定的代理程式傳送給模型。",
+  "memory.unavailable": "尚未安裝或設定",
+  "memory.allTags": "所有標籤",
+  "memory.updated": "最近更新",
+  "memory.titleSort": "依標題排序",
+  "memory.sourceNote": "此快照保留整理時使用的對話文字；即使原工作階段已刪除，仍可查閱。",
+  "memory.noKnowledge": "未發現可重複運用的知識，未變更任何記憶條目。",
+  "memory.running": "進行中",
+  "memory.completed": "已完成",
+  "memory.failed": "失敗",
+  "memory.cancelled": "已取消",
+  "memory.extract": "擷取主題",
+  "memory.merge": "合併知識",
+  "memory.commit": "儲存記憶",
+  "memory.done": "已儲存",
+  "memory.closeHint": "整理期間可關閉此視窗，稍後在整理紀錄中查看進度。",
+  "memory.conflict": "操作期間此記憶已變更。請重新載入後再試；本次修改尚未儲存。",
+  "memory.duplicate": "已有同名記憶，請開啟該條目合併內容。",
+  "memory.busy": "已有整理工作正在執行。請等待完成，或在整理紀錄中取消。",
+  "memory.notFound": "此記憶、來源或工作已不存在。",
+  "memory.noTranscript": "此工作階段目前沒有可讀取的對話內容。",
+  "memory.agentUnavailable": "所選代理程式無法使用，請在設定中檢查其執行檔路徑。",
+  "memory.invalid": "部分欄位或連結無效，請檢查標題、內文及相關記憶。",
+  "memory.processFailed": "代理程式未能完成整理。請檢查登入狀態、模型及 CLI 設定後重試。",
+  "memory.timeout": "代理程式呼叫逾時，請更換可用模型或縮短對話後重試。",
+  "memory.interrupted": "整理工作已中斷，可重試處理已儲存的來源快照。",
+  "memory.tooLarge": "來源、上下文或輸出超出支援的大小，未截斷內容，也未寫入記憶。",
+  "memory.invalidOutput": "代理程式傳回的結構化資料無效，未寫入記憶。請重試或更換代理程式。",
+  "memory.loadError": "無法載入記憶資料，請檢查連線後重試。",
+  "memory.unsaved": "放棄尚未儲存的修改？",
+  "memory.source": "來源快照",
+
   // ── Common ──
   "common.cancel": "取消", // Cancel
   "common.confirm": "確定", // OK
@@ -16,6 +130,7 @@ const zhTW: typeof en = {
   "common.selectAll": "全選", // Select All
   "common.copied": "已複製", // Copied
   "common.retry": "重試", // Retry
+  "common.experimental": "實驗性功能",
   "common.refresh": "重新整理", // Refresh
   "common.loading": "載入中…", // Loading…
   "common.prev": "上一個", // Previous
@@ -385,16 +500,16 @@ const zhTW: typeof en = {
   "connect.showPassword": "顯示密碼",
   "connect.hidePassword": "隱藏密碼",
   "connect.urlPasswordPlaceholder": "登入密碼",
-  "connect.mirror": "多端介面鏡像", // Mirror layout across devices
+  "connect.mirror": "鏡像遠端桌面版", // Mirror the remote desktop app
   "connect.mirrorHint":
-    "分頁、分割與目前工作階段在連到這台遠端服務的所有裝置上保持一致。不勾選則各裝置各自保有自己的版面。", // Tabs, splits, and the active session stay the same on every device connected to this remote service. Off = each device keeps its own layout.
+    "分頁、分割與目前工作階段與遠端機器上的桌面版保持一致，任一邊的變更兩邊同時可見。桌面版未執行時，本次連線直接開啟它的資料庫；沒有資料庫則使用獨立資料庫。", // Same tabs, splits, and active session as the desktop app on the remote machine; changes on either side show on both. If the desktop app is not running, this connection opens its database directly, or a separate database when there is none.
   "connect.shareDesktopDb": "共用遠端桌面版的資料庫",
   "connect.shareDesktopDbHint":
     "與遠端機器的桌面版共用同一資料庫（建議兩邊同版本）。不勾則使用獨立資料庫。",
 
   // ── Sidebar (project tree, menus, and dialogs) ──
   "tree.newSession": "新增會話", // New Session
-  "tree.newTerminalSession": "新增終端機會話", // New Terminal Session
+  "tree.newTerminalSession": "新增終端機", // New Terminal
   "tree.newBrowserPage": "新增瀏覽器頁面", // New Browser Page
   "tree.newAgentSession": (agent) => `新增 ${agent} 會話`, // New {agent} Session
   "tree.newAgentSessionGroup": "更多 Agent 會話", // More Agent Session
@@ -597,6 +712,13 @@ const zhTW: typeof en = {
   "info.createdAt": "建立時間", // Created at
 
   // Resume-session dialog
+  "importSessions.title": "匯入會話",
+  "importSessions.description": "尋找工作目錄與本專案一致的 Codex、Claude 和 OpenCode 歷史會話。選取並加入專案後，即可開啟並繼續對話。",
+  "importSessions.search": "搜尋標題、Agent 名稱或會話 ID",
+  "importSessions.empty": "找不到符合條件的會話。",
+  "importSessions.imported": "已匯入",
+  "importSessions.confirm": ({ count }: { count: number }) => `匯入（${count}）`,
+  "importSessions.success": ({ count }: { count: number }) => `已將 ${count} 個會話加入專案。`,
   "resume.title": "恢復會話", // Resume Session
   "resume.desc":
     "選 agent 類型並填入該 agent 自身的 session id，開啟後續接原對話。", // Pick the agent type and enter the agent's own session id…

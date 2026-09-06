@@ -251,3 +251,29 @@ export function archiveGroup(id: string): Promise<void> {
 export function listArchivedSessions(): Promise<Session[]> {
   return invoke<Session[]>("list_archived_sessions");
 }
+
+export interface HistoricalSession {
+  kind: SessionKind;
+  agentSessionId: string;
+  title: string;
+  cwd: string;
+  updatedAt: number;
+  imported: boolean;
+}
+
+export interface AgentHistory {
+  directory: string;
+  sessions: HistoricalSession[];
+  warnings: string[];
+}
+
+export function discoverAgentSessions(projectId: string): Promise<AgentHistory> {
+  return invoke("discover_agent_sessions", { projectId });
+}
+
+export function importAgentSessions(
+  projectId: string,
+  sessions: Pick<HistoricalSession, "kind" | "agentSessionId">[],
+): Promise<Session[]> {
+  return invoke("import_agent_sessions", { projectId, sessions });
+}

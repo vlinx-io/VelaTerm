@@ -3,6 +3,120 @@
 import type en from "./en";
 
 const de: typeof en = {
+  // Project code intelligence and memory associations.
+  "knowledge.title": "Codegraph",
+  "knowledge.intro": "Untersuchen Sie Codebeziehungen und verknüpfen Sie sie mit gespeicherten Entwurfsentscheidungen.",
+  "knowledge.setup": "Installieren Sie CodeGraph auf diesem Backend, um Projekte zu indizieren.",
+  "knowledge.downloadNotice": "Lädt die geprüfte CodeGraph-Laufzeit von GitHub herunter. Die Indizierung erfolgt auf diesem Rechner; Telemetrie und Updateprüfungen sind deaktiviert.",
+  "knowledge.install": "CodeGraph herunterladen",
+  "knowledge.installing": "Download und Installation…",
+  "knowledge.directory": "Arbeitsverzeichnis",
+  "knowledge.enable": "Indizierung aktivieren",
+  "knowledge.disable": "Indizierung deaktivieren",
+  "knowledge.sync": "Synchronisieren",
+  "knowledge.ready": "Bereit",
+  "knowledge.disabled": "Deaktiviert",
+  "knowledge.indexing": "Indizierung läuft…",
+  "knowledge.syncing": "Synchronisierung läuft…",
+  "knowledge.failed": "Fehlgeschlagen",
+  "knowledge.symbols": "Symbole",
+  "knowledge.files": "Dateien",
+  "knowledge.edges": "Beziehungen",
+  "knowledge.search": "Symbole oder Dateipfade suchen…",
+  "knowledge.searchButton": "Suchen",
+  "knowledge.noResults": "Keine passenden Symbole.",
+  "knowledge.selectSymbol": "Wählen Sie ein Symbol aus, um Quellcode, Beziehungen und verknüpfte Erinnerungen anzuzeigen.",
+  "knowledge.source": "Quellcode",
+  "knowledge.incoming": "Eingehende Beziehungen",
+  "knowledge.outgoing": "Ausgehende Beziehungen",
+  "knowledge.noEdges": "Keine indizierten Beziehungen.",
+  "knowledge.analysisNote": "Die Beziehungen stammen aus einer statischen Analyse und können unvollständig oder unsicher sein.",
+  "knowledge.changed": "Die Datei wurde während der Abfrage geändert. Synchronisieren Sie erneut, bevor Sie Zeilennummern verwenden oder die Prüfung bestätigen.",
+  "knowledge.truncated": "Diese Ansicht ist begrenzt. Einige Beziehungen oder Quellcodezeilen werden nicht angezeigt.",
+  "knowledge.linkMemory": "Erinnerung verknüpfen",
+  "knowledge.chooseMemory": "Erinnerung auswählen",
+  "knowledge.noLinks": "Noch keine Codeverknüpfungen. Sie können eine Erinnerung in der Symbolansicht verknüpfen.",
+  "knowledge.inspect": "Code und Erinnerung prüfen",
+  "knowledge.unlink": "Verknüpfung entfernen",
+  "knowledge.codeReferences": "Codeverweise",
+  "knowledge.refresh": "Aktualisieren",
+  "knowledge.current": "Unverändert",
+  "knowledge.review": "Prüfung erforderlich",
+  "knowledge.unavailable": "Nicht verfügbar",
+  "knowledge.reviewHelp": "Vergleichen Sie diese Erinnerung mit dem angezeigten Code. Die Bestätigung erfasst die aktuelle Dateiversion, ohne den Erinnerungstext zu ändern.",
+  "knowledge.confirmReview": "Prüfung bestätigen",
+  "knowledge.agentHint": "Agenten können in diesem Verzeichnis vknowledge search \"Thema\" verwenden. Abfragen synchronisieren aktivierte Indizes und liefern Code und Erinnerungen getrennt zurück.",
+  "knowledge.busy": "Eine Indizierungsaufgabe läuft. Sie können diese Seite schließen oder die Indizierung deaktivieren, um die Aufgabe zu stoppen.",
+  "knowledge.disabledHelp": "Aktivieren Sie die Indizierung dieses Verzeichnisses, um Code abzufragen. Beim Deaktivieren bleiben Index und Erinnerungsverknüpfungen erhalten.",
+  "knowledge.conflict": "Code oder Erinnerung wurden geändert. Laden Sie beide neu, bevor Sie diese Verknüpfung speichern.",
+  "knowledge.symbolMissing": "Symbol oder Quellcode sind nicht mehr verfügbar. Synchronisieren Sie und suchen Sie erneut.",
+  "knowledge.directoryMissing": "Dieses Arbeitsverzeichnis fehlt oder wurde geändert. Prüfen Sie die Projekt- und Sitzungspfade.",
+  "knowledge.partial": "Der Index ist unvollständig. Synchronisieren Sie erneut und prüfen Sie, ob die Quelldateien lesbar sind.",
+  "knowledge.interrupted": "Die vorherige Aufgabe wurde unterbrochen. Synchronisieren Sie, um sie erneut zu versuchen.",
+  "knowledge.checksum": "Die Prüfsumme des Downloads stimmt nicht überein. Die Laufzeit wurde nicht installiert.",
+  "knowledge.downloadFailed": "CodeGraph konnte nicht heruntergeladen werden. Prüfen Sie die Verbindung des Backends zu GitHub und versuchen Sie es erneut.",
+  "knowledge.timeout": "Die Indizierung hat das Zeitlimit überschritten. Prüfen Sie die Repository-Größe und versuchen Sie es erneut.",
+  "knowledge.error": "Der Vorgang ist fehlgeschlagen. Prüfen Sie die Verzeichnisberechtigungen und die Laufzeit auf dem Backend und versuchen Sie es erneut.",
+
+  // Global Memory: a thematic LLM Wiki shared across sessions.
+  "memory.title": "Globales Gedächtnis",
+  "memory.add": "Zum globalen Gedächtnis hinzufügen",
+  "memory.intro": "Ein fortlaufend gepflegtes Wiki für Wissen, Entscheidungen und Erfahrungen aus allen Sitzungen.",
+  "memory.entries": "Gedächtniseinträge",
+  "memory.emptyJobs": "Noch keine Verarbeitungen.",
+  "memory.jobs": "Verarbeitungsverlauf",
+  "memory.search": "Titel und Inhalte durchsuchen…",
+  "memory.empty": "Keine passenden Einträge. Fügen Sie eine Unterhaltung hinzu, um Ihr Wiki aufzubauen.",
+  "memory.emptyDetail": "Wählen Sie einen Eintrag, um Inhalte, Verknüpfungen und Quellen zu lesen.",
+  "memory.new": "Neuer Eintrag",
+  "memory.titleField": "Titel",
+  "memory.summary": "Zusammenfassung",
+  "memory.content": "Inhalt (Markdown)",
+  "memory.tags": "Tags (durch Kommas getrennt)",
+  "memory.related": "Verwandte Einträge",
+  "memory.backlinks": "Verweise auf diesen Eintrag",
+  "memory.sources": "Quellen",
+  "memory.history": "Versionsverlauf",
+  "memory.restore": "Diese Version wiederherstellen",
+  "memory.restoreConfirm": "Diese Version als neue Fassung wiederherstellen? Die aktuelle Fassung bleibt im Verlauf erhalten.",
+  "memory.deleteConfirm": "Diesen Eintrag samt Versionsverlauf löschen? Die Quellsitzungen bleiben erhalten.",
+  "memory.export": "Markdown exportieren",
+  "memory.selectAgent": "Agent",
+  "memory.model": "Modell (optional)",
+  "memory.modelHint": "Leer lassen, um das im Agenten konfigurierte Modell zu verwenden.",
+  "memory.compile": "Aufbereiten und speichern",
+  "memory.compileHelp": "Der gewählte Agent ordnet die Unterhaltung nach Themen und führt sie mit vorhandenen Einträgen zusammen. Der Unterhaltungstext und relevante Einträge werden über Ihren konfigurierten Agenten an das Modell gesendet.",
+  "memory.unavailable": "Nicht installiert oder konfiguriert",
+  "memory.allTags": "Alle Tags",
+  "memory.updated": "Zuletzt aktualisiert",
+  "memory.titleSort": "Titel",
+  "memory.sourceNote": "Dieser Stand bewahrt den für die Aufbereitung verwendeten Unterhaltungstext, auch wenn die ursprüngliche Sitzung gelöscht wird.",
+  "memory.noKnowledge": "Es wurde kein wiederverwendbares Wissen gefunden. Keine Einträge wurden geändert.",
+  "memory.running": "In Bearbeitung",
+  "memory.completed": "Abgeschlossen",
+  "memory.failed": "Fehlgeschlagen",
+  "memory.cancelled": "Abgebrochen",
+  "memory.extract": "Themen werden extrahiert",
+  "memory.merge": "Wissen wird zusammengeführt",
+  "memory.commit": "Einträge werden gespeichert",
+  "memory.done": "Gespeichert",
+  "memory.closeHint": "Sie können dieses Fenster während der Verarbeitung schließen und den Fortschritt im Verarbeitungsverlauf verfolgen.",
+  "memory.conflict": "Dieser Eintrag wurde während des Vorgangs geändert. Laden Sie ihn neu und versuchen Sie es erneut. Ihre Änderungen wurden nicht gespeichert.",
+  "memory.duplicate": "Ein Eintrag mit diesem Titel existiert bereits. Öffnen Sie ihn, um die Inhalte zusammenzuführen.",
+  "memory.busy": "Eine andere Verarbeitung läuft bereits. Warten Sie auf ihren Abschluss oder brechen Sie sie im Verlauf ab.",
+  "memory.notFound": "Dieser Eintrag, diese Quelle oder dieser Auftrag existiert nicht mehr.",
+  "memory.noTranscript": "Für diese Sitzung ist keine lesbare Unterhaltung verfügbar.",
+  "memory.agentUnavailable": "Der gewählte Agent ist nicht verfügbar. Prüfen Sie seinen Programmpfad in den Einstellungen.",
+  "memory.invalid": "Einige Felder oder Verknüpfungen sind ungültig. Prüfen Sie Titel, Inhalt und verwandte Einträge.",
+  "memory.processFailed": "Der Agent konnte den Vorgang nicht abschließen. Prüfen Sie Anmeldung, Modell und CLI-Einstellungen und versuchen Sie es erneut.",
+  "memory.timeout": "Zeitüberschreitung beim Agenten. Versuchen Sie es mit einem verfügbaren Modell oder einer kürzeren Unterhaltung erneut.",
+  "memory.interrupted": "Die Verarbeitung wurde unterbrochen. Sie können sie mit dem gespeicherten Quellstand erneut starten.",
+  "memory.tooLarge": "Quelle, Kontext oder Ausgabe überschreitet die unterstützte Größe. Nichts wurde gekürzt oder gespeichert.",
+  "memory.invalidOutput": "Der Agent hat ungültige strukturierte Daten zurückgegeben. Nichts wurde gespeichert. Versuchen Sie es erneut oder wählen Sie einen anderen Agenten.",
+  "memory.loadError": "Das Gedächtnis konnte nicht geladen werden. Prüfen Sie die Verbindung und versuchen Sie es erneut.",
+  "memory.unsaved": "Nicht gespeicherte Änderungen verwerfen?",
+  "memory.source": "Gespeicherter Quellstand",
+
   // ── Common ──
   "common.cancel": "Abbrechen", // Cancel
   "common.confirm": "OK", // OK
@@ -16,6 +130,7 @@ const de: typeof en = {
   "common.selectAll": "Alles auswählen", // Select All
   "common.copied": "Kopiert", // Copied
   "common.retry": "Erneut versuchen", // Retry
+  "common.experimental": "Experimentell",
   "common.refresh": "Aktualisieren", // Refresh
   "common.loading": "Lädt…", // Loading…
   "common.prev": "Zurück", // Previous
@@ -402,16 +517,16 @@ const de: typeof en = {
   "connect.showPassword": "Passwort anzeigen",
   "connect.hidePassword": "Passwort verbergen",
   "connect.urlPasswordPlaceholder": "Anmeldepasswort",
-  "connect.mirror": "Layout auf allen Geräten spiegeln", // Mirror layout across devices
+  "connect.mirror": "Remote-Desktop-App spiegeln", // Mirror the remote desktop app
   "connect.mirrorHint":
-    "Tabs, Splits und die aktive Sitzung bleiben auf allen mit diesem Remote-Dienst verbundenen Geräten gleich. Aus = jedes Gerät behält sein eigenes Layout.", // Tabs, splits, and the active session stay the same on every device connected to this remote service. Off = each device keeps its own layout.
+    "Tabs, Splits und die aktive Sitzung entsprechen der Desktop-App auf dem Remote-Rechner; Änderungen auf einer Seite erscheinen auf beiden. Läuft die Desktop-App nicht, öffnet diese Verbindung direkt deren Datenbank oder, wenn keine vorhanden ist, eine eigene Datenbank.", // Same tabs, splits, and active session as the desktop app on the remote machine; changes on either side show on both. If the desktop app is not running, this connection opens its database directly, or a separate database when there is none.
   "connect.shareDesktopDb": "Datenbank der Remote-Desktop-App mitnutzen",
   "connect.shareDesktopDbHint":
     "Teilt sich eine Datenbank mit der Desktop-App des Remote-Rechners (am besten bei gleicher Version). Aus = eigene Datenbank.",
 
   // ── Sidebar ──
   "tree.newSession": "Neue Sitzung", // New Session
-  "tree.newTerminalSession": "Neue Terminal-Sitzung", // New Terminal Session
+  "tree.newTerminalSession": "Neues Terminal", // New Terminal
   "tree.newBrowserPage": "Neue Browser-Seite", // New Browser Page
   "tree.newAgentSession": (agent) => `Neue ${agent}-Sitzung`, // New {agent} Session
   "tree.newAgentSessionGroup": "Weitere Agent-Sitzung", // More Agent Session
@@ -618,6 +733,13 @@ const de: typeof en = {
   "info.createdAt": "Erstellt am", // Created at
 
   // Resume-session dialog
+  "importSessions.title": "Sitzungen importieren",
+  "importSessions.description": "Suchen Sie bestehende Codex-, Claude- und OpenCode-Sitzungen mit dem Arbeitsverzeichnis dieses Projekts. Wählen Sie Sitzungen aus, um sie dem Projekt hinzuzufügen, und öffnen Sie anschließend eine Sitzung, um das Gespräch fortzusetzen.",
+  "importSessions.search": "Nach Titel, Agent oder Sitzungs-ID suchen",
+  "importSessions.empty": "Keine passenden Sitzungen gefunden.",
+  "importSessions.imported": "Bereits importiert",
+  "importSessions.confirm": ({ count }: { count: number }) => `Importieren (${count})`,
+  "importSessions.success": ({ count }: { count: number }) => `Dem Projekt hinzugefügte Sitzungen: ${count}.`,
   "resume.title": "Sitzung fortsetzen", // Resume Session
   "resume.desc":
     "Agententyp wählen und die eigene Session-ID des Agenten eingeben; beim Öffnen wird das ursprüngliche Gespräch fortgesetzt.", // Pick the agent type and enter the agent's own session id…

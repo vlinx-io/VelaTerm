@@ -1,0 +1,99 @@
+.memory-shell { width: min(1320px, 94vw); height: 89vh; display: flex; flex-direction: column; background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 24px 80px #0005; overflow: hidden; outline: none; font-size: 13px; }
+.memory-shell a { color: var(--accent); text-decoration: none; }
+.memory-shell a:hover { text-decoration: underline; }
+.memory-shell .btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex-shrink: 0; white-space: nowrap; text-decoration: none; }
+.memory-shell .input { min-width: 0; width: 100%; box-sizing: border-box; font: inherit; }
+.memory-shell select.input { width: auto; flex: 1; }
+.memory-header { display: flex; align-items: center; gap: 18px; padding: 19px 24px; border-bottom: 1px solid var(--border); }
+.memory-brand { display: flex; flex: 1; align-items: center; gap: 13px; min-width: 0; }
+.memory-brand > svg { color: var(--accent); flex-shrink: 0; }
+.memory-brand h2 { font-size: 17px; margin: 0; letter-spacing: .2px; }
+.memory-badge { margin-left: 9px; vertical-align: 2px; border: 1px solid var(--border); border-radius: 4px; padding: 2px 7px; font-size: 10px; font-weight: 500; letter-spacing: .3px; color: var(--text-muted); text-transform: none; }
+.memory-brand p { color: var(--text-muted); font-size: 12px; line-height: 1.6; margin: 5px 0 0; }
+.memory-nav { display: flex; align-items: center; gap: 25px; padding: 10px 24px; border-bottom: 1px solid var(--border); }
+.memory-nav > a:not(.btn) { padding: 6px 0; color: var(--text-secondary); border-bottom: 2px solid transparent; }
+.memory-nav > a.active { border-color: var(--accent); color: var(--accent); }
+.memory-body { display: flex; flex: 1; min-height: 0; }
+.memory-sidebar { flex: 0 0 320px; width: 320px; border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; background: var(--bg-base, var(--bg-panel)); }
+.memory-search { padding: 17px 16px 10px; display: flex; flex-direction: column; gap: 10px; }
+.memory-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.memory-spacer { flex: 1; }
+.memory-count { padding: 5px 17px 11px; font-size: 11px; color: var(--text-muted); }
+.memory-results { flex: 1; overflow: auto; padding: 0 9px 10px; }
+.memory-result { display: block; padding: 15px 12px; border: 1px solid transparent; border-radius: 7px; margin-bottom: 5px; overflow-wrap: anywhere; }
+.memory-result:hover { background: var(--bg-elevated); text-decoration: none !important; }
+.memory-result.active { border-color: var(--accent); background: var(--accent-soft); }
+.memory-result strong { font-size: 13px; color: var(--text-primary); line-height: 1.6; }
+.memory-result p { font-size: 12px; line-height: 1.6; margin: 6px 0; color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.memory-result small { display: block; font-size: 10px; color: var(--text-muted); margin-top: 10px; }
+.memory-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.memory-tags > * { border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-secondary); border-radius: 4px; padding: 2px 7px; font-size: 11px; }
+.memory-main { flex: 1; min-width: 0; overflow: auto; }
+.memory-document { padding: 25px 34px 40px; max-width: 1050px; margin: auto; user-select: text; overflow-wrap: anywhere; }
+.memory-document h1 { font-size: 27px; line-height: 1.4; margin: 22px 0 12px; }
+.memory-document h2 { font-size: 18px; line-height: 1.5; }
+.memory-document h3 { font-size: 13px; margin: 0 0 12px; }
+.memory-document p { line-height: 1.8; }
+.memory-lead { color: var(--text-secondary); font-size: 14px; }
+.memory-muted { font-size: 11px; color: var(--text-muted); }
+.memory-empty { color: var(--text-muted); display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 14px; padding: 36px; text-align: center; line-height: 1.9; }
+.memory-main > .memory-empty { min-height: 70%; }
+.memory-markdown { line-height: 1.85; margin-top: 28px; user-select: text; }
+.memory-markdown h2 { border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-top: 28px; }
+.memory-markdown h3 { margin-top: 22px; font-size: 15px; }
+.memory-markdown ul,.memory-markdown ol { padding-left: 1.7em; margin: 12px 0; }
+.memory-markdown ul { list-style: disc; }
+.memory-markdown ol { list-style: decimal; }
+.memory-markdown li { margin: 5px 0; }
+.memory-markdown pre { padding: 14px; border-radius: 6px; background: var(--bg-elevated); overflow: auto; line-height: 1.6; }
+.memory-markdown code { font-family: var(--font-mono, monospace); font-size: .92em; }
+.memory-markdown :not(pre) > code { background: var(--bg-elevated); padding: 2px 4px; border-radius: 3px; }
+.memory-markdown blockquote { border-left: 3px solid var(--accent); margin-left: 0; padding-left: 16px; color: var(--text-secondary); }
+.memory-markdown table { border-collapse: collapse; display: block; overflow: auto; }
+.memory-markdown td,.memory-markdown th { border: 1px solid var(--border); padding: 7px 12px; }
+.memory-references { margin-top: 35px; padding-top: 24px; border-top: 1px solid var(--border); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 25px; }
+.memory-reference { display: block; padding: 8px 0; line-height: 1.6; }
+.memory-reference small { display: block; color: var(--text-muted); font-size: 11px; }
+.memory-history { display: flex; flex-direction: column; gap: 9px; max-height: 220px; overflow: auto; }
+.memory-history small { display: block; color: var(--text-muted); }
+.memory-editor { max-width: 850px; display: flex; flex-direction: column; gap: 18px; }
+.memory-editor > label { display: flex; flex-direction: column; gap: 8px; }
+.memory-editor textarea { resize: vertical; line-height: 1.7; }
+.memory-content-input { min-height: 290px; font-family: monospace !important; }
+.memory-editor fieldset { border: 1px solid var(--border); border-radius: 6px; padding: 14px; }
+.memory-related-options { max-height: 220px; overflow: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.memory-related-options label { display: flex; gap: 7px; align-items: start; }
+.memory-related-options input { margin-top: 2px; }
+.memory-error { color: var(--status-error); }
+.memory-confirm { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-top: 16px; }
+.memory-source-text { font: inherit; white-space: pre-wrap; line-height: 1.85; border-top: 1px solid var(--border); padding-top: 20px; }
+.memory-compact { width: min(650px, 94vw); height: auto; max-height: 88vh; }
+.memory-compact .memory-body { min-height: 0; }
+.memory-compact .memory-document { padding: 22px 28px; gap: 15px; }
+.memory-compact .memory-document h2,.memory-compact .memory-document p { margin: 0; }
+.memory-job { border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin: 18px 0; }
+.memory-status { font-size: 11px; border: 1px solid var(--border); border-radius: 20px; padding: 3px 9px; }
+.memory-status.completed { color: var(--status-working); }
+.memory-status.failed { color: var(--status-error); }
+.memory-status.running { color: var(--accent); }
+.memory-job progress { width: 100%; accent-color: var(--accent); margin-bottom: 14px; }
+.memory-job-entries { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 15px; }
+.memory-pagination { display: flex; justify-content: space-between; padding: 12px 16px; gap: 8px; border-top: 1px solid var(--border); font-size: 12px; }
+@media (max-width: 780px) {
+ .memory-shell { width: 98vw; height: 96vh; }
+ .memory-header { padding: 12px; }
+ .memory-brand p { display: none; }
+ .memory-nav { padding: 8px 12px; gap: 12px; }
+ .memory-sidebar { flex-basis: 235px; width: 235px; }
+ .memory-document { padding: 18px; }
+ .memory-document h1 { font-size: 22px; }
+ .memory-references,.memory-related-options { grid-template-columns: 1fr; }
+ .memory-compact { height: auto; }
+}
+
+@media (max-width: 600px) {
+ .memory-shell[data-page="library"] .memory-main { display: none; }
+ .memory-shell[data-page="library"] .memory-sidebar { flex-basis: 100%; width: 100%; border-right: 0; }
+ .memory-shell[data-page="entry"] .memory-sidebar,.memory-shell[data-page="history"] .memory-sidebar { display: none; }
+ .memory-actions .memory-muted { flex-basis: 100%; }
+}

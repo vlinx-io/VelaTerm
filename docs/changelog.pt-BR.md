@@ -1,3 +1,25 @@
+## v0.1.107 — 2026-09-05
+
+- 🧠 Memória global (experimental): o Claude ou o Codex transforma suas conversas em uma wiki compartilhada organizada por tema
+- 🕸️ Grafo de código (experimental): indexe um diretório de trabalho, navegue pelas relações entre símbolos e vincule-as às memórias
+- 🔎 Os agentes podem consultar código e memória durante a sessão com `vknowledge`
+- 🖥️ O SSH pode espelhar o app de desktop remoto: as mesmas abas, divisões e sessão ativa nas duas máquinas
+- 🪟 As máquinas remotas por SSH agora podem ser Windows
+- 📥 Importe as sessões do Codex, Claude e OpenCode que já existem em uma pasta de projeto
+- 🤖 Novo agente: OMP
+- 🎚️ O `vspawn` pode escolher o modelo e o esforço de raciocínio de uma sessão filha
+- 🌿 O `vspawn-tree` funciona em coleções, e as sessões de worktree em execução exibem um ícone de branch
+- 🔤 A busca prioriza palavras inteiras e destaca exatamente o que encontrou
+- 🖱️ Clique com o botão do meio para fechar uma aba
+- ⌨️ Navegadores no macOS: ⌘D e ⌘⇧D dividem o painel
+- 💬 A digitação com IME não desloca mais a tela, e o cursor fica visível durante a composição
+- 🪓 Uma divisão feita pelo menu afeta apenas a janela em foco, e toda divisão é registrada em `logs/split.log`
+- 📁 O seletor de pastas remoto mantém o caminho que você digita
+- ℹ️ Painel de informações: horário de início e tempo de execução na mesma linha, com a carga média no macOS
+- 🔑 Os campos de senha não exibem mais o botão de revelar do próprio navegador
+
+---
+
 ## v0.1.106 — 2026-09-02
 
 ### Espaço de trabalho

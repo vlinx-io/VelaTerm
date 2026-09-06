@@ -250,6 +250,12 @@ export interface SearchMatch {
   ordinal: number;
   /** Readable contextual snippet preserving matched text for frontend highlighting. */
   snippet: string;
+  /**
+   * Literal strings the index matched in this fragment, in document order without duplicates: the whole
+   * word or phrase as written in the text for word hits, or the query terms for substring hits. Highlight
+   * these rather than the raw query, and use the first one for recording findNext.
+   */
+  matched: string[];
 }
 
 /** One matching session and its snippets from search.rs::SessionSearchHit. */

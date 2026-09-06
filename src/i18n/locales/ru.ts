@@ -13,6 +13,120 @@ function plural(n: number, one: string, few: string, many: string): string {
 }
 
 const ru: typeof en = {
+  // Project code intelligence and memory associations.
+  "knowledge.title": "Граф кода",
+  "knowledge.intro": "Изучайте связи в коде и связывайте их с сохранёнными проектными решениями.",
+  "knowledge.setup": "Установите CodeGraph на этом сервере, чтобы включить индексацию проектов.",
+  "knowledge.downloadNotice": "Проверенная среда выполнения CodeGraph будет загружена с GitHub. Индексация выполняется на этом компьютере; телеметрия и проверка обновлений отключены.",
+  "knowledge.install": "Скачать CodeGraph",
+  "knowledge.installing": "Загрузка и установка…",
+  "knowledge.directory": "Рабочий каталог",
+  "knowledge.enable": "Включить индексацию",
+  "knowledge.disable": "Отключить индексацию",
+  "knowledge.sync": "Синхронизировать",
+  "knowledge.ready": "Готово",
+  "knowledge.disabled": "Отключено",
+  "knowledge.indexing": "Индексация…",
+  "knowledge.syncing": "Синхронизация…",
+  "knowledge.failed": "Ошибка",
+  "knowledge.symbols": "Символы",
+  "knowledge.files": "Файлы",
+  "knowledge.edges": "Связи",
+  "knowledge.search": "Поиск символов или путей к файлам…",
+  "knowledge.searchButton": "Найти",
+  "knowledge.noResults": "Подходящих символов нет.",
+  "knowledge.selectSymbol": "Выберите символ, чтобы увидеть исходный код, связи и связанные записи памяти.",
+  "knowledge.source": "Исходный код",
+  "knowledge.incoming": "Входящие связи",
+  "knowledge.outgoing": "Исходящие связи",
+  "knowledge.noEdges": "В индексе нет связей.",
+  "knowledge.analysisNote": "Связи получены статическим анализом и могут быть неполными или неточными.",
+  "knowledge.changed": "Файл изменился во время запроса. Повторите синхронизацию, прежде чем использовать номера строк или подтверждать проверку.",
+  "knowledge.truncated": "Объём отображаемых данных ограничен. Некоторые связи или строки кода пропущены.",
+  "knowledge.linkMemory": "Связать с памятью",
+  "knowledge.chooseMemory": "Выберите запись памяти",
+  "knowledge.noLinks": "Связей с кодом пока нет. Запись памяти можно связать с кодом в представлении символа.",
+  "knowledge.inspect": "Проверить код и память",
+  "knowledge.unlink": "Удалить связь",
+  "knowledge.codeReferences": "Ссылки на код",
+  "knowledge.refresh": "Обновить",
+  "knowledge.current": "Без изменений",
+  "knowledge.review": "Требуется проверка",
+  "knowledge.unavailable": "Недоступно",
+  "knowledge.reviewHelp": "Сопоставьте эту запись памяти с показанным кодом. Подтверждение сохраняет текущую версию файла, не изменяя текст записи.",
+  "knowledge.confirmReview": "Подтвердить проверку",
+  "knowledge.agentHint": "Агенты могут выполнять vknowledge search \"тема\" в этом каталоге. Запросы синхронизируют включённые индексы и возвращают код и записи памяти отдельно.",
+  "knowledge.busy": "Выполняется индексация. Можно закрыть эту страницу или отключить индексацию, чтобы остановить задачу.",
+  "knowledge.disabledHelp": "Включите индексацию этого каталога для запросов к коду. При отключении индекс и связи с памятью сохраняются.",
+  "knowledge.conflict": "Код или запись памяти изменились. Загрузите их заново перед сохранением связи.",
+  "knowledge.symbolMissing": "Символ или исходный код больше недоступны. Синхронизируйте индекс и повторите поиск.",
+  "knowledge.directoryMissing": "Рабочий каталог отсутствует или изменился. Проверьте пути проекта и сеанса.",
+  "knowledge.partial": "Индекс неполон. Повторите синхронизацию и проверьте доступность исходных файлов для чтения.",
+  "knowledge.interrupted": "Предыдущая задача была прервана. Запустите синхронизацию для повторной попытки.",
+  "knowledge.checksum": "Контрольная сумма загрузки не совпала. Среда выполнения не установлена.",
+  "knowledge.downloadFailed": "Не удалось скачать CodeGraph. Проверьте подключение сервера к GitHub и повторите попытку.",
+  "knowledge.timeout": "Время индексации истекло. Проверьте размер репозитория и повторите попытку.",
+  "knowledge.error": "Операция не выполнена. Проверьте доступ сервера к каталогам и среду выполнения, затем повторите попытку.",
+
+  // Global Memory: a thematic LLM Wiki shared across sessions.
+  "memory.title": "Глобальная память",
+  "memory.add": "Добавить в глобальную память",
+  "memory.intro": "Постоянно обновляемая вики, объединяющая знания, решения и опыт из разных сеансов.",
+  "memory.entries": "Статьи памяти",
+  "memory.emptyJobs": "История обработки пока пуста.",
+  "memory.jobs": "История обработки",
+  "memory.search": "Поиск по заголовкам и содержимому…",
+  "memory.empty": "Подходящих статей нет. Добавьте беседу, чтобы начать создавать вики.",
+  "memory.emptyDetail": "Выберите статью, чтобы прочитать её и просмотреть связи и источники.",
+  "memory.new": "Новая статья",
+  "memory.titleField": "Заголовок",
+  "memory.summary": "Краткое описание",
+  "memory.content": "Содержимое (Markdown)",
+  "memory.tags": "Метки (через запятую)",
+  "memory.related": "Связанные статьи",
+  "memory.backlinks": "Ссылки на эту статью",
+  "memory.sources": "Источники",
+  "memory.history": "История версий",
+  "memory.restore": "Восстановить эту версию",
+  "memory.restoreConfirm": "Восстановить эту редакцию как новую версию? Текущая версия останется в истории.",
+  "memory.deleteConfirm": "Удалить эту статью и историю её версий? Исходные сеансы сохранятся.",
+  "memory.export": "Экспорт в Markdown",
+  "memory.selectAgent": "Агент",
+  "memory.model": "Модель (необязательно)",
+  "memory.modelHint": "Оставьте поле пустым, чтобы использовать модель из настроек агента.",
+  "memory.compile": "Упорядочить и сохранить",
+  "memory.compileHelp": "Выбранный агент распределит знания из беседы по темам и объединит их с существующими статьями. Текст беседы и связанные статьи будут отправлены модели через настроенного вами агента.",
+  "memory.unavailable": "Не установлен или не настроен",
+  "memory.allTags": "Все метки",
+  "memory.updated": "Недавно обновлённые",
+  "memory.titleSort": "По заголовку",
+  "memory.sourceNote": "Этот снимок сохраняет текст беседы, использованный при обработке, даже после удаления исходного сеанса.",
+  "memory.noKnowledge": "Знания для повторного использования не найдены. Статьи не изменены.",
+  "memory.running": "Выполняется",
+  "memory.completed": "Завершено",
+  "memory.failed": "Ошибка",
+  "memory.cancelled": "Отменено",
+  "memory.extract": "Извлечение тем",
+  "memory.merge": "Объединение знаний",
+  "memory.commit": "Сохранение статей",
+  "memory.done": "Сохранено",
+  "memory.closeHint": "Во время обработки окно можно закрыть. Следить за ходом работы можно в истории обработки.",
+  "memory.conflict": "Статья изменилась во время операции. Загрузите её заново и повторите попытку. Ваши изменения не сохранены.",
+  "memory.duplicate": "Статья с таким заголовком уже существует. Откройте её, чтобы объединить содержимое.",
+  "memory.busy": "Другая обработка уже выполняется. Дождитесь завершения или отмените её в истории.",
+  "memory.notFound": "Эта статья, источник или задача больше не существует.",
+  "memory.noTranscript": "Для этого сеанса нет доступной для чтения беседы.",
+  "memory.agentUnavailable": "Выбранный агент недоступен. Проверьте путь к его исполняемому файлу в настройках.",
+  "memory.invalid": "Некоторые поля или ссылки недействительны. Проверьте заголовок, содержимое и связанные статьи.",
+  "memory.processFailed": "Агент не смог завершить обработку. Проверьте авторизацию, модель и настройки CLI, затем повторите попытку.",
+  "memory.timeout": "Время ожидания агента истекло. Выберите доступную модель или более короткую беседу и повторите попытку.",
+  "memory.interrupted": "Обработка прервана. Её можно повторить, используя сохранённый снимок источника.",
+  "memory.tooLarge": "Источник, контекст или ответ превышает допустимый размер. Содержимое не обрезано и не сохранено.",
+  "memory.invalidOutput": "Агент вернул неверные структурированные данные. Ничего не сохранено. Повторите попытку или выберите другого агента.",
+  "memory.loadError": "Не удалось загрузить память. Проверьте соединение и повторите попытку.",
+  "memory.unsaved": "Отменить несохранённые изменения?",
+  "memory.source": "Снимок источника",
+
   // ── Common ──
   "common.cancel": "Отмена", // Cancel
   "common.confirm": "ОК", // OK
@@ -26,6 +140,7 @@ const ru: typeof en = {
   "common.selectAll": "Выделить все", // Select All
   "common.copied": "Скопировано", // Copied
   "common.retry": "Повторить", // Retry
+  "common.experimental": "Экспериментальная функция",
   "common.refresh": "Обновить", // Refresh
   "common.loading": "Загрузка…", // Loading…
   "common.prev": "Назад", // Previous
@@ -411,9 +526,9 @@ const ru: typeof en = {
   "connect.showPassword": "Показать пароль",
   "connect.hidePassword": "Скрыть пароль",
   "connect.urlPasswordPlaceholder": "Пароль для входа",
-  "connect.mirror": "Зеркалировать раскладку на всех устройствах", // Mirror layout across devices
+  "connect.mirror": "Зеркалировать удалённое настольное приложение", // Mirror the remote desktop app
   "connect.mirrorHint":
-    "Вкладки, разделения и активная сессия одинаковы на всех устройствах, подключённых к этому удалённому сервису. Выключено — каждое устройство сохраняет свою раскладку.", // Tabs, splits, and the active session stay the same on every device connected to this remote service. Off = each device keeps its own layout.
+    "Вкладки, разделения и активная сессия совпадают с настольным приложением на удалённой машине; изменения с любой стороны видны на обеих. Если настольное приложение не запущено, это подключение открывает его базу данных напрямую, а при её отсутствии — отдельную базу данных.", // Same tabs, splits, and active session as the desktop app on the remote machine; changes on either side show on both. If the desktop app is not running, this connection opens its database directly, or a separate database when there is none.
   "connect.shareDesktopDb":
     "Использовать базу данных настольного приложения на удалённой машине",
   "connect.shareDesktopDbHint":
@@ -421,7 +536,7 @@ const ru: typeof en = {
 
   // ── Sidebar ──
   "tree.newSession": "Новая сессия", // New Session
-  "tree.newTerminalSession": "Новая сессия терминала", // New Terminal Session
+  "tree.newTerminalSession": "Новый терминал", // New Terminal
   "tree.newBrowserPage": "Новая страница браузера", // New Browser Page
   "tree.newAgentSession": (agent) => `Новая сессия ${agent}`, // New {agent} Session
   "tree.newAgentSessionGroup": "Другие сессии агента", // More Agent Session
@@ -628,6 +743,13 @@ const ru: typeof en = {
   "info.createdAt": "Создано", // Created at
 
   // Resume-session dialog
+  "importSessions.title": "Импорт сессий",
+  "importSessions.description": "Найдите существующие сессии Codex, Claude и OpenCode, рабочий каталог которых совпадает с каталогом проекта. Выберите сессии для добавления в проект, затем откройте нужную сессию, чтобы продолжить разговор.",
+  "importSessions.search": "Поиск по названию, агенту или ID сессии",
+  "importSessions.empty": "Подходящие сессии не найдены.",
+  "importSessions.imported": "Уже импортирована",
+  "importSessions.confirm": ({ count }: { count: number }) => `Импортировать (${count})`,
+  "importSessions.success": ({ count }: { count: number }) => `Количество сессий, добавленных в проект: ${count}.`,
   "resume.title": "Возобновить сессию", // Resume Session
   "resume.desc":
     "Выберите тип агента и введите собственный session id агента; при открытии продолжится исходный диалог.", // Pick the agent type and enter the agent's own session id…

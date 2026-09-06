@@ -31,6 +31,10 @@ pub struct SpawnRequest {
     /// Whether to create a dedicated Git worktree; the frontend defaults to true.
     #[serde(default)]
     pub worktree: Option<bool>,
+    /// Directory from which vspawn was invoked. The frontend uses it as the child cwd and as the
+    /// repository context when a dedicated worktree is requested.
+    #[serde(default)]
+    pub cwd: Option<String>,
     /// Model override chosen in the spawn confirmation dialog.
     #[serde(default)]
     pub model: Option<String>,
@@ -115,9 +119,10 @@ fn serve_loop(server: tiny_http::Server, app: AppCtx, token: String) {
     let app_for_spawn = app.clone();
     let app_for_prompt = app.clone();
     let app_for_view = app.clone();
-    serve_with(
+    serve_with_app(
         server,
         &token,
+        Some(app.clone()),
         |sid, signal| {
             app.emit(&StatusSignal::event_name(&sid), signal);
         },
@@ -150,6 +155,7 @@ fn serve_loop(server: tiny_http::Server, app: AppCtx, token: String) {
                                 | crate::models::SessionKind::Antigravity
                                 | crate::models::SessionKind::Cline
                                 | crate::models::SessionKind::Pi
+                                | crate::models::SessionKind::Omp
                                 | crate::models::SessionKind::Crush
                                 | crate::models::SessionKind::Kimi
                                 | crate::models::SessionKind::Kiro
@@ -255,9 +261,23 @@ impl CodexTurnGuard {
 /// Core request loop. Pass mapped status to `on_signal`, the first user message to `on_prompt` for
 /// automatic naming, and the agent's parsed session_id to `on_session_id`, then return 200.
 /// Callback extraction permits real-HTTP integration tests without Tauri.
+#[cfg(test)]
 fn serve_with(
     server: tiny_http::Server,
     token: &str,
+    on_signal: impl FnMut(String, StatusSignal),
+    on_prompt: impl FnMut(String, String),
+    on_session_id: impl FnMut(String, String),
+    on_spawn: impl FnMut(SpawnRequest),
+    on_view: impl FnMut(ViewRequest),
+) {
+    serve_with_app(server,token,None,on_signal,on_prompt,on_session_id,on_spawn,on_view)
+}
+
+fn serve_with_app(
+    server: tiny_http::Server,
+    token: &str,
+    app: Option<AppCtx>,
     mut on_signal: impl FnMut(String, StatusSignal),
     mut on_prompt: impl FnMut(String, String),
     mut on_session_id: impl FnMut(String, String),
@@ -271,6 +291,13 @@ fn serve_with(
     for mut request in server.incoming_requests() {
         // Copy the URL before borrowing the request to read its body.
         let url = request.url().to_string();
+        if url == "/knowledge" {
+            if let Some(app) = &app {
+                let app = app.clone(); let token = token.to_string();
+                std::thread::spawn(move || crate::knowledge::agent::handle(app,request,token));
+            } else { let _ = request.respond(tiny_http::Response::empty(404)); }
+            continue;
+        }
         // Hook, spawn, and view POST requests all carry JSON bodies.
         let mut body = String::new();
         let _ = request.as_reader().read_to_string(&mut body);
@@ -440,6 +467,7 @@ fn is_auto_name(name: &str) -> bool {
         "Antigravity",
         "Cline",
         "Pi",
+        "OMP",
         "Crush",
         "Kimi Code",
         "Kimi",
@@ -993,13 +1021,13 @@ mod tests {
 
     #[test]
     fn parse_spawn_extracts_and_validates() {
-        let body =
-            r#"{"parentSessionId":"p1","prompt":"fix the login bug","kind":"claude","worktree":true}"#;
+        let body = r#"{"parentSessionId":"p1","prompt":"fix the login bug","kind":"claude","worktree":true,"cwd":"/repo"}"#;
         let req = parse_spawn("/spawn?t=tok", body, "tok").expect("should parse");
         assert_eq!(req.parent_session_id, "p1");
         assert_eq!(req.prompt, "fix the login bug");
         assert_eq!(req.kind.as_deref(), Some("claude"));
         assert_eq!(req.worktree, Some(true));
+        assert_eq!(req.cwd.as_deref(), Some("/repo"));
 
         // kind and worktree are optional.
         let req2 = parse_spawn(
@@ -1010,6 +1038,7 @@ mod tests {
         .unwrap();
         assert_eq!(req2.kind, None);
         assert_eq!(req2.worktree, None);
+        assert_eq!(req2.cwd, None);
 
         // Wrong token/path, empty required fields, or invalid JSON yields None.
         assert!(parse_spawn("/spawn?t=wrong", body, "tok").is_none());

@@ -131,8 +131,16 @@ export function useServerBrowser(active: boolean) {
   const [query, setQuery] = useState("");
   const [error, setError] = useState(""); // Action error written by save/import dialogs.
 
+  /**
+   * Whether the user already chose a directory during this activation. `home_dir` is answered over the
+   * WebSocket for remote clients, where the round trip easily outlasts a pasted path plus Enter; without
+   * this flag the late answer would replace the directory the user just navigated to with Home.
+   */
+  const navigatedRef = useRef(false);
+
   /** Set a directory as both tree root and current target. */
   const setRoot = useCallback((target: string) => {
+    navigatedRef.current = true;
     setRootPath(target);
     setSelectedDir(target);
     setQuery("");
@@ -159,10 +167,11 @@ export function useServerBrowser(active: boolean) {
     };
   }, [rootPath]);
 
-  // Start at Home whenever the dialog opens.
+  // Start at Home whenever the dialog opens, unless the user navigated before the answer arrived.
   useEffect(() => {
     if (!active) return;
     let cancelled = false;
+    navigatedRef.current = false;
     setError("");
     setQuery("");
     invoke<string | null>("home_dir")
@@ -170,13 +179,12 @@ export function useServerBrowser(active: boolean) {
         if (cancelled) return;
         const base = h || "/";
         setHome(base);
-        setRoot(base);
+        if (!navigatedRef.current) setRoot(base);
       })
       .catch(() => {
-        if (!cancelled) {
-          setHome("");
-          setRoot("/");
-        }
+        if (cancelled) return;
+        setHome("");
+        if (!navigatedRef.current) setRoot("/");
       });
     return () => {
       cancelled = true;
@@ -430,6 +438,18 @@ export function ServerBrowserView({
         if (h) target = h + raw.slice(1);
       }
       if (target !== "/") target = target.replace(/\/+$/, "");
+      // Pasted paths often point at a file rather than a directory, an image path copied out of the
+      // terminal being the common case. Listing a file fails and would leave an empty tree, so open the
+      // directory holding it. The parent listing also tells file from directory in a single round trip;
+      // when it cannot, the typed path is used unchanged and the tree reports the error itself.
+      const parent = parentOf(target);
+      if (target.startsWith("/") && parent !== target) {
+        const base = baseName(target);
+        const entry = await listDir(parent)
+          .then((kids) => kids.find((k) => k.name === base))
+          .catch(() => undefined);
+        if (entry && !entry.isDir) target = parent;
+      }
       browser.setRoot(target);
     } else if (chips[0]) {
       browser.setRoot(chips[0].path);

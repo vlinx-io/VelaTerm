@@ -26,7 +26,7 @@ Most operations live in the context menus:
 
 ![Project context menu](../assets/manuals/project-menu.png)
 
-- **Create**: project / group menus offer New Claude Session, more agent types under More Agent Session, New Browser Page (desktop), and New Group. Group menus also carry New Terminal Session, and so does the ＋ button that appears when you hover any project / group / session row — both create a center-pane draft terminal rather than a tree node. At the bottom you'll also find "New with launch args…" (create with custom launch arguments) and "Resume Session…" (attach a known agent session id as a new node — see the agents manual).
+- **Create**: project / group menus offer New Claude Session, more agent types under More Agent Session, New Browser Page (desktop), and New Group. Project and group menus also carry New Terminal, and so does the ＋ button that appears when you hover any project / group / session row — both create a center-pane draft terminal rather than a tree node. At the bottom you'll also find "New with launch args…" (create with custom launch arguments) and "Resume Session…" (attach a known agent session id as a new node — see the agents manual).
 - **Move**: drag nodes directly, or right-click → "Move to…". A session can also be moved under another session to become its child.
 - **Rename / Edit**: Rename changes the name; Edit opens the full form (name, working directory, startup command, launch args, permission toggle, and so on). If you don't name a claude session, it names itself after your first message.
 - **Multi-select**: ⌘/Ctrl-click several sessions, then right-click for batch open, batch archive, batch move, or batch delete.

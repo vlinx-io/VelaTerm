@@ -182,6 +182,32 @@ export function TabBar() {
     setMenu({ x: e.clientX, y: e.clientY, tabId });
   };
 
+  // Tab armed by a middle-button press, cleared once the pointer leaves the bar so a press that started
+  // outside, or one the user dragged away from, cannot close anything.
+  const midPressTabId = useRef<string | null>(null);
+
+  /** Middle-click closes a tab, matching browser tab strips, and is attached to every tab root.
+   * Pressing does not close: the button must go down and come back up on the same tab, so dragging off
+   * before release cancels. The press is also swallowed because the middle button carries platform defaults
+   * we never want here — autoscroll on Chromium, primary-selection paste on WebKitGTK, which would otherwise
+   * drop text into the scratch-terminal rename field. Down/up rather than auxclick: WKWebView gained that
+   * event only in a later Safari than the macOS floor Tauri builds against. */
+  const middleCloseProps = (tabId: string) => ({
+    onMouseDown: (e: React.MouseEvent) => {
+      if (e.button !== 1) return;
+      e.preventDefault();
+      midPressTabId.current = tabId;
+    },
+    onMouseUp: (e: React.MouseEvent) => {
+      if (e.button !== 1) return;
+      const armed = midPressTabId.current === tabId;
+      midPressTabId.current = null;
+      // An in-place rename keeps the tab open; the press existed only to swallow the paste.
+      if (!armed || renamingTabId === tabId) return;
+      closeAnyTab(tabId);
+    },
+  });
+
   // Frontend tooltip text/screen coordinates; null hides it and showTimer controls its early delay.
   const [tip, setTip] = useState<{ text: string; x: number; y: number } | null>(null);
   const showTimer = useRef<number | null>(null);
@@ -290,7 +316,12 @@ export function TabBar() {
   }, [openTabs, activeTabId]);
 
   return (
-    <div className="tabbar" onDragOver={onBarDragOver} onDrop={onBarDrop}>
+    <div
+      className="tabbar"
+      onDragOver={onBarDragOver}
+      onDrop={onBarDrop}
+      onMouseLeave={() => { midPressTabId.current = null; }}
+    >
       {openTabs.map((tabId) => {
         // Document tab: file icon, filename, dirty marker, and close action.
         const doc = docTabs[tabId];
@@ -307,6 +338,7 @@ export function TabBar() {
               onMouseEnter={(e) => onTabEnter(e, doc.path)}
               onMouseLeave={onTabLeave}
               {...dragProps(tabId)}
+              {...middleCloseProps(tabId)}
             >
               <span style={{ color: "var(--text-dim)", display: "grid", flex: "none" }}>
                 {doc.kind === "image" ? <Icons.image size={13} /> : <Icons.file size={13} />}
@@ -353,6 +385,7 @@ export function TabBar() {
               onMouseEnter={(e) => onTabEnter(e, browser.url)}
               onMouseLeave={onTabLeave}
               {...dragProps(tabId)}
+              {...middleCloseProps(tabId)}
             >
               <span style={{ color: "var(--text-dim)", display: "grid", flex: "none" }}>
                 <Icons.globe size={13} />
@@ -400,6 +433,7 @@ export function TabBar() {
             onMouseEnter={(e) => onTabEnter(e, pathTitle)}
             onMouseLeave={onTabLeave}
             {...dragProps(tabId)}
+            {...middleCloseProps(tabId)}
           >
             <span
               style={{
@@ -448,7 +482,7 @@ export function TabBar() {
       <button className="tab-add" title={t("tab.newTerminal")} onClick={() => newScratchTab()}>
         <Icons.plus size={14} />
       </button>
-      {/* Permanent entries on the right, separated from the tabs: new terminal session, new document, built-in browser tab. */}
+      {/* Permanent entries on the right, separated from the tabs: new terminal, new document, built-in browser tab. */}
       <div style={{ marginLeft: "auto", display: "flex", flex: "none" }}>
         <button className="tab-add" title={t("tab.newTerminal")} onClick={() => newScratchTab()}>
           <Icons.terminal size={14} />

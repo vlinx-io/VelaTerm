@@ -72,6 +72,7 @@ import {
   writeTerminalOutput,
 } from "../terminal/outputScheduler";
 import { installWebkitImeFix, isWebkitEngine } from "../terminal/imeWebkitFix";
+import { installImeCaret } from "../terminal/imeCaret";
 import { detectAgentScreen, readScreenTail } from "../terminal/screenDetect";
 import { remapGrokDayCanvasToWhite } from "../terminal/grokBgRemap";
 import { fontStack, resolveTheme, XTERM_THEME } from "../theme";
@@ -411,6 +412,10 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
     };
     container.addEventListener("compositionend", onCompositionEndReset, true);
 
+    // Draw a caret inside the pre-edit overlay while composing; xterm's overlay has none and it covers the
+    // terminal cursor (issue #59). See imeCaret.ts.
+    const imeCaret = installImeCaret(container);
+
     let disposed = false;
     let unlistenExit: UnlistenFn | undefined;
     let unlistenKilled: UnlistenFn | undefined;
@@ -564,6 +569,8 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
                     ? "cline"
                     : session.kind === "pi"
                       ? "pi"
+                      : session.kind === "omp"
+                      ? "omp"
                       : session.kind === "crush"
                         ? "crush"
                         : session.kind === "kimi"
@@ -931,6 +938,7 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       container.removeEventListener("compositionstart", onUserInputSignal, true);
       container.removeEventListener("compositionupdate", onUserInputSignal, true);
       container.removeEventListener("compositionend", onCompositionEndReset, true);
+      imeCaret.dispose();
       imeFix?.dispose();
       writeParsedSub.dispose();
       dataSub.dispose();

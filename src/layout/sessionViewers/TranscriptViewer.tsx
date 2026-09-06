@@ -24,6 +24,7 @@ export function assistantLabel(kind: Session["kind"]): string {
   if (kind === "antigravity") return "Antigravity";
   if (kind === "cline") return "Cline";
   if (kind === "pi") return "Pi";
+  if (kind === "omp") return "OMP";
   if (kind === "crush") return "Crush";
   if (kind === "kimi") return "Kimi Code (K3)";
   if (kind === "kiro") return "Kiro";
@@ -43,12 +44,15 @@ export function TranscriptViewer({
   session,
   messages,
   initialQuery,
+  highlightTerms,
   scrollToMessageIndex,
 }: {
   session: Session;
   messages: TranscriptMessage[];
-  /** Initial browsing query or controlled highlight query in locate mode. */
+  /** Initial browsing query; also the locate-mode highlight when `highlightTerms` is absent. */
   initialQuery?: string;
+  /** Locate mode: literals the search index matched, highlighted instead of the raw query. */
+  highlightTerms?: string[];
   /** Message index to scroll to and highlight; providing it enables locate mode. */
   scrollToMessageIndex?: number;
 }) {
@@ -57,10 +61,12 @@ export function TranscriptViewer({
   const isLocate = scrollToMessageIndex != null;
   const targetRef = useRef<HTMLDivElement | null>(null);
 
-  // Internal query for browsing mode; locate mode is controlled by initialQuery.
+  // Internal query for browsing mode; locate mode is controlled by highlightTerms/initialQuery.
   const [browseQuery, setBrowseQuery] = useState(initialQuery ?? "");
-  // Effective highlight query: external initialQuery in locate mode, internal input otherwise.
-  const q = (isLocate ? (initialQuery ?? "") : browseQuery).trim();
+  // Effective highlight terms: the matched literals in locate mode, the internal input otherwise.
+  const terms: string[] = isLocate
+    ? (highlightTerms ?? [initialQuery ?? ""]).map((s) => s.trim()).filter(Boolean)
+    : [browseQuery.trim()].filter(Boolean);
 
   // Locate mode preserves all messages and original indices; browsing mode filters by its query.
   const visible = useMemo(() => {
@@ -107,7 +113,7 @@ export function TranscriptViewer({
             />
           </div>
           <span style={{ fontSize: 11.5, color: "var(--text-muted)", flex: "0 0 auto" }}>
-            {q
+            {browseQuery.trim()
               ? t("archive.msgCountFiltered", visible.length, messages.length)
               : t("archive.msgCountAll", messages.length)}
           </span>
@@ -157,7 +163,7 @@ export function TranscriptViewer({
                   }}
                 >
                   {/* Use active highlighting for the target and regular highlighting for other matches. */}
-                  {q ? highlightMatches(m.text, q, isTarget) : m.text}
+                  {terms.length > 0 ? highlightMatches(m.text, terms, isTarget) : m.text}
                 </div>
               )}
               {m.tools.length > 0 && (
@@ -170,7 +176,7 @@ export function TranscriptViewer({
         })}
         {visible.length === 0 && (
           <div style={{ padding: 20, fontSize: 13, color: "var(--text-muted)" }}>
-            {q ? t("archive.noMatch") : t("archive.emptyTranscript")}
+            {browseQuery.trim() ? t("archive.noMatch") : t("archive.emptyTranscript")}
           </div>
         )}
       </div>

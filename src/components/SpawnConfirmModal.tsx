@@ -9,7 +9,7 @@
 //!
 //! State comes from the store's pendingSpawns queue; like DirectoryPickerModal, it mounts at the App root.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useT } from "../i18n";
 import { useSuspendNativeViews } from "../hooks/nativeViewSuspend";
 import { agentListModels } from "../ipc/commands";
@@ -30,6 +30,7 @@ const KIND_OPTIONS: { value: SpawnKind; label: string }[] = [
   { value: "antigravity", label: "Antigravity" },
   { value: "cline", label: "Cline" },
   { value: "pi", label: "Pi" },
+  { value: "omp", label: "OMP" },
   { value: "crush", label: "Crush" },
   { value: "kimi", label: "Kimi Code" },
   { value: "kiro", label: "Kiro" },
@@ -200,11 +201,10 @@ export function SpawnConfirmModal() {
   const [catalog, setCatalog] = useState<string[]>([]);
   const [listing, setListing] = useState(false);
 
-  // Reset fields when the queue head changes after enqueue, confirmation, or cancellation. Each
-  // queued request is a new object, so reference changes reliably trigger the reset.
-  useEffect(() => {
-    if (!req) return;
-    // Default to the parent agent type; use Claude when the parent is absent or is not an agent.
+  // The agent the request itself asks for: its own kind, else the parent's, else Claude. Both effects
+  // below need it — one to preselect the type, the other to decide whether a model named on the
+  // command line still applies to the currently selected type.
+  const requestedKind = useMemo<SpawnKind>(() => {
     const fallback: SpawnKind =
       parent?.kind === "codex" ||
       parent?.kind === "opencode" ||
@@ -220,9 +220,15 @@ export function SpawnConfirmModal() {
       parent?.kind === "zoo"
         ? parent.kind
         : "claude";
-    const resolvedKind = (req.kind ?? null) || fallback;
+    return (req?.kind ?? null) || fallback;
+  }, [req, parent]);
+
+  // Reset fields when the queue head changes after enqueue, confirmation, or cancellation. Each
+  // queued request is a new object, so reference changes reliably trigger the reset.
+  useEffect(() => {
+    if (!req) return;
     setPrompt(req.prompt);
-    setKind(resolvedKind);
+    setKind(requestedKind);
     // Worktrees default on, matching backend and legacy behavior; only explicit false disables them.
     setWorktree(req.worktree !== false);
     // Depend only on req because parent is derived from it.
@@ -237,10 +243,19 @@ export function SpawnConfirmModal() {
     const spec = modelSpec(kind);
     const inherited = parent && parent.kind === kind ? parent.agentArgs : "";
     const args = inherited || agentDefaults[kind]?.args || "";
+    // A model or effort named by `vspawn --model/--effort` was chosen for the agent the caller asked
+    // for, so it prefills only while that agent is still selected. Switching the type in the card
+    // drops it, the same way an inherited model is dropped when the child runs a different agent.
+    const asked = kind === requestedKind;
+    const askedModel = asked ? (req.model ?? "") : "";
+    // The effort control is a fixed list, so a level this agent does not document has nowhere to
+    // show; fall back to the inherited value rather than silently selecting nothing.
+    const askedEffort = asked ? (req.effort ?? "") : "";
+    const effortListed = spec?.effort?.values.includes(askedEffort) ? askedEffort : "";
     // Each agent spells these flags differently, so read back the flag this agent actually uses; a
     // Claude `--effort` sitting in another agent's arguments is not this agent's effort setting.
-    setModel(spec ? readFlag(args, spec.modelFlag) : "");
-    setEffort(spec?.effort ? readFlag(args, spec.effort.flag) : "");
+    setModel(spec ? askedModel || readFlag(args, spec.modelFlag) : "");
+    setEffort(spec?.effort ? effortListed || readFlag(args, spec.effort.flag) : "");
     // Parent and defaults are derived from req and kind.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [req, kind]);
@@ -292,6 +307,8 @@ export function SpawnConfirmModal() {
       prompt,
       kind,
       worktree,
+      // Keep the invocation directory captured by vspawn even when the card edits the visible fields.
+      cwd: req.cwd ?? null,
       // Agents without these selectors never receive an override: the fields are hidden, so any value
       // still held there is a leftover from another agent the user cannot see or clear.
       model: showModel ? model.trim() || null : null,

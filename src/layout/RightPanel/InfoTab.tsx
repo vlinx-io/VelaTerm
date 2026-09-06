@@ -45,10 +45,27 @@ function useNowTick(): number {
   return now;
 }
 
-/** Self-contained uptime row that rerenders only this KV each second. */
-function UptimeKV({ startedAt }: { startedAt: number | undefined }) {
+/**
+ * Start time and uptime share one row: the clock reads when the process began, the elapsed time
+ * beside it says how long ago that was. Own the one-second tick here so only this KV rerenders.
+ */
+function StartedKV({ startedAt }: { startedAt: number | undefined }) {
   const now = useNowTick();
-  return <KV k="uptime" v={startedAt ? fmtUptime(now - startedAt) : "—"} />;
+  return (
+    <KV
+      k="started"
+      v={
+        startedAt ? (
+          <>
+            {new Date(startedAt).toLocaleTimeString(dateLocale())}
+            <span className="kv-sub">{fmtUptime(now - startedAt)}</span>
+          </>
+        ) : (
+          "—"
+        )
+      }
+    />
+  );
 }
 
 /** Color a 0-100 percentage by severity, matching the quota rows: red at 90%, yellow at 70%. */
@@ -94,8 +111,8 @@ function MeterKV({
   );
 }
 
-/** Whole-machine rows. Which saturation signal appears is decided by the backend, not by sniffing the
- * platform here: macOS sends the kernel's memory pressure level, Linux sends load averages. */
+/** Whole-machine rows. The backend supplies every saturation signal available on the host: macOS sends
+ * memory pressure and load averages, while Linux sends load averages. The UI does not sniff the platform. */
 function SystemRows({ sys }: { sys: SystemStats | null }) {
   if (!sys) {
     return (
@@ -685,20 +702,18 @@ export function InfoTab({ session, cwd }: { session: Session; cwd: string | null
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
       <div className="insp-section">
-        <h4>{isAgent ? "Agent" : "Process"}</h4>
+        {/* Which agent this is belongs with the section title rather than in a row of its own: it
+            names the whole group below, the way "Process" is qualified by its pid. */}
+        <h4 style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span>{isAgent ? "Agent" : "Process"}</span>
+          <span className="insp-head-tag">
+            {isAgent ? runtime?.agent || session.kind : (runtime?.pid ?? "—")}
+          </span>
+        </h4>
         <KV k="session" v={session.name} />
         <KV k="cwd" v={cwd || "—"} />
         <KV k="branch" v={branch || "—"} accent />
-        {isAgent ? (
-          <KV k="agent" v={runtime?.agent || session.kind} accent />
-        ) : (
-          <KV k="pid" v={runtime?.pid ?? "—"} />
-        )}
-        <KV
-          k="started"
-          v={startedAt ? new Date(startedAt).toLocaleTimeString(dateLocale()) : "—"}
-        />
-        <UptimeKV startedAt={startedAt} />
+        <StartedKV startedAt={startedAt} />
       </div>
 
       {isAgent && (

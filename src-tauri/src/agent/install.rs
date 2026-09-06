@@ -109,6 +109,19 @@ pub fn install_recipe(agent: &str) -> Option<InstallRecipe> {
             auth_hint:
                 "Run `pi`, then `/login` (Claude/ChatGPT/Copilot) or set a provider API key.".into(),
         },
+        "omp" => InstallRecipe {
+            label: "OMP".into(),
+            bin: "omp".into(),
+            // Official Node-free installer; it drops a single prebuilt binary into ~/.local/bin.
+            command: if win {
+                "irm https://omp.sh/install.ps1 | iex".into()
+            } else {
+                "curl -fsSL https://omp.sh/install | sh".into()
+            },
+            needs_node: false,
+            docs_url: "https://omp.sh/".into(),
+            auth_hint: "Run `omp`, complete the setup, or use `/login` inside a session.".into(),
+        },
         "antigravity" => InstallRecipe {
             label: "Antigravity CLI".into(),
             // The executable is `agy`, matching inject.rs, not `antigravity`.
@@ -260,6 +273,12 @@ pub fn locate_installed_bin(agent: &str) -> Option<String> {
         "cline" => ("cline", true),
         // Pi has no native installer and uses global npm only.
         "pi" => ("pi", true),
+        // OMP's official installer always writes ~/.local/bin/omp (PI_INSTALL_DIR overrides it), so stat that
+        // path rather than reasoning from an npm prefix.
+        "omp" => {
+            candidates.push(home.join(".local").join("bin").join(exe_name("omp", win)));
+            ("omp", false)
+        }
         // Grok's native installer targets ~/.grok/bin; also probe ~/.local/bin for manually linked installs.
         // Windows uses the official npm fallback.
         "grok" => {
@@ -438,6 +457,7 @@ mod tests {
             "antigravity",
             "cline",
             "pi",
+            "omp",
             "crush",
         ] {
             let r = install_recipe(a).unwrap_or_else(|| panic!("no install recipe for {a}"));
@@ -445,6 +465,16 @@ mod tests {
             assert!(!r.bin.is_empty(), "the bin for {a} must not be empty");
             assert!(r.docs_url.starts_with("https://"), "the documentation link for {a} should be https");
         }
+    }
+
+    #[test]
+    fn omp_recipe_uses_the_official_installer() {
+        // OMP ships a prebuilt binary through its own installer, so the recipe must not require Node, and its
+        // binary name has to match the command inject.rs launches.
+        let r = install_recipe("omp").unwrap();
+        assert_eq!(r.bin, "omp");
+        assert!(!r.needs_node, "OMP's installer downloads a binary and needs no Node");
+        assert!(r.command.contains("omp.sh/install"), "the recipe should use the official installer");
     }
 
     #[test]

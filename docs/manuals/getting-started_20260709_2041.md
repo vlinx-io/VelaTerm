@@ -34,7 +34,7 @@ Once a project is in, you can create **groups** under it (nested arbitrarily dee
 Any of the three:
 
 1. Press ⌘T (Ctrl+Alt+T on Windows/Linux) — you instantly get a scratch terminal tab. Terminals are always drafts: they live in the center pane only, never join the tree, and are discarded when closed, which is what makes them handy for quick commands.
-2. Hover a project, group, or session row in the sidebar and click the ＋ button → "New Terminal Session". You get the same kind of draft, except it starts in that node's working directory. The group context menu carries the same entry.
+2. Hover a project, group, or session row in the sidebar and click the ＋ button → "New Terminal". You get the same kind of draft, except it starts in that node's working directory. Project and group context menus carry the same entry.
 3. When the center pane is empty, just click the "Create Terminal" button.
 
 ![Center pane with no session open](../assets/manuals/empty-state.png)

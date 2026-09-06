@@ -41,8 +41,9 @@ export interface AgentModelSpec {
  * Model and effort support per agent kind.
  *
  * Sources: `claude --help` plus the 2.1.245 binary's alias table; `codex` 0.146.0 built-in presets;
- * `opencode models`; `cursor-agent --list-models`; `pi --list-models`; `grok models` and
- * `grok --help`; Kimi Code, Kiro, Zoo/Roo, Antigravity, Cline, and Crush official documentation.
+ * `opencode models`; `cursor-agent --list-models`; `pi --list-models`; `omp --help` and `omp models --json`
+ * on v18.1.10; `grok models` and `grok --help`; Kimi Code, Kiro, Zoo/Roo, Antigravity, Cline, and Crush
+ * official documentation.
  */
 export const AGENT_MODEL_SPECS: Record<AgentKind, AgentModelSpec> = {
   // Aliases resolve to the current model of each family. The `[1m]` variants request the 1M-token
@@ -105,6 +106,17 @@ export const AGENT_MODEL_SPECS: Record<AgentKind, AgentModelSpec> = {
     effort: { flag: "--thinking", values: ["none", "low", "medium", "high", "xhigh"] },
   },
   pi: { modelFlag: "--model", source: "list", effort: null },
+  // OMP lists its catalogue as JSON and grades reasoning with `--thinking`, which its own `--help` documents
+  // as off/minimal/low/medium/high/xhigh/max/auto. `auto` is omitted: it is the unset behaviour, which the
+  // dialog already expresses as "Default".
+  omp: {
+    modelFlag: "--model",
+    source: "list",
+    effort: {
+      flag: "--thinking",
+      values: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+    },
+  },
   // Crush configures reasoning in its crushrc script, not on the command line.
   crush: { modelFlag: "--model", source: "list", effort: null },
   // Kimi Code's managed provider exposes exactly these four; other providers are configured in

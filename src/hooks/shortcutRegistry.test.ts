@@ -1,7 +1,7 @@
 //! Regression tests for platform/browser-aware shortcut defaults.
 //!
-//! Desktop macOS shells bind Cmd combos; Windows/Linux and plain-browser clients (URL remote access)
-//! bind Ctrl+Alt combos because browsers consume Cmd/Ctrl letter keys before the page sees them.
+//! Desktop macOS shells bind Cmd combos; macOS browsers retain Cmd splits alongside Ctrl bindings
+//! for other actions. Windows/Linux bind Ctrl+Alt combos.
 //! Remote-connection windows are WebViews without browser reservations, so they keep Cmd on macOS.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -66,17 +66,36 @@ describe("shortcut defaults per shell", () => {
     expect(formatCombo("mod+shift+d")).toBe("\u2318\u21E7D");
   });
 
-  it("macOS plain browser uses Ctrl+Alt bindings because the browser eats Cmd combos", async () => {
+  it("macOS plain browser uses Cmd splits alongside existing Ctrl bindings", async () => {
     vi.stubGlobal("navigator", MAC_NAVIGATOR);
     envState.isBrowser = true;
     envState.isRemoteWindow = false;
-    const { DEFAULT_BINDINGS, IS_PLAIN_BROWSER, formatCombo } = await loadRegistry();
+    const { DEFAULT_BINDINGS, IS_PLAIN_BROWSER, formatCombo, matchCombo, comboFromEvent,
+      appAltKeyCodes, labelWithCombo } = await loadRegistry();
 
     expect(IS_PLAIN_BROWSER).toBe(true);
-    expect(DEFAULT_BINDINGS.splitRight).toBe("mod+alt+d");
-    expect(DEFAULT_BINDINGS.splitDown).toBe("mod+alt+e");
+    expect(DEFAULT_BINDINGS.splitRight).toBe("cmd+d");
+    expect(DEFAULT_BINDINGS.splitDown).toBe("cmd+shift+d");
     expect(DEFAULT_BINDINGS.newTab).toBe("mod+alt+t");
+    expect(DEFAULT_BINDINGS.saveDoc).toBe("mod+s");
+    expect(formatCombo(DEFAULT_BINDINGS.splitRight)).toBe("⌘D");
+    expect(formatCombo(DEFAULT_BINDINGS.splitDown)).toBe("⌘⇧D");
     expect(formatCombo("mod+alt+d")).toBe("Ctrl+Alt+D");
+    expect(matchCombo(keyEvent("d", { meta: true }), DEFAULT_BINDINGS.splitRight)).toBe(true);
+    expect(matchCombo(keyEvent("D", { meta: true, shift: true }), DEFAULT_BINDINGS.splitDown)).toBe(true);
+    expect(matchCombo(keyEvent("d", { ctrl: true }), DEFAULT_BINDINGS.splitRight)).toBe(false);
+    expect(matchCombo(keyEvent("d", { meta: true, ctrl: true }), DEFAULT_BINDINGS.splitRight)).toBe(false);
+    expect(matchCombo(keyEvent("d", { meta: true, shift: true }), DEFAULT_BINDINGS.splitRight)).toBe(false);
+    expect(comboFromEvent(keyEvent("d", { meta: true }))).toBe("cmd+d");
+    expect(comboFromEvent(keyEvent("d", { meta: true, shift: true }))).toBe("cmd+shift+d");
+    expect(comboFromEvent(keyEvent("k", { ctrl: true, alt: true }))).toBe("mod+alt+k");
+    expect(matchCombo(keyEvent("k", { ctrl: true, alt: true }), "mod+alt+k")).toBe(true);
+    expect(labelWithCombo("Split right", "splitRight", { splitRight: "mod+alt+k" })).toBe(
+      "Split right (Ctrl+Alt+K)",
+    );
+    expect(appAltKeyCodes({}).has("KeyD")).toBe(false);
+    expect(appAltKeyCodes({ splitRight: "cmd+alt+k" }).has("KeyK")).toBe(false);
+    expect(appAltKeyCodes({ splitRight: "mod+alt+k" }).has("KeyK")).toBe(true);
   });
 
   it("macOS remote-connection window keeps Cmd bindings", async () => {

@@ -15,6 +15,8 @@ pub(crate) mod dispatch;
 // dispatch mints download tickets, so this is reachable from the crate rather than private to web transport.
 pub(crate) mod download;
 mod e2ee;
+// The desktop's always-on loopback link for SSH mirror connections (see local_link.rs).
+pub(crate) mod local_link;
 pub(crate) mod mirror;
 pub(crate) mod presence;
 mod rate_limit;

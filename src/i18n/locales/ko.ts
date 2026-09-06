@@ -3,6 +3,120 @@
 import type en from "./en";
 
 const ko: typeof en = {
+  // Project code intelligence and memory associations.
+  "knowledge.title": "코드 그래프",
+  "knowledge.intro": "코드 관계를 살펴보고 저장된 설계 결정과 연결합니다.",
+  "knowledge.setup": "이 백엔드에 CodeGraph를 설치하면 프로젝트 인덱싱을 활성화할 수 있습니다.",
+  "knowledge.downloadNotice": "검증된 CodeGraph 런타임을 GitHub에서 다운로드합니다. 코드 인덱싱은 이 컴퓨터에서 수행되며 원격 측정과 업데이트 확인은 비활성화됩니다.",
+  "knowledge.install": "CodeGraph 다운로드",
+  "knowledge.installing": "다운로드 및 설치 중…",
+  "knowledge.directory": "작업 디렉터리",
+  "knowledge.enable": "인덱싱 활성화",
+  "knowledge.disable": "인덱싱 비활성화",
+  "knowledge.sync": "동기화",
+  "knowledge.ready": "사용 가능",
+  "knowledge.disabled": "비활성화됨",
+  "knowledge.indexing": "인덱싱 중…",
+  "knowledge.syncing": "동기화 중…",
+  "knowledge.failed": "실패",
+  "knowledge.symbols": "심볼",
+  "knowledge.files": "파일",
+  "knowledge.edges": "관계",
+  "knowledge.search": "심볼 또는 파일 경로 검색…",
+  "knowledge.searchButton": "검색",
+  "knowledge.noResults": "일치하는 심볼이 없습니다.",
+  "knowledge.selectSymbol": "심볼을 선택하면 소스, 관계 및 연결된 메모리를 볼 수 있습니다.",
+  "knowledge.source": "소스",
+  "knowledge.incoming": "들어오는 관계",
+  "knowledge.outgoing": "나가는 관계",
+  "knowledge.noEdges": "인덱스에 관계가 없습니다.",
+  "knowledge.analysisNote": "관계는 정적 분석 결과이며 불완전하거나 불확실할 수 있습니다.",
+  "knowledge.changed": "조회 중에 파일이 변경되었습니다. 행 번호를 사용하거나 검토를 확정하기 전에 다시 동기화하세요.",
+  "knowledge.truncated": "표시 수가 제한되어 일부 관계 또는 소스 행이 생략되었습니다.",
+  "knowledge.linkMemory": "메모리 연결",
+  "knowledge.chooseMemory": "메모리 항목 선택",
+  "knowledge.noLinks": "코드 연결이 없습니다. 심볼 상세 화면에서 메모리를 연결할 수 있습니다.",
+  "knowledge.inspect": "코드와 메모리 검토",
+  "knowledge.unlink": "연결 제거",
+  "knowledge.codeReferences": "코드 참조",
+  "knowledge.refresh": "새로 고침",
+  "knowledge.current": "변경 없음",
+  "knowledge.review": "검토 필요",
+  "knowledge.unavailable": "사용 불가",
+  "knowledge.reviewHelp": "이 메모리를 표시된 코드와 비교하세요. 확인하면 현재 파일 버전만 기록하며 메모리 본문은 변경하지 않습니다.",
+  "knowledge.confirmReview": "검토 완료 확인",
+  "knowledge.agentHint": "에이전트는 이 작업 디렉터리에서 vknowledge search \"주제\"를 실행할 수 있습니다. 활성화된 인덱스를 동기화하고 코드와 메모리를 별도로 반환합니다.",
+  "knowledge.busy": "인덱싱 작업이 진행 중입니다. 이 페이지를 닫거나 인덱싱을 비활성화하여 작업을 중지할 수 있습니다.",
+  "knowledge.disabledHelp": "코드를 조회하려면 이 디렉터리의 인덱싱을 활성화하세요. 비활성화해도 인덱스와 메모리 연결은 유지됩니다.",
+  "knowledge.conflict": "코드 또는 메모리가 변경되었습니다. 둘 다 다시 불러온 후 연결을 저장하세요.",
+  "knowledge.symbolMissing": "심볼 또는 소스를 사용할 수 없습니다. 동기화한 후 다시 검색하세요.",
+  "knowledge.directoryMissing": "작업 디렉터리가 없거나 변경되었습니다. 프로젝트와 세션 경로를 확인하세요.",
+  "knowledge.partial": "인덱스가 불완전합니다. 다시 동기화하고 소스 파일을 읽을 수 있는지 확인하세요.",
+  "knowledge.interrupted": "이전 작업이 중단되었습니다. 동기화하여 다시 시도하세요.",
+  "knowledge.checksum": "다운로드 체크섬이 일치하지 않아 런타임을 설치하지 않았습니다.",
+  "knowledge.downloadFailed": "CodeGraph를 다운로드할 수 없습니다. 백엔드에서 GitHub에 연결할 수 있는지 확인한 후 다시 시도하세요.",
+  "knowledge.timeout": "인덱싱 시간이 초과되었습니다. 저장소 크기를 확인한 후 다시 시도하세요.",
+  "knowledge.error": "작업에 실패했습니다. 백엔드의 디렉터리 접근 권한과 런타임을 확인한 후 다시 시도하세요.",
+
+  // Global Memory: a thematic LLM Wiki shared across sessions.
+  "memory.title": "전역 메모리",
+  "memory.add": "전역 메모리에 추가",
+  "memory.intro": "지식, 결정 사항, 교훈을 지속적으로 갱신하는 Wiki로 정리하여 세션 간에 공유합니다.",
+  "memory.entries": "메모리 항목",
+  "memory.emptyJobs": "아직 정리 기록이 없습니다.",
+  "memory.jobs": "정리 기록",
+  "memory.search": "메모리 제목과 본문 검색…",
+  "memory.empty": "일치하는 메모리가 없습니다. 대화를 추가하여 Wiki를 만들어 보세요.",
+  "memory.emptyDetail": "항목을 선택하면 내용, 관련 항목, 출처를 확인할 수 있습니다.",
+  "memory.new": "새 메모리",
+  "memory.titleField": "제목",
+  "memory.summary": "요약",
+  "memory.content": "본문(Markdown)",
+  "memory.tags": "태그(쉼표로 구분)",
+  "memory.related": "관련 메모리",
+  "memory.backlinks": "이 항목을 참조하는 메모리",
+  "memory.sources": "출처",
+  "memory.history": "수정 이력",
+  "memory.restore": "이 버전 복원",
+  "memory.restoreConfirm": "이 버전을 새 버전으로 복원하시겠습니까? 현재 버전도 이력에 남습니다.",
+  "memory.deleteConfirm": "이 메모리와 수정 이력을 삭제하시겠습니까? 원본 세션은 유지됩니다.",
+  "memory.export": "Markdown 내보내기",
+  "memory.selectAgent": "에이전트",
+  "memory.model": "모델(선택 사항)",
+  "memory.modelHint": "비워 두면 에이전트에 설정된 모델을 사용합니다.",
+  "memory.compile": "정리 후 저장",
+  "memory.compileHelp": "선택한 에이전트가 대화를 주제별로 정리하고 기존 메모리에 통합합니다. 대화 텍스트와 관련 메모리는 설정된 에이전트를 통해 모델에 전송됩니다.",
+  "memory.unavailable": "설치 또는 설정되지 않음",
+  "memory.allTags": "모든 태그",
+  "memory.updated": "최근 수정순",
+  "memory.titleSort": "제목순",
+  "memory.sourceNote": "정리에 사용한 대화 텍스트를 보존한 스냅샷입니다. 원본 세션을 삭제해도 확인할 수 있습니다.",
+  "memory.noKnowledge": "재사용할 지식이 발견되지 않아 항목을 변경하지 않았습니다.",
+  "memory.running": "진행 중",
+  "memory.completed": "완료",
+  "memory.failed": "실패",
+  "memory.cancelled": "취소됨",
+  "memory.extract": "주제 추출 중",
+  "memory.merge": "지식 통합 중",
+  "memory.commit": "메모리 저장 중",
+  "memory.done": "저장됨",
+  "memory.closeHint": "정리 중에 이 창을 닫아도 됩니다. 정리 기록에서 진행 상황을 확인할 수 있습니다.",
+  "memory.conflict": "작업 중 이 메모리가 변경되었습니다. 다시 불러온 후 재시도하세요. 이번 변경 사항은 저장되지 않았습니다.",
+  "memory.duplicate": "같은 제목의 메모리가 이미 있습니다. 해당 항목을 열어 내용을 통합하세요.",
+  "memory.busy": "다른 정리 작업이 진행 중입니다. 완료될 때까지 기다리거나 정리 기록에서 취소하세요.",
+  "memory.notFound": "이 메모리, 출처 또는 작업이 더 이상 존재하지 않습니다.",
+  "memory.noTranscript": "이 세션에는 읽을 수 있는 대화가 없습니다.",
+  "memory.agentUnavailable": "선택한 에이전트를 사용할 수 없습니다. 설정에서 실행 파일 경로를 확인하세요.",
+  "memory.invalid": "유효하지 않은 필드나 링크가 있습니다. 제목, 본문, 관련 메모리를 확인하세요.",
+  "memory.processFailed": "에이전트가 정리를 완료하지 못했습니다. 로그인 상태, 모델, CLI 설정을 확인한 후 재시도하세요.",
+  "memory.timeout": "에이전트 호출 시간이 초과되었습니다. 사용 가능한 모델로 변경하거나 대화를 줄여 재시도하세요.",
+  "memory.interrupted": "정리 작업이 중단되었습니다. 저장된 출처 스냅샷으로 재시도할 수 있습니다.",
+  "memory.tooLarge": "출처, 컨텍스트 또는 출력이 지원 크기를 초과했습니다. 내용을 잘라내거나 메모리에 저장하지 않았습니다.",
+  "memory.invalidOutput": "에이전트가 유효하지 않은 구조화 데이터를 반환했습니다. 저장된 내용은 없습니다. 재시도하거나 다른 에이전트를 선택하세요.",
+  "memory.loadError": "메모리를 불러올 수 없습니다. 연결을 확인한 후 재시도하세요.",
+  "memory.unsaved": "저장하지 않은 변경 사항을 버리시겠습니까?",
+  "memory.source": "출처 스냅샷",
+
   // ── Common ──
   "common.cancel": "취소", // Cancel
   "common.confirm": "확인", // OK
@@ -16,6 +130,7 @@ const ko: typeof en = {
   "common.selectAll": "모두 선택", // Select All
   "common.copied": "복사됨", // Copied
   "common.retry": "다시 시도", // Retry
+  "common.experimental": "실험 기능",
   "common.refresh": "새로 고침", // Refresh
   "common.loading": "불러오는 중…", // Loading…
   "common.prev": "이전", // Previous
@@ -398,16 +513,16 @@ const ko: typeof en = {
   "connect.showPassword": "비밀번호 표시",
   "connect.hidePassword": "비밀번호 숨기기",
   "connect.urlPasswordPlaceholder": "로그인 비밀번호",
-  "connect.mirror": "기기 간 레이아웃 미러링", // Mirror layout across devices
+  "connect.mirror": "원격 데스크톱 앱 미러링", // Mirror the remote desktop app
   "connect.mirrorHint":
-    "이 원격 서비스에 연결된 모든 기기에서 탭, 분할, 활성 세션이 동일하게 유지됩니다. 끄면 기기마다 자체 레이아웃을 유지합니다.", // Tabs, splits, and the active session stay the same on every device connected to this remote service. Off = each device keeps its own layout.
+    "탭, 분할, 활성 세션이 원격 컴퓨터의 데스크톱 앱과 동일하게 유지되며, 어느 쪽에서 변경해도 양쪽에 반영됩니다. 데스크톱 앱이 실행 중이 아니면 이 연결은 해당 데이터베이스를 직접 열고, 데이터베이스가 없으면 별도 데이터베이스를 사용합니다.", // Same tabs, splits, and active session as the desktop app on the remote machine; changes on either side show on both. If the desktop app is not running, this connection opens its database directly, or a separate database when there is none.
   "connect.shareDesktopDb": "원격 데스크톱 앱의 데이터베이스 공유",
   "connect.shareDesktopDbHint":
     "원격 컴퓨터의 데스크톱 앱과 동일한 데이터베이스를 공유합니다(양쪽 버전을 동일하게 유지하는 것을 권장). 끄면 독립된 데이터베이스를 사용합니다.",
 
   // ── Sidebar ──
   "tree.newSession": "새 세션", // New Session
-  "tree.newTerminalSession": "새 터미널 세션", // New Terminal Session
+  "tree.newTerminalSession": "새 터미널", // New Terminal
   "tree.newBrowserPage": "새 브라우저 페이지", // New Browser Page
   "tree.newAgentSession": (agent) => `새 ${agent} 세션`, // New {agent} Session
   "tree.newAgentSessionGroup": "더 많은 에이전트 세션", // More Agent Session
@@ -611,6 +726,13 @@ const ko: typeof en = {
   "info.createdAt": "생성 시각", // Created at
 
   // Resume-session dialog
+  "importSessions.title": "세션 가져오기",
+  "importSessions.description": "작업 디렉터리가 이 프로젝트와 일치하는 기존 Codex, Claude, OpenCode 세션을 찾습니다. 세션을 선택하여 프로젝트에 추가한 후 열면 대화를 이어갈 수 있습니다.",
+  "importSessions.search": "제목, 에이전트 또는 세션 ID로 검색",
+  "importSessions.empty": "일치하는 세션이 없습니다.",
+  "importSessions.imported": "이미 가져옴",
+  "importSessions.confirm": ({ count }: { count: number }) => `가져오기 (${count})`,
+  "importSessions.success": ({ count }: { count: number }) => `프로젝트에 세션 ${count}개를 추가했습니다.`,
   "resume.title": "세션 재개", // Resume Session
   "resume.desc":
     "에이전트 종류를 고르고 해당 에이전트 자체의 session id를 입력하세요. 열면 원래 대화를 이어갑니다.", // Pick the agent type and enter the agent's own session id…

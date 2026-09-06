@@ -477,6 +477,8 @@ export const TerminalView = memo(function TerminalView({
                             ? "Cline"
                             : session.kind === "pi"
                               ? "Pi"
+                              : session.kind === "omp"
+                              ? "OMP"
                               : session.kind === "crush"
                                 ? "Crush"
                                 : session.kind === "kimi"
@@ -572,6 +574,7 @@ const AGENT_KIND_LABEL: Partial<Record<Session["kind"], string>> = {
   antigravity: "Antigravity CLI",
   cline: "Cline CLI",
   pi: "Pi",
+  omp: "OMP",
   crush: "Crush",
   kimi: "Kimi Code (K3)",
   kiro: "Kiro",

@@ -53,6 +53,8 @@ import {
   ResumeSession,
   SessionInfo,
 } from "./sessionMenuDialogs";
+import { importSessionsUrl, openImportSessions } from "./ImportSessions";
+import { memoryNavigate, memoryUrl } from "./Memory/navigation";
 import { kindLabel, supportsAgentArgs } from "./sessionMenuShared";
 
 /** Number of direct agent shortcuts on the first New Session menu level. */
@@ -69,6 +71,7 @@ const QUICK_AGENT_KINDS: SessionKind[] = [
   "antigravity",
   "cline",
   "pi",
+  "omp",
   "crush",
   "kimi",
   "kiro",
@@ -347,6 +350,8 @@ export function useSessionMenu(): SessionMenu {
                     ? "Cline"
                     : kind === "pi"
                       ? "Pi"
+                      : kind === "omp"
+                      ? "OMP"
                       : kind === "crush"
                         ? "Crush"
                         : kind === "kimi"
@@ -550,7 +555,7 @@ export function useSessionMenu(): SessionMenu {
         };
   };
 
-  // New Session can include browser, terminal, agent submenu, and resume. withTerminal is used by sidebar plus/group
+  // New Session can include browser, terminal, agent submenu, and resume. withTerminal is used by sidebar plus/project/group
   // menus but not child-session menus. withBrowser creates a persistent Browser node only for project/group menus and
   // is hidden remotely because no native child WebView exists.
   const newSessionItems = (
@@ -624,6 +629,11 @@ export function useSessionMenu(): SessionMenu {
           label: t("tree.newAgentSession", "Pi"),
           icon: kindIconEl("pi"),
           onClick: () => void handleNewSession(projectId, groupId, "pi", parentSessionId),
+        },
+        {
+          label: t("tree.newAgentSession", "OMP"),
+          icon: kindIconEl("omp"),
+          onClick: () => void handleNewSession(projectId, groupId, "omp", parentSessionId),
         },
         {
           label: t("tree.newAgentSession", "Crush"),
@@ -705,6 +715,14 @@ export function useSessionMenu(): SessionMenu {
               }),
           } as MenuItem,
         ]
+      : []),
+    ...(!groupId && !parentSessionId && useTermStore.getState().projects.some((p) => p.id === projectId && p.rootPath)
+      ? [{
+          label: t("importSessions.title"),
+          href: importSessionsUrl(projectId),
+          icon: <Icons.restart size={14} />,
+          onClick: () => openImportSessions(projectId),
+        }]
       : []),
     // Resume remains adjacent to creation actions in the Session section.
     {
@@ -878,11 +896,12 @@ export function useSessionMenu(): SessionMenu {
       items.push(buildMarkItem("session", node.id), sep, buildMoveTo(), sep, remove);
       return items;
     }
-    // Fork is available only to Claude/Codex/Pi with a captured conversation ID and native fork support.
+    // Fork is available only to Claude/Codex/Pi/OMP with a captured conversation ID and native fork support.
     const canFork =
       (sessionRec?.kind === "claude" ||
         sessionRec?.kind === "codex" ||
-        sessionRec?.kind === "pi") &&
+        sessionRec?.kind === "pi" ||
+        sessionRec?.kind === "omp") &&
       !!sessionRec?.agentSessionId;
 
     // Quick shell switching applies only to plain terminals with detected shells; agents use fixed injection logic.
@@ -906,6 +925,9 @@ export function useSessionMenu(): SessionMenu {
       // Export context for local Claude/Codex sessions with captured parseable conversation IDs.
       ...(sessionRec && canExportContext(sessionRec)
         ? [{ label: t("tree.exportSession"), onClick: () => void exportSessionToFile(sessionRec) }]
+        : []),
+      ...(sessionRec
+        ? [{ label: `${t("memory.add")} · ${t("common.experimental")}`, href: memoryUrl(`compile/${node.id}`), onClick: () => memoryNavigate(memoryUrl(`compile/${node.id}`)) }]
         : []),
       // Show the Git submenu for any session whose working directory is a repository, not just worktrees.
       ...buildGitItems({

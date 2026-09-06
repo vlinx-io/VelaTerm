@@ -6,7 +6,7 @@ description: >-
   (use vspawn-tree for a worktree). Only use when the user explicitly invokes /vspawn or $vspawn; never auto-trigger.
   This is a real session run by its own process in the vlx-term left-panel tree — not an in-process sub-agent,
   and not a background Task. Available only inside vlx-term-hosted sessions.
-argument-hint: "[--worktree] [--yes] [--claude|--codex] <task>"
+argument-hint: "[--worktree] [--cwd <path>] [--yes] [--claude|--codex] [--model <name>] [--effort <level>] <task>"
 disable-model-invocation: true
 allowed-tools: Bash(vspawn:*)
 ---
@@ -54,17 +54,29 @@ flag, and **do not** write that instruction into the prompt:
 - Specifying claude / codex, or a leading `--claude` / `--codex` → add the matching flag.
 - "no dialog / don't ask me / just start it / start it straight away," or a leading `--yes` (`-y`) → add `--yes`.
   The child session then starts immediately with the default settings, with no confirmation card to click.
+- Naming a model ("run it on opus / sonnet / gpt-5.5"), or a leading `--model` → add `--model <name>`. Pass the
+  name through as the user wrote it; model names belong to the agent that will run, and vlx-term turns it into
+  that agent's own model flag.
+- Naming a reasoning effort ("think harder / low effort / high effort"), or a leading `--effort` → add
+  `--effort <level>`. Levels are typically `low`, `medium`, `high`, `xhigh`, `max`; agents whose CLI has no
+  effort setting ignore it.
 
-Defaults: **no** worktree (run in the current directory), **follow** the current session type, and **show** the
-confirmation card when the user has "Confirm before spawn" turned on.
+Defaults: **no** worktree (run in the current directory), **follow** the current session type, **inherit** the
+current session's model and effort, and **show** the confirmation card when the user has "Confirm before spawn"
+turned on.
 
 ## Step 3: Run the command
+
+Choose the command directory before spawning. If the task or conversation identifies one unambiguous project or
+repository directory, add `--cwd <absolute-path>` so the child starts there and a requested worktree is created
+from that repository. Otherwise omit it and let `vspawn` use the command's current directory. Do not guess between
+multiple plausible repositories.
 
 Pass the prompt you expanded in Step 1 **as a single argument** (escaping any quotes inside it correctly), and run
 `vspawn` from PATH:
 
 ```bash
-vspawn [--worktree] [--yes] [--claude|--codex] "<expanded self-contained prompt>"
+vspawn [--worktree] [--cwd <absolute-path>] [--yes] [--claude|--codex] [--model <name>] [--effort <level>] "<expanded self-contained prompt>"
 ```
 
 After it succeeds, give the user a one-line summary: "Spawned a child session in vlx-term: <brief task summary>".

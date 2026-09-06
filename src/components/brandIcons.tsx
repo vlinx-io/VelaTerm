@@ -102,6 +102,31 @@ export function piMarkEl(size = 14) {
 }
 
 /**
+ * OMP (oh-my-pi) mark, redrawn from the project's own `assets/icon.svg`: a blocky pi whose shortened right
+ * leg ends in a plug, for the extension surface the CLI is built around. Monochrome through currentColor,
+ * typically the session tree's orange KIND_COLOR, with the plug's two pins cut out so they read at larger
+ * sizes. The square viewBox keeps it the same visual weight as the other 24-unit marks.
+ */
+function OmpMark({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 120 120" fill="currentColor" role="img" aria-label="OMP">
+      <rect x="10" y="23" width="100" height="12" rx="2" />
+      <rect x="25" y="35" width="12" height="62" rx="2" />
+      <rect x="75" y="35" width="12" height="45" rx="2" />
+      <path
+        fillRule="evenodd"
+        d="M71 70h20v16H71z M76 74h3v8h-3z M82 74h3v8h-3z"
+      />
+    </svg>
+  );
+}
+
+/** OMP plug-tipped pi mark using the caller's currentColor. */
+export function ompMarkEl(size = 14) {
+  return <OmpMark size={size} />;
+}
+
+/**
  * Hand-drawn Google Antigravity CLI (`agy`) mark: a double up-chevron evokes upward motion and stays
  * distinct from other logos. It uses currentColor, typically the session tree's blue KIND_COLOR.
  */

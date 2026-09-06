@@ -11,6 +11,8 @@ export interface MenuItem {
    * Existing `() => void` handlers remain assignable because TypeScript permits fewer parameters.
    */
   onClick?: (e: React.MouseEvent) => void;
+  /** A stable target for navigational items, including opening in another tab. */
+  href?: string;
   danger?: boolean;
   separator?: boolean;
   disabled?: boolean;
@@ -150,6 +152,15 @@ function MenuPanel({
               <Submenu anchor={anchor} items={item.submenu} onClose={onClose} />
             )}
           </div>
+        ) : item.href && !item.disabled ? (
+          <a key={i} className="menu-item" href={item.href}
+            style={{ color: "var(--text-primary)", display: "flex", alignItems: "center", gap: 8, textDecoration: "none" }}
+            onClick={(e) => {
+              if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+              e.preventDefault(); item.onClick?.(e); onClose();
+            }}>
+            {item.icon && <ItemIcon icon={item.icon} />}{item.label}
+          </a>
         ) : (
           <div
             key={i}

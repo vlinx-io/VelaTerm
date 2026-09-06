@@ -435,6 +435,7 @@ impl PtyManager {
                 | SessionKind::Antigravity
                 | SessionKind::Cline
                 | SessionKind::Pi
+                | SessionKind::Omp
                 | SessionKind::Crush
                 | SessionKind::Kimi
                 | SessionKind::Kiro
@@ -523,25 +524,30 @@ impl PtyManager {
         // Build in-memory injection and the launch command for typed sessions. Read the configured executable
         // path at spawn time so settings changes apply to the next launch.
         let bin_path = session_agent_path(&app, &id).or_else(|| agent_bin_path(&app, kind));
-        // Lazily install Pi's state-bridge extension under `<data_dir>/pi/` and pass its absolute path for
-        // loading through `-e "$VLX_PI_EXT"`. The static extension reads the session's injected `VLX_*` values.
-        // It reports without persisting the port or token. If installation fails, log it and let Pi launch
-        // without authoritative state, matching OpenCode's screen-detection fallback.
-        let pi_ext_path: Option<String> = if kind == SessionKind::Pi {
-            match app.data_dir() {
-                Ok(data_dir) => {
-                    match crate::agent::pi::install(&data_dir) {
+        // Lazily install the state-bridge extension of whichever agent loads one through `-e`: Pi's under
+        // `<data_dir>/pi/`, OMP's under `<data_dir>/omp/`. The static extension reads the session's injected
+        // `VLX_*` values and reports without persisting the port or token. If installation fails, log it and let
+        // the agent launch without authoritative state, matching OpenCode's screen-detection fallback.
+        let agent_ext_path: Option<String> = match kind {
+            SessionKind::Pi | SessionKind::Omp => {
+                let (label, install): (&str, fn(&std::path::Path) -> std::io::Result<std::path::PathBuf>) =
+                    if kind == SessionKind::Pi {
+                        ("pi", crate::agent::pi::install)
+                    } else {
+                        ("omp", crate::agent::omp::install)
+                    };
+                match app.data_dir() {
+                    Ok(data_dir) => match install(&data_dir) {
                         Ok(p) => Some(p.to_string_lossy().to_string()),
                         Err(e) => {
-                            eprintln!("failed to install pi extension (pi status reporting unavailable): {e}");
+                            eprintln!("failed to install {label} extension ({label} status reporting unavailable): {e}");
                             None
                         }
-                    }
+                    },
+                    Err(_) => None,
                 }
-                Err(_) => None,
             }
-        } else {
-            None
+            _ => None,
         };
         // Refresh the Kiro shadow agent before building the launch command. It re-clones the user's default
         // agent every time so their settings stay current, and a failure simply omits `--agent`.
@@ -581,7 +587,7 @@ impl PtyManager {
             init_prompt.as_deref(),
             extra_args.as_deref(),
             bin_path.as_deref(),
-            pi_ext_path.as_deref(),
+            agent_ext_path.as_deref(),
             kiro_agent.as_deref(),
             codex_hooks_supported,
         );
@@ -1078,6 +1084,26 @@ impl PtyManager {
                     spawn_cwd.clone(),
                     pid,
                     should_capture_agent_id,
+                    SessionKind::Pi,
+                );
+            }
+            // OMP behaves like Pi here: the extension reports lifecycle state and its own session ID for later
+            // `--resume <id>`, with the same disk scan standing by if the extension never reports.
+            SessionKind::Omp => {
+                app_extra.emit(
+                    &status_event_extra,
+                    StatusSignal::Agent {
+                        agent: Some("omp".to_string()),
+                        state_source: None,
+                    },
+                );
+                crate::agent::resume::spawn_pi_capture(
+                    app_extra.clone(),
+                    id.clone(),
+                    spawn_cwd.clone(),
+                    pid,
+                    should_capture_agent_id,
+                    SessionKind::Omp,
                 );
             }
             // Crush is marked immediately. Its sole PreToolUse hook reports working and persists `session_id`,
@@ -1504,6 +1530,7 @@ pub(crate) fn agent_bin_path(app: &AppCtx, kind: SessionKind) -> Option<String> 
         SessionKind::Antigravity => "antigravity",
         SessionKind::Cline => "cline",
         SessionKind::Pi => "pi",
+        SessionKind::Omp => "omp",
         SessionKind::Crush => "crush",
         SessionKind::Kimi => "kimi",
         SessionKind::Kiro => "kiro",

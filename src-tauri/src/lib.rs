@@ -18,10 +18,15 @@ mod git;
 mod gitea;
 mod host;
 mod models;
+mod memory;
+mod knowledge;
 mod procstat;
 mod pty;
 mod search;
 mod session_state;
+mod split_trace;
+#[cfg(feature = "gui")]
+mod native_menu;
 // GUI-only vela-server provisioning: R2 download, minisign verification, and cache.
 #[cfg(feature = "gui")]
 mod server_supply;
@@ -263,6 +268,10 @@ pub fn run_view(args: &[String]) -> ! {
     agent::cli_client::run_view(args)
 }
 
+pub fn run_knowledge(args: &[String]) -> ! {
+    knowledge::agent::run(args)
+}
+
 /// Build-time Git commit, or unknown, used by --version and SSH remote version pinning.
 pub const GIT_COMMIT: &str = match option_env!("VLX_GIT_COMMIT") {
     Some(c) => c,
@@ -441,6 +450,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
         .plugin(tauri_plugin_process::init())
         .manage(PtyManager::new())
         .manage(WebServer::new())
+        .manage(web::local_link::LocalLinkServer::new())
         .manage(browser::BrowserManager::new())
         .manage(QuitState::default())
         .manage(NativeTheme::default())
@@ -478,7 +488,6 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 use tauri::menu::{
                     AboutMetadataBuilder, MenuBuilder, MenuItemBuilder, SubmenuBuilder,
                 };
-                use tauri::Emitter;
                 let app_name = app.package_info().name.clone();
                 // Custom update/settings items emit menu://action. Native About displays icon/version and
                 // attribution; explicitly supply package version so metadata cannot suppress it.
@@ -582,17 +591,12 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                         | "clear-badges"
                         | "split-right"
                         | "split-down" => {
-                            // Deliver to the focused window only: remote SSH windows listen for
-                            // menu://action natively, and a global emit would make every open window
-                            // react to one menu click (e.g. splitting panes in all of them).
-                            match app_handle.get_focused_window() {
-                                Some(win) => {
-                                    let _ = win.emit("menu://action", id);
-                                }
-                                None => {
-                                    let _ = app_handle.emit("menu://action", id);
-                                }
-                            }
+                            let focused = app_handle.get_focused_window();
+                            let _ = native_menu::dispatch(
+                                app_handle,
+                                focused.as_ref().map(|window| window.label()),
+                                id,
+                            );
                         }
                         // Like VS Code, install/remove the PATH shim only on explicit user action and
                         // report its exact destination or conflict in a native dialog.
@@ -759,10 +763,30 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 });
             }
 
+            // Start the local link: a loopback web service on a random port whose port and password are
+            // recorded in the data directory, so an SSH mirror connection can attach to this very
+            // process instead of a separate headless server (see `web::local_link`). On a thread because
+            // start() preflights the port bind. Failure only loses SSH mirror attachment, never startup.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let ctx = AppCtx::Tauri(handle.clone());
+                    let server = handle.state::<web::local_link::LocalLinkServer>();
+                    match web::local_link::start(ctx, &server.0) {
+                        Ok(port) => println!("local link listening on 127.0.0.1:{port}"),
+                        Err(e) => eprintln!("local link failed to start: {e}"),
+                    }
+                });
+            }
+
             // One background poller keeps the account-usage snapshot fresh for every session, window,
             // and browser client. It only touches providers whose account material exists on this
             // machine, and honours the usage settings live.
             agent::usage_store::start(AppCtx::Tauri(app.handle().clone()));
+
+            // Refresh the search index in the background so the first search only pays for what changed
+            // since startup.
+            search::warm_index(AppCtx::Tauri(app.handle().clone()));
 
             // Install macOS session-aware notification click handling; unsupported builds skip it.
             #[cfg(target_os = "macos")]
@@ -935,6 +959,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             // Most desktop data commands use this single spawn_blocking dispatch entry; adding a web
             // dispatch command automatically covers desktop too.
             commands::desktop_call,
+            commands::record_split_trace,
             commands::take_open_project_request,
             commands::quit_prompt_ack,
             commands::confirm_quit,
@@ -1020,6 +1045,11 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 // When enabled, remove only this process's pasted-image temp files on exit, preserving
                 // images used by other instances.
                 if let tauri::RunEvent::Exit = event {
+                    // Retire the local-link record so an SSH mirror connection does not even try this
+                    // process; a crash leaves it behind, which the reader's PID check covers.
+                    if let Ok(dir) = app.path().app_data_dir() {
+                        web::local_link::remove(&dir);
+                    }
                     let enabled = app
                         .try_state::<Db>()
                         .map(|db| pasted_image_cleanup_enabled(db.inner()))
@@ -1388,6 +1418,9 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
     // Same account-usage poller as the desktop entry point: headless serves browser and mobile clients,
     // which read the stored snapshot instead of querying providers themselves.
     agent::usage_store::start(ctx.clone());
+
+    // Same background index warm-up as the desktop entry point.
+    search::warm_index(ctx.clone());
 
     println!("  press Ctrl+C (or send SIGTERM) to quit");
 

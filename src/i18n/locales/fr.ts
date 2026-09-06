@@ -3,6 +3,120 @@
 import type en from "./en";
 
 const fr: typeof en = {
+  // Project code intelligence and memory associations.
+  "knowledge.title": "Graphe du code",
+  "knowledge.intro": "Explorez les relations du code et associez-les aux décisions de conception enregistrées.",
+  "knowledge.setup": "Installez CodeGraph sur ce serveur pour activer l’indexation des projets.",
+  "knowledge.downloadNotice": "Télécharge le moteur CodeGraph vérifié depuis GitHub. L’indexation reste sur cette machine ; la télémétrie et la recherche de mises à jour sont désactivées.",
+  "knowledge.install": "Télécharger CodeGraph",
+  "knowledge.installing": "Téléchargement et installation…",
+  "knowledge.directory": "Répertoire de travail",
+  "knowledge.enable": "Activer l’indexation",
+  "knowledge.disable": "Désactiver l’indexation",
+  "knowledge.sync": "Synchroniser",
+  "knowledge.ready": "Prêt",
+  "knowledge.disabled": "Désactivé",
+  "knowledge.indexing": "Indexation…",
+  "knowledge.syncing": "Synchronisation…",
+  "knowledge.failed": "Échec",
+  "knowledge.symbols": "Symboles",
+  "knowledge.files": "Fichiers",
+  "knowledge.edges": "Relations",
+  "knowledge.search": "Rechercher un symbole ou un chemin de fichier…",
+  "knowledge.searchButton": "Rechercher",
+  "knowledge.noResults": "Aucun symbole correspondant.",
+  "knowledge.selectSymbol": "Sélectionnez un symbole pour consulter sa source, ses relations et les mémoires associées.",
+  "knowledge.source": "Source",
+  "knowledge.incoming": "Relations entrantes",
+  "knowledge.outgoing": "Relations sortantes",
+  "knowledge.noEdges": "Aucune relation indexée.",
+  "knowledge.analysisNote": "Les relations proviennent d’une analyse statique et peuvent être incomplètes ou incertaines.",
+  "knowledge.changed": "Le fichier a changé pendant la requête. Synchronisez à nouveau avant d’utiliser les numéros de ligne ou de confirmer la vérification.",
+  "knowledge.truncated": "Cet affichage est limité. Certaines relations ou lignes de code sont omises.",
+  "knowledge.linkMemory": "Associer une mémoire",
+  "knowledge.chooseMemory": "Choisir une entrée de mémoire",
+  "knowledge.noLinks": "Aucune association au code. Vous pouvez associer une mémoire depuis le détail d’un symbole.",
+  "knowledge.inspect": "Vérifier le code et la mémoire",
+  "knowledge.unlink": "Supprimer l’association",
+  "knowledge.codeReferences": "Références au code",
+  "knowledge.refresh": "Actualiser",
+  "knowledge.current": "Inchangé",
+  "knowledge.review": "À vérifier",
+  "knowledge.unavailable": "Indisponible",
+  "knowledge.reviewHelp": "Comparez cette mémoire au code affiché. La confirmation enregistre la version actuelle du fichier sans modifier le texte de la mémoire.",
+  "knowledge.confirmReview": "Confirmer la vérification",
+  "knowledge.agentHint": "Les agents peuvent utiliser vknowledge search \"sujet\" dans ce répertoire. Les requêtes synchronisent les index activés et renvoient séparément le code et les mémoires.",
+  "knowledge.busy": "Une tâche d’indexation est en cours. Vous pouvez fermer cette page ou désactiver l’indexation pour arrêter la tâche.",
+  "knowledge.disabledHelp": "Activez l’indexation de ce répertoire pour interroger le code. La désactivation conserve l’index et les associations aux mémoires.",
+  "knowledge.conflict": "Le code ou la mémoire a changé. Rechargez les deux avant d’enregistrer cette association.",
+  "knowledge.symbolMissing": "Le symbole ou la source n’est plus disponible. Synchronisez et relancez la recherche.",
+  "knowledge.directoryMissing": "Ce répertoire de travail est introuvable ou a changé. Vérifiez les chemins du projet et de la session.",
+  "knowledge.partial": "L’index est incomplet. Synchronisez à nouveau et vérifiez que les fichiers source sont lisibles.",
+  "knowledge.interrupted": "La tâche précédente a été interrompue. Synchronisez pour réessayer.",
+  "knowledge.checksum": "La somme de contrôle du téléchargement ne correspond pas. Le moteur n’a pas été installé.",
+  "knowledge.downloadFailed": "Impossible de télécharger CodeGraph. Vérifiez la connexion du serveur à GitHub et réessayez.",
+  "knowledge.timeout": "Le délai d’indexation a été dépassé. Vérifiez la taille du dépôt et réessayez.",
+  "knowledge.error": "L’opération a échoué. Vérifiez les droits d’accès aux répertoires et le moteur sur le serveur, puis réessayez.",
+
+  // Global Memory: a thematic LLM Wiki shared across sessions.
+  "memory.title": "Mémoire globale",
+  "memory.add": "Ajouter à la mémoire globale",
+  "memory.intro": "Un wiki vivant pour partager les connaissances, les décisions et les enseignements entre les sessions.",
+  "memory.entries": "Articles de mémoire",
+  "memory.emptyJobs": "Aucune synthèse pour le moment.",
+  "memory.jobs": "Historique des synthèses",
+  "memory.search": "Rechercher dans les titres et le contenu…",
+  "memory.empty": "Aucun article correspondant. Ajoutez une conversation pour commencer votre wiki.",
+  "memory.emptyDetail": "Sélectionnez un article pour consulter son contenu, ses liens et ses sources.",
+  "memory.new": "Nouvel article",
+  "memory.titleField": "Titre",
+  "memory.summary": "Résumé",
+  "memory.content": "Contenu (Markdown)",
+  "memory.tags": "Étiquettes (séparées par des virgules)",
+  "memory.related": "Articles associés",
+  "memory.backlinks": "Liens vers cet article",
+  "memory.sources": "Sources",
+  "memory.history": "Historique des révisions",
+  "memory.restore": "Restaurer cette révision",
+  "memory.restoreConfirm": "Restaurer cette révision en créant une nouvelle version ? La version actuelle restera dans l’historique.",
+  "memory.deleteConfirm": "Supprimer cet article et ses révisions ? Les sessions sources seront conservées.",
+  "memory.export": "Exporter en Markdown",
+  "memory.selectAgent": "Agent",
+  "memory.model": "Modèle (facultatif)",
+  "memory.modelHint": "Laissez ce champ vide pour utiliser le modèle configuré dans l’agent.",
+  "memory.compile": "Organiser et enregistrer",
+  "memory.compileHelp": "L’agent choisi organise la conversation par thème et l’intègre aux articles existants. Le texte de la conversation et les articles pertinents sont transmis au modèle via votre agent configuré.",
+  "memory.unavailable": "Non installé ou non configuré",
+  "memory.allTags": "Toutes les étiquettes",
+  "memory.updated": "Mise à jour récente",
+  "memory.titleSort": "Titre",
+  "memory.sourceNote": "Cet instantané conserve le texte utilisé pour la synthèse, même si la session d’origine est supprimée.",
+  "memory.noKnowledge": "Aucune connaissance réutilisable n’a été trouvée ; aucun article n’a été modifié.",
+  "memory.running": "En cours",
+  "memory.completed": "Terminé",
+  "memory.failed": "Échec",
+  "memory.cancelled": "Annulé",
+  "memory.extract": "Extraction des thèmes",
+  "memory.merge": "Fusion des connaissances",
+  "memory.commit": "Enregistrement des articles",
+  "memory.done": "Enregistré",
+  "memory.closeHint": "Vous pouvez fermer cette fenêtre pendant le traitement et suivre sa progression dans l’historique des synthèses.",
+  "memory.conflict": "Cet article a changé pendant l’opération. Rechargez-le avant de réessayer ; vos modifications n’ont pas été enregistrées.",
+  "memory.duplicate": "Un article porte déjà ce titre. Ouvrez-le pour y intégrer le contenu.",
+  "memory.busy": "Une autre synthèse est en cours. Attendez sa fin ou annulez-la dans l’historique.",
+  "memory.notFound": "Cet article, cette source ou cette tâche n’existe plus.",
+  "memory.noTranscript": "Aucune conversation lisible n’est disponible pour cette session.",
+  "memory.agentUnavailable": "L’agent choisi est indisponible. Vérifiez le chemin de son exécutable dans les paramètres.",
+  "memory.invalid": "Certains champs ou liens sont invalides. Vérifiez le titre, le contenu et les articles associés.",
+  "memory.processFailed": "L’agent n’a pas pu terminer. Vérifiez sa connexion, son modèle et ses paramètres CLI, puis réessayez.",
+  "memory.timeout": "Le délai de l’agent est dépassé. Réessayez avec un modèle disponible ou une conversation plus courte.",
+  "memory.interrupted": "La synthèse a été interrompue. Réessayez à partir de l’instantané source enregistré.",
+  "memory.tooLarge": "La source, le contexte ou la sortie dépasse la taille prise en charge. Aucun contenu n’a été tronqué ni enregistré.",
+  "memory.invalidOutput": "L’agent a renvoyé des données structurées invalides. Rien n’a été enregistré ; réessayez ou choisissez un autre agent.",
+  "memory.loadError": "Impossible de charger la mémoire. Vérifiez la connexion et réessayez.",
+  "memory.unsaved": "Abandonner les modifications non enregistrées ?",
+  "memory.source": "Instantané source",
+
   // ── Common ──
   "common.cancel": "Annuler", // Cancel
   "common.confirm": "OK", // OK
@@ -16,6 +130,7 @@ const fr: typeof en = {
   "common.selectAll": "Tout sélectionner", // Select All
   "common.copied": "Copié", // Copied
   "common.retry": "Réessayer", // Retry
+  "common.experimental": "Expérimental",
   "common.refresh": "Actualiser", // Refresh
   "common.loading": "Chargement…", // Loading…
   "common.prev": "Précédent", // Previous
@@ -404,9 +519,9 @@ const fr: typeof en = {
   "connect.showPassword": "Afficher le mot de passe",
   "connect.hidePassword": "Masquer le mot de passe",
   "connect.urlPasswordPlaceholder": "Mot de passe de connexion",
-  "connect.mirror": "Refléter la disposition sur tous les appareils", // Mirror layout across devices
+  "connect.mirror": "Refléter l'application de bureau distante", // Mirror the remote desktop app
   "connect.mirrorHint":
-    "Les onglets, les divisions et la session active restent identiques sur tous les appareils connectés à ce service distant. Désactivé, chaque appareil garde sa propre disposition.", // Tabs, splits, and the active session stay the same on every device connected to this remote service. Off = each device keeps its own layout.
+    "Les onglets, les divisions et la session active sont les mêmes que dans l'application de bureau de la machine distante ; toute modification d'un côté apparaît des deux côtés. Si l'application de bureau n'est pas lancée, cette connexion ouvre directement sa base de données, ou une base de données séparée s'il n'y en a pas.", // Same tabs, splits, and active session as the desktop app on the remote machine; changes on either side show on both. If the desktop app is not running, this connection opens its database directly, or a separate database when there is none.
   "connect.shareDesktopDb":
     "Utiliser la base de données de l'app de bureau distante",
   "connect.shareDesktopDbHint":
@@ -414,7 +529,7 @@ const fr: typeof en = {
 
   // ── Sidebar ──
   "tree.newSession": "Nouvelle session", // New Session
-  "tree.newTerminalSession": "Nouvelle session terminal", // New Terminal Session
+  "tree.newTerminalSession": "Nouveau terminal", // New Terminal
   "tree.newBrowserPage": "Nouvelle page de navigateur", // New Browser Page
   "tree.newAgentSession": (agent) => `Nouvelle session ${agent}`, // New {agent} Session
   "tree.newAgentSessionGroup": "Plus de sessions agent", // More Agent Session
@@ -622,6 +737,13 @@ const fr: typeof en = {
   "info.createdAt": "Créé le", // Created at
 
   // Resume-session dialog
+  "importSessions.title": "Importer des sessions",
+  "importSessions.description": "Recherchez les sessions Codex, Claude et OpenCode dont le répertoire de travail correspond à ce projet. Sélectionnez les sessions à ajouter au projet, puis ouvrez-en une pour reprendre la conversation.",
+  "importSessions.search": "Rechercher par titre, agent ou ID de session",
+  "importSessions.empty": "Aucune session correspondante.",
+  "importSessions.imported": "Déjà importée",
+  "importSessions.confirm": ({ count }: { count: number }) => `Importer (${count})`,
+  "importSessions.success": ({ count }: { count: number }) => `Sessions ajoutées au projet : ${count}.`,
   "resume.title": "Reprendre une session", // Resume Session
   "resume.desc":
     "Choisissez le type d'agent et saisissez le session id propre à l'agent ; l'ouverture reprend la conversation d'origine.", // Pick the agent type and enter the agent's own session id…

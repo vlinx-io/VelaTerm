@@ -62,7 +62,8 @@ export function GlobalSearch() {
 
   // Open or focus the session tab, then close the overlay. Agent sessions resume their conversation.
   const openSessionFromSearch = (hit: SessionSearchHit) => {
-    const q = query.trim();
+    // Look for the literal the index matched in the first hit, not the raw query.
+    const q = (hit.matches[0]?.matched[0] ?? query).trim();
     openSession(hit.sessionId);
     close();
     // Best effort: jump to the match in a live terminal after opening the session.
@@ -177,7 +178,6 @@ export function GlobalSearch() {
         <SearchConsole
           nav={nav}
           results={results}
-          query={query}
           sessionById={sessionById}
           projects={projects}
           groups={groups}

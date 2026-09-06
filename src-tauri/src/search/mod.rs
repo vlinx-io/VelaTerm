@@ -1,25 +1,30 @@
-//! Global session-content search backed by an FTS5 index.
+//! Global session-content search backed by two FTS5 indexes.
 //!
-//! SQLite's built-in FTS5 with its trigram tokenizer indexes history from every session, including archived
-//! ones. It supports multiple terms (implicit AND in any order), substring/CJK matching, and BM25 relevance
-//! ranking. Command names and response types intentionally remain **identical** to the old on-demand scanner
-//! (`SessionSearchHit` / `SearchMatch`), so the frontend requires no changes.
+//! `session_fts` (trigram) indexes history from every session, including archived ones, and answers
+//! substring/CJK queries without any dictionary. `session_words` (jieba boundaries + unicode61 + porter) holds
+//! the same fragments split into words, so a query matches whole words first: `和服` finds the word `和服`
+//! but not the run `总和服务`, and `spawn` finds `spawned` through stemming while leaving `vspawn` alone.
+//! Search runs the word index first and ranks its BM25 hits; only when it finds nothing does the trigram
+//! index (or the LIKE fallback for terms under three characters) take over, so a partial identifier such as
+//! `worktre` still resolves. Which path answered is not surfaced; both return the same hit shape.
 //!
-//! Dual content sources, index freshness, and extraction live in [`index`]; ANSI stripping lives in [`ansi`].
+//! Every match carries `matched`, the literal strings the index actually matched (the stemmed word as it
+//! appears in the text, or the query terms for substring hits). The frontend highlights those literals
+//! rather than the raw query, so what is marked on screen is exactly what the backend matched.
+//!
+//! Dual content sources, index freshness, and extraction live in [`index`]; segmentation lives in
+//! [`tokenize`]; ANSI stripping lives in [`ansi`].
 //!
 //! Navigation anchors: transcripts use `message_index`, which the frontend scrolls to; recordings use
-//! `ordinal`, the number of `findNext` operations to perform. A recording ordinal is query-dependent—the
-//! matching line's position among matches in document order—so it must be calculated at search time. The
-//! index's `ordinal` column stores only a stable line order for sorting.
-//!
-//! Tradeoff with literal full-query matching: frontend highlighting and recording `findNext` both use the
-//! complete query literally and are intentionally unchanged. For one term, indexed and literal matches align,
-//! making `ordinal` exact. With multiple terms, this module matches snippets containing every term in any
-//! order, which is not equivalent to the literal query. Results can still be listed, but character-level
-//! navigation and highlighting in recordings become best-effort, as documented in the design's section 6.
+//! `ordinal`, the number of `findNext` operations to perform. A recording ordinal is query-dependent (the
+//! matching line's position among matches in document order), so it is calculated at search time; the
+//! index's `ordinal` column stores only a stable line order for sorting. `findNext` counts occurrences of
+//! the first matched literal, which equals the line position only when each matching line contains it
+//! once, so recording navigation remains best-effort as documented in the design's section 6.
 
 pub mod ansi;
 pub mod index;
+pub mod tokenize;
 
 use std::path::Path;
 
@@ -85,6 +90,9 @@ pub struct SearchMatch {
     pub ordinal: u32,
     /// Readable contextual snippet that preserves matched text for frontend highlighting.
     pub snippet: String,
+    /// Literal strings the index matched in this fragment, in document order without duplicates. The
+    /// frontend highlights these and uses the first one for recording `findNext`.
+    pub matched: Vec<String>,
 }
 
 /// A matching session and its snippets, preserving the previous fields and serialization.
@@ -111,13 +119,27 @@ struct RawHit {
     message_index: Option<i64>,
     ordinal: i64,
     text: String,
+    /// Byte spans in `text` marked by the word index; empty for substring hits.
+    spans: Vec<(usize, usize)>,
+}
+
+/// Which index answered the query, which decides snippet placement, matched literals, and ordering.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Answered {
+    /// Word index; rows arrive in BM25 order and carry highlight spans.
+    Words,
+    /// Trigram MATCH; rows arrive in BM25 order.
+    Trigram,
+    /// LIKE scan; rows carry no rank, so sessions sort by hit count.
+    Like,
 }
 
 /// Searches every in-scope session for terms. `recordings_dir` is `<data_dir>/recordings`.
 ///
 /// First, `refresh_stale` incrementally updates changed sessions so newly visible content is immediately
-/// searchable; then the FTS index is queried. A query empty after trimming and tokenization returns no results.
-/// If SQLite lacks FTS5/trigram support, search gracefully returns no results after logging at startup.
+/// searchable; then the word index is queried, and the trigram index only when the word index has no hit.
+/// A query empty after trimming and tokenization returns no results. If SQLite lacks FTS5/trigram support,
+/// search gracefully returns no results after logging at startup.
 pub fn search_sessions(
     db: &Db,
     recordings_dir: &Path,
@@ -133,17 +155,29 @@ pub fn search_sessions(
     index::refresh_stale(db, recordings_dir)?;
 
     let conn = db.conn.lock().unwrap();
-    if !table_exists(&conn, "session_fts") {
+    if !table_exists(&conn, "session_fts") || !table_exists(&conn, "session_words") {
         return Ok(Vec::new()); // Return no results when the index is unavailable.
     }
 
-    // If any term is shorter than three characters, use LIKE for the whole query; trigram MATCH cannot handle it.
-    let use_fts = keys.iter().all(|k| k.chars().count() >= MIN_FTS_TERM_CHARS);
-    let raw = if use_fts {
-        query_fts(&conn, &keys, scope)?
-    } else {
-        query_like(&conn, &keys, scope)?
+    // Word index first. Every term must segment into at least one word; pure punctuation goes straight to
+    // the substring path.
+    let phrases: Option<Vec<String>> = keys.iter().map(|k| tokenize::query_phrase(k)).collect();
+    let mut answered = Answered::Words;
+    let mut raw = match phrases {
+        Some(p) => query_words(&conn, &p, scope)?,
+        None => Vec::new(),
     };
+    if raw.is_empty() {
+        // Substring fallback. If any term is shorter than three characters, use LIKE for the whole query;
+        // trigram MATCH cannot handle it.
+        let use_fts = keys.iter().all(|k| k.chars().count() >= MIN_FTS_TERM_CHARS);
+        answered = if use_fts { Answered::Trigram } else { Answered::Like };
+        raw = if use_fts {
+            query_fts(&conn, &keys, scope)?
+        } else {
+            query_like(&conn, &keys, scope)?
+        };
+    }
     if raw.is_empty() {
         return Ok(Vec::new());
     }
@@ -183,10 +217,19 @@ pub fn search_sessions(
             if matches.len() >= MAX_MATCHES_PER_SESSION {
                 break;
             }
-            let snippet = if is_transcript {
-                snippet_for(&r.text, &keys)
+            let (snippet, matched) = if answered == Answered::Words {
+                let snippet = match (is_transcript, r.spans.first()) {
+                    (true, Some(&(at, end))) => snippet_around(&r.text, at, end - at),
+                    _ => clip_line(&r.text),
+                };
+                (snippet, matched_literals(&r.text, &r.spans))
             } else {
-                clip_line(&r.text)
+                let snippet = if is_transcript {
+                    snippet_for(&r.text, &keys)
+                } else {
+                    clip_line(&r.text)
+                };
+                (snippet, keys.clone())
             };
             matches.push(SearchMatch {
                 // Recording ordinal is the match's position in document order and equals the findNext count.
@@ -194,6 +237,7 @@ pub fn search_sessions(
                 message_index: r.message_index.map(|v| v as u32),
                 ordinal: (i + 1) as u32,
                 snippet,
+                matched,
             });
         }
 
@@ -213,10 +257,61 @@ pub fn search_sessions(
     }
 
     // LIKE has no BM25 rank, so sort stably by descending hit count. Preserve rank order for FTS results.
-    if !use_fts {
+    if answered == Answered::Like {
         hits.sort_by(|a, b| b.match_count.cmp(&a.match_count));
     }
     Ok(hits)
+}
+
+/// Distinct literal strings under the index's highlight spans, in document order.
+fn matched_literals(text: &str, spans: &[(usize, usize)]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for &(a, b) in spans {
+        let lit = &text[a..b];
+        if !out.iter().any(|m| m == lit) {
+            out.push(lit.to_string());
+        }
+    }
+    out
+}
+
+/// Word-index query: each term is a phrase of its segmented words, terms are ANDed, rows come back in BM25
+/// order together with FTS5 `highlight()` output that marks the matched words in the boundary-marked column.
+fn query_words(
+    conn: &rusqlite::Connection,
+    phrases: &[String],
+    scope: SearchScope,
+) -> Result<Vec<RawHit>, String> {
+    let expr = phrases.join(" ");
+    let sql = format!(
+        "SELECT f.session_id, f.source, f.message_index, f.ordinal, \
+                highlight(session_words, 0, ?2, ?3) \
+         FROM session_words w JOIN session_fts f ON f.rowid = w.rowid \
+         JOIN sessions s ON s.id = f.session_id \
+         WHERE session_words MATCH ?1{} ORDER BY w.rank",
+        scope.sql_filter()
+    );
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| format!("Failed to prepare word query: {e}"))?;
+    let rows = stmt
+        .query_map(
+            rusqlite::params![expr, tokenize::MARK_OPEN, tokenize::MARK_CLOSE],
+            |row| {
+                let marked: String = row.get(4)?;
+                let h = tokenize::parse_highlight(&marked);
+                Ok(RawHit {
+                    session_id: row.get(0)?,
+                    source: row.get(1)?,
+                    message_index: row.get(2)?,
+                    ordinal: row.get(3)?,
+                    text: h.text,
+                    spans: h.spans,
+                })
+            },
+        )
+        .map_err(|e| format!("Failed to run word query: {e}"))?;
+    collect_raw(rows)
 }
 
 /// FTS5 multi-term query with implicit AND and BM25 relevance ranking. Joining `sessions` excludes orphaned
@@ -281,6 +376,7 @@ fn map_raw_hit(row: &rusqlite::Row) -> rusqlite::Result<RawHit> {
         message_index: row.get(2)?,
         ordinal: row.get(3)?,
         text: row.get(4)?,
+        spans: Vec::new(),
     })
 }
 
@@ -417,6 +513,21 @@ pub fn reindex_session_quiet(app: &AppCtx, session_id: &str) {
     let _ = index::reindex_session(db, &recordings_dir, &session);
 }
 
+/// Bring the index up to date on a background thread at startup so the first search does not pay for the
+/// sessions that changed since the last run, or for a full rebuild after the index tables change.
+pub fn warm_index(app: AppCtx) {
+    std::thread::spawn(move || {
+        let Ok(data_dir) = app.data_dir() else {
+            return;
+        };
+        let started = std::time::Instant::now();
+        match index::refresh_stale(app.db(), &data_dir.join("recordings")) {
+            Ok(()) => println!("search index warm-up finished in {:?}", started.elapsed()),
+            Err(e) => eprintln!("search index warm-up failed: {e}"),
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -464,6 +575,71 @@ mod tests {
             params![text, sid, source, message_index, ordinal],
         )
         .unwrap();
+        let rowid = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO session_words(rowid, words, session_id) VALUES (?1, ?2, ?3)",
+            params![rowid, tokenize::boundary_marked(text), sid],
+        )
+        .unwrap();
+    }
+
+    /// The word index answers first: `和服` matches the word but not the run `总和服务`, which the trigram
+    /// index would also have accepted, and the matched literal is exactly the word.
+    #[test]
+    fn word_index_rejects_cross_word_substring() {
+        let db = temp_db();
+        insert_session(&db, "s1", "kimono", "claude");
+        insert_session(&db, "s2", "billing", "claude");
+        insert_fts(&db, "s1", "transcript", Some(0), 0, "我买了一件和服，很好看。");
+        insert_fts(&db, "s2", "transcript", Some(0), 0, "总和服务的费用还没有结清。");
+
+        let hits = search_sessions(&db, Path::new("/nonexistent"), "和服", SearchScope::Live).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].session_id, "s1");
+        assert_eq!(hits[0].matches[0].matched, vec!["和服".to_string()]);
+        assert!(hits[0].matches[0].snippet.contains("和服"));
+    }
+
+    /// A partial identifier has no word hit, so the trigram index takes over and matched carries the term.
+    #[test]
+    fn substring_fallback_when_no_word_matches() {
+        let db = temp_db();
+        insert_session(&db, "s1", "git", "claude");
+        insert_fts(&db, "s1", "transcript", Some(0), 0, "list every worktree before merging");
+
+        let hits = search_sessions(&db, Path::new("/nonexistent"), "worktre", SearchScope::Live).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matches[0].matched, vec!["worktre".to_string()]);
+    }
+
+    /// Porter stemming folds inflections and the matched literal is the word as written; a different
+    /// identifier that merely contains the term is not a word hit.
+    #[test]
+    fn word_index_stems_english_and_reports_literal() {
+        let db = temp_db();
+        insert_session(&db, "s1", "orch", "claude");
+        insert_session(&db, "s2", "cli", "claude");
+        insert_fts(&db, "s1", "transcript", Some(0), 0, "The lead agent spawned two children.");
+        insert_fts(&db, "s2", "transcript", Some(0), 0, "Run vspawn to create a child session.");
+
+        let hits = search_sessions(&db, Path::new("/nonexistent"), "spawn", SearchScope::Live).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].session_id, "s1");
+        assert_eq!(hits[0].matches[0].matched, vec!["spawned".to_string()]);
+    }
+
+    /// A punctuated identifier and a multi-word CJK phrase each match as one phrase and come back as one
+    /// literal covering the whole run in the text.
+    #[test]
+    fn word_index_phrases_report_whole_literals() {
+        let db = temp_db();
+        insert_session(&db, "s1", "app", "claude");
+        insert_fts(&db, "s1", "transcript", Some(0), 0, "打开终端搜索功能，然后在 vlx-term 里试一下。");
+
+        let hits = search_sessions(&db, Path::new("/nonexistent"), "终端搜索", SearchScope::Live).unwrap();
+        assert_eq!(hits[0].matches[0].matched, vec!["终端搜索".to_string()]);
+        let hits = search_sessions(&db, Path::new("/nonexistent"), "vlx-term", SearchScope::Live).unwrap();
+        assert_eq!(hits[0].matches[0].matched, vec!["vlx-term".to_string()]);
     }
 
     /// Recording: single-term matches receive document-order ordinals equal to findNext counts; snippets are full lines.
@@ -627,3 +803,5 @@ mod tests {
         assert_eq!(live_like[0].session_id, "live1");
     }
 }
+
+

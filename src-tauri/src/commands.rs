@@ -91,6 +91,21 @@ pub async fn uninstall_vela_command() -> Result<crate::agent::spawn_cli::UserCli
 
 // ─────────────────────────── Unified desktop dispatch ───────────────────────────
 
+/// Remote windows log to their local desktop host, retaining the native window identity.
+#[tauri::command]
+pub async fn record_split_trace(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    entry: crate::split_trace::Entry,
+) -> Result<bool, String> {
+    let label = window.label().to_owned();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::split_trace::record(&AppCtx::Tauri(app), &label, entry)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Unified desktop entry point for frontend `invoke(cmd, args)`. It shares browser/remote dispatch
 /// and moves the full call to the blocking pool, keeping data commands off the UI thread. Hot-path
 /// typing, native windows/views, and host management remain direct allowlisted commands; see
@@ -813,7 +828,9 @@ pub async fn ssh_connect(
 ) -> Result<String, String> {
     // Data mode defaults to an isolated database; true reuses the remote desktop release database.
     let shared_db = shared_db.unwrap_or(false);
-    // Mirror mode defaults off for SSH: the switch is hidden behind Option/Alt and starts unchecked.
+    // Mirror mode defaults off. On, the connection follows the remote desktop app: it attaches to the
+    // running app when there is one, else opens the app's database, else an isolated one (the data-mode
+    // switch is then decided by the orchestration, see `ssh_remote::connect`).
     let mirror = mirror.unwrap_or(false);
     let data_dir = app
         .path()
@@ -912,7 +929,14 @@ pub async fn ssh_connect(
     }
     let app2 = app.clone();
     app.run_on_main_thread(move || {
-        if let Err(e) = open_login_window(&app2, &host, &r.session, r.local_port, &r.password) {
+        if let Err(e) = open_login_window(
+            &app2,
+            &host,
+            &r.session,
+            r.local_port,
+            &r.password,
+            r.desktop_link,
+        ) {
             eprintln!("open ssh login window failed: {e}");
         }
     })
@@ -933,12 +957,17 @@ pub async fn ssh_disconnect(host: String, session: String, kill_remote: bool) {
 /// Open a window on the local HTTP forwarding port and inject its random password for LoginGate.
 /// Unlike URL remote windows, SSH already encrypts transport, so no TLS-stripping tunnel or E2EE
 /// pairing fragment is needed.
+///
+/// `desktop_link` marks a window whose tunnel leads into the remote desktop app itself. That process is
+/// not this connection's to stop, so closing the window just leaves, exactly like a URL window; only a
+/// headless service started by this client gets the stop-or-keep question.
 fn open_login_window(
     app: &AppHandle,
     host: &str,
     session: &str,
     local_port: u16,
     password: &str,
+    desktop_link: bool,
 ) -> Result<(), String> {
     let parsed: url::Url = format!("http://127.0.0.1:{local_port}/")
         .parse()
@@ -958,8 +987,13 @@ fn open_login_window(
 }})();"#
     );
 
+    let title = if desktop_link {
+        format!("VelaTerm · SSH mirror: {host}")
+    } else {
+        format!("VelaTerm · SSH: {host}")
+    };
     let win = tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::External(parsed))
-        .title(format!("VelaTerm · SSH: {host}"))
+        .title(title)
         .inner_size(1280.0, 820.0)
         .min_inner_size(900.0, 600.0)
         // Open with the chrome the user already chose instead of the OS default; see `set_native_theme`.
@@ -970,6 +1004,7 @@ fn open_login_window(
         .map_err(|e| format!("failed to create SSH remote window: {e}"))?;
 
     // On SSH-window close, ask whether to stop or preserve the detached remote service for run.json reuse.
+    // A window attached to the remote desktop app has nothing to stop: drop the tunnel and close.
     let host_owned = host.to_string();
     let session_owned = session.to_string();
     let app_for_close = app.clone();
@@ -982,6 +1017,15 @@ fn open_login_window(
             let session = session_owned.clone();
             let app2 = app_for_close.clone();
             let label2 = label_for_close.clone();
+            if desktop_link {
+                std::thread::spawn(move || {
+                    crate::ssh_remote::disconnect(&host, &session, false);
+                    if let Some(w) = app2.get_webview_window(&label2) {
+                        let _ = w.destroy();
+                    }
+                });
+                return;
+            }
             use tauri_plugin_dialog::{
                 DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
             };

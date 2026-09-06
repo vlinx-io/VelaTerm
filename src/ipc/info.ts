@@ -224,11 +224,11 @@ export interface SystemStats {
   pressure: "normal" | "warning" | "critical" | null;
   /** macOS memory pressure as 0-100, higher meaning more pressure; null on other platforms. */
   pressurePct: number | null;
-  /** Linux 1/5/15-minute load averages; null on other platforms. */
+  /** macOS and Linux 1/5/15-minute load averages; null on other platforms. */
   load: [number, number, number] | null;
 }
 
-/** Sample whole-machine CPU, memory, swap, and the platform's saturation signal (pressure or load). */
+/** Sample whole-machine CPU, memory, swap, and the platform's available saturation signals. */
 export function systemStats(): Promise<SystemStats> {
   return invoke<SystemStats>("system_stats", {});
 }

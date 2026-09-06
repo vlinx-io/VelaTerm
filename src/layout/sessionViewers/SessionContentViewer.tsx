@@ -4,8 +4,11 @@
 //!
 //! Optional global-search location anchors:
 //! - A known `source` selects the path directly; "recording" skips transcript detection.
-//! - Transcript mode forwards `initialQuery` and `scrollToMessageIndex` to TranscriptViewer.
-//! - Recording mode forwards `initialQuery` and `scrollToOrdinal` to RecordingViewer.
+//! - Transcript mode forwards `highlightTerms` and `scrollToMessageIndex` to TranscriptViewer.
+//! - Recording mode forwards the first of `highlightTerms` as the find query and `scrollToOrdinal` to
+//!   RecordingViewer.
+//! - `highlightTerms` are the literals the search index matched for the active hit; `initialQuery` is the
+//!   archive-browsing prefill and is not used for location.
 //!
 //! Optional `preloadedMessages` bypasses internal readAgentTranscript and uses the search console's
 //! cache. Moving between matches in one session then only scrolls; it neither remounts nor reloads
@@ -29,6 +32,7 @@ export function SessionContentViewer({
   session,
   source,
   initialQuery,
+  highlightTerms,
   scrollToMessageIndex,
   scrollToOrdinal,
   preloadedMessages,
@@ -36,7 +40,10 @@ export function SessionContentViewer({
   session: Session;
   /** Known global-search match source; "recording" skips transcript detection. */
   source?: "transcript" | "recording";
+  /** Browsing-mode prefill for the transcript filter field. */
   initialQuery?: string;
+  /** Literals matched by the search index for the active hit; enables locate highlighting. */
+  highlightTerms?: string[];
   scrollToMessageIndex?: number;
   scrollToOrdinal?: number;
   /** Externally cached transcript from the search console; providing it skips internal loading. */
@@ -78,6 +85,7 @@ export function SessionContentViewer({
         session={session}
         messages={messages}
         initialQuery={initialQuery}
+        highlightTerms={highlightTerms}
         scrollToMessageIndex={scrollToMessageIndex}
       />
     );
@@ -85,7 +93,7 @@ export function SessionContentViewer({
     return (
       <RecordingViewer
         sessionId={session.id}
-        initialQuery={initialQuery}
+        initialQuery={highlightTerms?.[0] ?? initialQuery}
         scrollToOrdinal={scrollToOrdinal}
       />
     );
