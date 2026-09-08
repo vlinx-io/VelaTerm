@@ -209,11 +209,14 @@ async fn handle_socket(
     let mut pty_subs: HashMap<String, u64> = HashMap::new();
     // Sessions with status/exit forwarding already registered, preventing duplicates.
     let mut listened: HashSet<String> = HashSet::new();
+    let mut chat_listened: HashSet<String> = HashSet::new();
 
-    // Register session-independent global forwarding for spawn, document-open, tree, and clone events.
+    // Register session-independent global forwarding for spawn, orchestration, document-open, tree, and
+    // clone events.
     for name in [
         "spawn://request",
         "spawn://resolved",
+        "orch://request",
         "view://request",
         "knowledge://changed",
         crate::host::TREE_CHANGED,
@@ -244,6 +247,7 @@ async fn handle_socket(
             &out_tx,
             &mut pty_subs,
             &mut listened,
+            &mut chat_listened,
             &mut event_ids,
         );
     }
@@ -278,6 +282,7 @@ async fn handle_socket(
                             &out_tx,
                             &mut pty_subs,
                             &mut listened,
+                            &mut chat_listened,
                             &mut event_ids,
                         );
                     }
@@ -407,6 +412,9 @@ fn handle_text(
     out_tx: &mpsc::UnboundedSender<Message>,
     pty_subs: &mut HashMap<String, u64>,
     listened: &mut HashSet<String>,
+    // Sessions whose chat channel this connection forwards. Separate from `listened`: a session can have
+    // both a PTY and a chat engine, registered at different moments.
+    chat_listened: &mut HashSet<String>,
     event_ids: &mut Vec<ListenerId>,
 ) {
     let msg: Value = match serde_json::from_str(text) {
@@ -425,6 +433,29 @@ fn handle_text(
             // The caller's trust classification follows this instance's serve mode: Electron's loopback
             // sidecar clients are local; LAN-exposed instances serve remote paired devices.
             let origin = CallOrigin::for_serve_mode(ctx.mode);
+            // A chat session has no PTY, so its events have no pty-spawn to hang registration off. Register
+            // them when the client first asks about that session — starting the engine or reading its state —
+            // and do it before dispatching, since starting emits its first events synchronously.
+            if matches!(cmd.as_str(), "chat_start" | "chat_snapshot") {
+                if let Some(sid) = args.get("sessionId").and_then(Value::as_str) {
+                    if chat_listened.insert(sid.to_string()) {
+                        event_ids.push(listen_forward(
+                            &ctx.app,
+                            &crate::agent::chat::engine::event_name(sid),
+                            out_tx.clone(),
+                        ));
+                        // Work state reaches the sidebar through the channel PTY sessions use, so a session
+                        // that never spawns a PTY still needs it registered.
+                        if listened.insert(sid.to_string()) {
+                            event_ids.push(listen_forward(
+                                &ctx.app,
+                                &format!("pty://status/{sid}"),
+                                out_tx.clone(),
+                            ));
+                        }
+                    }
+                }
+            }
             if matches!(cmd.as_str(), "pty_write" | "pty_resize") {
                 // Keep frequent, lightweight keyboard and resize operations synchronous in the read loop for responsiveness.
                 let reply = match dispatch(&ctx.app, &cmd, &args, conn_source, origin) {
@@ -440,11 +471,22 @@ fn handle_text(
                 let out_tx = out_tx.clone();
                 let conn_source = conn_source.to_string();
                 tokio::task::spawn_blocking(move || {
+                    let started = std::time::Instant::now();
                     let reply = match dispatch(&ctx.app, &cmd, &args, &conn_source, origin) {
                         Ok(result) => json!({"t":"reply","id":id,"ok":true,"result":result}),
                         Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}),
                     };
-                    let _ = out_tx.send(Message::Text(reply.to_string()));
+                    let prepare_ms = started.elapsed().as_millis();
+                    let encoding = std::time::Instant::now();
+                    let encoded = reply.to_string();
+                    if cmd == "chat_snapshot" {
+                        let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+                        let timestamp = format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", now.year(), u8::from(now.month()), now.day(), now.hour(), now.minute(), now.second());
+                        eprintln!("{} [INFO ] [{}-{}] event=chat_sync method=snapshot prepareMs={} encodeMs={} bytes={} status={}",
+                            timestamp, conn_source, id.as_u64().unwrap_or(0),
+                            prepare_ms, encoding.elapsed().as_millis(), encoded.len(), reply["ok"]);
+                    }
+                    let _ = out_tx.send(Message::Text(encoded));
                 });
             }
         }
@@ -580,7 +622,10 @@ fn web_pty_spawn(
     if !in_db && !sid.starts_with("eph-") {
         return Err("Session has been deleted".to_string());
     }
-    resume_id = resume_id.filter(|id| !crate::agent::resume::confirmed_missing(kind, id));
+    // Codex validation runs in PtyManager after the existing-process attach path.
+    if kind != SessionKind::Codex {
+        resume_id = crate::agent::resume::checked_resume_id(kind, resume_id)?;
+    }
     if kind == SessionKind::Pi && resume_id.is_none() && !fork && in_db {
         if let Some(cwd_for_repair) = cwd.as_deref() {
             let created = created_at.max(0) as u64;
@@ -671,6 +716,7 @@ mod tests {
         let (out_tx, mut out_rx) = mpsc::unbounded_channel();
         let mut pty_subs = HashMap::new();
         let mut listened = HashSet::new();
+        let mut chat_listened = HashSet::new();
         let mut event_ids = Vec::new();
         let frame = json!({"t": "invoke", "id": 1, "cmd": cmd, "args": {}}).to_string();
         handle_text(
@@ -680,6 +726,7 @@ mod tests {
             &out_tx,
             &mut pty_subs,
             &mut listened,
+            &mut chat_listened,
             &mut event_ids,
         );
         match out_rx.recv().await.expect("expected a reply frame") {

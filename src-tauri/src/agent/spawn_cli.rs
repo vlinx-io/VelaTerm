@@ -1,7 +1,9 @@
-//! Installation and discovery of built-in command shims (`vspawn`, `vspawn-tree`, and `vopen`).
+//! Installation and discovery of built-in command shims (`vspawn`, `vspawn-tree`, `vopen`, `vrefer`,
+//! and `vsearch`).
 //!
 //! At startup VelaTerm installs thin shims under the application data `bin/` directory and prepends it
-//! to each session shell's PATH, allowing `vspawn "task"` and `vopen <file>` with no separate setup.
+//! to each session shell's PATH, allowing `vspawn "task"`, `vopen <file>`, `vrefer <session>`, and
+//! `vsearch <words>` with no separate setup.
 //!
 //! Each shim invokes a hidden main-program subcommand such as `$VLX_EXE --spawn` or `--view`, implemented
 //! in `agent/cli_client.rs`. Unix uses a tiny `#!/bin/sh` wrapper and Windows a `.cmd` file, keeping all
@@ -10,7 +12,9 @@
 use std::path::{Path, PathBuf};
 
 /// Built-in `(command name, main-program subcommand arguments)` shims. `vspawn` creates a child session
-/// without a worktree, `vspawn-tree` forces `--worktree`, and `vopen` opens a document or browser tab.
+/// without a worktree, `vspawn-tree` forces `--worktree`, `vopen` opens a document or browser tab,
+/// `vrefer` reads another session's conversation, `vsearch` searches across every session, `vorch`
+/// proposes several sessions at once, and `vstat` reports which sessions are busy.
 ///
 /// Unique `v`-prefixed names avoid shadowing system commands such as Vim's `/usr/bin/view`, so simply
 /// prepending the bin directory is sufficient without ZDOTDIR/path_helper reordering.
@@ -18,6 +22,10 @@ const SHIMS: &[(&str, &str)] = &[
     ("vspawn", "--spawn"),
     ("vspawn-tree", "--spawn --worktree"),
     ("vopen", "--view"),
+    ("vrefer", "--refer"),
+    ("vsearch", "--search"),
+    ("vorch", "--orch"),
+    ("vstat", "--stat"),
     ("vknowledge", "--knowledge"),
 ];
 
@@ -44,7 +52,14 @@ const SKILLS: &[(&str, &str)] = &[
         include_str!("../../../skills/vspawn-tree/SKILL.md"),
     ),
     ("vopen", include_str!("../../../skills/vopen/SKILL.md")),
-    ("vknowledge", include_str!("../../../skills/vknowledge/SKILL.md")),
+    ("vrefer", include_str!("../../../skills/vrefer/SKILL.md")),
+    ("vsearch", include_str!("../../../skills/vsearch/SKILL.md")),
+    ("vorch", include_str!("../../../skills/vorch/SKILL.md")),
+    ("vstat", include_str!("../../../skills/vstat/SKILL.md")),
+    (
+        "vknowledge",
+        include_str!("../../../skills/vknowledge/SKILL.md"),
+    ),
 ];
 
 /// Bin directory prepended to session PATH: `<data_dir>/bin`.
@@ -351,6 +366,14 @@ fn write_skills(dir: &Path, for_codex: bool) -> std::io::Result<()> {
         std::fs::create_dir_all(&dest)?;
         if for_codex {
             std::fs::write(dest.join("SKILL.md"), codex_skill_content(content))?;
+            if *name == "vknowledge" {
+                let agents = dest.join("agents");
+                std::fs::create_dir_all(&agents)?;
+                std::fs::write(
+                    agents.join("openai.yaml"),
+                    include_str!("../../../skills/vknowledge/agents/openai.yaml"),
+                )?;
+            }
         } else {
             std::fs::write(dest.join("SKILL.md"), content)?;
         }

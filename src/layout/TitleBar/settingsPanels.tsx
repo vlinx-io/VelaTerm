@@ -384,7 +384,17 @@ export function AgentsPanel() {
       />
 
       <Field label={t("info.permission")}>
-        {supportsYolo ? (
+        {selKind === "codex" ? (
+          <Select
+            value={skip || cfg.permissionMode === "full-access" ? "skip" : cfg.permissionMode === "read-only" ? "read-only" : "auto"}
+            options={[
+              { value: "read-only", label: t("chat.mode.readOnly") },
+              { value: "auto", label: t("chat.mode.auto") },
+              { value: "skip", label: t("chat.mode.fullAccess") },
+            ]}
+            onChange={(v) => setAgentDefault(selKind, { permissionMode: v })}
+          />
+        ) : supportsYolo ? (
           <Seg<"default" | "skip">
             value={skip ? "skip" : "default"}
             options={[

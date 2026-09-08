@@ -1,7 +1,10 @@
 ---
 name: vknowledge
-description: Query the current project's CodeGraph and VelaTerm global memory when understanding code, tracing dependencies, or looking up previous design decisions. Available inside VelaTerm sessions.
+description: Query the current project's CodeGraph and VelaTerm global memory only when the user explicitly requests vknowledge, including /vknowledge or $vknowledge. Never auto-trigger for code analysis, dependency tracing, or design history. Available inside VelaTerm sessions.
+disable-model-invocation: true
 ---
+
+Use this skill only when the user explicitly asks to use `vknowledge`. Do not invoke it automatically or as a fallback during other tasks.
 
 Use the session's `vknowledge` command for code structure and saved design context:
 

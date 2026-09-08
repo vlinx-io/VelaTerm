@@ -56,6 +56,22 @@ export function findBySession(
   return findBySession(node.a, sessionId) ?? findBySession(node.b, sessionId);
 }
 
+/** Retarget every leaf for one session while preserving pane identity and split geometry. */
+export function replaceSession(
+  node: PaneNode,
+  previousSessionId: string,
+  nextSessionId: string,
+): PaneNode {
+  if (node.kind === "leaf") {
+    return node.sessionId === previousSessionId
+      ? { ...node, sessionId: nextSessionId }
+      : node;
+  }
+  const a = replaceSession(node.a, previousSessionId, nextSessionId);
+  const b = replaceSession(node.b, previousSessionId, nextSessionId);
+  return a === node.a && b === node.b ? node : { ...node, a, b };
+}
+
 /** Split targetPaneId, keeping the original leaf as a and placing the new session in b. */
 export function splitAt(
   node: PaneNode,

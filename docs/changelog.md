@@ -7,6 +7,30 @@ v0.1.91 is the first public release; earlier version numbers were internal itera
 
 ---
 
+## v0.1.108 — 2026-09-08
+
+- Experimental conversation view for Claude, Codex and OpenCode, with streaming replies, thinking, tool details, permissions and question forms. New configurations still default to the terminal view.
+
+- Conversation controls now support model settings, queued messages, steering, file completion and image attachments, according to each engine’s capabilities.
+
+- Conversation search, file links, image actions and separate conversation fonts make long sessions easier to read. Remote history loads progressively, with tool details fetched on demand.
+
+- Message submission receipts help reconcile interrupted connections. Uncertain submissions stay pending instead of being retried automatically.
+
+- New `vrefer` and `vsearch` commands read and search other sessions; `vrefer --ask` delegates reading to an agent. `vorch` and `vstat` add multi-agent coordination and status inspection.
+
+- Memory entries support tags and direct text editing, with unsaved-change protection and configurable organization settings. History import gains filtering and selection improvements; graph navigation is improved.
+
+- Public sharing client support adds account/device binding, scoped AI-session access and encrypted relay connections. Guest image uploads and complex MCP forms remain unsupported.
+
+- Codex resume IDs are checked against persisted history. Confirmed missing history now produces an explicit error instead of silently starting an empty session; existing running terminals can still be reattached.
+
+- Rollback follows engine capabilities: Codex restores conversation state only, without restoring files. OpenCode rollback range handling and directory prechecks remain known limitations.
+
+- Release version bumps preserve locked dependency versions. Cross-platform installation/upgrade checks and live AI integration acceptance remain pending; automated checks do not replace them.
+
+---
+
 ## v0.1.107 — 2026-09-05
 
 - 🧠 Global Memory (experimental): Claude or Codex turns your conversations into a shared wiki organized by topic

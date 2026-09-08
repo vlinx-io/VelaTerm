@@ -1,0 +1,2002 @@
+/* Session view — the conversation reading of an agent session.
+ *
+ * The view follows the global background, accent, density, and light/dark scheme. Dark-mode secondary
+ * text is adjusted locally below so metadata and controls remain readable. */
+
+.sv {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-term);
+  min-height: 0;
+  font-family: var(--chat-font);
+  font-kerning: none;
+  font-variant-ligatures: none;
+  /* The one column everything in the view sits on: the conversation, the permission cards and the
+     composer share it, so what you are reading lines up with the box you answer in. Centred rather than
+     hung off the left edge, and given as a share of the pane so a wider pane gives it more room. */
+  --sv-col: 80%;
+  /* The gutter beside every message, holding the agent's mark or the rule down the person's own turn. */
+  --sv-gutter: 18px;
+  --sv-gutter-gap: 8px;
+  /* The inset of a message drawn on its own surface. It is also how far that surface reaches back into the
+     gutter, which is what keeps the words inside it on the conversation's left edge. */
+  --sv-pad: 12px;
+}
+
+/* Keep readable secondary text distinct from body text without changing surfaces or accent colors. */
+:root[data-theme="dark"] .sv {
+  --text-mid: oklch(0.82 0.004 260);
+  --text-dim: oklch(0.75 0.004 260);
+  --text-faint: oklch(0.68 0.004 260);
+  --text-secondary: var(--text-mid);
+  --text-muted: var(--text-dim);
+}
+
+/* Holds the scrolling conversation and the button that returns to the end of it. */
+.sv-scroll-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sv-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 18px 6px;
+  /* Conversation typography is independent of interface density and terminal preferences. */
+  font-family: var(--chat-font);
+  font-size: var(--chat-fs);
+  line-height: var(--chat-line-height);
+  color: var(--text);
+  user-select: text;
+}
+.sv-scroll > * {
+  width: var(--sv-col);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ── Virtualized list ──
+ *
+ * A long conversation only draws the rows near the viewport. The container below stands in for all of
+ * them at once so the scrollbar keeps its proportions, and each drawn row is placed inside it by a
+ * transform rather than by flowing after its neighbour. */
+
+.sv-virtual {
+  position: relative;
+  /* Use the same centered column as the mounted rows below. */
+}
+.sv-item-virtual {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+/* One entry, whether drawn in the virtualized part or mounted after it. The block formatting context is
+ * what makes it measurable: without it a row's own vertical margins escape the wrapper, and every measured
+ * height would come back short by the gap around it. Row margins are halved inside the wrapper because
+ * they no longer collapse into each other, which keeps the spacing what it was before. */
+.sv-item {
+  display: flow-root;
+}
+.sv-item > .sv-msg {
+  margin-top: 7px;
+  margin-bottom: 7px;
+}
+.sv-item > .sv-tool,
+.sv-item > .sv-run,
+.sv-item > .sv-thinking {
+  margin: 1px 0;
+}
+
+/* Sits over the end of the conversation while the reader is parked further up — just inside the right
+   edge of the column rather than of the pane, which on a wide pane is a long way from anything being read. */
+.sv-to-end {
+  position: absolute;
+  right: calc((100% - var(--sv-col)) / 2 + 6px);
+  bottom: 10px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-2);
+  color: var(--text-mid);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 25%);
+}
+.sv-to-end:hover {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.sv-empty {
+  padding: 24px 4px;
+  color: var(--text-dim);
+  font-size: var(--ui-fs);
+}
+/* The blank conversation. A session with nothing in it yet is the first thing its owner sees, so it gets
+ * the middle of the view — the agent's mark, what state it is in, and one line about what happens next —
+ * rather than a stray grey sentence in the top corner. */
+.sv-blank {
+  min-height: 68%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  text-align: center;
+  padding: 24px 4px;
+}
+.sv-blank-icon {
+  display: grid;
+  place-items: center;
+  margin-bottom: 10px;
+  opacity: 0.8;
+}
+.sv-blank-line {
+  color: var(--text-dim);
+  font-size: calc(var(--ui-fs) + 1px);
+}
+
+.sv-empty-detail {
+  margin-top: 6px;
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 1px);
+  font-family: var(--chat-font);
+  word-break: break-word;
+}
+
+/* ── Messages ──
+ *
+ * The two sides are drawn as different kinds of thing, because that is what they are. The agent's answer is
+ * a document: its mark in the margin, an author line, then prose running down the page as long as it needs.
+ * What you said is the prompt that opens a turn. It shares the agent answer's reading column and author
+ * line, but a quiet inset surface and short accent rule keep the instruction distinct from the response.
+ *
+ * Sharing a left edge was the thing to try first, and it is what makes a conversation of two similar-looking
+ * This makes the exchange read like an agent transcript rather than a social chat: prompts are easy to find
+ * without becoming the loudest element on the page. */
+
+.sv-msg {
+  display: grid;
+  grid-template-columns: var(--sv-gutter) minmax(0, 1fr);
+  column-gap: var(--sv-gutter-gap);
+  margin: 14px 0;
+}
+.sv-msg-mark {
+  position: absolute;
+  top: 50%;
+  right: calc(100% + var(--sv-gutter-gap));
+  display: flex;
+  width: var(--sv-gutter);
+  transform: translateY(-50%);
+  align-items: center;
+  justify-content: flex-end;
+}
+.sv-user-sail {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  color: oklch(0.62 0.17 256);
+}
+:root[data-theme="dark"] .sv-user-sail {
+  color: oklch(0.76 0.16 158);
+}
+.sv-user-sail svg {
+  display: block;
+}
+.sv-msg-head,
+.sv-msg-images,
+.sv-msg-body {
+  grid-column: 2;
+}
+.sv-msg-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.sv-msg-author {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.sv-msg-who {
+  font-size: calc(var(--ui-fs) - 0.5px);
+  font-weight: 600;
+  color: var(--text-mid);
+}
+/* Read aloud but not drawn. Taken out of flow so it adds neither width nor a flex gap. */
+.sv-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* Monospace and tabular so a column of times keeps its digits in line down the conversation. */
+.sv-msg-time {
+  font-family: var(--chat-font);
+  font-size: calc(var(--ui-fs) - 2.5px);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+.sv-msg-duration {
+  font-family: var(--chat-font);
+  font-size: calc(var(--ui-fs) - 2.5px);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+
+.sv-msg-body {
+  word-break: break-word;
+}
+/* A user turn occupies the same reading column as the answer it introduces. */
+.sv-msg-user .sv-msg-turn {
+  grid-column: 2;
+  min-width: 0;
+}
+.sv-msg-user .sv-msg-head {
+  margin-bottom: 4px;
+}
+.sv-msg-user .sv-msg-body {
+  /* The accent is deliberately a short inset rule rather than a full border: enough to identify the prompt,
+     without turning a long instruction into a large outlined card. */
+  position: relative;
+  min-width: 0;
+  padding: 8px 12px 9px 14px;
+  border-radius: var(--r-sm);
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.sv-msg-user .sv-msg-body::before {
+  content: "";
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: 0;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--accent-line);
+}
+
+/* Rewind stays quiet until the user returns to a message. Its menu spells out the scope because the
+   difference between conversation history and files on disk is too important to hide behind an icon. */
+.sv-rewind {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.sv-rewind-button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.sv-msg-user:hover .sv-rewind-button,
+.sv-rewind-button:focus-visible,
+.sv-rewind-button[aria-expanded="true"] {
+  opacity: 1;
+}
+.sv-rewind-button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.sv-rewind-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 3px);
+  z-index: 40;
+  display: block;
+  width: 236px;
+  padding: 5px;
+  box-sizing: border-box;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 28%);
+  font-family: var(--chat-font);
+}
+.sv-rewind-warning {
+  display: block;
+  padding: 4px 7px 6px;
+  color: var(--red);
+  font-size: calc(var(--ui-fs) - 2px);
+  line-height: 1.4;
+}
+.sv-rewind-choice {
+  display: block;
+  width: 100%;
+  padding: 6px 7px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: calc(var(--ui-fs) - 0.5px);
+  text-align: left;
+  cursor: pointer;
+}
+.sv-rewind-choice:hover {
+  background: var(--bg-hover);
+}
+
+/* ── Reasoning ── */
+
+.sv-thinking {
+  margin: 6px 0;
+}
+.sv-thinking-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 2px 8px 2px 8px;
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 1px);
+  font-style: italic;
+  cursor: pointer;
+}
+.sv-thinking-head:hover {
+  color: var(--text-dim);
+}
+.sv-thinking-body {
+  margin: 2px 0 8px 26px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.sv-caret {
+  transition: transform 0.12s ease;
+  flex: none;
+}
+.sv-caret-open {
+  transform: rotate(90deg);
+}
+
+/* ── A run of tool calls, folded into one line ── */
+
+.sv-run {
+  margin: 2px 0;
+}
+/* A tool line is machine text — a name, a path, a command — so it goes back to the monospace face the
+   prose above it left behind. The 12px caret plus this padding and gap put the name on the same left edge
+   as that prose, which is what makes an answer and the calls under it read as one turn. */
+.sv-run-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  color: var(--text-dim);
+  font-family: var(--chat-font);
+  font-size: calc(var(--ui-fs) - 1px);
+  text-align: left;
+  cursor: pointer;
+}
+.sv-run-head:hover {
+  background: var(--bg-hover);
+  color: var(--text-mid);
+}
+.sv-run-count {
+  flex: none;
+  color: var(--text-mid);
+}
+.sv-run-summary {
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Opened, the calls are indented under the line that stands for them, so it stays clear where the run
+ * begins and where it ends. */
+.sv-run-body {
+  margin: 2px 0 6px 14px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+
+/* ── Tool calls ──
+ *
+ * A collapsed call is one quiet line — name, summary, a caret at the end — with no box around it, so a
+ * run of them reads as a list of things done rather than a stack of cards. The box appears only when
+ * the line is opened, and wraps the details together with the line that opened them. */
+
+.sv-tool {
+  margin: 2px 0;
+}
+.sv-tool-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  color: var(--text-dim);
+  font-family: var(--chat-font);
+  font-size: calc(var(--ui-fs) - 1px);
+  text-align: left;
+  cursor: pointer;
+}
+.sv-tool-head:hover {
+  background: var(--bg-hover);
+  color: var(--text-mid);
+}
+.sv-tool-open > .sv-tool-head {
+  background: var(--bg-1);
+  border-color: var(--border);
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  color: var(--text);
+}
+.sv-tool-name {
+  flex: none;
+  color: var(--text-mid);
+}
+.sv-tool-open > .sv-tool-head .sv-tool-name,
+.sv-tool-head:hover .sv-tool-name {
+  color: var(--text);
+}
+.sv-tool-error .sv-tool-name {
+  color: var(--red);
+}
+.sv-tool-summary {
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sv-tool-spacer {
+  flex: 1;
+}
+.sv-tool-head .sv-caret {
+  color: var(--text-faint);
+}
+.sv-tool-pending {
+  flex: none;
+  color: var(--yellow);
+  font-size: calc(var(--ui-fs) - 2px);
+}
+/* How many steps a subagent took, on the collapsed card: the work is visible without opening it. */
+.sv-tool-steps {
+  flex: none;
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 2px);
+  white-space: nowrap;
+}
+.sv-tool-body {
+  margin-bottom: 4px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 var(--r-md) var(--r-md);
+}
+
+/* ── A question the agent asked, and the answer it was given ──
+ *
+ * A record of a decision rather than a tool call, so it keeps its own quiet surface instead of folding
+ * into the run of tool lines around it. The question is set in the prose face because it was written to be
+ * read; the answer sits under it against a rule, one step in, the way a reply sits under what it answers. */
+
+.sv-qa {
+  /* Sits in the message text column, like the prompt and the answer around it: the icon gutter stays empty
+     so the card lines up with what was said rather than reaching left under the author marks. */
+  margin: 6px 0 6px calc(var(--sv-gutter) + var(--sv-gutter-gap));
+  padding: 7px 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-1);
+}
+.sv-qa-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 1px);
+}
+.sv-qa-item + .sv-qa-item {
+  margin-top: 8px;
+}
+.sv-qa-q {
+  color: var(--text-mid);
+  font-size: var(--ui-fs);
+  line-height: 1.5;
+  word-break: break-word;
+}
+.sv-qa-a {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 3px;
+}
+/* The tick keeps the answer from reading as one more line of the question, and marks it as the line that
+   was chosen rather than one that was offered. */
+.sv-qa-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--bg-0);
+}
+.sv-qa-answer {
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--ui-fs);
+  font-weight: 600;
+  line-height: 1.5;
+  word-break: break-word;
+}
+.sv-qa-blank {
+  color: var(--text-faint);
+  font-size: var(--ui-fs);
+  font-style: italic;
+  line-height: 1.5;
+}
+
+/* A subagent's own work, inside the card that started it. Indented against a rule so that it reads as a
+   conversation held one level down rather than as more of this one. */
+.sv-subagent {
+  margin-bottom: 8px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+}
+.sv-subagent .sv-msg {
+  margin: 4px 0;
+}
+.sv-tool-empty {
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 1px);
+}
+.sv-tool-section + .sv-tool-section {
+  margin-top: 6px;
+}
+.sv-tool-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-mid);
+}
+
+/* ── Tool output ── */
+
+.sv-out pre {
+  margin: 0;
+  padding: 7px 9px;
+  background: var(--bg-1);
+  border-radius: var(--r-sm);
+  font-family: var(--chat-font);
+  font-size: calc(var(--ui-fs) - 1px);
+  line-height: 1.55;
+  color: var(--term-out);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 340px;
+  overflow: auto;
+}
+.sv-out-error pre {
+  color: var(--red);
+}
+.sv-out-label {
+  margin-bottom: 3px;
+  color: var(--red);
+  font-size: calc(var(--ui-fs) - 2px);
+}
+.sv-more {
+  margin-top: 4px;
+  padding: 2px 6px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  font-size: calc(var(--ui-fs) - 2px);
+  cursor: pointer;
+}
+.sv-more:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+/* ── Todo lists ── */
+
+.sv-todo {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: calc(var(--ui-fs) - 0.5px);
+  color: var(--text-mid);
+}
+.sv-todo-mark {
+  flex: none;
+  width: 1em;
+  color: var(--text-faint);
+}
+.sv-todo-completed {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+.sv-todo-in_progress {
+  color: var(--text);
+}
+.sv-todo-in_progress .sv-todo-mark {
+  color: var(--accent);
+}
+
+/* ── Diffs ── */
+
+.sv-diff {
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  overflow: auto;
+  max-height: 420px;
+  font-family: var(--chat-font);
+  font-size: calc(var(--ui-fs) - 1px);
+  line-height: 1.55;
+}
+.sv-diff-line {
+  display: flex;
+  gap: 6px;
+  padding: 0 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.sv-diff-sign {
+  flex: none;
+  width: 1ch;
+  color: var(--text-faint);
+}
+.sv-diff-text {
+  flex: 1;
+}
+.sv-diff-add {
+  background: color-mix(in oklch, var(--green) 12%, transparent);
+}
+.sv-diff-add .sv-diff-sign {
+  color: var(--green);
+}
+.sv-diff-del {
+  background: color-mix(in oklch, var(--red) 12%, transparent);
+}
+.sv-diff-del .sv-diff-sign {
+  color: var(--red);
+}
+.sv-diff-ctx {
+  color: var(--text-dim);
+}
+
+/* ── Markdown ──
+ *
+ * Prose follows the conversation typography settings. Supporting labels, controls, and code retain
+ * their original size hierarchy. */
+
+.sv-p {
+  margin: 0 0 9px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.sv-p:last-child {
+  margin-bottom: 0;
+}
+.sv-h {
+  margin: 15px 0 5px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text);
+}
+.sv-h:first-child {
+  margin-top: 0;
+}
+.sv-quote {
+  margin: 9px 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-mid);
+}
+.sv-list {
+  margin: 6px 0 9px;
+}
+.sv-li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.sv-li + .sv-li {
+  margin-top: 2px;
+}
+.sv-li-mark {
+  flex: none;
+  min-width: 1.1em;
+  color: var(--text-faint);
+}
+.sv-li-body {
+  flex: 1;
+  min-width: 0;
+}
+.sv-hr {
+  margin: 14px 0;
+  border-top: 1px solid var(--border);
+}
+/* Inline code retains its compact size within the surrounding prose. */
+.sv-codespan {
+  padding: 1.5px 5px;
+  background: var(--bg-hover);
+  border-radius: 4px;
+  font-family: var(--chat-font);
+  font-size: calc(var(--ui-fs) - 1px);
+  word-break: break-word;
+}
+.sv-code {
+  margin: 9px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.sv-code-lang {
+  padding: 2px 8px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 2.5px);
+}
+.sv-code pre {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--bg-1);
+  font-family: var(--chat-font);
+  font-size: calc(var(--ui-fs) - 1px);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 420px;
+  overflow: auto;
+}
+.sv-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+.sv-link:hover {
+  text-decoration: underline;
+}
+.sv-img {
+  color: var(--text-faint);
+  font-style: italic;
+}
+.sv-table-wrap {
+  margin: 9px 0;
+  overflow-x: auto;
+}
+/* A table is prose in rows, so it is set at the prose size: the cell rules already separate the values
+   from the sentences around them, and a size step down on top of that just makes the data harder to read. */
+.sv-table {
+  border-collapse: collapse;
+}
+.sv-table th,
+.sv-table td {
+  padding: 5px 11px;
+  border: 1px solid var(--border);
+  text-align: left;
+  /* The message body breaks inside words to keep long paths from overflowing. In a table that rule turns a
+     squeezed column into nonsense — a size cell breaking "522M" after the digits — so cells break between
+     words and only split one that could not fit on a line of its own. */
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+/* --bg-2 is the raised surface, which in the light theme is plain white — a header row filled with it is a
+   header nobody can see. The hover tint is the one neutral fill that shows up under both schemes. */
+.sv-table th {
+  background: var(--bg-hover);
+  font-weight: 600;
+}
+
+/* ── Working indicator ── */
+
+.sv-working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 12px calc(var(--sv-gutter) + var(--sv-gutter-gap));
+  color: var(--text-dim);
+  font-size: calc(var(--ui-fs) - 1px);
+}
+.sv-working-time {
+  font-family: var(--chat-font);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+}
+.sv-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: sv-pulse 1.1s ease-in-out infinite;
+}
+@keyframes sv-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sv-dot {
+    animation: none;
+  }
+  .sv-caret {
+    transition: none;
+  }
+}
+
+/* ── Composer ──
+ *
+ * The input and the controls that shape the next message share one surface: model, thinking effort, and
+ * permission mode belong to the message about to be sent, not to the pane, so they sit under the text
+ * rather than up in the header. */
+
+/* The composer is sized against the pane, not against the transcript: it belongs to the window you are
+   typing into rather than to the column of text above it, and a wide pane should give you a wide place to
+   write. 80% leaves a margin on both sides so it still reads as a box rather than as the pane's floor.
+   The completion list rides along — it has both left and right set, so auto margins centre it over the box
+   it completes, and the width below overrides that inset pair. */
+.sv-composer {
+  position: relative;
+  flex: none;
+  padding: 10px 18px 12px;
+}
+.sv-composer > * {
+  width: var(--sv-col);
+  margin-left: auto;
+  margin-right: auto;
+}
+/* Messages typed while the agent was busy, stacked above the input in the order they will go out. They
+ * sit outside the box because they are not what is being written — they are already handed over. */
+.sv-queue {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 10px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+}
+.sv-queue-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--r-md) var(--r-md) 0 0;
+  color: var(--text-mid);
+  font-size: calc(var(--ui-fs) - 1px);
+  font-weight: 600;
+}
+.sv-queue-count {
+  color: var(--text-mid);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.sv-queue-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 8px 9px 12px;
+}
+.sv-queue-item + .sv-queue-item {
+  border-top: 1px solid var(--border);
+}
+/* The text itself opens the editor, so the whole row is the target rather than a small pencil. */
+.sv-queue-text {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text-mid);
+  font-family: inherit;
+  font-size: var(--ui-fs);
+  line-height: 1.5;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+.sv-queue-text:hover {
+  color: var(--text-mid);
+}
+.sv-queue-edit {
+  flex: 1;
+  min-width: 0;
+  min-height: 20px;
+  max-height: 20vh;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--ui-fs);
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+}
+.sv-queue-steer {
+  flex: none;
+  min-height: 26px;
+  padding: 2px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-mid);
+  font: inherit;
+  font-size: calc(var(--ui-fs) - 1px);
+  cursor: pointer;
+}
+.sv-queue-steer:hover:not(:disabled) {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.sv-queue-steer:disabled,
+.sv-queue-drop:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.sv-queue-drop {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--r-sm);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.sv-queue-drop:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.sv-queue-steer:focus-visible,
+.sv-queue-text:focus-visible,
+.sv-queue-drop:focus-visible,
+.sv-queue-edit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Images waiting to go out with the message being written. They sit above the box for the same reason the
+ * queue does: they have been chosen, but not yet said. */
+.sv-attach {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.sv-attach-item {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--bg-1);
+}
+.sv-attach-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.sv-attach-drop {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: rgb(0 0 0 / 55%);
+  border: none;
+  border-radius: 50%;
+  color: #fff;
+  cursor: pointer;
+}
+.sv-attach-drop:hover {
+  background: rgb(0 0 0 / 80%);
+}
+/* Why a paste was not taken in full. Composer-level, so it is not left behind in the transcript. */
+.sv-attach-note {
+  margin-bottom: 6px;
+  color: var(--yellow);
+  font-size: calc(var(--ui-fs) - 1px);
+}
+/* Thumbnails on a queued message, smaller: the row is a reminder of what is waiting, not the picture itself. */
+.sv-queue-images {
+  flex: none;
+  display: flex;
+  gap: 4px;
+}
+.sv-queue-thumb {
+  width: 22px;
+  height: 22px;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  display: block;
+}
+
+.sv-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  transition: border-color 0.15s ease;
+}
+.sv-box:focus-within {
+  border-color: var(--accent-line);
+}
+.sv-composer textarea {
+  min-height: 34px;
+  max-height: 30vh;
+  padding: 2px 2px 0;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-family: var(--chat-font);
+  font-size: var(--chat-fs);
+  line-height: 1.6;
+  resize: none;
+  outline: none;
+}
+.sv-composer textarea::placeholder {
+  color: var(--text-faint);
+}
+
+/* Pictures inside a message, above its words. Capped rather than full width: a bubble is a message, and a
+ * screenshot filling the pane would bury the conversation around it. */
+.sv-msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 2px;
+}
+.sv-msg-image {
+  max-width: min(260px, 100%);
+  max-height: 200px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  display: block;
+}
+
+.sv-image-trigger {
+  cursor: default;
+}
+.sv-image-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.sv-image-preview {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 3vh 3vw;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+}
+.sv-image-preview::backdrop {
+  background: rgb(0 0 0 / 70%);
+}
+.sv-image-preview-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.sv-image-preview-toolbar {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.sv-image-preview-toolbar button {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.sv-image-preview-toolbar button[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+.sv-image-preview-close {
+  margin-left: auto;
+}
+.sv-image-preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.sv-image-preview-body img {
+  display: block;
+  max-width: none;
+  max-height: none;
+  margin: auto;
+}
+.sv-image-preview-body.is-fit {
+  display: flex;
+}
+.sv-image-preview-body.is-fit img {
+  min-width: 0;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.sv-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.sv-controls-gap {
+  flex: 1;
+}
+
+.sv-permission-control {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.sv-mode-pending {
+  flex: none;
+  padding: 2px 5px;
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--text-dim);
+  font-size: calc(var(--ui-fs) - 2px);
+  white-space: nowrap;
+}
+
+/* One control: glyph, label, caret. Borderless until hovered, so the row reads as text rather than
+ * as a strip of buttons. */
+.sv-chip-box {
+  position: relative;
+  min-width: 0;
+  flex-shrink: 1;
+}
+/* The 22ch cap keeps a long model name from crowding the chips beside it. The 100% is what stops the
+   button overflowing its own box once the row runs out of room: without it the box shrinks and the button
+   does not, and the chips end up drawn on top of each other. */
+.sv-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  max-width: min(22ch, 100%);
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: calc(var(--ui-fs) - 1px);
+  cursor: pointer;
+}
+/* Active composer options need readable labels in dark mode; keep hover and disabled states distinct. */
+:where([data-theme="dark"]) .sv-chip {
+  color: var(--text-mid);
+}
+.sv-chip:hover {
+  color: var(--text);
+}
+.sv-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sv-chip-glyph {
+  display: grid;
+  flex: none;
+}
+.sv-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The filter box above a long chip menu, drawn like the rows under it rather than like a form field. */
+.sv-chip-filter {
+  flex: none;
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 4px;
+  padding: 6px 8px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.sv-chip-filter::placeholder {
+  color: var(--text-faint);
+}
+
+.sv-send {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  background: var(--accent);
+  border: none;
+  border-radius: 999px;
+  color: var(--bg-0);
+  cursor: pointer;
+}
+.sv-send:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ── Chat engine ── */
+
+/* A small control in the pane header: permission mode, model. */
+.sv-pill {
+  flex: none;
+  max-width: 12ch;
+  padding: 1px 6px;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-mid);
+  font-family: inherit;
+  font-size: calc(var(--ui-fs) - 2.5px);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sv-pill:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+select.sv-pill {
+  appearance: none;
+  max-width: 18ch;
+}
+
+.sv-row-error {
+  margin-block: 10px;
+  padding: 7px 11px;
+  border-left: 3px solid var(--red);
+  background: color-mix(in oklch, var(--red) 8%, transparent);
+  color: var(--red);
+  font-size: calc(var(--ui-fs) - 0.5px);
+  word-break: break-word;
+}
+
+/* What a slash command answered by the session itself printed back. Held slightly apart from the
+   messages: it is a report on the session rather than something either side said. */
+.sv-row-command {
+  /* Command replies share the message text column. Leaving the icon gutter empty keeps their surface
+     aligned with prompt and assistant bodies instead of stretching left underneath the author marks. */
+  margin: 10px 0 10px calc(var(--sv-gutter) + var(--sv-gutter-gap));
+  padding: 6px 11px;
+  border-left: 3px solid var(--border-strong);
+  background: var(--bg-hover);
+  color: var(--text-dim);
+  font-size: calc(var(--ui-fs) - 0.5px);
+  border-radius: 0 4px 4px 0;
+  word-break: break-word;
+}
+.sv-row-command > :first-child {
+  margin-top: 0;
+}
+.sv-row-command > :last-child {
+  margin-bottom: 0;
+}
+
+/* A remark about the conversation, such as replayed history that was cut short. Quiet on purpose: it is
+   not a failure, and it must not compete with the messages around it. */
+.sv-row-notice {
+  margin: 8px 0;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border);
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 1px);
+  text-align: center;
+  word-break: break-word;
+}
+
+/* The conversation was summarized to make room in the context window. A rule across the timeline rather
+   than a message: it marks a boundary, and everything above it is what the agent now remembers only as a
+   summary. */
+.sv-compaction {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+.sv-compaction-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.sv-compaction-label {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 1.5px);
+}
+.sv-compaction-detail {
+  color: var(--text-faint);
+  opacity: 0.75;
+}
+/* While it runs, the same row pulses: the agent is busy with it and nothing else is happening. */
+.sv-compaction-running .sv-compaction-label {
+  animation: sv-compaction-pulse 1.4s ease-in-out infinite;
+}
+@keyframes sv-compaction-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* Permission questions sit directly above the composer, where the answer is expected. */
+.sv-permissions {
+  flex: none;
+  max-height: 45%;
+  overflow-y: auto;
+  padding: 8px 18px 0;
+  border-top: 1px solid var(--border);
+}
+.sv-permissions > * {
+  width: var(--sv-col);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Destructive rewind confirmation occupies the same decision lane as permissions, immediately above the
+   composer. The preview makes file rollback an informed action instead of an unexplained destructive click. */
+.sv-rewind-confirm-wrap {
+  flex: none;
+  max-height: 45%;
+  overflow-y: auto;
+  padding: 8px 18px 0;
+  border-top: 1px solid var(--border);
+}
+.sv-rewind-confirm {
+  width: var(--sv-col);
+  margin: 0 auto 8px;
+  padding: 9px 10px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--red) 45%, var(--border));
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--red) 8%, var(--bg-1));
+}
+.sv-rewind-confirm-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text);
+  font-size: var(--ui-fs);
+}
+.sv-rewind-confirm-detail {
+  margin-top: 5px;
+  color: var(--text-dim);
+  font-size: calc(var(--ui-fs) - 0.5px);
+  line-height: 1.5;
+}
+.sv-rewind-files {
+  max-height: 140px;
+  overflow: auto;
+  margin: 7px 0 0;
+  padding: 7px 8px;
+  border-radius: var(--r-sm);
+  background: var(--bg-0);
+  color: var(--text-mid);
+  font-family: var(--chat-font);
+  font-size: calc(var(--ui-fs) - 1.5px);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.sv-rewind-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+.sv-rewind-apply {
+  padding: 3px 12px;
+  border: 1px solid var(--red);
+  border-radius: var(--r-sm);
+  background: var(--red);
+  color: var(--bg-0);
+  font-family: inherit;
+  font-size: calc(var(--ui-fs) - 0.5px);
+  cursor: pointer;
+}
+.sv-rewind-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.sv-permission {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+}
+.sv-permission-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--text);
+  font-size: var(--ui-fs);
+}
+.sv-permission-title {
+  font-weight: 600;
+}
+.sv-permission-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+.sv-allow,
+.sv-deny {
+  padding: 3px 12px;
+  border-radius: var(--r-sm);
+  font-family: inherit;
+  font-size: calc(var(--ui-fs) - 0.5px);
+  cursor: pointer;
+}
+.sv-allow {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--bg-0);
+}
+.sv-deny {
+  background: none;
+  border: 1px solid var(--border-strong);
+  color: var(--text-mid);
+}
+.sv-deny:hover {
+  color: var(--text);
+}
+.sv-allow:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* The standing rules a permission question offers. They sit between the tool and the yes/no because
+   they are also a yes — one that answers the next few questions as well — and pressing one by mistake
+   costs more than a plain allow, so they are quieter than the primary button. A rule can name a long
+   command or path, so each button keeps to one line and drops the overflow rather than wrapping the
+   card into a wall of text; the full wording stays in the tooltip. */
+.sv-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+.sv-suggest {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-mid);
+  font-family: inherit;
+  font-size: calc(var(--ui-fs) - 0.5px);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.sv-suggest:hover {
+  border-color: var(--accent-line);
+  color: var(--text);
+}
+
+/* A question the agent asked, drawn as a form. One question at a time, with a tab per question when
+   there are several — a wall of them above the composer buries the last one. */
+.sv-question-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.sv-question-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-mid);
+  font-family: inherit;
+  font-size: calc(var(--ui-fs) - 0.5px);
+  cursor: pointer;
+}
+.sv-question-tab:hover {
+  color: var(--text);
+}
+.sv-question-tab-on {
+  border-color: var(--border-strong);
+  background: var(--bg-1);
+  color: var(--text);
+}
+.sv-question-text {
+  margin-bottom: 8px;
+  color: var(--text);
+  font-size: var(--ui-fs);
+  font-weight: 600;
+  line-height: 1.5;
+}
+.sv-question-options {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sv-question-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--ui-fs);
+  text-align: left;
+  cursor: pointer;
+}
+.sv-question-option:hover {
+  background: var(--bg-1);
+}
+.sv-question-option-on {
+  border-color: var(--accent-line);
+  background: var(--bg-1);
+}
+/* The control keeps its box whether or not it is filled, so picking an option never reflows the row. */
+.sv-question-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border: 1px solid var(--border-strong);
+  color: var(--bg-0);
+}
+.sv-question-mark-box {
+  border-radius: 3px;
+}
+.sv-question-mark-dot {
+  border-radius: 50%;
+}
+.sv-question-option-on .sv-question-mark {
+  border-color: var(--accent);
+}
+.sv-question-option-on .sv-question-mark-box {
+  background: var(--accent);
+}
+.sv-question-option-on .sv-question-mark-dot::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.sv-question-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.sv-question-option-label {
+  font-weight: 600;
+}
+.sv-question-option-desc {
+  color: var(--text-mid);
+  font-size: calc(var(--ui-fs) - 0.5px);
+  line-height: 1.4;
+}
+.sv-question-other {
+  width: 100%;
+  margin-top: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-0);
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--ui-fs);
+}
+.sv-question-other:focus {
+  border-color: var(--accent-line);
+  outline: none;
+}
+
+/* A plan waiting to be approved: its Markdown, kept scrollable so a long one cannot push the buttons
+   off the bottom of the pane. */
+.sv-plan-body {
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+  color: var(--text);
+  font-size: var(--ui-fs);
+}
+
+/* Slash-command completion, anchored above the input it completes. */
+.sv-complete {
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  bottom: calc(100% - 6px);
+  max-height: 40vh;
+  overflow-y: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow);
+  z-index: 5;
+}
+.sv-complete-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 10px;
+  background: none;
+  border: none;
+  color: var(--text-mid);
+  font-family: inherit;
+  font-size: calc(var(--ui-fs) - 1px);
+  text-align: left;
+  cursor: pointer;
+}
+.sv-complete-item:hover {
+  background: var(--bg-hover);
+}
+.sv-complete-name {
+  flex: none;
+  color: var(--accent);
+  font-weight: 600;
+}
+.sv-complete-hint {
+  flex: none;
+  color: var(--text-faint);
+}
+.sv-complete-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
+/* Stop button: the send button becomes one while a turn is running. */
+.sv-stop {
+  background: var(--red);
+  color: #fff;
+}
+.sv-stop-square {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+/* Offer to move a terminal-driven session onto the chat engine, from the view that is only reading it. */
+
+/* ── What Claude reports about its own run: context meter, fast mode, MCP servers, background tasks ── */
+.sv-usage {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 6px;
+  color: var(--text-dim);
+  font-size: calc(var(--ui-fs) - 1.5px);
+  cursor: default;
+  white-space: nowrap;
+}
+.sv-usage-pct {
+  font-variant-numeric: tabular-nums;
+}
+.sv-fast-on,
+.sv-fast-on:hover {
+  color: var(--accent);
+}
+.sv-chip-badge {
+  min-width: 14px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text);
+  font-size: calc(var(--ui-fs) - 3px);
+  line-height: 14px;
+  text-align: center;
+}
+/* The popover is anchored above the chip like the choice menus; its rows are read-only text plus one or
+   two small actions on the right. */
+.sv-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: var(--r-sm);
+}
+.sv-popover-row:hover {
+  background: var(--bg-hover);
+}
+.sv-popover-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+}
+.sv-popover-title {
+  overflow: hidden;
+  color: var(--text);
+  font-size: calc(var(--ui-fs) - 0.5px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sv-popover-sub {
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 2px);
+}
+.sv-popover-action,
+.sv-popover-wide {
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--text-mid);
+  font-family: inherit;
+  font-size: calc(var(--ui-fs) - 2px);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sv-popover-action:hover,
+.sv-popover-wide:hover {
+  color: var(--text);
+}
+.sv-popover-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sv-popover-wide {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 5px 8px;
+}
+.sv-popover-empty,
+.sv-popover-error {
+  padding: 8px 6px;
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 1px);
+}
+.sv-popover-error {
+  color: var(--red);
+}
+.sv-mcp-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+.sv-mcp-connected {
+  background: var(--green, #3fb950);
+}
+.sv-mcp-failed,
+.sv-mcp-disconnected {
+  background: var(--red);
+}
+.sv-mcp-pending {
+  background: var(--yellow, #d9a400);
+}
+
+/* A failed API call being retried: drawn under the working indicator, in the same quiet voice. */
+.sv-retry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-block: 2px 6px;
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 1px);
+  word-break: break-word;
+}
+
+/* A notification from the agent's own loop, above the permission cards, dismissable. */
+.sv-notify {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-1, var(--bg-hover));
+  color: var(--text);
+  font-size: calc(var(--ui-fs) - 0.5px);
+}
+.sv-notify-high,
+.sv-notify-immediate {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.sv-notify-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+.sv-notify-close {
+  display: inline-flex;
+  padding: 2px;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.sv-notify-close:hover {
+  color: var(--text);
+}
+
+/* An MCP server's form: one labelled field per line, the same inputs the question card uses. */
+.sv-elicit-server {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 2px);
+}
+.sv-elicit-message {
+  margin-bottom: 6px;
+}
+.sv-elicit-url {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0;
+  color: var(--accent);
+  font-size: calc(var(--ui-fs) - 0.5px);
+  word-break: break-all;
+}
+.sv-elicit-field {
+  display: flex;
+  flex-direction: column;
+  margin-top: 6px;
+  font-size: calc(var(--ui-fs) - 0.5px);
+}
+.sv-elicit-check {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.sv-elicit-label {
+  color: var(--text);
+}
+.sv-elicit-required {
+  margin-left: 2px;
+  color: var(--red);
+}
+.sv-elicit-hint {
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 2px);
+}
+.sv-elicit-field select.sv-question-other,
+.sv-elicit-field textarea.sv-question-other {
+  resize: vertical;
+}
+
+.sv-action-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 4px 10px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.sv-steer {
+  flex-shrink: 0;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.sv-steer:disabled { opacity: 0.4; cursor: default; }
+
+/* Float above the conversation so opening search never resizes the virtualized viewport. */
+.sv-search {
+  position: absolute;
+  top: 8px;
+  right: 18px;
+  z-index: 20;
+  width: min(380px, calc(100% - 28px));
+  box-sizing: border-box;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: 0 3px 12px rgb(0 0 0 / 12%);
+}
+.sv-search-controls { display: flex; align-items: center; gap: 4px; }
+.sv-search-controls input.vlx-input { flex: 1; min-width: 0; width: 0; height: 28px; padding: 3px 7px; font-size: 12px; }
+.sv-search-controls [role="status"] { flex: none; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 3px; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+.sv-search-controls button.vlx-btn { flex: none; width: 26px; height: 26px; min-height: 0; padding: 0; border: 0; background: transparent; box-shadow: none; border-radius: 4px; color: var(--text-secondary); }
+.sv-search-controls button.vlx-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.sv-search-controls button.vlx-btn:disabled { opacity: 0.35; }
+.sv-search-match { background: color-mix(in srgb, #f5ce58 13%, transparent); box-shadow: inset 3px 0 #d6a92f; }
+
+.sv-submission-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.sv-sync-state { display: flex; align-items: center; gap: 8px; color: var(--text-muted); padding: 8px 0; font-size: 12px; }
+.sv-history-more { display: block; margin-bottom: 12px; }

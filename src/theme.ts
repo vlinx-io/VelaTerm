@@ -41,6 +41,22 @@ export interface VisualSettings {
   uiFontFamily: string | null;
   /** UI font size in pixels. null follows density without an inline --ui-fs; a value overrides the density size inline. */
   uiFontSize: number | null;
+  chatFontFamily: string | null;
+  chatFontSize: number;
+  chatLineHeight: number;
+}
+
+/** Initial typography; terminal and conversation preferences are saved independently. */
+export const DEFAULT_TERMINAL_FONT_SIZE = 13;
+export const DEFAULT_CONVERSATION_FONT_SIZE = 13.5;
+export const DEFAULT_TERMINAL_LINE_HEIGHT = 1.2;
+
+export function normalizeTextSize(value: number, defaultValue = DEFAULT_TERMINAL_FONT_SIZE): number {
+  return Number.isFinite(value) ? Math.max(10, Math.min(24, Math.round(value * 2) / 2)) : defaultValue;
+}
+
+export function normalizeTextLineHeight(value: number): number {
+  return Number.isFinite(value) ? Math.max(1, Math.min(2, Math.round(value * 10) / 10)) : DEFAULT_TERMINAL_LINE_HEIGHT;
 }
 
 /**
@@ -81,6 +97,57 @@ export function fontStack(family: string | null | undefined): string {
   if (f.includes(",")) return f;
   const quoted = /\s/.test(f) ? `"${f}"` : f;
   return `${quoted}, ${SYS_MONO_FALLBACK}, "VlxSymbols", "Symbola", ${CJK_FALLBACK}, monospace`;
+}
+
+/** Match xterm's measured font height and device-pixel rounding, rather than CSS's em-based multiplier. */
+function conversationLineHeight(family: string, size: number, multiplier: number): number {
+  let height = 0;
+  if (typeof OffscreenCanvas !== "undefined") {
+    const ctx = new OffscreenCanvas(1, 1).getContext("2d");
+    if (ctx) {
+      ctx.font = `${size}px ${family}`;
+      const metrics = ctx.measureText("W");
+      height = metrics.fontBoundingBoxAscent + metrics.fontBoundingBoxDescent;
+    }
+  }
+  if (!(height > 0)) {
+    const probe = document.createElement("span");
+    probe.textContent = "W";
+    probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;line-height:normal;font-kerning:none";
+    probe.style.fontFamily = family;
+    probe.style.fontSize = `${size}px`;
+    document.documentElement.append(probe);
+    height = probe.offsetHeight || size;
+    probe.remove();
+  }
+  const dpr = window.devicePixelRatio || 1;
+  return Math.floor(Math.ceil(height * dpr) * multiplier) / dpr;
+}
+
+let chatTypography: { family: string; size: number; multiplier: number } | undefined;
+let chatResizeListenerInstalled = false;
+function refreshConversationLineHeight() {
+  if (!chatTypography) return;
+  const { family, size, multiplier } = chatTypography;
+  document.documentElement.style.setProperty("--chat-line-height", `${conversationLineHeight(family, size, multiplier)}px`);
+}
+
+function applyConversationTypography(s: VisualSettings) {
+  const family = fontStack(s.chatFontFamily);
+  const size = normalizeTextSize(s.chatFontSize, DEFAULT_CONVERSATION_FONT_SIZE);
+  const next = { family, size, multiplier: normalizeTextLineHeight(s.chatLineHeight) };
+  chatTypography = next;
+  document.documentElement.style.setProperty("--chat-font", family);
+  document.documentElement.style.setProperty("--chat-fs", `${size}px`);
+  refreshConversationLineHeight();
+  // A bundled webfont may finish loading after initial appearance settings have been applied.
+  document.fonts?.load(`${size}px ${family}`, "W").then(() => {
+    if (chatTypography === next) refreshConversationLineHeight();
+  }).catch(() => {});
+  if (!chatResizeListenerInstalled) {
+    window.addEventListener("resize", refreshConversationLineHeight);
+    chatResizeListenerInstalled = true;
+  }
 }
 
 export const XTERM_THEME: Record<ResolvedTheme, ITheme> = {
@@ -195,6 +262,7 @@ export function applyVisual(s: VisualSettings) {
   else root.style.removeProperty("--font-mono");
   if (s.uiFontSize != null) root.style.setProperty("--ui-fs", `${s.uiFontSize}px`);
   else root.style.removeProperty("--ui-fs");
+  applyConversationTypography(s);
 }
 
 /** Listen for operating-system scheme changes and return an unsubscribe function. */

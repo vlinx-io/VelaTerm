@@ -6,6 +6,7 @@ import type {
   NodeKind,
   Project,
   Session,
+  SessionEngine,
   SessionKind,
   Tree,
 } from "../types";
@@ -88,6 +89,14 @@ export interface CreateSessionInput {
   agentPresetId?: string | null;
   /** Executable for this session's agent, overriding the per-kind default. */
   agentPath?: string | null;
+  /**
+   * How the agent is driven from the start: its own terminal interface, or the chat engine.
+   *
+   * Absent means `tui`, which is what every session did before the chat engine existed. Choosing `chat`
+   * here is what lets a session open straight into the conversation view instead of starting a terminal
+   * the user has to switch away from.
+   */
+  engine?: SessionEngine | null;
 }
 
 export function createSession(input: CreateSessionInput): Promise<Session> {
@@ -107,6 +116,7 @@ export function createSession(input: CreateSessionInput): Promise<Session> {
     permissionMode: input.permissionMode ?? null,
     agentPresetId: input.agentPresetId ?? null,
     agentPath: input.agentPath ?? null,
+    engine: input.engine ?? null,
   });
 }
 

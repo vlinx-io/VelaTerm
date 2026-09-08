@@ -13,6 +13,8 @@
 //! `files::*`/`git::*` still calls lower layers directly, and transport-specific streaming commands such as
 //! `pty_spawn` and `read_recording` remain outside this module.
 
+use crate::agent::chat::protocol::ChatImage;
+use crate::agent::session_settings::{self, Selection};
 use crate::db::repo;
 use crate::host::{AppCtx, PRESETS_CHANGED, SETTINGS_CHANGED, TREE_CHANGED};
 use crate::models::{AgentPreset, Group, NodeKind, Project, Session, SessionKind, Tree};
@@ -37,6 +39,37 @@ fn session_kind_and_agent(ctx: &AppCtx, session_id: &str) -> Result<(SessionKind
 /// Normalizes empty strings to None so blank values are not persisted.
 fn empty_to_none(v: Option<&str>) -> Option<&str> {
     v.filter(|s| !s.trim().is_empty())
+}
+
+/// Allocate the same per-project `Claude N` / `Codex N` names as ordinary session creation.
+/// Archived sessions count too, so clearing repeatedly never reuses a label that remains in history.
+fn next_chat_session_name(
+    conn: &rusqlite::Connection,
+    project_id: &str,
+    kind: SessionKind,
+) -> Result<String, String> {
+    let label = match kind {
+        SessionKind::Claude => "Claude",
+        SessionKind::Codex => "Codex",
+        SessionKind::Opencode => "OpenCode",
+        _ => return Err("Only Claude, Codex, and OpenCode chat sessions can be cleared".to_string()),
+    };
+    let prefix = format!("{label} ");
+    let max_suffix = repo::list_all_sessions(conn)?
+        .into_iter()
+        .filter(|session| session.project_id == project_id && session.kind == kind)
+        .filter_map(|session| {
+            session
+                .name
+                .strip_prefix(&prefix)
+                .and_then(|suffix| suffix.parse::<u64>().ok())
+        })
+        .max()
+        .unwrap_or(0);
+    let suffix = max_suffix
+        .checked_add(1)
+        .ok_or_else(|| format!("No available {label} session number"))?;
+    Ok(format!("{label} {suffix}"))
 }
 
 // Tree management. Successful writes emit `TREE_CHANGED`; clients debounce tree reloads for cross-client sync.
@@ -228,6 +261,9 @@ pub fn create_session(
     worktree_base_ref: Option<&str>,
     agent_preset_id: Option<&str>,
     agent_path: Option<&str>,
+    // Which engine drives the session from the start. A session created as `chat` opens straight into
+    // the conversation view, rather than being switched over from a terminal the user never wanted.
+    engine: Option<&str>,
 ) -> Result<Session, String> {
     // Normalize empty strings consistently across transports.
     let agent_args = empty_to_none(agent_args);
@@ -253,6 +289,7 @@ pub fn create_session(
             worktree_base_ref,
             agent_preset_id,
             agent_path,
+            empty_to_none(engine),
         )?;
         let seeded_agent_id = agent_session_id
             .map(|s| s.trim().to_string())
@@ -414,9 +451,12 @@ pub fn delete_node(ctx: &AppCtx, kind: NodeKind, id: &str) -> Result<(), String>
         let _ = crate::search::index::drop_sessions(ctx.db(), &hard_deleted);
         // Drop the authoritative session records too. They deliberately outlive a process exit — an
         // agent that finished and left an unread result behind must stay marked — so removal from the
-        // tree is the only thing that clears one.
+        // tree is the only thing that clears one. The in-memory status view goes with them, so `vstat`
+        // stops listing sessions nobody can open and a coordinator waiting on one is released rather
+        // than waiting out its timeout.
         for sid in &hard_deleted {
             crate::session_state::forget(sid);
+            crate::agent::status_watch::forget(sid);
         }
         // Remove recordings consistently, including Electron over WS, so orphaned .log files do not remain.
         if let Ok(data_dir) = ctx.data_dir() {
@@ -761,11 +801,656 @@ pub fn read_agent_transcript(
     crate::agent::transcript::read(kind, &agent_id)
 }
 
+// ─────────────────────────── Chat engine ───────────────────────────
+
+/// Choose how an agent session is driven, and stop whatever the previous engine had running.
+///
+/// The conversation itself is untouched — both engines read and write the same recording — so the next
+/// launch picks up where the last one stopped.
+pub fn set_session_engine(ctx: &AppCtx, session_id: &str, engine: &str) -> Result<(), String> {
+    if !matches!(engine, "tui" | "chat") {
+        return Err(format!("Unknown session engine: {engine}"));
+    }
+    let session = session_settings::session(ctx, session_id)?;
+    if session.engine == engine { return Ok(()); }
+    if !matches!(session.kind, SessionKind::Claude | SessionKind::Codex | SessionKind::Opencode) {
+        return Err("This session does not support switching conversation engines".into());
+    }
+    // Leaving an engine means leaving its process behind; two agents must never share one conversation.
+    if engine == "tui" {
+        let snapshot = ctx.chat().snapshot(session_id);
+        let selection = if snapshot.running {
+            Selection { model: snapshot.model, effort: snapshot.effort }
+        } else { session_settings::resolve(ctx, &session)? };
+        session_settings::persist(ctx, &session, &selection)?;
+        if session.kind == SessionKind::Opencode {
+            // This opens only the local protocol peer; no prompt or model request is sent.
+            chat_start(ctx, session_id, selection.model.as_deref(), selection.effort.as_deref(), false)?;
+            ctx.chat().prepare_terminal(session_id, &selection)?;
+        }
+        ctx.chat().stop_for_handoff(ctx, session_id)?;
+    } else {
+        // Restart semantics, not close: the pane stays and the chat engine takes over the same session.
+        ctx.pty().kill_for_handoff(session_id)?;
+        // Read after the terminal exits so its final settings writes are visible.
+        let session = session_settings::session(ctx, session_id)?;
+        let selection = session_settings::resolve(ctx, &session)?;
+        session_settings::persist(ctx, &session, &selection)?;
+    }
+    repo::set_session_engine(&ctx.db().conn.lock().unwrap(), session_id, engine)?;
+    ctx.emit(TREE_CHANGED, ());
+    Ok(())
+}
+
+/// Archive one chat conversation and atomically put a fresh, identically configured sibling in its place.
+///
+/// The process is stopped only after the transaction commits. The returned session lets the initiating
+/// client retarget its pane synchronously; `TREE_CHANGED` then reconciles every other connected client.
+pub fn chat_clear(ctx: &AppCtx, session_id: &str) -> Result<Session, String> {
+    let fresh = {
+        let mut conn = ctx.db().conn.lock().unwrap();
+        let transaction = conn
+            .transaction()
+            .map_err(|e| format!("Failed to start chat clear transaction: {e}"))?;
+        let source = repo::get_session(&transaction, session_id)?.ok_or("Session not found")?;
+        if source.archived_at.is_some() {
+            return Err("This chat session is already archived".to_string());
+        }
+        if !matches!(source.kind, SessionKind::Claude | SessionKind::Codex | SessionKind::Opencode)
+            || source.engine != "chat"
+        {
+            return Err("Only Claude, Codex, and OpenCode chat sessions can be cleared".to_string());
+        }
+        let name = next_chat_session_name(&transaction, &source.project_id, source.kind)?;
+        let fresh = repo::create_fresh_chat_session(&transaction, &source, &name)?;
+        repo::set_archived(&transaction, session_id, true)?;
+        transaction
+            .commit()
+            .map_err(|e| format!("Failed to commit chat clear transaction: {e}"))?;
+        fresh
+    };
+
+    ctx.chat().stop(ctx, session_id)?;
+    ctx.emit(TREE_CHANGED, ());
+    Ok(fresh)
+}
+
+
+/// Start the chat engine for a session, or do nothing if it is already running.
+///
+/// The conversation continues where it left off: the session's captured agent id becomes `--resume`, and
+/// because both engines write the same recording, a conversation started in the terminal picks up here.
+pub fn chat_start(
+    ctx: &AppCtx,
+    session_id: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    fast_mode: bool,
+) -> Result<(), String> {
+    if ctx.chat().is_alive(session_id) { return Ok(()); }
+    let (session, project_root) = {
+        let conn = ctx.db().conn.lock().unwrap();
+        let session = repo::get_session(&conn, session_id)?.ok_or("Session not found")?;
+        let root = repo::get_project_root(&conn, &session.project_id)?;
+        (session, root)
+    };
+    if !matches!(session.kind, SessionKind::Claude | SessionKind::Codex | SessionKind::Opencode) {
+        return Err(format!(
+            "The chat engine does not support {} sessions yet",
+            session.kind.as_str()
+        ));
+    }
+    // A session created under a project usually has no directory of its own; it runs in the project's.
+    // The terminal path applies this fallback in the frontend, so the engine must apply it here or the
+    // agent inherits the backend's own working directory and reads the wrong files.
+    let cwd = session
+        .cwd
+        .as_deref()
+        .filter(|c| !c.trim().is_empty())
+        .map(str::to_string)
+        .or(project_root);
+    // A session's own agent path wins over the plain name on PATH, matching how PTY sessions launch.
+    let default_bin = match session.kind {
+        SessionKind::Codex => "codex",
+        SessionKind::Opencode => "opencode",
+        _ => "claude",
+    };
+    let bin = session
+        .agent_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| default_bin.to_string());
+    let mut selection = session_settings::resolve(ctx, &session)?;
+    if model.is_some() { selection.model = session_settings::clean(model); }
+    if effort.is_some() { selection.effort = session_settings::clean(effort); }
+    session_settings::persist(ctx, &session, &selection)?;
+    let extra_args = session_settings::without_selection_args(session.kind, session.agent_args.as_deref());
+    ctx.chat().start(
+        ctx,
+        session_id,
+        session.kind,
+        cwd.as_deref(),
+        &bin,
+        session.agent_session_id.as_deref(),
+        selection.model.as_deref(),
+        selection.effort.as_deref(),
+        session.permission_mode.as_deref(),
+        session.collaboration_mode.as_deref(),
+        &crate::agent::inject::split_extra_args(Some(&extra_args)),
+        fast_mode,
+    )
+}
+
+/// Switch Claude's fast mode on or off for the running conversation.
+pub fn chat_set_fast_mode(ctx: &AppCtx, session_id: &str, enabled: bool) -> Result<(), String> {
+    ctx.chat().set_fast_mode(ctx, session_id, enabled)
+}
+
+/// Choose the Codex service tier for subsequent turns; None returns to the thread's own.
+pub fn chat_set_service_tier(ctx: &AppCtx, session_id: &str, tier: Option<&str>) -> Result<(), String> {
+    let tier = tier.map(str::trim).filter(|value| !value.is_empty());
+    {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::set_codex_chat_setting(&conn, session_id, "service_tier", tier)?;
+    }
+    if ctx.chat().snapshot(session_id).running {
+        ctx.chat().set_service_tier(session_id, tier)?;
+    }
+    ctx.emit(&format!("chat://event/{session_id}"), serde_json::json!({"type":"codexSettingsChanged","serviceTier":tier}));
+    Ok(())
+}
+
+/// Choose the Codex personality for subsequent turns; None returns to the configured one.
+pub fn chat_set_personality(ctx: &AppCtx, session_id: &str, personality: Option<&str>) -> Result<(), String> {
+    let personality = personality.map(str::trim).filter(|value| !value.is_empty());
+    if personality.is_some_and(|value| !matches!(value, "none" | "friendly" | "pragmatic")) {
+        return Err("Unknown Codex personality".into());
+    }
+    {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::set_codex_chat_setting(&conn, session_id, "personality", personality)?;
+    }
+    if ctx.chat().snapshot(session_id).running {
+        ctx.chat().set_personality(session_id, personality)?;
+    }
+    ctx.emit(&format!("chat://event/{session_id}"), serde_json::json!({"type":"codexSettingsChanged","personality":personality}));
+    Ok(())
+}
+
+/// Ask Codex to summarize the conversation now (`/compact`).
+pub fn chat_compact(ctx: &AppCtx, session_id: &str) -> Result<(), String> {
+    ctx.chat().compact(session_id)
+}
+
+/// Run Codex's code review as a turn of the conversation (`/review [branch <name> | commit <sha> | <instructions>]`).
+pub fn chat_review(ctx: &AppCtx, session_id: &str, args: &str) -> Result<(), String> {
+    ctx.chat().review(ctx, session_id, args)
+}
+
+/// The MCP servers the running agent knows, with their state and tools.
+pub fn chat_mcp_status(ctx: &AppCtx, session_id: &str) -> Result<serde_json::Value, String> {
+    ctx.chat().mcp_status(session_id)
+}
+
+/// Enable or disable one MCP server, answering with the refreshed server list.
+pub fn chat_mcp_toggle(
+    ctx: &AppCtx,
+    session_id: &str,
+    server: &str,
+    enabled: bool,
+) -> Result<serde_json::Value, String> {
+    ctx.chat().mcp_toggle(session_id, server, enabled)
+}
+
+/// Reconnect one MCP server, answering with the refreshed server list.
+pub fn chat_mcp_reconnect(ctx: &AppCtx, session_id: &str, server: &str) -> Result<serde_json::Value, String> {
+    ctx.chat().mcp_reconnect(session_id, server)
+}
+
+/// Stop one of Claude's background tasks.
+pub fn chat_stop_task(ctx: &AppCtx, session_id: &str, task_id: &str) -> Result<(), String> {
+    ctx.chat().stop_task(session_id, task_id)
+}
+
+/// Move every foreground task of the running turn to the background.
+pub fn chat_background_tasks(ctx: &AppCtx, session_id: &str) -> Result<(), String> {
+    ctx.chat().background_tasks(session_id)
+}
+
+/// How many images one message may carry, and how large each may be once decoded.
+///
+/// Attached images are held in memory for as long as the row is on the timeline and are sent again to
+/// every client that opens the conversation, so an unbounded paste would be paid for repeatedly. The
+/// limits are generous for what people actually paste — a screenshot is well under a megabyte — and the
+/// composer stops at the same numbers, with a message, before anything is uploaded.
+pub const MAX_IMAGES_PER_MESSAGE: usize = 4;
+pub const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;
+
+/// Send a user turn to a running chat session, with any images attached to it.
+///
+/// `behavior` says what to do when a turn is already running: `queue` (the default) waits for it to end,
+/// `interrupt` stops it and goes first, `steer` writes into it. Answers `"sent"` or `"queued"`.
+pub fn chat_send(
+    ctx: &AppCtx,
+    session_id: &str,
+    text: &str,
+    images: Vec<ChatImage>,
+    behavior: Option<&str>,
+    message_id: Option<&str>,
+) -> Result<&'static str, String> {
+    check_images(&images)?;
+    // Pasted calls can bypass completion and arrive before the startup catalogue. Resolve aliases on
+    // the backend as well, so a first-message `$skill` in Claude is never sent as ordinary prose.
+    let session = session_settings::session(ctx, session_id)?;
+    let commands = if crate::agent::chat::skills::needs_alias_lookup(session.kind, text) {
+        chat_commands(ctx, session_id)?
+    } else { Vec::new() };
+    let original_text = text;
+    let text = crate::agent::chat::skills::native_text(text, &commands);
+    let Some(message_id) = message_id else {
+        return ctx.chat().send(ctx, session_id, &text, images, behavior.unwrap_or("queue"));
+    };
+    use crate::agent::chat::submissions::{self, Claim};
+    let payload = serde_json::to_vec(&serde_json::json!([original_text, images, behavior.unwrap_or("queue")]))
+        .map_err(|e| e.to_string())?;
+    let claim = submissions::claim(&ctx.db().conn.lock().unwrap(), session_id, message_id, &payload)?;
+    if let Claim::Complete(outcome) = claim {
+        return outcome.and_then(|value| match value.as_str() {
+            "sent" => Ok("sent"), "queued" => Ok("queued"), "command" => Ok("command"), _ => Err("Invalid submission receipt".into()),
+        });
+    }
+    let outcome = ctx.chat().send_identified(ctx, session_id, &text, images, behavior.unwrap_or("queue"), Some(message_id));
+    submissions::finish(&ctx.db().conn.lock().unwrap(), session_id, message_id,
+        &outcome.clone().map(str::to_owned)).map_err(|_| "chat_submission_pending".to_string())?;
+    outcome
+}
+
+/// Refuse a message whose attachments are past the limits. The last line of defence rather than the
+/// first: the composer says the same thing in the user's own language before the bytes are ever sent.
+fn check_images(images: &[ChatImage]) -> Result<(), String> {
+    if images.len() > MAX_IMAGES_PER_MESSAGE {
+        return Err(format!(
+            "At most {MAX_IMAGES_PER_MESSAGE} images can be sent with one message"
+        ));
+    }
+    for image in images {
+        if !image.mime_type.starts_with("image/") {
+            return Err(format!("{} is not an image", image.mime_type));
+        }
+        // Base64 carries three bytes in every four characters; padding makes the estimate slightly high,
+        // which only ever rejects a file already at the very edge of the limit.
+        if image.data.len() / 4 * 3 > MAX_IMAGE_BYTES {
+            return Err(format!(
+                "Each image must be under {} MB",
+                MAX_IMAGE_BYTES / (1024 * 1024)
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Add a queued message to the current turn after native acceptance.
+pub fn chat_queue_steer(ctx: &AppCtx, session_id: &str, id: &str) -> Result<(), String> {
+    ctx.chat().queue_steer(ctx, session_id, id)
+}
+
+/// Drop a message that is still waiting behind the running turn.
+pub fn chat_queue_remove(ctx: &AppCtx, session_id: &str, id: &str) -> Result<(), String> {
+    ctx.chat().queue_remove(ctx, session_id, id)
+}
+
+/// Rewrite a message that is still waiting behind the running turn.
+pub fn chat_queue_update(
+    ctx: &AppCtx,
+    session_id: &str,
+    id: &str,
+    text: &str,
+) -> Result<(), String> {
+    ctx.chat().queue_update(ctx, session_id, id, text)
+}
+
+/// Stop the turn in progress, leaving the conversation open.
+pub fn chat_interrupt(ctx: &AppCtx, session_id: &str) -> Result<(), String> {
+    ctx.chat().interrupt(session_id)
+}
+
+/// Answer a permission question raised by a tool the agent wants to run.
+///
+/// `updated_permissions` is the standing rule the answer adopts, taken from the question's own
+/// suggestions — what "allow, and stop asking me about this" sends.
+#[allow(clippy::too_many_arguments)]
+pub fn chat_permission(
+    ctx: &AppCtx,
+    session_id: &str,
+    request_id: &str,
+    allow: bool,
+    updated_input: Option<serde_json::Value>,
+    message: Option<&str>,
+    updated_permissions: Option<serde_json::Value>,
+) -> Result<(), String> {
+    ctx.chat().respond_permission(
+        ctx,
+        session_id,
+        request_id,
+        allow,
+        updated_input,
+        message,
+        updated_permissions,
+    )
+}
+
+/// Save the permission choice. Codex adopts it on the next turn without interrupting the active one.
+///
+/// Remembering matters because this is the only permission control a chat session shows: the status bar's
+/// two-state toggle applies at launch and is hidden for these sessions, so if the choice were not stored,
+/// every restart would silently go back to asking.
+pub fn chat_set_mode(ctx: &AppCtx, session_id: &str, mode: &str) -> Result<(), String> {
+    // The agent starts with the first message, so a mode chosen before that has nobody to tell yet; the
+    // stored value below is what that launch reads.
+    if ctx.chat().is_alive(session_id) {
+        ctx.chat().set_mode(ctx, session_id, mode)?;
+    }
+    // Terminal sessions have historically stored the unrestricted choice as `skip`; keep that spelling
+    // at rest so switching engines does not silently turn confirmations back on.
+    let stored = if matches!(mode, "bypassPermissions" | "full-access") {
+        "skip"
+    } else {
+        mode
+    };
+    {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::set_permission_mode(&conn, session_id, stored)?;
+    }
+    ctx.emit(TREE_CHANGED, ());
+    ctx.emit(
+        &crate::agent::chat::engine::event_name(session_id),
+        serde_json::json!({
+            "type":"settingsChanged",
+            "mode":mode,
+            "pendingPermissionMode":ctx.chat().pending_permission_mode(session_id),
+        }),
+    );
+    Ok(())
+}
+
+/// Change and persist the collaboration style used by subsequent Codex turns.
+pub fn chat_set_collaboration_mode(
+    ctx: &AppCtx,
+    session_id: &str,
+    mode: &str,
+) -> Result<(), String> {
+    if ctx.chat().is_alive(session_id) {
+        ctx.chat().set_collaboration_mode(ctx, session_id, mode)?;
+    }
+    {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::set_collaboration_mode(&conn, session_id, mode)?;
+    }
+    ctx.emit(TREE_CHANGED, ());
+    Ok(())
+}
+
+/// Change the model of the running conversation; an empty value restores the default.
+pub fn chat_set_model(ctx: &AppCtx, session_id: &str, model: Option<&str>) -> Result<(), String> {
+    let session = session_settings::session(ctx, session_id)?;
+    let mut selection = session_settings::resolve(ctx, &session)?;
+    selection.model = session_settings::clean(model);
+    if ctx.chat().is_alive(session_id) {
+        ctx.chat().set_model(session_id, selection.model.as_deref())?;
+        selection.model = ctx.chat().snapshot(session_id).model;
+    }
+    session_settings::persist(ctx, &session, &selection)?;
+    ctx.emit(
+        &crate::agent::chat::engine::event_name(session_id),
+        serde_json::json!({"type":"settingsChanged","model":selection.model}),
+    );
+    Ok(())
+}
+
+/// Change reasoning effort. Codex applies it as a turn option; Claude answers through `/effort`.
+pub fn chat_set_effort(ctx: &AppCtx, session_id: &str, effort: Option<&str>) -> Result<(), String> {
+    let session = session_settings::session(ctx, session_id)?;
+    let mut selection = session_settings::resolve(ctx, &session)?;
+    selection.effort = session_settings::clean(effort);
+    if ctx.chat().is_alive(session_id) {
+        ctx.chat().set_effort(ctx, session_id, selection.effort.as_deref())?;
+    }
+    session_settings::persist(ctx, &session, &selection)?;
+    ctx.emit(&crate::agent::chat::engine::event_name(session_id),
+        serde_json::json!({"type":"settingsChanged","effort":selection.effort}));
+    Ok(())
+}
+
+/// Models reported by the agent behind this session.
+pub fn chat_models(ctx: &AppCtx, session_id: &str) -> Result<serde_json::Value, String> {
+    let session = {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::get_session(&conn, session_id)?.ok_or("Session not found")?
+    };
+    match session.kind {
+        // The running agent knows its own catalogue best: which models the account may use, and what
+        // each supports. Before it has answered, the curated table stands in.
+        SessionKind::Claude => serde_json::to_value(
+            ctx.chat()
+                .live_claude_models(session_id)
+                .unwrap_or_else(crate::agent::claude_models::list),
+        ),
+        SessionKind::Codex => {
+            let bin = session
+                .agent_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .unwrap_or("codex");
+            let args = crate::agent::inject::split_extra_args(session.agent_args.as_deref());
+            serde_json::to_value(crate::agent::codex_models::list(bin, &args)?)
+        }
+        SessionKind::Opencode => {
+            // The running server already knows its providers; without one, a short-lived server answers.
+            let bin = session
+                .agent_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .unwrap_or("opencode");
+            let root = {
+                let conn = ctx.db().conn.lock().unwrap();
+                repo::get_project_root(&conn, &session.project_id)?
+            };
+            let cwd = session
+                .cwd
+                .as_deref()
+                .filter(|c| !c.trim().is_empty())
+                .map(str::to_string)
+                .or(root);
+            let running = ctx.chat().opencode_server(session_id);
+            serde_json::to_value(crate::agent::opencode_models::list(ctx, session_id, bin, cwd.as_deref(), running)?)
+        }
+        _ => return Err(format!("The chat engine does not support {} sessions", session.kind.as_str())),
+    }
+    .map_err(|e| format!("Failed to serialize model catalogue: {e}"))
+}
+
+/// Read the provider catalogue even before the first message, without starting a conversation.
+pub fn chat_commands(ctx: &AppCtx, session_id: &str) -> Result<Vec<serde_json::Value>, String> {
+    if let Some(commands) = ctx.chat().live_commands(session_id).filter(|commands| !commands.is_empty()) {
+        return Ok(commands);
+    }
+    let session = session_settings::session(ctx, session_id)?;
+    if !matches!(session.kind, SessionKind::Codex | SessionKind::Claude) { return Ok(Vec::new()); }
+    let root = {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::get_project_root(&conn, &session.project_id)?
+    };
+    let cwd = session.cwd.as_deref().filter(|c| !c.trim().is_empty()).or(root.as_deref());
+    let bin = session.agent_path.as_deref().map(str::trim).filter(|p| !p.is_empty())
+        .unwrap_or(if session.kind == SessionKind::Codex { "codex" } else { "claude" });
+    let args = session_settings::without_selection_args(session.kind, session.agent_args.as_deref());
+    crate::agent::chat::skills::lookup(session.kind, bin, cwd, &crate::agent::inject::split_extra_args(Some(&args)))
+}
+
+/// Everything a client needs to draw the conversation from scratch, including one that just connected.
+pub fn chat_snapshot(
+    ctx: &AppCtx,
+    session_id: &str,
+) -> Result<crate::agent::chat::engine::ChatSnapshot, String> {
+    chat_snapshot_window(ctx, session_id, None)
+}
+
+pub fn chat_snapshot_window(
+    ctx: &AppCtx, session_id: &str, window: Option<&crate::agent::chat::engine::ChatWindow>,
+) -> Result<crate::agent::chat::engine::ChatSnapshot, String> {
+    let mut snapshot = ctx.chat().snapshot_window(session_id, window);
+    if !snapshot.running {
+        let session = session_settings::session(ctx, session_id)?;
+        let selection = session_settings::resolve(ctx, &session)?;
+        snapshot.model = selection.model.clone();
+        snapshot.effort = selection.effort.clone();
+        snapshot.selection = Some(selection);
+    }
+    {
+        let conn = ctx.db().conn.lock().unwrap();
+        let (tier, personality) = repo::codex_chat_settings(&conn, session_id)?;
+        snapshot.service_tier = tier;
+        snapshot.personality = personality;
+    }
+    // No process has run this conversation since the backend started, so the engine holds no timeline for
+    // it. The agent's own recording still does. Reading it here means a reopened session shows what was
+    // said before anything else happens — and keeps showing it when the agent cannot be started at all,
+    // instead of an empty pane under an error.
+    if snapshot.pid.is_none() {
+        let session = {
+            let conn = ctx.db().conn.lock().unwrap();
+            repo::get_session(&conn, session_id)?
+        };
+        if let Some((kind, id)) = session.and_then(|s| s.agent_session_id.map(|id| (s.kind, id))) {
+            match crate::agent::chat::history::replay(kind, &id) {
+                Ok(rows) => snapshot.rows = rows,
+                // A recording that is gone, or a thread Codex never wrote, is the same empty pane as before.
+                Err(e) => eprintln!("chat: no history replayed for {id}: {e}"),
+            }
+            snapshot.agent_session_id = Some(id);
+        }
+    }
+    if snapshot.pid.is_none() {
+        snapshot.total_rows = snapshot.rows.len();
+        snapshot.positions = snapshot.rows.iter().enumerate().map(|(index, row)| (row.id().to_owned(), index)).collect();
+        if let Some(window) = window {
+            let end = window.before.as_ref().and_then(|id| snapshot.rows.iter().position(|row| row.id() == id)).unwrap_or(snapshot.rows.len());
+            let start = end.saturating_sub(crate::agent::chat::engine::SNAPSHOT_PAGE_ROWS);
+            snapshot.page_kind = if window.before.is_some() && end < snapshot.rows.len() { "history" } else { "recent" };
+            snapshot.has_more = start > 0;
+            snapshot.rows = snapshot.rows[start..end].to_vec();
+            snapshot.positions.retain(|_, index| *index >= start && *index < end);
+        }
+    }
+    Ok(snapshot)
+}
+
+/// Expanded tool details remain available when an inactive conversation is replayed from disk.
+pub fn chat_row(ctx: &AppCtx, session_id: &str, row_id: &str, epoch: Option<u64>) -> Result<serde_json::Value, String> {
+    if ctx.chat().snapshot_window(session_id, Some(&Default::default())).pid.is_some() {
+        return ctx.chat().row_detail(session_id, row_id, epoch);
+    }
+    if epoch.is_some() { return Err("Chat history changed; synchronize the conversation again".into()); }
+    let snapshot = chat_snapshot(ctx, session_id)?;
+    fn find(rows: &[crate::agent::chat::engine::ChatRow], id: &str) -> Option<serde_json::Value> {
+        for row in rows {
+            if row.id() == id { return serde_json::to_value(row).ok(); }
+            if let crate::agent::chat::engine::ChatRow::Tool { children, .. } = row {
+                if let Some(value) = find(children, id) { return Some(value); }
+            }
+        }
+        None
+    }
+    find(&snapshot.rows, row_id).ok_or_else(|| "Chat row is no longer available".into())
+}
+
+/// Resolve image bytes referenced by a slim chat snapshot.
+pub fn chat_attachment(
+    ctx: &AppCtx,
+    session_id: &str,
+    attachment_id: &str,
+) -> Result<ChatImage, String> {
+    ctx.chat().attachment(session_id, attachment_id)
+}
+
+/// Preview the Claude file checkpoint associated with one visible user message.
+pub fn chat_rewind_preview(
+    ctx: &AppCtx,
+    session_id: &str,
+    row_id: &str,
+) -> Result<serde_json::Value, String> {
+    ctx.chat().rewind_preview(session_id, row_id)
+}
+
+/// Rewind conversation state, Claude file checkpoints, or both from one visible user message.
+pub fn chat_rewind(
+    ctx: &AppCtx,
+    session_id: &str,
+    row_id: &str,
+    scope: &str,
+) -> Result<serde_json::Value, String> {
+    ctx.chat().rewind(ctx, session_id, row_id, scope)
+}
+
+/// A view started showing this conversation. Cancels a release a closed view asked for; starts nothing.
+pub fn chat_attach(ctx: &AppCtx, session_id: &str) -> Result<(), String> {
+    ctx.chat().attach(session_id);
+    Ok(())
+}
+
+/// A view stopped showing this conversation. Its process goes as soon as it is idle; the conversation
+/// stays, and the next message sent restarts the agent where it left off.
+pub fn chat_detach(ctx: &AppCtx, session_id: &str) -> Result<(), String> {
+    ctx.chat().detach(ctx, session_id);
+    Ok(())
+}
+
+/// End the conversation and let its process go.
+pub fn chat_stop(ctx: &AppCtx, session_id: &str) -> Result<(), String> {
+    ctx.chat().stop(ctx, session_id)
+}
+
+/// Reads an agent conversation for the session view — the chat-style second view of a live session.
+///
+/// This is the same recording `read_agent_transcript` reads, parsed more completely: reasoning and tool
+/// calls are kept, and each tool call carries its raw input so the view can draw a card per tool.
+/// A session that has not run a turn yet has no agent-native id and therefore no recording. That is an empty
+/// conversation, not a failure: reading it returns no rows, so the view says there is nothing here yet rather
+/// than printing a backend error over a session that is simply new. The other three commands sharing
+/// `session_kind_and_agent` keep the error — asking for usage or an export of a session that never ran is a
+/// question with no answer, while asking for its conversation has one.
+pub fn read_agent_chat(
+    ctx: &AppCtx,
+    session_id: &str,
+) -> Result<Vec<crate::agent::chat::ChatEvent>, String> {
+    let (kind, agent_id) = {
+        let conn = ctx.db().conn.lock().unwrap();
+        (
+            repo::get_session_kind(&conn, session_id)?,
+            repo::get_agent_session_id(&conn, session_id)?,
+        )
+    };
+    let kind = kind.ok_or("Session not found")?;
+    let Some(agent_id) = agent_id else {
+        return Ok(Vec::new());
+    };
+    crate::agent::chat::read(kind, &agent_id)
+}
+
 /// Queries model/context usage for the Info panel (Claude, Codex, Grok).
 pub fn agent_context_info(
     ctx: &AppCtx,
     session_id: &str,
 ) -> Result<crate::agent::transcript::AgentContextInfo, String> {
+    // A running chat process reports its own usage after every turn, which is both fresher and more
+    // exact than what the recording's tail can be made to say.
+    if let Some(info) = ctx.chat().context_info(session_id) {
+        return Ok(info);
+    }
     let (kind, agent_id) = session_kind_and_agent(ctx, session_id)?;
     crate::agent::transcript::context_info(kind, &agent_id)
 }
@@ -1139,10 +1824,32 @@ pub fn web_server_autostart(
 #[cfg(test)]
 mod tests {
     use super::{
-        autostart_config, claim_spawn, get_app_settings, install_id, release_spawn_claim,
-        set_app_settings, spawn_claim_key, web_server_autostart, web_server_status, web_server_stop,
+        autostart_config, check_images, claim_spawn, get_app_settings, install_id,
+        release_spawn_claim, set_app_settings, spawn_claim_key, web_server_autostart,
+        web_server_status, web_server_stop, ChatImage, MAX_IMAGE_BYTES, MAX_IMAGES_PER_MESSAGE,
     };
     use std::collections::HashMap;
+
+    fn image(bytes: usize) -> ChatImage {
+        // Four base64 characters per three bytes, which is what the check reads back.
+        ChatImage { mime_type: "image/png".into(), data: "A".repeat(bytes.div_ceil(3) * 4) }
+    }
+
+    /// The limits exist so one paste cannot be paid for by every client that later opens the
+    /// conversation. What people actually paste passes; a wall of screenshots does not.
+    #[test]
+    fn attached_images_are_checked_against_the_limits() {
+        assert!(check_images(&[]).is_ok());
+        assert!(check_images(&vec![image(256 * 1024); MAX_IMAGES_PER_MESSAGE]).is_ok());
+        assert!(
+            check_images(&vec![image(1024); MAX_IMAGES_PER_MESSAGE + 1]).is_err(),
+            "one more than the limit is one too many"
+        );
+        assert!(check_images(&[image(MAX_IMAGE_BYTES / 2)]).is_ok());
+        assert!(check_images(&[image(MAX_IMAGE_BYTES * 2)]).is_err());
+        let pdf = ChatImage { mime_type: "application/pdf".into(), data: "AAAA".into() };
+        assert!(check_images(&[pdf]).is_err(), "only images travel this way");
+    }
 
     /// Only the first answer to a spawn request wins; a second one — the same card confirmed on a phone
     /// a moment later — must be told it lost, so it cannot create a second worktree and child session.

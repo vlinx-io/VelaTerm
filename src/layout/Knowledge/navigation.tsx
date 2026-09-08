@@ -11,7 +11,8 @@ export function knowledgeUrl(projectId: string, values: Record<string, string | 
   for (const [key,value] of Object.entries(values)) {
     if (value == null || value === "") url.searchParams.delete(key); else url.searchParams.set(key,String(value));
   }
-  return `${url.pathname}${url.search}${url.hash}`;
+  // 无路径的 Tauri 地址在关闭时必须保留完整 URL，避免空目标保留原查询参数。
+  return url.href;
 }
 export function KnowledgeLink({ projectId, values, ...props }: AnchorHTMLAttributes<HTMLAnchorElement> & { projectId: string; values?: Record<string, string | number | null> }) {
   const href = knowledgeUrl(projectId, values);

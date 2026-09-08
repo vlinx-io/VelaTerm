@@ -38,6 +38,7 @@ impl Db {
         conn.execute_batch(schema::SCHEMA)
             .map_err(|e| format!("Failed to initialize schema: {e}"))?;
         migrate(&conn)?;
+        conn.execute_batch(crate::agent::chat::submissions::SCHEMA).map_err(|e| e.to_string())?;
         crate::memory::init(&conn)?;
         crate::knowledge::init(&conn)?;
         // Create FTS5/trigram separately so an unavailable extension disables search without blocking startup.
@@ -160,6 +161,27 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         conn.execute("ALTER TABLE sessions ADD COLUMN permission_mode TEXT", [])
             .map_err(|e| format!("Failed to migrate sessions.permission_mode: {e}"))?;
     }
+    // Codex collaboration style is independent of approvals/sandboxing. Null retains the native Default
+    // behavior for existing databases; only Codex chat sessions write `default` or `plan` here.
+    if !column_exists(conn, "sessions", "collaboration_mode") {
+        conn.execute("ALTER TABLE sessions ADD COLUMN collaboration_mode TEXT", [])
+            .map_err(|e| format!("Failed to migrate sessions.collaboration_mode: {e}"))?;
+    }
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS chat_codex_settings (
+            session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+            service_tier TEXT,
+            personality TEXT
+        );",
+    ).map_err(|e| format!("Failed to migrate Codex conversation settings: {e}"))?;
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_model_settings (
+            session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+            model TEXT,
+            effort TEXT,
+            native_state TEXT
+        );",
+    ).map_err(|e| format!("Failed to migrate session model settings: {e}"))?;
     // Add deleted_at tombstones to projects/groups. Containers holding archived sessions are hidden rather
     // than deleted so restoration can revive the hierarchy. Production SCHEMA always creates both tables;
     // table_exists only supports migration tests containing a sessions table alone.
@@ -179,6 +201,15 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     if table_exists(conn, "groups") && !column_exists(conn, "groups", "worktree_base_ref") {
         conn.execute("ALTER TABLE groups ADD COLUMN worktree_base_ref TEXT", [])
             .map_err(|e| format!("Failed to migrate groups.worktree_base_ref: {e}"))?;
+    }
+    // Add how an agent session is driven. Existing sessions keep the terminal engine they were created
+    // with; only a session explicitly switched to the chat engine reads anything else.
+    if !column_exists(conn, "sessions", "engine") {
+        conn.execute(
+            "ALTER TABLE sessions ADD COLUMN engine TEXT NOT NULL DEFAULT 'tui'",
+            [],
+        )
+        .map_err(|e| format!("Failed to migrate sessions.engine: {e}"))?;
     }
     // Add the nullable emoji marker to all three node tables. Unmarked nodes keep NULL, so old databases stay
     // unchanged and the sidebar simply renders no marker for them.
@@ -275,6 +306,7 @@ mod tests {
         assert!(column_exists(&conn, "sessions", "collapsed"));
         assert!(column_exists(&conn, "sessions", "worktree_path"));
         assert!(column_exists(&conn, "sessions", "mark"));
+        assert!(column_exists(&conn, "sessions", "collaboration_mode"));
 
         let idx: i64 = conn
             .query_row(

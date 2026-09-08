@@ -34,12 +34,17 @@ fn main() {
         }
         return;
     }
-    // Hidden built-in command subcommands. Thin PATH-prepended shims such as vspawn and vopen invoke
+    // Hidden built-in command subcommands. Thin PATH-prepended shims such as vspawn, vopen, vrefer, and
+    // vsearch invoke
     // this binary as a cross-platform replacement for the old shell scripts, read injected VLX_*
     // variables, POST to the local hook service, and exit after forwarding.
     match args.get(1).map(String::as_str) {
         Some("--spawn") => velaterm_lib::run_spawn(&args),
         Some("--view") => velaterm_lib::run_view(&args),
+        Some("--refer") => velaterm_lib::run_refer(&args),
+        Some("--search") => velaterm_lib::run_search(&args),
+        Some("--orch") => velaterm_lib::run_orch(&args),
+        Some("--stat") => velaterm_lib::run_stat(&args),
         Some("--knowledge") => velaterm_lib::run_knowledge(&args),
         _ => {}
     }

@@ -480,6 +480,10 @@ function PermissionSeg() {
   // Show only for persisted agent sessions that support permission switching, not temporary drafts.
   const session = sessions.find((s) => s.id === activeSessionId);
   if (!session || !supportsPermissionToggle(session.kind)) return null;
+  // A chat session carries its own permission control on the composer, with the agent's full set of modes
+  // and no restart to apply them. Two controls for one setting, disagreeing about how many choices there
+  // are and when they take effect, is worse than one.
+  if (session.engine === "chat") return null;
 
   const isSkip = session.permissionMode === "skip";
   const running = activeRunning;

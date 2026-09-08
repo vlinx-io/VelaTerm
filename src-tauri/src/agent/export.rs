@@ -23,7 +23,11 @@ use super::resume;
 use super::transcript::is_injected_context;
 
 /// One parsed context event, the smallest Markdown rendering unit, ordered as it appears in the file.
-enum Event {
+///
+/// The session view (`agent::chat`) reads the same events, so tool calls keep their raw id and raw input
+/// value: Markdown export pretty-prints them, while the chat cards need the individual fields (a Bash
+/// `command`, an Edit `old_string`/`new_string`) and the id that pairs a call with its result.
+pub(crate) enum Event {
     User {
         text: String,
         ts: Option<String>,
@@ -37,16 +41,28 @@ enum Event {
         ts: Option<String>,
     },
     ToolUse {
+        /// tool_use_id (Claude) or call_id (Codex); None when the recording omits it.
+        id: Option<String>,
         name: String,
-        /// Pretty-printed input JSON, or the original text when parsing fails.
-        input: String,
+        /// Raw input value. Codex stores arguments as a JSON string; unparseable text is kept as a string.
+        input: Value,
         ts: Option<String>,
     },
     ToolResult {
+        /// The id of the call this result answers, used to pair the two into one card.
+        id: Option<String>,
         /// Tool name resolved by tool_use_id or call_id, or None when unavailable.
         name: Option<String>,
         text: String,
         is_error: bool,
+    },
+    /// Output of a slash command the CLI answered itself, such as `/effort` or `/context`.
+    ///
+    /// Nobody said it and no tool produced it, so it is neither speech nor a tool result: it is the
+    /// answer to something typed into the box, and the view draws it as its own kind of row.
+    Command {
+        text: String,
+        ts: Option<String>,
     },
 }
 
@@ -63,21 +79,22 @@ pub fn export_markdown(
         SessionKind::Claude => {
             let path = resume::find_claude_transcript(agent_session_id)
                 .ok_or("Claude transcript file not found")?;
-            let content = std::fs::read_to_string(&path)
-                .map_err(|e| format!("Failed to read transcript: {e}"))?;
-            (path, claude_events(&content))
+            (path, claude_events(&resume::read_claude_transcript(agent_session_id)?))
         }
         SessionKind::Codex => {
-            let path = resume::find_codex_rollout(agent_session_id)
-                .ok_or("Codex rollout file not found")?;
-            let content = std::fs::read_to_string(&path)
-                .map_err(|e| format!("Failed to read transcript: {e}"))?;
+            let (path, content) = resume::read_codex_rollout_chain(agent_session_id)?;
             (path, codex_events(&content))
+        }
+        SessionKind::Opencode => {
+            let path = crate::agent::opencode_store::db_path()
+                .ok_or("OpenCode's data directory could not be located")?;
+            let messages = crate::agent::opencode_store::messages(agent_session_id)?;
+            (path, crate::agent::chat::opencode_timeline::events(&messages))
         }
         SessionKind::Terminal => {
             return Err("Terminal sessions have no agent transcript".to_string())
         }
-        // OpenCode, Copilot, Cursor, Cline, and similar agents do not expose locally parseable flat files.
+        // Copilot, Cursor, Cline, and similar agents do not expose locally parseable flat files.
         // Use a fallback rather than exhaustive matching so new session types compile as unsupported.
         other => {
             return Err(format!(
@@ -120,6 +137,11 @@ fn render(
     let (mut users, mut turns, mut tool_calls) = (0u32, 0u32, 0u32);
 
     for ev in events {
+        // The export is the conversation. What a slash command printed back into the session belongs to
+        // the moment it was typed, not to the record of what was said.
+        if matches!(ev, Event::Command { .. }) {
+            continue;
+        }
         match ev {
             Event::User { text, ts } => {
                 if sec != Sec::User {
@@ -150,13 +172,14 @@ fn render(
                         tool_calls += 1;
                         blocks.push(format!(
                             "**🔧 Tool call: {name}**\n\n{}",
-                            fenced("json", input)
+                            fenced("json", &pretty_json(input))
                         ));
                     }
                     Event::ToolResult {
                         name,
                         text,
                         is_error,
+                        ..
                     } => {
                         let mut title = "**📥 Tool result".to_string();
                         if let Some(n) = name {
@@ -168,7 +191,7 @@ fn render(
                         title.push_str("**");
                         blocks.push(format!("{title}\n\n{}", fenced("", text)));
                     }
-                    Event::User { .. } => unreachable!(),
+                    Event::User { .. } | Event::Command { .. } => unreachable!(),
                 }
             }
         }
@@ -251,8 +274,43 @@ fn fenced(lang: &str, text: &str) -> String {
 
 // ─────────────────────────── Claude parsing ───────────────────────────
 
+/// What the CLI records as the assistant's reply to a command it answered itself, such as `/effort`.
+const NO_RESPONSE_PLACEHOLDER: &str = "No response requested.";
+
+/// The text a locally answered slash command printed, or None for a row carrying anything else.
+///
+/// The CLI records the command's own echo (`<command-name>`) alongside its output, and only the output
+/// is worth showing: the echo repeats the line the user just typed.
+fn local_command_stdout(content: Option<&str>) -> Option<String> {
+    const OPEN: &str = "<local-command-stdout>";
+    const CLOSE: &str = "</local-command-stdout>";
+    let body = content?.trim().strip_prefix(OPEN)?;
+    let text = body.strip_suffix(CLOSE).unwrap_or(body).trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+/// The command line a locally answered slash command was invoked with, such as `/model claude-opus-4-6`.
+///
+/// The recording keeps the echo apart from the output, so without this a reopened session shows the
+/// answer to a command with nothing above it saying what was asked.
+fn local_command_echo(content: Option<&str>) -> Option<String> {
+    let content = content?;
+    let name = between(content, "<command-name>", "</command-name>")?;
+    let args = between(content, "<command-args>", "</command-args>").unwrap_or_default();
+    if name.is_empty() {
+        return None;
+    }
+    Some(if args.is_empty() { name } else { format!("{name} {args}") })
+}
+
+/// The text between two markers, trimmed. None when the opening marker is absent.
+fn between(text: &str, open: &str, close: &str) -> Option<String> {
+    let rest = text.split_once(open)?.1;
+    Some(rest.split_once(close).map_or(rest, |(inner, _)| inner).trim().to_string())
+}
+
 /// Parse a complete Claude transcript into events, skipping sidechain, meta, and injected blocks.
-fn claude_events(content: &str) -> Vec<Event> {
+pub(crate) fn claude_events(content: &str) -> Vec<Event> {
     // Map tool_use IDs to names for subsequent tool_result display.
     let mut tool_names: HashMap<String, String> = HashMap::new();
     let mut out: Vec<Event> = Vec::new();
@@ -272,6 +330,22 @@ fn claude_events(content: &str) -> Vec<Event> {
             .get("timestamp")
             .and_then(Value::as_str)
             .map(str::to_string);
+        // A slash command the CLI ran itself is recorded as a system row with no message of its own.
+        if v.get("type").and_then(Value::as_str) == Some("system")
+            && v.get("subtype").and_then(Value::as_str) == Some("local_command")
+        {
+            let content = v.get("content").and_then(Value::as_str);
+            match local_command_stdout(content) {
+                Some(text) => out.push(Event::Command { text, ts }),
+                // The echo of the command itself is what the person typed, so it reads as their message.
+                None => {
+                    if let Some(cmd) = local_command_echo(content) {
+                        out.push(Event::User { text: cmd, ts });
+                    }
+                }
+            }
+            continue;
+        }
         let Some(msg) = v.get("message") else {
             continue;
         };
@@ -293,11 +367,13 @@ fn claude_events(content: &str) -> Vec<Event> {
                             }
                             Some("image") => parts.push("[image]".to_string()),
                             Some("tool_result") => {
-                                let name = it
+                                let id = it
                                     .get("tool_use_id")
                                     .and_then(Value::as_str)
-                                    .and_then(|id| tool_names.get(id).cloned());
+                                    .map(str::to_string);
+                                let name = id.as_deref().and_then(|id| tool_names.get(id).cloned());
                                 out.push(Event::ToolResult {
+                                    id,
                                     name,
                                     text: tool_result_text(it),
                                     is_error: it
@@ -322,7 +398,10 @@ fn claude_events(content: &str) -> Vec<Event> {
                         Some("text") => {
                             if let Some(s) = it.get("text").and_then(Value::as_str) {
                                 let s = s.trim();
-                                if !s.is_empty() {
+                                // A slash command the CLI handled locally gets this stand-in reply
+                                // written to the recording. It says nothing; showing it would only
+                                // litter the conversation with the same line after every `/effort`.
+                                if !s.is_empty() && s != NO_RESPONSE_PLACEHOLDER {
                                     out.push(Event::AssistantText {
                                         text: s.to_string(),
                                         ts: ts.clone(),
@@ -347,14 +426,16 @@ fn claude_events(content: &str) -> Vec<Event> {
                                 .and_then(Value::as_str)
                                 .unwrap_or("(unknown tool)")
                                 .to_string();
-                            if let Some(id) = it.get("id").and_then(Value::as_str) {
+                            let id = it.get("id").and_then(Value::as_str).map(str::to_string);
+                            if let Some(id) = id.as_deref() {
                                 tool_names.insert(id.to_string(), name.clone());
                             }
                             let input = it
                                 .get("input")
-                                .map(pretty_json)
-                                .unwrap_or_else(|| "{}".to_string());
+                                .cloned()
+                                .unwrap_or_else(|| Value::Object(Default::default()));
                             out.push(Event::ToolUse {
+                                id,
                                 name,
                                 input,
                                 ts: ts.clone(),
@@ -407,7 +488,7 @@ fn pretty_json(v: &Value) -> String {
 // ─────────────────────────── Codex parsing ───────────────────────────
 
 /// Parse a complete Codex rollout into events, skipping injected environment and instruction blocks.
-fn codex_events(content: &str) -> Vec<Event> {
+pub(crate) fn codex_events(content: &str) -> Vec<Event> {
     // Map call IDs to tool names for function_call_output display.
     let mut call_names: HashMap<String, String> = HashMap::new();
     let mut out: Vec<Event> = Vec::new();
@@ -452,10 +533,11 @@ fn codex_events(content: &str) -> Vec<Event> {
                 }
                 match role {
                     "user" => {
-                        // Environment and instruction blocks injected into user turns are not user speech.
-                        if text.starts_with("<environment_context>")
-                            || text.starts_with("<user_instructions>")
-                        {
+                        // Modern app-server recordings identify every bundled content source. A row made
+                        // only from plugin recommendations, AGENTS.md, environment context, or other
+                        // harness input is not something the person typed. Older rollouts lack that
+                        // metadata, so retain the known-tag fallback for them.
+                        if codex_user_message_is_injected(payload, text) {
                             continue;
                         }
                         out.push(Event::User {
@@ -494,10 +576,14 @@ fn codex_events(content: &str) -> Vec<Event> {
                     .and_then(Value::as_str)
                     .unwrap_or("(unknown tool)")
                     .to_string();
-                if let Some(id) = payload.get("call_id").and_then(Value::as_str) {
+                let id = payload
+                    .get("call_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                if let Some(id) = id.as_deref() {
                     call_names.insert(id.to_string(), name.clone());
                 }
-                // Arguments are JSON strings; pretty-print valid JSON and retain invalid input unchanged.
+                // Arguments arrive as a JSON string; parse it back to a value and keep unparseable text as a string.
                 let raw = payload
                     .get("arguments")
                     .or_else(|| payload.get("input"))
@@ -506,22 +592,28 @@ fn codex_events(content: &str) -> Vec<Event> {
                         other => other.to_string(),
                     })
                     .unwrap_or_default();
-                let input = serde_json::from_str::<Value>(&raw)
-                    .map(|p| pretty_json(&p))
-                    .unwrap_or(raw);
-                out.push(Event::ToolUse { name, input, ts });
+                let input =
+                    serde_json::from_str::<Value>(&raw).unwrap_or_else(|_| Value::String(raw));
+                out.push(Event::ToolUse {
+                    id,
+                    name,
+                    input,
+                    ts,
+                });
             }
             Some("function_call_output") | Some("custom_tool_call_output") => {
-                let name = payload
+                let id = payload
                     .get("call_id")
                     .and_then(Value::as_str)
-                    .and_then(|id| call_names.get(id).cloned());
+                    .map(str::to_string);
+                let name = id.as_deref().and_then(|id| call_names.get(id).cloned());
                 let text = match payload.get("output") {
                     Some(Value::String(s)) => s.clone(),
                     Some(other) => pretty_json(other),
                     None => String::new(),
                 };
                 out.push(Event::ToolResult {
+                    id,
                     name,
                     text,
                     is_error: false,
@@ -533,9 +625,53 @@ fn codex_events(content: &str) -> Vec<Event> {
     out
 }
 
+pub(crate) fn codex_user_message_is_injected(payload: &Value, text: &str) -> bool {
+    if let Some(kinds) = payload
+        .pointer("/internal_chat_message_metadata_passthrough/content_item_kinds")
+        .and_then(Value::as_array)
+    {
+        return !kinds
+            .iter()
+            .filter_map(Value::as_str)
+            .any(|kind| kind.starts_with("user."));
+    }
+    const INJECTED_PREFIXES: &[&str] = &[
+        "<environment_context>",
+        "<user_instructions>",
+        "<recommended_plugins>",
+        "<skills_instructions>",
+        "<permissions instructions>",
+        "<collaboration_mode>",
+        "<apps_instructions>",
+        "<plugins_instructions>",
+        "<multi_agent_mode>",
+        "# AGENTS.md instructions",
+    ];
+    INJECTED_PREFIXES.iter().any(|prefix| text.starts_with(prefix))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The stand-in reply the CLI records for a locally handled command is not part of the conversation.
+    #[test]
+    fn claude_no_response_placeholder_is_dropped() {
+        let lines = [
+            r#"{"type":"user","message":{"role":"user","content":"/effort high"}}"#,
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"No response requested."}]}}"#,
+            r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"a real answer"}]}}"#,
+        ];
+        let events = claude_events(&lines.join("\n"));
+        let texts: Vec<&str> = events
+            .iter()
+            .filter_map(|e| match e {
+                Event::AssistantText { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, ["a real answer"]);
+    }
 
     /// Claude exports include reasoning and paired tool inputs/results, skip sidechain/meta/injected
     /// blocks, and lengthen fences when results contain backticks.
@@ -549,6 +685,8 @@ mod tests {
             r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu_1","content":"a.rs ```code``` b.rs"}]}}"#,
             r#"{"type":"user","isSidechain":true,"message":{"role":"user","content":"SIDECHAIN-PRIVATE subagent chatter"}}"#,
             r#"{"type":"user","message":{"role":"user","content":"<system-reminder>REMINDER-PRIVATE</system-reminder>"}}"#,
+            r#"{"type":"user","message":{"role":"user","content":"<task-notification>TASK-PRIVATE</task-notification>"}}"#,
+            r#"{"type":"user","message":{"role":"user","content":"This session is being continued from a previous conversation that ran out of context. CONTINUATION-PRIVATE"}}"#,
             r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Fixed it."}]}}"#,
         ];
         let events = claude_events(&lines.join("\n"));
@@ -571,6 +709,8 @@ mod tests {
         assert!(!md.contains("META-PRIVATE"));
         assert!(!md.contains("SIDECHAIN-PRIVATE"));
         assert!(!md.contains("REMINDER-PRIVATE"));
+        assert!(!md.contains("TASK-PRIVATE"));
+        assert!(!md.contains("CONTINUATION-PRIVATE"));
         // Reasoning is quoted; tool calls have pretty input; results pair to Bash by ID.
         assert!(md.contains("**💭 Thinking**\n\n> First find where it fails."));
         assert!(md.contains("**🔧 Tool call: Bash**"));
@@ -603,6 +743,7 @@ mod tests {
     fn codex_full_export() {
         let lines = [
             r#"{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n…\n</environment_context>"}]}}"#,
+            r#"{"timestamp":"t1b","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<recommended_plugins>\nPRIVATE PLUGIN LIST\n</recommended_plugins>"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["plugins.recommendations","agents_md.instructions"]}}}"#,
             r#"{"timestamp":"t2","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"check the configuration"}]}}"#,
             r#"{"timestamp":"t3","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"I need to find the config file first."}]}}"#,
             r#"{"timestamp":"t4","type":"response_item","payload":{"type":"function_call","name":"shell","call_id":"c1","arguments":"{\"command\":[\"ls\"]}"}}"#,
@@ -612,6 +753,7 @@ mod tests {
         let events = codex_events(&lines.join("\n"));
         let md = render(&events, "s", "codex", "id", "/p", None);
         assert!(!md.contains("environment_context"));
+        assert!(!md.contains("PRIVATE PLUGIN LIST"));
         assert!(md.contains("## 👤 User · t2"));
         assert!(md.contains("> I need to find the config file first."));
         assert!(md.contains("**🔧 Tool call: shell**"));
@@ -619,6 +761,25 @@ mod tests {
         assert!(md.contains("**📥 Tool result (shell)**"));
         assert!(md.contains("app.yml"));
         assert!(md.contains("The configuration lives in app.yml."));
+    }
+
+    /// Metadata wins over tag-shaped text: if the person deliberately types a reserved-looking tag, it
+    /// still belongs to the conversation, while a harness-only row is dropped.
+    #[test]
+    fn codex_content_kinds_distinguish_user_text_from_injected_context() {
+        let lines = [
+            r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<recommended_plugins>injected</recommended_plugins>"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["plugins.recommendations"]}}}"#,
+            r#"{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<recommended_plugins>typed deliberately</recommended_plugins>"}],"internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}}}"#,
+        ];
+        let events = codex_events(&lines.join("\n"));
+        let users = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::User { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(users, ["<recommended_plugins>typed deliberately</recommended_plugins>"]);
     }
 
     /// Empty recordings retain a complete header and an empty-conversation placeholder.

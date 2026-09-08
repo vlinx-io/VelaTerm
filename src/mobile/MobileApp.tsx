@@ -9,9 +9,11 @@
 //! - navigation uses local `openId` state without touching tab, split, or keep-alive store state.
 
 import { useCallback, useEffect, useState } from "react";
+import { OrchConfirmModal } from "../components/OrchConfirmModal";
 import { SpawnConfirmModal } from "../components/SpawnConfirmModal";
 import { useNotifications } from "../hooks/useNotifications";
 import {
+  onOrchRequest,
   onSessionState,
   onSpawnRequest,
   onSpawnResolved,
@@ -63,6 +65,9 @@ function MobileApp() {
     // Handle child-task requests normally. The new session appears in the tree and receives its
     // prompt through usePtySession when opened.
     const unlistenSpawn = onSpawnRequest((req) => void handleSpawnRequest(req));
+    const unlistenOrch = onOrchRequest((req) =>
+      useTermStore.getState().handleOrchRequest(req),
+    );
     // Another client answering the card must clear it here too. Without this the phone keeps showing a
     // request the desktop already confirmed, and tapping Confirm launches the same task a second time.
     const unlistenResolved = onSpawnResolved((ev) => {
@@ -80,6 +85,7 @@ function MobileApp() {
       unwatch();
       stopSettingsWatch();
       void unlistenSpawn.then((fn) => fn());
+      void unlistenOrch.then((fn) => fn());
       void unlistenResolved.then((fn) => fn());
       clearTimeout(treeTimer);
       void unlistenTree.then((fn) => fn());
@@ -117,6 +123,7 @@ function MobileApp() {
         <SessionListPage onOpen={open} />
       )}
       <SpawnConfirmModal />
+      <OrchConfirmModal />
       <ConnectionBanner />
     </div>
   );

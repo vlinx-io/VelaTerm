@@ -1,3 +1,27 @@
+## v0.1.108 — 2026-09-08
+
+- Vista de conversación experimental para Claude, Codex y OpenCode, con respuestas en streaming, razonamiento, detalles de herramientas, permisos y formularios de preguntas. Las configuraciones nuevas siguen usando la vista de terminal por defecto.
+
+- Los controles de conversación ofrecen ajustes de modelo, cola de mensajes, intervenciones, autocompletado de archivos e imágenes adjuntas según las capacidades del motor.
+
+- La búsqueda en conversaciones, los enlaces de archivos, las acciones sobre imágenes y las fuentes independientes facilitan la lectura. El historial remoto se carga progresivamente y los detalles de herramientas, bajo demanda.
+
+- Los recibos de envío permiten cotejar los resultados tras una desconexión. Los envíos inciertos quedan pendientes de confirmación, sin reenvío automático.
+
+- Los nuevos comandos `vrefer` y `vsearch` leen y buscan en otras sesiones; `vrefer --ask` delega la lectura a un agente. `vorch` y `vstat` añaden coordinación de múltiples agentes y consulta de estados.
+
+- Las entradas de memoria admiten etiquetas, edición directa, protección de cambios sin guardar y ajustes de organización. Mejoran los filtros y la selección al importar historiales, así como la navegación del grafo.
+
+- El cliente de uso compartido público admite vinculación de cuentas y dispositivos, acceso limitado a sesiones AI y conexiones de retransmisión cifradas. No admite todavía imágenes subidas por invitados ni formularios MCP complejos.
+
+- Los ID de reanudación de Codex se comprueban con el historial persistido. Si se confirma que falta, se muestra un error explícito en vez de iniciar una sesión vacía; sigue siendo posible reconectar terminales en ejecución.
+
+- La reversión depende del motor: Codex solo restaura la conversación, sin restaurar archivos. El manejo del alcance y las comprobaciones previas del directorio en OpenCode siguen teniendo limitaciones conocidas.
+
+- Los cambios de versión conservan las versiones bloqueadas de las dependencias. La validación de instalación y actualización multiplataforma y de integración AI real sigue pendiente; las comprobaciones automatizadas no la sustituyen.
+
+---
+
 ## v0.1.107 — 2026-09-05
 
 - 🧠 Memoria global (experimental): Claude o Codex convierte tus conversaciones en una wiki compartida organizada por temas

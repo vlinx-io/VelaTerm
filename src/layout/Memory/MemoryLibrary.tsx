@@ -16,6 +16,10 @@ export function MemoryLibrary({ selected }: { selected: string }) {
     return () => clearTimeout(timer);
   }, [input, query, location]);
   const { data, error, reload } = useMemoryLoad(() => memoryList({ query, tag, sort, page }), [query, tag, sort, page, selected]);
+  useEffect(() => {
+    window.addEventListener("memory:saved", reload);
+    return () => window.removeEventListener("memory:saved", reload);
+  }, [reload]);
   return <aside className="memory-sidebar">
     <div className="memory-search">
       <input className="input" aria-label={t("memory.search")} placeholder={t("memory.search")} value={input} onChange={(e) => setInput(e.target.value)} />

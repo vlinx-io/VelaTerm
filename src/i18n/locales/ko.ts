@@ -124,11 +124,25 @@ const ko: typeof en = {
   "common.save": "저장", // Save
   "common.create": "생성", // Create
   "common.close": "닫기", // Close
+  "chat.imageViewOriginal": "원본 이미지 보기",
+  "chat.imageCopy": "이미지 복사",
+  "chat.imageSave": "이미지 저장",
+  "chat.imageActionFailed": "이미지 작업을 완료하지 못했습니다. 다시 시도해 주세요.",
   "common.copy": "복사", // Copy
   "common.cut": "잘라내기", // Cut
   "common.paste": "붙여넣기", // Paste
   "common.selectAll": "모두 선택", // Select All
   "common.copied": "복사됨", // Copied
+  "chat.sync.loading": "대화 동기화 중…",
+  "chat.sync.failed": "동기화하지 못했습니다. 이미 불러온 메시지는 계속 볼 수 있습니다.",
+  "chat.sync.history": "이전 메시지 불러오기",
+  "chat.submission.updateRequired": "이 클라이언트에서 메시지를 보내려면 먼저 서버를 업데이트하세요.",
+  "chat.submission.sending": "전송 중…",
+  "chat.submission.sent": "전송됨",
+  "chat.submission.queued": "대기 중",
+  "chat.submission.failed": "전송 실패",
+  "chat.submission.unknown": "전송 결과 확인 필요",
+  "chat.submission.check": "상태 확인",
   "common.retry": "다시 시도", // Retry
   "common.experimental": "실험 기능",
   "common.refresh": "새로 고침", // Refresh
@@ -250,6 +264,8 @@ const ko: typeof en = {
   "settings.navTree": "표준", // Tree
   "settings.navCompact": "조밀", // Compact
   "settings.tabs": "탭", // Tabs
+  "settings.defaultSessionEngine": "새 세션의 기본 보기",
+  "settings.defaultSessionEngineHint": "기존 세션은 만들 때의 보기를 유지합니다.",
   "settings.dynamicStatusFilter": "상태 필터 동적 추가",
   "settings.tabSingle": "단일", // Single
   "settings.tabMulti": "다중", // Multi
@@ -286,6 +302,25 @@ const ko: typeof en = {
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
+  "orch.title": "이 에이전트들을 시작할까요?",
+  "orch.notifyTitle": "오케스트레이션 확인 대기 중",
+  "orch.coordinatorName": "진행 상황",
+  "orch.sharedSettings": "공통 설정",
+  "orch.agentLabel": "종류",
+  "orch.modelLabel": "모델",
+  "orch.effortLabel": "추론 강도",
+  "orch.nameLabel": "이름",
+  "orch.promptLabel": "작업",
+  "orch.worktreeLabel": "워크트리",
+  "orch.worktreeNone": "현재 디렉터리 사용",
+  "orch.worktreeShared": "공유 워크트리 하나",
+  "orch.worktreeEach": "각자 워크트리",
+  "orch.follow": "공통 설정 따름",
+  "orch.overridden": "변경됨",
+  "orch.remove": "제거",
+  "orch.launch": (n: number) => `${n}개 시작`,
+  "orch.modelPlaceholder": "에이전트 기본값",
+  "orch.effortPlaceholder": "에이전트 기본값",
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "변경 사항 보기…",
@@ -387,6 +422,12 @@ const ko: typeof en = {
   "settings.uiFontSize": "Interface size", // TODO translate
   "settings.termFont": "Terminal font", // TODO translate
   "settings.termFontSize": "Terminal size", // TODO translate
+  "settings.termLineHeight": "터미널 줄 높이",
+  "settings.chatTypography": "대화 보기",
+  "settings.chatTypographyHint": "글꼴 설정은 터미널과 별도로 저장되며 변경 사항은 즉시 적용됩니다.",
+  "settings.chatFont": "대화 글꼴",
+  "settings.chatFontSize": "대화 글꼴 크기",
+  "settings.chatLineHeight": "대화 줄 높이",
   "settings.fontDefault": "Default", // TODO translate
   "settings.fontCustom": "Custom…", // TODO translate
   "settings.fontUnavailable": "이 기기에 설치되어 있지 않음",
@@ -667,6 +708,13 @@ const ko: typeof en = {
   "form.customOption": "사용자 지정…", // Custom…
   "tree.cwdLabel": "작업 디렉터리 (비우면 프로젝트 루트)", // Working directory (leave empty for project root)
   "tree.initCmdLabel": "시작 명령 (선택)", // Startup command (optional)
+  "tree.engineLabel": "표시 방식",
+  "tree.engineTui": "터미널 보기",
+  "tree.engineChat": "대화 보기",
+  // The agent runs its own terminal interface.
+  "tree.engineTuiHint": "에이전트의 터미널 화면을 그대로 실행합니다.",
+  // Messages and tool cards, with buttons for permission questions.
+  "tree.engineChatHint": "메시지와 도구 카드로 표시하며, 권한 요청은 화면에서 응답합니다.",
   "tree.agentArgsLabel": "실행 인자 (선택)", // Launch args (optional)
   // Working directory / Leave empty for the default
   "tree.workingDirLabel": "작업 디렉터리",
@@ -726,6 +774,11 @@ const ko: typeof en = {
   "info.createdAt": "생성 시각", // Created at
 
   // Resume-session dialog
+  "importSessions.results": ({ count }: { count: number }) => `검색 결과 ${count}개`,
+  "importSessions.selected": ({ count }: { count: number }) => `${count}개 선택됨`,
+  "importSessions.clearSelection": "선택 해제",
+  "importSessions.clearSearch": "검색 지우기",
+  "importSessions.noHistory": "이 프로젝트 디렉터리에 세션 기록이 없습니다.",
   "importSessions.title": "세션 가져오기",
   "importSessions.description": "작업 디렉터리가 이 프로젝트와 일치하는 기존 Codex, Claude, OpenCode 세션을 찾습니다. 세션을 선택하여 프로젝트에 추가한 후 열면 대화를 이어갈 수 있습니다.",
   "importSessions.search": "제목, 에이전트 또는 세션 ID로 검색",
@@ -1181,6 +1234,196 @@ const ko: typeof en = {
   "statusbar.updateReady": "Restart to update", // TODO translate
   "statusbar.updateFailed": "Update failed", // TODO translate
   "statusbar.updateTooltip": "Click for details", // TODO translate
+
+  // ── 세션 뷰(에이전트 세션을 대화로 읽기) ──
+  "session.showConversation": "대화 보기",
+  "session.showTerminal": "터미널 보기",
+  "session.switchTitle": "보기를 전환하면 에이전트가 다시 시작됩니다",
+  "session.switchBody": "진행 중인 턴이 중단됩니다. 대화 내용은 그대로 유지됩니다.",
+  "session.switchConfirm": "전환",
+  "session.loading": "대화를 읽는 중…",
+  "session.unavailable": "이 대화는 아직 읽을 수 없습니다",
+  "session.working": "작업 중…",
+  "session.thinking": "생각",
+  "session.toolRunning": "실행 중",
+  "session.toolUnknown": "도구",
+  "session.toolFailed": "실패",
+  "session.toolNoDetail": "더 기록된 내용이 없습니다",
+  "session.showMore": (n: number) => `${n}자 더 보기`,
+  "session.showLess": "접기",
+  "session.composerHint": "에이전트에게 메시지 · Enter로 전송, Shift+Enter로 줄바꿈",
+  "session.send": "보내기",
+
+  // ── 대화 엔진(프로토콜로 구동되는 세션) ──
+  "chat.empty": "아래 입력창에서 대화를 시작할 수 있습니다.",
+  "chat.interrupt": "중지",
+  "chat.interruptTooltip": "중지 · Esc",
+  "chat.allow": "허용",
+  "chat.deny": "거부",
+  "chat.permissionAsk": (tool: string) => `${tool} 실행 권한을 요청합니다`,
+  "chat.exited": (code: number) => `에이전트가 종료되었습니다(코드 ${code})`,
+  "chat.modeNextTurn": "다음 턴부터 적용",
+  "chat.modePendingHint": (current: string, next: string) =>
+    `현재 권한: ${current}. 다음 턴부터 적용할 권한: ${next}. 현재 턴은 기존 권한으로 계속됩니다.`,
+  "chat.modeTooltip": "권한 모드",
+  "chat.collaborationModeTooltip": "협업 모드",
+  "chat.collaborationMode.default": "기본",
+  "chat.collaborationMode.defaultHint": "작업을 진행하고 결정이 필요할 때만 질문합니다",
+  "chat.collaborationMode.plan": "계획",
+  "chat.collaborationMode.planHint": "먼저 조사하여 계획을 세우며, 질문에 대화형 카드를 사용할 수 있습니다",
+  "chat.modelTooltip": "모델",
+  "chat.keepChoice": "기본값으로 설정",
+  "chat.keepChoiceFor": (model) => `${model}의 기본값으로 설정`,
+  "chat.modelDefault": "기본 모델",
+  "chat.mode.default": "매번 확인",
+  "chat.mode.acceptEdits": "편집 자동 승인",
+  "chat.mode.plan": "계획 모드",
+  "chat.mode.bypassPermissions": "확인 없음",
+  "chat.mode.readOnly": "읽기 전용",
+  "chat.mode.fullAccess": "전체 접근",
+  "chat.placeholder": "에이전트에게 메시지, /명령·/스킬·@파일도 사용 가능",
+  "chat.command.clearDescription": "현재 세션을 보관하고 새 대화 시작",
+  "chat.command.rewindDescription": "가장 최근 사용자 메시지부터 되돌릴 범위 선택",
+  "chat.command.rewindUnavailable":
+    "완료된 사용자 메시지가 있고 진행 중인 턴, 대기 메시지, 권한 요청이 없을 때 되돌릴 수 있습니다.",
+  "chat.effortTooltip": "사고 강도",
+  "chat.effortDefault": "사고",
+  "chat.effort.auto": "자동",
+  "chat.effort.low": "낮음",
+  "chat.effort.medium": "보통",
+  "chat.effort.high": "높음",
+  "chat.effort.xhigh": "매우 높음",
+  "chat.effort.max": "최대",
+  "chat.effort.ultra": "극대",
+  "chat.effort.ultracode": "Ultra Code",
+  "chat.agentTooltip": "에이전트",
+  "chat.effort.minimal": "최소",
+  "chat.filterPlaceholder": "필터",
+  "chat.placeholderOpencode": "에이전트에게 메시지를 보내세요. /명령과 @파일을 사용할 수 있고, ! 로 시작하면 셸 명령을 실행합니다",
+  "chat.command.compactDescription": "대화를 요약하여 컨텍스트를 확보합니다",
+  "chat.command.undoDescription": "마지막 메시지와 그로 인한 파일 변경을 되돌립니다",
+  "chat.command.redoDescription": "마지막으로 되돌린 내용을 복원합니다",
+  "chat.command.shareDescription": "이 대화의 공유 링크를 만듭니다",
+  "chat.command.unshareDescription": "이 대화의 공유를 중지합니다",
+  "chat.mode.auto": "자동 판단",
+
+  // ── 에이전트의 질문에 양식으로 답하기 ──
+  "chat.question.heading": "에이전트가 질문했습니다",
+  "chat.question.submit": "제출",
+  "chat.question.next": "다음",
+  "chat.question.dismiss": "닫기",
+  "chat.question.answerPlaceholder": "답변을 입력하세요",
+  "chat.question.otherPlaceholder": "다른 답변",
+  "chat.question.answeredHeading": (n: number) => `질문 ${n}개에 답변함`,
+  "chat.question.blankAnswer": "입력 없음",
+
+  // ── 승인을 기다리는 계획 ──
+  "chat.plan.heading": "계획이 승인을 기다리고 있습니다",
+  "chat.plan.implement": "승인하고 실행",
+  "chat.plan.reject": "거부",
+
+  // ── 에이전트가 작업 중일 때 입력한 메시지 ──
+  "chat.placeholderBusy": "메시지를 입력하세요. 이번 턴이 끝난 뒤 전송됩니다",
+  "chat.queueTooltip": (combo: string) => `이번 턴이 끝난 뒤 전송 · ${combo} 키로 즉시 전송`,
+  "chat.queue.pending": "전송 대기",
+  "chat.queue.edit": "편집",
+  "chat.queue.remove": "삭제",
+
+  // ── 입력창에 붙여넣거나 끌어다 놓은 이미지 ──
+  "chat.attach.remove": "이 이미지 제거",
+  "chat.attach.tooMany": (max: number) => `메시지 한 통에는 이미지를 ${max}장까지 첨부할 수 있습니다`,
+  "chat.attach.tooLarge": (name: string, mb: number) => `${name}은(는) ${mb} MB를 초과하여 첨부하지 않았습니다`,
+  "chat.attach.unreadable": (name: string) => `${name}을(를) 읽지 못했습니다`,
+  // Compacting the conversation… / Context compacted / Context compacted automatically
+  "chat.compaction.running": "컨텍스트를 압축하는 중…",
+  "chat.compaction.manual": "컨텍스트를 압축했습니다",
+  "chat.compaction.auto": "컨텍스트를 자동으로 압축했습니다",
+  "chat.compaction.from": (tokens: string) => `압축 전 ${tokens} 토큰`,
+  // N steps
+  "chat.subagent.steps": (n: number) => `${n}단계`,
+  "chat.subagent.tokens": (tokens: string) => `${tokens} 토큰`,
+  "chat.rewind.title": "여기서부터 되돌리기",
+  "chat.rewind.warning": "이 작업은 실행 후 되돌릴 수 없습니다.",
+  "chat.rewind.conversation": "대화 되돌리기",
+  "chat.rewind.files": "파일 복원하기",
+  "chat.rewind.both": "대화 되돌리고 파일 복원하기",
+  "chat.rewind.confirm.conversation": "이 메시지와 이후 내용을 모두 삭제할까요?",
+  "chat.rewind.confirm.files": "파일을 이 메시지 이전 상태로 복원할까요?",
+  "chat.rewind.confirm.both": "이 턴을 삭제하고 이 턴에서 변경된 파일도 복원할까요?",
+  "chat.rewind.unavailable": "이 메시지에 해당하는 파일 체크포인트가 없습니다.",
+  "chat.rewind.previewing": "파일 체크포인트를 확인하는 중…",
+  "chat.rewind.cancel": "그대로 두기",
+  "chat.rewind.apply": "되돌리기",
+  "chat.rewind.applying": "되돌리는 중…",
+  "chat.rewind.fileSummary": (files: number, insertions: number, deletions: number) =>
+    `파일 ${files}개가 변경됩니다: +${insertions} −${deletions}. 이 작업은 실행 후 되돌릴 수 없습니다.`,
+  // ── 권한 카드가 제안하는 상시 규칙. 한 번 누르면 적용된다 ──
+  "chat.suggest.modeSession": (mode: string) => `이 세션은 ${mode}(으)로`,
+  "chat.suggest.mode": (mode: string) => `${mode}(으)로 전환`,
+  "chat.suggest.allowSession": (rule: string) => `이 세션에서 ${rule} 허용`,
+  "chat.suggest.allowAlways": (rule: string) => `${rule} 항상 허용`,
+  "chat.suggest.dirSession": (dirs: string) => `이 세션에서 ${dirs} 접근 허용`,
+  "chat.suggest.dirAlways": (dirs: string) => `${dirs} 접근 항상 허용`,
+  // ── Codex: 네트워크 허용 규칙, 끼어들기, 자체 명령, 속도와 말투 칩 ──
+  "chat.suggest.networkAlways": (host: string) => `${host} 네트워크 접근 항상 허용`,
+  "chat.steer": "지시 추가",
+  "chat.stopping": "현재 턴을 중지하는 중…",
+  "chat.stopped": "현재 턴이 중지되었습니다",
+  "chat.steerAccepted": "추가 지시를 보냈습니다",
+  "chat.steerTooltip": (combo: string) => `${combo} 키로 진행 중인 턴에 추가`,
+  "chat.command.reviewDescription": "코드를 검토하고 주의가 필요한 부분을 보고합니다",
+  "chat.command.reviewHint": "[branch <브랜치명> | commit <커밋 ID> | 지시 사항]",
+  "chat.command.startTimeout": "에이전트가 제시간에 세션을 열지 못했습니다",
+  "chat.serviceTierTooltip": "속도",
+  "chat.serviceTier.default": "표준 속도",
+  "chat.personalityTooltip": "말투",
+  "chat.personality.default": "기본 말투",
+  "chat.personality.none": "중립",
+  "chat.personality.friendly": "친근함",
+  "chat.personality.pragmatic": "실용적",
+  // ── 긴 대화: 연속된 도구 호출을 한 줄로 접고, 끝으로 돌아가는 길을 둔다 ──
+  "chat.toolRun.count": (n: number) => `도구 호출 ${n}개`,
+  "chat.toolRun.tooltip": "하나씩 보기",
+  "chat.backToEnd": "최신 메시지로 이동",
+  "chat.elicitation.heading": (server: string) => `${server}에서 입력을 요청합니다`,
+  "chat.elicitation.cancel": "취소",
+  "chat.elicitation.decline": "거절",
+  "chat.elicitation.submit": "제출",
+  "chat.elicitation.done": "완료",
+  "chat.elicitation.choose": "선택…",
+  "chat.effort.off": "끔",
+  "chat.effort.offHint": "확장 사고를 사용하지 않음",
+  "chat.fastMode.label": "고속",
+  "chat.fastMode.on": "고속 모드가 켜져 있습니다",
+  "chat.fastMode.off": "고속 모드가 꺼져 있습니다",
+  "chat.usage.context": (used: string, max: string, pct: number) =>
+    `컨텍스트: ${max} 토큰 중 ${used} 사용(${pct}%)`,
+  "chat.usage.cost": (usd: string) => `세션 비용: $${usd}`,
+  "chat.usage.rateLimited": (resets: string) => `사용 한도에 도달했습니다. 초기화: ${resets}`,
+  "chat.usage.rateWarning": (pct: number, resets: string) => `사용 한도: ${pct}% 사용. 초기화: ${resets}`,
+  "chat.mcp.codexScope": "Codex 사용자 설정이 변경되며, 이 설정을 사용하는 다른 대화에도 영향을 줍니다. 계속하시겠습니까?",
+  "chat.mcp.tooltip": "MCP 서버",
+  "chat.mcp.loading": "서버 목록을 읽는 중…",
+  "chat.mcp.backendUnsupported": "현재 연결된 VelaTerm 백엔드는 MCP 관리를 지원하지 않습니다. 해당 백엔드를 업데이트하고 다시 시작한 후 재시도하세요.",
+  "chat.mcp.none": "구성된 MCP 서버가 없습니다",
+  "chat.mcp.tools": (n: number) => `도구 ${n}개`,
+  "chat.mcp.reconnect": "다시 연결",
+  "chat.mcp.disable": "사용 안 함",
+  "chat.mcp.enable": "사용",
+  "chat.mcp.status.connected": "연결됨",
+  "chat.mcp.status.disabled": "사용 안 함",
+  "chat.mcp.status.failed": "실패",
+  "chat.mcp.status.pending": "연결 중",
+  "chat.mcp.status.disconnected": "연결 끊김",
+  "chat.mcp.status.other": "알 수 없음",
+  "chat.tasks.label": "작업",
+  "chat.tasks.tooltip": "백그라운드 작업",
+  "chat.tasks.backgroundAll": "진행 중인 작업을 백그라운드로 보내기",
+  "chat.tasks.none": "백그라운드 작업이 없습니다",
+  "chat.tasks.stop": "중지",
+  "chat.retry.line": (attempt: number, max: number, seconds: number, message: string) =>
+    `${seconds}초 후 다시 시도합니다(${attempt}/${max}): ${message}`,
+  "chat.notify.dismiss": "닫기",
 };
 
 export default ko;

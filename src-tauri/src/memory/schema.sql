@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS memory_jobs (
  source_id TEXT NOT NULL REFERENCES memory_sources(id),
  agent TEXT NOT NULL,
  model TEXT NOT NULL,
+ effort TEXT NOT NULL DEFAULT '',
  status TEXT NOT NULL,
  stage TEXT NOT NULL,
  progress INTEGER NOT NULL DEFAULT 0,

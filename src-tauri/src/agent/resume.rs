@@ -1,15 +1,16 @@
 //! Agent auto-resume support: capture native agent session IDs and verify their existence before resuming.
 //!
 //! - **Claude** IDs arrive directly in hook bodies (see `server.rs`).
-//! - **Codex** notify is ineffective here, so scan `~/.codex/sessions/**/rollout-*.jsonl`. Its first
-//!   `session_meta` line contains payload ID and cwd; match files created after launch with the session cwd.
+//! - **Codex** callback IDs are verified against rollout metadata before persistence. Legacy versions
+//!   also scan rollouts while waiting for the first durable conversation.
 //! - **Pi** normally reports through an extension, with a disk fallback scanning session headers under
 //!   `~/.pi/agent/sessions` and matching cwd plus launch time.
 //! - **OMP** works the same way against `~/.omp/agent/sessions`; its files carry the header on the second line
 //!   rather than the first, so the parser scans the opening lines instead of reading exactly one.
-//! - **Existence checks** verify conversation files before resume and fall back to a fresh launch only when absence
-//!   is certain, avoiding hangs from invalid resume IDs.
+//! - **Existence checks** verify conversation files before resume. Missing Codex history fails explicitly;
+//!   other agents retain their existing fallback policy.
 
+use std::collections::HashSet;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -487,6 +488,62 @@ pub fn spawn_pi_capture(
     });
 }
 
+/// Persist a Codex callback only after its ID is confirmed by the rollout metadata.
+/// Notify payload IDs are not necessarily durable thread IDs. An unverified callback must
+/// neither overwrite a captured anchor nor finish a pending fork. A later hook can retry
+/// after Codex has flushed the rollout.
+pub fn store_codex_callback_id(
+    conn: &rusqlite::Connection,
+    sid: &str,
+    id: &str,
+) -> Result<bool, String> {
+    let Some(home) = codex_home() else {
+        return Ok(false);
+    };
+    store_codex_callback_id_in(conn, sid, id, &home.join("sessions"))
+}
+
+fn store_codex_callback_id_in(
+    conn: &rusqlite::Connection,
+    sid: &str,
+    id: &str,
+    sessions: &Path,
+) -> Result<bool, String> {
+    let Some(path) = find_codex_rollout_in(sessions, id) else {
+        return Ok(false);
+    };
+    if !read_rollout_meta(&path).is_some_and(|(actual, _)| actual == id) {
+        return Ok(false);
+    }
+    if repo::get_fork_pending(conn, sid)?
+        && repo::get_agent_session_id(conn, sid)?.as_deref() == Some(id)
+    {
+        return Ok(false);
+    }
+    repo::set_agent_session_id(conn, sid, id, SessionKind::Codex)
+}
+
+/// Both desktop and remote PTYs must preserve a failed Codex resume instead of
+/// silently launching an empty conversation. Other agents retain their existing policy.
+pub fn checked_resume_id(kind: SessionKind, id: Option<String>) -> Result<Option<String>, String> {
+    let missing = id.as_deref().is_some_and(|id| confirmed_missing(kind, id));
+    resume_id_after_check(kind, id, missing)
+}
+
+fn resume_id_after_check(
+    kind: SessionKind,
+    id: Option<String>,
+    missing: bool,
+) -> Result<Option<String>, String> {
+    if missing {
+        if kind == SessionKind::Codex {
+            return Err("Cannot restore the saved Codex conversation: its history file was not found. The saved session ID has been preserved. Restore the original history or explicitly create a new session.".to_string());
+        }
+        return Ok(None);
+    }
+    Ok(id)
+}
+
 // Pre-resume existence verification.
 
 /// Whether a conversation is **confirmed absent**. Only true triggers fallback to a fresh launch.
@@ -711,10 +768,185 @@ pub fn find_claude_transcript(id: &str) -> Option<PathBuf> {
     find_claude_transcript_in(&projects, id)
 }
 
+/// Read a Claude transcript reduced to the branch the agent itself still follows.
+///
+/// A rewind removes nothing from the file. It appends a `last-prompt` marker naming the new leaf, and the
+/// next message hangs off an earlier parent, so a linear read shows every abandoned turn as if it still
+/// counted. `--resume` walks `parentUuid` from the leaf instead; reading the same way keeps the session
+/// view, export, search, and rewind targets in step with what the agent remembers.
+pub(crate) fn read_claude_transcript(id: &str) -> Result<String, String> {
+    let path = find_claude_transcript(id).ok_or("Claude transcript file not found")?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read transcript: {e}"))?;
+    Ok(claude_active_branch(&content))
+}
+
+/// Keep only the lines on the active branch of a Claude transcript tree.
+///
+/// Chain nodes are the lines carrying both `uuid` and `parentUuid` (user, assistant, attachment, system).
+/// The leaf is the last of them, unless a later `last-prompt` marker with `rewound` moved it: that marker
+/// names the message the conversation now ends at, or nothing at all when the rewind removed the first
+/// message. Every other line — file-history snapshots, mode changes, the markers themselves — stays in
+/// place; the parsers already ignore them. Content without chain nodes is returned unchanged.
+pub(crate) fn claude_active_branch(content: &str) -> String {
+    struct Node {
+        uuid: String,
+        parent: Option<String>,
+    }
+    let mut nodes: Vec<Option<Node>> = Vec::new();
+    let mut leaf: Option<Option<String>> = None;
+    for line in content.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            nodes.push(None);
+            continue;
+        };
+        let is_marker = v.get("type").and_then(serde_json::Value::as_str) == Some("last-prompt")
+            && v.get("rewound").and_then(serde_json::Value::as_bool) == Some(true);
+        if is_marker {
+            leaf = Some(v.get("leafUuid").and_then(serde_json::Value::as_str).map(str::to_string));
+            nodes.push(None);
+            continue;
+        }
+        let node = match (v.get("uuid").and_then(serde_json::Value::as_str), v.get("parentUuid")) {
+            (Some(uuid), Some(parent)) => Some(Node {
+                uuid: uuid.to_string(),
+                parent: parent.as_str().map(str::to_string),
+            }),
+            _ => None,
+        };
+        if let Some(node) = &node {
+            leaf = Some(Some(node.uuid.clone()));
+        }
+        nodes.push(node);
+    }
+    let Some(leaf) = leaf else {
+        return content.to_string();
+    };
+
+    let parents: std::collections::HashMap<&str, Option<&str>> = nodes
+        .iter()
+        .flatten()
+        .map(|node| (node.uuid.as_str(), node.parent.as_deref()))
+        .collect();
+    let mut active: HashSet<&str> = HashSet::new();
+    let mut cursor = leaf.as_deref();
+    while let Some(uuid) = cursor {
+        if !active.insert(uuid) {
+            break;
+        }
+        cursor = parents.get(uuid).copied().flatten();
+    }
+
+    content
+        .lines()
+        .zip(&nodes)
+        .filter(|(_, node)| node.as_ref().is_none_or(|node| active.contains(node.uuid.as_str())))
+        .map(|(line, _)| line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Locates a Codex rollout by agent session ID under `~/.codex/sessions`.
 pub fn find_codex_rollout(id: &str) -> Option<PathBuf> {
     let sessions = codex_home()?.join("sessions");
     find_codex_rollout_in(&sessions, id)
+}
+
+/// Read the logical Codex rollout, following paginated fork ancestry.
+///
+/// A `thread/fork` rollout stores only its own suffix. The preceding turns remain in the parent file and
+/// are referenced by `session_meta.payload.history_base`; reading only the child therefore makes the view,
+/// export, and rewind targets lose everything before the fork after a process restart.
+pub(crate) fn read_codex_rollout_chain(id: &str) -> Result<(PathBuf, String), String> {
+    let sessions = codex_home()
+        .ok_or("Codex home directory not found")?
+        .join("sessions");
+    read_codex_rollout_chain_in(&sessions, id)
+}
+
+fn read_codex_rollout_chain_in(sessions: &Path, id: &str) -> Result<(PathBuf, String), String> {
+    let path = find_codex_rollout_in(sessions, id).ok_or("Codex rollout file not found")?;
+    let mut seen = HashSet::new();
+    let content = read_codex_rollout_segment(sessions, id, None, None, &mut seen, 0)?;
+    Ok((path, content))
+}
+
+fn read_codex_rollout_segment(
+    sessions: &Path,
+    id: &str,
+    end_ordinal_exclusive: Option<u64>,
+    end_byte_offset: Option<u64>,
+    seen: &mut HashSet<String>,
+    depth: usize,
+) -> Result<String, String> {
+    if depth >= 32 {
+        return Err("Codex rollout fork history is deeper than 32 levels".to_string());
+    }
+    if !seen.insert(id.to_string()) {
+        return Err("Codex rollout fork history contains a cycle".to_string());
+    }
+    let path = find_codex_rollout_in(sessions, id).ok_or("Codex parent rollout file not found")?;
+    let raw = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read transcript: {e}"))?;
+    let history_base = raw.lines().find_map(|line| {
+        let value = serde_json::from_str::<serde_json::Value>(line).ok()?;
+        if value.get("type").and_then(serde_json::Value::as_str) != Some("session_meta") {
+            return None;
+        }
+        let base = value
+            .pointer("/payload/history_base")
+            .or_else(|| value.pointer("/payload/historyBase"))?;
+        let thread_id = base
+            .get("thread_id")
+            .or_else(|| base.get("threadId"))
+            .and_then(serde_json::Value::as_str)?
+            .to_string();
+        let ordinal = base
+            .get("end_ordinal_exclusive")
+            .or_else(|| base.get("endOrdinalExclusive"))
+            .and_then(serde_json::Value::as_u64);
+        let bytes = base
+            .get("end_byte_offset")
+            .or_else(|| base.get("endByteOffset"))
+            .and_then(serde_json::Value::as_u64);
+        Some((thread_id, ordinal, bytes))
+    });
+
+    let mut logical = String::new();
+    if let Some((parent_id, parent_ordinal, parent_bytes)) = history_base {
+        logical.push_str(&read_codex_rollout_segment(
+            sessions,
+            &parent_id,
+            parent_ordinal,
+            parent_bytes,
+            seen,
+            depth + 1,
+        )?);
+    }
+
+    let segment = end_byte_offset
+        .and_then(|limit| usize::try_from(limit).ok())
+        .filter(|limit| *limit <= raw.len())
+        .and_then(|limit| raw.get(..limit))
+        .map(str::to_string)
+        .unwrap_or_else(|| match end_ordinal_exclusive {
+            Some(limit) => raw
+                .lines()
+                .filter(|line| {
+                    serde_json::from_str::<serde_json::Value>(line)
+                        .ok()
+                        .and_then(|value| value.get("ordinal").and_then(serde_json::Value::as_u64))
+                        .is_none_or(|ordinal| ordinal < limit)
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            None => raw,
+        });
+    logical.push_str(&segment);
+    if !logical.is_empty() && !logical.ends_with('\n') {
+        logical.push('\n');
+    }
+    Ok(logical)
 }
 
 #[cfg(test)]
@@ -739,6 +971,147 @@ mod tests {
     }
 
     #[test]
+    fn codex_callbacks_preserve_durable_anchor_and_pending_fork() {
+        let root = std::env::temp_dir().join(format!("vlx-callback-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::db::schema::SCHEMA).unwrap();
+        let project = repo::import_project(&conn, root.to_str().unwrap()).unwrap();
+        let session = repo::create_session(
+            &conn,
+            &project.id,
+            None,
+            "Codex",
+            SessionKind::Codex,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let original = "01a07b86-ce52-76f2-85d5-d1369f8eade5";
+        let invalid = "01a07bee-a3a1-7e11-9d5f-3e8cac82c87e";
+        let write_rollout = |id: &str, metadata_id: &str| {
+            write_file(
+                &root.join(format!("rollout-test-{id}.jsonl")),
+                &serde_json::json!({"type":"session_meta","payload":{"id":metadata_id}})
+                    .to_string(),
+            );
+        };
+        // A callback arriving before the file is flushed cannot establish an invalid anchor.
+        assert!(!store_codex_callback_id_in(&conn, &session.id, invalid, &root).unwrap());
+        assert_eq!(
+            repo::get_agent_session_id(&conn, &session.id).unwrap(),
+            None
+        );
+        write_rollout(original, original);
+        assert!(store_codex_callback_id_in(&conn, &session.id, original, &root).unwrap());
+        assert!(!store_codex_callback_id_in(&conn, &session.id, invalid, &root).unwrap());
+        // A filename match alone is insufficient; the persisted metadata must agree.
+        write_rollout(invalid, original);
+        assert!(!store_codex_callback_id_in(&conn, &session.id, invalid, &root).unwrap());
+        assert!(!store_codex_callback_id_in(&conn, &session.id, &original[..8], &root).unwrap());
+        assert_eq!(
+            repo::get_agent_session_id(&conn, &session.id)
+                .unwrap()
+                .as_deref(),
+            Some(original)
+        );
+
+        let fork = repo::fork_session(&conn, &session.id).unwrap();
+        assert!(!store_codex_callback_id_in(&conn, &fork.id, original, &root).unwrap());
+        assert!(!store_codex_callback_id_in(&conn, &fork.id, invalid, &root).unwrap());
+        assert!(repo::get_fork_pending(&conn, &fork.id).unwrap());
+        let fork_id = "01a07c5f-e50d-7e21-88b0-4029824043eb";
+        write_rollout(fork_id, fork_id);
+        assert!(store_codex_callback_id_in(&conn, &fork.id, fork_id, &root).unwrap());
+        assert!(!repo::get_fork_pending(&conn, &fork.id).unwrap());
+        assert_eq!(
+            repo::get_agent_session_id(&conn, &session.id)
+                .unwrap()
+                .as_deref(),
+            Some(original)
+        );
+        // An explicit new conversation may replace an anchor when it has real persisted history.
+        let new_id = "01a07ad4-20d7-7e31-ba9a-f6abc6e3133a";
+        write_rollout(new_id, new_id);
+        assert!(store_codex_callback_id_in(&conn, &session.id, new_id, &root).unwrap());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn codex_missing_resume_is_an_error_but_new_and_unverified_launches_are_allowed() {
+        assert!(resume_id_after_check(SessionKind::Codex, Some("saved".into()), true).is_err());
+        assert_eq!(
+            resume_id_after_check(SessionKind::Codex, None, false).unwrap(),
+            None
+        );
+        assert_eq!(
+            resume_id_after_check(SessionKind::Codex, Some("saved".into()), false).unwrap(),
+            Some("saved".into())
+        );
+        assert_eq!(
+            resume_id_after_check(SessionKind::Pi, Some("saved".into()), true).unwrap(),
+            None
+        );
+    }
+
+    fn branch_texts(content: &str) -> Vec<String> {
+        claude_active_branch(content)
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter_map(|v| v.pointer("/message/content").and_then(|c| c.as_str()).map(str::to_string))
+            .collect()
+    }
+
+    #[test]
+    fn claude_active_branch_drops_turns_abandoned_by_a_rewind() {
+        // Two turns, a rewind to the first, then a fresh turn hanging off the conversation start.
+        let content = [
+            r#"{"type":"file-history-snapshot","messageId":"u1"}"#,
+            r#"{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"first"}}"#,
+            r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":"one"}}"#,
+            r#"{"type":"user","uuid":"u2","parentUuid":"a1","message":{"role":"user","content":"second"}}"#,
+            r#"{"type":"assistant","uuid":"a2","parentUuid":"u2","message":{"role":"assistant","content":"two"}}"#,
+            r#"{"type":"last-prompt","leafUuid":null,"rewound":true}"#,
+            r#"{"type":"user","uuid":"u3","parentUuid":null,"message":{"role":"user","content":"third"}}"#,
+            r#"{"type":"assistant","uuid":"a3","parentUuid":"u3","message":{"role":"assistant","content":"three"}}"#,
+        ]
+        .join("\n");
+        assert_eq!(branch_texts(&content), vec!["third", "three"]);
+        assert_eq!(claude_active_branch(&content).lines().count(), 4, "markers and snapshots stay");
+    }
+
+    #[test]
+    fn claude_active_branch_follows_a_rewind_marker_before_any_new_message() {
+        // A rewind to the second turn with nothing sent afterwards: the file still ends on the old branch.
+        let content = [
+            r#"{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"first"}}"#,
+            r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":"one"}}"#,
+            r#"{"type":"user","uuid":"u2","parentUuid":"a1","message":{"role":"user","content":"second"}}"#,
+            r#"{"type":"assistant","uuid":"a2","parentUuid":"u2","message":{"role":"assistant","content":"two"}}"#,
+            r#"{"type":"last-prompt","leafUuid":"a1","rewound":true}"#,
+        ]
+        .join("\n");
+        assert_eq!(branch_texts(&content), vec!["first", "one"]);
+    }
+
+    #[test]
+    fn claude_active_branch_keeps_a_linear_transcript_intact() {
+        let content = [
+            r#"{"type":"user","uuid":"u1","parentUuid":null,"message":{"role":"user","content":"first"}}"#,
+            r#"{"type":"last-prompt","leafUuid":"u1"}"#,
+            r#"{"type":"assistant","uuid":"a1","parentUuid":"u1","message":{"role":"assistant","content":"one"}}"#,
+            r#"{"type":"summary","summary":"title","leafUuid":"a1"}"#,
+        ]
+        .join("\n");
+        assert_eq!(claude_active_branch(&content), content);
+        assert_eq!(claude_active_branch(""), "");
+        assert_eq!(claude_active_branch("not json"), "not json");
+    }
+
+    #[test]
     fn parse_rollout_meta_extracts_id_and_cwd() {
         let line = r#"{"timestamp":"t","type":"session_meta","payload":{"id":"uuid-1","cwd":"/private/tmp","source":"exec"}}"#;
         assert_eq!(
@@ -751,6 +1124,36 @@ mod tests {
         assert!(parse_rollout_meta(r#"{"type":"session_meta","payload":{"cwd":"/x"}}"#).is_none());
         // Invalid JSON returns None.
         assert!(parse_rollout_meta("garbage").is_none());
+    }
+
+    #[test]
+    fn codex_fork_rollout_chain_keeps_parent_prefix_and_child_suffix() {
+        let tmp = std::env::temp_dir().join(format!("vlx-codex-fork-chain-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let sessions = tmp.join("sessions/2026/09/04");
+        let parent_prefix = [
+            r#"{"type":"session_meta","ordinal":0,"payload":{"id":"parent"}}"#,
+            r#"{"type":"turn_context","ordinal":1,"payload":{"turn_id":"turn-1"}}"#,
+            r#"{"type":"response_item","ordinal":2,"payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"kept"}]}}"#,
+        ]
+        .join("\n")
+            + "\n";
+        let parent = parent_prefix.clone()
+            + r#"{"type":"response_item","ordinal":3,"payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"discarded"}]}}"#
+            + "\n";
+        write_file(&sessions.join("rollout-parent.jsonl"), &parent);
+        let child = format!(
+            "{{\"type\":\"session_meta\",\"ordinal\":3,\"payload\":{{\"id\":\"child\",\"history_base\":{{\"thread_id\":\"parent\",\"end_ordinal_exclusive\":3,\"end_byte_offset\":{}}}}}}}\n{{\"type\":\"turn_context\",\"ordinal\":4,\"payload\":{{\"turn_id\":\"turn-2\"}}}}\n{{\"type\":\"response_item\",\"ordinal\":5,\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":[{{\"type\":\"input_text\",\"text\":\"revised\"}}]}}}}\n",
+            parent_prefix.len()
+        );
+        write_file(&sessions.join("rollout-child.jsonl"), &child);
+
+        let (_, logical) = read_codex_rollout_chain_in(&tmp.join("sessions"), "child").unwrap();
+        assert!(logical.contains("kept"));
+        assert!(logical.contains("revised"));
+        assert!(!logical.contains("discarded"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]

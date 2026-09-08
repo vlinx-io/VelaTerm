@@ -18,6 +18,9 @@ import { useTermStore } from "../../store/termStore";
 import { effectiveStatus, type Session } from "../../types";
 import { type TreeNodeRef } from "../LeftSidebar/ProjectTree";
 import { useSessionMenu } from "../sessionMenu";
+import { MemoryIcon } from "../Memory/MemoryRoute";
+import { MemoryTab } from "../Memory/MemoryTab";
+import { MemoryLink } from "../Memory/navigation";
 import { SessionKindIcon } from "../sessionViewers/sessionMeta";
 
 /** Close any tab, routing dirty documents through their three-choice confirmation and closing others directly. */
@@ -479,11 +482,13 @@ export function TabBar() {
           </div>
         );
       })}
+      <MemoryTab />
       <button className="tab-add" title={t("tab.newTerminal")} onClick={() => newScratchTab()}>
         <Icons.plus size={14} />
       </button>
       {/* Permanent entries on the right, separated from the tabs: new terminal, new document, built-in browser tab. */}
       <div style={{ marginLeft: "auto", display: "flex", flex: "none" }}>
+        <MemoryLink route="library" className="tab-add memory-tab-entry" title={`${t("memory.title")} · ${t("common.experimental")}`} aria-label={t("memory.title")}><MemoryIcon size={16} /></MemoryLink>
         <button className="tab-add" title={t("tab.newTerminal")} onClick={() => newScratchTab()}>
           <Icons.terminal size={14} />
         </button>

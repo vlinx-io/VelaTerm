@@ -58,6 +58,28 @@
 .memory-history small { display: block; color: var(--text-muted); }
 .memory-editor { max-width: 850px; display: flex; flex-direction: column; gap: 18px; }
 .memory-editor > label { display: flex; flex-direction: column; gap: 8px; }
+.memory-compile .memory-agent-field { border: 0; padding: 0; margin: 0; min-width: 0; }
+.memory-agent-field legend { padding: 0; margin-bottom: 8px; }
+.memory-agent-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.memory-agent-option { display: flex; align-items: center; gap: 10px; min-height: 54px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); cursor: pointer; }
+.memory-agent-option:hover { border-color: var(--accent); }
+.memory-agent-option:has(:checked) { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.memory-agent-option:has(:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
+.memory-agent-option:has(:disabled) { opacity: .5; cursor: not-allowed; }
+.memory-agent-option input { width: 16px; height: 16px; flex-shrink: 0; margin: 0; accent-color: var(--accent); }
+.memory-agent-option strong { font-weight: 600; }
+.memory-agent-option small { display: block; margin-top: 4px; color: var(--text-secondary); }
+.memory-compile .input { min-height: 40px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elevated); color: var(--text-primary); }
+.memory-compile select.input { width: 100%; flex: none; cursor: pointer; }
+.memory-compile .input:hover { border-color: var(--text-muted); }
+.memory-compile .input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-color: var(--accent); }
+.memory-compile > footer { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 3px; }
+.memory-compile .btn { min-height: 38px; padding: 8px 16px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-elevated); color: var(--text-primary); font: inherit; cursor: pointer; }
+.memory-compile .btn:hover { background: var(--bg-hover); text-decoration: none; }
+.memory-compile .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--bg-0); font-weight: 600; }
+.memory-compile .btn-primary:hover { background: var(--accent); filter: brightness(.92); }
+.memory-compile .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.memory-compile .btn:disabled,.memory-compile .input:disabled { opacity: .5; cursor: not-allowed; }
 .memory-editor textarea { resize: vertical; line-height: 1.7; }
 .memory-content-input { min-height: 290px; font-family: monospace !important; }
 .memory-editor fieldset { border: 1px solid var(--border); border-radius: 6px; padding: 14px; }
@@ -97,3 +119,17 @@
  .memory-shell[data-page="entry"] .memory-sidebar,.memory-shell[data-page="history"] .memory-sidebar { display: none; }
  .memory-actions .memory-muted { flex-basis: 100%; }
 }
+
+/* The knowledge library occupies the same stage as session and document tabs. */
+.memory-shell.memory-tab-surface { position: absolute; inset: 0; width: 100%; height: 100%; max-height: none; min-width: 0; border: 0; border-radius: 0; box-shadow: none; z-index: 2; }
+.memory-tab-surface .memory-sidebar { flex-basis: 28%; min-width: 180px; max-width: 320px; }
+
+.memory-tab-entry { text-decoration: none; }
+.memory-tab-link { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; height: 100%; color: inherit; text-decoration: none; }
+.memory-tab-link > svg { flex: none; }
+
+/* Inline memory editing shares the document editor's theme and reading typography. */
+.memory-inline-editor.docview { position: relative; display: block; height: auto; background: transparent; margin-top: 24px; }
+.memory-inline-editor .docview-wysiwyg { padding: 0 0 24px; }
+.memory-inline-editor .milkdown .ProseMirror { padding: 12px 24px; min-height: 240px; }
+.memory-inline-editor .milkdown { background: transparent; }

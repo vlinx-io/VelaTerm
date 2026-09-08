@@ -1,3 +1,27 @@
+## v0.1.108 — 2026-09-08
+
+- Experimentelle Gesprächsansicht für Claude, Codex und OpenCode mit gestreamten Antworten, Denkprozess, Werkzeugdetails, Berechtigungen und Frageformularen. Neue Konfigurationen verwenden weiterhin standardmäßig die Terminalansicht.
+
+- Die Gesprächssteuerung bietet je nach Engine Modelleinstellungen, Nachrichtenwarteschlangen, Zwischenmeldungen, Dateivervollständigung und Bildanhänge.
+
+- Gesprächssuche, Dateilinks, Bildaktionen und separate Gesprächsschriften erleichtern das Lesen langer Sitzungen. Entfernte Verläufe werden schrittweise geladen, Werkzeugdetails bei Bedarf.
+
+- Übermittlungsbelege helfen, Ergebnisse nach Verbindungsabbrüchen abzugleichen. Ungewisse Übermittlungen warten auf Bestätigung und werden nicht automatisch erneut gesendet.
+
+- Die neuen Befehle `vrefer` und `vsearch` lesen und durchsuchen andere Sitzungen; `vrefer --ask` überträgt das Lesen an einen Agenten. `vorch` und `vstat` ergänzen die Koordination mehrerer Agenten und Statusabfragen.
+
+- Speichereinträge unterstützen Tags, direkte Textbearbeitung, Schutz ungespeicherter Änderungen und Organisationseinstellungen. Filter und Auswahl beim Verlaufsimport sowie die Graphnavigation wurden verbessert.
+
+- Der Client für öffentliche Freigaben unterstützt Konto-/Gerätebindung, begrenzten Zugriff auf AI-Sitzungen und verschlüsselte Relay-Verbindungen. Bilduploads durch Gäste und komplexe MCP-Formulare werden noch nicht unterstützt.
+
+- Codex-Fortsetzungs-IDs werden mit dem gespeicherten Verlauf abgeglichen. Fehlt dieser nachweislich, erscheint ein eindeutiger Fehler statt einer leeren Sitzung. Laufende Terminals bleiben erneut erreichbar.
+
+- Das Zurücksetzen richtet sich nach der Engine: Codex setzt nur das Gespräch zurück und stellt keine Dateien wieder her. Die Bereichsbehandlung und Verzeichnisvorprüfung in OpenCode haben weiterhin bekannte Einschränkungen.
+
+- Versionsänderungen für Releases erhalten gesperrte Abhängigkeitsversionen. Plattformübergreifende Installations-/Upgradeprüfungen und die Abnahme mit echten AI-Aufrufen stehen noch aus; automatisierte Prüfungen ersetzen sie nicht.
+
+---
+
 ## v0.1.107 — 2026-09-05
 
 - 🧠 Globales Gedächtnis (experimentell): Claude oder Codex fasst Ihre Unterhaltungen zu einem nach Themen geordneten, gemeinsamen Wiki zusammen

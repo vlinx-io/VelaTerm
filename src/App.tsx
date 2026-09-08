@@ -8,12 +8,12 @@ import { MergeModal } from "./components/MergeModal";
 import { ChangesModal } from "./components/diff/ChangesModal";
 import { NotifyGuideModal } from "./components/NotifyGuideModal";
 import { QuitConfirmModal } from "./components/QuitConfirmModal";
+import { OrchConfirmModal } from "./components/OrchConfirmModal";
 import { SpawnConfirmModal } from "./components/SpawnConfirmModal";
 import { UpdateModal } from "./components/UpdateModal";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotifications } from "./hooks/useNotifications";
 import { CenterPane } from "./layout/CenterPane/CenterPane";
-import { MemoryRoute } from "./layout/Memory/MemoryRoute";
 import { KnowledgeRoute } from "./layout/Knowledge/KnowledgeRoute";
 import { ImportSessionsRoute } from "./layout/ImportSessions";
 import { LeftSidebar } from "./layout/LeftSidebar/LeftSidebar";
@@ -24,6 +24,7 @@ import { runMenuAction } from "./layout/TitleBar/appMenuActions";
 import { listShells } from "./ipc/commands";
 import {
   onMenuAction,
+  onOrchRequest,
   onSpawnRequest,
   onSpawnResolved,
   onPresetsChanged,
@@ -114,6 +115,10 @@ function App() {
       if (useTermStore.getState().theme === "system") applyAppearance();
     });
     const unlisten = onSpawnRequest((req) => void handleSpawnRequest(req));
+    // An orchestration proposal only queues the confirmation dialog; nothing starts until the user confirms.
+    const unlistenOrch = onOrchRequest((req) =>
+      useTermStore.getState().handleOrchRequest(req),
+    );
     const unlistenResolved = onSpawnResolved((ev) => {
       // Skip our own echo — we already removed the card locally.
       if (ev.source === getClientSource()) return;
@@ -185,6 +190,7 @@ function App() {
       unwatch();
       offConnState?.();
       void unlisten.then((fn) => fn());
+      void unlistenOrch.then((fn) => fn());
       void unlistenResolved.then((fn) => fn());
       void unlistenOpenProject.then((fn) => fn());
       void unlistenView.then((fn) => fn());
@@ -238,13 +244,13 @@ function App() {
       </div>
       <StatusBar />
       <ImportSessionsRoute />
-      <MemoryRoute />
       <KnowledgeRoute />
       <DirectoryPickerModal />
       <CreateProjectModal />
       <CloneProjectModal />
       <SaveAsModal />
       <SpawnConfirmModal />
+      <OrchConfirmModal />
       <QuitConfirmModal />
       <MergeModal />
       <ChangesModal />

@@ -124,11 +124,25 @@ const zhTW: typeof en = {
   "common.save": "儲存", // Save
   "common.create": "建立", // Create
   "common.close": "關閉", // Close
+  "chat.imageViewOriginal": "檢視原圖",
+  "chat.imageCopy": "複製圖片",
+  "chat.imageSave": "儲存圖片",
+  "chat.imageActionFailed": "圖片操作失敗，請重試。",
   "common.copy": "複製", // Copy
   "common.cut": "剪下", // Cut
   "common.paste": "貼上", // Paste
   "common.selectAll": "全選", // Select All
   "common.copied": "已複製", // Copied
+  "chat.sync.loading": "正在同步對話…",
+  "chat.sync.failed": "同步失敗，仍可查看已載入的訊息。",
+  "chat.sync.history": "載入更早的訊息",
+  "chat.submission.updateRequired": "請先更新伺服器，再使用此用戶端傳送訊息。",
+  "chat.submission.sending": "傳送中…",
+  "chat.submission.sent": "已傳送",
+  "chat.submission.queued": "已排入佇列",
+  "chat.submission.failed": "傳送失敗",
+  "chat.submission.unknown": "傳送結果待確認",
+  "chat.submission.check": "確認狀態",
   "common.retry": "重試", // Retry
   "common.experimental": "實驗性功能",
   "common.refresh": "重新整理", // Refresh
@@ -170,10 +184,10 @@ const zhTW: typeof en = {
   "titlebar.connectRemote": "連線到遠端服務", // Connect to Remote Server
   "titlebar.mirrored": "鏡像中", // Mirrored
   "titlebar.mirroredHint":
-    "鏡像已開啟：分頁、分割與目前工作階段跟隨主機。開關在主機端。", // Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.
+    "鏡像已開啟：分頁、分割與目前會話跟隨主機。開關在主機端。", // Mirroring is on: tabs, splits, and the active session follow the host. The switch is on the host.
   "titlebar.mirroredBy": (n: number) => `被 ${n} 端鏡像`, // Mirrored by {n}
   "titlebar.mirroredByHint": (n: number) =>
-    `有 ${n} 個遠端連著。分頁、分割和目前的工作階段是共用的，兩邊都能改。`, // {n} remote clients are connected. Tabs, splits, and the active session are shared, and either side can rearrange them.
+    `有 ${n} 個遠端連著。分頁、分割和目前的會話是共用的，兩邊都能改。`, // {n} remote clients are connected. Tabs, splits, and the active session are shared, and either side can rearrange them.
   "titlebar.clientsTitle": "已連線的用戶端", // Attached clients
   "titlebar.clientUnnamed": "未命名用戶端", // Unnamed client
   "titlebar.clientSince": (time: string) => `${time} 起`, // since {time}
@@ -208,13 +222,13 @@ const zhTW: typeof en = {
   "settings.title": "設定", // Settings
   "settings.catTerminal": "終端機", // Terminal
   "settings.catBehavior": "行為", // Behavior
-  "settings.catAgents": "智能體", // Agents
+  "settings.catAgents": "智慧體", // Agents
   "settings.permDefault": "預設", // Default
   "settings.permYolo": "YOLO", // YOLO
   "settings.yoloHint": (flag: string) =>
     `啟動時附加 ${flag}，跳過全部權限確認，請謹慎使用。`,
   "settings.permViaEnvHint":
-    "透過設定檔注入跳過全部權限確認（無命令列旗標）。僅影響該工作階段啟動時的行為。", // YOLO flag hint
+    "透過設定檔注入跳過全部權限確認（無命令列旗標）。僅影響該會話啟動時的行為。", // YOLO flag hint
   "settings.catGeneral": "一般", // General
   "settings.cliLabel": "Shell 指令",
   "settings.cliInstall": "安裝 ‘vela’ 指令",
@@ -225,11 +239,11 @@ const zhTW: typeof en = {
   "settings.cliHint":
     "像 VS Code 的 `code` 一樣，將 `vela <專案路徑>` 加入 PATH。",
   "settings.agentArgsHint":
-    "各類型智能體新建工作階段時套用的預設啟動參數。新建或編輯單個工作階段時設定的參數會覆寫此處的預設。留空表示不帶參數。", // Agent default launch args hint
+    "各類型智慧體新建會話時套用的預設啟動參數。新建或編輯單個會話時設定的參數會覆寫此處的預設。留空表示不帶參數。", // Agent default launch args hint
   "settings.agentPathLabel": "可執行檔路徑（可選）", // Executable path (optional)
   "settings.agentPathPlaceholder": "如 ~/.local/bin/claude——留空則從 PATH 尋找", // e.g. path — empty = find on PATH
   "settings.agentPathHint":
-    "設定後，該類型工作階段一律按這條完整路徑啟動，不再從 PATH 尋找命令。適用於「已安裝但不在 shell PATH 上」的情況。一鍵安裝成功且能偵測到安裝位置時會自動填入。", // Agent executable path hint
+    "設定後，該類型會話一律按這條完整路徑啟動，不再從 PATH 尋找命令。適用於「已安裝但不在 shell PATH 上」的情況。一鍵安裝成功且能偵測到安裝位置時會自動填入。", // Agent executable path hint
   "settings.appearance": "外觀", // Appearance
   "settings.accent": "強調色", // Accent
   "settings.accentAuto": "跟隨明暗", // Follow theme
@@ -247,6 +261,8 @@ const zhTW: typeof en = {
   "settings.navTree": "標準", // Tree
   "settings.navCompact": "緊湊", // Compact
   "settings.tabs": "分頁", // Tabs
+  "settings.defaultSessionEngine": "新建會話的預設檢視",
+  "settings.defaultSessionEngineHint": "既有會話維持建立時的檢視。",
   "settings.dynamicStatusFilter": "狀態篩選動態增加",
   "settings.tabSingle": "單分頁", // Single
   "settings.tabMulti": "多分頁", // Multi
@@ -257,7 +273,7 @@ const zhTW: typeof en = {
   "settings.usageRefresh": "額度刷新", // Usage refresh
   "settings.cleanImages": "自動清理貼上的圖片",
   "settings.cleanImagesHint":
-    "貼上或拖入終端的圖片會先存成暫存檔（把路徑傳給 agent）。開啟後：結束時刪除本次工作階段產生的這些暫存圖，啟動時清理超過 24 小時的殘留。文件內的圖片不受影響。",
+    "貼上或拖入終端的圖片會先存成暫存檔（把路徑傳給 agent）。開啟後：結束時刪除本次會話產生的這些暫存圖，啟動時清理超過 24 小時的殘留。文件內的圖片不受影響。",
   "settings.cleanImagesNow": "立即清理",
   "settings.cleanImagesResult": (n: number, size: string) =>
     `已清理 ${n} 個暫存圖片（釋放 ${size}）。`,
@@ -268,11 +284,11 @@ const zhTW: typeof en = {
   "settings.imagePasteHint":
     "選擇貼上圖片時寫入的內容（僅本機桌面端）。貼上檔案路徑：把圖片存成暫存檔，在輸入框顯示可讀路徑（Codex 顯示 image_path: …）。原生圖片貼上：觸發 Claude 或 Codex 讀取系統剪貼簿並顯示自身的圖片預留位置。",
   "settings.imagePasteRemoteHint":
-    "遠端工作階段固定貼上檔案路徑，讓智能體能在其所在機器讀取圖片；原生圖片貼上僅在本機桌面端可用。",
+    "遠端會話固定貼上檔案路徑，讓智慧體能在其所在機器讀取圖片；原生圖片貼上僅在本機桌面端可用。",
   "spawn.title": "啟動派生會話？", // Start spawned session?
   "spawn.fromSession": "來自", // From
   "spawn.promptLabel": "提示詞", // Prompt
-  "spawn.agentLabel": "智能體", // Agent
+  "spawn.agentLabel": "智慧體", // Agent
   "spawn.worktreeLabel": "獨立 git worktree", // Separate git worktree
   "spawn.modelLabel": "模型", // Model
   "spawn.effortLabel": "推理強度", // Effort
@@ -282,6 +298,25 @@ const zhTW: typeof en = {
   "spawn.launch": "啟動", // Launch
   "spawn.remaining": (n: number) => `還有 ${n} 個待確認`, // ${n} more pending
   "spawn.notifyTitle": "派生會話待確認", // Spawn session awaiting confirmation
+  "orch.title": "啟動這些智慧體？",
+  "orch.notifyTitle": "編排等待確認",
+  "orch.coordinatorName": "進度",
+  "orch.sharedSettings": "總設定",
+  "orch.agentLabel": "類型",
+  "orch.modelLabel": "模型",
+  "orch.effortLabel": "思考程度",
+  "orch.nameLabel": "名稱",
+  "orch.promptLabel": "任務",
+  "orch.worktreeLabel": "工作樹",
+  "orch.worktreeNone": "沿用目前目錄",
+  "orch.worktreeShared": "共用一個工作樹",
+  "orch.worktreeEach": "每個各一個工作樹",
+  "orch.follow": "跟隨總設定",
+  "orch.overridden": "已改",
+  "orch.remove": "刪除",
+  "orch.launch": (n: number) => `啟動 ${n} 個`,
+  "orch.modelPlaceholder": "智慧體預設",
+  "orch.effortPlaceholder": "智慧體預設",
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "查看變更…",
@@ -378,6 +413,12 @@ const zhTW: typeof en = {
   "settings.uiFontSize": "介面字級", // Interface size
   "settings.termFont": "終端機字型", // Terminal font
   "settings.termFontSize": "終端機字級", // Terminal size
+  "settings.termLineHeight": "終端機行高",
+  "settings.chatTypography": "對話檢視",
+  "settings.chatTypographyHint": "字型設定與終端機分開儲存，變更後立即生效。",
+  "settings.chatFont": "對話字型",
+  "settings.chatFontSize": "對話字級",
+  "settings.chatLineHeight": "對話行高",
   "settings.fontDefault": "預設", // Default
   "settings.fontCustom": "自訂…", // Custom
   "settings.fontUnavailable": "本機未安裝此字型",
@@ -392,13 +433,13 @@ const zhTW: typeof en = {
   "settings.skillInstall": "安裝", // Install
   "settings.skillInstalled": "重新安裝", // Reinstall
   "settings.skillInvokeHint":
-    "Claude：/vspawn <任務>；Codex：$vspawn <任務>。安裝後若 Codex 未列出技能，請建立新的 Codex 工作階段。",
+    "Claude：/vspawn <任務>；Codex：$vspawn <任務>。安裝後若 Codex 未列出技能，請建立新的 Codex 會話。",
   // Notification permission guidance
   "settings.notify": "系統通知", // System notifications
   "settings.notifyGranted": "已開啟", // Enabled
   "settings.notifyAllow": "允許通知", // Allow notifications
   "settings.notifyOffHint":
-    "允許 VelaTerm 在智能體需要你輸入或任務完成時通知你。", // Allow VelaTerm to alert you when an agent needs your input or finishes a task.
+    "允許 VelaTerm 在智慧體需要你輸入或任務完成時通知你。", // Allow VelaTerm to alert you when an agent needs your input or finishes a task.
   "settings.notifyDeniedHint": "通知已被系統封鎖。開啟方法：", // Notifications are blocked. To turn them on:
   "settings.notifyStepsMac":
     "開啟「系統設定 ▸ 通知 ▸ VelaTerm」，開啟「允許通知」（建議樣式選橫幅或提醒）。", // open System Settings ▸ Notifications ▸ VelaTerm and turn on Allow Notifications (Banners or Alerts recommended).
@@ -418,7 +459,7 @@ const zhTW: typeof en = {
   "settings.scSplitRight": "向右分割", // Split right
   "settings.scSplitDown": "向下分割", // Split down
   "settings.scSearch": "在終端機中搜尋", // Find in terminal
-  "settings.scGlobalSearch": "搜尋所有工作階段", // Search all sessions
+  "settings.scGlobalSearch": "搜尋所有會話", // Search all sessions
   "settings.scSaveDoc": "儲存文件", // Save document
   "settings.scRecording": "請按下按鍵…", // Press keys…
   "settings.scHint": "點一下快捷鍵，再按下新的組合鍵（需含 Cmd/Ctrl）。", // hint
@@ -469,7 +510,7 @@ const zhTW: typeof en = {
   "remote.autostartFailed": "自動啟動失敗：", // Automatic start failed:
   "remote.mirror": "多端介面鏡像", // Mirror layout across devices
   "remote.mirrorHint":
-    "分頁、分割與目前工作階段在所有已連線裝置上保持一致，各端的鍵盤焦點互不打擾。", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
+    "分頁、分割與目前會話在所有已連線裝置上保持一致，各端的鍵盤焦點互不打擾。", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
 
   // ── Remote connection panel ──
   "connect.title": "連線到遠端服務", // Connect to Remote Server
@@ -502,7 +543,7 @@ const zhTW: typeof en = {
   "connect.urlPasswordPlaceholder": "登入密碼",
   "connect.mirror": "鏡像遠端桌面版", // Mirror the remote desktop app
   "connect.mirrorHint":
-    "分頁、分割與目前工作階段與遠端機器上的桌面版保持一致，任一邊的變更兩邊同時可見。桌面版未執行時，本次連線直接開啟它的資料庫；沒有資料庫則使用獨立資料庫。", // Same tabs, splits, and active session as the desktop app on the remote machine; changes on either side show on both. If the desktop app is not running, this connection opens its database directly, or a separate database when there is none.
+    "分頁、分割與目前會話均與遠端機器上的桌面版保持一致，任一邊的變更兩邊同時可見。桌面版未執行時，本次連線會直接開啟它的資料庫；沒有資料庫則使用獨立資料庫。", // Same tabs, splits, and active session as the desktop app on the remote machine; changes on either side show on both. If the desktop app is not running, this connection opens its database directly, or a separate database when there is none.
   "connect.shareDesktopDb": "共用遠端桌面版的資料庫",
   "connect.shareDesktopDbHint":
     "與遠端機器的桌面版共用同一資料庫（建議兩邊同版本）。不勾則使用獨立資料庫。",
@@ -557,7 +598,7 @@ const zhTW: typeof en = {
   "collection.tag": "無資料夾",
   "collection.deleteTitle": "刪除集合",
   "collection.deleteBody": (name) =>
-    `刪除集合「${name}」？其中的分組與工作階段也會一併刪除，且無法復原。`,
+    `刪除集合「${name}」？其中的分組與會話也會一併刪除，且無法復原。`,
   "tree.cloneProject": "從 Git 複製", // Clone from Git
   "createProject.title": "建立專案",
   "createProject.name": "專案名稱",
@@ -616,7 +657,7 @@ const zhTW: typeof en = {
   "tree.viewDeletePrimary": "主分身不能刪除",
   "tree.viewDeleteTitle": "刪除樹分身",
   "tree.viewDeleteConfirm": (name) =>
-    `確定刪除「${name}」嗎？其儲存的搜尋與篩選條件會被移除，專案和工作階段不受影響。`,
+    `確定刪除「${name}」嗎？其儲存的搜尋與篩選條件會被移除，專案和會話不受影響。`,
   "tree.viewSplitRight": "向右切分樹分身",
   "tree.viewSplitDown": "向下切分樹分身",
   "tree.viewAdd": "複製目前的樹分身到新分頁",
@@ -654,6 +695,14 @@ const zhTW: typeof en = {
   "form.customOption": "自訂…", // Custom…
   "tree.cwdLabel": "工作目錄（留空用專案根）", // Working directory (leave empty for project root)
   "tree.initCmdLabel": "啟動命令（可選）", // Startup command (optional)
+  // Run as / Terminal / Conversation
+  "tree.engineLabel": "開啟方式",
+  "tree.engineTui": "終端機檢視",
+  "tree.engineChat": "會話檢視",
+  // The agent runs its own terminal interface.
+  "tree.engineTuiHint": "執行智慧體自帶的終端介面。",
+  // Messages and tool cards, with buttons for permission questions.
+  "tree.engineChatHint": "以訊息和工具卡片呈現，權限請求可直接在介面中確認。",
   "tree.agentArgsLabel": "啟動參數（可選）", // Launch args (optional)
   // Working directory / Leave empty for the default
   "tree.workingDirLabel": "工作目錄",
@@ -661,7 +710,7 @@ const zhTW: typeof en = {
   "preset.execPathLabel": "可執行檔（選填）",
   "preset.execPathPlaceholder": "/usr/local/bin/claude",
   "preset.execPathHint":
-    "留空則使用該智慧體已設定的指令。填了就只有這個工作階段用它，可以跑相容的替代程式。",
+    "留空則使用該智慧體已設定的指令。填了就只有這個會話用它，可以跑相容的替代程式。",
   "preset.saveLabel": "儲存為預設組合",
   "preset.namePlaceholder": "為這個預設組合命名",
   "preset.iconChoose": "選擇圖示",
@@ -712,6 +761,11 @@ const zhTW: typeof en = {
   "info.createdAt": "建立時間", // Created at
 
   // Resume-session dialog
+  "importSessions.results": ({ count }: { count: number }) => `${count} 筆結果`,
+  "importSessions.selected": ({ count }: { count: number }) => `已選取 ${count} 筆`,
+  "importSessions.clearSelection": "清除選取",
+  "importSessions.clearSearch": "清除搜尋",
+  "importSessions.noHistory": "此專案目錄下沒有可匯入的歷史會話。",
   "importSessions.title": "匯入會話",
   "importSessions.description": "尋找工作目錄與本專案一致的 Codex、Claude 和 OpenCode 歷史會話。選取並加入專案後，即可開啟並繼續對話。",
   "importSessions.search": "搜尋標題、Agent 名稱或會話 ID",
@@ -743,7 +797,7 @@ const zhTW: typeof en = {
   "group.worktreeHint": "在此分組下新建的會話將預設使用此 worktree。", // Sessions created in this group will use this worktree by default.
   "worktree.moveGroupTitle": "把分組轉移到 Worktree",
   "worktree.moveGroupHint":
-    "之後在這個分組裡新建的工作階段會用這個 worktree；已有的則留在原來的目錄。",
+    "之後在這個分組裡新建的會話會用這個 worktree；已有的則留在原來的目錄。",
 
   // ── Archive panel ──
   "archive.title": "已封存會話", // Archived Sessions
@@ -818,7 +872,7 @@ const zhTW: typeof en = {
   "browser.loading": "載入中…", // Loading…
   // Application-exit confirmation and dormant restored sessions.
   "quit.title": "結束 VelaTerm？", // Quit VelaTerm?
-  "quit.body": "正在執行的終端機和 agent 工作階段都會被停止。", // Any running terminal and agent sessions will be stopped.
+  "quit.body": "正在執行的終端機會話與智慧體會話都會被停止。", // Any running terminal and agent sessions will be stopped.
   "quit.saveWorkspace": "儲存工作區", // Save workspace
   "quit.saveWorkspaceHint":
     "下次開啟時還原相同的分頁和分割。終端機會還原出來，但不會自動重新啟動。", // Reopen the same tabs and splits next time. Terminals are restored but not restarted.
@@ -859,7 +913,7 @@ const zhTW: typeof en = {
   // ── Agent installation guidance ──
   "agentInstall.title": (label) => `${label} 尚未安裝`, // {label} is not installed
   "agentInstall.desc": (label) =>
-    `VelaTerm 沒有在 PATH 上找到 ${label}。安裝後即可啟動此工作階段。`, // couldn't find {label} on PATH
+    `VelaTerm 沒有在 PATH 上找到 ${label}。安裝後即可啟動此會話。`, // couldn't find {label} on PATH
   "agentInstall.install": "一鍵安裝", // Install now
   "agentInstall.retry": "重試啟動", // Retry launch
   "agentInstall.dismiss": "我自己裝", // I'll do it myself
@@ -869,7 +923,7 @@ const zhTW: typeof en = {
   "agentInstall.pathSaved": (label: string) =>
     `已把 ${label} 的可執行檔路徑填入設定：`, // executable path saved to Settings
   "agentInstall.doneTitle": (label: string) => `${label} 已安裝`, // {label} is installed
-  "agentInstall.doneDesc": "重新啟動本工作階段即可開始使用。", // Relaunch this session to start using it.
+  "agentInstall.doneDesc": "重新啟動本會話即可開始使用。", // Relaunch this session to start using it.
   "agentInstall.restartNow": "立即重新啟動", // Relaunch now
   "agentInstall.later": "稍後", // Later
   "search.placeholder": "在終端機中搜尋", // Search in terminal
@@ -972,7 +1026,7 @@ const zhTW: typeof en = {
   "statusbar.permMenuTitle": "本會話權限", // This session's permissions
   "statusbar.permOptAsk": "逐步詢問（預設）", // Ask each time (default)
   "statusbar.permScopeHint":
-    "僅對當前會話生效。全域性設定，請前往「設定 ▸ 智能體」中調整。", // Applies to this session only. For global defaults, go to Settings ▸ Agents.
+    "僅對當前會話生效。全域性設定，請前往「設定 ▸ 智慧體」中調整。", // Applies to this session only. For global defaults, go to Settings ▸ Agents.
   "statusbar.permRestartMsg":
     "權限已變更，需重啟本會話才生效。重啟會接續目前對話，但會中斷進行中的任務。現在重啟？", // Permission changed. The session must restart to apply. Restart resumes the current conversation but interrupts any task in progress. Restart now?
   "statusbar.permRestartNow": "立即重啟", // Restart now
@@ -1147,6 +1201,196 @@ const zhTW: typeof en = {
   "statusbar.updateReady": "重新啟動以完成更新",
   "statusbar.updateFailed": "更新失敗",
   "statusbar.updateTooltip": "點擊查看詳情",
+
+  // ── 會話檢視（把智慧體會話讀成對話） ──
+  "session.showConversation": "會話檢視",
+  "session.showTerminal": "終端機檢視",
+  "session.switchTitle": "切換檢視將重新啟動智慧體",
+  "session.switchBody": "目前進行中的回合會中斷，對話內容不會遺失。",
+  "session.switchConfirm": "切換",
+  "session.loading": "正在讀取對話…",
+  "session.unavailable": "暫時無法讀取此會話的對話內容",
+  "session.working": "處理中…",
+  "session.thinking": "思考過程",
+  "session.toolRunning": "進行中",
+  "session.toolUnknown": "工具",
+  "session.toolFailed": "執行失敗",
+  "session.toolNoDetail": "沒有更多記錄",
+  "session.showMore": (n: number) => `顯示其餘 ${n} 個字元`,
+  "session.showLess": "收合",
+  "session.composerHint": "傳訊息給智慧體 · Enter 送出，Shift+Enter 換行",
+  "session.send": "送出",
+
+  // ── 對話引擎（以協定方式驅動的會話） ──
+  "chat.empty": "在下方輸入內容，開始對話。",
+  "chat.interrupt": "停止",
+  "chat.interruptTooltip": "停止 · Esc",
+  "chat.allow": "允許",
+  "chat.deny": "拒絕",
+  "chat.permissionAsk": (tool: string) => `${tool} 請求執行`,
+  "chat.exited": (code: number) => `智慧體已結束（代碼 ${code}）`,
+  "chat.modeNextTurn": "下一輪生效",
+  "chat.modePendingHint": (current: string, next: string) =>
+    `目前權限：${current}；下一輪權限：${next}。目前回合繼續使用原權限。`,
+  "chat.modeTooltip": "權限模式",
+  "chat.collaborationModeTooltip": "協作模式",
+  "chat.collaborationMode.default": "預設模式",
+  "chat.collaborationMode.defaultHint": "直接推進，僅在需要你決定時提問",
+  "chat.collaborationMode.plan": "計畫模式",
+  "chat.collaborationMode.planHint": "先調查並制定計畫，可用互動卡片提問",
+  "chat.modelTooltip": "模型",
+  "chat.keepChoice": "設為預設",
+  "chat.keepChoiceFor": (model) => `設為 ${model} 的預設`,
+  "chat.modelDefault": "預設模型",
+  "chat.mode.default": "每次詢問",
+  "chat.mode.acceptEdits": "自動接受變更",
+  "chat.mode.plan": "計畫模式",
+  "chat.mode.bypassPermissions": "全部放行",
+  "chat.mode.readOnly": "唯讀",
+  "chat.mode.fullAccess": "完整存取",
+  "chat.placeholder": "傳訊息給智慧體，可用 /命令、/技能 與 @檔案",
+  "chat.command.clearDescription": "封存目前工作階段並開始全新對話",
+  "chat.command.rewindDescription": "從最近一則使用者訊息選擇要回復的內容",
+  "chat.command.rewindUnavailable":
+    "必須先有已完成的使用者訊息，且目前沒有進行中的回合、佇列訊息或權限要求，才能回復。",
+  "chat.effortTooltip": "思考程度",
+  "chat.effortDefault": "思考",
+  "chat.effort.auto": "自動",
+  "chat.effort.low": "低",
+  "chat.effort.medium": "中",
+  "chat.effort.high": "高",
+  "chat.effort.xhigh": "很高",
+  "chat.effort.max": "最高",
+  "chat.effort.ultra": "極致",
+  "chat.effort.ultracode": "Ultra Code",
+  "chat.agentTooltip": "智慧體",
+  "chat.effort.minimal": "最低",
+  "chat.filterPlaceholder": "篩選",
+  "chat.placeholderOpencode": "向智慧體傳送訊息，可使用 /命令 與 @檔案；以 ! 開頭可執行 Shell 命令",
+  "chat.command.compactDescription": "摘要對話內容，釋放上下文空間",
+  "chat.command.undoDescription": "復原最後一則訊息及其造成的檔案變更",
+  "chat.command.redoDescription": "恢復上一次復原的內容",
+  "chat.command.shareDescription": "建立分享連結",
+  "chat.command.unshareDescription": "取消分享",
+  "chat.mode.auto": "自動判斷",
+
+  // ── 智慧體提出的問題，用表單作答 ──
+  "chat.question.heading": "智慧體提出了一個問題",
+  "chat.question.submit": "提交",
+  "chat.question.next": "下一題",
+  "chat.question.dismiss": "關閉",
+  "chat.question.answerPlaceholder": "輸入你的回答",
+  "chat.question.otherPlaceholder": "其他回答",
+  "chat.question.answeredHeading": (n: number) => `已回答 ${n} 個問題`,
+  "chat.question.blankAnswer": "未填寫",
+
+  // ── 等待核准的計畫 ──
+  "chat.plan.heading": "計畫已就緒，等待核准",
+  "chat.plan.implement": "核准並執行",
+  "chat.plan.reject": "拒絕",
+
+  // ── 智慧體忙碌時排隊的訊息 ──
+  "chat.placeholderBusy": "輸入訊息，本輪結束後將自動傳送",
+  "chat.queueTooltip": (combo: string) => `本輪結束後傳送 · ${combo} 立即傳送`,
+  "chat.queue.pending": "待傳送",
+  "chat.queue.edit": "編輯",
+  "chat.queue.remove": "刪除",
+
+  // ── 貼上或拖進輸入框的圖片 ──
+  "chat.attach.remove": "移除這張圖片",
+  "chat.attach.tooMany": (max: number) => `一則訊息最多可附帶 ${max} 張圖片`,
+  "chat.attach.tooLarge": (name: string, mb: number) => `${name} 超過 ${mb} MB，未加入附件`,
+  "chat.attach.unreadable": (name: string) => `無法讀取 ${name}`,
+  // Compacting the conversation… / Context compacted / Context compacted automatically
+  "chat.compaction.running": "正在壓縮上下文…",
+  "chat.compaction.manual": "上下文已壓縮",
+  "chat.compaction.auto": "上下文已自動壓縮",
+  "chat.compaction.from": (tokens: string) => `壓縮前 ${tokens} tokens`,
+  // N steps
+  "chat.subagent.steps": (n: number) => `${n} 步`,
+  "chat.subagent.tokens": (tokens: string) => `${tokens} 個 token`,
+  "chat.rewind.title": "從這裡回退",
+  "chat.rewind.warning": "此操作無法復原。",
+  "chat.rewind.conversation": "回退對話",
+  "chat.rewind.files": "還原檔案",
+  "chat.rewind.both": "回退對話並還原檔案",
+  "chat.rewind.confirm.conversation": "刪除這則訊息及其之後的全部內容？",
+  "chat.rewind.confirm.files": "將檔案還原到這則訊息之前的狀態？",
+  "chat.rewind.confirm.both": "刪除這一回合，並還原它修改過的檔案？",
+  "chat.rewind.unavailable": "這則訊息沒有對應的檔案檢查點。",
+  "chat.rewind.previewing": "正在檢查檔案還原點…",
+  "chat.rewind.cancel": "維持現狀",
+  "chat.rewind.apply": "回退",
+  "chat.rewind.applying": "正在回退…",
+  "chat.rewind.fileSummary": (files: number, insertions: number, deletions: number) =>
+    `將變更 ${files} 個檔案：+${insertions} −${deletions}。此操作無法復原。`,
+  // ── 權限卡上的「以後不用再問」按鈕，點一下就採納 ──
+  "chat.suggest.modeSession": (mode: string) => `本次會話改為${mode}`,
+  "chat.suggest.mode": (mode: string) => `改為${mode}`,
+  "chat.suggest.allowSession": (rule: string) => `本次會話允許 ${rule}`,
+  "chat.suggest.allowAlways": (rule: string) => `一律允許 ${rule}`,
+  "chat.suggest.dirSession": (dirs: string) => `本次會話允許存取 ${dirs}`,
+  "chat.suggest.dirAlways": (dirs: string) => `一律允許存取 ${dirs}`,
+  // ── Codex：網路放行規則、插話、內建命令，以及速度與語氣控制項 ──
+  "chat.suggest.networkAlways": (host: string) => `一律允許存取網路主機 ${host}`,
+  "chat.steer": "插話",
+  "chat.stopping": "正在停止目前回合…",
+  "chat.stopped": "目前回合已停止",
+  "chat.steerAccepted": "插話已傳送",
+  "chat.steerTooltip": (combo: string) => `${combo} 加入目前回合`,
+  "chat.command.reviewDescription": "審查程式碼並指出需要處理的問題",
+  "chat.command.reviewHint": "[branch <分支名稱> | commit <提交編號> | 說明]",
+  "chat.command.startTimeout": "智慧體未能及時開啟會話",
+  "chat.serviceTierTooltip": "速度",
+  "chat.serviceTier.default": "標準速度",
+  "chat.personalityTooltip": "語氣",
+  "chat.personality.default": "預設語氣",
+  "chat.personality.none": "中性",
+  "chat.personality.friendly": "友善",
+  "chat.personality.pragmatic": "務實",
+  // ── 長對話：連續的工具呼叫摺成一行，以及回到結尾的入口 ──
+  "chat.toolRun.count": (n: number) => `${n} 個工具呼叫`,
+  "chat.toolRun.tooltip": "逐一檢視",
+  "chat.backToEnd": "回到最新訊息",
+  "chat.elicitation.heading": (server: string) => `${server} 要求輸入`,
+  "chat.elicitation.cancel": "取消",
+  "chat.elicitation.decline": "拒絕",
+  "chat.elicitation.submit": "送出",
+  "chat.elicitation.done": "完成",
+  "chat.elicitation.choose": "請選擇…",
+  "chat.effort.off": "關閉",
+  "chat.effort.offHint": "不進行延伸思考",
+  "chat.fastMode.label": "快速",
+  "chat.fastMode.on": "快速模式已開啟",
+  "chat.fastMode.off": "快速模式已關閉",
+  "chat.usage.context": (used: string, max: string, pct: number) =>
+    `上下文：已用 ${used}，上限 ${max} token（${pct}%）`,
+  "chat.usage.cost": (usd: string) => `本次會話費用：$${usd}`,
+  "chat.usage.rateLimited": (resets: string) => `已達到用量上限，${resets} 重設`,
+  "chat.usage.rateWarning": (pct: number, resets: string) => `用量上限：已用 ${pct}%，${resets} 重設`,
+  "chat.mcp.codexScope": "此操作將修改 Codex 使用者設定，影響使用該設定的其他工作階段。是否繼續？",
+  "chat.mcp.tooltip": "MCP 伺服器",
+  "chat.mcp.loading": "正在讀取伺服器清單…",
+  "chat.mcp.backendUnsupported": "目前連線的 VelaTerm 後端不支援 MCP 管理。請更新並重新啟動該後端，然後重試。",
+  "chat.mcp.none": "尚未設定 MCP 伺服器",
+  "chat.mcp.tools": (n: number) => `${n} 個工具`,
+  "chat.mcp.reconnect": "重新連線",
+  "chat.mcp.disable": "停用",
+  "chat.mcp.enable": "啟用",
+  "chat.mcp.status.connected": "已連線",
+  "chat.mcp.status.disabled": "已停用",
+  "chat.mcp.status.failed": "連線失敗",
+  "chat.mcp.status.pending": "連線中",
+  "chat.mcp.status.disconnected": "已中斷",
+  "chat.mcp.status.other": "未知",
+  "chat.tasks.label": "工作",
+  "chat.tasks.tooltip": "背景工作",
+  "chat.tasks.backgroundAll": "將執行中的作業移至背景",
+  "chat.tasks.none": "沒有背景工作",
+  "chat.tasks.stop": "停止",
+  "chat.retry.line": (attempt: number, max: number, seconds: number, message: string) =>
+    `${seconds} 秒後重試（${attempt}/${max}）：${message}`,
+  "chat.notify.dismiss": "關閉",
 };
 
 export default zhTW;

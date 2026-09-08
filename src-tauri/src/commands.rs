@@ -138,8 +138,8 @@ pub async fn desktop_call(
 
 /// Start a PTY session and return its child PID plus any typed-session launch command.
 ///
-/// If a remembered agent session ID still has a transcript, inject exact resume arguments; otherwise
-/// fall back to a new session.
+/// Restore remembered agent conversations. Missing Codex history fails explicitly instead of
+/// starting an empty conversation; other agents retain their existing fallback policy.
 ///
 /// This async command moves SQLite queries, resume validation, openpty/fork, and spawn-slot polling
 /// off the main thread. The frontend already awaits it, and per-session spawn serialization preserves
@@ -187,7 +187,10 @@ pub fn pty_spawn(
     if !in_db && !session_id.starts_with("eph-") {
         return Err("Session has been deleted".to_string());
     }
-    resume_id = resume_id.filter(|id| !crate::agent::resume::confirmed_missing(kind, id));
+    // Codex validation runs in PtyManager after the existing-process attach path.
+    if kind != SessionKind::Codex {
+        resume_id = crate::agent::resume::checked_resume_id(kind, resume_id)?;
+    }
     if kind == SessionKind::Pi && resume_id.is_none() && !fork && in_db {
         if let Some(cwd_for_repair) = cwd.as_deref() {
             let created = created_at.max(0) as u64;
@@ -637,6 +640,7 @@ pub async fn open_remote_window(
             .window(label.clone())
             .remote("http://127.0.0.1:*".to_string())
             .permission("clipboard-manager:allow-write-text")
+            .permission("clipboard-manager:allow-write-image")
             .permission("notification:default")
             .permission("opener:allow-open-url")
             .permission("opener:allow-default-urls")
@@ -1072,6 +1076,7 @@ fn open_login_window(
             .window(label.clone())
             .remote("http://127.0.0.1:*".to_string())
             .permission("clipboard-manager:allow-write-text")
+            .permission("clipboard-manager:allow-write-image")
             .permission("notification:default")
             .permission("core:event:allow-listen")
             .permission("core:event:allow-unlisten")

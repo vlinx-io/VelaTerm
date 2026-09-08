@@ -32,7 +32,7 @@ import { sessionIconEl } from "../agentPresetIcon";
  */
 const KIND_COLOR: Partial<Record<SessionKind, string>> = {
   claude: "#D97757", // Orange (Anthropic's official color)
-  codex: CODEX_BRAND_COLOR, // Periwinkle blue, matching the Codex icon in Usage (see brandIcons)
+  codex: CODEX_BRAND_COLOR, // Theme-aware color shared with Usage (see brandIcons)
   opencode: "#3B82F6", // Blue
   copilot: "#8957E5", // Purple
   cursor: "#18B5C9", // Cyan

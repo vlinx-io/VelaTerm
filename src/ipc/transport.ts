@@ -426,3 +426,9 @@ export function onPtyReattachStart(
 }
 
 export type { UnlistenFn };
+
+/** Refresh authoritative chat state after the remote transport reconnects. */
+export function onTransportReconnect(callback: () => void): () => void {
+  if (isTauri) return () => {};
+  return wsClient.onConnState(state => { if (state === "online") callback(); });
+}

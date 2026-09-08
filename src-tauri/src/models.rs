@@ -190,6 +190,9 @@ pub struct Session {
     /// `--force`; OMP `--yolo`; OpenCode/Pi have no flag, while Cline injects `--auto-approve true/false` in both modes.
     /// Persisted independently of `agent_args`.
     pub permission_mode: Option<String>,
+    /// Codex collaboration style (`default` or `plan`), stored separately from filesystem permissions.
+    /// Other agents and older sessions leave it empty, which means Default.
+    pub collaboration_mode: Option<String>,
     /// Agent preset this session was created from, used only to show its name and icon. The preset's
     /// launch values are copied onto this row at creation, so editing or deleting the preset never
     /// changes how an existing session starts and a dangling ID is harmless.
@@ -199,6 +202,10 @@ pub struct Session {
     /// that default, and then to a PATH lookup.
     pub agent_path: Option<String>,
     pub hotkey: Option<String>,
+    /// How this agent session is driven: `tui` runs the agent's own terminal interface in a PTY, `chat`
+    /// runs it as a protocol peer with no PTY at all. Both write the same recording, so one conversation
+    /// can move between them. Non-agent sessions ignore this and are always `tui`.
+    pub engine: String,
     /// Last recorded native agent session ID, or None before a resumable conversation exists. Reopening
     /// passes it unchanged to Claude `--resume`, Codex `resume`, or the corresponding agent mechanism.
     pub agent_session_id: Option<String>,

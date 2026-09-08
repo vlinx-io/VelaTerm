@@ -14,14 +14,19 @@ import { ShareModal } from "../../components/ShareModal";
 import { AppMenuBar } from "./AppMenuBar";
 import { ConnectRemotePanel } from "./ConnectRemotePanel";
 import { RemoteAccessPanel } from "./RemoteAccessPanel";
-import { MemoryIcon } from "../Memory/MemoryRoute";
-import { MemoryLink } from "../Memory/navigation";
 import { SettingsModal } from "./SettingsModal";
 
-/** Format HH:mm:ss for the development badge's latest hot-update time. */
+/**
+ * Format MM-DD HH:mm:ss for the development badge's latest hot-update time.
+ *
+ * The date is part of it because a dev instance often stays open past midnight or across days; a bare
+ * clock then reads as "just updated" when the last update was actually yesterday. The year is left out
+ * as noise at this scale.
+ */
 function fmtClock(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  const date = `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  return `${date} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
 /**
@@ -469,8 +474,6 @@ export function TitleBar() {
       >
         <Icons.gear size={15} />
       </button>
-
-      <MemoryLink route="library" className="tb-btn" title={`${t("memory.title")} · ${t("common.experimental")}`} aria-label={t("memory.title")}><MemoryIcon size={16} /></MemoryLink>
 
       {/* VS Code-style panel toggles sit at the far right and fill their corresponding side when open. */}
       <div className="tb-pair">

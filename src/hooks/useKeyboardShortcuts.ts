@@ -65,7 +65,7 @@ export function useKeyboardShortcuts() {
           if (onSessionTab) {
             e.preventDefault();
             if (isZero) setTermFontSize(13);
-            else setTermFontSize(termFontSize + (isPlus ? 1 : -1));
+            else setTermFontSize(termFontSize + (isPlus ? 0.5 : -0.5));
           }
           return;
         }

@@ -10,7 +10,14 @@ use serde_json::{json, Value};
 
 pub fn init(conn: &rusqlite::Connection) -> Result<(), String> {
     conn.execute_batch(include_str!("schema.sql"))
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    let has_effort: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('memory_jobs') WHERE name='effort')", [], |r| r.get(0),
+    ).map_err(|e| e.to_string())?;
+    if !has_effort {
+        conn.execute_batch("ALTER TABLE memory_jobs ADD COLUMN effort TEXT NOT NULL DEFAULT '';").map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 pub fn now() -> i64 {
@@ -55,6 +62,7 @@ pub fn dispatch(app: &AppCtx, cmd: &str, args: &Value) -> Result<Value, String> 
     };
     match cmd {
         "memory_options" => runner::options(app),
+        "memory_models" => Ok(json!(runner::models(app, required("agent")?)?)),
         "memory_list" => repo::list(app, args),
         "memory_get" => repo::detail(
             app,
@@ -98,6 +106,7 @@ pub fn dispatch(app: &AppCtx, cmd: &str, args: &Value) -> Result<Value, String> 
             required("sessionId")?,
             required("agent")?,
             args.get("model").and_then(Value::as_str).unwrap_or(""),
+            args.get("effort").and_then(Value::as_str).unwrap_or(""),
         ),
         "memory_retry" => runner::retry(app, required("id")?),
         "memory_cancel" => runner::cancel(app, required("id")?),

@@ -268,6 +268,30 @@ pub fn run_view(args: &[String]) -> ! {
     agent::cli_client::run_view(args)
 }
 
+/// Hidden `--refer` entry used by the PATH `vrefer` shim. POST `/refer` to read another session's
+/// conversation, print the window it returns, and exit without launching the GUI.
+pub fn run_refer(args: &[String]) -> ! {
+    agent::cli_client::run_refer(args)
+}
+
+/// Hidden `--search` entry used by the PATH `vsearch` shim. POST `/search` to run the cross-session
+/// full-text search, print its hits, and exit without launching the GUI.
+pub fn run_search(args: &[String]) -> ! {
+    agent::cli_client::run_search(args)
+}
+
+/// Hidden `--orch` entry used by the PATH `vorch` shim. Read a proposal from stdin, POST `/orch` so the
+/// frontend can ask the user to confirm it, and exit; nothing is started here.
+pub fn run_orch(args: &[String]) -> ! {
+    agent::cli_client::run_orch(args)
+}
+
+/// Hidden `--stat` entry used by the PATH `vstat` shim. POST `/stat` for session status, optionally
+/// blocking until it changes, print it, and exit.
+pub fn run_stat(args: &[String]) -> ! {
+    agent::cli_client::run_stat(args)
+}
+
 pub fn run_knowledge(args: &[String]) -> ! {
     knowledge::agent::run(args)
 }
@@ -449,6 +473,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(PtyManager::new())
+        .manage(agent::chat::engine::ChatManager::new())
         .manage(WebServer::new())
         .manage(web::local_link::LocalLinkServer::new())
         .manage(browser::BrowserManager::new())
@@ -744,6 +769,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             // Start the random-port/token loopback hook service for agent status callbacks.
             let hooks = HookServer::start(AppCtx::Tauri(app.handle().clone()))?;
             app.manage(hooks);
+            let _ = web::public_relay::start(&AppCtx::Tauri(app.handle().clone()));
 
             // Auto-start LAN remote access when the persisted enabled flag is set, restoring the state
             // from before the last quit (GitHub issue #15). On a thread because start() synchronously
@@ -1414,6 +1440,8 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
         Ok(None) => {}
         Err(e) => eprintln!("  remote access auto-start failed: {e}"),
     }
+
+    let _ = web::public_relay::start(&ctx);
 
     // Same account-usage poller as the desktop entry point: headless serves browser and mobile clients,
     // which read the stored snapshot instead of querying providers themselves.

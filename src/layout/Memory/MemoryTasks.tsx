@@ -1,32 +1,52 @@
 import { useEffect, useState } from "react";
 import { useT } from "../../i18n";
-import { memoryCancel, memoryJobs, memoryOptions, memoryRetry, memoryStart, type MemoryJob } from "../../ipc/memory";
+import { memoryCancel, memoryJobs, memoryModels, memoryOptions, memoryRetry, memoryStart, type MemoryJob } from "../../ipc/memory";
 import { useTermStore } from "../../store/termStore";
 import { MemoryLink, memoryNavigate, memoryUrl, useMemoryLocation } from "./navigation";
-import { LoadState, StateLabel, memoryError, memoryTime, useMemoryLoad } from "./shared";
+import { LoadState, StateLabel, memoryError, memoryEffortLabel, memoryTime, useMemoryLoad } from "./shared";
 
 export function MemoryCompile({ sessionId }: { sessionId: string }) {
   const t = useT(); const session = useTermStore((s) => [...s.sessions, ...s.archivedSessions].find((item) => item.id === sessionId));
   const { data, error, reload } = useMemoryLoad(memoryOptions, []);
   const [agent, setAgent] = useState(""); const [model, setModel] = useState("");
+  const [effort, setEffort] = useState("");
+  const models = useMemoryLoad(async () => ({ agent, items: agent ? await memoryModels(agent) : [] }), [agent]);
+  const modelReady = !!agent && models.data?.agent === agent;
+  const selectedModel = modelReady ? models.data?.items.find((item) => item.id === model) : undefined;
   const [busy, setBusy] = useState(false); const [failure, setFailure] = useState("");
   useEffect(() => { if (data) setAgent(data.defaultAgent); }, [data]);
   if (!data) return <LoadState error={error} reload={reload} />;
   const start = async () => {
+    if (!modelReady) return;
     setBusy(true); setFailure("");
-    try { const job = await memoryStart(sessionId, agent, model.trim()); memoryNavigate(memoryUrl(`job/${job.id}`)); }
+    try { const job = await memoryStart(sessionId, agent, model, effort); memoryNavigate(memoryUrl(`job/${job.id}`)); }
     catch (e) { setFailure(memoryError(e)); }
     finally { setBusy(false); }
   };
-  return <form className="memory-document memory-editor" onSubmit={(e) => { e.preventDefault(); void start(); }}>
+  return <form className="memory-document memory-editor memory-compile" onSubmit={(e) => { e.preventDefault(); void start(); }}>
     <h2>{t("memory.add")}</h2><p className="memory-lead">{session?.name ?? sessionId}</p><p>{t("memory.compileHelp")}</p>
-    <label>{t("memory.selectAgent")}<select className="input" value={agent} disabled={busy} onChange={(e) => setAgent(e.target.value)}>
-      {data.agents.map((item) => <option key={item.id} value={item.id} disabled={!item.available}>{item.label}{!item.available ? ` · ${t("memory.unavailable")}` : ""}</option>)}
-    </select></label>
-    <label>{t("memory.model")}<input className="input" value={model} disabled={busy} maxLength={200} onChange={(e) => setModel(e.target.value)} placeholder={t("memory.modelHint")} /></label>
+    <fieldset className="memory-agent-field" disabled={busy}>
+      <legend>{t("memory.selectAgent")}</legend>
+      <div className="memory-agent-options">
+        {data.agents.map((item) => <label className="memory-agent-option" key={item.id}>
+          <input type="radio" name="memory-agent" value={item.id} checked={agent === item.id} disabled={!item.available} onChange={() => { setAgent(item.id); setModel(""); setEffort(""); }} />
+          <span><strong>{item.label}</strong>{!item.available && <small>{t("memory.unavailable")}</small>}</span>
+        </label>)}
+      </div>
+    </fieldset>
+    {!modelReady ? <LoadState error={models.error} reload={models.reload} /> : <>
+      <label>{t("memory.model")}<select className="input" value={model} disabled={busy} onChange={(e) => { setModel(e.target.value); setEffort(""); }}>
+        <option value="">{t("chat.modelDefault")}</option>
+        {models.data!.items.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+      </select></label>
+      <label>{t("chat.effortTooltip")}<select className="input" value={effort} disabled={busy || !selectedModel?.effortLevels.length} onChange={(e) => setEffort(e.target.value)}>
+        <option value="">{t("spawn.modelDefault")}</option>
+        {selectedModel?.effortLevels.map((level) => <option key={level} value={level}>{memoryEffortLabel(level)}</option>)}
+      </select></label>
+    </>}
     {failure && <p className="memory-error" role="alert">{failure}</p>}
     <p className="memory-muted">{t("memory.closeHint")}</p>
-    <footer className="memory-row"><MemoryLink route="" className="btn">{t("common.cancel")}</MemoryLink><span className="memory-spacer" /><button className="btn btn-primary" disabled={busy || !data.agents.some((item) => item.id === agent && item.available)}>{t(busy ? "common.loading" : "memory.compile")}</button></footer>
+    <footer className="memory-row"><MemoryLink route="" className="btn">{t("common.cancel")}</MemoryLink><span className="memory-spacer" /><button className="btn btn-primary" disabled={busy || !modelReady || !data.agents.some((item) => item.id === agent && item.available)}>{t(busy ? "common.loading" : "memory.compile")}</button></footer>
   </form>;
 }
 
@@ -62,7 +82,7 @@ export function MemoryJobs({ id }: { id?: string }) {
       {!data.jobs.length && <p>{t(id ? "memory.notFound" : "memory.emptyJobs")}</p>}
       {data.jobs.map((job) => <article className="memory-job" key={job.id}>
         <div className="memory-row"><MemoryLink route={`job/${job.id}`}><strong>{job.sessionName}</strong></MemoryLink><span className="memory-spacer" /><span className={`memory-status ${job.status}`}><StateLabel value={job.status} /></span></div>
-        <p className="memory-muted">{job.agent === "claude" ? "Claude" : "Codex"}{job.model ? ` · ${job.model}` : ""} · {memoryTime(job.createdAt)}</p>
+        <p className="memory-muted">{job.agent === "claude" ? "Claude" : "Codex"}{` · ${job.model || t("chat.modelDefault")}`} · {t("chat.effortTooltip")}: {job.effort ? memoryEffortLabel(job.effort) : t("spawn.modelDefault")} · {memoryTime(job.createdAt)}</p>
         {job.status === "running" && <><p role="status"><StateLabel value={job.stage} /> · {job.progress} / {job.total || "…"}</p><progress max={job.total || 1} value={job.progress} /></>}
         {job.error && <p className="memory-error">{memoryError(job.error)}</p>}
         {job.status === "completed" && !job.entries.length && <p>{t("memory.noKnowledge")}</p>}

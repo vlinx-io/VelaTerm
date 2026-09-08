@@ -1,0 +1,73 @@
+.import-sessions {
+  width: min(840px, calc(100vw - 32px));
+  height: min(680px, calc(100dvh - 48px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 24px 80px #0005;
+}
+.import-sessions-header { display: flex; align-items: flex-start; gap: 24px; padding: 24px 24px 18px; flex-shrink: 0; }
+.import-sessions-header > div { flex: 1; min-width: 0; }
+.import-sessions h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+.import-sessions-header p { margin: 0; max-width: 660px; font-size: 12px; line-height: 1.65; color: var(--text-secondary); }
+.import-sessions .vlx-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; font-family: inherit; white-space: nowrap; }
+.import-sessions .vlx-btn:disabled { opacity: .45; cursor: not-allowed; }
+.import-sessions .import-sessions-icon { padding: 6px; min-width: 32px; background: transparent; border-color: transparent; }
+.import-sessions .import-sessions-icon:hover { background: var(--bg-elevated); }
+.import-sessions :is(button, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.import-sessions input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); flex-shrink: 0; cursor: pointer; }
+.import-sessions input:disabled { cursor: not-allowed; }
+.import-sessions-toolbar { padding: 0 24px; flex-shrink: 0; }
+.import-sessions-directory { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 11px; margin-bottom: 14px; }
+.import-sessions-directory svg { flex-shrink: 0; }
+.import-sessions-directory span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+.import-sessions-search-row { display: flex; gap: 8px; }
+.import-sessions-search { position: relative; flex: 1; min-width: 0; }
+.import-sessions-search > svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+.import-sessions-search .vlx-input { padding-left: 34px; height: 36px; font-family: inherit; }
+.import-sessions-selection { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 0 12px; font-size: 12px; color: var(--text-secondary); }
+.import-sessions-selection label { display: flex; align-items: center; gap: 8px; }
+.import-sessions-content { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; border-top: 1px solid var(--border); }
+.import-sessions-row { display: flex; align-items: center; gap: 12px; padding: 15px 24px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.import-sessions-row:hover { background: var(--bg-elevated); }
+.import-sessions-row.is-selected { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.import-sessions-row.is-imported { cursor: default; color: var(--text-secondary); }
+.import-sessions-agent-icon { display: flex; flex-shrink: 0; }
+.import-sessions-session { flex: 1; min-width: 0; }
+.import-sessions-session-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: 13px; font-weight: 500; line-height: 1.5; }
+.import-sessions-meta { display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; row-gap: 3px; color: var(--text-muted); font-size: 11px; margin-top: 5px; }
+.import-sessions-id { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.import-sessions-badge { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; font-size: 10px; color: var(--text-muted); padding: 3px 7px; border: 1px solid var(--border); border-radius: 4px; }
+.import-sessions-message { display: flex; align-items: flex-start; gap: 8px; margin: 12px 24px; padding: 10px 12px; background: var(--bg-elevated); border-radius: 6px; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.import-sessions-message svg { flex-shrink: 0; margin-top: 2px; }
+.import-sessions-error { color: var(--status-error); }
+.import-sessions-success { color: var(--text-primary); }
+.import-sessions-warning { color: var(--status-warning); }
+.import-sessions-empty { min-height: 180px; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; text-align: center; font-size: 13px; color: var(--text-secondary); }
+.import-sessions-empty p { margin: 0; line-height: 1.6; }
+.import-sessions-empty > svg { color: var(--text-muted); }
+.import-sessions-footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 24px; border-top: 1px solid var(--border); flex-shrink: 0; }
+.import-sessions-selected { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; color: var(--text-secondary); font-size: 12px; }
+.import-sessions-selected .vlx-btn { background: transparent; border-color: transparent; padding: 4px; color: var(--accent); }
+.import-sessions-actions { display: flex; gap: 8px; margin-left: auto; }
+@media (max-width: 560px) {
+  .import-sessions { width: calc(100vw - 16px); height: calc(100dvh - 24px); border-radius: 8px; }
+  .import-sessions-header { padding: 16px; gap: 12px; }
+  .import-sessions-toolbar { padding: 0 16px; }
+  .import-sessions-row { display: grid; grid-template-columns: 15px 20px minmax(0, 1fr); padding: 12px 16px; gap: 8px; }
+  .import-sessions-badge { grid-column: 3; justify-self: start; }
+  .import-sessions-message { margin: 12px 16px; }
+  .import-sessions-footer { padding: 12px 16px; }
+  .import-sessions-id { max-width: 150px; }
+}
+@media (max-height: 480px) {
+  .import-sessions { height: calc(100dvh - 16px); }
+  .import-sessions-header { padding-top: 12px; padding-bottom: 10px; }
+  .import-sessions-header p { display: none; }
+  .import-sessions-directory { margin-bottom: 8px; }
+  .import-sessions-footer { padding-top: 8px; padding-bottom: 8px; }
+}

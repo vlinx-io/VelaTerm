@@ -20,6 +20,8 @@ pub(crate) mod local_link;
 pub(crate) mod mirror;
 pub(crate) mod presence;
 mod rate_limit;
+pub(crate) mod share_policy;
+pub(crate) mod public_relay;
 mod sniff;
 mod static_assets;
 mod tls;

@@ -1,3 +1,27 @@
+## v0.1.108 — 2026-09-08
+
+- Visualização experimental de conversa para Claude, Codex e OpenCode, com respostas em streaming, raciocínio, detalhes de ferramentas, permissões e formulários de perguntas. Novas configurações continuam usando o terminal por padrão.
+
+- Os controles da conversa oferecem configurações de modelo, fila de mensagens, intervenções, preenchimento de arquivos e imagens anexadas, conforme os recursos de cada mecanismo.
+
+- Busca na conversa, links de arquivos, ações em imagens e fontes independentes facilitam a leitura. O histórico remoto carrega progressivamente e os detalhes de ferramentas são obtidos sob demanda.
+
+- Os recibos de envio ajudam a conferir resultados após desconexões. Envios incertos permanecem aguardando confirmação, sem reenvio automático.
+
+- Os novos comandos `vrefer` e `vsearch` leem e pesquisam outras sessões; `vrefer --ask` delega a leitura a um agente. `vorch` e `vstat` oferecem coordenação de vários agentes e consulta de status.
+
+- As entradas de memória aceitam etiquetas, edição direta, proteção de alterações não salvas e configurações de organização. Os filtros e a seleção na importação de histórico e a navegação do grafo foram melhorados.
+
+- O cliente de compartilhamento público aceita vinculação de conta e dispositivo, acesso limitado a sessões AI e conexões de retransmissão criptografadas. Uploads de imagens por convidados e formulários MCP complexos ainda não são suportados.
+
+- Os IDs de retomada do Codex são conferidos com o histórico persistido. A ausência confirmada do histórico gera um erro explícito em vez de iniciar uma sessão vazia; terminais já em execução continuam acessíveis para reconexão.
+
+- A reversão segue os recursos do mecanismo: o Codex restaura apenas a conversa, sem restaurar arquivos. O tratamento do escopo e as verificações prévias de diretório no OpenCode ainda têm limitações conhecidas.
+
+- As mudanças de versão preservam as versões travadas das dependências. A validação de instalação e atualização multiplataforma e da integração AI real continua pendente; verificações automatizadas não a substituem.
+
+---
+
 ## v0.1.107 — 2026-09-05
 
 - 🧠 Memória global (experimental): o Claude ou o Codex transforma suas conversas em uma wiki compartilhada organizada por tema

@@ -34,6 +34,24 @@ export function supportsPermissionToggle(kind: SessionKind): boolean {
 }
 
 /**
+ * How an agent session is driven.
+ *
+ * `tui` runs the agent's own terminal interface in a PTY — what every session did before the chat engine
+ * existed. `chat` runs it as a protocol peer with no terminal at all, which is what makes real permission
+ * cards, live model switching, and command completion possible.
+ *
+ * Both write the same recording, so one conversation can move between them: switching engines stops one
+ * process and the next launch resumes exactly where it left off.
+ */
+export type SessionEngine = "tui" | "chat";
+
+/** Agent kinds the chat engine can drive. The backend refuses the rest, so nothing may offer them. */
+export const CHAT_ENGINE_KINDS: SessionKind[] = ["claude", "codex", "opencode"];
+export function supportsChatEngine(kind: SessionKind): boolean {
+  return CHAT_ENGINE_KINDS.includes(kind);
+}
+
+/**
  * Agent activity state:
  * - working: processing with ongoing output.
  * - asking: stopped while the UI asks a question or awaits confirmation.
@@ -115,6 +133,8 @@ export interface Session {
   name: string;
   /** Session kind: terminal, Claude, Codex, and others. */
   kind: SessionKind;
+  /** How the agent is driven. Absent on rows written before the chat engine existed, meaning `tui`. */
+  engine?: SessionEngine;
   shell?: string | null;
   cwd?: string | null;
   envJson?: string | null;
@@ -124,6 +144,9 @@ export interface Session {
   /** Two-state permission mode: empty/`"default"` asks incrementally (default); `"skip"` bypasses every permission
    *  confirmation. Agent sessions only; the backend maps it to the appropriate launch flag by kind (none for opencode). */
   permissionMode?: string | null;
+  /** Codex collaboration style. Empty means the native Default mode. */
+  /** Codex collaboration style (`default` or `plan`), or the OpenCode agent answering the session. */
+  collaborationMode?: string | null;
   /** Agent preset this session came from, used only to show its name and icon. The preset's launch values
    *  are copied onto the session at creation, so editing or deleting the preset changes nothing here and a
    *  dangling ID is harmless. */

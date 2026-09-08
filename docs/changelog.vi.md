@@ -1,3 +1,27 @@
+## v0.1.108 — 2026-09-08
+
+- Chế độ hội thoại thử nghiệm cho Claude, Codex và OpenCode, với phản hồi truyền trực tiếp, quá trình suy luận, chi tiết công cụ, phê duyệt quyền và biểu mẫu câu hỏi. Cấu hình mới vẫn mặc định dùng chế độ terminal.
+
+- Các điều khiển hội thoại hỗ trợ thiết lập mô hình, hàng đợi tin nhắn, chen lời, tự động hoàn thành tệp và ảnh đính kèm tùy theo khả năng của từng bộ máy.
+
+- Tìm kiếm hội thoại, liên kết tệp, thao tác với ảnh và phông chữ riêng giúp đọc phiên dài dễ hơn. Lịch sử từ xa được tải dần; chi tiết công cụ được lấy khi cần.
+
+- Biên nhận gửi tin giúp đối chiếu kết quả sau khi mất kết nối. Những lần gửi chưa rõ kết quả vẫn chờ xác nhận và không tự động gửi lại.
+
+- Các lệnh mới `vrefer` và `vsearch` đọc và tìm kiếm các phiên khác; `vrefer --ask` giao việc đọc cho tác nhân. `vorch` và `vstat` bổ sung điều phối nhiều tác nhân và tra cứu trạng thái.
+
+- Mục bộ nhớ hỗ trợ nhãn, chỉnh sửa trực tiếp nội dung, bảo vệ thay đổi chưa lưu và thiết lập sắp xếp. Cải thiện bộ lọc, lựa chọn khi nhập lịch sử và điều hướng đồ thị.
+
+- Ứng dụng khách chia sẻ công khai hỗ trợ liên kết tài khoản và thiết bị, truy cập phiên AI theo phạm vi và kết nối chuyển tiếp mã hóa. Chưa hỗ trợ khách tải ảnh lên hoặc biểu mẫu MCP phức tạp.
+
+- ID tiếp tục Codex được đối chiếu với lịch sử đã lưu. Khi xác nhận lịch sử bị thiếu, ứng dụng báo lỗi rõ ràng thay vì âm thầm mở phiên trống; vẫn có thể kết nối lại terminal đang chạy.
+
+- Phạm vi hoàn tác tuân theo khả năng của bộ máy: Codex chỉ hoàn tác hội thoại, không khôi phục tệp. Xử lý phạm vi hoàn tác và kiểm tra trước thư mục của OpenCode vẫn còn hạn chế đã biết.
+
+- Việc tăng phiên bản phát hành giữ nguyên các phiên bản phụ thuộc đã khóa. Kiểm thử cài đặt, nâng cấp đa nền tảng và nghiệm thu tích hợp AI thực tế vẫn chưa thực hiện; kiểm tra tự động không thay thế các bước này.
+
+---
+
 ## v0.1.107 — 2026-09-05
 
 - 🧠 Bộ nhớ toàn cục (thử nghiệm): Claude hoặc Codex biến các cuộc hội thoại thành một wiki dùng chung, sắp xếp theo chủ đề

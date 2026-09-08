@@ -4,7 +4,8 @@
 //! announcement was empty and the only safe reading of an empty announcement is "gone". And a browser
 //! connecting to a desktop that had merely *restored* a workspace started every one of those sessions for
 //! real, because a client that had not opened a session could not tell "not running" from "running, just
-//! not opened here" — so it mounted a terminal, and mounting starts a process.
+//! not opened here" — so it mounted a terminal, and mounting starts a process. Headless chat sessions must
+//! keep their pane after exit, though, because the pane is the only place their transcript remains visible.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -42,6 +43,8 @@ const leaf = (sessionId: string) => ({ kind: "leaf" as const, paneId: `p-${sessi
 beforeEach(() => {
   ptyKill.mockClear();
   useTermStore.setState({
+    sessions: [],
+    ephemeralSessions: {},
     dormantSessions: {},
     runtimes: {},
     notifications: {},
@@ -90,6 +93,28 @@ describe("what to mount for a laid-out session", () => {
 
     expect(SID in useTermStore.getState().dormantSessions).toBe(false);
     unregisterTerminal(SID, term);
+  });
+
+  it("keeps a woken chat pane mounted after its headless process exits", () => {
+    useTermStore.setState({
+      paneTrees: { t1: leaf(SID) },
+      ephemeralSessions: {
+        [SID]: {
+          id: SID,
+          projectId: "project-1",
+          name: "Codex chat",
+          kind: "codex",
+          engine: "chat",
+          collapsed: false,
+          sortOrder: 0,
+          createdAt: 1,
+        },
+      },
+    });
+
+    useTermStore.getState().applySessionStates({ [SID]: { alive: false } });
+
+    expect(SID in useTermStore.getState().dormantSessions).toBe(false);
   });
 
   it("says nothing about a session that is not in the layout", () => {

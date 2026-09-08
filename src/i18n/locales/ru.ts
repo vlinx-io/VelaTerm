@@ -134,11 +134,25 @@ const ru: typeof en = {
   "common.save": "Сохранить", // Save
   "common.create": "Создать", // Create
   "common.close": "Закрыть", // Close
+  "chat.imageViewOriginal": "Открыть исходное изображение",
+  "chat.imageCopy": "Копировать изображение",
+  "chat.imageSave": "Сохранить изображение",
+  "chat.imageActionFailed": "Не удалось выполнить операцию с изображением. Повторите попытку.",
   "common.copy": "Копировать", // Copy
   "common.cut": "Вырезать", // Cut
   "common.paste": "Вставить", // Paste
   "common.selectAll": "Выделить все", // Select All
   "common.copied": "Скопировано", // Copied
+  "chat.sync.loading": "Синхронизация переписки…",
+  "chat.sync.failed": "Не удалось синхронизировать. Загруженные сообщения по-прежнему доступны.",
+  "chat.sync.history": "Загрузить более ранние сообщения",
+  "chat.submission.updateRequired": "Обновите сервер, прежде чем отправлять сообщения из этого клиента.",
+  "chat.submission.sending": "Отправка…",
+  "chat.submission.sent": "Отправлено",
+  "chat.submission.queued": "В очереди",
+  "chat.submission.failed": "Ошибка отправки",
+  "chat.submission.unknown": "Доставка не подтверждена",
+  "chat.submission.check": "Проверить статус",
   "common.retry": "Повторить", // Retry
   "common.experimental": "Экспериментальная функция",
   "common.refresh": "Обновить", // Refresh
@@ -260,6 +274,8 @@ const ru: typeof en = {
   "settings.navTree": "Дерево", // Tree
   "settings.navCompact": "Компактно", // Compact
   "settings.tabs": "Вкладки", // Tabs
+  "settings.defaultSessionEngine": "Вид по умолчанию для новых сессий",
+  "settings.defaultSessionEngineHint": "Уже созданные сессии сохраняют вид, с которым были созданы.",
   "settings.dynamicStatusFilter": "Динамическое добавление в фильтр статуса",
   "settings.tabSingle": "Одна", // Single
   "settings.tabMulti": "Несколько", // Multi
@@ -296,6 +312,25 @@ const ru: typeof en = {
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
+  "orch.title": "Запустить этих агентов?",
+  "orch.notifyTitle": "Оркестрация ожидает подтверждения",
+  "orch.coordinatorName": "Прогресс",
+  "orch.sharedSettings": "Общие настройки",
+  "orch.agentLabel": "Агент",
+  "orch.modelLabel": "Модель",
+  "orch.effortLabel": "Усилие",
+  "orch.nameLabel": "Имя",
+  "orch.promptLabel": "Задача",
+  "orch.worktreeLabel": "Worktree",
+  "orch.worktreeNone": "Использовать текущий каталог",
+  "orch.worktreeShared": "Один общий worktree",
+  "orch.worktreeEach": "По одному worktree каждому",
+  "orch.follow": "Как в общих настройках",
+  "orch.overridden": "изменено",
+  "orch.remove": "Удалить",
+  "orch.launch": (n: number) => `Запустить ${n}`,
+  "orch.modelPlaceholder": "по умолчанию у агента",
+  "orch.effortPlaceholder": "по умолчанию у агента",
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "Показать изменения…",
@@ -397,6 +432,12 @@ const ru: typeof en = {
   "settings.uiFontSize": "Interface size", // TODO translate
   "settings.termFont": "Terminal font", // TODO translate
   "settings.termFontSize": "Terminal size", // TODO translate
+  "settings.termLineHeight": "Высота строки в терминале",
+  "settings.chatTypography": "Просмотр диалога",
+  "settings.chatTypographyHint": "Эти настройки шрифта не зависят от терминала и применяются сразу.",
+  "settings.chatFont": "Шрифт диалога",
+  "settings.chatFontSize": "Размер шрифта диалога",
+  "settings.chatLineHeight": "Высота строки диалога",
   "settings.fontDefault": "Default", // TODO translate
   "settings.fontCustom": "Custom…", // TODO translate
   "settings.fontUnavailable": "Не установлен на этом устройстве",
@@ -684,6 +725,13 @@ const ru: typeof en = {
   "form.customOption": "Другой…", // Custom…
   "tree.cwdLabel": "Рабочий каталог (пусто = корень проекта)", // Working directory (leave empty for project root)
   "tree.initCmdLabel": "Команда запуска (необязательно)", // Startup command (optional)
+  "tree.engineLabel": "Открывается в",
+  "tree.engineTui": "Вид терминала",
+  "tree.engineChat": "Вид беседы",
+  // The agent runs its own terminal interface.
+  "tree.engineTuiHint": "Агент работает в собственном терминальном интерфейсе.",
+  // Messages and tool cards, with buttons for permission questions.
+  "tree.engineChatHint": "Представление в виде сообщений и карточек инструментов; запросы разрешений обрабатываются в интерфейсе.",
   "tree.agentArgsLabel": "Аргументы запуска (необязательно)", // Launch args (optional)
   // Working directory / Leave empty for the default
   "tree.workingDirLabel": "Рабочий каталог",
@@ -743,6 +791,11 @@ const ru: typeof en = {
   "info.createdAt": "Создано", // Created at
 
   // Resume-session dialog
+  "importSessions.results": ({ count }: { count: number }) => `Результатов: ${count}`,
+  "importSessions.selected": ({ count }: { count: number }) => `Выбрано: ${count}`,
+  "importSessions.clearSelection": "Снять выделение",
+  "importSessions.clearSearch": "Очистить поиск",
+  "importSessions.noHistory": "Для каталога этого проекта не найдено предыдущих сессий.",
   "importSessions.title": "Импорт сессий",
   "importSessions.description": "Найдите существующие сессии Codex, Claude и OpenCode, рабочий каталог которых совпадает с каталогом проекта. Выберите сессии для добавления в проект, затем откройте нужную сессию, чтобы продолжить разговор.",
   "importSessions.search": "Поиск по названию, агенту или ID сессии",
@@ -1213,6 +1266,204 @@ const ru: typeof en = {
   "statusbar.updateReady": "Restart to update", // TODO translate
   "statusbar.updateFailed": "Update failed", // TODO translate
   "statusbar.updateTooltip": "Click for details", // TODO translate
+
+  // ── Вид беседы (сессия агента, прочитанная как разговор) ──
+  "session.showConversation": "Вид беседы",
+  "session.showTerminal": "Вид терминала",
+  "session.switchTitle": "Смена вида перезапускает агента",
+  "session.switchBody": "Текущий ход будет прерван. Разговор сохранится.",
+  "session.switchConfirm": "Переключить",
+  "session.loading": "Читаем беседу…",
+  "session.unavailable": "Эту беседу пока не удаётся прочитать",
+  "session.working": "Работает…",
+  "session.thinking": "Рассуждение",
+  "session.toolRunning": "выполняется",
+  "session.toolUnknown": "Инструмент",
+  "session.toolFailed": "Не удалось",
+  "session.toolNoDetail": "Больше ничего не записано",
+  "session.showMore": (n: number) => `Показать ещё ${n} символов`,
+  "session.showLess": "Свернуть",
+  "session.composerHint": "Сообщение агенту · Enter отправляет, Shift+Enter переносит строку",
+  "session.send": "Отправить",
+
+  // ── Движок беседы (сессия, управляемая по протоколу) ──
+  "chat.empty": "Введите сообщение в поле ниже, чтобы начать разговор.",
+  "chat.interrupt": "Остановить",
+  "chat.interruptTooltip": "Остановить · Esc",
+  "chat.allow": "Разрешить",
+  "chat.deny": "Отклонить",
+  "chat.permissionAsk": (tool: string) => `${tool} просит разрешения на запуск`,
+  "chat.exited": (code: number) => `Агент завершился (код ${code})`,
+  "chat.modeNextTurn": "Со следующего хода",
+  "chat.modePendingHint": (current: string, next: string) =>
+    `Текущие разрешения: ${current}. Режим ${next} будет применён со следующего хода; текущий ход продолжится без изменений.`,
+  "chat.modeTooltip": "Режим разрешений",
+  "chat.collaborationModeTooltip": "Режим взаимодействия",
+  "chat.collaborationMode.default": "Обычный",
+  "chat.collaborationMode.defaultHint":
+    "Сразу выполняет задачу и задаёт вопросы только при необходимости принять решение",
+  "chat.collaborationMode.plan": "Планирование",
+  "chat.collaborationMode.planHint":
+    "Сначала изучает задачу и составляет план; вопросы могут отображаться как интерактивные карточки",
+  "chat.modelTooltip": "Модель",
+  "chat.keepChoice": "По умолчанию",
+  "chat.keepChoiceFor": (model) => `По умолчанию для ${model}`,
+  "chat.modelDefault": "Модель по умолчанию",
+  "chat.mode.default": "Всегда спрашивать",
+  "chat.mode.acceptEdits": "Принимать правки",
+  "chat.mode.plan": "Режим плана",
+  "chat.mode.bypassPermissions": "Без вопросов",
+  "chat.mode.readOnly": "Только чтение",
+  "chat.mode.fullAccess": "Полный доступ",
+  "chat.placeholder": "Сообщение агенту, доступны /команды, /навыки и @файлы",
+  "chat.command.clearDescription": "Архивировать эту сессию и начать новый диалог",
+  "chat.command.rewindDescription": "Выбрать, что откатить от последнего сообщения пользователя",
+  "chat.command.rewindUnavailable":
+    "Для отката нужно завершённое сообщение пользователя; не должно быть активного хода, сообщений в очереди или запросов разрешений.",
+  "chat.effortTooltip": "Глубина рассуждения",
+  "chat.effortDefault": "Рассуждение",
+  "chat.effort.auto": "Автоматически",
+  "chat.effort.low": "Низкая",
+  "chat.effort.medium": "Средняя",
+  "chat.effort.high": "Высокая",
+  "chat.effort.xhigh": "Очень высокая",
+  "chat.effort.max": "Максимальная",
+  "chat.effort.ultra": "Предельная",
+  "chat.effort.ultracode": "Ultra Code",
+  "chat.agentTooltip": "Агент",
+  "chat.effort.minimal": "Минимальный",
+  "chat.filterPlaceholder": "Фильтр",
+  "chat.placeholderOpencode": "Напишите агенту; доступны /команды и @файлы, а сообщение, начинающееся с !, выполняется как команда оболочки",
+  "chat.command.compactDescription": "Сжать беседу, чтобы освободить контекст",
+  "chat.command.undoDescription": "Отменить последнее сообщение и вызванные им изменения файлов",
+  "chat.command.redoDescription": "Вернуть то, что отменила последняя отмена",
+  "chat.command.shareDescription": "Создать ссылку для доступа к этой беседе",
+  "chat.command.unshareDescription": "Закрыть доступ к этой беседе",
+  "chat.mode.auto": "Автоматически",
+
+  // ── Вопрос агента, на который отвечают формой ──
+  "chat.question.heading": "У агента есть вопрос",
+  "chat.question.submit": "Отправить",
+  "chat.question.next": "Далее",
+  "chat.question.dismiss": "Закрыть",
+  "chat.question.answerPlaceholder": "Введите ответ",
+  "chat.question.otherPlaceholder": "Другой ответ",
+  "chat.question.answeredHeading": (n: number) =>
+    `Отвечено на ${n} ${plural(n, "вопрос", "вопроса", "вопросов")}`, // N questions answered
+  "chat.question.blankAnswer": "Без ответа", // Left blank
+
+  // ── План, ожидающий одобрения ──
+  "chat.plan.heading": "План ожидает одобрения",
+  "chat.plan.implement": "Одобрить и выполнить",
+  "chat.plan.reject": "Отклонить",
+
+  // ── Сообщения, написанные во время работы агента ──
+  "chat.placeholderBusy": "Введите сообщение; оно будет отправлено по завершении текущего хода",
+  "chat.queueTooltip": (combo: string) => `Будет отправлено по завершении хода · ${combo} — отправить сейчас`,
+  "chat.queue.pending": "Сообщения в очереди",
+  "chat.queue.edit": "Изменить",
+  "chat.queue.remove": "Удалить",
+
+  // ── Изображения, вставленные или перетащенные в поле ввода ──
+  "chat.attach.remove": "Удалить это изображение",
+  "chat.attach.tooMany": (max: number) => `К одному сообщению можно приложить не более ${max} изображений`,
+  "chat.attach.tooLarge": (name: string, mb: number) => `${name} превышает ${mb} МБ и не был приложен`,
+  "chat.attach.unreadable": (name: string) => `Не удалось прочитать ${name}`,
+  // Compacting the conversation… / Context compacted / Context compacted automatically
+  "chat.compaction.running": "Сжимаем диалог…",
+  "chat.compaction.manual": "Контекст сжат",
+  "chat.compaction.auto": "Контекст сжат автоматически",
+  "chat.compaction.from": (tokens: string) => `было ${tokens} токенов`,
+  // N steps
+  "chat.subagent.steps": (n: number) => {
+    const tail = n % 100 >= 11 && n % 100 <= 14 ? 0 : n % 10;
+    const word = tail === 1 ? "шаг" : tail >= 2 && tail <= 4 ? "шага" : "шагов";
+    return `${n} ${word}`;
+  },
+  "chat.subagent.tokens": (tokens: string) => `${tokens} токенов`,
+  "chat.rewind.title": "Откатить отсюда",
+  "chat.rewind.warning": "Это действие нельзя отменить.",
+  "chat.rewind.conversation": "Откатить диалог",
+  "chat.rewind.files": "Восстановить файлы",
+  "chat.rewind.both": "Откатить диалог и восстановить файлы",
+  "chat.rewind.confirm.conversation": "Удалить это сообщение и всё, что следует за ним?",
+  "chat.rewind.confirm.files": "Восстановить файлы до состояния перед этим сообщением?",
+  "chat.rewind.confirm.both": "Удалить этот ход и восстановить изменённые им файлы?",
+  "chat.rewind.unavailable": "Для этого сообщения нет контрольной точки файлов.",
+  "chat.rewind.previewing": "Проверка контрольной точки файлов…",
+  "chat.rewind.cancel": "Оставить как есть",
+  "chat.rewind.apply": "Откатить",
+  "chat.rewind.applying": "Выполняется откат…",
+  "chat.rewind.fileSummary": (files: number, insertions: number, deletions: number) =>
+    `Будет изменено файлов: ${files} (+${insertions} −${deletions}). Это действие нельзя отменить.`,
+  // ── Постоянные правила, которые предлагает запрос разрешения; принимаются одним нажатием ──
+  "chat.suggest.modeSession": (mode: string) => `${mode} в этой сессии`,
+  "chat.suggest.mode": (mode: string) => `Переключить на «${mode}»`,
+  "chat.suggest.allowSession": (rule: string) => `Разрешить ${rule} в этой сессии`,
+  "chat.suggest.allowAlways": (rule: string) => `Всегда разрешать ${rule}`,
+  "chat.suggest.dirSession": (dirs: string) => `Разрешить доступ к ${dirs} в этой сессии`,
+  "chat.suggest.dirAlways": (dirs: string) => `Всегда разрешать доступ к ${dirs}`,
+  // ── Codex: постоянные сетевые правила, вмешательство, собственные команды и чипы скорости и тона ──
+  "chat.suggest.networkAlways": (host: string) => `Всегда разрешать сетевой доступ к ${host}`,
+  "chat.steer": "Дополнить",
+  "chat.stopping": "Остановка текущего хода…",
+  "chat.stopped": "Текущий ход остановлен",
+  "chat.steerAccepted": "Дополнительное указание отправлено",
+  "chat.steerTooltip": (combo: string) => `${combo} — добавить к текущему ходу`,
+  "chat.command.reviewDescription": "Проверить код и сообщить, что требует внимания",
+  "chat.command.reviewHint": "[branch <имя> | commit <sha> | указания]",
+  "chat.command.startTimeout": "Агент не открыл сеанс вовремя",
+  "chat.serviceTierTooltip": "Скорость",
+  "chat.serviceTier.default": "Обычная скорость",
+  "chat.personalityTooltip": "Тон",
+  "chat.personality.default": "Тон по умолчанию",
+  "chat.personality.none": "Нейтральный",
+  "chat.personality.friendly": "Дружелюбный",
+  "chat.personality.pragmatic": "Прагматичный",
+  // ── Длинный разговор: серия вызовов инструментов сворачивается в строку, плюс возврат в конец ──
+  "chat.toolRun.count": (n: number) => `Вызовов инструментов: ${n}`,
+  "chat.toolRun.tooltip": "Показать каждый вызов",
+  "chat.backToEnd": "К последнему сообщению",
+  "chat.elicitation.heading": (server: string) => `${server} запрашивает данные`,
+  "chat.elicitation.cancel": "Отмена",
+  "chat.elicitation.decline": "Отклонить",
+  "chat.elicitation.submit": "Отправить",
+  "chat.elicitation.done": "Готово",
+  "chat.elicitation.choose": "Выберите…",
+  "chat.effort.off": "Выключено",
+  "chat.effort.offHint": "Без расширенного размышления",
+  "chat.fastMode.label": "Быстро",
+  "chat.fastMode.on": "Быстрый режим включён",
+  "chat.fastMode.off": "Быстрый режим выключен",
+  "chat.usage.context": (used: string, max: string, pct: number) =>
+    `Контекст: ${used} из ${max} токенов (${pct} %)`,
+  "chat.usage.cost": (usd: string) => `Стоимость сеанса: $${usd}`,
+  "chat.usage.rateLimited": (resets: string) => `Лимит использования исчерпан; сброс ${resets}`,
+  "chat.usage.rateWarning": (pct: number, resets: string) =>
+    `Лимит использования: израсходовано ${pct} %; сброс ${resets}`,
+  "chat.mcp.codexScope": "Это изменит пользовательскую конфигурацию Codex и затронет другие беседы, использующие её. Продолжить?",
+  "chat.mcp.tooltip": "Серверы MCP",
+  "chat.mcp.loading": "Чтение списка серверов…",
+  "chat.mcp.backendUnsupported": "Сервер VelaTerm, к которому установлено подключение, не поддерживает управление MCP. Обновите и перезапустите этот сервер, затем повторите попытку.",
+  "chat.mcp.none": "Серверы MCP не настроены",
+  "chat.mcp.tools": (n: number) => `Инструментов: ${n}`,
+  "chat.mcp.reconnect": "Переподключить",
+  "chat.mcp.disable": "Отключить",
+  "chat.mcp.enable": "Включить",
+  "chat.mcp.status.connected": "Подключён",
+  "chat.mcp.status.disabled": "Отключён",
+  "chat.mcp.status.failed": "Ошибка",
+  "chat.mcp.status.pending": "Подключение",
+  "chat.mcp.status.disconnected": "Соединение разорвано",
+  "chat.mcp.status.other": "Неизвестно",
+  "chat.tasks.label": "Задачи",
+  "chat.tasks.tooltip": "Фоновые задачи",
+  "chat.tasks.backgroundAll": "Перевести текущую работу в фон",
+  "chat.tasks.none": "Фоновых задач нет",
+  "chat.tasks.stop": "Остановить",
+  "chat.retry.line": (attempt: number, max: number, seconds: number, message: string) =>
+    `Повторная попытка (${attempt}/${max}) через ${seconds} с: ${message}`,
+  "chat.notify.dismiss": "Закрыть",
 };
 
 export default ru;

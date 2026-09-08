@@ -43,7 +43,8 @@ import {
   redrawTerminal,
   selectAll,
 } from "../../terminal/registry";
-import { effectiveStatus, type Session } from "../../types";
+import { effectiveStatus, supportsChatEngine, type Session } from "../../types";
+import { useEngineSwitch } from "./session/engineSwitch";
 
 // Platform-specific terminal search hint: Cmd+F on macOS shells, Ctrl+Alt+F on Windows/Linux and
 // plain browsers (see IS_PLAIN_BROWSER / useKeyboardShortcuts).
@@ -74,6 +75,11 @@ export const TerminalView = memo(function TerminalView({
   onClose: (paneId: string, id: string) => void;
 }) {
   const t = useT();
+  // Whether this session can be moved to the conversation view at all. Only agents the chat engine can drive
+  // offer the choice; for everything else the terminal is the only view there is.
+  const canSessionView = supportsChatEngine(session.kind);
+  // Moving to the conversation restarts the agent under the other engine, so a working one is asked first.
+  const { switchTo, confirm: engineConfirm } = useEngineSwitch(session);
   const { containerRef, starting, sizeMode, ptyDims, takeoverSize } =
     usePtySession(session, cwd, hidden);
   const paneStyle = useTermStore((s) => s.paneStyle);
@@ -283,6 +289,21 @@ export const TerminalView = memo(function TerminalView({
           {/* Terminal sessions put the shell picker in the header, left of the tool buttons, rather than over the bottom-right of xterm; see ShellPicker. */}
           <ShellPicker session={session} />
           <span className="pane-tools">
+            {canSessionView && (
+              <button
+                className="conversation-switch"
+                title={`${t("session.showConversation")} · ${t("common.experimental")}`}
+                aria-label={`${t("session.showConversation")} · ${t("common.experimental")}`}
+                onMouseDown={stop}
+                onClick={(e) => {
+                  stop(e);
+                  switchTo("chat");
+                }}
+              >
+                <Icons.bot size={14} />
+                <span className="session-experimental-badge">{t("common.experimental")}</span>
+              </button>
+            )}
             <button
               title={t("term.redraw")}
               onMouseDown={stop}
@@ -334,7 +355,11 @@ export const TerminalView = memo(function TerminalView({
             TUI repaints against that wrong count, overwriting its final answer or pushing it out of
             view. */}
         <div
-          style={{ flex: 1, minHeight: 0, position: "relative" }}
+          style={{
+            flex: 1,
+            minHeight: 0,
+            position: "relative",
+          }}
           onContextMenu={onContextMenu}
           // When right-clicking an existing selection, intercept both mousedown and mouseup during capture,
           // before xterm listeners. Otherwise a mouse-reporting TUI receives both events through CoreMouseService
@@ -497,6 +522,7 @@ export const TerminalView = memo(function TerminalView({
           {!hidden && <AgentInstallCard session={session} />}
           <TermScrollbar containerRef={containerRef} hidden={hidden} />
         </div>
+
       </div>
 
       {menu && (
@@ -507,6 +533,7 @@ export const TerminalView = memo(function TerminalView({
           onClose={() => setMenu(null)}
         />
       )}
+      {engineConfirm}
     </div>
   );
 });

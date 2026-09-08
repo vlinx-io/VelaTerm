@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useT } from "../../i18n";
-import { memoryDelete, memoryGet, memoryOptions, memoryRestore, memorySave, memorySource, type MemoryDetail, type MemoryEdit } from "../../ipc/memory";
+import { memoryDelete, memoryGet, memoryOptions, memoryRestore, memorySave, memorySource, type MemoryDetail, type MemoryEntry, type MemoryEdit } from "../../ipc/memory";
 import { kindLabel } from "../sessionMenuShared";
 import type { SessionKind } from "../../types";
 import { platform } from "../../platform";
@@ -8,20 +8,53 @@ import { writeTextFile } from "../../ipc/info";
 import { isTauri } from "../../ipc/transport";
 import { MemoryLink, memoryNavigate, memoryUrl } from "./navigation";
 import { LoadState, MemoryMarkdown, memoryError, memoryTime, useMemoryLoad } from "./shared";
+import { WysiwygEditor, type WysiwygHandle } from "../CenterPane/doc/WysiwygEditor";
+import "../CenterPane/doc/docTheme.css";
 import { KnowledgeReferences } from "../Knowledge/KnowledgeReferences";
 
 export function MemoryDocument({ id, version }: { id: string; version?: number }) {
   const t = useT(); const { data, error, reload } = useMemoryLoad(() => memoryGet(id, version), [id, version]);
   const [action, setAction] = useState<"delete" | "restore" | null>(null);
   const [busy, setBusy] = useState(false); const [failure, setFailure] = useState("");
+  const editor = useRef<WysiwygHandle>(null);
+  const [saved, setSaved] = useState<MemoryEntry | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const saving = useRef(false);
+  const [savedVersions, setSavedVersions] = useState<MemoryDetail["versions"]>([]);
+  const [pending, setPending] = useState<{ url: string; replace: boolean } | null>(null);
+  useEffect(() => {
+    const unload = (event: BeforeUnloadEvent) => { if (dirty || busy) { event.preventDefault(); event.returnValue = ""; } };
+    const navigate = (event: Event) => {
+      if (!dirty && !busy) return;
+      event.preventDefault();
+      setPending((event as CustomEvent<{ url: string; replace: boolean }>).detail);
+    };
+    window.addEventListener("beforeunload", unload);
+    window.addEventListener("memory:beforeNavigate", navigate);
+    return () => { window.removeEventListener("beforeunload", unload); window.removeEventListener("memory:beforeNavigate", navigate); };
+  }, [dirty, busy]);
   if (!data) return <LoadState error={error} reload={reload} />;
-  const entry = version == null ? data.entry : data.revision;
+  const entry = version == null ? saved ?? data.entry : data.revision;
   if (!entry) return <p className="memory-empty">{t("memory.notFound")}</p>;
+  const save = async () => {
+    const content = editor.current?.getMarkdown();
+    if (content == null || busy || saving.current) return;
+    saving.current = true;
+    setBusy(true); setFailure("");
+    try {
+      const result = await memorySave({ id, version: entry.version, title: entry.title, summary: entry.summary, content, tags: entry.tags, related: entry.related });
+      setSaved(result);
+      setSavedVersions((versions) => [{ version: result.version, createdAt: result.updatedAt, author: "manual" }, ...versions]);
+      setDirty(editor.current?.getMarkdown() !== content);
+      window.dispatchEvent(new Event("memory:saved"));
+    } catch (e) { setFailure(memoryError(e)); }
+    finally { setBusy(false); saving.current = false; }
+  };
   const perform = async () => {
     setBusy(true); setFailure("");
     try {
-      if (action === "delete") { await memoryDelete(id, data.entry.version); memoryNavigate(memoryUrl("library")); }
-      else if (version != null) { await memoryRestore(id, data.entry.version, version); memoryNavigate(memoryUrl(`entry/${id}`)); }
+      if (action === "delete") { await memoryDelete(id, entry.version); memoryNavigate(memoryUrl("library"), false, true); }
+      else if (version != null) { await memoryRestore(id, data.entry.version, version); memoryNavigate(memoryUrl(`entry/${id}`), false, true); }
       setAction(null);
     } catch (e) { setFailure(memoryError(e)); }
     finally { setBusy(false); }
@@ -30,7 +63,8 @@ export function MemoryDocument({ id, version }: { id: string; version?: number }
     setFailure("");
     try {
     const permalink = (route: string) => { const url = new URL(location.href); url.search = ""; url.hash = ""; url.searchParams.set("memory", route); return url.href; };
-    const content = `# ${entry.title}\n\n${entry.summary}\n\n${entry.content}\n\n## ${t("memory.related")}\n\n${data.catalog.filter((e) => entry.related.includes(e.id)).map((e) => `- [${e.title}](${permalink(`entry/${e.id}`)})`).join("\n")}\n\n## ${t("memory.sources")}\n\n${data.sources.filter((s) => entry.sources.includes(s.id)).map((s) => `- ${s.sessionName} · ${s.kind} · ${memoryTime(s.createdAt)}\n  SHA-256: ${s.digest}\n  ${permalink(`source/${s.id}`)}`).join("\n")}\n`;
+    const body = version == null ? editor.current?.getMarkdown() ?? entry.content : entry.content;
+    const content = `# ${entry.title}\n\n${entry.summary}\n\n${body}\n\n## ${t("memory.related")}\n\n${data.catalog.filter((e) => entry.related.includes(e.id)).map((e) => `- [${e.title}](${permalink(`entry/${e.id}`)})`).join("\n")}\n\n## ${t("memory.sources")}\n\n${data.sources.filter((s) => entry.sources.includes(s.id)).map((s) => `- ${s.sessionName} · ${s.kind} · ${memoryTime(s.createdAt)}\n  SHA-256: ${s.digest}\n  ${permalink(`source/${s.id}`)}`).join("\n")}\n`;
     const fileName = `${entry.title.replace(/[\\/:*?"<>|]/g, "_")}.md`;
     if (isTauri || platform.env.isElectron) {
       const dest = await platform.dialog.saveFile({ defaultPath: fileName, filters: [{ name: "Markdown", extensions: ["md"] }] });
@@ -42,11 +76,15 @@ export function MemoryDocument({ id, version }: { id: string; version?: number }
     a.href = url; a.download = fileName; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) { setFailure(memoryError(e)); }
   };
-  return <article className="memory-document">
+  return <article className="memory-document" onKeyDown={(event) => {
+    if (version == null && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault(); if (dirty) void save();
+    }
+  }}>
     <div className="memory-row memory-actions">
       <span className="memory-muted">v{entry.version} · {memoryTime(entry.updatedAt)}</span><span className="memory-spacer" />
       <button className="btn" onClick={() => void exportMarkdown()}>{t("memory.export")}</button>
-      {version == null ? <><MemoryLink className="btn" route={`edit/${id}`}>{t("common.edit")}</MemoryLink><button className="btn" onClick={() => setAction("delete")}>{t("common.delete")}</button></> : <>
+      {version == null ? <><button className="btn btn-primary" disabled={!dirty || busy} onClick={() => void save()}>{t(busy ? "common.loading" : "common.save")}{dirty ? " *" : ""}</button><MemoryLink className="btn" route={`edit/${id}`}>{t("common.edit")}</MemoryLink><button className="btn" disabled={busy} onClick={() => setAction("delete")}>{t("common.delete")}</button></> : <>
         <MemoryLink className="btn" route={`entry/${id}`}>{t("common.cancel")}</MemoryLink><button className="btn" disabled={version === data.entry.version} onClick={() => setAction("restore")}>{t("memory.restore")}</button>
       </>}
     </div>
@@ -55,10 +93,13 @@ export function MemoryDocument({ id, version }: { id: string; version?: number }
         <button className="btn" disabled={busy} onClick={() => setAction(null)}>{t("common.cancel")}</button><button className="btn btn-primary" disabled={busy} onClick={() => void perform()}>{t(busy ? "common.loading" : "common.confirm")}</button>
       </div>
     </div>}
+    {pending && <div className="memory-confirm" role="alertdialog" aria-label={t("memory.unsaved")}><p>{t("memory.unsaved")}</p><div className="memory-row"><button className="btn" onClick={() => setPending(null)}>{t("common.cancel")}</button><button className="btn" disabled={busy} onClick={() => memoryNavigate(pending.url, pending.replace, true)}>{t("common.confirm")}</button></div></div>}
     {failure && <p className="memory-error" role="alert">{failure}</p>}
     <h1>{entry.title}</h1><p className="memory-lead">{entry.summary}</p>
     <div className="memory-tags">{entry.tags.map((tag) => <MemoryLink key={tag} route="library" values={{ memoryTag: tag, memoryPage: null }}>{tag}</MemoryLink>)}</div>
-    <MemoryMarkdown content={entry.content} />
+    {version == null ? <div className="docview memory-inline-editor" aria-label={t("memory.content")}>
+      <WysiwygEditor ref={editor} defaultValue={data.entry.content} docPath="" textOnly onEdited={() => setDirty(true)} />
+    </div> : <MemoryMarkdown content={entry.content} />}
     {version == null && <KnowledgeReferences entryId={id} />}
     <div className="memory-references">
       <ReferenceList label={t("memory.related")} entries={data.catalog.filter((e) => entry.related.includes(e.id))} />
@@ -67,7 +108,7 @@ export function MemoryDocument({ id, version }: { id: string; version?: number }
         {data.sources.filter((s) => entry.sources.includes(s.id)).map((s) => <MemoryLink className="memory-reference" key={s.id} route={`source/${s.id}`}><strong>{s.sessionName}</strong><small>{kindLabel(s.kind as SessionKind)} · {memoryTime(s.createdAt)}</small></MemoryLink>)}
       </section>
       <section><h3>{t("memory.history")}</h3><div className="memory-history">
-        {data.versions.map((v) => <MemoryLink key={v.version} route={`history/${id}/${v.version}`} className={v.version === version ? "active" : ""}>
+        {[...savedVersions, ...data.versions.filter((v) => !savedVersions.some((savedVersion) => savedVersion.version === v.version))].map((v) => <MemoryLink key={v.version} route={`history/${id}/${v.version}`} className={v.version === version ? "active" : ""}>
           v{v.version} · {memoryTime(v.createdAt)} <small>{v.author.includes(":") ? kindLabel(v.author.split(":")[0] as SessionKind) : t(v.author === "restore" ? "memory.restore" : "common.edit")}</small>
         </MemoryLink>)}
       </div></section>

@@ -124,11 +124,25 @@ const es: typeof en = {
   "common.save": "Guardar", // Save
   "common.create": "Crear", // Create
   "common.close": "Cerrar", // Close
+  "chat.imageViewOriginal": "Ver imagen original",
+  "chat.imageCopy": "Copiar imagen",
+  "chat.imageSave": "Guardar imagen",
+  "chat.imageActionFailed": "No se pudo completar la operación con la imagen. Inténtelo de nuevo.",
   "common.copy": "Copiar", // Copy
   "common.cut": "Cortar", // Cut
   "common.paste": "Pegar", // Paste
   "common.selectAll": "Seleccionar todo", // Select All
   "common.copied": "Copiado", // Copied
+  "chat.sync.loading": "Sincronizando conversación…",
+  "chat.sync.failed": "No se pudo sincronizar. Los mensajes cargados siguen disponibles.",
+  "chat.sync.history": "Cargar mensajes anteriores",
+  "chat.submission.updateRequired": "Actualiza el servidor antes de enviar mensajes desde este cliente.",
+  "chat.submission.sending": "Enviando…",
+  "chat.submission.sent": "Enviado",
+  "chat.submission.queued": "En cola",
+  "chat.submission.failed": "Error al enviar",
+  "chat.submission.unknown": "Entrega sin confirmar",
+  "chat.submission.check": "Comprobar estado",
   "common.retry": "Reintentar", // Retry
   "common.experimental": "Experimental",
   "common.refresh": "Actualizar", // Refresh
@@ -251,6 +265,8 @@ const es: typeof en = {
   "settings.navTree": "Árbol", // Tree
   "settings.navCompact": "Compacta", // Compact
   "settings.tabs": "Pestañas", // Tabs
+  "settings.defaultSessionEngine": "Vista predeterminada de las sesiones nuevas",
+  "settings.defaultSessionEngineHint": "Las sesiones existentes conservan la vista con la que se crearon.",
   "settings.dynamicStatusFilter": "Incorporación dinámica al filtro de estado",
   "settings.tabSingle": "Única", // Single
   "settings.tabMulti": "Múltiples", // Multi
@@ -287,6 +303,25 @@ const es: typeof en = {
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
+  "orch.title": "¿Iniciar estos agentes?",
+  "orch.notifyTitle": "Orquestación pendiente de confirmación",
+  "orch.coordinatorName": "Progreso",
+  "orch.sharedSettings": "Ajustes comunes",
+  "orch.agentLabel": "Agente",
+  "orch.modelLabel": "Modelo",
+  "orch.effortLabel": "Esfuerzo",
+  "orch.nameLabel": "Nombre",
+  "orch.promptLabel": "Tarea",
+  "orch.worktreeLabel": "Worktree",
+  "orch.worktreeNone": "Usar el directorio actual",
+  "orch.worktreeShared": "Un worktree compartido",
+  "orch.worktreeEach": "Un worktree para cada uno",
+  "orch.follow": "Seguir los ajustes comunes",
+  "orch.overridden": "cambiado",
+  "orch.remove": "Quitar",
+  "orch.launch": (n: number) => `Iniciar ${n}`,
+  "orch.modelPlaceholder": "predeterminado del agente",
+  "orch.effortPlaceholder": "predeterminado del agente",
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "Ver cambios…",
@@ -389,6 +424,12 @@ const es: typeof en = {
   "settings.uiFontSize": "Interface size", // TODO translate
   "settings.termFont": "Terminal font", // TODO translate
   "settings.termFontSize": "Terminal size", // TODO translate
+  "settings.termLineHeight": "Interlineado del terminal",
+  "settings.chatTypography": "Vista de conversación",
+  "settings.chatTypographyHint": "Estos ajustes de fuente son independientes del terminal y se aplican de inmediato.",
+  "settings.chatFont": "Fuente de la conversación",
+  "settings.chatFontSize": "Tamaño de fuente de la conversación",
+  "settings.chatLineHeight": "Interlineado de la conversación",
   "settings.fontDefault": "Default", // TODO translate
   "settings.fontCustom": "Custom…", // TODO translate
   "settings.fontUnavailable": "No instalada en este dispositivo",
@@ -677,6 +718,13 @@ const es: typeof en = {
   "form.customOption": "Personalizado…", // Custom…
   "tree.cwdLabel": "Directorio de trabajo (vacío = raíz del proyecto)", // Working directory (leave empty for project root)
   "tree.initCmdLabel": "Comando de inicio (opcional)", // Startup command (optional)
+  "tree.engineLabel": "Se abre en",
+  "tree.engineTui": "Vista de terminal",
+  "tree.engineChat": "Vista de conversación",
+  // The agent runs its own terminal interface.
+  "tree.engineTuiHint": "El agente usa su propia interfaz de terminal.",
+  // Messages and tool cards, with buttons for permission questions.
+  "tree.engineChatHint": "Presentación con mensajes y tarjetas de herramientas; las solicitudes de permiso se responden en la interfaz.",
   "tree.agentArgsLabel": "Argumentos de inicio (opcional)", // Launch args (optional)
   // Working directory / Leave empty for the default
   "tree.workingDirLabel": "Directorio de trabajo",
@@ -737,6 +785,11 @@ const es: typeof en = {
   "info.createdAt": "Creado el", // Created at
 
   // Resume-session dialog
+  "importSessions.results": ({ count }: { count: number }) => `Resultados: ${count}`,
+  "importSessions.selected": ({ count }: { count: number }) => `Seleccionadas: ${count}`,
+  "importSessions.clearSelection": "Borrar selección",
+  "importSessions.clearSearch": "Borrar búsqueda",
+  "importSessions.noHistory": "No se encontraron sesiones anteriores para este directorio de proyecto.",
   "importSessions.title": "Importar sesiones",
   "importSessions.description": "Busca sesiones existentes de Codex, Claude y OpenCode cuyo directorio de trabajo coincida con este proyecto. Selecciona las sesiones que quieras añadir al proyecto y abre una para continuar la conversación.",
   "importSessions.search": "Buscar por título, agente o ID de sesión",
@@ -1208,6 +1261,200 @@ const es: typeof en = {
   "statusbar.updateReady": "Restart to update", // TODO translate
   "statusbar.updateFailed": "Update failed", // TODO translate
   "statusbar.updateTooltip": "Click for details", // TODO translate
+
+  // ── Vista de conversación (la sesión del agente leída como diálogo) ──
+  "session.showConversation": "Vista de conversación",
+  "session.showTerminal": "Vista de terminal",
+  "session.switchTitle": "Cambiar de vista reinicia el agente",
+  "session.switchBody": "El turno en curso se interrumpirá. La conversación se conserva.",
+  "session.switchConfirm": "Cambiar",
+  "session.loading": "Leyendo la conversación…",
+  "session.unavailable": "Esta conversación aún no se puede leer",
+  "session.working": "Trabajando…",
+  "session.thinking": "Razonamiento",
+  "session.toolRunning": "en curso",
+  "session.toolUnknown": "Herramienta",
+  "session.toolFailed": "Falló",
+  "session.toolNoDetail": "No se registró nada más",
+  "session.showMore": (n: number) => `Mostrar ${n} caracteres más`,
+  "session.showLess": "Mostrar menos",
+  "session.composerHint": "Escribe al agente · Intro envía, Mayús+Intro salta de línea",
+  "session.send": "Enviar",
+
+  // ── Motor de conversación (una sesión gobernada por protocolo) ──
+  "chat.empty": "Escriba en el campo inferior para iniciar la conversación.",
+  "chat.interrupt": "Detener",
+  "chat.interruptTooltip": "Detener · Esc",
+  "chat.allow": "Permitir",
+  "chat.deny": "Denegar",
+  "chat.permissionAsk": (tool: string) => `${tool} pide ejecutarse`,
+  "chat.exited": (code: number) => `El agente se detuvo (código ${code})`,
+  "chat.modeNextTurn": "En el próximo turno",
+  "chat.modePendingHint": (current: string, next: string) =>
+    `Permisos actuales: ${current}. ${next} se aplicará en el próximo turno; el turno actual continuará sin cambios.`,
+  "chat.modeTooltip": "Modo de permisos",
+  "chat.collaborationModeTooltip": "Modo de colaboración",
+  "chat.collaborationMode.default": "Predeterminado",
+  "chat.collaborationMode.defaultHint":
+    "Avanza directamente y solo pregunta cuando hace falta una decisión",
+  "chat.collaborationMode.plan": "Planificación",
+  "chat.collaborationMode.planHint":
+    "Analiza la tarea y prepara un plan; las preguntas pueden mostrarse en tarjetas interactivas",
+  "chat.modelTooltip": "Modelo",
+  "chat.keepChoice": "Predeterminado",
+  "chat.keepChoiceFor": (model) => `Predeterminado para ${model}`,
+  "chat.modelDefault": "Modelo predeterminado",
+  "chat.mode.default": "Preguntar siempre",
+  "chat.mode.acceptEdits": "Aceptar ediciones",
+  "chat.mode.plan": "Modo plan",
+  "chat.mode.bypassPermissions": "Sin preguntar",
+  "chat.mode.readOnly": "Solo lectura",
+  "chat.mode.fullAccess": "Acceso total",
+  "chat.placeholder": "Escribe al agente, o usa /comandos, /habilidades y @archivos",
+  "chat.command.clearDescription": "Archivar esta sesión e iniciar una conversación nueva",
+  "chat.command.rewindDescription": "Elegir qué revertir desde el último mensaje del usuario",
+  "chat.command.rewindUnavailable":
+    "Para revertir debe haber un mensaje del usuario completado y no puede haber turnos activos, mensajes en cola ni solicitudes de permiso.",
+  "chat.effortTooltip": "Esfuerzo de razonamiento",
+  "chat.effortDefault": "Razonamiento",
+  "chat.effort.auto": "Automático",
+  "chat.effort.low": "Bajo",
+  "chat.effort.medium": "Medio",
+  "chat.effort.high": "Alto",
+  "chat.effort.xhigh": "Muy alto",
+  "chat.effort.max": "Máximo",
+  "chat.effort.ultra": "Extremo",
+  "chat.effort.ultracode": "Ultra Code",
+  "chat.agentTooltip": "Agente",
+  "chat.effort.minimal": "Mínimo",
+  "chat.filterPlaceholder": "Filtrar",
+  "chat.placeholderOpencode": "Escribe al agente; puedes usar /comandos y @archivos, o empezar con ! para ejecutar un comando de shell",
+  "chat.command.compactDescription": "Resumir la conversación para liberar contexto",
+  "chat.command.undoDescription": "Revertir el último mensaje y los cambios de archivos que provocó",
+  "chat.command.redoDescription": "Restaurar lo que revirtió el último deshacer",
+  "chat.command.shareDescription": "Crear un enlace para compartir esta conversación",
+  "chat.command.unshareDescription": "Dejar de compartir esta conversación",
+  "chat.mode.auto": "Modo automático",
+
+  // ── Una pregunta del agente, respondida como formulario ──
+  "chat.question.heading": "El agente tiene una pregunta",
+  "chat.question.submit": "Enviar",
+  "chat.question.next": "Siguiente",
+  "chat.question.dismiss": "Descartar",
+  "chat.question.answerPlaceholder": "Escribe tu respuesta",
+  "chat.question.otherPlaceholder": "Otra respuesta",
+  "chat.question.answeredHeading": (n: number) =>
+    n === 1 ? "1 pregunta respondida" : `${n} preguntas respondidas`,
+  "chat.question.blankAnswer": "Sin responder",
+
+  // ── Un plan a la espera de aprobación ──
+  "chat.plan.heading": "Plan a la espera de aprobación",
+  "chat.plan.implement": "Aprobar y ejecutar",
+  "chat.plan.reject": "Rechazar",
+
+  // ── Mensajes escritos mientras el agente trabaja ──
+  "chat.placeholderBusy": "Escribe un mensaje; se enviará cuando termine este turno",
+  "chat.queueTooltip": (combo: string) => `Se enviará cuando termine este turno · ${combo} lo envía ahora`,
+  "chat.queue.pending": "Mensajes pendientes",
+  "chat.queue.edit": "Editar",
+  "chat.queue.remove": "Eliminar",
+
+  // ── Imágenes pegadas o soltadas en el redactor ──
+  "chat.attach.remove": "Quitar esta imagen",
+  "chat.attach.tooMany": (max: number) => `Un mensaje puede incluir hasta ${max} imágenes`,
+  "chat.attach.tooLarge": (name: string, mb: number) => `${name} supera los ${mb} MB y no se adjuntó`,
+  "chat.attach.unreadable": (name: string) => `No se pudo leer ${name}`,
+  // Compacting the conversation… / Context compacted / Context compacted automatically
+  "chat.compaction.running": "Compactando la conversación…",
+  "chat.compaction.manual": "Contexto compactado",
+  "chat.compaction.auto": "Contexto compactado automáticamente",
+  "chat.compaction.from": (tokens: string) => `desde ${tokens} tokens`,
+  // N steps
+  "chat.subagent.steps": (n: number) => (n === 1 ? "1 paso" : `${n} pasos`),
+  "chat.subagent.tokens": (tokens: string) => `${tokens} tokens`,
+  "chat.rewind.title": "Volver a este punto",
+  "chat.rewind.warning": "Esta acción no se puede deshacer.",
+  "chat.rewind.conversation": "Retroceder la conversación",
+  "chat.rewind.files": "Restaurar archivos",
+  "chat.rewind.both": "Retroceder la conversación y restaurar archivos",
+  "chat.rewind.confirm.conversation": "¿Eliminar este mensaje y todo lo posterior?",
+  "chat.rewind.confirm.files": "¿Restaurar los archivos al estado anterior a este mensaje?",
+  "chat.rewind.confirm.both": "¿Eliminar este turno y restaurar los archivos que modificó?",
+  "chat.rewind.unavailable": "No hay un punto de restauración de archivos para este mensaje.",
+  "chat.rewind.previewing": "Comprobando el punto de restauración…",
+  "chat.rewind.cancel": "Dejar como está",
+  "chat.rewind.apply": "Retroceder",
+  "chat.rewind.applying": "Retrocediendo…",
+  "chat.rewind.fileSummary": (files: number, insertions: number, deletions: number) =>
+    `Se ${files === 1 ? "modificará" : "modificarán"} ${files} ${files === 1 ? "archivo" : "archivos"}: +${insertions} −${deletions}. Esta acción no se puede deshacer.`,
+  // ── Reglas permanentes que ofrece una solicitud de permiso, adoptadas con un clic ──
+  "chat.suggest.modeSession": (mode: string) => `${mode} en esta sesión`,
+  "chat.suggest.mode": (mode: string) => `Cambiar a ${mode}`,
+  "chat.suggest.allowSession": (rule: string) => `Permitir ${rule} en esta sesión`,
+  "chat.suggest.allowAlways": (rule: string) => `Permitir ${rule} siempre`,
+  "chat.suggest.dirSession": (dirs: string) => `Permitir el acceso a ${dirs} en esta sesión`,
+  "chat.suggest.dirAlways": (dirs: string) => `Permitir el acceso a ${dirs} siempre`,
+  // ── Codex: reglas de red permanentes, intervenir, comandos propios y los chips de velocidad y tono ──
+  "chat.suggest.networkAlways": (host: string) => `Permitir siempre el acceso de red a ${host}`,
+  "chat.steer": "Añadir indicación",
+  "chat.stopping": "Deteniendo el turno actual…",
+  "chat.stopped": "Turno actual detenido",
+  "chat.steerAccepted": "Indicación enviada",
+  "chat.steerTooltip": (combo: string) => `${combo} lo añade al turno en curso`,
+  "chat.command.reviewDescription": "Revisar el código e informar de lo que requiere atención",
+  "chat.command.reviewHint": "[branch <nombre> | commit <sha> | instrucciones]",
+  "chat.command.startTimeout": "El agente no abrió su sesión a tiempo",
+  "chat.serviceTierTooltip": "Velocidad",
+  "chat.serviceTier.default": "Velocidad estándar",
+  "chat.personalityTooltip": "Tono",
+  "chat.personality.default": "Tono predeterminado",
+  "chat.personality.none": "Neutral",
+  "chat.personality.friendly": "Cordial",
+  "chat.personality.pragmatic": "Pragmático",
+  // ── Conversación larga: las tandas de llamadas a herramientas caben en una línea, con vuelta al final ──
+  "chat.toolRun.count": (n: number) => `${n} llamadas a herramientas`,
+  "chat.toolRun.tooltip": "Ver cada llamada",
+  "chat.backToEnd": "Volver al mensaje más reciente",
+  "chat.elicitation.heading": (server: string) => `${server} solicita datos`,
+  "chat.elicitation.cancel": "Cancelar",
+  "chat.elicitation.decline": "Rechazar",
+  "chat.elicitation.submit": "Enviar",
+  "chat.elicitation.done": "Listo",
+  "chat.elicitation.choose": "Elegir…",
+  "chat.effort.off": "Desactivado",
+  "chat.effort.offHint": "Sin razonamiento extendido",
+  "chat.fastMode.label": "Rápido",
+  "chat.fastMode.on": "El modo rápido está activado",
+  "chat.fastMode.off": "El modo rápido está desactivado",
+  "chat.usage.context": (used: string, max: string, pct: number) =>
+    `Contexto: ${used} de ${max} tokens (${pct} %)`,
+  "chat.usage.cost": (usd: string) => `Coste de la sesión: $${usd}`,
+  "chat.usage.rateLimited": (resets: string) => `Límite de uso alcanzado; se restablece ${resets}`,
+  "chat.usage.rateWarning": (pct: number, resets: string) =>
+    `Límite de uso: ${pct} % consumido; se restablece ${resets}`,
+  "chat.mcp.codexScope": "Esta acción modifica tu configuración de usuario de Codex y afecta a otras conversaciones que la utilicen. ¿Continuar?",
+  "chat.mcp.tooltip": "Servidores MCP",
+  "chat.mcp.loading": "Leyendo la lista de servidores…",
+  "chat.mcp.backendUnsupported": "El servidor VelaTerm conectado no admite la gestión de MCP. Actualícelo y reinícielo; después, vuelva a intentarlo.",
+  "chat.mcp.none": "No hay servidores MCP configurados",
+  "chat.mcp.tools": (n: number) => (n === 1 ? "1 herramienta" : `${n} herramientas`),
+  "chat.mcp.reconnect": "Reconectar",
+  "chat.mcp.disable": "Desactivar",
+  "chat.mcp.enable": "Activar",
+  "chat.mcp.status.connected": "Conectado",
+  "chat.mcp.status.disabled": "Desactivado",
+  "chat.mcp.status.failed": "Con error",
+  "chat.mcp.status.pending": "Conectando",
+  "chat.mcp.status.disconnected": "Desconectado",
+  "chat.mcp.status.other": "Desconocido",
+  "chat.tasks.label": "Tareas",
+  "chat.tasks.tooltip": "Tareas en segundo plano",
+  "chat.tasks.backgroundAll": "Pasar el trabajo en curso a segundo plano",
+  "chat.tasks.none": "No hay tareas en segundo plano",
+  "chat.tasks.stop": "Detener",
+  "chat.retry.line": (attempt: number, max: number, seconds: number, message: string) =>
+    `Reintentando (${attempt}/${max}) en ${seconds} s: ${message}`,
+  "chat.notify.dismiss": "Cerrar",
 };
 
 export default es;

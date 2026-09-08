@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   init_cmd    TEXT,
   agent_args  TEXT,
   permission_mode TEXT,
+  collaboration_mode TEXT,
   agent_preset_id TEXT,
   agent_path  TEXT,
   hotkey      TEXT,
@@ -61,6 +62,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   archived_at INTEGER,
   fork_pending INTEGER NOT NULL DEFAULT 0,
   browser_url TEXT,
+  engine      TEXT NOT NULL DEFAULT 'tui',
   mark        TEXT,
   sort_order  INTEGER NOT NULL DEFAULT 0,
   created_at  INTEGER NOT NULL
@@ -70,6 +72,13 @@ CREATE INDEX IF NOT EXISTS idx_groups_project ON groups(project_id);
 CREATE INDEX IF NOT EXISTS idx_groups_parent ON groups(parent_group_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_group ON sessions(group_id);
+
+CREATE TABLE IF NOT EXISTS session_model_settings (
+  session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  model TEXT,
+  effort TEXT,
+  native_state TEXT
+);
 
 -- Application preferences shared across shells: theme, language, appearance, shortcuts, sound, and more.
 -- Keys match frontend localStorage (`vlx-theme`, `vlx-lang`, `vlx-sound`, `vlx-notify`, `vlx-settings`),
@@ -157,6 +166,35 @@ CREATE TABLE IF NOT EXISTS search_index_state (
   PRIMARY KEY (session_id, source)
 );
 CREATE INDEX IF NOT EXISTS idx_search_state_session ON search_index_state(session_id);
+CREATE TABLE IF NOT EXISTS chat_codex_settings (
+  session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  service_tier TEXT,
+  personality TEXT
+);
+
+-- One `/vorch` orchestration: a parent session asked for several agents at once. Without these two tables an
+-- orchestration would leave no trace beyond unrelated-looking sibling sessions, and nothing could report on it
+-- afterwards. Rows are kept after the run so its outcome stays inspectable; deleting the parent takes them.
+CREATE TABLE IF NOT EXISTS orch_runs (
+  id                TEXT PRIMARY KEY,
+  parent_session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  title             TEXT NOT NULL,
+  created_at        INTEGER NOT NULL
+);
+
+-- One agent within a run. `session_id` stays NULL until the frontend has created that session and reported it
+-- back, and stays NULL forever when the user removed that entry in the confirmation dialog: the request is the
+-- record, and what became of it is filled in later. `status` distinguishes the two NULL cases.
+CREATE TABLE IF NOT EXISTS orch_agents (
+  orch_id    TEXT NOT NULL REFERENCES orch_runs(id) ON DELETE CASCADE,
+  idx        INTEGER NOT NULL,
+  name       TEXT NOT NULL,
+  session_id TEXT,
+  status     TEXT NOT NULL DEFAULT 'pending',
+  PRIMARY KEY (orch_id, idx)
+);
+CREATE INDEX IF NOT EXISTS idx_orch_runs_parent ON orch_runs(parent_session_id);
+CREATE INDEX IF NOT EXISTS idx_orch_agents_session ON orch_agents(session_id);
 "#;
 
 /// Creation statement for the `session_fts` virtual full-text index using a trigram tokenizer for substring/CJK
@@ -179,6 +217,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS session_fts USING fts5(
   role          UNINDEXED,
   ts            UNINDEXED,
   tokenize = 'trigram remove_diacritics 1'
+);
+CREATE TABLE IF NOT EXISTS chat_codex_settings (
+  session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  service_tier TEXT,
+  personality TEXT
 );
 "#;
 

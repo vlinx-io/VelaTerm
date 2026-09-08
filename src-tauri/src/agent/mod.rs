@@ -4,6 +4,9 @@
 //! embeds the session ID and one-time token in the hook URL, and emits when the agent POSTs state changes here.
 
 pub mod antigravity;
+pub mod chat;
+pub mod codex_models;
+pub mod claude_models;
 pub mod cli_client;
 pub mod cline;
 pub mod copilot;
@@ -12,6 +15,7 @@ pub mod cursor;
 pub mod export;
 pub mod gitbash;
 pub mod grok;
+pub mod headless;
 pub mod history;
 pub mod inject;
 pub mod install;
@@ -20,10 +24,14 @@ pub mod kiro;
 pub mod model_catalog;
 pub mod omp;
 pub mod opencode;
+pub mod opencode_models;
+pub mod opencode_store;
 pub mod pi;
 pub mod resume;
+pub mod session_settings;
 pub mod server;
 pub mod spawn_cli;
+pub mod status_watch;
 pub mod transcript;
 pub mod usage;
 pub mod usage_store;

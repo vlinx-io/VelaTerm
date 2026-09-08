@@ -2,11 +2,15 @@
 //! The center area uses tabs containing recursively splittable pane trees.
 
 import { create } from "zustand";
+import { DEFAULT_CONVERSATION_FONT_SIZE, normalizeTextSize, normalizeTextLineHeight } from "../theme";
 import { t } from "../i18n";
 import { setBrowserUrl } from "../ipc/browser";
+import { chatClear, setSessionEngine } from "../ipc/chat";
 import {
+  composeAgentArgs,
   createWorktree,
   getSessionCwd,
+  orchAttachSession,
   ptyKill,
   ptyWrite,
   resolveSpawn,
@@ -24,7 +28,7 @@ import { pushSetting } from "../ipc/settingsSync";
 import { isTauri } from "../ipc/transport";
 import { env } from "../platform";
 import { genId } from "../genId";
-import type { SpawnRequest, StatusSignal } from "../ipc/events";
+import type { OrchRequest, SpawnRequest, StatusSignal } from "../ipc/events";
 import type { MirrorLayout } from "./mirrorLayout";
 import type { RemoteClient } from "../ipc/mirror";
 import { whenFirstMirrorAlign } from "./mirrorAlign";
@@ -42,6 +46,7 @@ import {
   type PaneNode,
   removeLeaf,
   removeSession,
+  replaceSession,
   setSizes,
   splitAt,
 } from "../layout/CenterPane/paneTree";
@@ -81,6 +86,8 @@ import type {
   Project,
   Session,
   SessionId,
+  SessionEngine,
+  SessionKind,
   SessionRuntime,
 } from "../types";
 import { effectiveStatus, matchesAgentState } from "../types";
@@ -698,6 +705,26 @@ function reconcileTabs(state: {
   };
 }
 
+/** Every persisted row hidden when a session root is archived, including nested child sessions. */
+function sessionSubtreeIds(sessions: Session[], rootId: SessionId): Set<SessionId> {
+  const children = new Map<SessionId, SessionId[]>();
+  for (const session of sessions) {
+    if (!session.parentSessionId) continue;
+    const siblings = children.get(session.parentSessionId) ?? [];
+    siblings.push(session.id);
+    children.set(session.parentSessionId, siblings);
+  }
+  const ids = new Set<SessionId>();
+  const pending = [rootId];
+  while (pending.length > 0) {
+    const id = pending.pop()!;
+    if (ids.has(id)) continue;
+    ids.add(id);
+    pending.push(...(children.get(id) ?? []));
+  }
+  return ids;
+}
+
 /** Selected tree node. */
 export interface SelNode {
   id: string;
@@ -749,8 +776,14 @@ interface TermStore {
   dormantSessions: Record<SessionId, true>;
   /** Initial prompt pending for a spawned child, consumed by `usePtySession` after startup. */
   pendingPrompts: Record<SessionId, string>;
+  /** One-shot model/effort carried from a cleared chat into its fresh replacement. */
+  pendingChatStarts: Record<SessionId, { model?: string; effort?: string }>;
   /** FIFO spawn-confirmation queue processed one item at a time by `SpawnConfirmModal`. */
   pendingSpawns: SpawnRequest[];
+  /** The orchestration proposal awaiting confirmation, or null. Only one is ever pending: a second
+   * arriving while the dialog is open would silently replace it, which cannot happen in practice
+   * because the session that sent the first is blocked until the user answers. */
+  pendingOrch: OrchRequest | null;
   /** Target ID for the open merge dialog, or `null`. */
   mergeTarget: SessionId | null;
   /** Working directory for the open changes dialog, or `null`. */
@@ -943,6 +976,10 @@ interface TermStore {
   termFontFamily: string | null;
   /** Terminal font size in pixels, applied live to all terminals. */
   termFontSize: number;
+  termLineHeight: number;
+  chatFontFamily: string | null;
+  chatFontSize: number;
+  chatLineHeight: number;
   /** Custom global shortcut overrides by action ID. */
   shortcutOverrides: Record<string, string>;
   /** Default arguments and permission mode by agent type, applied when new sessions omit them. */
@@ -960,6 +997,16 @@ interface TermStore {
   usage: UsageSnapshot | null;
   /** Image-paste mode, configurable only in the local desktop app. */
   imagePasteMode: ImagePasteMode;
+  /** How a new agent session is driven, which is also which of the two views it opens in. */
+  defaultSessionEngine: SessionEngine;
+  /** Model a conversation starts on, remembered from the last one picked. */
+  chatModel: string;
+  /** Model a new conversation starts on, per agent protocol. */
+  chatModelByKind: Record<string, string>;
+  /** Thinking effort per model, remembered from the last one picked for that model. */
+  chatEffortByModel: Record<string, string>;
+  /** Whether a new Claude conversation opens with fast mode on, per agent protocol. */
+  chatFastModeByKind: Record<string, boolean>;
   /** Whether the Info panel's Resources section shows the whole-machine group. */
   showSystemResources: boolean;
 
@@ -1000,6 +1047,7 @@ interface TermStore {
   ) => Promise<void>;
   /** Browser mode: requests a server-side Save As path, or `null` on cancellation. */
   promptSaveAs: (defaultName: string) => Promise<string | null>;
+  /** Creates a group and returns it, so a caller that needs to put sessions inside has its id. */
   addGroup: (
     projectId: string,
     parentGroupId: string | null,
@@ -1008,7 +1056,7 @@ interface TermStore {
       worktreePath?: string | null;
       worktreeBaseRef?: string | null;
     },
-  ) => Promise<void>;
+  ) => Promise<Group>;
   addSession: (input: tree.CreateSessionInput) => Promise<Session | null>;
   /** Forks current conversation history into a sibling session and opens it without changing the source. */
   forkSession: (id: SessionId) => Promise<void>;
@@ -1030,8 +1078,20 @@ interface TermStore {
   closeChanges: () => void;
   /** Executes a spawn: creates the child and optional worktree, stores its prompt, and opens it. */
   executeSpawn: (req: SpawnRequest) => Promise<void>;
+  /** Queue an orchestration proposal for confirmation; it never starts anything by itself. */
+  handleOrchRequest: (req: OrchRequest) => void;
+  /** Discard the proposal, recording every entry as dropped. */
+  cancelOrch: () => void;
+  /** Start the proposal as the user edited it in the dialog. */
+  confirmOrch: (edited: OrchRequest) => Promise<void>;
+  /** Create the group, worktrees, child sessions, and coordinator for one confirmed proposal. */
+  executeOrch: (req: OrchRequest) => Promise<void>;
   /** Consumes a session's pending initial spawn prompt after PTY startup. */
   takePendingPrompt: (id: SessionId) => string | undefined;
+  /** Archives a chat and retargets its existing pane to the returned fresh session. */
+  clearChatSession: (id: SessionId, model?: string, effort?: string) => Promise<Session>;
+  /** Consumes model/effort transferred by `clearChatSession`. */
+  takePendingChatStart: (id: SessionId) => { model?: string; effort?: string } | undefined;
   renameNode: (kind: NodeKind, id: string, name: string) => Promise<void>;
   /** Sets or clears a node's emoji marker; passing null clears it. */
   setNodeMark: (
@@ -1187,6 +1247,13 @@ interface TermStore {
   /** Start a dormant restored session, mounting its terminal and spawning the process. */
   wakeSession: (id: SessionId) => void;
   /**
+   * Choose how a session is driven: its own terminal interface, or the chat engine.
+   *
+   * This one does change what runs — the engine being left is stopped — but not the conversation, which
+   * both engines read and write in the same place.
+   */
+  setSessionEngineMode: (id: SessionId, engine: SessionEngine) => Promise<void>;
+  /**
    * Write the current tabs, split trees, and active state so the next launch can restore them. Called from the
    * quit dialog when the user opts in, and deliberately synchronous so the snapshot lands before the process exits.
    */
@@ -1295,6 +1362,13 @@ interface TermStore {
   setSaveWorkspaceOnQuit: (v: boolean) => void;
   /** Sets persisted image-paste mode for subsequent local desktop pastes. */
   setImagePasteMode: (v: ImagePasteMode) => void;
+  setDefaultSessionEngine: (v: SessionEngine) => void;
+  /** Remember the model a conversation should start on. */
+  setChatModel: (kind: SessionKind, model: string) => void;
+  /** Remember the effort chosen for one model; an empty effort forgets it. */
+  setChatEffort: (model: string, effort: string) => void;
+  /** Remember whether new conversations of this agent open with fast mode on. */
+  setChatFastMode: (kind: SessionKind, enabled: boolean) => void;
   /** Shows or hides the whole-machine rows in the Info panel's Resources section. */
   setShowSystemResources: (v: boolean) => void;
   /** Turns the backend's automatic usage polling on or off. */
@@ -1321,6 +1395,10 @@ interface TermStore {
   setTermFontFamily: (v: string | null) => void;
   /** Terminal font size in pixels, clamped to 10–24. */
   setTermFontSize: (v: number) => void;
+  setTermLineHeight: (v: number) => void;
+  setChatFontFamily: (v: string | null) => void;
+  setChatFontSize: (v: number) => void;
+  setChatLineHeight: (v: number) => void;
   /** Persists a global shortcut override for one action. */
   setShortcut: (action: string, combo: string) => void;
   /** Restores all global shortcuts by clearing overrides. */
@@ -1453,6 +1531,10 @@ function persistAndApplyVisual(getState: () => TermStore) {
     uiFontSize: s.uiFontSize,
     termFontFamily: s.termFontFamily,
     termFontSize: s.termFontSize,
+    termLineHeight: s.termLineHeight,
+    chatFontFamily: s.chatFontFamily,
+    chatFontSize: s.chatFontSize,
+    chatLineHeight: s.chatLineHeight,
     shortcutOverrides: s.shortcutOverrides,
     agentDefaults: s.agentDefaults,
     spawnConfirm: s.spawnConfirm,
@@ -1460,6 +1542,11 @@ function persistAndApplyVisual(getState: () => TermStore) {
     usageAutoRefresh: s.usageAutoRefresh,
     usageRefreshSec: s.usageRefreshSec,
     imagePasteMode: s.imagePasteMode,
+    defaultSessionEngine: s.defaultSessionEngine,
+    chatModel: s.chatModel,
+    chatModelByKind: s.chatModelByKind,
+    chatEffortByModel: s.chatEffortByModel,
+    chatFastModeByKind: s.chatFastModeByKind,
     showSystemResources: s.showSystemResources,
   };
   saveSettings(ps);
@@ -1658,7 +1745,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
   dormantSessions: {},
   ephemeralSessions: {},
   pendingPrompts: {},
+  pendingChatStarts: {},
   pendingSpawns: [],
+  pendingOrch: null,
   mergeTarget: null,
   changesCwd: null,
   changesPath: null,
@@ -1798,7 +1887,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
               browserTabs: {},
             });
             // Restore visible tabs, background tabs, and split trees intact.
-            layoutPatch = { ...reconciled, ephemeralSessions: restoredEph };
+            layoutPatch = {
+              ...reconciled,
+              ephemeralSessions: restoredEph,
+            };
             if (dormant) {
               // Mark every surviving leaf dormant. Reconciliation has already dropped leaves whose sessions no
               // longer exist, so this covers exactly what will be rendered.
@@ -1932,7 +2024,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
     }),
 
   addGroup: async (projectId, parentGroupId, name, worktree) => {
-    await tree.createGroup(projectId, parentGroupId, name, worktree);
+    const created = await tree.createGroup(projectId, parentGroupId, name, worktree);
     // Expand the parent so the new group is not hidden under a collapsed node.
     if (parentGroupId) {
       await tree.setCollapsed("group", parentGroupId, false).catch(() => {});
@@ -1940,6 +2032,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
       await tree.setCollapsed("project", projectId, false).catch(() => {});
     }
     await get().loadTree();
+    return created;
   },
 
   addSession: async (input) => {
@@ -2089,6 +2182,148 @@ export const useTermStore = create<TermStore>((set, get) => ({
   closeChanges: () =>
     set({ changesCwd: null, changesPath: null, changesCommit: null }),
 
+  handleOrchRequest: (req) => {
+    // Always confirmed: an orchestration starts several agent processes at once, which is far past the
+    // threshold where a user should be asked. There is no setting to skip it, unlike single spawns.
+    set({ pendingOrch: req });
+    const s = get();
+    if (s.notifyEnabled) {
+      void notify(
+        req.sessionId,
+        t("orch.notifyTitle"),
+        `${req.title} · ${req.agents.length}`,
+        s.soundEnabled,
+      );
+    }
+  },
+
+  cancelOrch: () => {
+    const req = get().pendingOrch;
+    set({ pendingOrch: null });
+    if (!req) return;
+    // Record every entry as dropped so the run reads as "proposed, then declined" rather than as one
+    // that never reported back.
+    req.agents.forEach((_, idx) => {
+      void orchAttachSession(req.orchId, idx, null).catch(() => {});
+    });
+  },
+
+  confirmOrch: async (edited) => {
+    const original = get().pendingOrch;
+    set({ pendingOrch: null });
+    // Entries the user removed in the dialog never reach executeOrch, so report them here; otherwise
+    // the run would read as one that never finished reporting rather than one trimmed on purpose.
+    if (original) {
+      const kept = new Set(edited.agents.map((a, i) => a.idx ?? i));
+      original.agents.forEach((_, idx) => {
+        if (!kept.has(idx)) void orchAttachSession(edited.orchId, idx, null).catch(() => {});
+      });
+    }
+    await get().executeOrch(edited);
+  },
+
+  executeOrch: async (req) => {
+    const state = get();
+    const parent = state.sessions.find((s) => s.id === req.sessionId);
+    if (!parent) return;
+    const project = state.projects.find((p) => p.id === parent.projectId);
+    const repoRoot = parent.cwd || project?.rootPath || null;
+    const mode = req.worktreeMode ?? "each";
+
+    // Everything from one run lives under a group named after it. Five loose sessions per run would
+    // make the tree unusable after a few, and the group is also what carries a shared worktree.
+    let sharedWorktree: { path: string; baseRef: string | null } | null = null;
+    if (mode === "shared" && repoRoot) {
+      try {
+        const wt = await createWorktree(repoRoot, req.title);
+        sharedWorktree = { path: wt.path, baseRef: wt.baseRef || null };
+      } catch {
+        // Without a worktree the run still proceeds in the parent's directory.
+      }
+    }
+    const group = await get().addGroup(
+      parent.projectId,
+      parent.groupId ?? null,
+      req.title.slice(0, 40),
+      sharedWorktree
+        ? { worktreePath: sharedWorktree.path, worktreeBaseRef: sharedWorktree.baseRef }
+        : undefined,
+    );
+
+    for (const [position, agent] of req.agents.entries()) {
+      // Report under the proposal's own index, which differs from the position once entries were removed.
+      const idx = agent.idx ?? position;
+      const kind = (agent.kind || req.defaults?.kind || parent.kind || "claude") as Session["kind"];
+      const model = agent.model ?? req.defaults?.model ?? null;
+      const effort = agent.effort ?? req.defaults?.effort ?? null;
+
+      let cwd: string | null = parent.cwd ?? project?.rootPath ?? null;
+      let worktreePath: string | null = null;
+      let worktreeBaseRef: string | null = null;
+      if (sharedWorktree) {
+        cwd = sharedWorktree.path;
+        worktreePath = sharedWorktree.path;
+        worktreeBaseRef = sharedWorktree.baseRef;
+      } else if ((agent.worktree ?? mode === "each") && repoRoot) {
+        try {
+          const wt = await createWorktree(repoRoot, agent.name);
+          cwd = wt.path;
+          worktreePath = wt.path;
+          worktreeBaseRef = wt.baseRef || null;
+        } catch {
+          // Falls back to the parent directory, same as a single spawn does.
+        }
+      }
+
+      // The flag spelling differs per agent, so the backend renders it; see composeAgentArgs.
+      const defaults = state.agentDefaults[kind] ?? {};
+      let agentArgs: string | null = defaults.args?.trim() || null;
+      if (model || effort) {
+        agentArgs = await composeAgentArgs(kind, model, effort, agentArgs).catch(() => agentArgs);
+      }
+
+      const created = await get().addSession({
+        projectId: parent.projectId,
+        groupId: group.id,
+        name: agent.name.slice(0, 40),
+        kind,
+        cwd,
+        parentSessionId: parent.id,
+        worktreePath,
+        worktreeBaseRef,
+        agentArgs,
+        permissionMode: defaults.permissionMode ?? null,
+      });
+      // Tell the backend what this entry became. Without it an orchestration cannot be reported on:
+      // nothing else connects a new session to the request that asked for it.
+      void orchAttachSession(req.orchId, idx, created?.id ?? null).catch(() => {});
+      if (!created) continue;
+      set((s) => ({
+        pendingPrompts: { ...s.pendingPrompts, [created.id]: agent.prompt },
+      }));
+      // Opening is what starts the process, so every child has to be opened. The coordinator is opened
+      // last and therefore ends up in front, which is the tab worth watching.
+      get().openSession(created.id, { newTab: true });
+    }
+
+    // A coordinator terminal follows the run so the orchestrating session never has to poll. It is a
+    // plain terminal, not an agent: it only displays status, and paying a model to watch would be waste.
+    // The watch command is its persisted init command rather than a pending prompt: a terminal session
+    // takes no launch prompt, and persisting it means reopening the tab later resumes the watch.
+    const coordinator = await get().addSession({
+      projectId: parent.projectId,
+      groupId: group.id,
+      name: t("orch.coordinatorName"),
+      kind: "terminal",
+      cwd: parent.cwd ?? project?.rootPath ?? null,
+      initCmd: `vstat ${req.orchId} --follow`,
+      parentSessionId: parent.id,
+    });
+    if (coordinator) {
+      get().openSession(coordinator.id, { newTab: !get().singleTabMode });
+    }
+  },
+
   executeSpawn: async (req) => {
     const state = get();
     const parent = state.sessions.find((s) => s.id === req.parentSessionId);
@@ -2210,6 +2445,91 @@ export const useTermStore = create<TermStore>((set, get) => ({
       return { pendingPrompts: rest };
     });
     return p;
+  },
+
+  clearChatSession: async (id, model, effort) => {
+    const fresh = await chatClear(id);
+    let retargeted = false;
+    set((state) => {
+      const archivedIds = sessionSubtreeIds(state.sessions, id);
+      const sessions = state.sessions.flatMap((session) => {
+        if (session.id === id) return [fresh];
+        return archivedIds.has(session.id) ? [] : [session];
+      });
+      if (!sessions.some((session) => session.id === fresh.id)) sessions.push(fresh);
+
+      const paneTrees: Record<SessionId, PaneNode> = {};
+      for (const [tabId, paneTree] of Object.entries(state.paneTrees)) {
+        const nextTree = replaceSession(paneTree, id, fresh.id);
+        if (nextTree !== paneTree) retargeted = true;
+        paneTrees[tabId === id ? fresh.id : tabId] = nextTree;
+      }
+      const replaceId = (value: SessionId) => value === id ? fresh.id : value;
+      const openTabs = state.openTabs.map(replaceId);
+      const liveTabs = state.liveTabs.map(replaceId);
+      const pinnedTabs = state.pinnedTabs.map(replaceId);
+      const activeTabId = state.activeTabId === id ? fresh.id : state.activeTabId;
+      const lastActiveSessionTabId =
+        state.lastActiveSessionTabId === id ? fresh.id : state.lastActiveSessionTabId;
+      const activeSessionId = state.activeSessionId === id ? fresh.id : state.activeSessionId;
+
+      const stripArchived = <T,>(record: Record<SessionId, T>): Record<SessionId, T> => {
+        const next = { ...record };
+        for (const archivedId of archivedIds) delete next[archivedId];
+        return next;
+      };
+      const runtimes = stripArchived(state.runtimes);
+      runtimes[fresh.id] = { status: "idle" };
+      const pendingChatStarts = stripArchived(state.pendingChatStarts);
+      pendingChatStarts[fresh.id] = { model, effort };
+      const selection = state.selection.filter(
+        (node) => node.kind !== "session" || !archivedIds.has(node.id),
+      );
+      const patched = {
+        ...state,
+        sessions,
+        paneTrees,
+        openTabs,
+        liveTabs,
+        pinnedTabs,
+        activeTabId,
+        lastActiveSessionTabId,
+        activeSessionId,
+        runtimes,
+        epochs: stripArchived(state.epochs),
+        dormantSessions: stripArchived(state.dormantSessions),
+        pendingPrompts: stripArchived(state.pendingPrompts),
+        pendingChatStarts,
+        notifications: stripArchived(state.notifications),
+        selection,
+        selectionAnchor:
+          state.selectionAnchor && archivedIds.has(state.selectionAnchor)
+            ? null
+            : state.selectionAnchor,
+        inspectTarget:
+          state.inspectTarget?.kind === "session" && archivedIds.has(state.inspectTarget.id)
+            ? null
+            : state.inspectTarget,
+      };
+      return { ...patched, ...reconcileTabs(patched) };
+    });
+    // The response normally wins the 300 ms tree-event debounce. If another refresh already removed the
+    // source pane, opening the backend-returned session still lands the user in the promised fresh chat.
+    if (!retargeted) get().openSession(fresh.id);
+    await get().loadTree();
+    saveLayoutTick();
+    return fresh;
+  },
+
+  takePendingChatStart: (id) => {
+    const pending = get().pendingChatStarts[id];
+    if (pending === undefined) return undefined;
+    set((state) => {
+      const pendingChatStarts = { ...state.pendingChatStarts };
+      delete pendingChatStarts[id];
+      return { pendingChatStarts };
+    });
+    return pending;
   },
 
   renameNode: async (kind, id, name) => {
@@ -3635,7 +3955,9 @@ export const useTermStore = create<TermStore>((set, get) => ({
         // Whether to mount a terminal for a laid-out session now follows the backend, because mounting is
         // what starts a process. A client that had not opened a session could not tell "not running" from
         // "running, just not opened here", so it mounted — which is how a browser connecting to a desktop
-        // that had merely *restored* a workspace launched every one of those sessions for real.
+        // that had merely *restored* a workspace launched every one of those sessions for real. Chat panes
+        // are different: after one has been woken, keeping it mounted is what preserves its transcript and
+        // exit error, and mounting the pane can safely restart its headless process on demand.
         if (
           !displayed.has(id) &&
           laidOut.has(id) &&
@@ -3644,7 +3966,12 @@ export const useTermStore = create<TermStore>((set, get) => ({
           if (record.alive && dormantSessions[id]) {
             delete dormantSessions[id];
             dormantDirty = true;
-          } else if (!record.alive && !dormantSessions[id]) {
+          } else if (
+            !record.alive &&
+            !dormantSessions[id] &&
+            (state.sessions.find((session) => session.id === id) ?? state.ephemeralSessions[id])
+              ?.engine !== "chat"
+          ) {
             dormantSessions[id] = true;
             dormantDirty = true;
           }
@@ -3709,6 +4036,11 @@ export const useTermStore = create<TermStore>((set, get) => ({
     set((state) => ({
       epochs: { ...state.epochs, [id]: (state.epochs[id] ?? 0) + 1 },
     }));
+  },
+
+  setSessionEngineMode: async (id, engine) => {
+    await setSessionEngine(id, engine);
+    await get().loadTree();
   },
 
   wakeSession: (id) =>
@@ -4187,6 +4519,33 @@ export const useTermStore = create<TermStore>((set, get) => ({
     set({ imagePasteMode: v });
     persistAndApplyVisual(get);
   },
+  setDefaultSessionEngine: (v) => {
+    set({ defaultSessionEngine: v });
+    persistAndApplyVisual(get);
+  },
+  setChatModel: (kind, model) => {
+    set((state) => ({
+      // Keep the old key current for a downgrade and for existing Claude-only settings readers.
+      chatModel: kind === "claude" ? model : state.chatModel,
+      chatModelByKind: { ...state.chatModelByKind, [kind]: model },
+    }));
+    persistAndApplyVisual(get);
+  },
+  setChatEffort: (model, effort) => {
+    set((state) => {
+      const next = { ...state.chatEffortByModel };
+      // The key for "no model chosen" is the empty string, which is a real state: the agent's own default
+      // still has an effort ladder and someone may have picked a level on it.
+      if (effort) next[model] = effort;
+      else delete next[model];
+      return { chatEffortByModel: next };
+    });
+    persistAndApplyVisual(get);
+  },
+  setChatFastMode: (kind, enabled) => {
+    set((state) => ({ chatFastModeByKind: { ...state.chatFastModeByKind, [kind]: enabled } }));
+    persistAndApplyVisual(get);
+  },
   setShowSystemResources: (v) => {
     set({ showSystemResources: v });
     persistAndApplyVisual(get);
@@ -4232,7 +4591,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
   setUiFontSize: (v) => {
     set({
-      uiFontSize: v == null ? null : Math.max(10, Math.min(20, Math.round(v))),
+      uiFontSize: v == null ? null : Math.min(20, normalizeTextSize(v)),
     });
     persistAndApplyVisual(get);
   },
@@ -4241,7 +4600,23 @@ export const useTermStore = create<TermStore>((set, get) => ({
     persistAndApplyVisual(get);
   },
   setTermFontSize: (v) => {
-    set({ termFontSize: Math.max(10, Math.min(24, Math.round(v))) });
+    set({ termFontSize: normalizeTextSize(v) });
+    persistAndApplyVisual(get);
+  },
+  setTermLineHeight: (v) => {
+    set({ termLineHeight: normalizeTextLineHeight(v) });
+    persistAndApplyVisual(get);
+  },
+  setChatFontFamily: (v) => {
+    set({ chatFontFamily: v?.trim() || null });
+    persistAndApplyVisual(get);
+  },
+  setChatFontSize: (v) => {
+    set({ chatFontSize: normalizeTextSize(v, DEFAULT_CONVERSATION_FONT_SIZE) });
+    persistAndApplyVisual(get);
+  },
+  setChatLineHeight: (v) => {
+    set({ chatLineHeight: normalizeTextLineHeight(v) });
     persistAndApplyVisual(get);
   },
   setShortcut: (action, combo) => {

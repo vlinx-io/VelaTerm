@@ -3,6 +3,7 @@
 //! SettingsModal and the store share types while reducing the size of the main store.
 
 import { pushSetting } from "../ipc/settingsSync";
+import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, normalizeTextSize, normalizeTextLineHeight } from "../theme";
 import type {
   AccentChoice,
   Density,
@@ -12,6 +13,7 @@ import type {
   PaneStyle,
   VisualSettings,
 } from "../theme";
+import type { SessionEngine } from "../types";
 
 /** User-configurable background keep-alive tab limit, defaulting to 32. */
 export const DEFAULT_MAX_LIVE_TABS = 32;
@@ -93,6 +95,12 @@ export interface PersistedSettings {
   termFontFamily: string | null;
   /** Terminal font size in pixels, defaulting to 13. */
   termFontSize: number;
+  /** Line-height multiplier, independent of conversation typography. */
+  termLineHeight: number;
+  /** Conversation typography is saved independently of terminal preferences. */
+  chatFontFamily: string | null;
+  chatFontSize: number;
+  chatLineHeight: number;
   /** Global shortcut overrides from action ID to chord; missing entries use shortcutRegistry defaults. */
   shortcutOverrides: Record<string, string>;
   /** Defaults by agent type, serving as global templates for new local-agent sessions. Explicit
@@ -113,6 +121,22 @@ export interface PersistedSettings {
   /** Image paste mode: upload writes a file path, while agent lets the agent read the clipboard and show
    * `[Image #x]`. Configurable only on local desktop clients; browser and remote clients always upload. */
   imagePasteMode: ImagePasteMode;
+  /** How a new agent session is driven, which is also which view it opens in: the conversation (the chat
+   * engine, with permission buttons and model controls) or the agent's own terminal interface. An existing
+   * session keeps whatever it was created with until someone switches it. */
+  defaultSessionEngine: SessionEngine;
+  /** Model a conversation starts on, remembered from the last one picked. Empty means the agent's own default. */
+  chatModel: string;
+  /** Model remembered independently for each chat-capable agent. */
+  chatModelByKind: Record<string, string>;
+  /** Thinking effort per model, remembered from the last one picked for that model.
+   *
+   * Kept per model rather than as one value because the models do not offer the same ladder: a level that
+   * is valid on one is rejected by another, and a single remembered value would be silently dropped every
+   * time it did not apply. */
+  chatEffortByModel: Record<string, string>;
+  /** Whether a new Claude conversation opens with fast mode on, per agent protocol. */
+  chatFastModeByKind: Record<string, boolean>;
   /** Whether the Info panel's Resources section shows the whole-machine group. Off hides those rows and
    * stops sampling the machine, leaving only this session's own CPU and memory. */
   showSystemResources: boolean;
@@ -134,7 +158,11 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   uiFontFamily: null,
   uiFontSize: null,
   termFontFamily: null,
-  termFontSize: 13,
+  termFontSize: DEFAULT_TERMINAL_FONT_SIZE,
+  termLineHeight: DEFAULT_TERMINAL_LINE_HEIGHT,
+  chatFontFamily: null,
+  chatFontSize: DEFAULT_CONVERSATION_FONT_SIZE,
+  chatLineHeight: DEFAULT_TERMINAL_LINE_HEIGHT,
   shortcutOverrides: {},
   agentDefaults: {},
   spawnConfirm: true,
@@ -142,6 +170,11 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   usageAutoRefresh: true,
   usageRefreshSec: 300,
   imagePasteMode: "upload",
+  defaultSessionEngine: "tui",
+  chatModel: "",
+  chatModelByKind: {},
+  chatEffortByModel: {},
+  chatFastModeByKind: {},
   showSystemResources: true,
 };
 export function loadSettings(): PersistedSettings {
@@ -151,6 +184,17 @@ export function loadSettings(): PersistedSettings {
     // Older versions stored boolean gpuRender outside PersistedSettings; declare it solely for migration.
     const parsed = JSON.parse(raw) as Partial<PersistedSettings> & { gpuRender?: boolean };
     const merged = { ...SETTINGS_DEFAULTS, ...parsed };
+    merged.chatFontFamily = typeof merged.chatFontFamily === "string" ? merged.chatFontFamily.trim() || null : null;
+    merged.chatFontSize = normalizeTextSize(merged.chatFontSize, DEFAULT_CONVERSATION_FONT_SIZE);
+    merged.chatLineHeight = normalizeTextLineHeight(merged.chatLineHeight);
+    merged.termLineHeight = normalizeTextLineHeight(merged.termLineHeight);
+    if (
+      !parsed.chatModelByKind ||
+      typeof parsed.chatModelByKind !== "object" ||
+      Array.isArray(parsed.chatModelByKind)
+    ) {
+      merged.chatModelByKind = typeof parsed.chatModel === "string" ? { claude: parsed.chatModel } : {};
+    }
     // Migrate boolean gpuRender to termRenderer only when the new key is absent, preserving WebGL for
     // existing users. Future saves write only the new structure and naturally discard the old field.
     if (parsed.termRenderer === undefined && typeof parsed.gpuRender === "boolean") {
@@ -179,4 +223,7 @@ export const visualOf = (s: PersistedSettings): VisualSettings => ({
   navLayout: s.navLayout,
   uiFontFamily: s.uiFontFamily,
   uiFontSize: s.uiFontSize,
+  chatFontFamily: s.chatFontFamily,
+  chatFontSize: s.chatFontSize,
+  chatLineHeight: s.chatLineHeight,
 });

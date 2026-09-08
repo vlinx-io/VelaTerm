@@ -52,9 +52,18 @@ impl Fixture {
             "#!/usr/bin/env python3\nMODE = {mode:?}\n{}",
             r#"
 import sys,json,re,pathlib,time
+if '--version' in sys.argv: print('2.1.252');sys.exit(0)
+if 'app-server' in sys.argv:
+ for line in sys.stdin:
+  request=json.loads(line)
+  if request.get('method')=='initialize': print(json.dumps({'id':request['id'],'result':{}}),flush=True)
+  if request.get('method')=='model/list':
+   print(json.dumps({'id':request['id'],'result':{'data':[{'id':'test-model','displayName':'Test model','supportedReasoningEfforts':[{'reasoningEffort':'low'},{'reasoningEffort':'high'}]}]}}),flush=True)
+ sys.exit(0)
 prompt=sys.stdin.read()
 root=pathlib.Path(__file__).parent
 with (root/'calls').open('a') as f: f.write('call\n')
+with (root/'args').open('a') as f: f.write(json.dumps(sys.argv[1:])+'\n')
 if MODE=='invalid': print('invalid');sys.exit(0)
 if MODE=='slow': time.sleep(8)
 if 'CATALOG:\n' in prompt:
@@ -385,4 +394,53 @@ fn human_edit_during_merge_is_preserved_and_job_fails_with_conflict() {
             .content,
         "必须保留人工修改"
     );
+}
+
+#[test]
+fn old_memory_jobs_gain_an_empty_effort_without_losing_history() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(&include_str!("schema.sql").replace(" effort TEXT NOT NULL DEFAULT '',\n", "")).unwrap();
+    conn.execute("INSERT INTO memory_sources VALUES('s','s','s','claude','s','digest','source',1)", []).unwrap();
+    conn.execute("INSERT INTO memory_jobs(id,source_id,agent,model,status,stage,owner_pid,created_at,updated_at) VALUES('j','s','claude','opus','completed','done',0,1,1)", []).unwrap();
+    init(&conn).unwrap(); init(&conn).unwrap();
+    let saved: (String,String) = conn.query_row("SELECT model,effort FROM memory_jobs WHERE id='j'", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(saved, ("opus".into(), "".into()));
+}
+
+#[test]
+fn model_selection_rejects_unknown_models_and_unsupported_effort() {
+    let options = vec![runner::ModelOption { id: "model".into(), label: "Model".into(), effort_levels: vec!["high".into()] }];
+    assert!(runner::validate_model(&options, "model", "high").is_ok());
+    assert!(runner::validate_model(&options, "model", "").is_ok());
+    assert!(runner::validate_model(&options, "unknown", "high").is_err());
+    assert!(runner::validate_model(&options, "model", "ultra").is_err());
+    assert!(runner::validate_model(&options, "", "high").is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn compilation_preserves_effort_on_retry_and_deduplicates_only_matching_settings() {
+    for agent in ["claude", "codex"] {
+        let f = Fixture::new(); f.cli("normal"); f.source("s", "Durable knowledge");
+        let model = if agent == "claude" { "claude-opus-5" } else { "test-model" };
+        for effort in ["low", "high"] {
+            f.failed_job(effort, "s", agent);
+            f.app.db().conn.lock().unwrap().execute("UPDATE memory_jobs SET model=?1,effort=?2 WHERE id=?2", params![model,effort]).unwrap();
+            let result = runner::retry(&f.app, effort).unwrap();
+            assert_eq!(result["reused"], false);
+            let job = f.await_job(result["id"].as_str().unwrap());
+            assert_eq!(job["status"], "completed", "{job}");
+            assert_eq!(job["model"], model); assert_eq!(job["effort"], effort);
+            assert_eq!(runner::retry(&f.app, effort).unwrap()["id"], result["id"]);
+        }
+        let args = std::fs::read_to_string(f.dir.join("args")).unwrap();
+        let calls: Vec<Vec<String>> = args.lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        assert_eq!(calls.len(), 4);
+        for (index, args) in calls.iter().enumerate() {
+            let effort = if index < 2 { "low" } else { "high" };
+            assert!(args.windows(2).any(|pair| pair == ["--model", model]));
+            if agent == "claude" { assert!(args.windows(2).any(|pair| pair == ["--effort", effort])); }
+            else { assert!(args.windows(2).any(|pair| pair[0] == "-c" && pair[1] == format!("model_reasoning_effort=\"{effort}\""))); }
+        }
+    }
 }

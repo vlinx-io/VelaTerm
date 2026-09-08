@@ -24,6 +24,7 @@ use tauri::{Emitter, Listener, Manager};
 
 use crate::agent::server::HookServer;
 use crate::db::Db;
+use crate::agent::chat::engine::ChatManager;
 use crate::pty::manager::PtyManager;
 use crate::web::WebServer;
 
@@ -89,6 +90,7 @@ pub struct HeadlessHost {
     data_dir: PathBuf,
     db: Db,
     pty: PtyManager,
+    chat: ChatManager,
     /// HookServer::start itself needs AppCtx to emit and write the database, so construct the host first
     /// and fill this after startup. No hook traffic can access it beforehand.
     hooks: OnceLock<HookServer>,
@@ -105,6 +107,7 @@ impl HeadlessHost {
             data_dir,
             db,
             pty: PtyManager::new(),
+            chat: ChatManager::new(),
             hooks: OnceLock::new(),
             events: EventBus::new(),
             remote_web: WebServer::new(),
@@ -152,6 +155,15 @@ impl AppCtx {
             #[cfg(feature = "gui")]
             AppCtx::Tauri(app) => app.state::<PtyManager>().inner(),
             AppCtx::Headless(host) => &host.pty,
+        }
+    }
+
+    /// Chat-engine sessions: agents driven as protocol peers rather than through a PTY.
+    pub fn chat(&self) -> &ChatManager {
+        match self {
+            #[cfg(feature = "gui")]
+            AppCtx::Tauri(app) => app.state::<ChatManager>().inner(),
+            AppCtx::Headless(host) => &host.chat,
         }
     }
 

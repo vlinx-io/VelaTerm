@@ -737,22 +737,33 @@ pub fn read_at(kind: SessionKind, path: &Path) -> Result<Vec<TranscriptMessage>,
     }
 }
 
+/// Parses an entire JSONL file line-by-line and merges adjacent fragments of the same role. Used by the
+/// path-based `read_at`; `read` resolves each kind's own reader instead, because Codex spans a rollout chain.
+fn parse_file(
+    path: &Path,
+    parse_line: impl Fn(&str) -> Option<Piece>,
+) -> Result<Vec<TranscriptMessage>, String> {
+    let content =
+        std::fs::read_to_string(path).map_err(|e| format!("Failed to read transcript: {e}"))?;
+    let pieces = content.lines().filter_map(|l| parse_line(l));
+    Ok(merge(pieces))
+}
+
 /// Reads and parses an agent transcript by kind. Missing/deleted/unsupported sources return Err so the frontend can
 /// fall back to raw recording playback.
 pub fn read(kind: SessionKind, agent_session_id: &str) -> Result<Vec<TranscriptMessage>, String> {
     match kind {
         SessionKind::Claude => {
-            let path = resume::find_claude_transcript(agent_session_id)
-                .ok_or("Claude transcript file not found")?;
-            parse_file(&path, parse_claude_line)
+            let content = resume::read_claude_transcript(agent_session_id)?;
+            Ok(merge(content.lines().filter_map(parse_claude_line)))
         }
         SessionKind::Codex => {
-            let path = resume::find_codex_rollout(agent_session_id)
-                .ok_or("Codex rollout file not found")?;
-            parse_file(&path, parse_codex_line)
+            let (_, content) = resume::read_codex_rollout_chain(agent_session_id)?;
+            Ok(merge(content.lines().filter_map(parse_codex_line)))
         }
         SessionKind::Opencode => {
-            Err("Transcript view is not supported for opencode sessions yet".to_string())
+            let messages = crate::agent::opencode_store::messages(agent_session_id)?;
+            Ok(merge(opencode_pieces(&messages).into_iter()))
         }
         // Copilot stores internal state under ~/.copilot rather than a flat parseable transcript.
         SessionKind::Copilot => {
@@ -795,17 +806,6 @@ pub fn read(kind: SessionKind, agent_session_id: &str) -> Result<Vec<TranscriptM
         SessionKind::Terminal => Err("Terminal sessions have no agent transcript".to_string()),
         SessionKind::Browser => Err("Browser pages have no agent transcript".to_string()),
     }
-}
-
-/// Parses an entire JSONL file line-by-line and merges adjacent fragments of the same role.
-fn parse_file(
-    path: &Path,
-    parse_line: impl Fn(&str) -> Option<Piece>,
-) -> Result<Vec<TranscriptMessage>, String> {
-    let content =
-        std::fs::read_to_string(path).map_err(|e| format!("Failed to read transcript: {e}"))?;
-    let pieces = content.lines().filter_map(|l| parse_line(l));
-    Ok(merge(pieces))
 }
 
 /// Parse Grok's authoritative ACP `updates.jsonl` stream.
@@ -905,6 +905,27 @@ fn append_grok_text(
     });
 }
 
+/// OpenCode's messages as transcript pieces: one per user message, one per assistant message with the
+/// tools it called, read through the same converter the export uses.
+fn opencode_pieces(messages: &[crate::agent::opencode_store::OpencodeMessage]) -> Vec<Piece> {
+    let mut pieces: Vec<Piece> = Vec::new();
+    for event in crate::agent::chat::opencode_timeline::events(messages) {
+        match event {
+            crate::agent::export::Event::User { text, ts } => {
+                pieces.push(Piece { role: "user", text, timestamp: ts, tools: Vec::new() })
+            }
+            crate::agent::export::Event::AssistantText { text, ts } => {
+                pieces.push(Piece { role: "assistant", text, timestamp: ts, tools: Vec::new() })
+            }
+            crate::agent::export::Event::ToolUse { name, ts, .. } => {
+                pieces.push(Piece { role: "assistant", text: String::new(), timestamp: ts, tools: vec![name] })
+            }
+            _ => {}
+        }
+    }
+    pieces
+}
+
 /// Grok writes Unix seconds at the row root. Convert it to the ISO shape consumed by the viewer.
 fn grok_timestamp(value: &Value) -> Option<String> {
     let seconds = value.get("timestamp")?.as_i64()?;
@@ -952,8 +973,9 @@ fn merge(pieces: impl Iterator<Item = Piece>) -> Vec<TranscriptMessage> {
     out
 }
 
-/// Claude-injected inter-turn context begins with known XML tags but may lack isMeta. It is not genuine user input
-/// and must not establish a turn boundary; export.rs filters it too.
+/// Claude-injected inter-turn context begins with a known XML tag or the fixed compaction-continuation
+/// sentence, but may lack isMeta. It is not genuine user input and must not establish a turn boundary;
+/// export.rs filters it too.
 pub(super) fn is_injected_context(text: &str) -> bool {
     const PREFIXES: &[&str] = &[
         "<command-name>",
@@ -963,8 +985,10 @@ pub(super) fn is_injected_context(text: &str) -> bool {
         "<local-command-caveat>",
         "<system-reminder>",
         "<user-prompt-submit-hook>",
+        "<task-notification>",
         "<environment_details>",
         "<context>",
+        "This session is being continued from a previous conversation",
     ];
     PREFIXES.iter().any(|p| text.starts_with(p))
 }
@@ -1306,7 +1330,8 @@ mod tests {
         files.sort_by_key(|f| std::cmp::Reverse(f.0));
         let path = &files.first().expect("there should be at least one transcript").1;
         eprintln!("parsing: {}", path.display());
-        let msgs = parse_file(path, parse_claude_line).expect("parsing failed");
+        let content = std::fs::read_to_string(path).expect("transcript should be readable");
+        let msgs = merge(content.lines().filter_map(parse_claude_line));
         eprintln!("{} messages in total", msgs.len());
         for m in msgs.iter().take(6) {
             let text: String = m.text.chars().take(120).collect();

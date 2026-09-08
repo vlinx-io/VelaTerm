@@ -37,6 +37,8 @@ import {
   projectRoot,
   type NodeKind,
   type Session,
+  supportsChatEngine,
+  type SessionEngine,
   type SessionKind,
   supportsPermissionToggle,
 } from "../types";
@@ -327,6 +329,8 @@ export function useSessionMenu(): SessionMenu {
       agentPresetId?: string | null;
       /** Executable overriding the kind's default, copied from a preset or typed by the user. */
       agentPath?: string | null;
+      /** How the agent is driven from the start; absent means its own terminal interface. */
+      engine?: SessionEngine | null;
     },
   ) => {
     const st = useTermStore.getState();
@@ -393,6 +397,9 @@ export function useSessionMenu(): SessionMenu {
       permissionMode: rawPerm || null,
       agentPresetId: opts?.agentPresetId ?? null,
       agentPath: opts?.agentPath ?? null,
+      // No explicit choice means the quick "New <agent> Session" path, which follows the app-wide setting
+      // for which view a new session opens in. Terminal sessions ignore the field entirely.
+      engine: opts?.engine ?? (supportsChatEngine(kind) ? st.defaultSessionEngine : null),
       // A group worktree wins over a typed directory, because the session belongs to that worktree.
       ...(wt
         ? { cwd: wt.cwd, worktreePath: wt.worktreePath, worktreeBaseRef: wt.worktreeBaseRef }
@@ -464,6 +471,7 @@ export function useSessionMenu(): SessionMenu {
       permissionMode: string | null;
       agentPresetId?: string | null;
       agentPath?: string | null;
+      engine?: SessionEngine | null;
     },
   ) => {
     const st = useTermStore.getState();
@@ -488,6 +496,7 @@ export function useSessionMenu(): SessionMenu {
       permissionMode: payload.permissionMode || null,
       agentPresetId: payload.agentPresetId ?? null,
       agentPath: payload.agentPath ?? null,
+      engine: payload.engine ?? null,
     });
     if (created) openSession(created.id);
   };
@@ -506,6 +515,7 @@ export function useSessionMenu(): SessionMenu {
       permissionMode: string | null;
       agentPresetId?: string | null;
       agentPath?: string | null;
+      engine?: SessionEngine | null;
     },
   ) => {
     const created = await addSession({
@@ -521,6 +531,7 @@ export function useSessionMenu(): SessionMenu {
       permissionMode: payload.permissionMode || null,
       agentPresetId: payload.agentPresetId ?? null,
       agentPath: payload.agentPath ?? null,
+      engine: payload.engine ?? null,
     });
     if (created) openSession(created.id);
   };
@@ -718,7 +729,7 @@ export function useSessionMenu(): SessionMenu {
       : []),
     ...(!groupId && !parentSessionId && useTermStore.getState().projects.some((p) => p.id === projectId && p.rootPath)
       ? [{
-          label: t("importSessions.title"),
+          label: `${t("importSessions.title")}…`,
           href: importSessionsUrl(projectId),
           icon: <Icons.restart size={14} />,
           onClick: () => openImportSessions(projectId),
@@ -1235,6 +1246,7 @@ export function useSessionMenu(): SessionMenu {
             name,
             agentArgs,
             permissionMode,
+            engine,
             worktree,
             cwd,
             execPath,
@@ -1270,6 +1282,7 @@ export function useSessionMenu(): SessionMenu {
                   permissionMode,
                   agentPresetId: presetId,
                   agentPath: execPath,
+                  engine,
                 },
               );
             } else if (worktree.mode === "existing") {
@@ -1285,6 +1298,7 @@ export function useSessionMenu(): SessionMenu {
                   permissionMode,
                   agentPresetId: presetId,
                   agentPath: execPath,
+                  engine,
                 },
               );
             } else {
@@ -1301,6 +1315,7 @@ export function useSessionMenu(): SessionMenu {
                   cwd,
                   agentPresetId: presetId,
                   agentPath: execPath,
+                  engine,
                 },
               );
             }

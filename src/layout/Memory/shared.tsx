@@ -5,7 +5,7 @@ import { dateLocale, t, type I18nKey } from "../../i18n";
 import { memoryNavigate } from "./navigation";
 
 const errors: Record<string, I18nKey> = {
-  memory_conflict: "memory.conflict", memory_duplicate_title: "memory.duplicate", memory_busy: "memory.busy",
+  memory_models_unavailable: "memory.loadError", memory_conflict: "memory.conflict", memory_duplicate_title: "memory.duplicate", memory_busy: "memory.busy",
   memory_not_found: "memory.notFound", memory_no_transcript: "memory.noTranscript", memory_agent_unavailable: "memory.agentUnavailable",
   memory_invalid: "memory.invalid", memory_process_failed: "memory.processFailed", memory_timeout: "memory.timeout",
   memory_interrupted: "memory.interrupted", memory_source_too_large: "memory.tooLarge", memory_context_too_large: "memory.tooLarge",
@@ -15,6 +15,10 @@ export function memoryError(error: unknown) {
   const text = String(error);
   const code = text.match(/memory_[a-z_]+/)?.[0];
   return t(errors[code ?? ""] ?? "memory.loadError");
+}
+export function memoryEffortLabel(effort: string) {
+  const known = ["auto", "low", "medium", "high", "xhigh", "max", "ultra", "ultracode", "minimal", "off"];
+  return known.includes(effort) ? t(`chat.effort.${effort}` as I18nKey) : effort;
 }
 export function memoryTime(stamp: number) { return new Date(stamp).toLocaleString(dateLocale()); }
 export function StateLabel({ value }: { value: string }) {
@@ -36,7 +40,7 @@ export function useMemoryLoad<T>(loader: () => Promise<T>, deps: unknown[]) {
 }
 export function LoadState({ error, reload }: { error: string; reload: () => void }) {
   return <div className="memory-empty" role={error ? "alert" : "status"}>{error || t("common.loading")}
-    {error && <button className="btn" onClick={reload}>{t("common.retry")}</button>}
+    {error && <button type="button" className="btn" onClick={reload}>{t("common.retry")}</button>}
   </div>;
 }
 export function MemoryMarkdown({ content }: { content: string }) {

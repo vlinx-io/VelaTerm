@@ -1,11 +1,10 @@
 //! Global Memory surface: thematic wiki reading, provenance, editing and compilation history.
 import { useEffect, useRef } from "react";
-import { Backdrop } from "../../components/Backdrop";
 import { useT } from "../../i18n";
 import { MemoryLibrary } from "./MemoryLibrary";
 import { MemoryDocument, MemoryEditor, MemorySourceView } from "./MemoryDocument";
 import { MemoryCompile, MemoryJobs } from "./MemoryTasks";
-import { MemoryLink, memoryNavigate, memoryUrl, useMemoryLocation } from "./navigation";
+import { MemoryLink, useMemoryLocation } from "./navigation";
 import "./memory.css";
 
 export function MemoryIcon({ size = 16 }: { size?: number }) {
@@ -23,7 +22,6 @@ export function MemoryRoute() {
 function MemorySurface({ route }: { route: string }) {
   const t = useT(); const ref = useRef<HTMLElement>(null);
   const [page, id = "", version] = route.split("/");
-  const close = () => memoryNavigate(memoryUrl(""));
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     ref.current?.focus();
@@ -31,19 +29,9 @@ function MemorySurface({ route }: { route: string }) {
   }, []);
   const compact = page === "compile";
   const library = ["library", "entry", "history"].includes(page);
-  return <Backdrop onClose={close}>
-    <section ref={ref} data-page={page} tabIndex={-1} className={`memory-shell${compact ? " memory-compact" : ""}`} role="dialog" aria-modal="true" aria-labelledby="memory-heading" onKeyDown={(e) => {
-      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); }
-      if (e.key === "Tab") {
-        const items = [...(ref.current?.querySelectorAll<HTMLElement>('a[href],button:not(:disabled),input:not(:disabled),textarea:not(:disabled),select:not(:disabled),[tabindex="0"]') ?? [])].filter((node) => node.getClientRects().length);
-        if (items.length && ((!e.shiftKey && document.activeElement === items[items.length - 1]) || (e.shiftKey && (document.activeElement === items[0] || document.activeElement === ref.current)))) {
-          e.preventDefault(); (e.shiftKey ? items[items.length - 1] : items[0])?.focus();
-        }
-      }
-    }}>
+  return <section ref={ref} data-page={page} tabIndex={-1} className="memory-shell memory-tab-surface" role="tabpanel" aria-labelledby="memory-heading">
       <header className="memory-header">
         <div className="memory-brand"><MemoryIcon size={23} /><div><h2 id="memory-heading">{t("memory.title")}<span className="memory-badge">{t("common.experimental")}</span></h2><p>{t("memory.intro")}</p></div></div>
-        <MemoryLink route="" className="btn" aria-label={t("common.close")}>×</MemoryLink>
       </header>
       {!compact && <nav className="memory-nav" aria-label={t("memory.title")}>
         <MemoryLink route="library" className={library ? "active" : ""}>{t("memory.entries")}</MemoryLink>
@@ -58,6 +46,5 @@ function MemorySurface({ route }: { route: string }) {
           {page === "compile" ? <MemoryCompile sessionId={id} /> : page === "jobs" || page === "job" ? <MemoryJobs id={page === "job" ? id : undefined} /> : page === "source" ? <MemorySourceView id={id} /> : page === "edit" || page === "new" ? <MemoryEditor id={page === "edit" ? id : undefined} /> : <div className="memory-empty">{t("memory.notFound")}</div>}
         </main>}
       </div>
-    </section>
-  </Backdrop>;
+    </section>;
 }

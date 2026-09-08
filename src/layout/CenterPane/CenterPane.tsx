@@ -3,6 +3,8 @@
 //! Inactive tabs use `display:none`, keeping xterm and the PTY alive; dividers overlay the active tab.
 
 import { lazy, Suspense, useCallback, useMemo, useRef } from "react";
+import { MemoryRoute } from "../Memory/MemoryRoute";
+import { useMemoryTab } from "../Memory/useMemoryTab";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
 import { IS_PLAIN_BROWSER } from "../../hooks/shortcutRegistry";
@@ -23,6 +25,7 @@ import { LiveTabsOverLimitDialog } from "./LiveTabsOverLimitDialog";
 import { SearchBar } from "./SearchBar";
 import { TabBar } from "./TabBar";
 import { TerminalView } from "./TerminalView";
+import { ChatPane } from "./session/ChatPane";
 
 // Dynamically import the entire document editor. Crepe/CodeMirror plus ProseMirror exceeds 1 MB
 // before compression, so Vite splits it into a chunk that does not affect terminal startup.
@@ -111,6 +114,7 @@ function Divider({
 }
 
 export function CenterPane() {
+  useMemoryTab();
   const t = useT();
   const projects = useTermStore((s) => s.projects);
   const sessions = useTermStore((s) => s.sessions);
@@ -179,7 +183,8 @@ export function CenterPane() {
     <div className="col col-mid">
       <TabBar />
       <div className="stage" ref={stageRef} style={{ position: "relative" }}>
-        {searchOpen && activeSessionId && <SearchBar />}
+        <MemoryRoute />
+        {searchOpen && activeSessionId && (sessionsById.get(activeSessionId) ?? ephemeralSessions[activeSessionId])?.engine !== "chat" && <SearchBar />}
 
         {openTabs.length === 0 && (
           <div className="empty">
@@ -219,6 +224,25 @@ export function CenterPane() {
                 area={info ? rectToStyle(info.rect) : FULL}
                 hidden={!visible}
                 onActivate={info ? () => handleActivate(info.paneId, id) : undefined}
+              />
+            );
+          }
+          // A chat-engine session has no PTY: the agent runs as a protocol peer in the backend, and this
+          // pane is its whole interface. Mounting and unmounting it is free, unlike a terminal.
+          if (session.engine === "chat") {
+            return (
+              <ChatPane
+                key={`${id}:${epoch}`}
+                session={session}
+                cwd={cwd}
+                area={info ? rectToStyle(info.rect) : FULL}
+                hidden={!visible}
+                focused={visible && id === activeSessionId}
+                multi={multi}
+                paneId={info?.paneId}
+                onActivate={handleActivate}
+                onSplit={handleSplit}
+                onClose={handleClose}
               />
             );
           }

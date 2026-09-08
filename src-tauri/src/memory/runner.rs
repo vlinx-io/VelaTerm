@@ -24,6 +24,7 @@ pub struct Job {
     pub session_name: String,
     pub agent: String,
     pub model: String,
+    pub effort: String,
     pub status: String,
     pub stage: String,
     pub progress: i64,
@@ -41,6 +42,7 @@ fn read_job(r: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         session_name: r.get(2)?,
         agent: r.get(3)?,
         model: r.get(4)?,
+        effort: r.get(13)?,
         status: r.get(5)?,
         stage: r.get(6)?,
         progress: r.get(7)?,
@@ -51,7 +53,7 @@ fn read_job(r: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         updated_at: r.get(12)?,
     })
 }
-const JOB_SQL: &str = "SELECT j.id,j.source_id,s.session_name,j.agent,j.model,j.status,j.stage,j.progress,j.total,j.error,j.entries,j.created_at,j.updated_at FROM memory_jobs j JOIN memory_sources s ON s.id=j.source_id";
+const JOB_SQL: &str = "SELECT j.id,j.source_id,s.session_name,j.agent,j.model,j.status,j.stage,j.progress,j.total,j.error,j.entries,j.created_at,j.updated_at,j.effort FROM memory_jobs j JOIN memory_sources s ON s.id=j.source_id";
 
 pub fn recover(conn: &rusqlite::Connection) -> Result<(), String> {
     // Active processes heartbeat while waiting for the CLI. Stale jobs become explicitly retryable.
@@ -105,11 +107,48 @@ pub fn options(app: &AppCtx) -> Result<Value, String> {
     )
 }
 
-pub fn start(app: &AppCtx, session_id: &str, agent: &str, model: &str) -> Result<Value, String> {
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelOption {
+    pub id: String,
+    pub label: String,
+    pub effort_levels: Vec<String>,
+}
+
+pub fn models(app: &AppCtx, agent: &str) -> Result<Vec<ModelOption>, String> {
+    let bin = process::executable(app, agent)?;
+    if agent == "claude" {
+        Ok(crate::agent::claude_models::list_for_bin(&bin).into_iter().map(|m| ModelOption {
+            id: m.id, label: m.label, effort_levels: m.effort_levels,
+        }).collect())
+    } else {
+        crate::agent::codex_models::list(&bin, &[]).map(|models| models.into_iter().map(|m| ModelOption {
+            id: m.id, label: m.label, effort_levels: m.effort_levels,
+        }).collect()).map_err(|_| "memory_models_unavailable".to_string())
+    }
+}
+
+fn validate_selection(app: &AppCtx, agent: &str, model: &str, effort: &str) -> Result<(), String> {
+    // Legacy jobs with no overrides still use the CLI configuration.
+    if model.is_empty() && effort.is_empty() { return Ok(()); }
+    let options = models(app, agent)?;
+    validate_model(&options, model, effort)
+}
+
+pub(super) fn validate_model(options: &[ModelOption], model: &str, effort: &str) -> Result<(), String> {
+    let selected = options.iter().find(|m| m.id == model).ok_or("memory_invalid:model")?;
+    if !effort.is_empty() && !selected.effort_levels.iter().any(|e| e == effort) {
+        return Err("memory_invalid:effort".into());
+    }
+    Ok(())
+}
+
+pub fn start(app: &AppCtx, session_id: &str, agent: &str, model: &str, effort: &str) -> Result<Value, String> {
     process::executable(app, agent)?;
     if model.len() > 200 || model.chars().any(char::is_control) {
         return Err("memory_invalid:model".into());
     }
+    validate_selection(app, agent, model, effort)?;
     let session = {
         let conn = app.db().conn.lock().map_err(|e| e.to_string())?;
         crate::db::repo::get_session(&conn, session_id)?.ok_or("memory_not_found")?
@@ -168,18 +207,21 @@ pub fn start(app: &AppCtx, session_id: &str, agent: &str, model: &str) -> Result
         )
         .map_err(|e| e.to_string())?
     };
-    launch(app, &source_id, agent, model)
+    launch(app, &source_id, agent, model, effort)
 }
 
-fn launch(app: &AppCtx, source_id: &str, agent: &str, model: &str) -> Result<Value, String> {
+fn launch(app: &AppCtx, source_id: &str, agent: &str, model: &str, effort: &str) -> Result<Value, String> {
     process::executable(app, agent)?;
     let id = uuid::Uuid::new_v4().to_string();
     {
         let mut conn = app.db().conn.lock().map_err(|e| e.to_string())?;
         let tx = conn.transaction().map_err(|e| e.to_string())?;
         recover(&tx)?;
-        let previous:Option<Job>=tx.query_row(&format!("{JOB_SQL} WHERE j.source_id=?1 AND (j.status='running' OR (j.status='completed' AND j.agent=?2 AND j.model=?3)) ORDER BY (j.status='running') DESC,j.created_at DESC LIMIT 1"),params![source_id,agent,model],read_job).optional().map_err(|e|e.to_string())?;
+        let previous:Option<Job>=tx.query_row(&format!("{JOB_SQL} WHERE j.source_id=?1 AND (j.status='running' OR (j.status='completed' AND j.agent=?2 AND j.model=?3 AND j.effort=?4)) ORDER BY (j.status='running') DESC,j.created_at DESC LIMIT 1"),params![source_id,agent,model,effort],read_job).optional().map_err(|e|e.to_string())?;
         if let Some(previous) = previous {
+            if previous.status == "running" && (previous.agent != agent || previous.model != model || previous.effort != effort) {
+                return Err("memory_busy".into());
+            }
             let live = previous
                 .entries
                 .iter()
@@ -187,7 +229,8 @@ fn launch(app: &AppCtx, source_id: &str, agent: &str, model: &str) -> Result<Val
             if previous.status == "running"
                 || ((previous.entries.is_empty() || live)
                     && previous.agent == agent
-                    && previous.model == model)
+                    && previous.model == model
+                    && previous.effort == effort)
             {
                 return Ok(json!({"id":previous.id,"reused":true}));
             }
@@ -202,7 +245,7 @@ fn launch(app: &AppCtx, source_id: &str, agent: &str, model: &str) -> Result<Val
         if busy {
             return Err("memory_busy".into());
         }
-        tx.execute("INSERT INTO memory_jobs(id,source_id,agent,model,status,stage,owner_pid,created_at,updated_at) VALUES(?1,?2,?3,?4,'running','extract',?5,?6,?6)",params![id,source_id,agent,model,std::process::id(),now()]).map_err(|e|e.to_string())?;
+        tx.execute("INSERT INTO memory_jobs(id,source_id,agent,model,effort,status,stage,owner_pid,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,'running','extract',?6,?7,?7)",params![id,source_id,agent,model,effort,std::process::id(),now()]).map_err(|e|e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
     }
     let ctx = app.clone();
@@ -238,7 +281,8 @@ pub fn retry(app: &AppCtx, id: &str) -> Result<Value, String> {
     if !["failed", "cancelled"].contains(&job.status.as_str()) {
         return Err("memory_invalid:job_status".into());
     }
-    launch(app, &job.source_id, &job.agent, &job.model)
+    if !job.effort.is_empty() { validate_selection(app, &job.agent, &job.model, &job.effort)?; }
+    launch(app, &job.source_id, &job.agent, &job.model, &job.effort)
 }
 
 pub fn cancel(app: &AppCtx, id: &str) -> Result<Value, String> {

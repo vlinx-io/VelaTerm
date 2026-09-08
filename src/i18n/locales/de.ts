@@ -124,11 +124,25 @@ const de: typeof en = {
   "common.save": "Speichern", // Save
   "common.create": "Erstellen", // Create
   "common.close": "Schließen", // Close
+  "chat.imageViewOriginal": "Originalbild anzeigen",
+  "chat.imageCopy": "Bild kopieren",
+  "chat.imageSave": "Bild speichern",
+  "chat.imageActionFailed": "Die Bildaktion konnte nicht ausgeführt werden. Bitte versuchen Sie es erneut.",
   "common.copy": "Kopieren", // Copy
   "common.cut": "Ausschneiden", // Cut
   "common.paste": "Einfügen", // Paste
   "common.selectAll": "Alles auswählen", // Select All
   "common.copied": "Kopiert", // Copied
+  "chat.sync.loading": "Unterhaltung wird synchronisiert…",
+  "chat.sync.failed": "Synchronisierung fehlgeschlagen. Bereits geladene Nachrichten bleiben verfügbar.",
+  "chat.sync.history": "Ältere Nachrichten laden",
+  "chat.submission.updateRequired": "Aktualisieren Sie den Server, bevor Sie mit diesem Client Nachrichten senden.",
+  "chat.submission.sending": "Wird gesendet…",
+  "chat.submission.sent": "Gesendet",
+  "chat.submission.queued": "In der Warteschlange",
+  "chat.submission.failed": "Senden fehlgeschlagen",
+  "chat.submission.unknown": "Zustellung nicht bestätigt",
+  "chat.submission.check": "Status prüfen",
   "common.retry": "Erneut versuchen", // Retry
   "common.experimental": "Experimentell",
   "common.refresh": "Aktualisieren", // Refresh
@@ -250,6 +264,8 @@ const de: typeof en = {
   "settings.navTree": "Baum", // Tree
   "settings.navCompact": "Kompakt", // Compact
   "settings.tabs": "Tabs", // Tabs
+  "settings.defaultSessionEngine": "Standardansicht für neue Sitzungen",
+  "settings.defaultSessionEngineHint": "Bestehende Sitzungen behalten die Ansicht, mit der sie erstellt wurden.",
   "settings.dynamicStatusFilter": "Dynamische Ergänzung des Statusfilters",
   "settings.tabSingle": "Einzeln", // Single
   "settings.tabMulti": "Mehrere", // Multi
@@ -286,6 +302,25 @@ const de: typeof en = {
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
+  "orch.title": "Diese Agenten starten?",
+  "orch.notifyTitle": "Orchestrierung wartet auf Bestätigung",
+  "orch.coordinatorName": "Fortschritt",
+  "orch.sharedSettings": "Gemeinsame Einstellungen",
+  "orch.agentLabel": "Agent",
+  "orch.modelLabel": "Modell",
+  "orch.effortLabel": "Aufwand",
+  "orch.nameLabel": "Name",
+  "orch.promptLabel": "Aufgabe",
+  "orch.worktreeLabel": "Worktree",
+  "orch.worktreeNone": "Aktuelles Verzeichnis verwenden",
+  "orch.worktreeShared": "Ein gemeinsamer Worktree",
+  "orch.worktreeEach": "Je ein Worktree",
+  "orch.follow": "Gemeinsam übernehmen",
+  "orch.overridden": "geändert",
+  "orch.remove": "Entfernen",
+  "orch.launch": (n: number) => `${n} starten`,
+  "orch.modelPlaceholder": "Agent-Standard",
+  "orch.effortPlaceholder": "Agent-Standard",
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "Änderungen anzeigen…",
@@ -388,6 +423,12 @@ const de: typeof en = {
   "settings.uiFontSize": "Interface size", // TODO translate
   "settings.termFont": "Terminal font", // TODO translate
   "settings.termFontSize": "Terminal size", // TODO translate
+  "settings.termLineHeight": "Zeilenhöhe im Terminal",
+  "settings.chatTypography": "Unterhaltungsansicht",
+  "settings.chatTypographyHint": "Diese Schrifteinstellungen sind unabhängig vom Terminal und werden sofort wirksam.",
+  "settings.chatFont": "Schriftart der Unterhaltung",
+  "settings.chatFontSize": "Schriftgröße der Unterhaltung",
+  "settings.chatLineHeight": "Zeilenhöhe der Unterhaltung",
   "settings.fontDefault": "Default", // TODO translate
   "settings.fontCustom": "Custom…", // TODO translate
   "settings.fontUnavailable": "Auf diesem Gerät nicht installiert",
@@ -674,6 +715,13 @@ const de: typeof en = {
   "form.customOption": "Benutzerdefiniert…", // Custom…
   "tree.cwdLabel": "Arbeitsverzeichnis (leer = Projektwurzel)", // Working directory (leave empty for project root)
   "tree.initCmdLabel": "Startbefehl (optional)", // Startup command (optional)
+  "tree.engineLabel": "Öffnet in",
+  "tree.engineTui": "Terminalansicht",
+  "tree.engineChat": "Gesprächsansicht",
+  // The agent runs its own terminal interface.
+  "tree.engineTuiHint": "Der Agent läuft in seiner eigenen Terminaloberfläche.",
+  // Messages and tool cards, with buttons for permission questions.
+  "tree.engineChatHint": "Darstellung als Nachrichten und Werkzeugkarten; Berechtigungsanfragen werden in der Oberfläche beantwortet.",
   "tree.agentArgsLabel": "Startargumente (optional)", // Launch args (optional)
   // Working directory / Leave empty for the default
   "tree.workingDirLabel": "Arbeitsverzeichnis",
@@ -733,6 +781,11 @@ const de: typeof en = {
   "info.createdAt": "Erstellt am", // Created at
 
   // Resume-session dialog
+  "importSessions.results": ({ count }: { count: number }) => `Ergebnisse: ${count}`,
+  "importSessions.selected": ({ count }: { count: number }) => `Ausgewählt: ${count}`,
+  "importSessions.clearSelection": "Auswahl aufheben",
+  "importSessions.clearSearch": "Suche zurücksetzen",
+  "importSessions.noHistory": "Für dieses Projektverzeichnis wurden keine bisherigen Sitzungen gefunden.",
   "importSessions.title": "Sitzungen importieren",
   "importSessions.description": "Suchen Sie bestehende Codex-, Claude- und OpenCode-Sitzungen mit dem Arbeitsverzeichnis dieses Projekts. Wählen Sie Sitzungen aus, um sie dem Projekt hinzuzufügen, und öffnen Sie anschließend eine Sitzung, um das Gespräch fortzusetzen.",
   "importSessions.search": "Nach Titel, Agent oder Sitzungs-ID suchen",
@@ -1201,6 +1254,200 @@ const de: typeof en = {
   "statusbar.updateReady": "Restart to update", // TODO translate
   "statusbar.updateFailed": "Update failed", // TODO translate
   "statusbar.updateTooltip": "Click for details", // TODO translate
+
+  // ── Gesprächsansicht (die Agenten-Sitzung als Unterhaltung gelesen) ──
+  "session.showConversation": "Gesprächsansicht",
+  "session.showTerminal": "Terminalansicht",
+  "session.switchTitle": "Der Wechsel der Ansicht startet den Agenten neu",
+  "session.switchBody": "Der laufende Zug wird abgebrochen. Das Gespräch bleibt erhalten.",
+  "session.switchConfirm": "Wechseln",
+  "session.loading": "Gespräch wird gelesen…",
+  "session.unavailable": "Dieses Gespräch lässt sich noch nicht lesen",
+  "session.working": "Arbeitet…",
+  "session.thinking": "Überlegung",
+  "session.toolRunning": "läuft",
+  "session.toolUnknown": "Werkzeug",
+  "session.toolFailed": "Fehlgeschlagen",
+  "session.toolNoDetail": "Mehr wurde nicht aufgezeichnet",
+  "session.showMore": (n: number) => `${n} weitere Zeichen anzeigen`,
+  "session.showLess": "Weniger anzeigen",
+  "session.composerHint": "Nachricht an den Agenten · Enter sendet, Umschalt+Enter fügt eine Zeile ein",
+  "session.send": "Senden",
+
+  // ── Gesprächs-Engine (eine über Protokoll gesteuerte Sitzung) ──
+  "chat.empty": "Beginnen Sie das Gespräch über das Eingabefeld unten.",
+  "chat.interrupt": "Stoppen",
+  "chat.interruptTooltip": "Anhalten · Esc",
+  "chat.allow": "Erlauben",
+  "chat.deny": "Ablehnen",
+  "chat.permissionAsk": (tool: string) => `${tool} möchte ausgeführt werden`,
+  "chat.exited": (code: number) => `Der Agent hat sich beendet (Code ${code})`,
+  "chat.modeNextTurn": "Ab nächster Runde",
+  "chat.modePendingHint": (current: string, next: string) =>
+    `Aktuelle Berechtigungen: ${current}. ${next} gilt ab der nächsten Runde; die aktuelle Runde wird unverändert fortgesetzt.`,
+  "chat.modeTooltip": "Berechtigungsmodus",
+  "chat.collaborationModeTooltip": "Zusammenarbeitsmodus",
+  "chat.collaborationMode.default": "Standard",
+  "chat.collaborationMode.defaultHint":
+    "Arbeitet direkt und fragt nur, wenn eine Entscheidung erforderlich ist",
+  "chat.collaborationMode.plan": "Planung",
+  "chat.collaborationMode.planHint":
+    "Analysiert die Aufgabe und erstellt einen Plan; Fragen können als interaktive Karten erscheinen",
+  "chat.modelTooltip": "Modell",
+  "chat.keepChoice": "Als Standard",
+  "chat.keepChoiceFor": (model) => `Als Standard für ${model}`,
+  "chat.modelDefault": "Standardmodell",
+  "chat.mode.default": "Immer fragen",
+  "chat.mode.acceptEdits": "Änderungen annehmen",
+  "chat.mode.plan": "Planmodus",
+  "chat.mode.bypassPermissions": "Ohne Nachfrage",
+  "chat.mode.readOnly": "Schreibgeschützt",
+  "chat.mode.fullAccess": "Vollzugriff",
+  "chat.placeholder": "Nachricht an den Agenten, oder /Befehle, /Skills und @Dateien nutzen",
+  "chat.command.clearDescription": "Diese Sitzung archivieren und eine neue Unterhaltung beginnen",
+  "chat.command.rewindDescription": "Auswählen, was ab der letzten Benutzernachricht zurückgesetzt wird",
+  "chat.command.rewindUnavailable":
+    "Zum Zurücksetzen muss eine Benutzernachricht abgeschlossen sein; außerdem dürfen keine Runde, Nachrichten oder Berechtigungsanfragen offen sein.",
+  "chat.effortTooltip": "Denkaufwand",
+  "chat.effortDefault": "Denken",
+  "chat.effort.auto": "Automatisch",
+  "chat.effort.low": "Niedrig",
+  "chat.effort.medium": "Mittel",
+  "chat.effort.high": "Hoch",
+  "chat.effort.xhigh": "Sehr hoch",
+  "chat.effort.max": "Maximal",
+  "chat.effort.ultra": "Extrem",
+  "chat.effort.ultracode": "Ultra Code",
+  "chat.agentTooltip": "Agent",
+  "chat.effort.minimal": "Minimal",
+  "chat.filterPlaceholder": "Filtern",
+  "chat.placeholderOpencode": "Nachricht an den Agenten; /Befehle und @Dateien möglich, mit ! wird ein Shell-Befehl ausgeführt",
+  "chat.command.compactDescription": "Die Unterhaltung zusammenfassen, um Kontext freizugeben",
+  "chat.command.undoDescription": "Die letzte Nachricht und die dadurch geänderten Dateien zurücknehmen",
+  "chat.command.redoDescription": "Das zuletzt Zurückgenommene wiederherstellen",
+  "chat.command.shareDescription": "Einen Link zum Teilen dieser Unterhaltung erstellen",
+  "chat.command.unshareDescription": "Diese Unterhaltung nicht mehr teilen",
+  "chat.mode.auto": "Automatik",
+
+  // ── Eine Frage des Agenten, als Formular beantwortet ──
+  "chat.question.heading": "Der Agent hat eine Frage",
+  "chat.question.submit": "Absenden",
+  "chat.question.next": "Weiter",
+  "chat.question.dismiss": "Verwerfen",
+  "chat.question.answerPlaceholder": "Antwort eingeben",
+  "chat.question.otherPlaceholder": "Andere Antwort",
+  "chat.question.answeredHeading": (n: number) =>
+    n === 1 ? "1 Frage beantwortet" : `${n} Fragen beantwortet`,
+  "chat.question.blankAnswer": "Leer gelassen",
+
+  // ── Ein Plan wartet auf Freigabe ──
+  "chat.plan.heading": "Plan wartet auf Freigabe",
+  "chat.plan.implement": "Freigeben und ausführen",
+  "chat.plan.reject": "Ablehnen",
+
+  // ── Nachrichten, die während der Arbeit getippt wurden ──
+  "chat.placeholderBusy": "Nachricht eingeben; sie wird gesendet, sobald dieser Durchlauf endet",
+  "chat.queueTooltip": (combo: string) => `Wird gesendet, sobald dieser Durchlauf endet · ${combo} sendet sofort`,
+  "chat.queue.pending": "Ausstehende Nachrichten",
+  "chat.queue.edit": "Bearbeiten",
+  "chat.queue.remove": "Entfernen",
+
+  // ── Bilder, die in das Eingabefeld eingefügt oder gezogen wurden ──
+  "chat.attach.remove": "Dieses Bild entfernen",
+  "chat.attach.tooMany": (max: number) => `Eine Nachricht kann bis zu ${max} Bilder enthalten`,
+  "chat.attach.tooLarge": (name: string, mb: number) => `${name} überschreitet ${mb} MB und wurde nicht angehängt`,
+  "chat.attach.unreadable": (name: string) => `${name} konnte nicht gelesen werden`,
+  // Compacting the conversation… / Context compacted / Context compacted automatically
+  "chat.compaction.running": "Unterhaltung wird komprimiert …",
+  "chat.compaction.manual": "Kontext komprimiert",
+  "chat.compaction.auto": "Kontext automatisch komprimiert",
+  "chat.compaction.from": (tokens: string) => `von ${tokens} Tokens`,
+  // N steps
+  "chat.subagent.steps": (n: number) => (n === 1 ? "1 Schritt" : `${n} Schritte`),
+  "chat.subagent.tokens": (tokens: string) => `${tokens} Token`,
+  "chat.rewind.title": "Ab hier zurückspulen",
+  "chat.rewind.warning": "Diese Aktion lässt sich nicht rückgängig machen.",
+  "chat.rewind.conversation": "Konversation zurückspulen",
+  "chat.rewind.files": "Dateien wiederherstellen",
+  "chat.rewind.both": "Konversation zurückspulen und Dateien wiederherstellen",
+  "chat.rewind.confirm.conversation": "Diese Nachricht und alles danach entfernen?",
+  "chat.rewind.confirm.files": "Dateien auf den Stand vor dieser Nachricht zurücksetzen?",
+  "chat.rewind.confirm.both": "Diesen Durchlauf entfernen und seine Dateiänderungen zurücksetzen?",
+  "chat.rewind.unavailable": "Für diese Nachricht ist kein Datei-Checkpoint vorhanden.",
+  "chat.rewind.previewing": "Datei-Checkpoint wird geprüft…",
+  "chat.rewind.cancel": "Unverändert lassen",
+  "chat.rewind.apply": "Zurückspulen",
+  "chat.rewind.applying": "Wird zurückgespult…",
+  "chat.rewind.fileSummary": (files: number, insertions: number, deletions: number) =>
+    `${files} ${files === 1 ? "Datei wird" : "Dateien werden"} geändert: +${insertions} −${deletions}. Diese Aktion lässt sich nicht rückgängig machen.`,
+  // ── Dauerregeln, die eine Berechtigungsfrage anbietet, mit einem Klick übernommen ──
+  "chat.suggest.modeSession": (mode: string) => `${mode} für diese Sitzung`,
+  "chat.suggest.mode": (mode: string) => `Auf ${mode} wechseln`,
+  "chat.suggest.allowSession": (rule: string) => `${rule} für diese Sitzung erlauben`,
+  "chat.suggest.allowAlways": (rule: string) => `${rule} immer erlauben`,
+  "chat.suggest.dirSession": (dirs: string) => `Zugriff auf ${dirs} für diese Sitzung erlauben`,
+  "chat.suggest.dirAlways": (dirs: string) => `Zugriff auf ${dirs} immer erlauben`,
+  // ── Codex: dauerhafte Netzwerkregeln, Einwerfen, eigene Befehle sowie die Chips für Tempo und Tonfall ──
+  "chat.suggest.networkAlways": (host: string) => `Netzwerkzugriff auf ${host} immer erlauben`,
+  "chat.steer": "Ergänzen",
+  "chat.stopping": "Aktueller Durchlauf wird angehalten…",
+  "chat.stopped": "Aktueller Durchlauf angehalten",
+  "chat.steerAccepted": "Ergänzung gesendet",
+  "chat.steerTooltip": (combo: string) => `${combo} fügt es dem laufenden Durchlauf hinzu`,
+  "chat.command.reviewDescription": "Code prüfen und melden, was Aufmerksamkeit braucht",
+  "chat.command.reviewHint": "[branch <Name> | commit <SHA> | Anweisungen]",
+  "chat.command.startTimeout": "Der Agent hat seine Sitzung nicht rechtzeitig geöffnet",
+  "chat.serviceTierTooltip": "Tempo",
+  "chat.serviceTier.default": "Standardtempo",
+  "chat.personalityTooltip": "Tonfall",
+  "chat.personality.default": "Standard-Tonfall",
+  "chat.personality.none": "Neutral",
+  "chat.personality.friendly": "Freundlich",
+  "chat.personality.pragmatic": "Pragmatisch",
+  // ── Langes Gespräch: Folgen von Tool-Aufrufen stehen in einer Zeile, dazu der Weg zurück ans Ende ──
+  "chat.toolRun.count": (n: number) => `${n} Tool-Aufrufe`,
+  "chat.toolRun.tooltip": "Jeden Aufruf anzeigen",
+  "chat.backToEnd": "Zur neuesten Nachricht",
+  "chat.elicitation.heading": (server: string) => `${server} bittet um Eingaben`,
+  "chat.elicitation.cancel": "Abbrechen",
+  "chat.elicitation.decline": "Ablehnen",
+  "chat.elicitation.submit": "Absenden",
+  "chat.elicitation.done": "Fertig",
+  "chat.elicitation.choose": "Auswählen …",
+  "chat.effort.off": "Aus",
+  "chat.effort.offHint": "Kein erweitertes Denken",
+  "chat.fastMode.label": "Schnell",
+  "chat.fastMode.on": "Schnellmodus ist aktiv",
+  "chat.fastMode.off": "Schnellmodus ist aus",
+  "chat.usage.context": (used: string, max: string, pct: number) =>
+    `Kontext: ${used} von ${max} Tokens (${pct} %)`,
+  "chat.usage.cost": (usd: string) => `Sitzungskosten: $${usd}`,
+  "chat.usage.rateLimited": (resets: string) => `Ratenlimit erreicht; Zurücksetzung ${resets}`,
+  "chat.usage.rateWarning": (pct: number, resets: string) =>
+    `Ratenlimit: ${pct} % verbraucht; Zurücksetzung ${resets}`,
+  "chat.mcp.codexScope": "Dadurch wird Ihre Codex-Benutzerkonfiguration geändert. Dies betrifft auch andere Unterhaltungen, die diese Konfiguration verwenden. Fortfahren?",
+  "chat.mcp.tooltip": "MCP-Server",
+  "chat.mcp.loading": "Serverliste wird gelesen …",
+  "chat.mcp.backendUnsupported": "Das verbundene VelaTerm-Backend unterstützt die MCP-Verwaltung nicht. Aktualisieren Sie dieses Backend, starten Sie es neu und versuchen Sie es erneut.",
+  "chat.mcp.none": "Keine MCP-Server konfiguriert",
+  "chat.mcp.tools": (n: number) => (n === 1 ? "1 Werkzeug" : `${n} Werkzeuge`),
+  "chat.mcp.reconnect": "Neu verbinden",
+  "chat.mcp.disable": "Deaktivieren",
+  "chat.mcp.enable": "Aktivieren",
+  "chat.mcp.status.connected": "Verbunden",
+  "chat.mcp.status.disabled": "Deaktiviert",
+  "chat.mcp.status.failed": "Fehlgeschlagen",
+  "chat.mcp.status.pending": "Verbindung wird hergestellt",
+  "chat.mcp.status.disconnected": "Getrennt",
+  "chat.mcp.status.other": "Unbekannt",
+  "chat.tasks.label": "Aufgaben",
+  "chat.tasks.tooltip": "Hintergrundaufgaben",
+  "chat.tasks.backgroundAll": "Laufende Arbeit in den Hintergrund verschieben",
+  "chat.tasks.none": "Keine Hintergrundaufgaben",
+  "chat.tasks.stop": "Stoppen",
+  "chat.retry.line": (attempt: number, max: number, seconds: number, message: string) =>
+    `Neuer Versuch (${attempt}/${max}) in ${seconds} s: ${message}`,
+  "chat.notify.dismiss": "Schließen",
 };
 
 export default de;

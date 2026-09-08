@@ -314,6 +314,14 @@ impl PtyManager {
         };
         let first_sink = first_sink.take().expect("the sink has not been consumed since the slot was reserved");
 
+        // Validate only a real launch, under its reservation. Reattaching to a live PTY
+        // must remain possible even when its persisted history is temporarily unavailable.
+        let resume_id = if kind == SessionKind::Codex {
+            crate::agent::resume::checked_resume_id(kind, resume_id)?
+        } else {
+            resume_id
+        };
+
         let pty_system = native_pty_system();
         let pair = pty_system
             .openpty(PtySize {
@@ -416,6 +424,9 @@ impl PtyManager {
         // Drop inherited color suppressors before advertising color, so an instance launched from an IDE
         // or an agent harness does not hand every session a monochrome TUI.
         scrub_color_suppressors(&mut cmd);
+        // Drop the markers an agent harness leaves in its environment, so a session we launch is a session of
+        // its own rather than a continuation of whatever launched VelaTerm.
+        scrub_agent_harness_markers(&mut cmd);
         // Advertise a color-capable terminal.
         cmd.env("TERM", "xterm-256color");
         // Explicitly advertise true color so applications do not conservatively fall back to 256 colors.
@@ -574,6 +585,21 @@ impl PtyManager {
         let codex_hooks_supported = kind != SessionKind::Codex
             || (!cfg!(windows) && codex_lifecycle_hooks_supported(bin_path.as_deref()));
         let should_capture_agent_id = resume_id.is_none() || fork;
+        let mut terminal_thinking_off = false;
+        let extra_args = if matches!(kind, SessionKind::Claude | SessionKind::Codex | SessionKind::Opencode) {
+            let stored = {
+                let conn = app.db().conn.lock().unwrap();
+                crate::agent::session_settings::stored(&conn, &id)?
+            };
+            if let Some((selection, _)) = stored {
+                terminal_thinking_off = kind == SessionKind::Claude && selection.effort.as_deref() == Some("off");
+                let (args, values) = crate::agent::session_settings::terminal_args(
+                    kind, inject::shell_kind(&shell), extra_args.as_deref(), &selection,
+                );
+                for (key, value) in values { cmd.env(key, value); }
+                Some(args)
+            } else { extra_args }
+        } else { extra_args };
         // Only the Windows theme-injection branch mutates this value.
         #[cfg_attr(not(windows), allow(unused_mut))]
         let mut agent_spawn = inject::prepare_with_args_capabilities(
@@ -610,6 +636,16 @@ impl PtyManager {
         // Non-Windows platforms preserve automatic live theme switching.
         #[cfg(not(windows))]
         let _ = &theme;
+        if terminal_thinking_off {
+            for (key, value) in &mut agent_spawn.env {
+                if key == inject::CLAUDE_SETTINGS_ENV {
+                    let mut settings: serde_json::Value = serde_json::from_str(value)
+                        .map_err(|e| format!("Failed to prepare Claude thinking settings: {e}"))?;
+                    settings["alwaysThinkingEnabled"] = serde_json::json!(false);
+                    *value = settings.to_string();
+                }
+            }
+        }
         for (k, v) in &agent_spawn.env {
             cmd.env(k, v);
         }
@@ -762,6 +798,7 @@ impl PtyManager {
 
         // Intentional-termination flag shared with the reader to suppress natural-exit events after `kill()`.
         let intentional = Arc::new(AtomicBool::new(false));
+        let terminated = Arc::new((Mutex::new(0u8), std::sync::Condvar::new()));
         let intentional_reader = Arc::clone(&intentional);
         // Who killed the session and why, filled in by `kill` and read by the reader when it announces it.
         let kill_info: Arc<Mutex<Option<KillInfo>>> = Arc::new(Mutex::new(None));
@@ -776,6 +813,7 @@ impl PtyManager {
         self.sessions.lock().unwrap().insert(
             id.clone(),
             PtySession {
+                terminated: terminated.clone(),
                 master: pair.master,
                 input: input_tx,
                 killer,
@@ -872,6 +910,7 @@ impl PtyManager {
         let id_for_read = id.clone();
         let exit_event = format!("pty://exit/{id}");
         let killed_event = format!("pty://killed/{id}");
+        let terminated_reader = terminated.clone();
         std::thread::spawn(move || {
             let mut scanner = OutputScanner::default();
             let mut buf = [0u8; 8192];
@@ -941,6 +980,9 @@ impl PtyManager {
             status_cache_for_read.lock().unwrap().remove(&id_for_read);
             // Emit `pty://exit` for natural exit and `pty://killed` for intentional termination. Other attached
             // clients use the latter to close their views instead of leaving a frozen terminal.
+            // An agent that exits mid-turn never sends Stop; settle it so `vstat` and anything waiting on
+            // the run see it as no longer busy rather than working forever.
+            crate::agent::status_watch::settle(&id_for_read);
             if !intentional_reader.load(Ordering::SeqCst) {
                 app.emit(&exit_event, ());
             } else {
@@ -966,6 +1008,8 @@ impl PtyManager {
                     crate::search::reindex_session_quiet(&app_for_index, &sid_for_index);
                 });
             }
+            *terminated_reader.0.lock().unwrap() += 1;
+            terminated_reader.1.notify_all();
         });
 
         // A dedicated exit waiter fixes ConPTY retaining its output pipe after the child exits. `wait()` then
@@ -979,6 +1023,8 @@ impl PtyManager {
                 let _ = child.wait();
                 // Removing a dead process drops the master and forces ConPTY's reader to EOF; prior removal is harmless.
                 sessions_for_wait.lock().unwrap().remove(&id_for_wait);
+                *terminated.0.lock().unwrap() += 1;
+                terminated.1.notify_all();
             });
         }
 
@@ -1360,6 +1406,19 @@ impl PtyManager {
         Ok(())
     }
 
+    /// Stop and drain the terminal before reading native settings or starting its replacement.
+    pub fn kill_for_handoff(&self, id: &str) -> Result<(), String> {
+        let terminated = self.sessions.lock().unwrap().get(id).map(|s| s.terminated.clone());
+        self.kill(id, DESKTOP_SOURCE, KillReason::Restart)?;
+        if let Some(terminated) = terminated {
+            let (done, _) = terminated.1.wait_timeout_while(
+                terminated.0.lock().unwrap(), Duration::from_secs(5), |count| *count < 2,
+            ).map_err(|e| e.to_string())?;
+            if *done < 2 { return Err("The terminal is still stopping; retry the view switch shortly".into()); }
+        }
+        Ok(())
+    }
+
     /// Terminates all sessions during headless shutdown, marking each intentional before killing its child.
     pub fn kill_all(&self) {
         let mut map = self.sessions.lock().unwrap();
@@ -1419,6 +1478,33 @@ fn force_color_disables(value: &str) -> bool {
 /// right after this call. Only the launcher's leftovers are dropped: a user who exports these in a shell
 /// profile still gets them, because the profile runs inside the PTY. `TERM=dumb` needs no handling here
 /// since `TERM` is overwritten unconditionally.
+/// Environment markers that say "you are running inside a Claude Code session".
+///
+/// They identify the *parent* process: its session id, its messaging socket and token, its binary. A child
+/// that sees them behaves as a nested run rather than a session in its own right — most visibly, it turns off
+/// transcript saving, which leaves the session view with nothing to read and the session unable to resume.
+///
+/// VelaTerm launched from a desktop icon never carries them. Launched from a terminal that is itself inside an
+/// agent session — which is how it is usually run during development — every session it spawns would inherit
+/// them. The user's shell profile still sets whatever the user configured; only the inherited markers go.
+pub(crate) const AGENT_HARNESS_MARKERS: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_PID",
+];
+
+/// Remove inherited agent-harness markers before spawning a PTY. See `AGENT_HARNESS_MARKERS`.
+fn scrub_agent_harness_markers(cmd: &mut portable_pty::CommandBuilder) {
+    for key in AGENT_HARNESS_MARKERS {
+        cmd.env_remove(key);
+    }
+}
+
 fn scrub_color_suppressors(cmd: &mut portable_pty::CommandBuilder) {
     cmd.env_remove("NO_COLOR");
     cmd.env_remove("CI");
@@ -1715,6 +1801,9 @@ fn spawn_idle_heal(
                 continue;
             }
             healed = true;
+            // The heal bypasses the hook path that normally feeds the process-wide status view, so
+            // record it here too; otherwise `vstat` would keep reporting the interrupted turn as working.
+            crate::agent::status_watch::record(&sid, AgentState::Waiting);
             app.emit(
                 &status_event,
                 StatusSignal::State {
@@ -2068,6 +2157,25 @@ mod tests {
         kept.env("FORCE_COLOR", "3");
         super::scrub_color_suppressors(&mut kept);
         assert_eq!(kept.get_env("FORCE_COLOR").unwrap(), "3");
+    }
+
+    /// A session we launch must not look like a continuation of the agent session that launched VelaTerm,
+    /// while the user's own environment passes through untouched.
+    #[test]
+    fn scrub_agent_harness_markers_drops_only_inherited_session_markers() {
+        let mut cmd = CommandBuilder::new("bash");
+        cmd.env("CLAUDE_CODE_CHILD_SESSION", "1");
+        cmd.env("CLAUDE_CODE_SESSION_ID", "abc-123");
+        cmd.env("CLAUDECODE", "1");
+        cmd.env("CLAUDE_CODE_MESSAGING_TOKEN", "secret");
+        cmd.env("ANTHROPIC_API_KEY", "user-key");
+        cmd.env("EDITOR", "vim");
+        super::scrub_agent_harness_markers(&mut cmd);
+        for key in super::AGENT_HARNESS_MARKERS {
+            assert!(cmd.get_env(key).is_none(), "{key} should have been removed");
+        }
+        assert_eq!(cmd.get_env("ANTHROPIC_API_KEY").unwrap(), "user-key");
+        assert_eq!(cmd.get_env("EDITOR").unwrap(), "vim");
     }
 
     /// Only `0`, `false` and an empty value mean "no color"; every other value turns color on.

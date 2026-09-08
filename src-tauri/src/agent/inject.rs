@@ -231,7 +231,7 @@ pub fn build_opencode_config_content(plugin_path: &str, permission_mode: Option<
 /// result as one argument; `CommandLineToArgvW` restores the quotes before they reach `claude.exe`.
 /// This is reliable only for targets that use `CommandLineToArgvW`, such as a native `claude.exe`.
 /// An npm `.cmd` wrapper may still let cmd.exe reinterpret `&` in the hook URL and needs separate handling.
-fn value_ref(shell: ShellKind, env: &str) -> String {
+pub(crate) fn value_ref(shell: ShellKind, env: &str) -> String {
     match shell {
         ShellKind::Posix | ShellKind::Fish => format!("\"${env}\""),
         ShellKind::PowerShell => format!("$($env:{env} -replace '\"', '\\\"')"),
@@ -287,6 +287,52 @@ fn normalize_extra_args(extra: Option<&str>) -> Option<String> {
     Some(joined)
 }
 
+/// Splits custom launch arguments into individual arguments, respecting quotes.
+///
+/// The terminal path hands these to a shell, which does the splitting; the chat engine spawns the agent
+/// directly and has to do it here. Quotes matter because a path can contain spaces, which is exactly what
+/// someone writing `--add-dir "~/My Notes"` expects to work.
+pub(crate) fn split_extra_args(extra: Option<&str>) -> Vec<String> {
+    let Some(text) = extra else { return Vec::new() };
+    let mut args: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut started = false;
+    // The quote character currently open, or None outside quotes.
+    let mut quote: Option<char> = None;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if quote != Some('\'') => {
+                // A backslash escapes the next character everywhere except inside single quotes, where the
+                // shell treats it literally.
+                if let Some(next) = chars.next() {
+                    current.push(next);
+                    started = true;
+                }
+            }
+            '\'' | '"' if quote.is_none() => {
+                quote = Some(c);
+                started = true;
+            }
+            c if Some(c) == quote => quote = None,
+            c if c.is_whitespace() && quote.is_none() => {
+                if started {
+                    args.push(std::mem::take(&mut current));
+                    started = false;
+                }
+            }
+            c => {
+                current.push(c);
+                started = true;
+            }
+        }
+    }
+    if started {
+        args.push(current);
+    }
+    args
+}
+
 /// Builds a command-line fragment for custom launch arguments, including a leading space when nonempty.
 ///
 /// The fragment is intentionally unquoted. These are user-supplied local shell flags, such as
@@ -318,7 +364,17 @@ fn extra_args_fragment(extra: Option<&str>) -> String {
 /// receive an explicit flag so the session UI remains consistent and future CLI defaults cannot change its
 /// meaning: default uses `--auto-approve false`, while skip uses `--auto-approve true`.
 pub fn permission_flag(kind: SessionKind, mode: Option<&str>) -> Option<&'static str> {
-    let skip = mode.map(str::trim) == Some("skip");
+    // `bypassPermissions` is the same intent written in the chat engine's vocabulary; a session that chose
+    // it there must not quietly start asking again when it runs as a terminal.
+    if kind == SessionKind::Codex {
+        match mode.map(str::trim) {
+            Some("read-only") => return Some("--sandbox read-only --ask-for-approval on-request"),
+            Some("auto") => return Some("--sandbox workspace-write --ask-for-approval on-request"),
+            Some("full-access") => return Some("--dangerously-bypass-approvals-and-sandbox"),
+            _ => {}
+        }
+    }
+    let skip = matches!(mode.map(str::trim), Some("skip") | Some("bypassPermissions"));
     match kind {
         // Cline needs an explicit flag in both modes because its native default is full auto-approval.
         SessionKind::Cline => Some(if skip {
@@ -359,6 +415,82 @@ pub fn permission_flag(kind: SessionKind, mode: Option<&str>) -> Option<&'static
             None
         }
     }
+}
+
+/// Render a model choice as this agent's own command-line spelling.
+///
+/// Every CLI spells it differently and some carry more than the name: Cursor puts reasoning effort
+/// inside the model string, so it takes the effort here rather than through [`effort_flag`]. Returns
+/// `None` for an empty selection or for a kind that takes no model argument.
+///
+/// Flags verified against each CLI's own `--help`; see the orchestration design doc for the versions.
+pub fn model_flag(kind: SessionKind, model: Option<&str>, effort: Option<&str>) -> Option<String> {
+    let model = model.map(str::trim).filter(|m| !m.is_empty())?;
+    match kind {
+        SessionKind::Claude | SessionKind::Copilot => Some(format!("--model {model}")),
+        SessionKind::Codex | SessionKind::Grok | SessionKind::Opencode => {
+            Some(format!("-m {model}"))
+        }
+        // Cursor has no effort flag at all. A "parameterized" model instead accepts bracketed overrides,
+        // as in `--model 'claude-opus-4-8[effort=high]'`, so effort is folded in here and
+        // `effort_flag(Cursor, _)` deliberately returns None. Quote it: the brackets are shell globs.
+        SessionKind::Cursor => Some(match effort.map(str::trim).filter(|e| !e.is_empty()) {
+            Some(effort) => format!("--model '{model}[effort={effort}]'"),
+            None => format!("--model {model}"),
+        }),
+        // The rest expose no model selection on the command line, or are not agents at all.
+        _ => None,
+    }
+}
+
+/// Render a reasoning-effort choice as this agent's own command-line spelling.
+///
+/// `None` means this agent has no separate effort control — either it has none at all, or, for Cursor,
+/// because [`model_flag`] already carried it. Returns `None` for an empty selection too.
+///
+/// **Valid values are per model and mostly not knowable here.** Only Claude and Copilot publish a closed
+/// list in `--help`; the others take their values from a server-provided model catalog. Passing an
+/// unsupported level is not fatal in the same way everywhere: Grok logs and ignores it, while Codex and
+/// Cursor reject the launch. Callers should therefore treat this as pass-through, not as validation.
+pub fn effort_flag(kind: SessionKind, effort: Option<&str>) -> Option<String> {
+    let effort = effort.map(str::trim).filter(|e| !e.is_empty())?;
+    match kind {
+        SessionKind::Claude | SessionKind::Copilot => Some(format!("--effort {effort}")),
+        SessionKind::Grok => Some(format!("--reasoning-effort {effort}")),
+        // Codex has no dedicated flag; the generic config override sets the same setting.
+        SessionKind::Codex => Some(format!("-c model_reasoning_effort={effort}")),
+        // OpenCode calls it a model variant, and documents the flag only on its `run` subcommand.
+        SessionKind::Opencode => Some(format!("--variant {effort}")),
+        // Cursor carries effort inside the model string; see `model_flag`.
+        SessionKind::Cursor => None,
+        _ => None,
+    }
+}
+
+/// Build the launch arguments for one agent from a model and effort selection plus any user arguments.
+///
+/// Order is model, then effort, then whatever the user wrote, so an explicit argument of theirs wins
+/// with CLIs that take the last occurrence. Returns `None` when nothing at all was selected.
+pub fn compose_agent_args(
+    kind: SessionKind,
+    model: Option<&str>,
+    effort: Option<&str>,
+    extra_args: Option<&str>,
+) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(flag) = model_flag(kind, model, effort) {
+        parts.push(flag);
+    }
+    if let Some(flag) = effort_flag(kind, effort) {
+        parts.push(flag);
+    }
+    if let Some(user) = extra_args.map(str::trim).filter(|s| !s.is_empty()) {
+        parts.push(user.to_string());
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(parts.join(" "))
 }
 
 /// Merges the permission flag with custom launch arguments, placing the flag first. Spawn call sites pass
@@ -1248,6 +1380,90 @@ mod tests {
         );
     }
 
+
+    #[test]
+    fn model_flag_uses_each_agents_own_spelling() {
+        let m = |k| model_flag(k, Some("opus"), None);
+        assert_eq!(m(SessionKind::Claude).as_deref(), Some("--model opus"));
+        assert_eq!(m(SessionKind::Copilot).as_deref(), Some("--model opus"));
+        assert_eq!(m(SessionKind::Codex).as_deref(), Some("-m opus"));
+        assert_eq!(m(SessionKind::Grok).as_deref(), Some("-m opus"));
+        assert_eq!(m(SessionKind::Opencode).as_deref(), Some("-m opus"));
+        // Kinds with no command-line model selection, and non-agents.
+        assert!(m(SessionKind::Cline).is_none());
+        assert!(m(SessionKind::Terminal).is_none());
+        assert!(m(SessionKind::Browser).is_none());
+        // An empty or blank selection is not an argument.
+        assert!(model_flag(SessionKind::Claude, None, None).is_none());
+        assert!(model_flag(SessionKind::Claude, Some("  "), None).is_none());
+    }
+
+    #[test]
+    fn cursor_carries_effort_inside_the_model_string() {
+        // Cursor has no effort flag: the level rides along in bracket syntax, quoted because the
+        // brackets would otherwise be read as a shell glob.
+        assert_eq!(
+            model_flag(SessionKind::Cursor, Some("claude-opus-4-8"), Some("high")).as_deref(),
+            Some("--model 'claude-opus-4-8[effort=high]'")
+        );
+        // Without an effort it is a plain model selection.
+        assert_eq!(
+            model_flag(SessionKind::Cursor, Some("gpt-5"), None).as_deref(),
+            Some("--model gpt-5")
+        );
+        // And it must not also emit a separate effort argument, or the launch would carry it twice.
+        assert!(effort_flag(SessionKind::Cursor, Some("high")).is_none());
+    }
+
+    #[test]
+    fn effort_flag_uses_each_agents_own_spelling() {
+        let e = |k| effort_flag(k, Some("high"));
+        assert_eq!(e(SessionKind::Claude).as_deref(), Some("--effort high"));
+        assert_eq!(e(SessionKind::Copilot).as_deref(), Some("--effort high"));
+        assert_eq!(e(SessionKind::Grok).as_deref(), Some("--reasoning-effort high"));
+        // Codex has no dedicated flag and goes through its generic config override.
+        assert_eq!(
+            e(SessionKind::Codex).as_deref(),
+            Some("-c model_reasoning_effort=high")
+        );
+        // OpenCode calls the same idea a model variant.
+        assert_eq!(e(SessionKind::Opencode).as_deref(), Some("--variant high"));
+        assert!(e(SessionKind::Cline).is_none());
+        assert!(effort_flag(SessionKind::Claude, Some("")).is_none());
+    }
+
+    #[test]
+    fn compose_agent_args_orders_model_effort_then_user() {
+        assert_eq!(
+            compose_agent_args(SessionKind::Claude, Some("opus"), Some("high"), Some("--verbose"))
+                .as_deref(),
+            Some("--model opus --effort high --verbose")
+        );
+        // Cursor produces one argument, not two, because effort is inside the model string.
+        assert_eq!(
+            compose_agent_args(SessionKind::Cursor, Some("gpt-5"), Some("high"), None).as_deref(),
+            Some("--model 'gpt-5[effort=high]'")
+        );
+        // Effort alone is valid: it applies to whatever model the agent defaults to.
+        assert_eq!(
+            compose_agent_args(SessionKind::Codex, None, Some("xhigh"), None).as_deref(),
+            Some("-c model_reasoning_effort=xhigh")
+        );
+        // User arguments survive on their own.
+        assert_eq!(
+            compose_agent_args(SessionKind::Claude, None, None, Some("--resume x")).as_deref(),
+            Some("--resume x")
+        );
+        // Nothing selected means no arguments at all, not an empty string.
+        assert!(compose_agent_args(SessionKind::Claude, None, None, None).is_none());
+        assert!(compose_agent_args(SessionKind::Claude, Some(" "), Some(""), Some("  ")).is_none());
+        // A kind that takes neither still keeps the user's own arguments.
+        assert_eq!(
+            compose_agent_args(SessionKind::Cline, Some("opus"), Some("high"), Some("-x")).as_deref(),
+            Some("-x")
+        );
+    }
+
     #[test]
     fn launch_cmd_posix_guards_missing_bin() {
         // POSIX launches directly only when `command -v` succeeds, preserving aliases. Otherwise it
@@ -1547,6 +1763,22 @@ mod tests {
     fn codex_config_snippet_quotes_exe() {
         let s = codex_config_snippet("/Apps/vlx-term");
         assert_eq!(s, "notify = [\"/Apps/vlx-term\", \"--notify-env\"]");
+    }
+
+    #[test]
+    fn codex_saved_permission_modes_survive_terminal_launch() {
+        for (mode, expected) in [
+            ("read-only", "--sandbox read-only --ask-for-approval on-request"),
+            ("auto", "--sandbox workspace-write --ask-for-approval on-request"),
+            ("full-access", "--dangerously-bypass-approvals-and-sandbox"),
+            ("skip", "--dangerously-bypass-approvals-and-sandbox"),
+        ] {
+            assert_eq!(
+                merge_permission_flag(SessionKind::Codex, Some(mode), Some("--model example")),
+                Some(format!("{expected} --model example")),
+            );
+        }
+        assert_eq!(permission_flag(SessionKind::Codex, None), None);
     }
 
     #[test]
@@ -2974,6 +3206,32 @@ mod tests {
             &resumed.launch.unwrap(),
             &format!("grok --resume {sid} --no-alt-screen"),
         );
+    }
+
+    #[test]
+    /// Splitting keeps a quoted path together and drops the quotes, the way a shell would.
+    #[test]
+    fn split_extra_args_respects_quotes() {
+        assert_eq!(split_extra_args(None), Vec::<String>::new());
+        assert_eq!(split_extra_args(Some("   ")), Vec::<String>::new());
+        assert_eq!(
+            split_extra_args(Some("--model opus")),
+            vec!["--model".to_string(), "opus".to_string()]
+        );
+        assert_eq!(
+            split_extra_args(Some("--add-dir \"/My Notes\" --verbose")),
+            vec![
+                "--add-dir".to_string(),
+                "/My Notes".to_string(),
+                "--verbose".to_string()
+            ]
+        );
+        assert_eq!(
+            split_extra_args(Some("--say 'it is fine'")),
+            vec!["--say".to_string(), "it is fine".to_string()]
+        );
+        // An empty quoted argument is still an argument.
+        assert_eq!(split_extra_args(Some("--name \"\"")), vec!["--name".to_string(), String::new()]);
     }
 
     #[test]

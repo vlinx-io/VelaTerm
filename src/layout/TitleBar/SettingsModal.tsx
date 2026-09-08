@@ -24,6 +24,7 @@ import { pushSetting } from "../../ipc/settingsSync";
 import { env, platform } from "../../platform";
 import type { VelaCommandStatus } from "../../platform/types";
 import { useTermStore, type TermRenderer } from "../../store/termStore";
+import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT } from "../../theme";
 import type {
   AccentChoice,
   Density,
@@ -300,6 +301,9 @@ function FontSizeStepper({
   max,
   defaultValue,
   autoLabel,
+  stepSize = 0.5,
+  unit = "px",
+  label,
 }: {
   value: number | null;
   onChange: (v: number | null) => void;
@@ -307,17 +311,23 @@ function FontSizeStepper({
   max: number;
   defaultValue: number;
   autoLabel?: string;
+  stepSize?: number;
+  unit?: string;
+  label?: string;
 }) {
   const t = useT();
-  const display = value == null ? (autoLabel ?? String(defaultValue)) : `${value}px`;
+  const display = value == null ? (autoLabel ?? String(defaultValue)) : `${value}${unit}`;
   const step = (d: number) => {
-    const base = value ?? defaultValue;
-    onChange(Math.max(min, Math.min(max, base + d)));
+    const autoSize = autoLabel != null
+      ? parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--ui-fs"))
+      : NaN;
+    const base = value ?? (Number.isFinite(autoSize) ? autoSize : defaultValue);
+    onChange(Math.max(min, Math.min(max, Math.round((base + d * stepSize) * 10) / 10)));
   };
   // UI size resets to null to follow density; terminal size resets to its explicit default.
   const reset = () => onChange(autoLabel != null ? null : defaultValue);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+    <div role={label ? "group" : undefined} aria-label={label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
       <button style={STEP_BTN} onClick={() => step(-1)} title={t("settings.fontSmaller")}>
         −
       </button>
@@ -387,7 +397,7 @@ function AccentPicker({
 }
 
 
-type Cat = "appearance" | "terminal" | "behavior" | "advanced" | "agents" | "shortcuts" | "general";
+type Cat = "appearance" | "terminal" | "conversation" | "behavior" | "advanced" | "agents" | "shortcuts" | "general";
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const t = useT();
@@ -402,6 +412,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const setDividerStyle = useTermStore((s) => s.setDividerStyle);
   const setNavLayout = useTermStore((s) => s.setNavLayout);
   const singleTabMode = useTermStore((s) => s.singleTabMode);
+  const defaultSessionEngine = useTermStore((s) => s.defaultSessionEngine);
+  const setDefaultSessionEngine = useTermStore((s) => s.setDefaultSessionEngine);
   const setSingleTabMode = useTermStore((s) => s.setSingleTabMode);
   const spawnConfirm = useTermStore((s) => s.spawnConfirm);
   const setSpawnConfirm = useTermStore((s) => s.setSpawnConfirm);
@@ -427,10 +439,18 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const uiFontSize = useTermStore((s) => s.uiFontSize);
   const termFontFamily = useTermStore((s) => s.termFontFamily);
   const termFontSize = useTermStore((s) => s.termFontSize);
+  const termLineHeight = useTermStore((s) => s.termLineHeight);
+  const chatFontFamily = useTermStore((s) => s.chatFontFamily);
+  const chatFontSize = useTermStore((s) => s.chatFontSize);
+  const chatLineHeight = useTermStore((s) => s.chatLineHeight);
   const setUiFontFamily = useTermStore((s) => s.setUiFontFamily);
   const setUiFontSize = useTermStore((s) => s.setUiFontSize);
   const setTermFontFamily = useTermStore((s) => s.setTermFontFamily);
   const setTermFontSize = useTermStore((s) => s.setTermFontSize);
+  const setTermLineHeight = useTermStore((s) => s.setTermLineHeight);
+  const setChatFontFamily = useTermStore((s) => s.setChatFontFamily);
+  const setChatFontSize = useTermStore((s) => s.setChatFontSize);
+  const setChatLineHeight = useTermStore((s) => s.setChatLineHeight);
 
   const [cat, setCat] = useState<Cat>("appearance");
   const [skillOn, setSkillOn] = useState<boolean | null>(null);
@@ -448,6 +468,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     { key: "general", label: t("settings.catGeneral") },
     { key: "appearance", label: t("settings.appearance") },
     { key: "terminal", label: t("settings.catTerminal") },
+    { key: "conversation", label: t("settings.chatTypography") },
     { key: "behavior", label: t("settings.catBehavior") },
     { key: "advanced", label: t("settings.catAdvanced") },
     { key: "agents", label: t("settings.catAgents") },
@@ -621,6 +642,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 <Field label={t("settings.uiFontSize")}>
                   <FontSizeStepper
                     value={uiFontSize}
+                    label={t("settings.uiFontSize")}
                     onChange={setUiFontSize}
                     min={10}
                     max={20}
@@ -642,11 +664,39 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 <Field label={t("settings.termFontSize")}>
                   <FontSizeStepper
                     value={termFontSize}
-                    onChange={(v) => setTermFontSize(v ?? 13)}
+                    label={t("settings.termFontSize")}
+                    onChange={(v) => setTermFontSize(v ?? DEFAULT_TERMINAL_FONT_SIZE)}
                     min={10}
                     max={24}
-                    defaultValue={13}
+                    defaultValue={DEFAULT_TERMINAL_FONT_SIZE}
                   />
+                </Field>
+                <Field label={t("settings.termLineHeight")}>
+                  <FontSizeStepper value={termLineHeight} label={t("settings.termLineHeight")}
+                    onChange={(v) => setTermLineHeight(v ?? DEFAULT_TERMINAL_LINE_HEIGHT)}
+                    min={1} max={2} defaultValue={DEFAULT_TERMINAL_LINE_HEIGHT} stepSize={0.1} unit="×" />
+                </Field>
+              </>
+            )}
+
+            {cat === "conversation" && (
+              <>
+                <SectionTitle>{t("settings.chatTypography")}</SectionTitle>
+                <p style={{ color: "var(--text-dim)", fontSize: 12, lineHeight: 1.5, margin: "0 0 12px" }}>
+                  {t("settings.chatTypographyHint")}
+                </p>
+                <Field label={t("settings.chatFont")}>
+                  <FontSelect value={chatFontFamily} onChange={setChatFontFamily} label={t("settings.chatFont")} />
+                </Field>
+                <Field label={t("settings.chatFontSize")}>
+                  <FontSizeStepper value={chatFontSize} label={t("settings.chatFontSize")}
+                    onChange={(v) => setChatFontSize(v ?? DEFAULT_CONVERSATION_FONT_SIZE)}
+                    min={10} max={24} defaultValue={DEFAULT_CONVERSATION_FONT_SIZE} />
+                </Field>
+                <Field label={t("settings.chatLineHeight")}>
+                  <FontSizeStepper value={chatLineHeight} label={t("settings.chatLineHeight")}
+                    onChange={(v) => setChatLineHeight(v ?? DEFAULT_TERMINAL_LINE_HEIGHT)}
+                    min={1} max={2} defaultValue={DEFAULT_TERMINAL_LINE_HEIGHT} stepSize={0.1} unit="×" />
                 </Field>
               </>
             )}
@@ -721,6 +771,29 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     onChange={(v) => setSingleTabMode(v === "single")}
                   />
                 </Field>
+                {/* Which of the two views a new agent session opens in, which is the same thing as which
+                    engine drives it. An existing session keeps what it was created with. */}
+                <Field label={t("settings.defaultSessionEngine")}>
+                  <Seg<"chat" | "tui">
+                    value={defaultSessionEngine}
+                    options={[
+                      ["chat", `${t("session.showConversation")} · ${t("common.experimental")}`],
+                      ["tui", t("session.showTerminal")],
+                    ]}
+                    onChange={(v) => setDefaultSessionEngine(v)}
+                  />
+                </Field>
+                <div
+                  style={{
+                    marginTop: -2,
+                    marginBottom: 10,
+                    fontSize: 11,
+                    lineHeight: 1.5,
+                    color: "var(--text-dim)",
+                  }}
+                >
+                  {t("settings.defaultSessionEngineHint")}
+                </div>
                 <Field label={t("settings.dynamicStatusFilter")}>
                   <Seg<"on" | "off">
                     value={dynamicStatusFilter ? "on" : "off"}

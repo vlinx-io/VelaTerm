@@ -698,6 +698,8 @@ mod tests {
             init_cmd: None,
             agent_args: None,
             permission_mode: None,
+            collaboration_mode: None,
+            engine: "tui".to_string(),
             hotkey: None,
             agent_session_id: agent_id.map(|s| s.to_string()),
             parent_session_id: None,

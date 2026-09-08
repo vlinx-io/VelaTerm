@@ -169,6 +169,10 @@ pub fn dispatch(
     source: &str,
     origin: CallOrigin,
 ) -> Result<Value, String> {
+    if cmd.starts_with("public_account_") || cmd.starts_with("public_share_") {
+        if origin != CallOrigin::Local { return Err(format!("remote_cmd_forbidden:{cmd}")); }
+        return super::public_relay::dispatch(app, cmd, args);
+    }
     // Gate the management plane and secret-bearing commands before any argument parsing: remote paired
     // devices are trusted with a shell (threat model), but not with rotating/revoking the credentials
     // that admit other devices, nor with reading/writing stored secrets. The machine-readable
@@ -358,6 +362,7 @@ pub fn dispatch(
             opt_str(args, "worktreeBaseRef").as_deref(),
             opt_str(args, "agentPresetId").as_deref(),
             opt_str(args, "agentPath").as_deref(),
+            opt_str(args, "engine").as_deref(),
         )?),
         "persist_session" => to_value(core::persist_session(
             app,
@@ -596,6 +601,174 @@ pub fn dispatch(
             app,
             &req_str(args, "sessionId")?,
         )?),
+        // Session view rows: the same recording as read_agent_transcript, parsed with reasoning and tool
+        // calls kept. Takes a session id, never a path, so the remote path ACL has nothing to gate.
+        "read_agent_chat" => to_value(core::read_agent_chat(app, &req_str(args, "sessionId")?)?),
+        // Chat engine: an agent driven as a protocol peer. Every arm takes a session id and never a path,
+        // so a remote client can drive a conversation without reaching the filesystem through these calls.
+        "chat_clear" => to_value(core::chat_clear(app, &req_str(args, "sessionId")?)?),
+        "chat_start" => {
+            let (model, effort) = (opt_str(args, "model"), opt_str(args, "effort"));
+            to_value(core::chat_start(
+                app,
+                &req_str(args, "sessionId")?,
+                model.as_deref(),
+                effort.as_deref(),
+                args.get("fastMode").and_then(Value::as_bool).unwrap_or(false),
+            )?)
+        }
+        "chat_set_fast_mode" => to_value(core::chat_set_fast_mode(
+            app,
+            &req_str(args, "sessionId")?,
+            args.get("enabled").and_then(Value::as_bool).unwrap_or(false),
+        )?),
+        "chat_set_service_tier" => {
+            let tier = opt_str(args, "tier");
+            to_value(core::chat_set_service_tier(app, &req_str(args, "sessionId")?, tier.as_deref())?)
+        }
+        "chat_set_personality" => {
+            let personality = opt_str(args, "personality");
+            to_value(core::chat_set_personality(
+                app,
+                &req_str(args, "sessionId")?,
+                personality.as_deref(),
+            )?)
+        }
+        "chat_compact" => to_value(core::chat_compact(app, &req_str(args, "sessionId")?)?),
+        "chat_review" => to_value(core::chat_review(
+            app,
+            &req_str(args, "sessionId")?,
+            &opt_str(args, "args").unwrap_or_default(),
+        )?),
+        "chat_mcp_status" => core::chat_mcp_status(app, &req_str(args, "sessionId")?),
+        "chat_mcp_toggle" => core::chat_mcp_toggle(
+            app,
+            &req_str(args, "sessionId")?,
+            &req_str(args, "server")?,
+            args.get("enabled").and_then(Value::as_bool).unwrap_or(false),
+        ),
+        "chat_mcp_reconnect" => core::chat_mcp_reconnect(
+            app,
+            &req_str(args, "sessionId")?,
+            &req_str(args, "server")?,
+        ),
+        "chat_stop_task" => to_value(core::chat_stop_task(
+            app,
+            &req_str(args, "sessionId")?,
+            &req_str(args, "taskId")?,
+        )?),
+        "chat_background_tasks" => to_value(core::chat_background_tasks(app, &req_str(args, "sessionId")?)?),
+        "chat_send" => {
+            let behavior = opt_str(args, "behavior");
+            // Attachments arrive as the same objects the timeline hands back, so a malformed one is a
+            // programming error rather than something to guess at: reject the call instead of silently
+            // sending a message without the picture it was about.
+            let images = match args.get("images").filter(|v| !v.is_null()) {
+                Some(v) => serde_json::from_value(v.clone())
+                    .map_err(|e| format!("Bad image attachment: {e}"))?,
+                None => Vec::new(),
+            };
+            to_value(core::chat_send(
+                app,
+                &req_str(args, "sessionId")?,
+                &req_str(args, "text")?,
+                images,
+                behavior.as_deref(),
+                opt_str(args, "messageId").as_deref(),
+            )?)
+        }
+        "chat_queue_steer" => to_value(core::chat_queue_steer(
+            app,
+            &req_str(args, "sessionId")?,
+            &req_str(args, "id")?,
+        )?),
+        "chat_queue_remove" => to_value(core::chat_queue_remove(
+            app,
+            &req_str(args, "sessionId")?,
+            &req_str(args, "id")?,
+        )?),
+        "chat_queue_update" => to_value(core::chat_queue_update(
+            app,
+            &req_str(args, "sessionId")?,
+            &req_str(args, "id")?,
+            &req_str(args, "text")?,
+        )?),
+        "chat_interrupt" => to_value(core::chat_interrupt(app, &req_str(args, "sessionId")?)?),
+        "chat_permission" => {
+            let message = opt_str(args, "message");
+            // Absent means "run what was proposed"; a form the user filled in arrives here instead.
+            let updated_input = args.get("updatedInput").filter(|v| !v.is_null()).cloned();
+            // One of the question's own suggestions, handed back to say "and stop asking me about this".
+            let updated_permissions = args.get("updatedPermissions").filter(|v| !v.is_null()).cloned();
+            to_value(core::chat_permission(
+                app,
+                &req_str(args, "sessionId")?,
+                &req_str(args, "requestId")?,
+                args.get("allow").and_then(Value::as_bool).unwrap_or(false),
+                updated_input,
+                message.as_deref(),
+                updated_permissions,
+            )?)
+        }
+        "chat_set_mode" => to_value(core::chat_set_mode(
+            app,
+            &req_str(args, "sessionId")?,
+            &req_str(args, "mode")?,
+        )?),
+        "chat_set_collaboration_mode" => to_value(core::chat_set_collaboration_mode(
+            app,
+            &req_str(args, "sessionId")?,
+            &req_str(args, "mode")?,
+        )?),
+        "chat_set_model" => {
+            let model = opt_str(args, "model");
+            to_value(core::chat_set_model(
+                app,
+                &req_str(args, "sessionId")?,
+                model.as_deref(),
+            )?)
+        }
+        "chat_set_effort" => {
+            let effort = opt_str(args, "effort");
+            to_value(core::chat_set_effort(
+                app,
+                &req_str(args, "sessionId")?,
+                effort.as_deref(),
+            )?)
+        }
+        // The catalogue belongs to an agent installation, but the session selects both its kind and any
+        // custom executable/configuration used to query it.
+        "chat_models" => core::chat_models(app, &req_str(args, "sessionId")?),
+        "chat_commands" => to_value(core::chat_commands(app, &req_str(args, "sessionId")?)?),
+        "chat_snapshot" => {
+            let window = args.get("window").filter(|value| !value.is_null()).map(|value| serde_json::from_value::<crate::agent::chat::engine::ChatWindow>(value.clone())).transpose().map_err(|e| e.to_string())?;
+            to_value(core::chat_snapshot_window(app, &req_str(args, "sessionId")?, window.as_ref())?)
+        }
+        "chat_row" => core::chat_row(app, &req_str(args, "sessionId")?, &req_str(args, "rowId")?, args.get("epoch").and_then(Value::as_u64)),
+        "chat_attachment" => to_value(core::chat_attachment(
+            app,
+            &req_str(args, "sessionId")?,
+            &req_str(args, "attachmentId")?,
+        )?),
+        "chat_rewind_preview" => to_value(core::chat_rewind_preview(
+            app,
+            &req_str(args, "sessionId")?,
+            &req_str(args, "rowId")?,
+        )?),
+        "chat_rewind" => to_value(core::chat_rewind(
+            app,
+            &req_str(args, "sessionId")?,
+            &req_str(args, "rowId")?,
+            &req_str(args, "scope")?,
+        )?),
+        "chat_attach" => to_value(core::chat_attach(app, &req_str(args, "sessionId")?)?),
+        "chat_detach" => to_value(core::chat_detach(app, &req_str(args, "sessionId")?)?),
+        "chat_stop" => to_value(core::chat_stop(app, &req_str(args, "sessionId")?)?),
+        "set_session_engine" => to_value(core::set_session_engine(
+            app,
+            &req_str(args, "sessionId")?,
+            &req_str(args, "engine")?,
+        )?),
         // Export complete session context as Markdown. Browsers omit destPath and download returned
         // content locally; core returns None after writing to disk or Some(content) for transfer.
         "export_session_context" => {
@@ -752,6 +925,25 @@ pub fn dispatch(
             &req_str(args, "name")?,
         )?),
         "list_worktrees" => to_value(git::worktree_list(&req_str(args, "repoRoot")?)?),
+        // Report which session an orchestration's agent became, closing the one gap that kept spawned
+        // sessions anonymous to the backend. A null sessionId records that the user dropped that entry.
+        "orch_attach_session" => {
+            let conn = app.db().conn.lock().map_err(|_| "database is unavailable")?;
+            to_value(crate::db::repo::set_orch_agent_session(
+                &conn,
+                &req_str(args, "orchId")?,
+                req_u64(args, "idx")? as u32,
+                opt_str(args, "sessionId").as_deref(),
+            )?)
+        }
+        // Render a model and effort choice into that agent's own command-line spelling. The frontend
+        // asks rather than reproducing the table, which differs per agent and would drift if copied.
+        "compose_agent_args" => to_value(crate::agent::inject::compose_agent_args(
+            crate::models::SessionKind::from_db(&req_str(args, "kind")?),
+            opt_str(args, "model").as_deref(),
+            opt_str(args, "effort").as_deref(),
+            opt_str(args, "extraArgs").as_deref(),
+        )),
         "worktrees_in_subtree" => to_value(core::worktrees_in_subtree(
             app,
             &req_str(args, "sessionId")?,
@@ -1050,6 +1242,25 @@ mod tests {
         let db = crate::db::Db::open(&data_dir.join("test.db"))
             .expect("failed to open the test database");
         AppCtx::Headless(Arc::new(HeadlessHost::new(data_dir, db)))
+    }
+
+    #[test]
+    fn chat_mcp_commands_reach_the_agent_manager() {
+        let app = test_ctx();
+        let data_dir = app.data_dir().unwrap();
+        for cmd in ["chat_mcp_status", "chat_mcp_toggle", "chat_mcp_reconnect"] {
+            // Missing parameters must fail validation rather than fall through as an unknown command.
+            let error = dispatch(&app, cmd, &json!({}), DESKTOP_SOURCE, CallOrigin::Local).unwrap_err();
+            assert_eq!(error, "Missing string parameter sessionId", "{cmd}");
+            let error = dispatch(
+                &app, cmd,
+                &json!({ "sessionId": "mcp-probe", "server": "local-tools", "enabled": false }),
+                DESKTOP_SOURCE, CallOrigin::Local,
+            ).unwrap_err();
+            assert_eq!(error, "This session has no running agent", "{cmd}");
+        }
+        drop(app);
+        std::fs::remove_dir_all(data_dir).unwrap();
     }
 
     /// Regression for the Electron/browser pairing panel: the three pairing commands must be routed

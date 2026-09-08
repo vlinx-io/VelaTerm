@@ -417,6 +417,8 @@ impl OutputCoalescer {
 ///
 /// PtyManager::spawn starts a detached reader that continuously reads the master and fans out through `stream`.
 pub struct PtySession {
+    /// Reader completion and child reaping, both required before another engine takes over.
+    pub terminated: Arc<(Mutex<u8>, std::sync::Condvar)>,
     #[allow(dead_code)]
     pub master: Box<dyn MasterPty + Send>,
     /// Input queue makes `pty_write` return after enqueue without touching the fd. A dedicated FIFO writer isolates

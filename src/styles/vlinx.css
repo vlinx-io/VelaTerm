@@ -11,6 +11,11 @@
   /* Place CJK fallbacks (PingFang, Microsoft YaHei, Noto) before generic monospace. Common monospace
      fonts lack CJK glyphs; otherwise browsers fall through to bitmap-serif SimSun beside Latin text. */
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, "VlxSymbols", "Symbola", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", monospace;
+  /* Prose face for the one place this app shows written language rather than machine output: the agent
+     conversation. Everything else — paths, output, code, the chrome around it — stays monospace, so the
+     two faces mark the difference between what was said and what was run. System stack only: no webfont
+     is downloaded, and each platform's own text face already carries the CJK ranges named after it. */
+  --font-prose: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
   --r-sm: 5px; --r-md: 8px; --r-lg: 12px;
   --pane-gap: 3px;
   /* accent (overridden by [data-accent] and set inline by App.jsx) */
@@ -23,6 +28,10 @@
   --row-h: 28px;
   --ui-fs: 12.5px;
   --term-fs: 13px;
+  /* Startup fallbacks; applyVisual supplies the independently persisted conversation settings. */
+  --chat-font: var(--font-mono);
+  --chat-fs: 13.5px;
+  --chat-line-height: 1.2;
   /* Startup fallback colors. theme.ts writes data-theme after React mounts; without initial --bg-0
      and --text, body becomes transparent and flashes white. Default to dark, with a system-light
      override below. Explicit [data-theme] replaces these values once initialized. */
@@ -45,6 +54,7 @@
 /* ---- DARK (default) ---- */
 [data-theme="dark"] {
   --grok-brand-color: #ffffff;
+  --codex-brand-color: #c4c9d1;
   --bg-0: oklch(0.2 0.006 260);     /* app frame */
   --bg-1: oklch(0.205 0.006 260);   /* sidebars */
   --bg-2: oklch(0.225 0.007 260);   /* raised: tabs, headers */
@@ -368,6 +378,8 @@ svg { display: block; }
 .pane-tools button { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 4px; color: var(--text-faint); }
 .pane-tools button:hover { background: var(--bg-active); color: var(--text); }
 .pane-tools button:disabled { opacity: 0.3; cursor: default; }
+.pane-tools button.conversation-switch { width: auto; display: flex; align-items: center; gap: 4px; padding: 0 4px; }
+.session-experimental-badge { flex: none; white-space: nowrap; border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; font-size: 10px; line-height: 14px; font-weight: 500; color: var(--text-muted); }
 
 /* Shell-switch pill sits left of pane tools and includes text, so it does not reuse fixed-width tool buttons. */
 .pane-head .shell-pick { display: flex; align-items: center; gap: 4px; flex: none; height: 20px; padding: 0 6px; border-radius: 5px; color: var(--text-faint); font-size: 10.5px; cursor: pointer; }

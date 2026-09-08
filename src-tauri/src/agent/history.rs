@@ -306,9 +306,11 @@ fn import_discovered(ctx: &AppCtx, project_id: &str, selected: Vec<Selection>, h
                 rusqlite::params![s.kind.as_str(), s.agent_session_id], |r| r.get(0)).map_err(|e| e.to_string())?;
             if exists { continue; }
             let defaults = &settings["agentDefaults"][s.kind.as_str()];
+            // Imported conversations were run in the agent's own terminal interface, so they open in the
+            // terminal engine; the user can switch one to the conversation view afterwards.
             let mut record = repo::create_session_full(&tx, project_id, None, &s.title, s.kind,
                 None, Some(&s.cwd), None, None, None, defaults["args"].as_str(),
-                defaults["permissionMode"].as_str(), None, None, None)?;
+                defaults["permissionMode"].as_str(), None, None, None, None)?;
             repo::set_agent_session_id(&tx, &record.id, &s.agent_session_id, s.kind)?;
             record.agent_session_id = Some(s.agent_session_id.clone());
             imported.push(record);

@@ -161,6 +161,7 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
   // Subscribe to terminal font family/size for live application to this xterm.
   const termFontFamily = useTermStore((s) => s.termFontFamily);
   const termFontSize = useTermStore((s) => s.termFontSize);
+  const termLineHeight = useTermStore((s) => s.termLineHeight);
   // Window focus plus active-session state drives terminal FocusIn/FocusOut forwarding.
   const windowFocused = useTermStore((s) => s.windowFocused);
   // Subscribe only to whether this session is active, avoiding rerenders of every terminal on switches.
@@ -230,7 +231,7 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
     const term = new Terminal({
       fontFamily: fontStack(fontState.termFontFamily),
       fontSize: fontState.termFontSize,
-      lineHeight: 1.2,
+      lineHeight: fontState.termLineHeight,
       cursorBlink: true,
       scrollback: 5000,
       allowProposedApi: true,
@@ -977,9 +978,10 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
     const term = termRef.current;
     if (!term) return;
     const fam = fontStack(termFontFamily);
-    if (term.options.fontFamily === fam && term.options.fontSize === termFontSize) return;
+    if (term.options.fontFamily === fam && term.options.fontSize === termFontSize && term.options.lineHeight === termLineHeight) return;
     term.options.fontFamily = fam;
     term.options.fontSize = termFontSize;
+    term.options.lineHeight = termLineHeight;
     const container = containerRef.current;
     if (modeRef.current === "mirror") {
       applyScaleRef.current?.();
@@ -992,7 +994,7 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       ptyResize(session.id, term.cols, term.rows).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [termFontFamily, termFontSize]);
+  }, [termFontFamily, termFontSize, termLineHeight]);
 
   // Repair scroll geometry when a hidden tab becomes visible.
   //

@@ -121,6 +121,7 @@ pub fn command(bin: &str, job: &Job, dir: &WorkDir) -> Command {
         if !job.model.is_empty() {
             cmd.args(["--model", &job.model]);
         }
+        if !job.effort.is_empty() { cmd.args(["--effort", &job.effort]); }
         cmd.env_remove("CLAUDECODE");
     } else {
         cmd.args([
@@ -149,6 +150,9 @@ pub fn command(bin: &str, job: &Job, dir: &WorkDir) -> Command {
         .arg(dir.0.join("schema.json"));
         if !job.model.is_empty() {
             cmd.args(["--model", &job.model]);
+        }
+        if !job.effort.is_empty() {
+            cmd.arg("-c").arg(format!("model_reasoning_effort={}", serde_json::to_string(&job.effort).unwrap()));
         }
         let config_home = std::env::var_os("CODEX_HOME")
             .map(PathBuf::from)
@@ -300,7 +304,7 @@ pub fn call(
         &job.id,
         "INFO",
         "ai_request",
-        &json!({"step":step,"method":"AI","model":if job.model.is_empty(){"configured_default"}else{&job.model},"interface":format!("{} CLI",job.agent),"goal":"compile_thematic_memory","inputType":"text","originalChars":prompt.chars().count(),"sentChars":prompt.chars().count(),"limit":350000,"truncated":false,"imageCount":0,"schema":"memory-wiki-v1","preview":"[source and memory content redacted]","sha256":digest(prompt),"inputCount":1,"outputCount":0,"status":"started","durationMs":0}),
+        &json!({"step":step,"method":"AI","model":if job.model.is_empty(){"configured_default"}else{&job.model},"effort":if job.effort.is_empty(){"configured_default"}else{&job.effort},"interface":format!("{} CLI",job.agent),"goal":"compile_thematic_memory","inputType":"text","originalChars":prompt.chars().count(),"sentChars":prompt.chars().count(),"limit":350000,"truncated":false,"imageCount":0,"schema":"memory-wiki-v1","preview":"[source and memory content redacted]","sha256":digest(prompt),"inputCount":1,"outputCount":0,"status":"started","durationMs":0}),
     );
     let bin = executable(app, &job.agent)?;
     let mut child = command(&bin, job, dir)

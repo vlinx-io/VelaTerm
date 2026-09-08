@@ -126,6 +126,10 @@ fn map_session(row: &Row) -> rusqlite::Result<Session> {
         // Append the agent preset link and per-session executable at indices 22/23.
         agent_preset_id: row.get(22)?,
         agent_path: normalize_optional_windows_verbatim_path(row.get(23)?),
+        // Append the driving engine at index 24.
+        engine: row.get(24)?,
+        // Append the Codex collaboration style at index 25.
+        collaboration_mode: row.get(25)?,
     })
 }
 
@@ -133,7 +137,7 @@ fn map_session(row: &Row) -> rusqlite::Result<Session> {
 const SESSION_COLUMNS: &str = "id, project_id, group_id, name, shell, cwd, env_json, init_cmd, \
      hotkey, sort_order, created_at, kind, agent_session_id, \
      parent_session_id, collapsed, worktree_path, archived_at, browser_url, agent_args, \
-     permission_mode, worktree_base_ref, mark, agent_preset_id, agent_path";
+     permission_mode, worktree_base_ref, mark, agent_preset_id, agent_path, engine, collaboration_mode";
 
 /// Import an existing directory as a project, using its directory name.
 pub fn import_project(conn: &Connection, root_path: &str) -> Result<Project, String> {
@@ -326,6 +330,7 @@ pub fn create_session(
         None,
         None,
         None,
+        None,
     )
 }
 
@@ -348,6 +353,9 @@ pub fn create_session_full(
     worktree_base_ref: Option<&str>,
     agent_preset_id: Option<&str>,
     agent_path: Option<&str>,
+    // How the agent is driven. Empty or unrecognized means the terminal engine, which is what every
+    // session used before the chat engine existed and what a plain terminal always uses.
+    engine: Option<&str>,
 ) -> Result<Session, String> {
     let session = Session {
         id: new_id(),
@@ -363,6 +371,7 @@ pub fn create_session_full(
         permission_mode: permission_mode
             .map(|s| s.to_string())
             .filter(|s| !s.is_empty()),
+        collaboration_mode: None,
         hotkey: None,
         agent_session_id: None,
         parent_session_id: parent_session_id
@@ -383,14 +392,18 @@ pub fn create_session_full(
             .map(|s| s.to_string())
             .filter(|s| !s.is_empty()),
         agent_path: agent_path.map(|s| s.to_string()).filter(|s| !s.is_empty()),
+        engine: match engine.map(str::trim) {
+            Some("chat") => "chat".to_string(),
+            _ => "tui".to_string(),
+        },
         sort_order: now_millis(),
         created_at: now_secs(),
     };
 
     conn.execute(
         "INSERT INTO sessions
-           (id, project_id, group_id, name, kind, shell, cwd, env_json, init_cmd, hotkey, parent_session_id, collapsed, worktree_path, sort_order, created_at, agent_args, permission_mode, worktree_base_ref, agent_preset_id, agent_path)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+           (id, project_id, group_id, name, kind, shell, cwd, env_json, init_cmd, hotkey, parent_session_id, collapsed, worktree_path, sort_order, created_at, agent_args, permission_mode, worktree_base_ref, agent_preset_id, agent_path, engine)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
         params![
             session.id,
             session.project_id,
@@ -412,9 +425,97 @@ pub fn create_session_full(
             session.worktree_base_ref,
             session.agent_preset_id,
             session.agent_path,
+            session.engine,
         ],
     )
     .map_err(|e| format!("Failed to write session: {e}"))?;
+
+    Ok(session)
+}
+
+/// Create an empty chat session from an existing session's launch and placement configuration.
+///
+/// This is the database half of the client `/clear` command. The old row remains an exact archived
+/// record, while the replacement keeps its sibling position, working directory, worktree, executable,
+/// arguments, permissions, collaboration style, preset, marker, and hotkey. Conversation identity is
+/// deliberately omitted.
+pub fn create_fresh_chat_session(
+    conn: &Connection,
+    source: &Session,
+    name: &str,
+) -> Result<Session, String> {
+    if !matches!(source.kind, SessionKind::Claude | SessionKind::Codex | SessionKind::Opencode)
+        || source.engine != "chat"
+    {
+        return Err("Only Claude, Codex, and OpenCode chat sessions can be cleared".to_string());
+    }
+
+    let session = Session {
+        id: new_id(),
+        project_id: source.project_id.clone(),
+        group_id: source.group_id.clone(),
+        name: name.to_string(),
+        kind: source.kind,
+        shell: source.shell.clone(),
+        cwd: source.cwd.clone(),
+        env_json: source.env_json.clone(),
+        init_cmd: source.init_cmd.clone(),
+        agent_args: source.agent_args.clone(),
+        permission_mode: source.permission_mode.clone(),
+        collaboration_mode: source.collaboration_mode.clone(),
+        agent_preset_id: source.agent_preset_id.clone(),
+        agent_path: source.agent_path.clone(),
+        hotkey: source.hotkey.clone(),
+        engine: "chat".to_string(),
+        agent_session_id: None,
+        parent_session_id: source.parent_session_id.clone(),
+        collapsed: false,
+        worktree_path: source.worktree_path.clone(),
+        worktree_base_ref: source.worktree_base_ref.clone(),
+        archived_at: None,
+        browser_url: None,
+        mark: source.mark.clone(),
+        // The archived source disappears from the live tree, so reusing its order puts the fresh session
+        // in the same sidebar position instead of making `/clear` move the reader elsewhere.
+        sort_order: source.sort_order,
+        created_at: now_secs(),
+    };
+
+    conn.execute(
+        "INSERT INTO sessions
+           (id, project_id, group_id, name, kind, shell, cwd, env_json, init_cmd, hotkey,
+            parent_session_id, collapsed, worktree_path, worktree_base_ref, sort_order, created_at,
+            agent_args, permission_mode, collaboration_mode, mark, agent_preset_id, agent_path, engine)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, ?12, ?13, ?14, ?15,
+                 ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+        params![
+            session.id,
+            session.project_id,
+            session.group_id,
+            session.name,
+            session.kind.as_str(),
+            session.shell,
+            session.cwd,
+            session.env_json,
+            session.init_cmd,
+            session.hotkey,
+            session.parent_session_id,
+            session.worktree_path,
+            session.worktree_base_ref,
+            session.sort_order,
+            session.created_at,
+            session.agent_args,
+            session.permission_mode,
+            session.collaboration_mode,
+            session.mark,
+            session.agent_preset_id,
+            session.agent_path,
+            session.engine,
+        ],
+    )
+    .map_err(|e| format!("Failed to create fresh chat session: {e}"))?;
+    copy_codex_chat_settings(conn, &source.id, &session.id)?;
+    crate::agent::session_settings::copy(conn, &source.id, &session.id)?;
 
     Ok(session)
 }
@@ -450,6 +551,8 @@ pub fn persist_session(
         agent_path: None,
         agent_args: None,
         permission_mode: None,
+        collaboration_mode: None,
+        engine: "tui".to_string(),
         hotkey: None,
         agent_session_id: None,
         parent_session_id: parent_session_id
@@ -511,6 +614,78 @@ pub fn update_session(
         params![name, shell, cwd, init_cmd, agent_args, permission_mode, id],
     )
     .map_err(|e| format!("Failed to update session: {e}"))?;
+    Ok(())
+}
+
+/// The directory a project lives in, or None for a project that has none (a collection) or is unknown.
+pub fn get_project_root(conn: &Connection, project_id: &str) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT root_path FROM projects WHERE id = ?1",
+        params![project_id],
+        |row| row.get::<_, Option<String>>(0),
+    )
+    .optional()
+    .map(|opt| opt.flatten().filter(|p| !p.trim().is_empty()))
+    .map_err(|e| format!("Failed to read project root: {e}"))
+}
+
+/// Persist a session's permission mode on its own, without rewriting the rest of the row.
+pub fn set_permission_mode(conn: &Connection, id: &str, mode: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE sessions SET permission_mode = ?1 WHERE id = ?2",
+        params![mode, id],
+    )
+    .map_err(|e| format!("Failed to update permission mode: {e}"))?;
+    Ok(())
+}
+
+/// Read authoritative per-conversation Codex choices, including explicit default values.
+pub fn codex_chat_settings(conn: &Connection, id: &str) -> Result<(Option<String>, Option<String>), String> {
+    conn.query_row("SELECT service_tier, personality FROM chat_codex_settings WHERE session_id = ?1",
+        [id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .optional().map(|value| value.unwrap_or_default()).map_err(|e| e.to_string())
+}
+
+/// Save one choice without resetting the other; only Codex sessions accept these settings.
+pub fn set_codex_chat_setting(conn: &Connection, id: &str, field: &str, value: Option<&str>) -> Result<(), String> {
+    if get_session_kind(conn, id)? != Some(SessionKind::Codex) {
+        return Err("These settings are available only for Codex conversations".into());
+    }
+    let sql = match field {
+        "service_tier" => "INSERT INTO chat_codex_settings(session_id, service_tier) VALUES (?1, ?2) ON CONFLICT(session_id) DO UPDATE SET service_tier = excluded.service_tier",
+        "personality" => "INSERT INTO chat_codex_settings(session_id, personality) VALUES (?1, ?2) ON CONFLICT(session_id) DO UPDATE SET personality = excluded.personality",
+        _ => return Err("Unknown Codex setting".into()),
+    };
+    conn.execute(sql, params![id, value]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn copy_codex_chat_settings(conn: &Connection, source: &str, target: &str) -> Result<(), String> {
+    conn.execute("INSERT INTO chat_codex_settings(session_id, service_tier, personality) SELECT ?2, service_tier, personality FROM chat_codex_settings WHERE session_id = ?1",
+        params![source, target]).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Persist a Codex session's collaboration style independently of its permission mode.
+pub fn set_collaboration_mode(conn: &Connection, id: &str, mode: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE sessions SET collaboration_mode = ?1 WHERE id = ?2",
+        params![mode, id],
+    )
+    .map_err(|e| format!("Failed to update collaboration mode: {e}"))?;
+    Ok(())
+}
+
+/// Choose how an agent session is driven. See `Session::engine`.
+///
+/// Switching engines does not touch the conversation: the recording is the same file either way, so the
+/// next launch resumes exactly where the previous engine left off.
+pub fn set_session_engine(conn: &Connection, id: &str, engine: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE sessions SET engine = ?1 WHERE id = ?2",
+        params![engine, id],
+    )
+    .map_err(|e| format!("Failed to update session engine: {e}"))?;
     Ok(())
 }
 
@@ -1012,6 +1187,9 @@ pub fn fork_session(conn: &Connection, source_id: &str) -> Result<Session, Strin
         agent_preset_id: source.agent_preset_id.clone(),
         agent_path: source.agent_path.clone(),
         permission_mode: source.permission_mode.clone(),
+        collaboration_mode: source.collaboration_mode.clone(),
+        // A fork continues the same conversation, so it is driven the same way.
+        engine: source.engine.clone(),
         hotkey: None,
         agent_session_id: Some(anchor.clone()),
         parent_session_id: source.parent_session_id.clone(),
@@ -1030,9 +1208,9 @@ pub fn fork_session(conn: &Connection, source_id: &str) -> Result<Session, Strin
         "INSERT INTO sessions
            (id, project_id, group_id, name, kind, shell, cwd, env_json, init_cmd, hotkey,
             agent_session_id, parent_session_id, collapsed, worktree_path,
-            fork_pending, sort_order, created_at, agent_args, permission_mode, mark,
-            agent_preset_id, agent_path)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, 1, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+            fork_pending, sort_order, created_at, agent_args, permission_mode, collaboration_mode, mark,
+            agent_preset_id, agent_path, engine)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0, ?13, 1, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
         params![
             session.id,
             session.project_id,
@@ -1051,12 +1229,16 @@ pub fn fork_session(conn: &Connection, source_id: &str) -> Result<Session, Strin
             session.created_at,
             session.agent_args,
             session.permission_mode,
+            session.collaboration_mode,
             session.mark,
             session.agent_preset_id,
             session.agent_path,
+            session.engine,
         ],
     )
     .map_err(|e| format!("Failed to write forked session: {e}"))?;
+    copy_codex_chat_settings(conn, &source.id, &session.id)?;
+    crate::agent::session_settings::copy(conn, &source.id, &session.id)?;
 
     Ok(session)
 }
@@ -1094,6 +1276,266 @@ pub fn get_session_name(conn: &Connection, id: &str) -> Result<Option<String>, S
     )
     .optional()
     .map_err(|e| format!("Failed to read session name: {e}"))
+}
+
+/// One session row as shown by `vrefer --list`; see agent/server.rs `/refer`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionBrief {
+    pub session_id: String,
+    pub name: String,
+    pub kind: SessionKind,
+    pub archived: bool,
+    pub cwd: Option<String>,
+}
+
+/// Outcome of resolving a user-facing session reference.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SessionRefMatch {
+    /// Exactly one session matched; carries its id.
+    One(String),
+    /// Several sessions matched; carries `(id, name)` for every candidate so the caller can print them.
+    Ambiguous(Vec<(String, String)>),
+    /// Nothing matched.
+    None,
+}
+
+/// Minimum id prefix length accepted as a reference. Shorter prefixes collide too easily across the
+/// UUIDs used for session ids, and a stray two-character argument should not resolve to a session.
+const MIN_ID_PREFIX: usize = 8;
+
+/// List every session that `vrefer` can address, live ones first and newest first within each group.
+pub fn list_referable_sessions(conn: &Connection) -> Result<Vec<SessionBrief>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name, kind, cwd, archived_at FROM sessions
+             ORDER BY (archived_at IS NOT NULL), created_at DESC",
+        )
+        .map_err(|e| format!("Failed to prepare session list: {e}"))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(SessionBrief {
+                session_id: row.get(0)?,
+                name: row.get(1)?,
+                kind: SessionKind::from_db(&row.get::<_, String>(2)?),
+                cwd: normalize_optional_windows_verbatim_path(row.get(3)?),
+                archived: row.get::<_, Option<i64>>(4)?.is_some(),
+            })
+        })
+        .map_err(|e| format!("Failed to query sessions: {e}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to read sessions: {e}"))
+}
+
+/// Resolve a user-facing session reference to a session id.
+///
+/// Tries, in order: exact id, id prefix (at least `MIN_ID_PREFIX` characters), exact name
+/// (case-insensitive), unique name substring. Each step returns as soon as it matches, so a name that
+/// happens to be a substring of another name never shadows an exact hit. Ambiguous matches return every
+/// candidate so the caller can print them instead of silently picking one.
+pub fn resolve_session_ref(
+    conn: &Connection,
+    reference: &str,
+) -> Result<SessionRefMatch, String> {
+    let needle = reference.trim();
+    if needle.is_empty() {
+        return Ok(SessionRefMatch::None);
+    }
+    let sessions = list_referable_sessions(conn)?;
+    Ok(resolve_from(&sessions, needle))
+}
+
+/// Reference resolution over an already-loaded session list, kept separate so it can be unit tested
+/// without a database.
+fn resolve_from(sessions: &[SessionBrief], needle: &str) -> SessionRefMatch {
+    // Guard here rather than only in the caller: an empty needle is a substring of every name and
+    // would otherwise report every session as an ambiguous match.
+    if needle.is_empty() {
+        return SessionRefMatch::None;
+    }
+    let pick = |mut hits: Vec<&SessionBrief>| match hits.len() {
+        0 => SessionRefMatch::None,
+        1 => SessionRefMatch::One(hits.remove(0).session_id.clone()),
+        _ => SessionRefMatch::Ambiguous(
+            hits.into_iter()
+                .map(|s| (s.session_id.clone(), s.name.clone()))
+                .collect(),
+        ),
+    };
+
+    if let Some(exact) = sessions.iter().find(|s| s.session_id == needle) {
+        return SessionRefMatch::One(exact.session_id.clone());
+    }
+
+    if needle.len() >= MIN_ID_PREFIX {
+        let by_prefix: Vec<&SessionBrief> = sessions
+            .iter()
+            .filter(|s| s.session_id.starts_with(needle))
+            .collect();
+        if !by_prefix.is_empty() {
+            return pick(by_prefix);
+        }
+    }
+
+    let lowered = needle.to_lowercase();
+    let by_name: Vec<&SessionBrief> = sessions
+        .iter()
+        .filter(|s| s.name.to_lowercase() == lowered)
+        .collect();
+    if !by_name.is_empty() {
+        return pick(by_name);
+    }
+
+    let by_substring: Vec<&SessionBrief> = sessions
+        .iter()
+        .filter(|s| s.name.to_lowercase().contains(&lowered))
+        .collect();
+    pick(by_substring)
+}
+
+/// One agent inside an orchestration run, as requested and as it turned out.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrchAgent {
+    pub idx: u32,
+    pub name: String,
+    /// The session that was created for it, or None while pending or when the user dropped it.
+    pub session_id: Option<String>,
+    /// "pending" until the frontend reports back, then "started" or "cancelled".
+    pub status: String,
+}
+
+/// One `/vorch` run and the agents it asked for.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrchRun {
+    pub id: String,
+    pub parent_session_id: String,
+    pub title: String,
+    pub created_at: i64,
+    pub agents: Vec<OrchAgent>,
+}
+
+/// Record a requested orchestration and return its id.
+///
+/// Written when the request arrives, before the user has confirmed anything, so a run that is cancelled
+/// outright still leaves a record of what was proposed.
+pub fn create_orch_run(
+    conn: &Connection,
+    parent_session_id: &str,
+    title: &str,
+    agent_names: &[String],
+) -> Result<String, String> {
+    let id = Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO orch_runs (id, parent_session_id, title, created_at) VALUES (?1, ?2, ?3, ?4)",
+        params![id, parent_session_id, title, now_secs()],
+    )
+    .map_err(|e| format!("Failed to record orchestration: {e}"))?;
+    for (idx, name) in agent_names.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO orch_agents (orch_id, idx, name, session_id, status)
+             VALUES (?1, ?2, ?3, NULL, 'pending')",
+            params![id, idx as i64, name],
+        )
+        .map_err(|e| format!("Failed to record orchestration agent: {e}"))?;
+    }
+    Ok(id)
+}
+
+/// Attach the session the frontend created for one agent, or mark that agent cancelled.
+///
+/// Passing `None` records the user having removed that entry, which is a real outcome rather than a
+/// failure: the run is still complete, just smaller than proposed.
+pub fn set_orch_agent_session(
+    conn: &Connection,
+    orch_id: &str,
+    idx: u32,
+    session_id: Option<&str>,
+) -> Result<(), String> {
+    let status = if session_id.is_some() {
+        "started"
+    } else {
+        "cancelled"
+    };
+    let changed = conn
+        .execute(
+            "UPDATE orch_agents SET session_id = ?1, status = ?2 WHERE orch_id = ?3 AND idx = ?4",
+            params![session_id, status, orch_id, idx as i64],
+        )
+        .map_err(|e| format!("Failed to attach orchestration session: {e}"))?;
+    if changed == 0 {
+        return Err(format!("No orchestration agent {orch_id}#{idx}"));
+    }
+    Ok(())
+}
+
+/// Read one run with its agents in request order; missing returns Ok(None).
+pub fn get_orch_run(conn: &Connection, id: &str) -> Result<Option<OrchRun>, String> {
+    let head = conn
+        .query_row(
+            "SELECT id, parent_session_id, title, created_at FROM orch_runs WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| format!("Failed to read orchestration: {e}"))?;
+    let Some((id, parent_session_id, title, created_at)) = head else {
+        return Ok(None);
+    };
+    Ok(Some(OrchRun {
+        agents: orch_agents(conn, &id)?,
+        id,
+        parent_session_id,
+        title,
+        created_at,
+    }))
+}
+
+/// The most recent run started by this session, which is what "how is it going" refers to.
+pub fn latest_orch_run_for(
+    conn: &Connection,
+    parent_session_id: &str,
+) -> Result<Option<OrchRun>, String> {
+    let id = conn
+        .query_row(
+            "SELECT id FROM orch_runs WHERE parent_session_id = ?1 ORDER BY created_at DESC LIMIT 1",
+            params![parent_session_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(|e| format!("Failed to read orchestrations: {e}"))?;
+    match id {
+        Some(id) => get_orch_run(conn, &id),
+        None => Ok(None),
+    }
+}
+
+fn orch_agents(conn: &Connection, orch_id: &str) -> Result<Vec<OrchAgent>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT idx, name, session_id, status FROM orch_agents WHERE orch_id = ?1 ORDER BY idx",
+        )
+        .map_err(|e| format!("Failed to prepare orchestration agents: {e}"))?;
+    let rows = stmt
+        .query_map(params![orch_id], |row| {
+            Ok(OrchAgent {
+                idx: row.get::<_, i64>(0)? as u32,
+                name: row.get(1)?,
+                session_id: row.get(2)?,
+                status: row.get(3)?,
+            })
+        })
+        .map_err(|e| format!("Failed to query orchestration agents: {e}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to read orchestration agents: {e}"))
 }
 
 /// Return nonempty worktree paths for a session and all descendants for deletion cleanup.
@@ -1974,6 +2416,194 @@ mod tests {
         conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
         conn.execute_batch(crate::db::schema::SCHEMA).unwrap();
         conn
+    }
+
+    /// Build a `SessionBrief` list for resolution tests without touching a database.
+    fn brief(id: &str, name: &str) -> SessionBrief {
+        SessionBrief {
+            session_id: id.to_string(),
+            name: name.to_string(),
+            kind: SessionKind::Claude,
+            archived: false,
+            cwd: None,
+        }
+    }
+
+    /// A project with one session, the parent an orchestration hangs off.
+    fn orch_fixture(conn: &Connection) -> String {
+        let project = import_project(conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        create_session(
+            conn,
+            &project.id,
+            None,
+            "main",
+            SessionKind::Claude,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap()
+        .id
+    }
+
+    #[test]
+    fn orch_run_records_the_request_then_its_outcome() {
+        let conn = mem_conn();
+        let parent = orch_fixture(&conn);
+        let names = vec!["split".to_string(), "migrate".to_string(), "tests".to_string()];
+        let orch = create_orch_run(&conn, &parent, "break up the settings panel", &names).unwrap();
+
+        // Everything starts pending: the request is recorded before the user confirms anything.
+        let run = get_orch_run(&conn, &orch).unwrap().unwrap();
+        assert_eq!(run.title, "break up the settings panel");
+        assert_eq!(run.parent_session_id, parent);
+        assert_eq!(run.agents.len(), 3);
+        assert!(run.agents.iter().all(|a| a.status == "pending" && a.session_id.is_none()));
+        assert_eq!(run.agents[1].name, "migrate");
+        // Order follows the request, not insertion luck.
+        assert_eq!(run.agents.iter().map(|a| a.idx).collect::<Vec<_>>(), vec![0, 1, 2]);
+
+        // Two get sessions; the user dropped the third in the dialog.
+        set_orch_agent_session(&conn, &orch, 0, Some("child-a")).unwrap();
+        set_orch_agent_session(&conn, &orch, 1, Some("child-b")).unwrap();
+        set_orch_agent_session(&conn, &orch, 2, None).unwrap();
+
+        let run = get_orch_run(&conn, &orch).unwrap().unwrap();
+        assert_eq!(run.agents[0].session_id.as_deref(), Some("child-a"));
+        assert_eq!(run.agents[0].status, "started");
+        // A dropped entry is a real outcome, distinguishable from one still pending.
+        assert!(run.agents[2].session_id.is_none());
+        assert_eq!(run.agents[2].status, "cancelled");
+    }
+
+    #[test]
+    fn orch_lookups_handle_missing_and_pick_the_newest() {
+        let conn = mem_conn();
+        let parent = orch_fixture(&conn);
+        assert!(get_orch_run(&conn, "no-such-run").unwrap().is_none());
+        assert!(latest_orch_run_for(&conn, &parent).unwrap().is_none());
+
+        let first = create_orch_run(&conn, &parent, "first", &["a".to_string()]).unwrap();
+        let second = create_orch_run(&conn, &parent, "second", &["b".to_string()]).unwrap();
+        // Both share a timestamp at this resolution, so the newest must still be one of them and the
+        // lookup must not fail; asking "how is it going" resolves to a real run.
+        let latest = latest_orch_run_for(&conn, &parent).unwrap().unwrap();
+        assert!(latest.id == first || latest.id == second);
+
+        // Attaching to an agent that was never requested is an error, not a silent no-op.
+        assert!(set_orch_agent_session(&conn, &first, 9, Some("x")).is_err());
+    }
+
+    #[test]
+    fn deleting_the_parent_session_takes_its_orchestrations() {
+        let conn = mem_conn();
+        let parent = orch_fixture(&conn);
+        let orch = create_orch_run(&conn, &parent, "t", &["a".to_string()]).unwrap();
+        delete_node(&conn, NodeKind::Session, &parent).unwrap();
+        // Otherwise orphaned runs would accumulate forever, pointing at sessions nobody can open.
+        assert!(get_orch_run(&conn, &orch).unwrap().is_none());
+    }
+
+    #[test]
+    fn resolve_session_ref_prefers_exact_id_then_prefix_then_name() {
+        let sessions = vec![
+            brief("2feead2c-1111-4444-8888-000000000001", "Refactor session views"),
+            brief("2feead2c-2222-4444-8888-000000000002", "Terminal input latency"),
+            brief("98384f2e-3333-4444-8888-000000000003", "2feead2c-1111-4444-8888-000000000001"),
+        ];
+
+        // An exact id wins even though another session is *named* after that id.
+        assert_eq!(
+            resolve_from(&sessions, "2feead2c-1111-4444-8888-000000000001"),
+            SessionRefMatch::One("2feead2c-1111-4444-8888-000000000001".to_string())
+        );
+        // A unique id prefix resolves.
+        assert_eq!(
+            resolve_from(&sessions, "98384f2e"),
+            SessionRefMatch::One("98384f2e-3333-4444-8888-000000000003".to_string())
+        );
+        // An exact name resolves, case-insensitively.
+        assert_eq!(
+            resolve_from(&sessions, "terminal INPUT latency"),
+            SessionRefMatch::One("2feead2c-2222-4444-8888-000000000002".to_string())
+        );
+        // A unique name substring resolves.
+        assert_eq!(
+            resolve_from(&sessions, "latency"),
+            SessionRefMatch::One("2feead2c-2222-4444-8888-000000000002".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_session_ref_reports_ambiguity_and_misses() {
+        let sessions = vec![
+            brief("2feead2c-1111-4444-8888-000000000001", "Output scheduler"),
+            brief("2feead2c-2222-4444-8888-000000000002", "Output throttling"),
+        ];
+
+        // A prefix shared by two sessions lists both candidates rather than picking one.
+        let SessionRefMatch::Ambiguous(candidates) = resolve_from(&sessions, "2feead2c") else {
+            panic!("a shared id prefix should be ambiguous");
+        };
+        assert_eq!(candidates.len(), 2);
+        // A name substring shared by two sessions is ambiguous as well.
+        assert!(matches!(
+            resolve_from(&sessions, "output"),
+            SessionRefMatch::Ambiguous(_)
+        ));
+        // Prefixes shorter than the minimum never match an id.
+        assert_eq!(resolve_from(&sessions, "2fe"), SessionRefMatch::None);
+        assert_eq!(resolve_from(&sessions, "nothing here"), SessionRefMatch::None);
+        assert_eq!(resolve_from(&sessions, ""), SessionRefMatch::None);
+    }
+
+    #[test]
+    fn list_referable_sessions_orders_live_first_and_marks_archives() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        let live = create_session(
+            &conn,
+            &project.id,
+            None,
+            "live one",
+            SessionKind::Claude,
+            None,
+            Some("/work/live"),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let archived = create_session(
+            &conn,
+            &project.id,
+            None,
+            "archived one",
+            SessionKind::Codex,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        set_archived(&conn, &archived.id, true).unwrap();
+
+        let listed = list_referable_sessions(&conn).unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].session_id, live.id, "live sessions should come first");
+        assert!(!listed[0].archived);
+        assert_eq!(listed[0].cwd.as_deref(), Some("/work/live"));
+        assert_eq!(listed[1].session_id, archived.id);
+        assert!(listed[1].archived, "archived sessions should be flagged");
+
+        // Resolution reaches archived sessions too: they are still readable.
+        assert_eq!(
+            resolve_session_ref(&conn, "archived one").unwrap(),
+            SessionRefMatch::One(archived.id.clone())
+        );
     }
 
     /// A collection stores an empty root and still lands in the tree beside folder-backed projects.
@@ -3040,6 +3670,7 @@ mod tests {
             None,
             Some(&preset.id),
             preset.exec_path.as_deref(),
+            None,
         )
         .unwrap();
         assert_eq!(session.agent_path.as_deref(), Some("/opt/bin/claude-deepseek"));
@@ -3072,6 +3703,48 @@ mod tests {
         );
     }
 
+    /// A session can be born on the chat engine, so choosing "conversation" when creating one does not
+    /// mean starting a terminal and switching away from it. Anything else is the terminal engine.
+    #[test]
+    fn a_session_can_be_created_on_either_engine() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        let make = |engine: Option<&str>| {
+            create_session_full(
+                &conn,
+                &project.id,
+                None,
+                "c",
+                SessionKind::Claude,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                engine,
+            )
+            .unwrap()
+        };
+        let chat = make(Some("chat"));
+        assert_eq!(chat.engine, "chat");
+        assert_eq!(make(None).engine, "tui");
+        assert_eq!(make(Some("")).engine, "tui");
+        assert_eq!(make(Some("nonsense")).engine, "tui");
+        // The column is what survives a restart, so read it back rather than trusting the returned struct.
+        let stored = list_tree(&conn)
+            .unwrap()
+            .sessions
+            .into_iter()
+            .find(|x| x.id == chat.id)
+            .unwrap();
+        assert_eq!(stored.engine, "chat");
+    }
+
     #[test]
     fn agent_args_roundtrip_create_update_fork() {
         let conn = mem_conn();
@@ -3091,6 +3764,7 @@ mod tests {
             None,
             Some("--model opus"),
             Some("skip"),
+            None,
             None,
             None,
             None,
@@ -3170,5 +3844,60 @@ mod tests {
         let f = fork_session(&conn, &s.id).unwrap();
         assert_eq!(f.agent_args.as_deref(), Some("--model sonnet"));
         assert_eq!(f.permission_mode.as_deref(), Some("skip"));
+    }
+
+    #[test]
+    fn codex_collaboration_mode_survives_reload_clear_and_fork() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        let created = create_session_full(
+            &conn,
+            &project.id,
+            None,
+            "codex chat",
+            SessionKind::Codex,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("auto"),
+            None,
+            None,
+            None,
+            Some("chat"),
+        )
+        .unwrap();
+
+        set_codex_chat_setting(&conn, &created.id, "service_tier", Some("priority")).unwrap();
+        set_codex_chat_setting(&conn, &created.id, "personality", Some("friendly")).unwrap();
+        let expected = (Some("priority".to_string()), Some("friendly".to_string()));
+        assert_eq!(codex_chat_settings(&conn, &created.id).unwrap(), expected);
+        set_collaboration_mode(&conn, &created.id, "plan").unwrap();
+        let stored = get_session(&conn, &created.id).unwrap().unwrap();
+        assert_eq!(stored.collaboration_mode.as_deref(), Some("plan"));
+
+        let fresh = create_fresh_chat_session(&conn, &stored, "codex chat 2").unwrap();
+        assert_eq!(fresh.collaboration_mode.as_deref(), Some("plan"));
+        assert_eq!(
+            get_session(&conn, &fresh.id)
+                .unwrap()
+                .unwrap()
+                .collaboration_mode
+                .as_deref(),
+            Some("plan")
+        );
+
+        set_agent_session_id(&conn, &created.id, "codex-thread-1", SessionKind::Codex).unwrap();
+        let fork = fork_session(&conn, &created.id).unwrap();
+        assert_eq!(fork.collaboration_mode.as_deref(), Some("plan"));
+        assert_eq!(codex_chat_settings(&conn, &fresh.id).unwrap(), expected);
+        assert_eq!(codex_chat_settings(&conn, &fork.id).unwrap(), expected);
+        set_codex_chat_setting(&conn, &fork.id, "service_tier", Some("default")).unwrap();
+        set_codex_chat_setting(&conn, &fork.id, "personality", None).unwrap();
+        assert_eq!(codex_chat_settings(&conn, &fork.id).unwrap(), (Some("default".into()), None));
+        assert_eq!(codex_chat_settings(&conn, &created.id).unwrap(), expected);
+
     }
 }

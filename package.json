@@ -1,7 +1,7 @@
 {
   "name": "velaterm",
   "private": true,
-  "version": "0.1.107",
+  "version": "0.1.108",
   "description": "VelaTerm — a terminal multiplexer GUI that manages terminals and AI agent sessions in one project/group/session tree",
   "author": "VLINX Software",
   "type": "module",
@@ -64,6 +64,8 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "simple-icons": "^16.23.0",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2",
     "tweetnacl": "^1.0.3",
     "zustand": "^5.0.2"
   },
@@ -74,6 +76,7 @@
     "@testing-library/react": "^16.3.2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
+    "@types/turndown": "^5.0.6",
     "@typescript-eslint/parser": "^8.62.0",
     "@vitejs/plugin-react": "^4.6.0",
     "electron": "^42.5.0",

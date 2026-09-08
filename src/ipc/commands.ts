@@ -223,6 +223,40 @@ export function readAgentTranscript(
 }
 
 /**
+ * One row of the session view: a message bubble, or a tool call folded together with its result.
+ *
+ * Richer than TranscriptMessage, which the archive reader uses: reasoning and tool calls are kept, and a
+ * tool row carries its raw input so each card can show the fields that matter for that tool.
+ */
+export interface ChatEvent {
+  /** Position in the list. Stable for a given transcript length; used as the React key. */
+  index: number;
+  kind: "user" | "assistant" | "thinking" | "tool";
+  /** Message body. Absent on a tool row. */
+  text?: string;
+  /** Possibly empty ISO timestamp. */
+  timestamp?: string | null;
+  /** Tool name, on a tool row. */
+  tool?: string;
+  /** Raw tool input, shaped by the tool itself. */
+  input?: unknown;
+  /** Tool output text. Absent while the call is still pending. */
+  output?: string;
+  /** The tool reported a failure. */
+  isError: boolean;
+  /** The call has no result yet: still running, or the recording ends mid-call. */
+  pending: boolean;
+}
+
+/**
+ * Reads a parsed conversation for the session view. Rejects when the session has no readable recording
+ * yet or the agent stores its history in a format we cannot parse, so callers can offer the terminal view.
+ */
+export function readAgentChat(sessionId: string): Promise<ChatEvent[]> {
+  return invoke<ChatEvent[]>("read_agent_chat", { sessionId });
+}
+
+/**
  * Exports complete Claude/Codex session context as Markdown. Desktop `destPath` writes to disk and returns null;
  * browser receives content for local download. `exportedAt` is a preformatted header timestamp. Requires a captured ID.
  */
@@ -446,6 +480,35 @@ export function createWorktree(
   name: string,
 ): Promise<WorktreeInfo> {
   return invoke<WorktreeInfo>("create_worktree", { repoRoot, name });
+}
+
+/**
+ * Report which session an orchestration's agent became, or that the user dropped it.
+ *
+ * Until this call the backend only knows what was proposed: the frontend creates sessions, so nothing
+ * else ties a new session back to the request that asked for it.
+ */
+export function orchAttachSession(
+  orchId: string,
+  idx: number,
+  sessionId: string | null,
+): Promise<void> {
+  return invoke<void>("orch_attach_session", { orchId, idx, sessionId });
+}
+
+/**
+ * Render a model and effort choice into one agent's own command-line spelling.
+ *
+ * Every agent CLI spells this differently — some carry effort inside the model string — so the mapping
+ * lives in one Rust table. Asking for it keeps a second, drifting copy out of the frontend.
+ */
+export function composeAgentArgs(
+  kind: string,
+  model: string | null,
+  effort: string | null,
+  extraArgs: string | null,
+): Promise<string | null> {
+  return invoke<string | null>("compose_agent_args", { kind, model, effort, extraArgs });
 }
 
 /** Existing Git worktree offered by Select Existing Worktree. */

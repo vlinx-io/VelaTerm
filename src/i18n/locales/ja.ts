@@ -124,11 +124,25 @@ const ja: typeof en = {
   "common.save": "保存", // Save
   "common.create": "作成", // Create
   "common.close": "閉じる", // Close
+  "chat.imageViewOriginal": "元の画像を表示",
+  "chat.imageCopy": "画像をコピー",
+  "chat.imageSave": "画像を保存",
+  "chat.imageActionFailed": "画像の操作に失敗しました。もう一度お試しください。",
   "common.copy": "コピー", // Copy
   "common.cut": "切り取り", // Cut
   "common.paste": "貼り付け", // Paste
   "common.selectAll": "すべて選択", // Select All
   "common.copied": "コピーしました", // Copied
+  "chat.sync.loading": "会話を同期中…",
+  "chat.sync.failed": "同期できませんでした。読み込み済みのメッセージは引き続き表示できます。",
+  "chat.sync.history": "以前のメッセージを読み込む",
+  "chat.submission.updateRequired": "このクライアントからメッセージを送信するには、サーバーを更新してください。",
+  "chat.submission.sending": "送信中…",
+  "chat.submission.sent": "送信済み",
+  "chat.submission.queued": "送信待ち",
+  "chat.submission.failed": "送信に失敗しました",
+  "chat.submission.unknown": "送信結果を確認できません",
+  "chat.submission.check": "状態を確認",
   "common.retry": "再試行", // Retry
   "common.experimental": "実験的機能",
   "common.refresh": "更新", // Refresh
@@ -250,6 +264,8 @@ const ja: typeof en = {
   "settings.navTree": "標準", // Tree
   "settings.navCompact": "コンパクト", // Compact
   "settings.tabs": "タブ", // Tabs
+  "settings.defaultSessionEngine": "新規セッションの既定のビュー",
+  "settings.defaultSessionEngineHint": "すでにあるセッションは作成時のビューのままです。",
   "settings.dynamicStatusFilter": "状態フィルターへの動的追加",
   "settings.tabSingle": "シングル", // Single
   "settings.tabMulti": "マルチ", // Multi
@@ -286,6 +302,25 @@ const ja: typeof en = {
   "spawn.launch": "Launch", // Launch
   "spawn.remaining": (n: number) => `${n} more pending`, // ${n} more pending
   "spawn.notifyTitle": "Spawn session awaiting confirmation", // Spawn session awaiting confirmation
+  "orch.title": "これらのエージェントを起動しますか？",
+  "orch.notifyTitle": "オーケストレーションの確認待ち",
+  "orch.coordinatorName": "進捗",
+  "orch.sharedSettings": "共通設定",
+  "orch.agentLabel": "種類",
+  "orch.modelLabel": "モデル",
+  "orch.effortLabel": "推論の深さ",
+  "orch.nameLabel": "名前",
+  "orch.promptLabel": "タスク",
+  "orch.worktreeLabel": "ワークツリー",
+  "orch.worktreeNone": "現在のディレクトリを使う",
+  "orch.worktreeShared": "共有ワークツリー 1 つ",
+  "orch.worktreeEach": "各自にワークツリー",
+  "orch.follow": "共通設定に従う",
+  "orch.overridden": "変更済み",
+  "orch.remove": "削除",
+  "orch.launch": (n: number) => `${n} 件を起動`,
+  "orch.modelPlaceholder": "エージェント既定",
+  "orch.effortPlaceholder": "エージェント既定",
   "tree.worktreeMenu": "Worktree",
   "tree.gitMenu": "Git",
   "tree.viewChanges": "変更を表示…",
@@ -387,6 +422,12 @@ const ja: typeof en = {
   "settings.uiFontSize": "Interface size", // TODO translate
   "settings.termFont": "Terminal font", // TODO translate
   "settings.termFontSize": "Terminal size", // TODO translate
+  "settings.termLineHeight": "ターミナルの行の高さ",
+  "settings.chatTypography": "会話ビュー",
+  "settings.chatTypographyHint": "フォント設定はターミナルとは別に保存され、変更はすぐに反映されます。",
+  "settings.chatFont": "会話のフォント",
+  "settings.chatFontSize": "会話の文字サイズ",
+  "settings.chatLineHeight": "会話の行の高さ",
   "settings.fontDefault": "Default", // TODO translate
   "settings.fontCustom": "Custom…", // TODO translate
   "settings.fontUnavailable": "このデバイスにインストールされていません",
@@ -674,6 +715,13 @@ const ja: typeof en = {
   "form.customOption": "カスタム…", // Custom…
   "tree.cwdLabel": "作業ディレクトリ（空欄でプロジェクトルート）", // Working directory (leave empty for project root)
   "tree.initCmdLabel": "起動コマンド（任意）", // Startup command (optional)
+  "tree.engineLabel": "表示形式",
+  "tree.engineTui": "ターミナルビュー",
+  "tree.engineChat": "会話ビュー",
+  // The agent runs its own terminal interface.
+  "tree.engineTuiHint": "エージェント本体のターミナル画面で実行します。",
+  // Messages and tool cards, with buttons for permission questions.
+  "tree.engineChatHint": "メッセージとツールカードで表示し、権限の要求は画面上で応答します。",
   "tree.agentArgsLabel": "起動引数（任意）", // Launch args (optional)
   // Working directory / Leave empty for the default
   "tree.workingDirLabel": "作業ディレクトリ",
@@ -733,6 +781,11 @@ const ja: typeof en = {
   "info.createdAt": "作成日時", // Created at
 
   // Resume-session dialog
+  "importSessions.results": ({ count }: { count: number }) => `${count} 件の結果`,
+  "importSessions.selected": ({ count }: { count: number }) => `${count} 件選択中`,
+  "importSessions.clearSelection": "選択を解除",
+  "importSessions.clearSearch": "検索をクリア",
+  "importSessions.noHistory": "このプロジェクトのディレクトリにセッション履歴はありません。",
   "importSessions.title": "セッションをインポート",
   "importSessions.description": "作業ディレクトリがこのプロジェクトと一致する Codex、Claude、OpenCode の既存セッションを検索します。セッションを選択してプロジェクトに追加し、開くと会話を再開できます。",
   "importSessions.search": "タイトル、エージェント、セッション ID で検索",
@@ -1199,6 +1252,196 @@ const ja: typeof en = {
   "statusbar.updateReady": "Restart to update", // TODO translate
   "statusbar.updateFailed": "Update failed", // TODO translate
   "statusbar.updateTooltip": "Click for details", // TODO translate
+
+  // ── セッションビュー（エージェントのセッションを会話として読む） ──
+  "session.showConversation": "会話ビュー",
+  "session.showTerminal": "ターミナルビュー",
+  "session.switchTitle": "ビューを切り替えるとエージェントが再起動します",
+  "session.switchBody": "進行中のターンは中断されます。会話の内容は残ります。",
+  "session.switchConfirm": "切り替える",
+  "session.loading": "会話を読み込んでいます…",
+  "session.unavailable": "この会話はまだ読み取れません",
+  "session.working": "実行中…",
+  "session.thinking": "思考",
+  "session.toolRunning": "実行中",
+  "session.toolUnknown": "ツール",
+  "session.toolFailed": "失敗しました",
+  "session.toolNoDetail": "これ以上の記録はありません",
+  "session.showMore": (n: number) => `残り ${n} 文字を表示`,
+  "session.showLess": "折りたたむ",
+  "session.composerHint": "エージェントに送信 · Enter で送信、Shift+Enter で改行",
+  "session.send": "送信",
+
+  // ── チャットエンジン（プロトコルで駆動するセッション） ──
+  "chat.empty": "下の入力欄から会話を開始できます。",
+  "chat.interrupt": "停止",
+  "chat.interruptTooltip": "停止 · Esc",
+  "chat.allow": "許可",
+  "chat.deny": "拒否",
+  "chat.permissionAsk": (tool: string) => `${tool} の実行許可を求めています`,
+  "chat.exited": (code: number) => `エージェントが終了しました（コード ${code}）`,
+  "chat.modeNextTurn": "次のターンから適用",
+  "chat.modePendingHint": (current: string, next: string) =>
+    `現在の権限：${current}。${next} は次のターンから適用されます。現在のターンは元の権限で続行します。`,
+  "chat.modeTooltip": "許可モード",
+  "chat.collaborationModeTooltip": "協働モード",
+  "chat.collaborationMode.default": "デフォルト",
+  "chat.collaborationMode.defaultHint": "作業を進め、判断が必要な場合のみ質問します",
+  "chat.collaborationMode.plan": "プラン",
+  "chat.collaborationMode.planHint": "調査して計画を作成し、質問には選択式カードを使用できます",
+  "chat.modelTooltip": "モデル",
+  "chat.keepChoice": "既定にする",
+  "chat.keepChoiceFor": (model) => `${model} の既定にする`,
+  "chat.modelDefault": "既定のモデル",
+  "chat.mode.default": "毎回確認",
+  "chat.mode.acceptEdits": "編集を自動承認",
+  "chat.mode.plan": "計画モード",
+  "chat.mode.bypassPermissions": "確認なし",
+  "chat.mode.readOnly": "読み取り専用",
+  "chat.mode.fullAccess": "フルアクセス",
+  "chat.placeholder": "エージェントに送信。/コマンド・/スキル・@ファイル も使えます",
+  "chat.command.clearDescription": "このセッションをアーカイブして新しい会話を始める",
+  "chat.command.rewindDescription": "直近のユーザーメッセージから巻き戻す範囲を選ぶ",
+  "chat.command.rewindUnavailable":
+    "完了済みのユーザーメッセージがあり、処理中のターン、待機中のメッセージ、権限確認がない場合に巻き戻せます。",
+  "chat.effortTooltip": "思考の深さ",
+  "chat.effortDefault": "思考",
+  "chat.effort.auto": "自動",
+  "chat.effort.low": "低",
+  "chat.effort.medium": "中",
+  "chat.effort.high": "高",
+  "chat.effort.xhigh": "特高",
+  "chat.effort.max": "最大",
+  "chat.effort.ultra": "極限",
+  "chat.effort.ultracode": "Ultra Code",
+  "chat.agentTooltip": "エージェント",
+  "chat.effort.minimal": "最小",
+  "chat.filterPlaceholder": "絞り込み",
+  "chat.placeholderOpencode": "エージェントに送信。/コマンド・@ファイル が使えます。! で始めるとシェルコマンドを実行します",
+  "chat.command.compactDescription": "会話を要約してコンテキストを空ける",
+  "chat.command.undoDescription": "最後のメッセージと、それによるファイル変更を取り消す",
+  "chat.command.redoDescription": "直前の取り消しを元に戻す",
+  "chat.command.shareDescription": "この会話の共有リンクを作成する",
+  "chat.command.unshareDescription": "この会話の共有を停止する",
+  "chat.mode.auto": "自動判定",
+
+  // ── エージェントからの質問にフォームで答える ──
+  "chat.question.heading": "エージェントからの質問",
+  "chat.question.submit": "送信",
+  "chat.question.next": "次へ",
+  "chat.question.dismiss": "閉じる",
+  "chat.question.answerPlaceholder": "回答を入力",
+  "chat.question.otherPlaceholder": "その他の回答",
+  "chat.question.answeredHeading": (n: number) => `${n} 件の質問に回答済み`,
+  "chat.question.blankAnswer": "未記入",
+
+  // ── 承認待ちのプラン ──
+  "chat.plan.heading": "プランの承認待ちです",
+  "chat.plan.implement": "承認して実行",
+  "chat.plan.reject": "却下",
+
+  // ── エージェントの作業中に入力したメッセージ ──
+  "chat.placeholderBusy": "メッセージを入力してください。このターンの終了後に送信されます",
+  "chat.queueTooltip": (combo: string) => `このターンの終了後に送信 · ${combo} で今すぐ送信`,
+  "chat.queue.pending": "送信待ち",
+  "chat.queue.edit": "編集",
+  "chat.queue.remove": "削除",
+
+  // ── 入力欄に貼り付け・ドロップした画像 ──
+  "chat.attach.remove": "この画像を削除",
+  "chat.attach.tooMany": (max: number) => `1 通のメッセージに添付できる画像は ${max} 枚までです`,
+  "chat.attach.tooLarge": (name: string, mb: number) => `${name} は ${mb} MB を超えるため添付しませんでした`,
+  "chat.attach.unreadable": (name: string) => `${name} を読み込めませんでした`,
+  // Compacting the conversation… / Context compacted / Context compacted automatically
+  "chat.compaction.running": "コンテキストを圧縮しています…",
+  "chat.compaction.manual": "コンテキストを圧縮しました",
+  "chat.compaction.auto": "コンテキストを自動で圧縮しました",
+  "chat.compaction.from": (tokens: string) => `圧縮前 ${tokens} トークン`,
+  // N steps
+  "chat.subagent.steps": (n: number) => `${n} ステップ`,
+  "chat.subagent.tokens": (tokens: string) => `${tokens}トークン`,
+  "chat.rewind.title": "ここから巻き戻す",
+  "chat.rewind.warning": "この操作は元に戻せません。",
+  "chat.rewind.conversation": "会話を巻き戻す",
+  "chat.rewind.files": "ファイルを復元する",
+  "chat.rewind.both": "会話を巻き戻してファイルを復元する",
+  "chat.rewind.confirm.conversation": "このメッセージ以降をすべて削除しますか？",
+  "chat.rewind.confirm.files": "ファイルをこのメッセージ以前の状態に復元しますか？",
+  "chat.rewind.confirm.both": "このターンを削除し、変更されたファイルも復元しますか？",
+  "chat.rewind.unavailable": "このメッセージに対応するファイルのチェックポイントはありません。",
+  "chat.rewind.previewing": "ファイルのチェックポイントを確認しています…",
+  "chat.rewind.cancel": "変更しない",
+  "chat.rewind.apply": "巻き戻す",
+  "chat.rewind.applying": "巻き戻しています…",
+  "chat.rewind.fileSummary": (files: number, insertions: number, deletions: number) =>
+    `${files} 件のファイルが変更されます：+${insertions} −${deletions}。この操作は元に戻せません。`,
+  // ── 許可カードが提示する常設ルール。1 回押すだけで採用される ──
+  "chat.suggest.modeSession": (mode: string) => `このセッションは${mode}にする`,
+  "chat.suggest.mode": (mode: string) => `${mode}に切り替える`,
+  "chat.suggest.allowSession": (rule: string) => `このセッションでは ${rule} を許可`,
+  "chat.suggest.allowAlways": (rule: string) => `${rule} を常に許可`,
+  "chat.suggest.dirSession": (dirs: string) => `このセッションでは ${dirs} へのアクセスを許可`,
+  "chat.suggest.dirAlways": (dirs: string) => `${dirs} へのアクセスを常に許可`,
+  // ── Codex：ネットワーク許可ルール、割り込み、独自コマンド、速度と口調のチップ ──
+  "chat.suggest.networkAlways": (host: string) => `${host} へのネットワークアクセスを常に許可`,
+  "chat.steer": "指示を追加",
+  "chat.stopping": "現在のターンを停止中…",
+  "chat.stopped": "現在のターンを停止しました",
+  "chat.steerAccepted": "追加の指示を送信しました",
+  "chat.steerTooltip": (combo: string) => `${combo} で実行中のターンに追加`,
+  "chat.command.reviewDescription": "コードをレビューして対応が必要な箇所を報告",
+  "chat.command.reviewHint": "[branch <ブランチ名> | commit <コミット ID> | 指示]",
+  "chat.command.startTimeout": "エージェントが時間内にセッションを開始できませんでした",
+  "chat.serviceTierTooltip": "速度",
+  "chat.serviceTier.default": "標準速度",
+  "chat.personalityTooltip": "口調",
+  "chat.personality.default": "既定の口調",
+  "chat.personality.none": "中立",
+  "chat.personality.friendly": "フレンドリー",
+  "chat.personality.pragmatic": "実務的",
+  // ── 長い会話：連続したツール呼び出しを 1 行にまとめ、末尾へ戻る導線を置く ──
+  "chat.toolRun.count": (n: number) => `ツール呼び出し ${n} 件`,
+  "chat.toolRun.tooltip": "1 件ずつ表示",
+  "chat.backToEnd": "最新のメッセージに戻る",
+  "chat.elicitation.heading": (server: string) => `${server} が入力を求めています`,
+  "chat.elicitation.cancel": "キャンセル",
+  "chat.elicitation.decline": "拒否",
+  "chat.elicitation.submit": "送信",
+  "chat.elicitation.done": "完了",
+  "chat.elicitation.choose": "選択…",
+  "chat.effort.off": "オフ",
+  "chat.effort.offHint": "拡張思考を行わない",
+  "chat.fastMode.label": "高速",
+  "chat.fastMode.on": "高速モードはオンです",
+  "chat.fastMode.off": "高速モードはオフです",
+  "chat.usage.context": (used: string, max: string, pct: number) =>
+    `コンテキスト: ${max} トークン中 ${used} を使用（${pct}%）`,
+  "chat.usage.cost": (usd: string) => `セッションの費用: $${usd}`,
+  "chat.usage.rateLimited": (resets: string) => `利用上限に達しました。リセット: ${resets}`,
+  "chat.usage.rateWarning": (pct: number, resets: string) => `利用上限: ${pct}% 使用済み。リセット: ${resets}`,
+  "chat.mcp.codexScope": "Codex のユーザー設定を変更します。この設定を使用する他のセッションにも影響します。続行しますか？",
+  "chat.mcp.tooltip": "MCP サーバー",
+  "chat.mcp.loading": "サーバー一覧を読み込んでいます…",
+  "chat.mcp.backendUnsupported": "接続先の VelaTerm バックエンドは MCP の管理に対応していません。バックエンドを更新して再起動し、もう一度お試しください。",
+  "chat.mcp.none": "MCP サーバーは設定されていません",
+  "chat.mcp.tools": (n: number) => `${n} 個のツール`,
+  "chat.mcp.reconnect": "再接続",
+  "chat.mcp.disable": "無効にする",
+  "chat.mcp.enable": "有効にする",
+  "chat.mcp.status.connected": "接続済み",
+  "chat.mcp.status.disabled": "無効",
+  "chat.mcp.status.failed": "失敗",
+  "chat.mcp.status.pending": "接続中",
+  "chat.mcp.status.disconnected": "切断",
+  "chat.mcp.status.other": "不明",
+  "chat.tasks.label": "タスク",
+  "chat.tasks.tooltip": "バックグラウンドタスク",
+  "chat.tasks.backgroundAll": "実行中の作業をバックグラウンドに移す",
+  "chat.tasks.none": "バックグラウンドタスクはありません",
+  "chat.tasks.stop": "停止",
+  "chat.retry.line": (attempt: number, max: number, seconds: number, message: string) =>
+    `${seconds} 秒後に再試行します（${attempt}/${max}）: ${message}`,
+  "chat.notify.dismiss": "閉じる",
 };
 
 export default ja;

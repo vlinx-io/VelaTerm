@@ -46,8 +46,10 @@ const {
 vi.mock("../../i18n", () => ({
   // Echo keys so assertions are locale-independent.
   useT: () => (key: string) => key,
+  getLocale: () => "en",
 }));
 vi.mock("../../ipc/transport", () => ({ invoke: invokeMock }));
+vi.mock("../../platform", () => ({ platform: { opener: { openExternal: vi.fn() } } }));
 vi.mock("../../ipc/info", () => ({ copyText: vi.fn() }));
 vi.mock("../../ipc/mirror", () => ({ mirrorSetEnabled: mirrorSetEnabledMock }));
 // The panel reads mirror mode from the store; stub it rather than loading the store and its platform

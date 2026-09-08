@@ -17,6 +17,7 @@ import MobileApp from "./mobile/MobileApp";
 import { isMobileView } from "./mobile/detect";
 import { LoginGate } from "./remote/LoginGate";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { isDeferredResizeNotification } from "./platform/resizeObserverError";
 
 // The main UI uses only application context menus. WKWebView otherwise shows native Reload/AutoFill
 // items in uncovered areas, mixing unrelated actions and styles. Cancel only the browser default in
@@ -108,6 +109,10 @@ function installGlobalErrorOverlay() {
   }
 
   window.addEventListener("error", (e) => {
+    if (isDeferredResizeNotification(e)) {
+      // Keep the browser's console diagnostic without blocking the UI with a reload dialog.
+      return;
+    }
     const message = e.error?.message ?? e.message ?? "Unknown error";
     const detail = e.error?.stack ?? `at ${e.filename}:${e.lineno}:${e.colno}`;
     if (isBenignDisposedCallbackError(message, detail)) {

@@ -4,34 +4,86 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { setLang } from "../../i18n";
 import { MemoryEditor } from "./MemoryDocument";
 import { MemoryCompile } from "./MemoryTasks";
+import { MemoryTab } from "./MemoryTab";
+import { MemoryRoute } from "./MemoryRoute";
 import { MemoryMarkdown } from "./shared";
 import { memoryNavigate, memoryUrl } from "./navigation";
 
-const api = vi.hoisted(() => ({ get: vi.fn(), options: vi.fn(), save: vi.fn(), start: vi.fn() }));
+const api = vi.hoisted(() => ({ get: vi.fn(), options: vi.fn(), save: vi.fn(), start: vi.fn(), models: vi.fn() }));
 vi.mock("../../ipc/memory", () => ({
-  memoryGet: api.get, memoryOptions: api.options, memorySave: api.save, memoryStart: api.start,
+  memoryList: vi.fn().mockResolvedValue({ entries: [], tags: [], total: 0, pageSize: 20 }),
+  memoryModels: api.models, memoryGet: api.get, memoryOptions: api.options, memorySave: api.save, memoryStart: api.start,
   memoryDelete: vi.fn(), memoryRestore: vi.fn(), memorySource: vi.fn(), memoryJobs: vi.fn(), memoryCancel: vi.fn(), memoryRetry: vi.fn(),
 }));
 vi.mock("../../store/termStore", () => ({ useTermStore: (select: (s: unknown) => unknown) => select({ sessions: [{ id: "session", name: "Source conversation" }], archivedSessions: [] }) }));
 
 beforeEach(() => {
   setLang("en"); window.history.replaceState(null, "", "/?memory=library");
-  api.get.mockReset(); api.options.mockReset(); api.save.mockReset(); api.start.mockReset();
+  api.get.mockReset(); api.options.mockReset(); api.save.mockReset(); api.start.mockReset(); api.models.mockReset();
+  api.models.mockResolvedValue([{ id: "chosen-model", label: "Chosen model", effortLevels: ["low", "high"] }, { id: "simple-model", label: "Simple model", effortLevels: [] }]);
   api.options.mockResolvedValue({ agents: [{ id: "claude", label: "Claude", available: true }, { id: "codex", label: "Codex", available: true }], defaultAgent: "codex", catalog: [] });
 });
 afterEach(cleanup);
 
 describe("Global Memory interactions", () => {
+  it.each(["tauri://localhost", "tauri://localhost/"])("builds an explicit close URL for %s", (base) => {
+    vi.stubGlobal("window", { location: { href: `${base}?memory=library&memoryQuery=test` } });
+    try {
+      expect(memoryUrl("")).toBe(base);
+      expect(new URL(memoryUrl("")).search).toBe("");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("closes the library tab and clears its route", async () => {
+    window.history.replaceState(null, "", "/?memory=library&memoryQuery=test&session=keep#terminal");
+    render(<><MemoryTab /><MemoryRoute /></>);
+    expect(screen.getByRole("tabpanel").querySelector(".memory-close")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("tabpanel")).toBeNull());
+    expect(document.querySelector(".memory-open-tab")).toBeNull();
+    expect(location.search).toBe("?session=keep");
+    expect(location.hash).toBe("#terminal");
+  });
+
   it("uses the backend agent default and submits the user's selected model", async () => {
     api.start.mockResolvedValue({ id: "job-1", reused: false });
     render(<MemoryCompile sessionId="session" />);
-    const select = await screen.findByLabelText("Agent") as HTMLSelectElement;
-    await waitFor(() => expect(select.value).toBe("codex"));
-    fireEvent.change(select, { target: { value: "claude" } });
-    fireEvent.change(screen.getByLabelText("Model (optional)"), { target: { value: "chosen-model" } });
+    const codex = await screen.findByRole("radio", { name: "Codex" }) as HTMLInputElement;
+    await waitFor(() => expect(codex.checked).toBe(true));
+    fireEvent.click(screen.getByRole("radio", { name: "Claude" }));
+    fireEvent.change(await screen.findByLabelText("Model (optional)"), { target: { value: "chosen-model" } });
+    fireEvent.change(screen.getByLabelText("Thinking effort"), { target: { value: "high" } });
     fireEvent.click(screen.getByRole("button", { name: "Compile and save" }));
-    await waitFor(() => expect(api.start).toHaveBeenCalledWith("session", "claude", "chosen-model"));
+    await waitFor(() => expect(api.start).toHaveBeenCalledWith("session", "claude", "chosen-model", "high"));
     await waitFor(() => expect(new URLSearchParams(location.search).get("memory")).toBe("job/job-1"));
+  });
+
+  it("clears effort when changing models and clears both overrides when changing agents", async () => {
+    render(<MemoryCompile sessionId="session" />);
+    const model = await screen.findByLabelText("Model (optional)") as HTMLSelectElement;
+    fireEvent.change(model, { target: { value: "chosen-model" } });
+    const effort = screen.getByLabelText("Thinking effort") as HTMLSelectElement;
+    fireEvent.change(effort, { target: { value: "high" } });
+    fireEvent.change(model, { target: { value: "simple-model" } });
+    expect(effort.value).toBe(""); expect(effort.disabled).toBe(true);
+    fireEvent.change(model, { target: { value: "chosen-model" } });
+    fireEvent.change(effort, { target: { value: "low" } });
+    fireEvent.click(screen.getByRole("radio", { name: "Claude" }));
+    expect((await screen.findByLabelText("Model (optional)") as HTMLSelectElement).value).toBe("");
+    expect((screen.getByLabelText("Thinking effort") as HTMLSelectElement).value).toBe("");
+  });
+
+  it("blocks compilation after a catalogue failure and retries without submitting", async () => {
+    api.models.mockRejectedValueOnce(new Error("memory_models_unavailable"));
+    render(<MemoryCompile sessionId="session" />);
+    await screen.findByRole("alert");
+    expect((screen.getByRole("button", { name: "Compile and save" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByLabelText("Model (optional)");
+    expect(api.start).not.toHaveBeenCalled();
   });
 
   it("submits edits with the backend version and preserves the form after a conflict", async () => {

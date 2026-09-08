@@ -88,7 +88,7 @@ async function proxyDocImageURL(src: string, docPath: string): Promise<string> {
 /** Localize Crepe's slash menu, placeholders, and link/image/code widgets. Capture the current locale
  * at mount; DocView rebuilds the editor by key instead of hot-switching it. docPath locates pasted
  * image storage and resolves rendering paths. */
-const crepeFeatureConfigs = (docPath: string) => ({
+const crepeFeatureConfigs = (docPath: string, textOnly: boolean) => ({
   [Crepe.Feature.Placeholder]: {
     text: t("crepe.placeholder"),
     mode: "block" as const,
@@ -114,7 +114,7 @@ const crepeFeatureConfigs = (docPath: string) => ({
     },
     advancedGroup: {
       label: t("crepe.advancedGroup"),
-      image: { label: t("crepe.image") },
+      image: textOnly ? null : { label: t("crepe.image") },
       codeBlock: { label: t("crepe.codeBlock") },
       table: { label: t("crepe.table") },
       math: { label: t("crepe.math") },
@@ -131,8 +131,8 @@ const crepeFeatureConfigs = (docPath: string) => ({
     blockCaptionPlaceholderText: t("crepe.imageCaption"),
     blockConfirmButton: t("crepe.confirm"),
     // Top-level onUpload/proxyDomURL covers both inline and block images through Crepe's fallback.
-    onUpload: (file: File) => onUploadDocImage(file, docPath),
-    proxyDomURL: (url: string) => proxyDocImageURL(url, docPath),
+    onUpload: (file: File) => textOnly ? Promise.reject(new Error(t("memory.invalid"))) : onUploadDocImage(file, docPath),
+    proxyDomURL: (url: string) => textOnly ? "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" : proxyDocImageURL(url, docPath),
   },
   [Crepe.Feature.CodeMirror]: {
     searchPlaceholder: t("crepe.searchLanguage"),
@@ -160,8 +160,10 @@ export const WysiwygEditor = forwardRef<
     docPath: string;
     /** Called after genuine user edits so DocView can mark dirty and decide persistence. */
     onEdited: () => void;
+    /** Prevent document image reads and uploads for text-only knowledge entries. */
+    textOnly?: boolean;
   }
->(function WysiwygEditor({ defaultValue, docPath, onEdited }, ref) {
+>(function WysiwygEditor({ defaultValue, docPath, onEdited, textOnly = false }, ref) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const crepeRef = useRef<Crepe | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -176,7 +178,7 @@ export const WysiwygEditor = forwardRef<
     const crepe = new Crepe({
       root,
       defaultValue,
-      featureConfigs: crepeFeatureConfigs(docPath),
+      featureConfigs: crepeFeatureConfigs(docPath, textOnly),
     });
     // Register find/replace before create(), the stable Milkdown pattern versus mutating state afterward.
     crepe.editor.use($prose(() => pmSearchPlugin()));

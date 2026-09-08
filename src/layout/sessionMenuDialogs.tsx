@@ -23,7 +23,9 @@ import {
   effectiveStatus,
   projectRoot,
   type NodeKind,
+  type SessionEngine,
   type SessionKind,
+  supportsChatEngine,
   supportsPermissionToggle,
 } from "../types";
 import {
@@ -1122,6 +1124,8 @@ export function NewAgentSession({
     name: string;
     agentArgs: string;
     permissionMode: string | null;
+    /** How the agent is driven from the start: its own terminal interface, or a conversation. */
+    engine: SessionEngine;
     worktree: WorktreeChoice;
     /** Executable overriding the kind's default; empty keeps that default. */
     execPath: string;
@@ -1140,8 +1144,14 @@ export function NewAgentSession({
   const [name, setName] = useState("");
   // Prefill arguments and permissions from this type's global agent template; users may override or clear.
   const [agentArgs, setAgentArgs] = useState(() => agentDefaults["claude"]?.args ?? "");
-  const [skipPerm, setSkipPerm] = useState(
-    () => agentDefaults["claude"]?.permissionMode === "skip",
+  const [permissionMode, setPermissionMode] = useState(
+    () => agentDefaults["claude"]?.permissionMode ?? "",
+  );
+  // Which of the two views this session opens in, which is the same thing as which engine drives it. The
+  // dialog starts on the app-wide setting; kinds the chat engine cannot drive are forced back to the
+  // terminal below.
+  const [engine, setEngine] = useState<SessionEngine>(
+    () => useTermStore.getState().defaultSessionEngine,
   );
   // Executable for this session alone. Empty falls back to the kind's global default and then to PATH; a
   // value here is what lets two sessions of one kind run different drop-in binaries at the same time.
@@ -1213,7 +1223,10 @@ export function NewAgentSession({
         ? agentDefaults[k]?.args ?? ""
         : cur,
     );
-    setSkipPerm(agentDefaults[k]?.permissionMode === "skip");
+    setPermissionMode(agentDefaults[k]?.permissionMode ?? "");
+    // Only some agents can be driven as a conversation. Switching to one that cannot must not leave a
+    // choice behind that the backend would refuse the moment the session opened.
+    if (!supportsChatEngine(k)) setEngine("tui");
     setKind(k);
   };
 
@@ -1223,7 +1236,8 @@ export function NewAgentSession({
     setKind(p.baseKind);
     setExecPath(p.execPath ?? "");
     setAgentArgs(p.agentArgs ?? "");
-    setSkipPerm(p.permissionMode === "skip");
+    setPermissionMode(p.permissionMode ?? "");
+    if (!supportsChatEngine(p.baseKind)) setEngine("tui");
   };
 
   /** Read a chosen image, downscale it to a square icon and keep it as a data URL. */
@@ -1237,6 +1251,9 @@ export function NewAgentSession({
   };
   // Permission-toggle support follows the selected agent type; OpenCode has no corresponding flag.
   const permSupported = supportsPermissionToggle(kind);
+  // The conversation engine speaks one agent's protocol, so the choice only appears for agents that
+  // support it rather than as a disabled control on every other type.
+  const chatSupported = supportsChatEngine(kind);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1256,7 +1273,8 @@ export function NewAgentSession({
         kind,
         name: finalName,
         agentArgs: normalizeArgDashes(agentArgs),
-        permissionMode: permSupported && skipPerm ? "skip" : null,
+        permissionMode: permSupported ? permissionMode || null : null,
+        engine: chatSupported ? engine : "tui",
         worktree,
         cwd: cwd.trim(),
         execPath: execPath.trim(),
@@ -1339,6 +1357,37 @@ export function NewAgentSession({
             ariaLabel={t("resume.agentType")}
           />
         </div>
+
+        {/* How the agent is driven. A terminal session runs the agent's own interface; a conversation runs
+            it as a protocol peer, with permission buttons, model switching and command completion. */}
+        {chatSupported && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
+              {t("tree.engineLabel")}
+            </div>
+            <Select
+              value={engine}
+              onChange={(v) => setEngine(v as SessionEngine)}
+              options={[
+                { value: "tui", label: t("tree.engineTui") },
+                { value: "chat", label: `${t("tree.engineChat")} · ${t("common.experimental")}` },
+              ]}
+              width="100%"
+              ariaLabel={t("tree.engineLabel")}
+            />
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-muted)",
+                lineHeight: 1.5,
+                marginTop: 4,
+              }}
+            >
+              {engine === "chat" ? t("tree.engineChatHint") : t("tree.engineTuiHint")}
+            </div>
+          </div>
+        )}
+
         <label style={{ display: "block", marginBottom: 12 }}>
           <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 4 }}>
             {t("tree.sessionNameAuto")}
@@ -1539,13 +1588,30 @@ export function NewAgentSession({
               cursor: permSupported ? "pointer" : "default",
             }}
           >
-            <input
-              type="checkbox"
-              disabled={!permSupported}
-              checked={permSupported && skipPerm}
-              onChange={(e) => setSkipPerm(e.target.checked)}
-            />
-            {t("tree.permissionSkipLabel")}
+            {kind === "codex" ? (
+              <>
+                {t("info.permission")}
+                <Select
+                  value={permissionMode === "skip" || permissionMode === "full-access" ? "skip" : permissionMode === "read-only" ? "read-only" : "auto"}
+                  options={[
+                    { value: "read-only", label: t("chat.mode.readOnly") },
+                    { value: "auto", label: t("chat.mode.auto") },
+                    { value: "skip", label: t("chat.mode.fullAccess") },
+                  ]}
+                  onChange={setPermissionMode}
+                />
+              </>
+            ) : (
+              <>
+                <input
+                  type="checkbox"
+                  disabled={!permSupported}
+                  checked={permSupported && permissionMode === "skip"}
+                  onChange={(e) => setPermissionMode(e.target.checked ? "skip" : "")}
+                />
+                {t("tree.permissionSkipLabel")}
+              </>
+            )}
           </label>
           <div
             style={{
@@ -1556,7 +1622,7 @@ export function NewAgentSession({
               marginLeft: 24,
             }}
           >
-            {permSupported
+            {kind === "codex" ? null : permSupported
               ? t("tree.permissionSkipHint")
               : kind === "pi"
                 ? t("tree.permissionUnsupportedPi")
@@ -1635,18 +1701,18 @@ export function ResumeSession({
   const [name, setName] = useState("");
   // Prefill arguments and permissions from the type's global agent template; users may override or clear.
   const [agentArgs, setAgentArgs] = useState(() => agentDefaults["claude"]?.args ?? "");
-  const [skipPerm, setSkipPerm] = useState(
-    () => agentDefaults["claude"]?.permissionMode === "skip",
+  const [permissionMode, setPermissionMode] = useState(
+    () => agentDefaults["claude"]?.permissionMode ?? "",
   );
   // On type change, replace arguments only if still at the old default or empty; preserve user edits.
-  // The binary permission toggle safely follows the new type's default.
+  // Permissions follow the selected agent type's default.
   const changeKind = (k: SessionKind) => {
     setAgentArgs((cur) =>
       cur.trim() === "" || cur === (agentDefaults[kind]?.args ?? "")
         ? agentDefaults[k]?.args ?? ""
         : cur,
     );
-    setSkipPerm(agentDefaults[k]?.permissionMode === "skip");
+    setPermissionMode(agentDefaults[k]?.permissionMode ?? "");
     setKind(k);
   };
   // Permission-toggle support follows the selected agent type; OpenCode has no corresponding flag.
@@ -1660,7 +1726,7 @@ export function ResumeSession({
       sessionId,
       name,
       agentArgs: normalizeArgDashes(agentArgs),
-      permissionMode: permSupported && skipPerm ? "skip" : null,
+      permissionMode: permSupported ? permissionMode || null : null,
     });
   };
 
@@ -1767,13 +1833,30 @@ export function ResumeSession({
               cursor: permSupported ? "pointer" : "default",
             }}
           >
-            <input
-              type="checkbox"
-              disabled={!permSupported}
-              checked={permSupported && skipPerm}
-              onChange={(e) => setSkipPerm(e.target.checked)}
-            />
-            {t("tree.permissionSkipLabel")}
+            {kind === "codex" ? (
+              <>
+                {t("info.permission")}
+                <Select
+                  value={permissionMode === "skip" || permissionMode === "full-access" ? "skip" : permissionMode === "read-only" ? "read-only" : "auto"}
+                  options={[
+                    { value: "read-only", label: t("chat.mode.readOnly") },
+                    { value: "auto", label: t("chat.mode.auto") },
+                    { value: "skip", label: t("chat.mode.fullAccess") },
+                  ]}
+                  onChange={setPermissionMode}
+                />
+              </>
+            ) : (
+              <>
+                <input
+                  type="checkbox"
+                  disabled={!permSupported}
+                  checked={permSupported && permissionMode === "skip"}
+                  onChange={(e) => setPermissionMode(e.target.checked ? "skip" : "")}
+                />
+                {t("tree.permissionSkipLabel")}
+              </>
+            )}
           </label>
           <div
             style={{
@@ -1784,7 +1867,7 @@ export function ResumeSession({
               marginLeft: 24,
             }}
           >
-            {permSupported
+            {kind === "codex" ? null : permSupported
               ? t("tree.permissionSkipHint")
               : kind === "pi"
                 ? t("tree.permissionUnsupportedPi")
