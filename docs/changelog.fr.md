@@ -1,24 +1,24 @@
 ## v0.1.108 — 2026-09-08
 
-- Vue de conversation expérimentale pour Claude, Codex et OpenCode : réponses en continu, raisonnement, détails des outils, autorisations et formulaires de questions. Les nouvelles configurations utilisent toujours le terminal par défaut.
+- 💬 Vue de conversation expérimentale pour Claude, Codex et OpenCode : réponses en continu, raisonnement, détails des outils, autorisations et formulaires de questions. Les nouvelles configurations utilisent toujours le terminal par défaut.
 
-- Les commandes de conversation proposent les réglages du modèle, la file de messages, les interventions, la complétion de fichiers et les images jointes, selon les capacités du moteur.
+- 🎛️ Les commandes de conversation proposent les réglages du modèle, la file de messages, les interventions, la complétion de fichiers et les images jointes, selon les capacités du moteur.
 
-- Recherche dans les conversations, liens de fichiers, actions sur les images et polices distinctes facilitent la lecture. L’historique distant se charge progressivement et les détails des outils à la demande.
+- 🔎 Recherche dans les conversations, liens de fichiers, actions sur les images et polices distinctes facilitent la lecture. L’historique distant se charge progressivement et les détails des outils à la demande.
 
-- Les accusés de soumission permettent de rapprocher les résultats après une déconnexion. Les envois incertains restent en attente de confirmation, sans renvoi automatique.
+- 📨 Les accusés de soumission permettent de rapprocher les résultats après une déconnexion. Les envois incertains restent en attente de confirmation, sans renvoi automatique.
 
-- Les nouvelles commandes `vrefer` et `vsearch` lisent et recherchent dans les autres sessions ; `vrefer --ask` délègue la lecture à un agent. `vorch` et `vstat` ajoutent la coordination multi-agent et la consultation des états.
+- 🤝 Les nouvelles commandes `vrefer` et `vsearch` lisent et recherchent dans les autres sessions ; `vrefer --ask` délègue la lecture à un agent. `vorch` et `vstat` ajoutent la coordination multi-agent et la consultation des états.
 
-- Les entrées mémoire acceptent les étiquettes, l’édition directe, la protection des modifications non enregistrées et les réglages d’organisation. Le filtrage et la sélection à l’import de l’historique ainsi que la navigation du graphe sont améliorés.
+- 🧠 Les entrées mémoire acceptent les étiquettes, l’édition directe, la protection des modifications non enregistrées et les réglages d’organisation. Le filtrage et la sélection à l’import de l’historique ainsi que la navigation du graphe sont améliorés.
 
-- Le client de partage public prend en charge l’association compte/appareil, l’accès limité à des sessions AI et les connexions relais chiffrées. L’envoi d’images par les invités et les formulaires MCP complexes restent indisponibles.
+- 🌐 Le client de partage public prend en charge l’association compte/appareil, l’accès limité à des sessions AI et les connexions relais chiffrées. L’envoi d’images par les invités et les formulaires MCP complexes restent indisponibles.
 
-- Les ID de reprise Codex sont vérifiés dans l’historique enregistré. Un historique confirmé manquant produit une erreur explicite au lieu d’ouvrir une session vide ; les terminaux déjà actifs restent accessibles.
+- 🔄 Les ID de reprise Codex sont vérifiés dans l’historique enregistré. Un historique confirmé manquant produit une erreur explicite au lieu d’ouvrir une session vide ; les terminaux déjà actifs restent accessibles.
 
-- Le retour arrière dépend du moteur : Codex restaure uniquement la conversation, sans restaurer les fichiers. La gestion de la portée et les contrôles préalables du répertoire dans OpenCode restent des limites connues.
+- ↩️ Le retour arrière dépend du moteur : Codex restaure uniquement la conversation, sans restaurer les fichiers. La gestion de la portée et les contrôles préalables du répertoire dans OpenCode restent des limites connues.
 
-- Le changement de version conserve les versions verrouillées des dépendances. La validation des installations et mises à niveau multiplateformes et de l’intégration AI réelle reste à effectuer ; les contrôles automatisés ne la remplacent pas.
+- 📦 Le changement de version conserve les versions verrouillées des dépendances. La validation des installations et mises à niveau multiplateformes et de l’intégration AI réelle reste à effectuer ; les contrôles automatisés ne la remplacent pas.
 
 ---
 
