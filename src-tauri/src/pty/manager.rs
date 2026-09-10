@@ -392,7 +392,9 @@ impl PtyManager {
                     // Agent sessions start PowerShell with a process-local execution-policy bypass so npm `.ps1`
                     // shims and interactive profiles can load. Plain terminals preserve the native policy.
                     // Group Policy can still override the command-line setting.
-                    inject::ShellKind::PowerShell if kind != SessionKind::Terminal => {
+                    inject::ShellKind::PowerShell | inject::ShellKind::Pwsh
+                        if kind != SessionKind::Terminal =>
+                    {
                         cmd.arg("-ExecutionPolicy");
                         cmd.arg("Bypass");
                     }
