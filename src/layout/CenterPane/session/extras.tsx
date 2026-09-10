@@ -337,33 +337,25 @@ export function TasksChip({
       ) : (
         tasks.map((task) => {
           const finished = isTaskFinished(task);
+          // Two sibling buttons rather than Stop inside the row button: interactive content may not nest,
+          // and a nested Stop could not be reached by keyboard.
           return (
-            <button
-              className="sv-popover-row sv-popover-open"
-              key={task.task_id}
-              title={t("chat.tasks.open")}
-              onClick={() => onOpen(task)}
-            >
-              <span className="sv-popover-main">
-                <span className="sv-popover-title">{task.description || task.summary || task.task_id}</span>
-                <span className="sv-popover-sub">
-                  {task.task_type.replace(/_/g, " ")}
-                  {finished ? ` · ${taskStatusLabel(t, task.status)}` : ""}
+            <div className="sv-popover-row" key={task.task_id}>
+              <button className="sv-popover-open" title={t("chat.tasks.open")} onClick={() => onOpen(task)}>
+                <span className="sv-popover-main">
+                  <span className="sv-popover-title">{task.description || task.summary || task.task_id}</span>
+                  <span className="sv-popover-sub">
+                    {task.task_type.replace(/_/g, " ")}
+                    {finished ? ` · ${taskStatusLabel(t, task.status)}` : ""}
+                  </span>
                 </span>
-              </span>
+              </button>
               {finished ? null : (
-                <span
-                  className="sv-popover-action"
-                  role="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onStop(task.task_id);
-                  }}
-                >
+                <button className="sv-popover-action" onClick={() => onStop(task.task_id)}>
                   {t("chat.tasks.stop")}
-                </span>
+                </button>
               )}
-            </button>
+            </div>
           );
         })
       )}

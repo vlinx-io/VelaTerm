@@ -4,7 +4,8 @@
 //! `extras` event, so it keeps working after the conversation pane unmounts (the process stays alive while
 //! a task runs). The opener's copy of the task is the first paint; one snapshot on mount fetches the current
 //! state and, in the browser, registers this connection for the session's events. A task that leaves the
-//! list without a terminal frame is shown as ended with the last state seen, never as running or empty.
+//! list without a terminal frame, or whose process ends, is shown as ended with the last state seen, never
+//! as running or empty.
 
 import { useEffect, useState } from "react";
 
@@ -101,9 +102,16 @@ export function TaskView({ tab, hidden }: { tab: TaskTab; hidden: boolean }) {
       }
     };
     void onChatEvent(tab.sessionId, (event) => {
-      if (event.type !== "extras") return;
-      sawEvent = true;
-      apply(event.extras.backgroundTasks);
+      if (event.type === "extras") {
+        sawEvent = true;
+        apply(event.extras.backgroundTasks);
+      } else if (event.type === "exited" || event.type === "reset") {
+        // The process that ran this task is gone (it exited, or a new one took the session over), and it
+        // sends no extras on its way out. Without this the view would keep showing a running task, with a
+        // ticking clock and a Stop that can only fail, until the next process happens to list its tasks.
+        sawEvent = true;
+        apply(undefined);
+      }
     }).then((fn) => {
       if (disposed) fn();
       else unlisten = fn;

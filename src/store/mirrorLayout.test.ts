@@ -117,17 +117,62 @@ describe("buildMirrorLayout", () => {
     expect(Object.keys(layout.center.paneTrees).sort()).toEqual(["A", "B"]);
   });
 
-  it("leaves task tabs out: they are client-local, and an active one publishes no active tab", () => {
-    const taskTab = { id: "task-1", sessionId: "A", taskId: "t1", title: "probe", taskType: "local_workflow" };
-    const layout = buildMirrorLayout(
-      source({ openTabs: ["A", "task-1"], activeTabId: "task-1", taskTabs: { "task-1": taskTab } }),
-    );
+  const taskTab = { id: "task-1", sessionId: "A", taskId: "t1", title: "probe", taskType: "local_workflow" };
+  /** What the store holds while a task tab is in front: no active session and no focused pane. */
+  const inTaskTab = { activeTabId: "task-1", activeSessionId: null, focusedPaneId: null, taskTabs: { "task-1": taskTab } };
+
+  it("leaves task tabs out: they are client-local, and an active one publishes the last session tab instead", () => {
+    const layout = buildMirrorLayout(source({ ...inTaskTab, openTabs: ["A", "task-1"] }));
     expect(layout.center.openTabs).toEqual(["A"]);
-    expect(layout.center.activeTabId).toBeNull();
+    // Never null with open tabs: the peer would show an empty stage, and its reconcile would publish its
+    // first tab back and pull this client out of the task tab. The session and pane come along, derived
+    // the way the peer's reconcile would derive them, so that reconcile has nothing to repair.
+    expect(layout.center.activeTabId).toBe("A");
+    expect(layout.center.activeSessionId).toBe("A");
+    expect(layout.center.focusedPaneId).toBe("pa");
     expect(JSON.stringify(layout)).not.toContain("task-1");
     // Opening a task tab must not change the published bytes, or the sync loop would push for nothing.
     expect(JSON.stringify(buildMirrorLayout(source({ openTabs: ["A", "task-1"], taskTabs: { "task-1": taskTab } }))))
       .toBe(JSON.stringify(buildMirrorLayout(source())));
+  });
+
+  it("names the last published tab for an active task tab when the session anchor is not open", () => {
+    const base = {
+      ...inTaskTab,
+      openTabs: ["A", "B", "task-1"],
+      paneTrees: { A: leaf("pa", "A"), B: split(leaf("pb1", "B1"), leaf("pb2", "B2")) },
+    };
+    const anchored = buildMirrorLayout(source({ ...base, lastActiveSessionTabId: "B" })).center;
+    expect([anchored.activeTabId, anchored.activeSessionId, anchored.focusedPaneId]).toEqual(["B", "B1", "pb1"]);
+    expect(buildMirrorLayout(source({ ...base, lastActiveSessionTabId: "gone" })).center.activeTabId).toBe("B");
+    expect(buildMirrorLayout(source({ ...base, lastActiveSessionTabId: null })).center.activeTabId).toBe("B");
+    // Only an empty published tab list leaves the active tab null.
+    const alone = buildMirrorLayout(source({ ...base, openTabs: ["task-1"], lastActiveSessionTabId: null, paneTrees: {} }));
+    expect(alone.center.openTabs).toEqual([]);
+    expect(alone.center.activeTabId).toBeNull();
+    expect(alone.center.activeSessionId).toBeNull();
+    expect(alone.center.focusedPaneId).toBeNull();
+  });
+
+  it("publishes no session or pane when the tab named for an active task tab is a document tab", () => {
+    const doc = { id: "doc-1", path: "/tmp/x.md", title: "x" } as unknown as MirrorLayoutSource["docTabs"][string];
+    const layout = buildMirrorLayout(
+      source({ ...inTaskTab, openTabs: ["A", "doc-1", "task-1"], lastActiveSessionTabId: null, docTabs: { "doc-1": doc } }),
+    ).center;
+    expect([layout.activeTabId, layout.activeSessionId, layout.focusedPaneId]).toEqual(["doc-1", null, null]);
+  });
+
+  it("publishes a snapshot a peer's reconcile keeps as is, so following it echoes nothing back", () => {
+    const published = buildMirrorLayout(source({ ...inTaskTab, openTabs: ["A", "task-1"] }));
+    const received = sanitizeMirrorLayout(JSON.parse(JSON.stringify(published)))!;
+    // The peer's reconcile only replaces an active tab that is null or not open, and only repairs a session
+    // that is null or not in the active tab's tree; this snapshot trips neither.
+    expect(received.center.activeTabId).toBe("A");
+    expect(received.center.openTabs).toContain("A");
+    expect(received.center.activeSessionId).toBe("A");
+    expect(received.center.focusedPaneId).toBe("pa");
+    // What the peer would publish from the adopted arrangement is byte-identical to what it received.
+    expect(JSON.stringify(buildMirrorLayout(source({ ...received.center, taskTabs: {} })))).toBe(JSON.stringify(published));
   });
 
   it("drops pane trees and session metadata no tab references, keeping the payload to the arrangement", () => {

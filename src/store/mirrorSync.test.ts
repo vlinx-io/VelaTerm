@@ -95,6 +95,7 @@ const emitClients = (count: number, clients: unknown[] = []) =>
   h.cbs.clients!(count, clients);
 
 import { markMirrorDetach } from "../ipc/commands";
+import { listTree } from "../ipc/tree";
 import { buildMirrorLayout } from "./mirrorLayout";
 import { startMirrorSync } from "./mirrorSync";
 import { useTermStore } from "./termStore";
@@ -133,7 +134,12 @@ function peerLayout(tab: string, rev: number, source = "ws-2"): MirrorSnapshot {
 
 let peerState: unknown = null;
 function seedSnapshotSource(tab: string) {
-  peerState = buildMirrorLayout({
+  peerState = buildMirrorLayout(snapshotSource(tab));
+}
+
+/** The store fields another client would build its single-tab snapshot from. */
+function snapshotSource(tab: string): Parameters<typeof buildMirrorLayout>[0] {
+  return {
     openTabs: [tab],
     liveTabs: [],
     pinnedTabs: [],
@@ -171,7 +177,7 @@ function seedSnapshotSource(tab: string) {
     ],
     primarySidebarTreeViewId: "main",
     activeSidebarTreeViewId: "main",
-  });
+  };
 }
 
 /** Let the `mirrorGet` promise chain in `align` settle. */
@@ -339,6 +345,49 @@ describe("following a peer", () => {
 
     expect(useTermStore.getState().openTabs).toEqual(["B"]);
     expect(useTermStore.getState().activeSessionId).toBe("B");
+    expect(mirrorPush).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it("keeps a publisher's task tab in front: its snapshot names a session tab, so reconciling echoes nothing", async () => {
+    alignEnabledEmpty();
+    const stop = start();
+    await settle();
+    mirrorPush.mockClear();
+
+    // The peer sits in a task tab, which it never publishes. Its snapshot must still name an active tab,
+    // or this client shows an empty stage and its next reconcile publishes its first tab back, pulling the
+    // peer out of the task tab.
+    // The publisher's real store state in front of a task tab: no active session and no focused pane
+    // (`openTaskTab`/`setActiveTab` null both). Those must not travel as null either, or the reconcile
+    // below would repair them to the first leaf and push that repair back.
+    const taskTab = { id: "task-1", sessionId: "B", taskId: "t1", title: "probe", taskType: "local_workflow" };
+    const published = buildMirrorLayout({
+      ...snapshotSource("B"),
+      openTabs: ["B", "task-1"],
+      activeTabId: "task-1",
+      activeSessionId: null,
+      focusedPaneId: null,
+      taskTabs: { "task-1": taskTab },
+    });
+    emitLayout({ rev: 2, source: "ws-2", state: JSON.parse(JSON.stringify(published)) });
+    expect(useTermStore.getState().openTabs).toEqual(["B"]);
+    expect(useTermStore.getState().activeTabId).toBe("B");
+    expect(useTermStore.getState().activeSessionId).toBe("B");
+    expect(useTermStore.getState().focusedPaneId).toBe("p-B");
+
+    // A tree refresh reconciles the adopted arrangement with the real `reconcileTabs`.
+    vi.mocked(listTree).mockResolvedValueOnce({
+      projects: [{ id: "p1", name: "p1", rootPath: "/tmp", sortOrder: 0, collapsed: false, createdAt: 0 }],
+      groups: [],
+      sessions: [{ id: "B", projectId: "p1", groupId: null, name: "B", kind: "terminal", sortOrder: 0, collapsed: false, createdAt: 0 }],
+    });
+    await useTermStore.getState().loadTree();
+    vi.advanceTimersByTime(500);
+
+    expect(useTermStore.getState().activeTabId).toBe("B");
+    expect(useTermStore.getState().activeSessionId).toBe("B");
+    expect(useTermStore.getState().focusedPaneId).toBe("p-B");
     expect(mirrorPush).not.toHaveBeenCalled();
     stop();
   });

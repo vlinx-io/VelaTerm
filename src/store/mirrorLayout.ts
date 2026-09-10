@@ -15,7 +15,7 @@
 //! Sidebar search text and status/marker filters travel with the rest. Mirror mode means the two windows hold
 //! the same state, not that they replay each other's keystrokes: a filter that is on here is on there.
 
-import type { PaneNode } from "../layout/CenterPane/paneTree";
+import { firstLeaf, type PaneNode } from "../layout/CenterPane/paneTree";
 import {
   collectSidebarViewIds,
   firstSidebarViewId,
@@ -163,16 +163,17 @@ export function buildMirrorLayout(s: MirrorLayoutSource): MirrorLayout {
   const paneTrees = pick(s.paneTrees, carried);
   const sessionIds = new Set<string>();
   for (const id of carried) sessionIdsOf(paneTrees[id], sessionIds);
+  const active = publishedActive(s, openTabs);
   return {
     v: MIRROR_LAYOUT_VERSION,
     center: {
       openTabs,
       liveTabs: [...s.liveTabs],
       pinnedTabs: [...s.pinnedTabs],
-      activeTabId: s.activeTabId && s.taskTabs[s.activeTabId] ? null : s.activeTabId,
+      activeTabId: active.activeTabId,
       lastActiveSessionTabId: s.lastActiveSessionTabId,
-      activeSessionId: s.activeSessionId,
-      focusedPaneId: s.focusedPaneId,
+      activeSessionId: active.activeSessionId,
+      focusedPaneId: active.focusedPaneId,
       paneTrees,
       ephemeralSessions: pick(s.ephemeralSessions, sessionIds),
       docTabs: pick(s.docTabs, tabIds),
@@ -192,6 +193,37 @@ export function buildMirrorLayout(s: MirrorLayoutSource): MirrorLayout {
       collapsed: s.rightCollapsed,
     },
   };
+}
+
+/** The published "what is active" trio: the tab in front, the session it shows, and the focused pane. */
+type PublishedActive = Pick<MirrorCenter, "activeTabId" | "activeSessionId" | "focusedPaneId">;
+
+/**
+ * What a snapshot names as active when this client's own active tab is a task tab it does not publish.
+ *
+ * Publishing `null` there would hand the peer an arrangement with open tabs but no active one: it shows an
+ * empty stage, and its next reconcile repairs the null to its first tab and publishes that back, pulling
+ * this client out of its task tab. So the snapshot names the tab the peer would be on anyway: the last
+ * session tab this client had in front, or failing that the last published tab. Only an empty tab list
+ * leaves the active tab null.
+ *
+ * The session and pane travel with it. In front of a task tab this client holds both as null, and the
+ * peer's reconcile would repair those too (to the first leaf of the tab it adopted) and publish the repair
+ * back. Deriving them here the same way makes that reconcile a no-op, so the echo never leaves the peer.
+ */
+function publishedActive(s: MirrorLayoutSource, openTabs: string[]): PublishedActive {
+  const own = { activeTabId: s.activeTabId, activeSessionId: s.activeSessionId, focusedPaneId: s.focusedPaneId };
+  if (!s.activeTabId || !s.taskTabs[s.activeTabId]) return own;
+  const activeTabId =
+    s.lastActiveSessionTabId && openTabs.includes(s.lastActiveSessionTabId)
+      ? s.lastActiveSessionTabId
+      : openTabs.length
+        ? openTabs[openTabs.length - 1]
+        : null;
+  // A document or browser tab has no session or pane, on the peer as well; a session tab shows its first leaf.
+  const tree = activeTabId && !s.docTabs[activeTabId] && !s.browserTabs[activeTabId] ? s.paneTrees[activeTabId] : undefined;
+  const leaf = tree ? firstLeaf(tree) : null;
+  return { activeTabId, activeSessionId: leaf?.sessionId ?? null, focusedPaneId: leaf?.paneId ?? null };
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>

@@ -1829,9 +1829,13 @@ select.sv-pill {
   margin-bottom: 4px;
   padding: 5px 8px;
 }
-/* A popover row that opens something: the row itself is the button, keeping the row's look. */
+/* The opening button of a popover row: it fills the row and keeps the row's look, with the row's own
+   actions as its siblings so no button nests inside another. */
 .sv-popover-open {
-  width: 100%;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
   border: 0;
   background: none;
   color: inherit;

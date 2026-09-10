@@ -89,6 +89,32 @@ it("opens the task behind a row, and Stop stops without opening", () => {
   expect(onOpen).toHaveBeenCalledTimes(1);
 });
 
+it("opens and stops through real buttons that do not nest, so both work from the keyboard", () => {
+  const { onOpen, onStop } = renderTasks();
+  const [open] = screen.getAllByTitle("Open task");
+  const stop = screen.getByRole("button", { name: "Stop" });
+  // Native buttons: the browser itself activates them on Enter and Space, which jsdom does not emulate,
+  // so the element kind and the focus order are what is asserted here.
+  expect(open.tagName).toBe("BUTTON");
+  expect(stop.tagName).toBe("BUTTON");
+  expect(open.contains(stop)).toBe(false);
+  expect(stop.contains(open)).toBe(false);
+  expect(open.parentElement).toBe(stop.parentElement);
+  expect(open.parentElement!.getAttribute("role")).toBeNull();
+  expect(open.querySelector("[role=button], button")).toBeNull();
+  expect(stop.querySelector("[role=button], button")).toBeNull();
+
+  open.focus();
+  expect(document.activeElement).toBe(open);
+  fireEvent.click(open);
+  expect(onOpen).toHaveBeenCalledWith(tasks[0]);
+  stop.focus();
+  expect(document.activeElement).toBe(stop);
+  fireEvent.click(stop);
+  expect(onStop).toHaveBeenCalledWith("w1");
+  expect(onOpen).toHaveBeenCalledTimes(1);
+});
+
 it("offers no Stop for a finished task, only its status", () => {
   renderTasks();
   expect(screen.getAllByRole("button", { name: "Stop" }).length).toBe(1);

@@ -131,6 +131,45 @@ it("shows the final state once the task ends and drops the Stop action", async (
   expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
 });
 
+it("shows a running task as ended once its process exits, and stops the clock and the Stop action", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(1_000_000 + 65_000);
+  await mount();
+  expect(screen.getByText("Running")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+  expect(screen.getByText("1:05")).toBeTruthy();
+
+  // The process sends no extras on its way out; the exit itself is the last word about its tasks.
+  act(() => eventCallback?.({ type: "exited", code: 1, stderr: "", released: false }));
+  expect(screen.getByText("Ended")).toBeTruthy();
+  expect(screen.getByText("No longer reported by the agent")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  expect(screen.queryByText("Running")).toBeNull();
+  const elapsed = screen.getByText("Elapsed").nextElementSibling!.textContent;
+  act(() => { vi.advanceTimersByTime(3000); });
+  expect(screen.getByText("Elapsed").nextElementSibling!.textContent).toBe(elapsed);
+});
+
+it("shows a running task as ended when a new process takes the session over", async () => {
+  await mount();
+  act(() => eventCallback?.({ type: "reset", epoch: 2 }));
+  expect(screen.getByText("Ended")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+});
+
+it("does not let a snapshot that resolves after the exit revive the task", async () => {
+  let resolveSnapshot!: (value: unknown) => void;
+  const previous = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) =>
+    command === "chat_snapshot" ? (new Promise<unknown>((resolve) => { resolveSnapshot = resolve; }) as Promise<never>) : previous(command, args));
+  await mount();
+  act(() => eventCallback?.({ type: "exited", code: 0, stderr: "", released: true }));
+  expect(screen.getByText("Ended")).toBeTruthy();
+  await act(async () => resolveSnapshot({ running: false, rows: [], queue: [], permissions: [], commands: [], configKeys: [], backgroundTasks: [seed] }));
+  expect(screen.getByText("Ended")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+});
+
 it("treats a snapshot without a task list as an empty one: the backend omits empty lists", async () => {
   snapshotTasks = undefined;
   await mount();
