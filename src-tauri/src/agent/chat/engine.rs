@@ -653,6 +653,14 @@ const FINISHED_TASK_STATUSES: [&str; 8] = ["completed", "failed", "error", "kill
 /// How many finished tasks stay listed until the next turn prunes them.
 const FINISHED_TASK_CAP: usize = 20;
 
+/// How long a release waits for the terminal frames of a task the inventory just dropped.
+///
+/// Claude empties `background_tasks_changed` first and sends `task_updated` and `task_notification` (final
+/// status, summary, output file) afterwards. A task tab that outlives its conversation pane shows exactly
+/// those, so the process is not killed on the drop itself; a task whose frames never come is let go after
+/// this grace so nothing leaks.
+const TASK_SETTLE_GRACE: Duration = Duration::from_secs(2);
+
 /// One background task as the composer and the task tab see it: the inventory entry merged with every
 /// task-protocol frame that named the same task_id. Wire keys stay Claude's snake_case.
 #[derive(Clone, Debug, Default, serde::Serialize)]
@@ -851,6 +859,9 @@ struct TurnQueue {
     active_tasks: HashSet<String>,
     /// The most recent background-task inventory, also covering tasks without a task_started frame.
     background_tasks: HashSet<String>,
+    /// Tasks the inventory dropped whose `task_notification` has not arrived yet, with the instant the
+    /// release stops waiting for it (see `TASK_SETTLE_GRACE`).
+    settling: HashMap<String, std::time::Instant>,
     /// True from the moment a user turn is written until its `result` line arrives.
     running: bool,
     /// Messages waiting for that turn to end, in the order they will be sent.
@@ -2188,13 +2199,16 @@ impl ChatManager {
 
 /// The turn lock keeps a new send or attach from racing the final idle check and process release.
 fn release_if_idle(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
-    let turn = proc.turn.lock().unwrap();
+    let mut turn = proc.turn.lock().unwrap();
+    let now = std::time::Instant::now();
+    turn.settling.retain(|_, deadline| *deadline > now);
     if proc.release_when_idle.load(Ordering::Relaxed)
         && proc.alive.load(Ordering::Relaxed)
         && !turn.running
         && turn.waiting.is_empty()
         && turn.active_tasks.is_empty()
         && turn.background_tasks.is_empty()
+        && turn.settling.is_empty()
         && proc.permissions.lock().unwrap().is_empty()
     {
         release_process(app, session_id, proc);
@@ -2208,6 +2222,9 @@ fn track_claude_task(proc: &Arc<ChatProcess>, subtype: &str, message: &Value) {
     let finished = matches!(status, Some("completed" | "failed" | "error" | "killed" | "stopped" | "canceled" | "cancelled"))
         || (subtype == "task_notification" && status.is_none());
     let mut turn = proc.turn.lock().unwrap();
+    if subtype == "task_notification" {
+        turn.settling.remove(id);
+    }
     if finished {
         turn.active_tasks.remove(id);
         turn.background_tasks.remove(id);
@@ -2809,10 +2826,21 @@ fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, line: &s
                     .filter(|task| !matches!(task.get("status").and_then(Value::as_str), Some("completed" | "failed" | "killed" | "stopped" | "canceled" | "cancelled")))
                     .filter_map(|task| task.get("task_id").and_then(Value::as_str).map(str::to_string)).collect();
                 let previous = std::mem::replace(&mut turn.background_tasks, current.clone());
+                let deadline = std::time::Instant::now() + TASK_SETTLE_GRACE;
                 for ended in previous.difference(&current) {
                     turn.active_tasks.remove(ended);
+                    turn.settling.insert(ended.clone(), deadline);
                 }
                 fold_task_inventory(&mut proc.extras.lock().unwrap(), &tasks);
+                // A dropped task whose terminal frames never come must still let the process go: nothing
+                // else would call the idle check again once the grace has passed.
+                if !turn.settling.is_empty() {
+                    let (app, session_id, proc) = (app.clone(), session_id.to_string(), proc.clone());
+                    std::thread::spawn(move || {
+                        std::thread::sleep(TASK_SETTLE_GRACE);
+                        release_if_idle(&app, &session_id, &proc);
+                    });
+                }
             }
             emit_extras(app, session_id, proc);
             release_if_idle(app, session_id, proc);
@@ -6728,6 +6756,8 @@ mod tests {
         handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#);
         assert!(running(&manager, "s"), "the subagent still owns work");
         handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_notification","task_id":"agent","status":"completed","summary":"done"}"#);
+        assert!(running(&manager, "s"), "the dropped shell's terminal frame is still expected");
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_notification","task_id":"shell","status":"completed"}"#);
         assert!(!running(&manager, "s"));
         assert!(manager.snapshot("s").rows.iter().any(|row| matches!(row, ChatRow::Tool { output: Some(output), .. } if output == "done")));
     }
@@ -6749,6 +6779,53 @@ mod tests {
             manager.stop(&app, "s").unwrap();
             assert!(!running(&manager, "s"));
         }
+    }
+
+    /// The real wire order of a finishing task: the inventory empties FIRST, then `task_updated` and
+    /// `task_notification` follow. A detached process must survive the drop until the notification has
+    /// landed, or a task tab that outlived its conversation pane never gets status, summary or output file.
+    #[test]
+    fn a_detached_release_waits_for_the_terminal_frames_of_a_dropped_task() {
+        let app = ctx("detach-settle");
+        let manager = manager_with_session("s");
+        let proc = manager.get("s").unwrap();
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"worwyzf75","task_type":"local_workflow","description":"protocol probe"}]}"#);
+        manager.detach(&app, "s");
+        assert!(running(&manager, "s"));
+
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#);
+        assert!(running(&manager, "s"), "the drop alone does not release: the terminal frames are still coming");
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_updated","task_id":"worwyzf75","patch":{"status":"completed","end_time":1789036359792}}"#);
+        assert!(running(&manager, "s"), "the notification with summary and output file is still coming");
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_notification","task_id":"worwyzf75","status":"completed","output_file":"/tmp/tasks/worwyzf75.output","summary":"Dynamic workflow \"protocol probe\" completed"}"#);
+        assert!(!running(&manager, "s"), "the last terminal frame releases the process");
+
+        let listed = background_tasks(&manager);
+        assert_eq!(listed[0].status, "completed");
+        assert_eq!(listed[0].ended_at, Some(1789036359792));
+        assert_eq!(listed[0].output_file.as_deref(), Some("/tmp/tasks/worwyzf75.output"));
+        assert!(listed[0].summary.as_deref().unwrap_or("").starts_with("Dynamic workflow"));
+        assert!(proc.released.load(Ordering::Relaxed));
+    }
+
+    /// A dropped task whose terminal frames never arrive must not keep the process alive forever.
+    #[test]
+    fn a_dropped_task_without_terminal_frames_releases_after_the_grace() {
+        let app = ctx("detach-settle-grace");
+        let manager = manager_with_session("s");
+        let proc = manager.get("s").unwrap();
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"shell","task_type":"local_bash"}]}"#);
+        manager.detach(&app, "s");
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#);
+        assert!(running(&manager, "s"));
+
+        let deadline = std::time::Instant::now() + TASK_SETTLE_GRACE + Duration::from_secs(5);
+        while running(&manager, "s") {
+            assert!(std::time::Instant::now() < deadline, "the process was never released after the grace");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(proc.released.load(Ordering::Relaxed));
+        assert_eq!(background_tasks(&manager)[0].status, "ended");
     }
 
     // ── Background tasks as the composer and the task tabs see them ──

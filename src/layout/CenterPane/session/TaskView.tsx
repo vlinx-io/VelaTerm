@@ -116,8 +116,9 @@ export function TaskView({ tab, hidden }: { tab: TaskTab; hidden: boolean }) {
       if (disposed) fn();
       else unlisten = fn;
     });
-    // The snapshot is the current state at mount; an event that arrived first is newer than it.
-    void chatSnapshot(tab.sessionId)
+    // The snapshot is the current state at mount; an event that arrived first is newer than it. Only the
+    // flattened extras are read, so ask for a page rather than the whole transcript.
+    void chatSnapshot(tab.sessionId, {})
       .then((snapshot) => {
         if (!disposed && !sawEvent) apply(extrasOf(snapshot).backgroundTasks);
       })

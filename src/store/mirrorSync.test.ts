@@ -120,10 +120,17 @@ function seed(tab: string) {
     ephemeralSessions: {},
     docTabs: {},
     browserTabs: {},
+    taskTabs: {},
     selection: [],
     inspectTarget: null,
     mirrorFocusSessionId: null,
   });
+}
+
+/** Open a task tab for `sessionId` the way the Tasks chip does and return its id; the store sits in it afterwards. */
+function openTaskTab(sessionId: string) {
+  useTermStore.getState().openTaskTab(sessionId, { task_id: "t1", task_type: "local_workflow", description: "probe", status: "running" });
+  return useTermStore.getState().activeTabId!;
 }
 
 /** A published snapshot for a single tab, as another client would send it. */
@@ -389,6 +396,67 @@ describe("following a peer", () => {
     expect(useTermStore.getState().activeSessionId).toBe("B");
     expect(useTermStore.getState().focusedPaneId).toBe("p-B");
     expect(mirrorPush).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it("stays in its own task tab as a publisher: neither the reconcile echo nor a peer's push names it", async () => {
+    alignEnabledEmpty();
+    const stop = start();
+    await settle();
+    mirrorPush.mockClear();
+
+    const taskTabId = openTaskTab("A");
+    vi.advanceTimersByTime(500);
+    await settle();
+    expect(mirrorPush).toHaveBeenCalledTimes(1);
+    const published = mirrorPush.mock.calls[0][0] as { center: { activeTabId: string | null } };
+    expect(published.center.activeTabId).toBe("A");
+
+    // The peer adopted our snapshot and echoes it back: the anchor A is what it now names as active.
+    emitLayout({ rev: 2, source: "ws-2", state: JSON.parse(JSON.stringify(published)) });
+    expect(useTermStore.getState().activeTabId).toBe(taskTabId);
+    expect(useTermStore.getState().activeSessionId).toBeNull();
+    expect(useTermStore.getState().focusedPaneId).toBeNull();
+    expect(useTermStore.getState().openTabs).toEqual(["A", taskTabId]);
+
+    // An ordinary peer push (the peer clicked a sidebar row, resized a split): the arrangement follows,
+    // the task tab stays in front.
+    emitLayout(peerLayout("B", 3));
+    expect(useTermStore.getState().openTabs).toEqual(["B", taskTabId]);
+    expect(useTermStore.getState().activeTabId).toBe(taskTabId);
+    expect(useTermStore.getState().activeSessionId).toBeNull();
+    expect(useTermStore.getState().focusedPaneId).toBeNull();
+    expect(useTermStore.getState().lastActiveSessionTabId).toBe("B");
+    expect(useTermStore.getState().mirrorFocusSessionId).toBeNull();
+    stop();
+  });
+
+  it("stays in its own task tab as a follower while the publisher keeps pushing", async () => {
+    alignEnabledEmpty();
+    const stop = start();
+    await settle();
+    emitLayout(peerLayout("B", 2));
+    expect(useTermStore.getState().activeTabId).toBe("B");
+    mirrorPush.mockClear();
+
+    const taskTabId = openTaskTab("B");
+    vi.advanceTimersByTime(500);
+    await settle();
+
+    emitLayout(peerLayout("B", 3));
+    expect(useTermStore.getState().activeTabId).toBe(taskTabId);
+    expect(useTermStore.getState().activeSessionId).toBeNull();
+    expect(useTermStore.getState().focusedPaneId).toBeNull();
+    expect(useTermStore.getState().openTabs).toEqual(["B", taskTabId]);
+
+    // Leaving the task tab hands the active trio back to the mirror.
+    useTermStore.getState().setActiveTab("B");
+    vi.advanceTimersByTime(500);
+    await settle();
+    emitLayout(peerLayout("C", 4));
+    expect(useTermStore.getState().activeTabId).toBe("C");
+    expect(useTermStore.getState().activeSessionId).toBe("C");
+    expect(useTermStore.getState().focusedPaneId).toBe("p-C");
     stop();
   });
 

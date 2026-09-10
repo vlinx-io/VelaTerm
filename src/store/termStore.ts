@@ -4159,6 +4159,12 @@ export const useTermStore = create<TermStore>((set, get) => ({
         traceSplit("mirror", `peer layout brought ${sessionIds.join(", ")}`, { sessionIds });
       }
     }
+    // A task tab is client-local: the peer never sees it, so the tab its frame names as active is only the
+    // anchor this client published in its place (or whatever the peer is looking at). Following it would
+    // pull the user out of the task tab on every peer interaction; stay until they leave it themselves.
+    const local = get();
+    const inTaskTab = !!(local.activeTabId && local.taskTabs[local.activeTabId]);
+    const activeSessionId = inTaskTab ? local.activeSessionId : c.activeSessionId;
     set((s) => ({
       // A leaf arriving from a peer is not a request to start anything. If the backend says no process
       // stands behind that session, render a placeholder: mounting a terminal is what starts one, and
@@ -4180,10 +4186,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
       openTabs: [...c.openTabs, ...s.openTabs.filter((id) => s.taskTabs[id] && !c.openTabs.includes(id))],
       liveTabs: c.liveTabs,
       pinnedTabs: c.pinnedTabs,
-      activeTabId: c.activeTabId,
+      activeTabId: inTaskTab ? s.activeTabId : c.activeTabId,
       lastActiveSessionTabId: c.lastActiveSessionTabId,
-      activeSessionId: c.activeSessionId,
-      focusedPaneId: c.focusedPaneId,
+      activeSessionId,
+      focusedPaneId: inTaskTab ? s.focusedPaneId : c.focusedPaneId,
       paneTrees: c.paneTrees,
       // Merge rather than replace: the publisher only carries the ephemeral sessions its own trees
       // reference, and dropping the rest would strand a split this client is still showing.
@@ -4211,8 +4217,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
       // Only an activation that actually changes which session is active can steal focus, so repeated
       // frames from a peer's drag leave an already-consumed marker alone.
       mirrorFocusSessionId:
-        c.activeSessionId !== s.activeSessionId
-          ? c.activeSessionId
+        activeSessionId !== s.activeSessionId
+          ? activeSessionId
           : s.mirrorFocusSessionId,
     }));
     // A mirrored arrangement counts as the layout for this session. Without this, a first `loadTree`

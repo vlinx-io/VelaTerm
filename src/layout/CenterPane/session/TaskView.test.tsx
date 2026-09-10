@@ -69,7 +69,7 @@ async function mount(over: Partial<TaskTab> = {}) {
   return view;
 }
 
-it("paints the seed at once, subscribes to the session, and reads one snapshot for it", async () => {
+it("paints the seed at once, subscribes to the session, and reads one paged snapshot for it", async () => {
   await mount();
   expect(screen.getByText("protocol probe", { selector: ".sv-task-title" })).toBeTruthy();
   expect(screen.getByText("Alpha: alpha-worker")).toBeTruthy();
@@ -77,7 +77,8 @@ it("paints the seed at once, subscribes to the session, and reads one snapshot f
   expect(screen.getByText("1.2k")).toBeTruthy();
   expect(screen.getByText("Running")).toBeTruthy();
   expect(listen).toHaveBeenCalledWith("chat://event/s", expect.any(Function));
-  expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "chat_snapshot")).toEqual([["chat_snapshot", { sessionId: "s" }]]);
+  // A window, even an empty one, makes the engine return a page: the view reads only the extras.
+  expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "chat_snapshot")).toEqual([["chat_snapshot", { sessionId: "s", window: {} }]]);
 });
 
 it("follows extras events for its own task and ignores other tasks", async () => {
