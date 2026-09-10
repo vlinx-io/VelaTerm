@@ -543,6 +543,7 @@ mod tests {
                 ShellKind::Posix,
                 ShellKind::Fish,
                 ShellKind::PowerShell,
+                ShellKind::Pwsh,
                 ShellKind::Cmd,
             ] {
                 let selection = pair("custom/$(touch should-not-run)", "high");

@@ -10,6 +10,9 @@
 use crate::agent::server::HookEndpoint;
 use crate::models::SessionKind;
 
+#[cfg(test)]
+mod powershell_tests;
+
 /// Holds the Claude settings JSON so the command line can reference it without echoing a large JSON value.
 pub const CLAUDE_SETTINGS_ENV: &str = "VLX_CLAUDE_SETTINGS";
 /// Holds the Codex notify array referenced by `-c notify=`.
@@ -66,11 +69,11 @@ pub enum ShellKind {
     /// POSIX shells such as bash, zsh, sh, and dash.
     Posix,
     Fish,
-    /// Windows PowerShell 5.1 (`powershell.exe`), which passes native-command arguments through
-    /// unmodified and therefore needs quotes escaped by hand.
+    /// Windows PowerShell 5.1 (`powershell.exe`), whose Legacy native argument binding requires
+    /// manually escaped quotes in structured values.
     PowerShell,
-    /// PowerShell 6+ (`pwsh`), which re-quotes native-command arguments itself. Hand-escaping a value
-    /// here double-escapes it, so the two dialects need opposite treatment; see [`value_ref`].
+    /// PowerShell Core (`pwsh`). Native argument passing depends on the version, runtime preference,
+    /// and target command; the launcher checks those after the interactive profile has loaded.
     Pwsh,
     Cmd,
 }
@@ -242,9 +245,12 @@ pub(crate) fn value_ref(shell: ShellKind, env: &str) -> String {
     match shell {
         ShellKind::Posix | ShellKind::Fish => format!("\"${env}\""),
         ShellKind::PowerShell => format!("$($env:{env} -replace '\"', '\\\"')"),
-        // pwsh re-quotes the argument itself, so the value is passed as-is; escaping here would
-        // reach the agent as literal backslashes and produce the very error the arm above prevents.
-        ShellKind::Pwsh => format!("\"$env:{env}\""),
+        // The scoped Pwsh launcher decides whether the native binder uses Legacy rules. Modern
+        // binding preserves the raw value. Legacy binding also consumes backslashes before quotes,
+        // so preserve those when escaping JSON strings such as Windows paths and quoted text.
+        ShellKind::Pwsh => format!(
+            r#""$(if ($vlxLegacyArguments) {{ $env:{env} -replace '(\\*)"', '$1$1\"' }} else {{ $env:{env} }})""#
+        ),
         ShellKind::Cmd => format!("\"%{env}%\""),
     }
 }
@@ -641,6 +647,7 @@ fn launch_cmd(shell: ShellKind, bin: &str, args: &str) -> String {
     } else {
         format!("{bin} {args}")
     };
+    let inner = pwsh_invocation(shell, bin, &inner);
     // The `else` branch reports through the hook and prints a readable message.
     let report = report_not_found(shell, bin);
     // Clear the screen and scrollback before the guard to remove the shell's echoed command.
@@ -675,6 +682,42 @@ fn sq_posix(s: &str) -> String {
 /// Embeds arbitrary text in PowerShell single quotes by replacing `'` with `''`.
 fn sq_pwsh(s: &str) -> String {
     s.replace('\'', "''")
+}
+
+/// Chooses native argument passing inside the actual interactive Pwsh session. A separate version
+/// probe cannot see profile preferences or aliases. The child scope keeps our variables local and
+/// leaves PSNativeCommandArgumentPassing unchanged, including for user-supplied launch arguments.
+fn pwsh_invocation(shell: ShellKind, target: &str, inner: &str) -> String {
+    if shell != ShellKind::Pwsh {
+        return inner.to_string();
+    }
+    let target = sq_pwsh(target);
+    // The feature was experimental in 7.2 and became stable in 7.3. A missing preference in a
+    // capable engine means Standard, whereas older engines always use Legacy. Windows mode uses
+    // Legacy for the same command names and extensions as PowerShell's NativeCommandProcessor.
+    format!(
+        "& {{ \
+         $vlxArgumentMode = 'Legacy'; \
+         if ($PSVersionTable.PSVersion -ge [version]'7.3' -or \
+             ($PSVersionTable.PSVersion -ge [version]'7.2' -and \
+              $EnabledExperimentalFeatures -contains 'PSNativeCommandArgumentPassing')) {{ \
+             $vlxArgumentMode = [string](Get-Variable -Name PSNativeCommandArgumentPassing \
+                 -ValueOnly -ErrorAction SilentlyContinue); \
+         }}; \
+         $vlxLegacyArguments = $vlxArgumentMode -eq 'Legacy'; \
+         if ($vlxArgumentMode -eq 'Windows') {{ \
+             $vlxCommand = $ExecutionContext.InvokeCommand.GetCommand(\
+                 '{target}', [System.Management.Automation.CommandTypes]::All); \
+             if ($vlxCommand -is [System.Management.Automation.AliasInfo]) {{ \
+                 $vlxCommand = $vlxCommand.ResolvedCommand; \
+             }}; \
+             if ($vlxCommand -is [System.Management.Automation.ApplicationInfo]) {{ \
+                 $vlxLegacyArguments = \
+                     [System.IO.Path]::GetExtension($vlxCommand.Path) -in '.bat','.cmd','.js','.vbs','.wsf' -or \
+                     [System.IO.Path]::GetFileNameWithoutExtension($vlxCommand.Path) -in 'cmd','cscript','find','sqlcmd','wscript'; \
+             }}; \
+         }}; {inner} }}"
+    )
 }
 
 /// Escapes bare text used as an `echo` argument inside a cmd.exe parenthesized block. Prefixing block-level
@@ -729,6 +772,7 @@ fn launch_cmd_at(shell: ShellKind, path: &str, args: &str) -> String {
             } else {
                 format!("& '{p}' {args}")
             };
+            let inner = pwsh_invocation(shell, path, &inner);
             let report = report_not_found_with(shell, &sq_pwsh(&path_missing_message(path)));
             format!(
                 "{clear}if (Test-Path -LiteralPath '{p}' -PathType Leaf) {{ {inner} }} else {{ {report} }}"
@@ -1501,11 +1545,7 @@ mod tests {
         assert!(bare.contains("\"$VLX_NOTFOUND_URL\""));
     }
 
-    /// `pwsh` and `powershell.exe` need OPPOSITE escaping for a native-command argument, so they must not
-    /// classify to the same kind. Windows PowerShell passes the value through verbatim and needs every `"`
-    /// hand-escaped; pwsh re-quotes the argument itself, so that same escaping arrives as literal
-    /// backslashes and the agent reports `Invalid JSON provided to --settings`. Both behaviours were
-    /// measured on Windows against 5.1.26100 and 7.6.5.
+    /// Keep the runtime-aware Pwsh launcher separate from the Windows PowerShell 5.1 path.
     #[test]
     fn shell_kind_separates_windows_powershell_from_pwsh() {
         assert_eq!(
@@ -1520,25 +1560,20 @@ mod tests {
         assert_eq!(shell_kind("powershell"), ShellKind::PowerShell);
     }
 
-    /// The regression this fix exists for: a compact-JSON value must reach the agent unmangled on BOTH
-    /// PowerShell dialects, and that requires different text in each.
+    /// Pwsh chooses escaping at launch time instead of assuming its native argument mode from its name.
     #[test]
-    fn value_ref_escapes_for_windows_powershell_but_not_for_pwsh() {
-        // Windows PowerShell 5.1 hand-escapes, because it passes the value through untouched.
+    fn value_ref_defers_pwsh_escaping_to_the_runtime_mode() {
+        // Retain the existing Windows PowerShell 5.1 quote-escaping expression.
         assert_eq!(
             value_ref(ShellKind::PowerShell, "VLX_CLAUDE_SETTINGS"),
             r#"$($env:VLX_CLAUDE_SETTINGS -replace '"', '\"')"#
         );
-        // pwsh must NOT hand-escape; a backslash here survives into the argument itself.
-        assert_eq!(
-            value_ref(ShellKind::Pwsh, "VLX_CLAUDE_SETTINGS"),
-            r#""$env:VLX_CLAUDE_SETTINGS""#
-        );
-        assert!(!value_ref(ShellKind::Pwsh, "X").contains('\\'));
+        let reference = value_ref(ShellKind::Pwsh, "VLX_CLAUDE_SETTINGS");
+        assert!(reference.contains("if ($vlxLegacyArguments)"));
+        assert!(reference.contains("else { $env:VLX_CLAUDE_SETTINGS }"));
     }
 
-    /// A prompt is one argument on both dialects. Windows PowerShell still splits a prompt containing `"`
-    /// (a pre-existing limitation noted on `prompt_ref`); pwsh does not, so quoting is enough for both.
+    /// Preserve prompt references; Legacy-mode prompt quoting is independent of structured values.
     #[test]
     fn prompt_ref_quotes_on_both_powershell_dialects() {
         assert_eq!(
@@ -1721,8 +1756,7 @@ mod tests {
             shell_kind("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"),
             ShellKind::PowerShell
         );
-        // The two dialects are separate variants: they pass native-command arguments under opposite
-        // rules, so anything that collapses them reintroduces the --settings mangling on pwsh 7.
+        // Pwsh needs runtime argument-mode detection, unlike the Windows PowerShell 5.1 path.
         assert_eq!(shell_kind("pwsh"), ShellKind::Pwsh);
         assert_eq!(
             shell_kind("C:\\Program Files\\PowerShell\\7\\pwsh.exe"),
