@@ -26,7 +26,7 @@ import {
 import type { InspectorTab } from "../theme";
 import type { AgentState, Session } from "../types";
 import type { DocTab } from "./docTab";
-import type { BrowserTab, SelNode, SidebarTreeView } from "./termStore";
+import type { BrowserTab, SelNode, SidebarTreeView, TaskTab } from "./termStore";
 
 /** Current snapshot schema. A peer running an older or newer version is ignored rather than half-applied. */
 export const MIRROR_LAYOUT_VERSION = 2;
@@ -107,6 +107,11 @@ export interface MirrorLayoutSource {
   ephemeralSessions: Record<string, Session>;
   docTabs: Record<string, DocTab>;
   browserTabs: Record<string, BrowserTab>;
+  /**
+   * Task tabs are client-local and never published: a peer without the opening conversation's context
+   * could show nothing useful, so they are filtered out of `openTabs` and `activeTabId` below.
+   */
+  taskTabs: Record<string, TaskTab>;
   selection: SelNode[];
   inspectTarget: SelNode | null;
   leftCollapsed: boolean;
@@ -152,7 +157,8 @@ function sessionIdsOf(node: PaneNode, into: Set<string>): void {
  * arrangement serialize identically — that byte equality is what stops the sync loop from feeding itself.
  */
 export function buildMirrorLayout(s: MirrorLayoutSource): MirrorLayout {
-  const tabIds = [...s.openTabs, ...s.liveTabs.filter((id) => !s.openTabs.includes(id))];
+  const openTabs = s.openTabs.filter((id) => !s.taskTabs[id]);
+  const tabIds = [...openTabs, ...s.liveTabs.filter((id) => !openTabs.includes(id))];
   const carried = tabIds.filter((id) => s.paneTrees[id]);
   const paneTrees = pick(s.paneTrees, carried);
   const sessionIds = new Set<string>();
@@ -160,10 +166,10 @@ export function buildMirrorLayout(s: MirrorLayoutSource): MirrorLayout {
   return {
     v: MIRROR_LAYOUT_VERSION,
     center: {
-      openTabs: [...s.openTabs],
+      openTabs,
       liveTabs: [...s.liveTabs],
       pinnedTabs: [...s.pinnedTabs],
-      activeTabId: s.activeTabId,
+      activeTabId: s.activeTabId && s.taskTabs[s.activeTabId] ? null : s.activeTabId,
       lastActiveSessionTabId: s.lastActiveSessionTabId,
       activeSessionId: s.activeSessionId,
       focusedPaneId: s.focusedPaneId,

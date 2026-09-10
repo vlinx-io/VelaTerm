@@ -205,6 +205,7 @@ export function ChatPane({
   const status = useTermStore((s) => effectiveStatus(s.runtimes[session.id]));
   const searchOpen = useTermStore((s) => s.searchOpen);
   const closeSearch = useTermStore((s) => s.closeSearch);
+  const openTaskTab = useTermStore((s) => s.openTaskTab);
   const [searchTarget, setSearchTarget] = useState<string | null>(null);
   const unread = useTermStore((s) => session.id in s.notifications);
   const defaultMode = useTermStore((s) => storedMode({
@@ -1861,6 +1862,7 @@ export function ChatPane({
                     tasks={extras.backgroundTasks ?? []}
                     busy={busy}
                     onStop={(taskId) => void chatStopTask(session.id, taskId).catch((err) => setError(String(err)))}
+                    onOpen={(task) => openTaskTab(session.id, task)}
                     onBackgroundAll={() => void chatBackgroundTasks(session.id).catch((err) => setError(String(err)))}
                   />
                 )}

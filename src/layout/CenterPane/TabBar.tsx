@@ -2,8 +2,8 @@
 //! The trailing + creates a scratch terminal; desktop clients also expose terminal-session and built-in
 //! browser actions. Session tooltips show project/group/parent/session ancestry. Context actions vary:
 //! persisted sessions combine close actions with shared sessionMenu operations, documents add refresh,
-//! scratch terminals add inline renaming, and browser tabs expose close actions only. StatusBar lists
-//! background liveTabs.
+//! scratch terminals add inline renaming, and browser and task tabs expose close actions only. StatusBar
+//! lists background liveTabs.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ContextMenu, type MenuItem } from "../../components/ContextMenu";
@@ -22,6 +22,7 @@ import { MemoryIcon } from "../Memory/MemoryRoute";
 import { MemoryTab } from "../Memory/MemoryTab";
 import { MemoryLink } from "../Memory/navigation";
 import { SessionKindIcon } from "../sessionViewers/sessionMeta";
+import { taskIcon } from "./session/TaskView";
 
 /** Close any tab, routing dirty documents through their three-choice confirmation and closing others directly. */
 function closeAnyTab(tabId: string) {
@@ -79,6 +80,7 @@ export function TabBar() {
   const activeTabId = useTermStore((s) => s.activeTabId);
   const docTabs = useTermStore((s) => s.docTabs);
   const browserTabs = useTermStore((s) => s.browserTabs);
+  const taskTabs = useTermStore((s) => s.taskTabs);
   const setActiveTab = useTermStore((s) => s.setActiveTab);
   const closeTab = useTermStore((s) => s.closeTab);
   const requestCloseDocTab = useTermStore((s) => s.requestCloseDocTab);
@@ -419,6 +421,41 @@ export function TabBar() {
             </div>
           );
         }
+        // Background-task tab: an icon for the task kind, the task's description, and a close action.
+        const task = taskTabs[tabId];
+        if (task) {
+          const isActive = tabId === activeTabId;
+          const TaskIcon = taskIcon(task.taskType);
+          return (
+            <div
+              key={tabId}
+              ref={(el) => { tabRefs.current[tabId] = el; }}
+              className={tabClass(tabId, isActive)}
+              title={t("chat.tasks.tabTooltip")}
+              onClick={() => setActiveTab(tabId)}
+              onContextMenu={(e) => openTabMenu(e, tabId)}
+              onMouseEnter={(e) => onTabEnter(e, task.title)}
+              onMouseLeave={onTabLeave}
+              {...dragProps(tabId)}
+              {...middleCloseProps(tabId)}
+            >
+              <span style={{ color: "var(--text-dim)", display: "grid", flex: "none" }}>
+                <TaskIcon size={13} />
+              </span>
+              <span className="tnm">{task.title}</span>
+              <span
+                className="x"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  // The tab only shows what the agent reports; nothing to confirm.
+                  closeTab(tabId);
+                }}
+              >
+                <Icons.x size={12} />
+              </span>
+            </div>
+          );
+        }
         const session = sessions.find((s) => s.id === tabId) ?? ephemeralSessions[tabId];
         if (!session) return null;
         const isAgent = session.kind !== "terminal";
@@ -589,6 +626,9 @@ export function TabBar() {
                   ]
                 : [];
             items = [...headItems, ...mdItems, { label: "", separator: true }, ...closeItems];
+          } else if (taskTabs[tabId]) {
+            // A task tab has no session, file or node behind it: close actions only.
+            items = closeItems;
           } else {
             // Persisted sessions receive full operations; draft terminals/browsers receive temporary actions
             // such as conversion; other browser tabs retain only close actions.

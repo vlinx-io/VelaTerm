@@ -145,6 +145,7 @@ function seedSnapshotSource(tab: string) {
     ephemeralSessions: {},
     docTabs: {},
     browserTabs: {},
+    taskTabs: {},
     selection: [],
     inspectTarget: null,
     leftCollapsed: false,

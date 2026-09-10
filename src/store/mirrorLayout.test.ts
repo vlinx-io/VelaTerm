@@ -81,6 +81,7 @@ function source(over: Partial<MirrorLayoutSource> = {}): MirrorLayoutSource {
     ephemeralSessions: {},
     docTabs: {},
     browserTabs: {},
+    taskTabs: {},
     selection: [{ id: "A", kind: "session" }],
     inspectTarget: { id: "A", kind: "session" },
     leftCollapsed: false,
@@ -114,6 +115,19 @@ describe("buildMirrorLayout", () => {
     );
     expect(layout.center.liveTabs).toEqual(["B"]);
     expect(Object.keys(layout.center.paneTrees).sort()).toEqual(["A", "B"]);
+  });
+
+  it("leaves task tabs out: they are client-local, and an active one publishes no active tab", () => {
+    const taskTab = { id: "task-1", sessionId: "A", taskId: "t1", title: "probe", taskType: "local_workflow" };
+    const layout = buildMirrorLayout(
+      source({ openTabs: ["A", "task-1"], activeTabId: "task-1", taskTabs: { "task-1": taskTab } }),
+    );
+    expect(layout.center.openTabs).toEqual(["A"]);
+    expect(layout.center.activeTabId).toBeNull();
+    expect(JSON.stringify(layout)).not.toContain("task-1");
+    // Opening a task tab must not change the published bytes, or the sync loop would push for nothing.
+    expect(JSON.stringify(buildMirrorLayout(source({ openTabs: ["A", "task-1"], taskTabs: { "task-1": taskTab } }))))
+      .toBe(JSON.stringify(buildMirrorLayout(source())));
   });
 
   it("drops pane trees and session metadata no tab references, keeping the payload to the arrangement", () => {

@@ -13,6 +13,7 @@ import {
   chatMcpReconnect,
   chatMcpStatus,
   chatMcpToggle,
+  isTaskFinished,
   type ChatApiRetry,
   type ChatBackgroundTask,
   type ChatExtras,
@@ -283,30 +284,46 @@ function statusKey(status: string): "connected" | "disabled" | "failed" | "pendi
   }
 }
 
+/** The label for a task's status as the chip row shows it; unknown values read as the agent wrote them. */
+function taskStatusLabel(t: ReturnType<typeof useT>, status: string | undefined): string {
+  switch (status) {
+    case "completed": return t("chat.tasks.status.completed");
+    case "failed": case "error": return t("chat.tasks.status.failed");
+    case "killed": case "stopped": case "canceled": case "cancelled": return t("chat.tasks.status.canceled");
+    case "ended": return t("chat.tasks.status.ended");
+    default: return status ?? "";
+  }
+}
+
 /**
  * Claude's background tasks, and the way to send the running turn's foreground work there.
  *
- * Shown while there is something to list or something to background; otherwise the row stays clean.
+ * Shown while there is something to list or something to background; otherwise the row stays clean. Each
+ * row is live (a workflow reads "Phase: agent") and opens the task in a tab of its own; finished tasks stay
+ * listed with their status until the next turn so their final state can still be opened.
  */
 export function TasksChip({
   tasks,
   busy,
   onStop,
+  onOpen,
   onBackgroundAll,
 }: {
   tasks: ChatBackgroundTask[];
   busy: boolean;
   onStop: (taskId: string) => void;
+  onOpen: (task: ChatBackgroundTask) => void;
   onBackgroundAll: () => void;
 }) {
   const t = useT();
   if (tasks.length === 0 && !busy) return null;
+  const running = tasks.filter((task) => !isTaskFinished(task)).length;
   return (
     <ChipPopover
       glyph={<Icons.layers size={14} />}
       label={t("chat.tasks.label")}
       title={t("chat.tasks.tooltip")}
-      badge={tasks.length > 0 ? <span className="sv-chip-badge">{tasks.length}</span> : undefined}
+      badge={running > 0 ? <span className="sv-chip-badge">{running}</span> : undefined}
       width={340}
     >
       {busy ? (
@@ -318,17 +335,37 @@ export function TasksChip({
       {tasks.length === 0 ? (
         <div className="sv-popover-empty">{t("chat.tasks.none")}</div>
       ) : (
-        tasks.map((task) => (
-          <div className="sv-popover-row" key={task.task_id}>
-            <span className="sv-popover-main">
-              <span className="sv-popover-title">{task.description || task.task_id}</span>
-              <span className="sv-popover-sub">{task.task_type.replace(/_/g, " ")}</span>
-            </span>
-            <button className="sv-popover-action" onClick={() => onStop(task.task_id)}>
-              {t("chat.tasks.stop")}
+        tasks.map((task) => {
+          const finished = isTaskFinished(task);
+          return (
+            <button
+              className="sv-popover-row sv-popover-open"
+              key={task.task_id}
+              title={t("chat.tasks.open")}
+              onClick={() => onOpen(task)}
+            >
+              <span className="sv-popover-main">
+                <span className="sv-popover-title">{task.description || task.summary || task.task_id}</span>
+                <span className="sv-popover-sub">
+                  {task.task_type.replace(/_/g, " ")}
+                  {finished ? ` · ${taskStatusLabel(t, task.status)}` : ""}
+                </span>
+              </span>
+              {finished ? null : (
+                <span
+                  className="sv-popover-action"
+                  role="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onStop(task.task_id);
+                  }}
+                >
+                  {t("chat.tasks.stop")}
+                </span>
+              )}
             </button>
-          </div>
-        ))
+          );
+        })
       )}
     </ChipPopover>
   );
