@@ -16,6 +16,7 @@ const storeState = vi.hoisted(() => ({
     "doc-1": { path: "/tmp/project/notes.md", title: "notes.md", kind: "text", dirty: true },
   } as Record<string, unknown>,
   browserTabs: {},
+  taskTabs: {},
   runtimes: {},
   notifications: {},
   setActiveTab: vi.fn(),

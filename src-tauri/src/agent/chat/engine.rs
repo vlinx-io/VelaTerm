@@ -646,6 +646,65 @@ pub struct ChatSnapshot {
     pub extras: ClaudeExtras,
 }
 
+/// Statuses after which a task reports nothing more. "ended" is synthesized when the inventory drops a task
+/// before (or without) a terminal frame naming it.
+const FINISHED_TASK_STATUSES: [&str; 8] = ["completed", "failed", "error", "killed", "stopped", "canceled", "cancelled", "ended"];
+
+/// How many finished tasks stay listed until the next turn prunes them.
+const FINISHED_TASK_CAP: usize = 20;
+
+/// How long a release waits for the terminal frames of a task the inventory just dropped.
+///
+/// Claude empties `background_tasks_changed` first and sends `task_updated` and `task_notification` (final
+/// status, summary, output file) afterwards. A task tab that outlives its conversation pane shows exactly
+/// those, so the process is not killed on the drop itself; a task whose frames never come is let go after
+/// this grace so nothing leaks.
+const TASK_SETTLE_GRACE: Duration = Duration::from_secs(2);
+
+/// One background task as the composer and the task tab see it: the inventory entry merged with every
+/// task-protocol frame that named the same task_id. Wire keys stay Claude's snake_case.
+#[derive(Clone, Debug, Default, serde::Serialize)]
+pub struct BackgroundTask {
+    pub task_id: String,
+    /// "local_workflow", "local_agent", "local_bash"; empty until a frame names it.
+    pub task_type: String,
+    /// Live: `task_progress.description` ("Phase: agent" for workflows) wins over the inventory's static text.
+    pub description: String,
+    /// The static description from `task_progress.summary`, or the final summary of `task_notification`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    /// "running", one of Claude's terminal values, or the synthesized "ended".
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_use_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_tool_name: Option<String>,
+    /// Stamped here on the first frame; the protocol carries no task-level start time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<u64>,
+    /// `{total_tokens, tool_uses, duration_ms}` as last reported.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Value>,
+    /// The workflow's phase/agent tree, kept from the last frame that carried one (about every second frame).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow_progress: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_file: Option<String>,
+    /// Seen in a `background_tasks_changed` inventory; only listed tasks are published.
+    #[serde(skip)]
+    pub listed: bool,
+}
+
+impl BackgroundTask {
+    fn finished(&self) -> bool {
+        FINISHED_TASK_STATUSES.contains(&self.status.as_str())
+    }
+}
+
 /// Live facts the Claude protocol reports outside the conversation, shown by the composer.
 ///
 /// Sent whole on every change under one `extras` event: a client that connects late reads the same
@@ -668,9 +727,11 @@ pub struct ClaudeExtras {
     /// The subscription rate-limit windows as last reported.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<Value>,
-    /// Every live background task, replaced whole on each change.
+    /// Background tasks merged per task_id from the inventory and the task protocol; finished ones stay
+    /// listed with their final state until the next turn starts. Foreground subagents are held here too
+    /// but only published once an inventory names them (see `published`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub background_tasks: Vec<Value>,
+    pub background_tasks: Vec<BackgroundTask>,
     /// Whether fast mode was switched on for this process.
     pub fast_mode: bool,
     /// A failed API call being retried right now; cleared by the next frame that says the call went through.
@@ -679,6 +740,16 @@ pub struct ClaudeExtras {
     /// The model named by the last assistant frame, which is the key into `modelUsage` at turn end.
     #[serde(skip)]
     pub usage_model: Option<String>,
+}
+
+impl ClaudeExtras {
+    /// The view clients receive: every task the inventory has named, finished or not. Tasks known only
+    /// from `task_*` frames are foreground work and stay out until `backgroundAll` lists them.
+    fn published(&self) -> ClaudeExtras {
+        let mut extras = self.clone();
+        extras.background_tasks.retain(|task| task.listed);
+        extras
+    }
 }
 
 // ─────────────────────────── Sessions ───────────────────────────
@@ -788,6 +859,9 @@ struct TurnQueue {
     active_tasks: HashSet<String>,
     /// The most recent background-task inventory, also covering tasks without a task_started frame.
     background_tasks: HashSet<String>,
+    /// Tasks the inventory dropped whose `task_notification` has not arrived yet, with the instant the
+    /// release stops waiting for it (see `TASK_SETTLE_GRACE`).
+    settling: HashMap<String, std::time::Instant>,
     /// True from the moment a user turn is written until its `result` line arrives.
     running: bool,
     /// Messages waiting for that turn to end, in the order they will be sent.
@@ -1305,6 +1379,10 @@ impl ChatManager {
         }
         turn.running = true;
         drop(turn);
+        // A new turn retires the finished tasks the composer kept showing since the last one.
+        if prune_finished_tasks(&mut proc.extras.lock().unwrap()) {
+            emit_extras(app, session_id, &proc);
+        }
         if let Err(e) = dispatch(app, session_id, &proc, text, &images, message_id) {
             // Nothing was written, so nothing will report a result to clear this again.
             let mut turn = proc.turn.lock().unwrap();
@@ -1887,7 +1965,7 @@ impl ChatManager {
         let collaboration_modes = proc.collaboration_modes.lock().unwrap().clone();
         let service_tier = proc.service_tier.lock().unwrap().clone();
         let personality = proc.personality.lock().unwrap().clone();
-        let extras = proc.extras.lock().unwrap().clone();
+        let extras = proc.extras.lock().unwrap().published();
         ChatSnapshot {
             positions, page_kind, has_more, total_rows,
             submission_receipts: true,
@@ -2121,13 +2199,16 @@ impl ChatManager {
 
 /// The turn lock keeps a new send or attach from racing the final idle check and process release.
 fn release_if_idle(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
-    let turn = proc.turn.lock().unwrap();
+    let mut turn = proc.turn.lock().unwrap();
+    let now = std::time::Instant::now();
+    turn.settling.retain(|_, deadline| *deadline > now);
     if proc.release_when_idle.load(Ordering::Relaxed)
         && proc.alive.load(Ordering::Relaxed)
         && !turn.running
         && turn.waiting.is_empty()
         && turn.active_tasks.is_empty()
         && turn.background_tasks.is_empty()
+        && turn.settling.is_empty()
         && proc.permissions.lock().unwrap().is_empty()
     {
         release_process(app, session_id, proc);
@@ -2141,13 +2222,121 @@ fn track_claude_task(proc: &Arc<ChatProcess>, subtype: &str, message: &Value) {
     let finished = matches!(status, Some("completed" | "failed" | "error" | "killed" | "stopped" | "canceled" | "cancelled"))
         || (subtype == "task_notification" && status.is_none());
     let mut turn = proc.turn.lock().unwrap();
+    if subtype == "task_notification" {
+        turn.settling.remove(id);
+    }
     if finished {
         turn.active_tasks.remove(id);
         turn.background_tasks.remove(id);
-        proc.extras.lock().unwrap().background_tasks.retain(|task| task.get("task_id").and_then(Value::as_str) != Some(id));
     } else if matches!(subtype, "task_started" | "task_progress") || matches!(status, Some("pending" | "running" | "paused")) {
         turn.active_tasks.insert(id.to_string());
     }
+}
+
+/// Fold one `task_*` frame into the merged task list the composer and the task tabs read.
+///
+/// Every frame upserts by task_id, so the list also holds foreground subagents the inventory never named;
+/// `ClaudeExtras::published` keeps those out of the client view. Fields missing from a frame leave the
+/// merged state alone: older CLIs send no `workflow_progress`, and only about every second frame carries it.
+fn fold_task_frame(extras: &mut ClaudeExtras, subtype: &str, message: &Value) {
+    let Some(task_id) = message.get("task_id").and_then(Value::as_str).filter(|id| !id.is_empty()) else { return };
+    let text = |key: &str| message.get(key).and_then(Value::as_str).filter(|value| !value.trim().is_empty()).map(str::to_string);
+    let task = upsert_task(&mut extras.background_tasks, task_id);
+    match subtype {
+        "task_started" => {
+            if let Some(task_type) = text("task_type") { task.task_type = task_type; }
+            if let Some(description) = text("description") { task.description = description; }
+            if let Some(tool_use_id) = text("tool_use_id") { task.tool_use_id = Some(tool_use_id); }
+            if let Some(workflow_name) = text("workflow_name") { task.workflow_name = Some(workflow_name); }
+            task.status = "running".into();
+        }
+        "task_progress" => {
+            if let Some(description) = text("description") { task.description = description; }
+            if let Some(last_tool_name) = text("last_tool_name") { task.last_tool_name = Some(last_tool_name); }
+            if let Some(summary) = text("summary") { task.summary = Some(summary); }
+            if let Some(usage) = message.get("usage").filter(|usage| usage.is_object()) { task.usage = Some(usage.clone()); }
+            if let Some(progress) = message.get("workflow_progress").filter(|progress| progress.is_array()) {
+                task.workflow_progress = Some(progress.clone());
+            }
+        }
+        "task_updated" => {
+            if let Some(status) = message.pointer("/patch/status").and_then(Value::as_str).filter(|value| !value.is_empty()) {
+                task.status = status.into();
+            }
+            if let Some(end_time) = message.pointer("/patch/end_time").and_then(Value::as_u64) { task.ended_at = Some(end_time); }
+        }
+        "task_notification" => {
+            task.status = text("status").unwrap_or_else(|| "ended".into());
+            if let Some(summary) = text("summary") { task.summary = Some(summary); }
+            if let Some(usage) = message.get("usage").filter(|usage| usage.is_object()) { task.usage = Some(usage.clone()); }
+            if let Some(output_file) = text("output_file") { task.output_file = Some(output_file); }
+            if task.ended_at.is_none() { task.ended_at = Some(now_ms()); }
+        }
+        _ => {}
+    }
+    cap_finished_tasks(&mut extras.background_tasks);
+}
+
+/// Fold a `background_tasks_changed` inventory into the merged list.
+///
+/// The inventory is authoritative for membership, not for content: it names the tasks that are in the
+/// background right now, with a static description. A listed task it no longer names has finished, and
+/// its terminal frames arrive only afterwards (if at all), so it is marked "ended" here rather than dropped.
+fn fold_task_inventory(extras: &mut ClaudeExtras, tasks: &[Value]) {
+    let mut current: HashSet<&str> = HashSet::new();
+    for entry in tasks {
+        let Some(task_id) = entry.get("task_id").and_then(Value::as_str).filter(|id| !id.is_empty()) else { continue };
+        current.insert(task_id);
+        let task = upsert_task(&mut extras.background_tasks, task_id);
+        task.listed = true;
+        if task.task_type.is_empty() {
+            if let Some(task_type) = entry.get("task_type").and_then(Value::as_str) { task.task_type = task_type.into(); }
+        }
+        if task.description.is_empty() {
+            if let Some(description) = entry.get("description").and_then(Value::as_str) { task.description = description.into(); }
+        }
+        if let Some(status) = entry.get("status").and_then(Value::as_str).filter(|value| !value.is_empty()) {
+            task.status = status.into();
+        }
+    }
+    let now = now_ms();
+    for task in extras.background_tasks.iter_mut() {
+        if task.listed && !task.finished() && !current.contains(task.task_id.as_str()) {
+            task.status = "ended".into();
+            task.ended_at = Some(now);
+        }
+    }
+    cap_finished_tasks(&mut extras.background_tasks);
+}
+
+/// The merged entry for `task_id`, created as a running task on first sight.
+fn upsert_task<'a>(tasks: &'a mut Vec<BackgroundTask>, task_id: &str) -> &'a mut BackgroundTask {
+    if let Some(index) = tasks.iter().position(|task| task.task_id == task_id) {
+        return &mut tasks[index];
+    }
+    tasks.push(BackgroundTask {
+        task_id: task_id.to_string(),
+        status: "running".into(),
+        started_at: Some(now_ms()),
+        ..BackgroundTask::default()
+    });
+    tasks.last_mut().expect("just pushed")
+}
+
+/// Keep at most `FINISHED_TASK_CAP` finished tasks, dropping the oldest first.
+fn cap_finished_tasks(tasks: &mut Vec<BackgroundTask>) {
+    while tasks.iter().filter(|task| task.finished()).count() > FINISHED_TASK_CAP {
+        let Some(index) = tasks.iter().position(BackgroundTask::finished) else { break };
+        tasks.remove(index);
+    }
+}
+
+/// Drop finished tasks when a new turn starts; their final state was on screen until now. Returns
+/// whether anything changed so the caller can republish `extras`.
+fn prune_finished_tasks(extras: &mut ClaudeExtras) -> bool {
+    let before = extras.background_tasks.len();
+    extras.background_tasks.retain(|task| !task.finished());
+    extras.background_tasks.len() != before
 }
 
 /// End an idle process that no view is showing any more.
@@ -2637,10 +2826,21 @@ fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, line: &s
                     .filter(|task| !matches!(task.get("status").and_then(Value::as_str), Some("completed" | "failed" | "killed" | "stopped" | "canceled" | "cancelled")))
                     .filter_map(|task| task.get("task_id").and_then(Value::as_str).map(str::to_string)).collect();
                 let previous = std::mem::replace(&mut turn.background_tasks, current.clone());
+                let deadline = std::time::Instant::now() + TASK_SETTLE_GRACE;
                 for ended in previous.difference(&current) {
                     turn.active_tasks.remove(ended);
+                    turn.settling.insert(ended.clone(), deadline);
                 }
-                proc.extras.lock().unwrap().background_tasks = tasks;
+                fold_task_inventory(&mut proc.extras.lock().unwrap(), &tasks);
+                // A dropped task whose terminal frames never come must still let the process go: nothing
+                // else would call the idle check again once the grace has passed.
+                if !turn.settling.is_empty() {
+                    let (app, session_id, proc) = (app.clone(), session_id.to_string(), proc.clone());
+                    std::thread::spawn(move || {
+                        std::thread::sleep(TASK_SETTLE_GRACE);
+                        release_if_idle(&app, &session_id, &proc);
+                    });
+                }
             }
             emit_extras(app, session_id, proc);
             release_if_idle(app, session_id, proc);
@@ -2656,6 +2856,7 @@ fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, line: &s
             handle_compaction(proc, true, trigger, pre_tokens)
         }
         Incoming::Task { subtype, message } => {
+            fold_task_frame(&mut proc.extras.lock().unwrap(), &subtype, &message);
             track_claude_task(proc, &subtype, &message);
             handle_claude_task(proc, &subtype, &message);
             emit_extras(app, session_id, proc);
@@ -3121,6 +3322,9 @@ fn start_waiting_message(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>
         turn.running = true;
         turn.waiting.remove(0)
     };
+    if prune_finished_tasks(&mut proc.extras.lock().unwrap()) {
+        emit_extras(app, session_id, proc);
+    }
     emit_queue(app, session_id, &proc);
     if let Err(message) = dispatch(app, session_id, proc, &next.text, &next.images, Some(&next.id)) {
         let mut turn = proc.turn.lock().unwrap();
@@ -4569,7 +4773,7 @@ fn handle_control_response(
 
 /// Publish the whole `extras` object. See `ClaudeExtras`.
 fn emit_extras(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
-    let extras = proc.extras.lock().unwrap().clone();
+    let extras = proc.extras.lock().unwrap().published();
     emit(app, session_id, json!({"type":"extras","extras":extras}));
 }
 
@@ -6552,6 +6756,8 @@ mod tests {
         handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#);
         assert!(running(&manager, "s"), "the subagent still owns work");
         handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_notification","task_id":"agent","status":"completed","summary":"done"}"#);
+        assert!(running(&manager, "s"), "the dropped shell's terminal frame is still expected");
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_notification","task_id":"shell","status":"completed"}"#);
         assert!(!running(&manager, "s"));
         assert!(manager.snapshot("s").rows.iter().any(|row| matches!(row, ChatRow::Tool { output: Some(output), .. } if output == "done")));
     }
@@ -6573,6 +6779,219 @@ mod tests {
             manager.stop(&app, "s").unwrap();
             assert!(!running(&manager, "s"));
         }
+    }
+
+    /// The real wire order of a finishing task: the inventory empties FIRST, then `task_updated` and
+    /// `task_notification` follow. A detached process must survive the drop until the notification has
+    /// landed, or a task tab that outlived its conversation pane never gets status, summary or output file.
+    #[test]
+    fn a_detached_release_waits_for_the_terminal_frames_of_a_dropped_task() {
+        let app = ctx("detach-settle");
+        let manager = manager_with_session("s");
+        let proc = manager.get("s").unwrap();
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"worwyzf75","task_type":"local_workflow","description":"protocol probe"}]}"#);
+        manager.detach(&app, "s");
+        assert!(running(&manager, "s"));
+
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#);
+        assert!(running(&manager, "s"), "the drop alone does not release: the terminal frames are still coming");
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_updated","task_id":"worwyzf75","patch":{"status":"completed","end_time":1789036359792}}"#);
+        assert!(running(&manager, "s"), "the notification with summary and output file is still coming");
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_notification","task_id":"worwyzf75","status":"completed","output_file":"/tmp/tasks/worwyzf75.output","summary":"Dynamic workflow \"protocol probe\" completed"}"#);
+        assert!(!running(&manager, "s"), "the last terminal frame releases the process");
+
+        let listed = background_tasks(&manager);
+        assert_eq!(listed[0].status, "completed");
+        assert_eq!(listed[0].ended_at, Some(1789036359792));
+        assert_eq!(listed[0].output_file.as_deref(), Some("/tmp/tasks/worwyzf75.output"));
+        assert!(listed[0].summary.as_deref().unwrap_or("").starts_with("Dynamic workflow"));
+        assert!(proc.released.load(Ordering::Relaxed));
+    }
+
+    /// A dropped task whose terminal frames never arrive must not keep the process alive forever.
+    #[test]
+    fn a_dropped_task_without_terminal_frames_releases_after_the_grace() {
+        let app = ctx("detach-settle-grace");
+        let manager = manager_with_session("s");
+        let proc = manager.get("s").unwrap();
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"shell","task_type":"local_bash"}]}"#);
+        manager.detach(&app, "s");
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#);
+        assert!(running(&manager, "s"));
+
+        let deadline = std::time::Instant::now() + TASK_SETTLE_GRACE + Duration::from_secs(5);
+        while running(&manager, "s") {
+            assert!(std::time::Instant::now() < deadline, "the process was never released after the grace");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(proc.released.load(Ordering::Relaxed));
+        assert_eq!(background_tasks(&manager)[0].status, "ended");
+    }
+
+    // ── Background tasks as the composer and the task tabs see them ──
+
+    /// The published task list for session `s`.
+    fn background_tasks(manager: &ChatManager) -> Vec<BackgroundTask> {
+        manager.snapshot("s").extras.background_tasks
+    }
+
+    /// The workflow probe (Claude Code 2.1.267) in wire order: the inventory empties BEFORE the terminal
+    /// frames arrive, so a list that merely mirrored the inventory could never show a final state.
+    #[test]
+    fn background_task_extras_merge_the_task_protocol_and_survive_the_inventory_drop() {
+        let app = ctx("task-merge");
+        let manager = manager_with_session("s");
+        let proc = manager.get("s").unwrap();
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"worwyzf75","task_type":"local_workflow","description":"protocol probe"}]}"#);
+        let listed = background_tasks(&manager);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].description, "protocol probe");
+        assert_eq!(listed[0].status, "running");
+        assert!(listed[0].started_at.is_some());
+
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_started","task_id":"worwyzf75","tool_use_id":"toolu_01","description":"protocol probe","task_type":"local_workflow","workflow_name":"probe","prompt":"export const meta = {}"}"#);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_progress","task_id":"worwyzf75","tool_use_id":"toolu_01","description":"Alpha: alpha-worker","usage":{"total_tokens":0,"tool_uses":0,"duration_ms":20},"last_tool_name":"alpha-worker","summary":"protocol probe"}"#);
+        let listed = background_tasks(&manager);
+        assert_eq!(listed.len(), 1, "progress frames update the entry rather than adding one");
+        assert_eq!(listed[0].description, "Alpha: alpha-worker");
+        assert_eq!(listed[0].last_tool_name.as_deref(), Some("alpha-worker"));
+        assert_eq!(listed[0].summary.as_deref(), Some("protocol probe"));
+        assert_eq!(listed[0].tool_use_id.as_deref(), Some("toolu_01"));
+        assert_eq!(listed[0].workflow_name.as_deref(), Some("probe"));
+        assert!(listed[0].workflow_progress.is_none());
+
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_progress","task_id":"worwyzf75","description":"Beta: gamma-worker","usage":{"total_tokens":64131,"tool_uses":0,"duration_ms":5000},"last_tool_name":"gamma-worker","summary":"protocol probe","workflow_progress":[{"type":"workflow_phase","index":1,"title":"Alpha"},{"type":"workflow_phase","index":2,"title":"Beta"},{"type":"workflow_agent","index":1,"label":"alpha-worker","phaseIndex":1,"phaseTitle":"Alpha","model":"haiku","state":"done","startedAt":1789036353475,"attempt":1,"durationMs":1200,"tokens":300,"resultPreview":"ALPHA"},{"type":"workflow_agent","index":2,"label":"beta-worker","phaseIndex":1,"phaseTitle":"Alpha","model":"haiku","state":"done","resultPreview":"BETA"},{"type":"workflow_agent","index":3,"label":"gamma-worker","phaseIndex":2,"phaseTitle":"Beta","model":"haiku","state":"start","startedAt":1789036356000}]}"#);
+        let listed = background_tasks(&manager);
+        assert_eq!(listed[0].description, "Beta: gamma-worker");
+        assert_eq!(listed[0].usage.as_ref().and_then(|usage| usage.get("total_tokens")).and_then(Value::as_u64), Some(64131));
+        assert_eq!(listed[0].workflow_progress.as_ref().and_then(Value::as_array).map(Vec::len), Some(5));
+
+        // Only about every second frame carries the tree; the last one seen stays.
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_progress","task_id":"worwyzf75","description":"Beta: gamma-worker","usage":{"total_tokens":64131,"tool_uses":0,"duration_ms":6000},"last_tool_name":"gamma-worker","summary":"protocol probe"}"#);
+        let listed = background_tasks(&manager);
+        assert_eq!(listed[0].workflow_progress.as_ref().and_then(Value::as_array).map(Vec::len), Some(5));
+
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#);
+        let listed = background_tasks(&manager);
+        assert_eq!(listed.len(), 1, "an emptied inventory keeps the task with a final state");
+        assert_eq!(listed[0].status, "ended");
+        assert!(listed[0].ended_at.is_some());
+
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_updated","task_id":"worwyzf75","patch":{"status":"completed","end_time":1789036359792}}"#);
+        let listed = background_tasks(&manager);
+        assert_eq!(listed[0].status, "completed");
+        assert_eq!(listed[0].ended_at, Some(1789036359792));
+
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_notification","task_id":"worwyzf75","tool_use_id":"toolu_01","status":"completed","output_file":"/tmp/tasks/worwyzf75.output","summary":"Dynamic workflow \"protocol probe\" completed","usage":{"total_tokens":64131,"tool_uses":0,"duration_ms":6324}}"#);
+        let listed = background_tasks(&manager);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].status, "completed");
+        assert!(listed[0].summary.as_deref().unwrap_or("").starts_with("Dynamic workflow"));
+        assert_eq!(listed[0].output_file.as_deref(), Some("/tmp/tasks/worwyzf75.output"));
+        assert_eq!(listed[0].ended_at, Some(1789036359792), "the notification does not overwrite the reported end time");
+        assert!(listed[0].started_at.is_some());
+        assert_eq!(listed[0].usage.as_ref().and_then(|usage| usage.get("duration_ms")).and_then(Value::as_u64), Some(6324));
+        manager.stop(&app, "s").unwrap();
+    }
+
+    /// The reverse wire order: a terminal frame lands BEFORE the inventory drops the task. The final status
+    /// must not be downgraded to the synthesized "ended", and the client must see it in an `extras` event,
+    /// not only in a snapshot it may never request.
+    #[test]
+    fn a_terminal_frame_before_the_inventory_drop_keeps_its_status_and_is_published_as_an_event() {
+        let app = ctx("task-terminal-first");
+        let manager = manager_with_session("s");
+        let proc = manager.get("s").unwrap();
+        let events = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let captured = events.clone();
+        app.listen(&event_name("s"), move |payload| {
+            captured.lock().unwrap().push(serde_json::from_str(payload).unwrap());
+        });
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"agent-z","task_type":"local_agent","description":"Inspect the parser"}]}"#);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_updated","task_id":"agent-z","patch":{"status":"failed","end_time":1789036359792}}"#);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#);
+        let listed = background_tasks(&manager);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].status, "failed", "the inventory drop must not overwrite a terminal status");
+        assert_eq!(listed[0].ended_at, Some(1789036359792));
+
+        let extras: Vec<Value> = events.lock().unwrap().iter().filter(|event| event["type"] == "extras").cloned().collect();
+        assert!(extras.len() >= 3, "every inventory and task frame republishes extras, got {}", extras.len());
+        let last = &extras.last().unwrap()["extras"]["backgroundTasks"];
+        assert_eq!(last.as_array().map(Vec::len), Some(1), "the final state rides in the event, not only the snapshot");
+        assert_eq!(last[0]["task_id"], "agent-z");
+        assert_eq!(last[0]["status"], "failed");
+        assert_eq!(last[0]["ended_at"], 1789036359792u64);
+        assert!(last[0].get("listed").is_none(), "the internal `listed` flag never reaches the wire");
+        manager.stop(&app, "s").unwrap();
+    }
+
+    /// Finished tasks stay on screen until the user's next turn, and never pile up without bound.
+    #[test]
+    fn finished_background_tasks_are_pruned_when_the_next_turn_starts() {
+        let app = ctx("task-prune");
+        let manager = manager_with_session("s");
+        let proc = manager.get("s").unwrap();
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"shell-a","task_type":"local_bash","description":"npm test"}]}"#);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_notification","task_id":"shell-a","status":"completed","summary":"ok"}"#);
+        assert_eq!(background_tasks(&manager).len(), 1);
+        manager.send(&app, "s", "next", Vec::new(), "queue").unwrap();
+        assert!(background_tasks(&manager).is_empty(), "a new turn retires the finished tasks");
+
+        // Twenty-one finished shells collapse to the cap, oldest first.
+        let inventory: Vec<String> = (0..21).map(|n| format!(r#"{{"task_id":"shell-{n}","task_type":"local_bash","description":"job {n}"}}"#)).collect();
+        handle_line(&app, "s", &proc, &format!(r#"{{"type":"system","subtype":"background_tasks_changed","tasks":[{}]}}"#, inventory.join(",")));
+        assert_eq!(background_tasks(&manager).len(), 21);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#);
+        let listed = background_tasks(&manager);
+        assert_eq!(listed.len(), FINISHED_TASK_CAP);
+        assert_eq!(listed[0].task_id, "shell-1");
+        assert!(listed.iter().all(|task| task.status == "ended"));
+        manager.stop(&app, "s").unwrap();
+    }
+
+    /// A foreground subagent is known from its task frames alone. It is not a background task until the
+    /// inventory names it (the user moved the turn's work to the background), but its facts are kept so
+    /// that moment shows the whole picture, not just the inventory's static line.
+    #[test]
+    fn foreground_subagents_stay_unlisted_until_the_inventory_names_them() {
+        let app = ctx("task-foreground");
+        let manager = manager_with_session("s");
+        let proc = manager.get("s").unwrap();
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_started","task_id":"agent-a","tool_use_id":"tool-a","task_type":"local_agent","subagent_type":"Explore","description":"Inspect the parser","prompt":"Find it"}"#);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_progress","task_id":"agent-a","description":"Reading parser.rs","usage":{"total_tokens":1234,"tool_uses":3,"duration_ms":90}}"#);
+        assert!(background_tasks(&manager).is_empty(), "foreground work is not a background task");
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"agent-a","task_type":"local_agent","description":"Inspect the parser"}]}"#);
+        let listed = background_tasks(&manager);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].tool_use_id.as_deref(), Some("tool-a"));
+        assert_eq!(listed[0].description, "Reading parser.rs", "the inventory's static text does not overwrite the live description");
+        assert_eq!(listed[0].usage.as_ref().and_then(|usage| usage.get("tool_uses")).and_then(Value::as_u64), Some(3));
+        manager.stop(&app, "s").unwrap();
+    }
+
+    /// Frames missing the identity or the fields this list reads must neither panic nor invent entries.
+    #[test]
+    fn task_frames_without_task_id_or_fields_are_ignored_safely() {
+        let app = ctx("task-lenient");
+        let manager = manager_with_session("s");
+        let proc = manager.get("s").unwrap();
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_progress"}"#);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_started","task_id":""}"#);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"description":"no id"},{"task_id":"shell-b"}]}"#);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_progress","task_id":"shell-b","usage":"not an object","workflow_progress":{"not":"an array"}}"#);
+        let listed = background_tasks(&manager);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].task_id, "shell-b");
+        assert_eq!(listed[0].task_type, "");
+        assert!(listed[0].usage.is_none());
+        assert!(listed[0].workflow_progress.is_none());
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_notification","task_id":"shell-b"}"#);
+        let listed = background_tasks(&manager);
+        assert_eq!(listed[0].status, "ended", "a notification without a status still ends the task");
+        assert!(listed[0].ended_at.is_some());
+        manager.stop(&app, "s").unwrap();
     }
 
     // ── Releasing the process when its view goes away ──

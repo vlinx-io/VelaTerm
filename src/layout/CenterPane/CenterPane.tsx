@@ -26,6 +26,7 @@ import { SearchBar } from "./SearchBar";
 import { TabBar } from "./TabBar";
 import { TerminalView } from "./TerminalView";
 import { ChatPane } from "./session/ChatPane";
+import { TaskView } from "./session/TaskView";
 
 // Dynamically import the entire document editor. Crepe/CodeMirror plus ProseMirror exceeds 1 MB
 // before compression, so Vite splits it into a chunk that does not affect terminal startup.
@@ -123,6 +124,7 @@ export function CenterPane() {
   const liveTabs = useTermStore((s) => s.liveTabs);
   const docTabs = useTermStore((s) => s.docTabs);
   const browserTabs = useTermStore((s) => s.browserTabs);
+  const taskTabs = useTermStore((s) => s.taskTabs);
   const paneTrees = useTermStore((s) => s.paneTrees);
   const activeTabId = useTermStore((s) => s.activeTabId);
   const activeSessionId = useTermStore((s) => s.activeSessionId);
@@ -272,6 +274,14 @@ export function CenterPane() {
             <Suspense key={tabId} fallback={null}>
               <DocView tab={docTabs[tabId]} hidden={tabId !== activeTabId} />
             </Suspense>
+          ))}
+
+        {/* Task tabs stay mounted too: each keeps its own subscription to the conversation's events and
+            the last state it saw, which display:none preserves across tab switches. */}
+        {openTabs
+          .filter((tabId) => taskTabs[tabId])
+          .map((tabId) => (
+            <TaskView key={tabId} tab={taskTabs[tabId]} hidden={tabId !== activeTabId} />
           ))}
 
         {/* Browser tabs also remain mounted because unmounting destroys the native child WebView.

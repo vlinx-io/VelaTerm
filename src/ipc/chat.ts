@@ -226,11 +226,65 @@ export const CODEX_STANDARD_TIER = "default";
 export const CODEX_PERSONALITIES = ["none", "friendly", "pragmatic"] as const;
 export type CodexPersonality = (typeof CODEX_PERSONALITIES)[number];
 
-/** One of Claude's background tasks: a shell command or a subagent still running after its turn moved on. */
+/** One phase of a Claude workflow, as `task_progress.workflow_progress` lists it. */
+export interface ChatWorkflowPhase {
+  type: "workflow_phase";
+  index: number;
+  title: string;
+}
+
+/** One agent of a Claude workflow. Everything but the label is optional: older CLIs send less. */
+export interface ChatWorkflowAgent {
+  type: "workflow_agent";
+  index: number;
+  label: string;
+  phaseIndex?: number;
+  phaseTitle?: string;
+  agentId?: string;
+  model?: string;
+  state?: "start" | "done" | string;
+  startedAt?: number;
+  queuedAt?: number;
+  attempt?: number;
+  promptPreview?: string;
+  promptFramed?: boolean;
+  lastProgressAt?: number;
+  tokens?: number;
+  toolCalls?: number;
+  durationMs?: number;
+  resultPreview?: string;
+}
+
+export type ChatWorkflowEntry = ChatWorkflowPhase | ChatWorkflowAgent;
+
+/**
+ * One of Claude's background tasks: a shell command, a subagent or a workflow still running after its turn
+ * moved on, merged by the backend from the inventory and every task-protocol frame. Keys are Claude's
+ * snake_case. Only `task_id`, `task_type`, `description` and `status` are always present.
+ */
 export interface ChatBackgroundTask {
   task_id: string;
   task_type: string;
+  /** Live: for workflows "Phase: agent", refreshed every few seconds. */
   description: string;
+  /** "running", one of Claude's terminal values, or "ended" when the task left the inventory silently. */
+  status?: string;
+  /** The static description, then the final summary once the task ends. */
+  summary?: string;
+  tool_use_id?: string;
+  workflow_name?: string;
+  /** The agent working right now, for workflows. */
+  last_tool_name?: string;
+  started_at?: number;
+  ended_at?: number;
+  usage?: { total_tokens?: number; tool_uses?: number; duration_ms?: number };
+  workflow_progress?: ChatWorkflowEntry[];
+  output_file?: string;
+}
+
+/** Whether a task reports nothing more. A task without a status is one the backend still lists as live. */
+export function isTaskFinished(task: Pick<ChatBackgroundTask, "status">): boolean {
+  return !!task.status && !["running", "pending", "paused"].includes(task.status);
 }
 
 /** An MCP server as the running agent reports it. */

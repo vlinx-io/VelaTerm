@@ -1,13 +1,14 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-vi.mock("../../../ipc/chat", () => ({
+vi.mock("../../../ipc/chat", async (original) => ({
+  ...await original<typeof import("../../../ipc/chat")>(),
   chatMcpStatus: vi.fn(), chatMcpToggle: vi.fn(), chatMcpReconnect: vi.fn(),
 }));
 
-import { chatMcpStatus, chatMcpToggle } from "../../../ipc/chat";
+import { chatMcpStatus, chatMcpToggle, type ChatBackgroundTask } from "../../../ipc/chat";
 import { setLang } from "../../../i18n";
-import { McpChip } from "./extras";
+import { McpChip, TasksChip } from "./extras";
 
 const servers = { mcpServers: [{ name: "local-tools", status: "connected", tools: [] }] };
 
@@ -57,4 +58,66 @@ it("hides stale controls after a mutation fails and retries only the read", asyn
   await screen.findByRole("button", { name: "Disable" });
   expect(chatMcpToggle).toHaveBeenCalledTimes(1);
   expect(chatMcpStatus).toHaveBeenCalledTimes(2);
+});
+
+const tasks: ChatBackgroundTask[] = [
+  { task_id: "w1", task_type: "local_workflow", description: "Beta: gamma-worker", summary: "protocol probe", status: "running" },
+  { task_id: "sh1", task_type: "local_bash", description: "npm test", status: "completed" },
+];
+
+function renderTasks(onOpen = vi.fn(), onStop = vi.fn()) {
+  render(<TasksChip tasks={tasks} busy={false} onStop={onStop} onOpen={onOpen} onBackgroundAll={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: /Tasks/ }));
+  return { onOpen, onStop };
+}
+
+it("lists the live description of each task and counts only the running ones", () => {
+  renderTasks();
+  expect(screen.getByText("Beta: gamma-worker")).toBeTruthy();
+  expect(screen.getByText("npm test")).toBeTruthy();
+  expect(screen.getByText("local bash · Completed")).toBeTruthy();
+  expect(screen.getByText("1", { selector: ".sv-chip-badge" })).toBeTruthy();
+});
+
+it("opens the task behind a row, and Stop stops without opening", () => {
+  const { onOpen, onStop } = renderTasks();
+  fireEvent.click(screen.getByText("Beta: gamma-worker"));
+  expect(onOpen).toHaveBeenCalledWith(tasks[0]);
+
+  fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+  expect(onStop).toHaveBeenCalledWith("w1");
+  expect(onOpen).toHaveBeenCalledTimes(1);
+});
+
+it("opens and stops through real buttons that do not nest, so both work from the keyboard", () => {
+  const { onOpen, onStop } = renderTasks();
+  const [open] = screen.getAllByTitle("Open task");
+  const stop = screen.getByRole("button", { name: "Stop" });
+  // Native buttons: the browser itself activates them on Enter and Space, which jsdom does not emulate,
+  // so the element kind and the focus order are what is asserted here.
+  expect(open.tagName).toBe("BUTTON");
+  expect(stop.tagName).toBe("BUTTON");
+  expect(open.contains(stop)).toBe(false);
+  expect(stop.contains(open)).toBe(false);
+  expect(open.parentElement).toBe(stop.parentElement);
+  expect(open.parentElement!.getAttribute("role")).toBeNull();
+  expect(open.querySelector("[role=button], button")).toBeNull();
+  expect(stop.querySelector("[role=button], button")).toBeNull();
+
+  open.focus();
+  expect(document.activeElement).toBe(open);
+  fireEvent.click(open);
+  expect(onOpen).toHaveBeenCalledWith(tasks[0]);
+  stop.focus();
+  expect(document.activeElement).toBe(stop);
+  fireEvent.click(stop);
+  expect(onStop).toHaveBeenCalledWith("w1");
+  expect(onOpen).toHaveBeenCalledTimes(1);
+});
+
+it("offers no Stop for a finished task, only its status", () => {
+  renderTasks();
+  expect(screen.getAllByRole("button", { name: "Stop" }).length).toBe(1);
+  fireEvent.click(screen.getByText("npm test"));
+  expect(screen.getByText("local bash · Completed")).toBeTruthy();
 });

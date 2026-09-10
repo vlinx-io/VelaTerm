@@ -1829,6 +1829,20 @@ select.sv-pill {
   margin-bottom: 4px;
   padding: 5px 8px;
 }
+/* The opening button of a popover row: it fills the row and keeps the row's look, with the row's own
+   actions as its siblings so no button nests inside another. */
+.sv-popover-open {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
 .sv-popover-empty,
 .sv-popover-error {
   padding: 8px 6px;
@@ -2000,3 +2014,166 @@ select.sv-pill {
 
 .sv-sync-state { display: flex; align-items: center; gap: 8px; color: var(--text-muted); padding: 8px 0; font-size: 12px; }
 .sv-history-more { display: block; margin-bottom: 12px; }
+
+/* ── Task tab: one background task, live ─────────────────────────────────────────────────────────── */
+/* Fills the stage like DocView; the head carries identity and the Stop action, the rest is read-only. */
+.sv-task-view {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 16px 20px 24px;
+  color: var(--text);
+  font-size: var(--ui-fs);
+}
+.sv-task-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.sv-task-icon {
+  display: grid;
+  flex: none;
+  margin-top: 2px;
+  color: var(--text-dim);
+}
+.sv-task-heading {
+  flex: 1;
+  min-width: 0;
+}
+.sv-task-title {
+  overflow: hidden;
+  font-size: calc(var(--ui-fs) + 2px);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sv-task-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 3px;
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 1px);
+}
+.sv-task-badge {
+  padding: 1px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-mid);
+  font-size: calc(var(--ui-fs) - 2px);
+}
+.sv-task-badge-running {
+  border-color: var(--yellow);
+  color: var(--yellow);
+}
+.sv-task-badge-completed {
+  border-color: var(--green);
+  color: var(--green);
+}
+.sv-task-badge-failed {
+  border-color: var(--red);
+  color: var(--red);
+}
+.sv-task-stale,
+.sv-task-empty {
+  color: var(--text-faint);
+  font-style: italic;
+}
+.sv-task-error {
+  margin-top: 8px;
+  color: var(--red);
+}
+.sv-task-description {
+  margin-top: 12px;
+  color: var(--text-mid);
+}
+.sv-task-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 12px 0 0;
+}
+.sv-task-stat dt {
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 2px);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sv-task-stat dd {
+  margin: 2px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+.sv-task-section {
+  margin-top: 18px;
+}
+.sv-task-section h3 {
+  margin: 0 0 8px;
+  color: var(--text-mid);
+  font-size: calc(var(--ui-fs) - 1px);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sv-task-phase {
+  margin-bottom: 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.sv-task-phase-title {
+  padding: 2px 0 6px;
+  font-weight: 600;
+}
+.sv-task-agent {
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.sv-task-agent:first-child {
+  border-top: 0;
+}
+.sv-task-agent-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.sv-task-agent-label {
+  font-weight: 600;
+}
+.sv-task-agent-spacer {
+  flex: 1;
+}
+.sv-task-agent-meta,
+.sv-task-agent-state {
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 2px);
+  white-space: nowrap;
+}
+.sv-task-agent-start .sv-task-agent-state {
+  color: var(--yellow);
+}
+.sv-task-agent-done .sv-task-agent-state {
+  color: var(--green);
+}
+.sv-task-agent-text {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.sv-task-agent-key {
+  flex: none;
+  min-width: 48px;
+  color: var(--text-faint);
+  font-size: calc(var(--ui-fs) - 2px);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sv-task-preview {
+  overflow-wrap: anywhere;
+  color: var(--text-mid);
+  font-size: calc(var(--ui-fs) - 1px);
+  white-space: pre-wrap;
+}

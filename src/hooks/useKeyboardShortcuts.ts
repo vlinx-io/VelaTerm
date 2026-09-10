@@ -57,11 +57,11 @@ export function useKeyboardShortcuts() {
         const isMinus = e.key === "-" || e.key === "_" || e.code === "Minus";
         const isZero = e.key === "0" || e.code === "Digit0";
         if (isPlus || isMinus || isZero) {
-          const { activeSessionId, activeTabId, docTabs, browserTabs, termFontSize, setTermFontSize } =
+          const { activeSessionId, activeTabId, docTabs, browserTabs, taskTabs, termFontSize, setTermFontSize } =
             useTermStore.getState();
           const onSessionTab =
             !!activeSessionId &&
-            !(activeTabId && (docTabs[activeTabId] || browserTabs[activeTabId]));
+            !(activeTabId && (docTabs[activeTabId] || browserTabs[activeTabId] || taskTabs[activeTabId]));
           if (onSessionTab) {
             e.preventDefault();
             if (isZero) setTermFontSize(13);
@@ -97,7 +97,7 @@ export function useKeyboardShortcuts() {
       }
 
       if (matchCombo(e, sc("closePane"))) {
-        const { activeTabId, docTabs, browserTabs, requestCloseDocTab, closeTab, activeSessionId, closePane } =
+        const { activeTabId, docTabs, browserTabs, taskTabs, requestCloseDocTab, closeTab, activeSessionId, closePane } =
           useTermStore.getState();
         // Document tabs close directly when clean or route dirty state to DocView confirmation.
         if (activeTabId && docTabs[activeTabId]) {
@@ -105,8 +105,9 @@ export function useKeyboardShortcuts() {
           requestCloseDocTab(activeTabId);
           return;
         }
-        // Browser tabs close directly; unmounting destroys the child WebView and no unsaved state exists.
-        if (activeTabId && browserTabs[activeTabId]) {
+        // Browser and task tabs close directly: a browser tab has no unsaved state (unmounting destroys the
+        // child WebView), and a task tab only shows what the agent reports.
+        if (activeTabId && (browserTabs[activeTabId] || taskTabs[activeTabId])) {
           e.preventDefault();
           closeTab(activeTabId);
           return;

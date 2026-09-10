@@ -1387,6 +1387,29 @@ const zhCN: typeof en = {
   "chat.tasks.backgroundAll": "将正在运行的工作转入后台",
   "chat.tasks.none": "没有后台任务",
   "chat.tasks.stop": "停止",
+  "chat.tasks.open": "Open task", // TODO translate
+  "chat.tasks.tabTooltip": "Background task", // TODO translate
+  "chat.tasks.status.running": "Running", // TODO translate
+  "chat.tasks.status.completed": "Completed", // TODO translate
+  "chat.tasks.status.failed": "Failed", // TODO translate
+  "chat.tasks.status.canceled": "Stopped", // TODO translate
+  "chat.tasks.status.ended": "Ended", // TODO translate
+  "chat.tasks.stale": "No longer reported by the agent", // TODO translate
+  "chat.tasks.elapsed": "Elapsed", // TODO translate
+  "chat.tasks.tokens": "Tokens", // TODO translate
+  "chat.tasks.toolUses": "Tool calls", // TODO translate
+  "chat.tasks.currentAgent": "Current agent", // TODO translate
+  "chat.tasks.started": "Started", // TODO translate
+  "chat.tasks.finished": "Finished", // TODO translate
+  "chat.tasks.summary": "Summary", // TODO translate
+  "chat.tasks.outputFile": "Output file", // TODO translate
+  "chat.tasks.phases": "Phases", // TODO translate
+  "chat.tasks.noProgress": "This task reports no per-agent progress.", // TODO translate
+  "chat.tasks.attempt": (n: number) => `attempt ${n}`, // TODO translate
+  "chat.tasks.prompt": "Prompt", // TODO translate
+  "chat.tasks.result": "Result", // TODO translate
+  "chat.tasks.agentState.start": "running", // TODO translate
+  "chat.tasks.agentState.done": "done", // TODO translate
   "chat.retry.line": (attempt: number, max: number, seconds: number, message: string) =>
     `${seconds} 秒后重试（${attempt}/${max}）：${message}`,
   "chat.notify.dismiss": "关闭",
