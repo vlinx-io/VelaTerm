@@ -114,7 +114,9 @@ pub fn lookup(kind: SessionKind, bin: &str, cwd: Option<&str>, args: &[String]) 
     match kind {
         SessionKind::Codex => { command.arg("app-server").args(crate::agent::codex_models::app_server_args(args)); }
         SessionKind::Claude => {
-            command.args(protocol::launch_args(None, None, None, None)).args(args);
+            // The probe sends no turn and runs no tool, so its permission mode is moot; `default` is stated
+            // only because a launch never leaves it to the CLI's settings.
+            command.args(protocol::launch_args(None, None, None, "default")).args(args);
         }
         _ => return Ok(Vec::new()),
     }

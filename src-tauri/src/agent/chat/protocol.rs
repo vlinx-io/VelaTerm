@@ -13,7 +13,8 @@ use serde_json::{json, Value};
 /// the user turns confirmations off — is not among them, so it is translated rather than passed through.
 const CLI_PERMISSION_MODES: &[&str] = &["plan", "default", "acceptEdits", "auto", "bypassPermissions"];
 
-/// Translate a session's stored permission mode into one the agent accepts, or None to let it decide.
+/// Translate a session's stored permission mode into one the agent accepts, or None when nothing usable is
+/// stored; the caller then falls back to `default`, the same word the view shows.
 ///
 /// The stored value predates the chat engine: it is `skip` or nothing, and means "stop asking me". Passing
 /// `skip` through would abort the launch, since the agent's own vocabulary calls that `bypassPermissions`.
@@ -33,6 +34,13 @@ pub fn cli_permission_mode(stored: Option<&str>) -> Option<&str> {
 /// - `--include-partial-messages` adds the per-token events the view needs to show an answer as it lands.
 /// - `--permission-prompt-tool stdio` routes permission questions to us as control requests. Without it the
 ///   CLI has no one to ask and quietly denies anything not already allowed.
+/// - `--permission-mode` is always stated. Left out, the process inherits the user's `permissions.defaultMode`
+///   from the CLI's own settings, made for a TUI: `dontAsk` there denies every tool without asking us, while
+///   the view reports whatever mode it believes the session has. The caller passes the mode it shows, so the
+///   two cannot drift apart.
+/// - `--allow-dangerously-skip-permissions` only permits a later switch to `bypassPermissions` through a
+///   `set_permission_mode` control request on our stdin; the CLI refuses that switch otherwise. It does not
+///   start the process in bypass, and nothing but VelaTerm holds that stdin.
 /// - `--thinking adaptive` together with `--thinking-display summarized` is what puts the reasoning text in
 ///   the stream. Neither works alone: with the first flag only, the thinking blocks and their deltas still
 ///   arrive, but every `thinking` field is an empty string, so the view can tell that the agent thought and
@@ -42,7 +50,7 @@ pub fn launch_args(
     resume: Option<&str>,
     model: Option<&str>,
     effort: Option<&str>,
-    permission_mode: Option<&str>,
+    permission_mode: &str,
 ) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "--print".into(),
@@ -73,10 +81,9 @@ pub fn launch_args(
         args.push("--effort".into());
         args.push(effort.into());
     }
-    if let Some(mode) = permission_mode {
-        args.push("--permission-mode".into());
-        args.push(mode.into());
-    }
+    args.push("--permission-mode".into());
+    args.push(permission_mode.into());
+    args.push("--allow-dangerously-skip-permissions".into());
     args
 }
 
@@ -643,12 +650,21 @@ mod tests {
 
     #[test]
     fn launch_args_always_ask_for_streaming_and_permission_routing() {
-        let args = launch_args(None, None, None, None);
+        let args = launch_args(None, None, None, "default");
         let joined = args.join(" ");
         assert!(joined.contains("--input-format stream-json"));
         assert!(joined.contains("--output-format stream-json"));
         assert!(joined.contains("--include-partial-messages"));
         assert!(joined.contains("--permission-prompt-tool stdio"));
+        assert!(
+            joined.contains("--permission-mode default"),
+            "an unstated mode would fall back to the user's TUI defaultMode: {joined}"
+        );
+        assert!(
+            joined.contains("--allow-dangerously-skip-permissions"),
+            "the view's switch to bypassPermissions is refused without it: {joined}"
+        );
+        assert!(!joined.contains("--dangerously-skip-permissions"), "must not start in bypass: {joined}");
         assert!(joined.contains("--verbose"), "stream-json output requires it");
         assert!(
             joined.contains("--thinking adaptive") && joined.contains("--thinking-display summarized"),
@@ -658,7 +674,7 @@ mod tests {
 
     #[test]
     fn launch_args_append_only_what_was_asked_for() {
-        let args = launch_args(Some("sid-1"), Some("opus"), Some("high"), Some("plan")).join(" ");
+        let args = launch_args(Some("sid-1"), Some("opus"), Some("high"), "plan").join(" ");
         assert!(args.contains("--resume sid-1"));
         assert!(args.contains("--model opus"));
         assert!(args.contains("--effort high"));
@@ -738,7 +754,7 @@ mod tests {
 
     #[test]
     fn thinking_off_is_a_cap_rather_than_a_command_line_level() {
-        let joined = launch_args(None, None, Some(THINKING_OFF), None).join(" ");
+        let joined = launch_args(None, None, Some(THINKING_OFF), "default").join(" ");
         assert!(!joined.contains("--effort"), "{joined}");
         assert_eq!(
             set_max_thinking_tokens(Some(0)),
