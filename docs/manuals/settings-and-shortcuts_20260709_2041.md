@@ -2,7 +2,7 @@
 
 Created: 2026-07-09 20:41
 
-> Settings open from the gear button in the title bar (on macOS also the app menu, "Settings… ⌘,"). Seven categories on the left; this chapter is an item-by-item reference, ending with the default key bindings and how to rebind. Settings are shared between the desktop app and browser remote clients (a few purely per-client view options aside).
+> Settings open from the gear button in the title bar (on macOS also the app menu, "Settings… ⌘,"). Eight categories on the left; this chapter is an item-by-item reference, ending with the default key bindings and how to rebind. Settings are shared between the desktop app and browser remote clients (a few purely per-client view options aside).
 
 ![Settings · Appearance](../assets/manuals/settings-appearance.png)
 
@@ -37,7 +37,18 @@ Light/dark themes are switched from the title bar, not here (follow-system / dar
 | Redraw on tab switch | Force a full repaint when switching tabs — enable if TUIs occasionally look glitched |
 | Default shell (Windows only) | Default shell for new terminal sessions |
 
-## 4. Behavior
+## 4. Conversation view
+
+Applies to agent conversation views (the chat layout), not to terminal sessions.
+
+| Item | Description |
+|------|-------------|
+| Conversation font / size / line height | Font, size and line height of the conversation view, independent of the terminal font |
+| Composer toolbar | Which chips sit beside the message input, and in which order: Model, Thinking effort, Collaboration mode, Permission mode, Fast mode, Speed, Tone, MCP servers, Background tasks, Account, Codex reset credits. Each chip has an On/Off switch; the arrows move a chip that is on up or down. Model, Thinking effort, Collaboration mode and Permission mode are on by default. A chip that is on is always in the toolbar and a chip that is off never is, regardless of what the agent is doing right now: when a chip's feature is momentarily unavailable (no running agent process for MCP servers and Background tasks, an empty task list, an unresolved sign-in for Account) the chip stays in place, shown empty or dimmed and not openable; while the agent process is not running, MCP servers and Background tasks say so in their tooltip. Only a chip the current agent kind does not have at all is left out (for example Codex reset credits in a Claude session, or Fast mode when the model does not offer it) |
+
+The **More** menu in the composer appears only while the chips that are on do not fit the row. It then holds the chips that overflowed plus the chips that are off, so nothing you turned off becomes unreachable: switch it back on here, or open it from More whenever that menu is shown. A chip you switch off and on again returns at the end of the inline order, even while it has nothing to show (for example Background tasks with an empty task list). On the mobile layout all chips that are off stay visible in a second row.
+
+## 5. Behavior
 
 | Item | Description |
 |------|-------------|
@@ -49,14 +60,14 @@ Light/dark themes are switched from the title bar, not here (follow-system / dar
 | Auto-clean pasted images | Periodically clean up pasted temp images, with a "Clean now" button |
 | System notifications | Shortcut to the notification permission controls (same as General) |
 
-## 5. Advanced
+## 6. Advanced
 
 | Item | Description |
 |------|-------------|
 | Foreground-priority output | Output scheduling that protects typing latency while agents flood output (on by default); turn off to compare if you suspect display issues |
 | Record session logs | Session recording (off by default). When on, terminal content is recorded in full — archives get replay, global search covers terminal output |
 
-## 6. Agents
+## 7. Agents
 
 Configured per type (Claude / Codex / OpenCode / …), applying to **newly created** sessions of that type; per-session settings in the edit form override these defaults.
 
@@ -68,7 +79,7 @@ Configured per type (Claude / Codex / OpenCode / …), applying to **newly creat
 | Launch args | Default launch-argument template for the type (e.g. `--model opus`) |
 | Permission | Default permission level: Default (step-by-step confirmation) / YOLO (skip all permission prompts) |
 
-## 7. Shortcuts
+## 8. Shortcuts
 
 ![Settings · Shortcuts](../assets/manuals/settings-shortcuts.png)
 

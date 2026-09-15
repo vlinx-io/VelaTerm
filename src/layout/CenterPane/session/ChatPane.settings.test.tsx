@@ -26,6 +26,7 @@ vi.mock("./permissionCards", () => ({
 }));
 
 import { invoke, listen, onTransportReconnect } from "../../../ipc/transport";
+import { COMPOSER_CHIP_IDS, DEFAULT_COMPOSER_INLINE_CHIPS } from "../../../store/settings";
 import { useTermStore } from "../../../store/termStore";
 import { ChatPane } from "./ChatPane";
 import { useOutbox } from "./outbox";
@@ -56,7 +57,9 @@ beforeEach(() => {
     if (name === "chat://event/s") chatListeners.add(listener);
     return Promise.resolve(() => { chatListeners.delete(listener); });
   });
-  useTermStore.setState({ chatModel: "old-model", chatModelByKind: { claude: "old-model" }, chatEffortByModel: {}, runtimes: {}, agentDefaults: {} });
+  // Every chip inline: jsdom reports no widths, so nothing folds into a More row and the assertions below
+  // can reach every chip directly.
+  useTermStore.setState({ chatModel: "old-model", chatModelByKind: { claude: "old-model" }, chatEffortByModel: {}, runtimes: {}, agentDefaults: {}, composerInlineChips: [...COMPOSER_CHIP_IDS] });
   vi.mocked(invoke).mockImplementation((command, args) => {
     if (command === "agent_permission_catalog") {
       const agent = (args as { agent: string }).agent;
@@ -114,7 +117,6 @@ async function mountPane(kind: "claude" | "codex" | "opencode" = "claude", expec
   const view = render(<ChatPane session={{ id: "s", projectId: "p", name: "Claude", kind, engine: "chat", collapsed: false, sortOrder: 0, createdAt: 0 }}
     area={{}} hidden={false} focused multi={false} onActivate={() => {}} onSplit={() => {}} onClose={() => {}} />);
   await waitFor(() => expect((screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement).value).toBe(expectedModel));
-  fireEvent.click(screen.getByRole("button", { name: "More" }));
   return view;
 }
 
@@ -1455,13 +1457,17 @@ it("offers manual sign-out without an auth error and requires confirmation befor
   await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_auth_start", { sessionId: "s" }));
 });
 
-it("keeps the stop shortcut available after folding a settings menu with the keyboard", async () => {
+it("keeps the stop shortcut available after closing a settings menu with the keyboard", async () => {
   const { container } = await mountPane("codex");
   act(() => useTermStore.setState({ runtimes: { s: { status: "running", agent: "codex", agentState: "working" } } }));
-  fireEvent.click(screen.getByRole("button", { name: "Codex account" }));
-  // Keyboard activation does not dispatch the outside mousedown that closes a nested popover.
-  fireEvent.click(screen.getByRole("button", { name: "More" }));
-  expect(screen.queryByRole("button", { name: "Codex account" })).toBeNull();
+  const account = screen.getByRole("button", { name: "Codex account" });
+  fireEvent.click(account);
+  expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
+  // The open popover takes the first Escape; no More toggle exists while every chip fits inline.
+  fireEvent.keyDown(account, { key: "Escape" });
+  expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+  expect(invoke).not.toHaveBeenCalledWith("chat_interrupt", { sessionId: "s" });
   fireEvent.keyDown(container.querySelector(".sv-box textarea")!, { key: "Escape" });
   expect(invoke).toHaveBeenCalledWith("chat_interrupt", { sessionId: "s" });
 });
@@ -1501,7 +1507,8 @@ it("folds canceled authorization back into the account menu, including after a r
   expect(screen.getByRole("button", { name: "Sign in again" })).toBeTruthy();
   expect(screen.queryByText("Sign-in canceled. You can try again at any time.")).toBeNull();
   act(() => eventCallback({ type: "extras", extras: { auth: { status: "starting" } } }));
-  expect(screen.queryByRole("button", { name: "Codex account" })).toBeNull();
+  // The chip stays in the row but disabled while the inline panel owns the sign-in; its menu is closed.
+  expect(screen.getByRole("button", { name: "Codex account" }).hasAttribute("disabled")).toBe(true);
   expect(screen.getAllByRole("region", { name: "Codex account" })).toHaveLength(1);
 });
 
@@ -1554,4 +1561,81 @@ it("shows Claude-specific login failures and folds a confirmed cancellation", as
   act(() => eventCallback({ type: "extras", extras: { auth: { status: "canceled" } } }));
   expect(screen.queryByRole("region", { name: "Claude account" })).toBeNull();
   expect(screen.getByRole("button", { name: "Claude account" })).toBeTruthy();
+});
+
+it("shows only the default inline chips without a More toggle and follows the preference at runtime", async () => {
+  // The shipped default: what used to sit beside the message stays there; chips that are off are not
+  // rendered at all, and with everything fitting (jsdom reports no widths) no More toggle exists.
+  useTermStore.setState({ composerInlineChips: [...DEFAULT_COMPOSER_INLINE_CHIPS] });
+  const { container } = await mountPane("codex");
+  expect(screen.getByRole("combobox", { name: "Model" })).toBeTruthy();
+  expect(screen.getByRole("combobox", { name: "Thinking effort" })).toBeTruthy();
+  expect(screen.getByRole("combobox", { name: "Permission mode" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Codex account" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+  expect(container.querySelector(".sv-controls-secondary")).toBeNull();
+  const inline = [...container.querySelectorAll(".sv-controls-primary .sv-chip-slot")].map((el) => (el as HTMLElement).dataset.chip);
+  expect(inline).toEqual(["model", "effort", "permission"]);
+  // Changing the preference reorders and reveals chips without a remount.
+  act(() => useTermStore.setState({ composerInlineChips: ["account", "permission"] }));
+  expect(screen.getByRole("button", { name: "Codex account" })).toBeTruthy();
+  expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
+  expect([...container.querySelectorAll(".sv-controls-primary .sv-chip-slot")].map((el) => (el as HTMLElement).dataset.chip)).toEqual(["account", "permission"]);
+  expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+});
+
+it("keeps MCP and Tasks chips in the row while no process runs, disabled and silent, and wakes them in place", async () => {
+  snapshotOverrides = { running: false };
+  const { container } = await mountPane();
+  const mcp = screen.getByRole("button", { name: "MCP" });
+  const tasks = screen.getByRole("button", { name: "Tasks" });
+  for (const chip of [mcp, tasks]) {
+    expect(chip.hasAttribute("disabled")).toBe(true);
+    expect(chip.getAttribute("aria-disabled")).toBe("true");
+    expect(chip.getAttribute("title")).toBe("The agent process is not running. Send a message to start it.");
+    fireEvent.click(chip);
+    expect(chip.getAttribute("aria-expanded")).toBe("false");
+  }
+  expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "chat_mcp_status")).toBe(false);
+  // The account chip is offered too; it is only disabled while a sign-in is unresolved.
+  expect(screen.getByRole("button", { name: "Claude account" }).hasAttribute("disabled")).toBe(false);
+  expect([...container.querySelectorAll(".sv-controls-primary .sv-chip-slot")].map((el) => (el as HTMLElement).dataset.chip))
+    .toEqual(["model", "effort", "permission", "mcp", "tasks", "account"]);
+  act(() => eventCallback({ type: "process", pid: 123, startedAt: 100 }));
+  expect(screen.getByRole("button", { name: "MCP" })).toBe(mcp);
+  expect(mcp.hasAttribute("disabled")).toBe(false);
+  expect(tasks.hasAttribute("disabled")).toBe(false);
+  expect(tasks.getAttribute("title")).toBe("Background tasks");
+  fireEvent.click(tasks);
+  expect(screen.getByText("No background tasks")).toBeTruthy();
+  fireEvent.click(mcp);
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_mcp_status", { sessionId: "s" }));
+  act(() => eventCallback({ type: "exited", code: 0, stderr: "", released: true }));
+  expect(mcp.hasAttribute("disabled")).toBe(true);
+  expect(mcp.getAttribute("aria-expanded")).toBe("false");
+});
+
+it("brings the Tasks chip back at the end of the row when it is switched off and on with no tasks", async () => {
+  snapshotOverrides = { running: false };
+  useTermStore.setState({ composerInlineChips: ["model", "tasks", "effort"] });
+  const { container } = await mountPane();
+  const inline = () => [...container.querySelectorAll(".sv-controls-primary .sv-chip-slot")].map((el) => (el as HTMLElement).dataset.chip);
+  expect(inline()).toEqual(["model", "tasks", "effort"]);
+  act(() => useTermStore.setState({ composerInlineChips: ["model", "effort"] }));
+  expect(screen.queryByRole("button", { name: "Tasks" })).toBeNull();
+  expect(inline()).toEqual(["model", "effort"]);
+  act(() => useTermStore.setState({ composerInlineChips: ["model", "effort", "tasks"] }));
+  expect(inline()).toEqual(["model", "effort", "tasks"]);
+  expect(screen.getByRole("button", { name: "Tasks" }).hasAttribute("disabled")).toBe(true);
+});
+
+it("keeps the account chip in the row but disabled while a sign-in is unresolved", async () => {
+  snapshotOverrides = { auth: { status: "required" } };
+  await mountPane("codex");
+  const account = screen.getByRole("button", { name: "Codex account" });
+  expect(account.hasAttribute("disabled")).toBe(true);
+  expect(screen.getByRole("region", { name: "Codex account" })).toBeTruthy();
+  act(() => eventCallback({ type: "extras", extras: { auth: { status: "success" } } }));
+  expect(screen.getByRole("button", { name: "Codex account" }).hasAttribute("disabled")).toBe(false);
+  expect(screen.queryByRole("region", { name: "Codex account" })).toBeNull();
 });

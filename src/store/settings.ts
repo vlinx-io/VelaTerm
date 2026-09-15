@@ -196,7 +196,30 @@ export interface PersistedSettings {
   /** Info panel sections the user collapsed, as a sparse map of section id to `true`. A missing id means
    * the section is open, so the map stays empty until someone collapses something. */
   infoCollapsed: Record<string, boolean>;
+  /** Composer chips shown inline under the message input, in display order. Chips missing from the list
+   * are off: they stay reachable in the settings and move into the More row whenever it appears. */
+  composerInlineChips: ComposerChipId[];
 }
+
+/** Every composer chip the toolbar can show, in the order the toolbar used before the list became
+ * configurable. Availability per agent and engine state is decided by the pane, not here. */
+export const COMPOSER_CHIP_IDS = [
+  "model",
+  "effort",
+  "collaboration",
+  "permission",
+  "fastMode",
+  "serviceTier",
+  "personality",
+  "mcp",
+  "tasks",
+  "account",
+  "codexCredits",
+] as const;
+export type ComposerChipId = (typeof COMPOSER_CHIP_IDS)[number];
+/** The chips that sat beside the message before the list became configurable. */
+export const DEFAULT_COMPOSER_INLINE_CHIPS: ComposerChipId[] = ["model", "effort", "collaboration", "permission"];
+
 const SETTINGS_DEFAULTS: PersistedSettings = {
   accent: "auto",
   density: "regular",
@@ -236,7 +259,20 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   referSummary: { enabled: false, agent: "claude", model: "", effort: "" },
   showSystemResources: true,
   infoCollapsed: {},
+  composerInlineChips: DEFAULT_COMPOSER_INLINE_CHIPS,
 };
+
+/** Keeps only known chip ids, once each and in the saved order. A missing or malformed value falls back
+ * to the default set; an explicit empty list is a valid choice (no inline chips). */
+export function sanitizeComposerInlineChips(value: unknown): ComposerChipId[] {
+  if (!Array.isArray(value)) return [...DEFAULT_COMPOSER_INLINE_CHIPS];
+  const known = new Set<string>(COMPOSER_CHIP_IDS);
+  const result: ComposerChipId[] = [];
+  for (const id of value) {
+    if (typeof id === "string" && known.has(id) && !result.includes(id as ComposerChipId)) result.push(id as ComposerChipId);
+  }
+  return result;
+}
 
 /** Drops anything a corrupted or older payload may hold, keeping only the three launch choices. */
 function sanitizeLaunchChoice(input: unknown): MemoryPrefs {
@@ -299,6 +335,7 @@ export function loadSettings(): PersistedSettings {
     merged.planExecutePrefs = sanitizePlanExecutePrefs(parsed.planExecutePrefs);
     merged.memoryPrefs = sanitizeLaunchChoice(parsed.memoryPrefs);
     merged.referSummary = sanitizeReferSummary(parsed.referSummary);
+    merged.composerInlineChips = sanitizeComposerInlineChips(parsed.composerInlineChips);
     // Migrate boolean gpuRender to termRenderer only when the new key is absent, preserving WebGL for
     // existing users. Future saves write only the new structure and naturally discard the old field.
     if (parsed.termRenderer === undefined && typeof parsed.gpuRender === "boolean") {

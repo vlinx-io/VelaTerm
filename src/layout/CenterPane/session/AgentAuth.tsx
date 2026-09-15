@@ -8,7 +8,8 @@ import { ChipPopover } from "./extras";
 
 type AuthProps = { provider: "Claude" | "Codex"; sessionId: string; state?: ChatAuthState; busy: boolean };
 
-function needsAttention(state?: ChatAuthState) {
+/** True while a sign-in or sign-out is unresolved; the account chip yields to the inline panel then. */
+export function needsAttention(state?: ChatAuthState) {
   return state !== undefined && state.status !== "success" && state.status !== "canceled";
 }
 
@@ -17,12 +18,15 @@ export function AgentAuth(props: AuthProps) {
   return needsAttention(props.state) ? <AuthPanel {...props} /> : null;
 }
 
-/** Manual account actions stay folded into the composer menu. */
+/**
+ * Manual account actions stay folded into the composer menu. While a sign-in or sign-out is unresolved
+ * the chip stays in the row but disabled: the inline panel above the composer owns that flow.
+ */
 export function AgentAccountMenu(props: AuthProps) {
   const t = useT();
-  if (needsAttention(props.state)) return null;
   return <ChipPopover key={props.state?.status ?? "idle"} glyph={<Icons.lock size={14} />}
-    label={t("chat.auth.title", props.provider)} title={t("chat.auth.title", props.provider)} width={320} fitViewport>
+    label={t("chat.auth.title", props.provider)} title={t("chat.auth.title", props.provider)} width={320} fitViewport
+    disabled={needsAttention(props.state)}>
     <div className="sv-auth-menu"><AuthPanel {...props} state={undefined} /></div>
   </ChipPopover>;
 }

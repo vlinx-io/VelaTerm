@@ -18,6 +18,7 @@ import { measureElement, observeElementOffset, useVirtualizer } from "@tanstack/
 import Icons from "../../../components/Icons";
 import { ComposerOptionsButton, useComposerOptions } from "./ComposerOptions";
 import { ComposerToolbar } from "./ComposerToolbar";
+import type { ComposerChip } from "./composerLayout";
 import { ModelCatalogStatus } from "./ModelCatalogStatus";
 import { StatusIndicator } from "../../../components/StatusIndicator";
 import { useT, type I18nKey } from "../../../i18n";
@@ -248,6 +249,7 @@ export function ChatPane({
   const t = useT();
   const composerOptions = useComposerOptions(mobile);
   const paneStyle = useTermStore((s) => s.paneStyle);
+  const composerInlineChips = useTermStore((s) => s.composerInlineChips);
   const status = useTermStore((s) => effectiveStatus(s.runtimes[session.id]));
   const searchOpen = useTermStore((s) => s.searchOpen);
   const closeSearch = useTermStore((s) => s.closeSearch);
@@ -1756,6 +1758,125 @@ export function ChatPane({
     </div>;
   };
 
+  // Every chip that exists for this session, in the toolbar's traditional order. The toolbar applies the
+  // user's inline preference on top and never renders a chip the pane did not offer.
+  const composerChips: ComposerChip[] = [];
+  if (catalogue.length > 0) composerChips.push({ id: "model", node: (
+    <ControlChip
+      glyph={kindIconEl(session.kind, 14)}
+      label={modelLabel}
+      title={t("chat.modelTooltip")}
+      value={model ?? ""}
+      options={modelOptions}
+      defaultValue={defaultModel || undefined}
+      defaultLabel={t("chat.savedModelDefault")}
+      advancedFooter={session.kind === "claude" ? <ModelCatalogStatus onChanged={() => setCatalogueVersion(v => v + 1)} /> : undefined}
+      onPick={pickModel}
+      keepLabel={t("chat.keepChoice")}
+      onKeepCurrent={() => rememberPair(model ?? "", effort)}
+      menuWidth={300}
+      filterPlaceholder={t("chat.filterPlaceholder")}
+    />
+  ) });
+  composerChips.push({ id: "effort", node: (
+    <ControlChip
+      glyph={<Icons.cpu size={14} />}
+      label={effort ? effortLabel(effort) : t("chat.effortDefault")}
+      title={t("chat.effortTooltip")}
+      value={effort}
+      options={effortOptions}
+      defaultValue={defaultEffort}
+      onPick={pickEffort}
+      // A level belongs to a model, so the box says which one it would become the default for.
+      keepLabel={selected ? t("chat.keepChoiceFor", selected.label) : t("chat.keepChoice")}
+      menuWidth={230}
+    />
+  ) });
+  if (collaborationModeOptions.length > 0) composerChips.push({ id: "collaboration", node: (
+    <ControlChip
+      glyph={session.kind === "opencode" ? <Icons.bot size={14} /> : <Icons.compass size={14} />}
+      label={collaborationLabel(session.kind, selectedCollaboration, collaborationMode, t)}
+      title={t(session.kind === "opencode" ? "chat.agentTooltip" : "chat.collaborationModeTooltip")}
+      value={collaborationMode}
+      options={collaborationModeOptions}
+      onPick={pickCollaborationMode}
+      menuWidth={260}
+    />
+  ) });
+  if (hasPermissionControl) composerChips.push({ id: "permission", node: (
+    <div className="sv-permission-control">
+      <ControlChip
+        glyph={permissionPending
+          ? <Icons.clock size={14} style={{ color: "var(--accent)" }} />
+          : <Icons.lock size={14} />}
+        label={t(modeLabelKeyFor(session.kind, mode))}
+        title={permissionValue?.activation === "nextTurn"
+          ? `${t("chat.modeTooltip")} · ${t("chat.modePendingHint", currentPermissionLabel(permissionValue), t(modeLabelKeyFor(session.kind, mode)))}`
+          : permissionValue?.activation === "restart"
+            ? `${t("chat.modeTooltip")} · ${t("permission.restart")}`
+            : permissionValue?.activation === "applied"
+              ? `${t("chat.modeTooltip")} · ${t("permission.applied")}`
+              : t("chat.modeTooltip")}
+        value={mode}
+        options={modeOptions}
+        disabled={!permissionCatalog?.catalog}
+        defaultValue={defaultMode}
+        onPick={pickMode}
+        keepLabel={t("chat.keepChoice")}
+        menuWidth={240}
+      />
+    </div>
+  ) });
+  if (fastModeOffered) composerChips.push({ id: "fastMode", node: (
+    <FastModeChip enabled={extras.fastMode === true} onToggle={pickFastMode} />
+  ) });
+  if (serviceTierOptions.length > 1) composerChips.push({ id: "serviceTier", node: (
+    <ControlChip
+      glyph={<Icons.clock size={14} />}
+      label={serviceTierOptions.find((o) => o.value === serviceTier)?.label ?? t("chat.serviceTier.default")}
+      title={t("chat.serviceTierTooltip")}
+      value={serviceTier || CODEX_STANDARD_TIER}
+      options={serviceTierOptions}
+      onPick={pickServiceTier}
+      menuWidth={240}
+    />
+  ) });
+  if (personalityOffered) composerChips.push({ id: "personality", node: (
+    <ControlChip
+      glyph={<Icons.bot size={14} />}
+      label={
+        personality
+          ? t(`chat.personality.${personality}` as "chat.personality.none")
+          : t("chat.personality.default")
+      }
+      title={t("chat.personalityTooltip")}
+      value={personality}
+      options={personalityOptions}
+      onPick={pickPersonality}
+      menuWidth={220}
+    />
+  ) });
+  // A chip the user turned on is offered whenever it exists for this agent kind. Between turns the agent
+  // process is away, so MCP and Tasks are disabled rather than dropped: a chip that comes and goes with
+  // the process cannot be found by someone who just switched it on.
+  if (session.kind === "claude" || session.kind === "codex") composerChips.push({ id: "mcp", node: (
+    <McpChip sessionId={session.id} codex={session.kind === "codex"} disabled={!engineRunning} />
+  ) });
+  if (session.kind === "claude") composerChips.push({ id: "tasks", node: (
+    <TasksChip
+      tasks={extras.backgroundTasks ?? []}
+      busy={busy}
+      disabled={!engineRunning}
+      onStop={(taskId) => void chatStopTask(session.id, taskId).catch((err) => setError(String(err)))}
+      onBackgroundAll={() => void chatBackgroundTasks(session.id).catch((err) => setError(String(err)))}
+    />
+  ) });
+  // The account menu disables itself while a sign-in is unresolved; the inline panel handles that flow.
+  if (session.kind === "codex" || session.kind === "claude") composerChips.push({ id: "account", node: (
+    <AgentAccountMenu provider={session.kind === "claude" ? "Claude" : "Codex"} sessionId={session.id} state={extras.auth} busy={turnStartedAt !== undefined} />
+  ) });
+  if (session.kind === "codex") composerChips.push({ id: "codexCredits", node: <CodexResetCredits /> });
+
   return (
     <SessionLinkDirectory.Provider value={cwd}>
     <div
@@ -2215,115 +2336,7 @@ export function ChatPane({
                   {busy && <span>{t("chat.interruptTooltip")} · {t("chat.steerTooltip", steerCombo)}</span>}
                 </div>
               )}
-              <ComposerToolbar mobile={mobile}
-                primary={<>
-                  {catalogue.length > 0 && (
-                    <ControlChip
-                      glyph={kindIconEl(session.kind, 14)}
-                      label={modelLabel}
-                      title={t("chat.modelTooltip")}
-                      value={model ?? ""}
-                      options={modelOptions}
-                      defaultValue={defaultModel || undefined}
-                      defaultLabel={t("chat.savedModelDefault")}
-                      advancedFooter={session.kind === "claude" ? <ModelCatalogStatus onChanged={() => setCatalogueVersion(v => v + 1)} /> : undefined}
-                      onPick={pickModel}
-                      keepLabel={t("chat.keepChoice")}
-                      onKeepCurrent={() => rememberPair(model ?? "", effort)}
-                      menuWidth={300}
-                      filterPlaceholder={t("chat.filterPlaceholder")}
-                    />
-                  )}
-                  <ControlChip
-                    glyph={<Icons.cpu size={14} />}
-                    label={effort ? effortLabel(effort) : t("chat.effortDefault")}
-                    title={t("chat.effortTooltip")}
-                    value={effort}
-                    options={effortOptions}
-                    defaultValue={defaultEffort}
-                    onPick={pickEffort}
-                    // A level belongs to a model, so the box says which one it would become the default for.
-                    keepLabel={selected ? t("chat.keepChoiceFor", selected.label) : t("chat.keepChoice")}
-                    menuWidth={230}
-                  />
-                  {collaborationModeOptions.length > 0 && (
-                    <ControlChip
-                      glyph={session.kind === "opencode" ? <Icons.bot size={14} /> : <Icons.compass size={14} />}
-                      label={collaborationLabel(session.kind, selectedCollaboration, collaborationMode, t)}
-                      title={t(session.kind === "opencode" ? "chat.agentTooltip" : "chat.collaborationModeTooltip")}
-                      value={collaborationMode}
-                      options={collaborationModeOptions}
-                      onPick={pickCollaborationMode}
-                      menuWidth={260}
-                    />
-                  )}
-                  {hasPermissionControl && (
-                    <div className="sv-permission-control">
-                      <ControlChip
-                        glyph={permissionPending
-                          ? <Icons.clock size={14} style={{ color: "var(--accent)" }} />
-                          : <Icons.lock size={14} />}
-                        label={t(modeLabelKeyFor(session.kind, mode))}
-                        title={permissionValue?.activation === "nextTurn"
-                          ? `${t("chat.modeTooltip")} · ${t("chat.modePendingHint", currentPermissionLabel(permissionValue), t(modeLabelKeyFor(session.kind, mode)))}`
-                          : permissionValue?.activation === "restart"
-                            ? `${t("chat.modeTooltip")} · ${t("permission.restart")}`
-                            : permissionValue?.activation === "applied"
-                              ? `${t("chat.modeTooltip")} · ${t("permission.applied")}`
-                              : t("chat.modeTooltip")}
-                        value={mode}
-                        options={modeOptions}
-                        disabled={!permissionCatalog?.catalog}
-                        defaultValue={defaultMode}
-                        onPick={pickMode}
-                        keepLabel={t("chat.keepChoice")}
-                        menuWidth={240}
-                      />
-                    </div>
-                  )}
-                </>}
-                secondary={<>
-                  {fastModeOffered && (
-                    <FastModeChip enabled={extras.fastMode === true} onToggle={pickFastMode} />
-                  )}
-                  {serviceTierOptions.length > 1 && (
-                    <ControlChip
-                      glyph={<Icons.clock size={14} />}
-                      label={serviceTierOptions.find((o) => o.value === serviceTier)?.label ?? t("chat.serviceTier.default")}
-                      title={t("chat.serviceTierTooltip")}
-                      value={serviceTier || CODEX_STANDARD_TIER}
-                      options={serviceTierOptions}
-                      onPick={pickServiceTier}
-                      menuWidth={240}
-                    />
-                  )}
-                  {personalityOffered && (
-                    <ControlChip
-                      glyph={<Icons.bot size={14} />}
-                      label={
-                        personality
-                          ? t(`chat.personality.${personality}` as "chat.personality.none")
-                          : t("chat.personality.default")
-                      }
-                      title={t("chat.personalityTooltip")}
-                      value={personality}
-                      options={personalityOptions}
-                      onPick={pickPersonality}
-                      menuWidth={220}
-                    />
-                  )}
-                  {(session.kind === "claude" || session.kind === "codex") && engineRunning && <McpChip sessionId={session.id} codex={session.kind === "codex"} />}
-                  {session.kind === "claude" && engineRunning && (
-                    <TasksChip
-                      tasks={extras.backgroundTasks ?? []}
-                      busy={busy}
-                      onStop={(taskId) => void chatStopTask(session.id, taskId).catch((err) => setError(String(err)))}
-                      onBackgroundAll={() => void chatBackgroundTasks(session.id).catch((err) => setError(String(err)))}
-                    />
-                  )}
-                  {(session.kind === "codex" || session.kind === "claude") && <AgentAccountMenu provider={session.kind === "claude" ? "Claude" : "Codex"} sessionId={session.id} state={extras.auth} busy={turnStartedAt !== undefined} />}
-                  {session.kind === "codex" && <CodexResetCredits />}
-                </>}
+              <ComposerToolbar mobile={mobile} chips={composerChips} inline={composerInlineChips}
                 actions={<>
                   {(session.kind === "claude" || session.kind === "codex") && <UsageMeter extras={extras} />}
                   {busy && (

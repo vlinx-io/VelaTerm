@@ -1358,7 +1358,20 @@
   gap: 6px;
 }
 .sv-controls-primary {
-  display: contents;
+  flex: 1 1 0;
+  flex-wrap: nowrap;
+}
+/* Mobile keeps both rows visible without measuring, so its first row wraps like before. */
+.sv-controls-primary-wrap {
+  flex-wrap: wrap;
+}
+/* One slot per chip so the toolbar can measure each chip's own width. Slots do not shrink: a chip that
+   no longer fits moves into the More row instead of being squeezed. The row itself has no overflow
+   clipping because chip menus open absolutely positioned below their slot. */
+.sv-chip-slot {
+  display: flex;
+  flex: none;
+  min-width: 0;
 }
 .sv-controls-actions {
   flex: none;

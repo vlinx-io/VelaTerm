@@ -616,6 +616,21 @@ const zhCN: typeof en = {
   "settings.chatFont": "会话字体",
   "settings.chatFontSize": "会话字号",
   "settings.chatLineHeight": "会话行高",
+  "settings.composerChips": "Composer toolbar", // TODO translate
+  "settings.composerChipsHint": "Chips that are on always appear beside the message in this order, even while they have nothing to show: a chip whose feature is momentarily unavailable (no running agent process, no background tasks, an unresolved sign-in) is shown empty or disabled rather than hidden. Only a chip the current agent does not have at all is left out. When the chips do not fit, the ones that overflow move into a More menu together with the chips that are off. Chips that are off never appear in the row and stay available here and in that menu.", // TODO translate
+  "settings.composerChipUp": (chip: string) => `Move ${chip} up`, // TODO translate
+  "settings.composerChipDown": (chip: string) => `Move ${chip} down`, // TODO translate
+  "settings.composerChip.model": "Model", // TODO translate
+  "settings.composerChip.effort": "Thinking effort", // TODO translate
+  "settings.composerChip.collaboration": "Collaboration mode", // TODO translate
+  "settings.composerChip.permission": "Permission mode", // TODO translate
+  "settings.composerChip.fastMode": "Fast mode", // TODO translate
+  "settings.composerChip.serviceTier": "Speed", // TODO translate
+  "settings.composerChip.personality": "Tone", // TODO translate
+  "settings.composerChip.mcp": "MCP servers", // TODO translate
+  "settings.composerChip.tasks": "Background tasks", // TODO translate
+  "settings.composerChip.account": "Account", // TODO translate
+  "settings.composerChip.codexCredits": "Codex reset credits", // TODO translate
   "settings.fontDefault": "默认",
   "settings.fontCustom": "自定义…",
   "settings.fontListUnavailable": "无法获取系统字体列表，可手动输入字体名称。",
@@ -1715,6 +1730,7 @@ const zhCN: typeof en = {
   "chat.tasks.backgroundAll": "将正在运行的工作转入后台",
   "chat.tasks.none": "没有后台任务",
   "chat.tasks.stop": "停止",
+  "chat.chipAgentNotRunning": "The agent process is not running. Send a message to start it.", // TODO translate
   "chat.retry.line": (attempt: number, max: number, seconds: number, message: string) =>
     `${seconds} 秒后重试（${attempt}/${max}）：${message}`,
   "chat.notify.dismiss": "关闭",

@@ -7,7 +7,7 @@ vi.mock("../../../ipc/chat", () => ({
 
 import { chatMcpStatus, chatMcpToggle } from "../../../ipc/chat";
 import { setLang } from "../../../i18n";
-import { McpChip } from "./extras";
+import { McpChip, TasksChip } from "./extras";
 
 const servers = { mcpServers: [{ name: "local-tools", status: "connected", tools: [] }] };
 
@@ -57,4 +57,51 @@ it("hides stale controls after a mutation fails and retries only the read", asyn
   await screen.findByRole("button", { name: "Disable" });
   expect(chatMcpToggle).toHaveBeenCalledTimes(1);
   expect(chatMcpStatus).toHaveBeenCalledTimes(2);
+});
+
+it("keeps the Tasks chip in the row with an empty task list and says so when opened", () => {
+  render(<TasksChip tasks={[]} busy={false} onStop={() => {}} onBackgroundAll={() => {}} />);
+  const chip = screen.getByRole("button", { name: "Tasks" });
+  expect(chip.hasAttribute("disabled")).toBe(false);
+  expect(chip.querySelector(".sv-chip-badge")).toBeNull();
+  fireEvent.click(chip);
+  expect(screen.getByText("No background tasks")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Move the running work to the background" })).toBeNull();
+});
+
+it("draws disabled MCP and Tasks chips that open nothing and ask the backend nothing without a process", () => {
+  const { rerender } = render(<>
+    <McpChip sessionId="session-a" disabled />
+    <TasksChip tasks={[]} busy={false} disabled onStop={() => {}} onBackgroundAll={() => {}} />
+  </>);
+  const mcp = screen.getByRole("button", { name: "MCP" });
+  const tasks = screen.getByRole("button", { name: "Tasks" });
+  for (const chip of [mcp, tasks]) {
+    expect(chip.hasAttribute("disabled")).toBe(true);
+    expect(chip.getAttribute("aria-disabled")).toBe("true");
+    expect(chip.getAttribute("title")).toBe("The agent process is not running. Send a message to start it.");
+    fireEvent.click(chip);
+    expect(chip.getAttribute("aria-expanded")).toBe("false");
+  }
+  expect(screen.queryByText("No background tasks")).toBeNull();
+  expect(chatMcpStatus).not.toHaveBeenCalled();
+  // The same chip becomes active in place once the process is there.
+  vi.mocked(chatMcpStatus).mockResolvedValueOnce({ mcpServers: [] });
+  rerender(<>
+    <McpChip sessionId="session-a" />
+    <TasksChip tasks={[]} busy={false} onStop={() => {}} onBackgroundAll={() => {}} />
+  </>);
+  expect(mcp.hasAttribute("disabled")).toBe(false);
+  expect(mcp.getAttribute("title")).toBe("MCP servers");
+  fireEvent.click(mcp);
+  expect(chatMcpStatus).toHaveBeenCalledWith("session-a");
+});
+
+it("closes an open popover when the chip becomes disabled", () => {
+  const { rerender } = render(<TasksChip tasks={[]} busy={false} onStop={() => {}} onBackgroundAll={() => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: "Tasks" }));
+  expect(screen.getByText("No background tasks")).toBeTruthy();
+  rerender(<TasksChip tasks={[]} busy={false} disabled onStop={() => {}} onBackgroundAll={() => {}} />);
+  expect(screen.queryByText("No background tasks")).toBeNull();
+  expect(screen.getByRole("button", { name: "Tasks" }).getAttribute("aria-expanded")).toBe("false");
 });
