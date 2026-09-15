@@ -95,7 +95,9 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
     private var generation = 0
     private var activeID: String?
     private var browser: ProjectBrowser?
+    private var prompts: TrustPromptCoordinator!
     public override func load() {
+        prompts = TrustPromptCoordinator { [weak self] request in guard let self else { return false }; return try await self.presentTrustAlert(request) }
         TaskNotifications.shared.activate()
         TaskNotifications.shared.onOpen = { [weak self] event in self?.notifyListeners("notificationOpen", data: event, retainUntilConsumed: true) }
     }
@@ -342,16 +344,39 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
             } catch { call.reject((error as? PushFailure)?.code ?? error.localizedDescription, "STORAGE_ERROR") }
         }
     }
+    // Concurrent challenges for one fingerprint share a single alert; distinct prompts wait until the previous one is dismissed.
     private func approve(_ identity: String, _ fingerprint: String, _ changed: Bool) async -> Bool {
         let epoch = generation
+        return await prompts.decide(.init(identity: identity, fingerprint: fingerprint, changed: changed)) { [weak self] in self?.generation == epoch }
+    }
+    // Top-most controller that is fully in the window hierarchy; retries on the main run loop for about 5 s while a presentation is still animating.
+    @MainActor private func settledPresenter() async throws -> UIViewController {
+        for _ in 0..<50 {
+            var top = bridge?.viewController
+            while let next = top?.presentedViewController { top = next }
+            if let top, !(top is UIAlertController), !top.isBeingPresented, !top.isBeingDismissed, top.view.window != nil { return top }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        throw RemoteFailure("No view controller available for the fingerprint prompt")
+    }
+    // Shows one fingerprint alert; the continuation is resumed exactly once, also when the alert never appears or vanishes without an action.
+    @MainActor private func presentTrustAlert(_ request: TrustPromptCoordinator.Request) async throws -> Bool {
+        let host = try await settledPresenter()
         return await withCheckedContinuation { continuation in
-            DispatchQueue.main.async {
-                guard self.generation == epoch else { continuation.resume(returning: false); return }
-                let alert = UIAlertController(title: changed ? "远端指纹已变化" : "确认远端指纹", message: "\(identity)\n\n\(fingerprint)\n\n请与主机管理员核对。\(changed ? "原有信任记录将被替换。" : "")", preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in continuation.resume(returning: false) })
-                alert.addAction(UIAlertAction(title: "确认并信任", style: .destructive) { _ in continuation.resume(returning: true) })
-                (self.browser ?? self.bridge?.viewController)?.present(alert, animated: true)
+            var done = false, shown = false, ticks = 0, gone = 0
+            let finish: (Bool) -> Void = { value in guard !done else { return }; done = true; continuation.resume(returning: value) }
+            let alert = UIAlertController(title: request.changed ? "远端指纹已变化" : "确认远端指纹", message: "\(request.identity)\n\n\(request.fingerprint)\n\n请与主机管理员核对。\(request.changed ? "原有信任记录将被替换。" : "")", preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in finish(false) })
+            alert.addAction(UIAlertAction(title: "确认并信任", style: .default) { _ in finish(true) })
+            host.present(alert, animated: true) { shown = true }
+            func watch() {
+                guard !done else { return }
+                ticks += 1; if shown, alert.view.window == nil { gone += 1 }
+                // Not on screen after 5 s (presentation refused) or gone for 1 s without an action (dismissed with its presenter): answer false.
+                if (!shown && ticks >= 50) || gone >= 10 { finish(false); return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: watch)
             }
+            watch()
         }
     }
     private func resource(_ name: String) throws -> String {
@@ -794,8 +819,10 @@ private final class ProjectBrowser: UIViewController, WKNavigationDelegate, WKUI
         Task {let accepted=await onCertificate?(identity,fingerprint) ?? false;await MainActor.run {completionHandler(accepted ? .useCredential:.cancelAuthenticationChallenge,accepted ? URLCredential(trust:trust):nil)}}
     }
     private func failedNavigation(_ error: Error) {
-        if (error as NSError).domain == NSURLErrorDomain && (error as NSError).code == NSURLErrorCancelled { return }
-        showError("无法加载远端页面，请检查网络后重试，或返回连接列表。")
+        let failure = error as NSError
+        if failure.domain == NSURLErrorDomain && failure.code == NSURLErrorCancelled { return }
+        // Append the system sentence (already localized by iOS) plus domain and code so the real cause is visible on the page.
+        showError("无法加载远端页面，请检查网络后重试，或返回连接列表。\n\n\(failure.localizedDescription)\n\(failure.domain) \(failure.code)")
     }
     func webView(_ webView:WKWebView,didFailProvisionalNavigation navigation:WKNavigation!,withError error:Error) { failedNavigation(error) }
     func webView(_ webView:WKWebView,didFail navigation:WKNavigation!,withError error:Error) { failedNavigation(error) }
