@@ -340,18 +340,10 @@ impl PtyManager {
         diagnostic.step("shell");
         // Default-shell resolution needs the data directory to locate bundled Git Bash on Windows.
         let data_dir_for_shell = app.data_dir().ok();
-        // Heal stale persisted absolute shell paths, especially legacy bundled Git Bash locations removed by
-        // upgrades. Fall back to an available shell, preferring the current Git Bash for Windows terminals.
-        let shell = match shell {
-            Some(s) if shell_path_usable(&s) => s,
-            Some(stale) => {
-                let fb = resolve_fallback_shell(kind, data_dir_for_shell.as_deref());
-                crate::diagnostics::record("WARN","pty_shell_fallback",serde_json::json!({"sessionId":id,"step":"fallback"}));
-                let _ = stale;
-                fb
-            }
-            None => default_shell(kind, data_dir_for_shell.as_deref()),
-        };
+        let (shell, fell_back) = resolve_shell(kind, shell, data_dir_for_shell.as_deref());
+        if fell_back {
+            crate::diagnostics::record("WARN","pty_shell_fallback",serde_json::json!({"sessionId":id,"step":"fallback"}));
+        }
         // WSL is persisted as `wsl://<distribution>`, not an executable path. Convert it to
         // `wsl.exe --distribution <name>` and let WSL start the distribution's default interactive shell.
         let wsl_distro = wsl_distro_from_shell(&shell);
@@ -1909,7 +1901,7 @@ fn should_scan_codex_rollout(codex_hooks_supported: bool) -> bool {
 
 /// Prefix for persisted WSL launch specifications. A URI-like value stores the distribution name without
 /// conflicting with existing executable paths or requiring a separate arguments field.
-const WSL_SHELL_PREFIX: &str = "wsl://";
+pub(crate) const WSL_SHELL_PREFIX: &str = "wsl://";
 
 #[cfg(any(windows, test))]
 fn wsl_shell_value(distro: &str) -> String {
@@ -2113,12 +2105,30 @@ fn git_bash_path() -> Option<String> {
     None
 }
 
+/// The shell a session runs: its persisted choice when it still launches, otherwise a fallback.
+///
+/// Heals stale persisted absolute shell paths, especially legacy bundled Git Bash locations removed by
+/// upgrades, preferring the current Git Bash for Windows terminals. The second value says whether the
+/// persisted choice was replaced, so the caller can record it. Shared by the PTY and by the conversation
+/// view's shell mode, so both resolve the same shell for the same session.
+pub(crate) fn resolve_shell(
+    kind: SessionKind,
+    persisted: Option<String>,
+    data_dir: Option<&std::path::Path>,
+) -> (String, bool) {
+    match persisted {
+        Some(s) if shell_path_usable(&s) => (s, false),
+        Some(_stale) => (resolve_fallback_shell(kind, data_dir), true),
+        None => (default_shell(kind, data_dir), false),
+    }
+}
+
 /// Returns the platform's default shell. `data_dir` remains for signature compatibility and shell listing.
 ///
 /// Windows：
 /// Agent sessions default to PowerShell because `$env:` injection is safer than cmd.exe `%VAR%` expansion.
 /// Terminal sessions default to `COMSPEC`; users can still select Git Bash or PowerShell.
-fn default_shell(kind: SessionKind, data_dir: Option<&std::path::Path>) -> String {
+pub(crate) fn default_shell(kind: SessionKind, data_dir: Option<&std::path::Path>) -> String {
     #[cfg(windows)]
     {
         // Default-shell resolution no longer depends on bundled Git Bash.

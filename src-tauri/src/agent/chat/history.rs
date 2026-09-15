@@ -374,6 +374,14 @@ fn replay_id(index: usize) -> String {
 /// The agent remembers the conversation across a restart, but the timeline is in memory and starts empty,
 /// so without this the view would be blank in front of an agent that knows exactly what was said.
 pub fn replay(kind: SessionKind, agent_session_id: &str) -> Result<Vec<ChatRow>, String> {
+    let mut rows = replay_recorded(kind, agent_session_id)?;
+    // The recording holds the message shell mode sent the agent as a user message; the view shows it as
+    // the command row it was. One pass here covers every provider.
+    super::shell::map_replayed_rows(&mut rows);
+    Ok(rows)
+}
+
+fn replay_recorded(kind: SessionKind, agent_session_id: &str) -> Result<Vec<ChatRow>, String> {
     if kind == SessionKind::Opencode {
         // OpenCode's store already holds addressable parts, and its subagents are whole sessions of their
         // own; the row ids come from the store so a later live event can update the same rows.
@@ -513,7 +521,7 @@ fn scope_child_rows(rows: &mut [ChatRow], agent_id: &str) {
         let id = match row {
             ChatRow::User { id, .. } | ChatRow::Assistant { id, .. } | ChatRow::Reasoning { id, .. }
             | ChatRow::Tool { id, .. } | ChatRow::Error { id, .. } | ChatRow::Command { id, .. }
-            | ChatRow::Notice { id, .. } | ChatRow::Compaction { id, .. } => id,
+            | ChatRow::Shell { id, .. } | ChatRow::Notice { id, .. } | ChatRow::Compaction { id, .. } => id,
         };
         *id = format!("child-{agent_id}-{id}");
         if let ChatRow::Tool { children, .. } = row { scope_child_rows(children, agent_id); }
@@ -1111,6 +1119,46 @@ mod tests {
             if missing { assert!(matches!(&children[0], ChatRow::Notice { .. })); }
             else { assert!(matches!(&children[0], ChatRow::Tool { children, .. } if matches!(&children[0], ChatRow::Notice { .. }))); }
         }
+    }
+
+    /// The recording holds the shell-mode context as a plain user message (it is not on the injected
+    /// prefix list, and must not be: the agent did receive it). Replay maps it back to the command row,
+    /// for Claude and Codex alike, while the read-only view keeps the user event as it is.
+    #[test]
+    fn replay_maps_the_shell_context_message_back_to_a_command_row() {
+        let tagged = super::super::shell::build_context(&super::super::shell::ShellContext {
+            command: "git status".into(), stdout: "clean\n".into(), stderr: "warn".into(),
+            exit_code: Some(3), cancelled: false, stdout_truncated: false, stderr_truncated: false,
+        });
+        let recording = [
+            r#"{"type":"user","uuid":"u-1","message":{"content":"hello"}}"#.to_string(),
+            serde_json::json!({"type":"user","uuid":"u-2","message":{"content":tagged}}).to_string(),
+        ].join("\n");
+        let events = claude(&recording.lines().collect::<Vec<_>>());
+        assert_eq!(events.iter().map(|ev| ev.kind).collect::<Vec<_>>(), vec!["user", "user"], "read() keeps the user event");
+        let mut rows = claude_replay(&recording, &mut |_| Err("none".into()), &mut HashSet::new(), 0);
+        assert!(matches!(&rows[1], ChatRow::User { .. }), "the parser hands the tagged text back as a user row");
+        super::super::shell::map_replayed_rows(&mut rows);
+        assert!(matches!(&rows[0], ChatRow::User { text, .. } if text == "hello"));
+        match &rows[1] {
+            ChatRow::Shell { command, stdout, stderr, exit_code, status, .. } => {
+                assert_eq!((command.as_str(), stdout.as_str(), stderr.as_str()), ("git status", "clean\n", "warn"));
+                assert_eq!((*exit_code, *status), (Some(3), "completed"));
+            }
+            other => panic!("expected a shell row, got {other:?}"),
+        }
+
+        let codex = [
+            r#"{"type":"turn_context","payload":{"turn_id":"turn-1"}}"#.to_string(),
+            serde_json::json!({"type":"response_item","payload":{"type":"message","id":"msg-1","role":"user",
+                "content":[{"type":"input_text","text":tagged}],
+                "internal_chat_message_metadata_passthrough":{"content_item_kinds":["user.text"]}}}).to_string(),
+        ].join("\n");
+        let events: Vec<ChatEvent> = fold(codex_events(&codex)).into_iter().filter(codex_replay_event_visible).collect();
+        let mut rows = to_rows(events);
+        assert!(matches!(&rows[0], ChatRow::User { .. }));
+        super::super::shell::map_replayed_rows(&mut rows);
+        assert!(matches!(&rows[0], ChatRow::Shell { command, exit_code, .. } if command == "git status" && *exit_code == Some(3)));
     }
 
     #[test]

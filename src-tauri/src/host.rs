@@ -75,6 +75,32 @@ pub fn command<S: AsRef<OsStr>>(program: S) -> Command {
     cmd
 }
 
+/// Kill a child together with everything it started.
+///
+/// On Unix the child must have been spawned into its own process group (`process_group(0)`); the signal
+/// goes to the negative group id so helpers the command forked go too, where `Child::kill` alone would
+/// leave them holding the pipes. Windows has no process groups here; `taskkill /T` removes the tree.
+pub(crate) fn kill_process_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        unsafe {
+            libc::kill(-(child.id() as i32), libc::SIGKILL);
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::process::Stdio;
+        let pid = child.id().to_string();
+        let _ = command("taskkill")
+            .args(["/PID", pid.as_str(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+}
+
 /// Unified runtime host entry point for desktop Tauri and headless operation.
 #[derive(Clone)]
 pub enum AppCtx {

@@ -144,6 +144,25 @@ pub enum ChatRow {
     /// it as an answer would credit the model with words it never wrote.
     #[serde(rename_all = "camelCase")]
     Command { id: String, text: String },
+    /// A shell command the user ran with `!` from the composer, with what it printed.
+    ///
+    /// Its own row because it is neither a prompt nor a tool call: the user ran it, the agent only gets
+    /// told. `running` while it runs, then `completed` with its `exit_code`, or `cancelled`.
+    #[serde(rename_all = "camelCase")]
+    Shell {
+        id: String,
+        command: String,
+        stdout: String,
+        stderr: String,
+        /// The head of the stream was cut; only the tail is kept.
+        stdout_truncated: bool,
+        stderr_truncated: bool,
+        status: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        at: Option<i64>,
+    },
     /// A remark about the conversation rather than a part of it — currently only that the replayed
     /// recording was cut short. Separate from `Error` because nothing went wrong and it must not read as
     /// a failure.
@@ -194,6 +213,7 @@ impl ChatRow {
             | ChatRow::Tool { id, .. }
             | ChatRow::Error { id, .. }
             | ChatRow::Command { id, .. }
+            | ChatRow::Shell { id, .. }
             | ChatRow::Notice { id, .. }
             | ChatRow::Compaction { id, .. } => id,
         }
@@ -704,6 +724,43 @@ pub struct ClaudeExtras {
 
 // ─────────────────────────── Sessions ───────────────────────────
 
+/// The environment every process this engine starts for a session gets: the agent itself, and a shell
+/// command run from the conversation view, which must see exactly what the agent would.
+pub(crate) fn agent_environment(app: &AppCtx, session_id: &str, cmd: &mut std::process::Command) {
+    // The same reasoning as for PTY sessions: an agent we start is a session of its own, never a
+    // continuation of whatever harness happened to launch VelaTerm.
+    for key in crate::pty::manager::AGENT_HARNESS_MARKERS {
+        cmd.env_remove(key);
+    }
+    // Give the agent this instance's identity, the same way pty/manager.rs does for a terminal. `vspawn`
+    // and `vopen` read these to reach the local `/spawn` and `/view` endpoints, and their PATH shims call
+    // `$VLX_EXE`. Without this the child inherits whatever the backend was started with: nothing when
+    // it was launched from a plain shell, and another instance's session when it was launched from
+    // inside a VelaTerm session: the spawn card then appears in that instance, under that session.
+    let hook = app.hooks().endpoint();
+    cmd.env("VLX_SESSION_ID", session_id);
+    cmd.env("VLX_TOKEN", &hook.token);
+    cmd.env("VLX_SPAWN_URL", format!("http://127.0.0.1:{}", hook.port));
+    if let Ok(exe) = std::env::current_exe() {
+        cmd.env("VLX_EXE", exe.as_os_str());
+    }
+    if let Ok(data_dir) = app.data_dir() {
+        let bin = crate::agent::spawn_cli::bin_dir(&data_dir);
+        let existing = crate::appimage::clean_var("PATH").unwrap_or_default();
+        let sep = if cfg!(windows) { ';' } else { ':' };
+        cmd.env("PATH", format!("{}{sep}{existing}", bin.display()));
+        cmd.env("VLX_BIN_DIR", bin.as_os_str());
+    }
+    // Per-session values a terminal session injects for its own hooks. They belong to whichever session
+    // the backend was started from, not to this one, and the chat engine does not use them.
+    for key in [
+        crate::agent::inject::CLAUDE_SETTINGS_ENV,
+        crate::agent::inject::NOTFOUND_URL_ENV,
+    ] {
+        cmd.env_remove(key);
+    }
+}
+
 struct ChatProcess {
     kind: SessionKind,
     cwd: Option<String>,
@@ -928,6 +985,8 @@ pub struct ChatManager {
     sessions: Mutex<HashMap<String, Arc<ChatProcess>>>,
     permission_restarts: Mutex<HashSet<String>>,
     auth_change: Mutex<()>,
+    /// The shell command running for each session, at most one per conversation.
+    shell_runs: Mutex<HashMap<String, Arc<super::shell::ShellRun>>>,
 }
 
 impl ChatManager {
@@ -950,6 +1009,91 @@ impl ChatManager {
     pub fn turn_in_progress(&self, session_id: &str) -> bool {
         self.sessions.lock().unwrap().get(session_id).cloned()
             .is_some_and(|proc| proc.turn.lock().unwrap().running)
+    }
+
+    // ── Shell mode ──
+
+    /// Run a `!` command for this conversation: in the agent's directory and environment, its output on
+    /// a row of its own, and the result handed to the agent when it ends.
+    ///
+    /// One command at a time per session; a second one is refused with `chat_shell_running`. The agent
+    /// process must be alive: the row lives on its timeline, which is the only thing the views follow.
+    pub fn run_shell(&self, app: &AppCtx, session_id: &str, command: &str, message_id: &str) -> Result<(), String> {
+        let proc = self.get(session_id)?;
+        if !proc.alive.load(Ordering::Relaxed) {
+            return Err("This session has no running agent".into());
+        }
+        let session = {
+            let conn = app.db().conn.lock().unwrap();
+            crate::db::repo::get_session(&conn, session_id)?.ok_or("Session not found")?
+        };
+        // Held across the spawn so two submissions racing each other cannot both pass the check.
+        let mut runs = self.shell_runs.lock().unwrap();
+        if runs.contains_key(session_id) {
+            return Err("chat_shell_running".into());
+        }
+        let update_app = app.clone();
+        let update_session = session_id.to_string();
+        let finish_app = app.clone();
+        let finish_session = session_id.to_string();
+        let run = super::shell::spawn_run(
+            app,
+            session_id,
+            session.kind,
+            session.shell.as_deref(),
+            proc.cwd.as_deref(),
+            message_id,
+            command,
+            move |run| update_app.chat().upsert_shell_row(&update_session, run.running_row()),
+            move |run, ctx| finish_app.chat().finish_shell_run(&finish_app, &finish_session, run, ctx),
+        )?;
+        proc.timeline.lock().unwrap().upsert(run.running_row());
+        runs.insert(session_id.to_string(), run);
+        Ok(())
+    }
+
+    /// Stop the command `message_id` names, taking its whole process group with it.
+    pub fn cancel_shell(&self, session_id: &str, message_id: &str) -> Result<(), String> {
+        let run = self.shell_runs.lock().unwrap().get(session_id).cloned()
+            .filter(|run| run.id == message_id)
+            .ok_or("chat_shell_not_found")?;
+        run.cancel();
+        Ok(())
+    }
+
+    /// Refresh a command's row on whichever process currently owns the conversation.
+    pub(crate) fn upsert_shell_row(&self, session_id: &str, row: ChatRow) {
+        if let Some(proc) = self.sessions.lock().unwrap().get(session_id).cloned() {
+            proc.timeline.lock().unwrap().upsert(row);
+        }
+    }
+
+    /// A command ended: show its final state and tell the agent, as the terminal UI's shell mode does.
+    ///
+    /// The context message goes through the ordinary send path under the row's own id, so `dispatch`
+    /// replaces the row with its final form instead of adding a user bubble. An agent that went away
+    /// meanwhile is started again first, the way a normal send would.
+    pub(crate) fn finish_shell_run(&self, app: &AppCtx, session_id: &str, run: &super::shell::ShellRun, ctx: super::shell::ShellContext) {
+        {
+            let mut runs = self.shell_runs.lock().unwrap();
+            if runs.get(session_id).is_some_and(|current| current.id == run.id) {
+                runs.remove(session_id);
+            }
+        }
+        if run.abandoned() {
+            return;
+        }
+        self.upsert_shell_row(session_id, super::shell::row(run.id.clone(), Some(run.started_at), &ctx, ctx.status()));
+        let result = (|| {
+            if !self.is_alive(session_id) {
+                crate::command_core::chat_start(app, session_id, None, None, false)?;
+            }
+            self.send_identified(app, session_id, &super::shell::build_context(&ctx), Vec::new(), "queue", Some(&run.id))
+        })();
+        if let Err(e) = result {
+            crate::diagnostic_warn!("chat: shell result for {session_id} not delivered: {e}");
+            emit(app, session_id, json!({"type":"error","message":e}));
+        }
     }
 
     /// Read notification prose without cloning the timeline or starting/changing an agent process.
@@ -1100,38 +1244,7 @@ impl ChatManager {
         if let Some(cwd) = cwd {
             cmd.current_dir(cwd);
         }
-        // The same reasoning as for PTY sessions: an agent we start is a session of its own, never a
-        // continuation of whatever harness happened to launch VelaTerm.
-        for key in crate::pty::manager::AGENT_HARNESS_MARKERS {
-            cmd.env_remove(key);
-        }
-        // Give the agent this instance's identity, the same way pty/manager.rs does for a terminal. `vspawn`
-        // and `vopen` read these to reach the local `/spawn` and `/view` endpoints, and their PATH shims call
-        // `$VLX_EXE`. Without this the child inherits whatever the backend was started with: nothing when
-        // it was launched from a plain shell, and another instance's session when it was launched from
-        // inside a VelaTerm session — the spawn card then appears in that instance, under that session.
-        let hook = app.hooks().endpoint();
-        cmd.env("VLX_SESSION_ID", session_id);
-        cmd.env("VLX_TOKEN", &hook.token);
-        cmd.env("VLX_SPAWN_URL", format!("http://127.0.0.1:{}", hook.port));
-        if let Ok(exe) = std::env::current_exe() {
-            cmd.env("VLX_EXE", exe.as_os_str());
-        }
-        if let Ok(data_dir) = app.data_dir() {
-            let bin = crate::agent::spawn_cli::bin_dir(&data_dir);
-            let existing = crate::appimage::clean_var("PATH").unwrap_or_default();
-            let sep = if cfg!(windows) { ';' } else { ':' };
-            cmd.env("PATH", format!("{}{sep}{existing}", bin.display()));
-            cmd.env("VLX_BIN_DIR", bin.as_os_str());
-        }
-        // Per-session values a terminal session injects for its own hooks. They belong to whichever session
-        // the backend was started from, not to this one, and the chat engine does not use them.
-        for key in [
-            crate::agent::inject::CLAUDE_SETTINGS_ENV,
-            crate::agent::inject::NOTFOUND_URL_ENV,
-        ] {
-            cmd.env_remove(key);
-        }
+        agent_environment(app, session_id, &mut cmd);
         if kind == SessionKind::Claude {
             // Claude disables file checkpoints outside its TUI unless this SDK-compatible switch is set.
             // Its explicit disable switch still wins, so user policy remains authoritative.
@@ -2328,6 +2441,11 @@ impl ChatManager {
     /// End the conversation and let the process go.
     pub fn stop(&self, app: &AppCtx, session_id: &str) -> Result<(), String> {
         self.check_permission_restart(session_id)?;
+        // A command still running would otherwise report to an agent that has just been let go, and
+        // start it again only to do so.
+        if let Some(run) = self.shell_runs.lock().unwrap().remove(session_id) {
+            run.abandon();
+        }
         let Some(proc) = self.sessions.lock().unwrap().get(session_id).cloned() else {
             return Ok(());
         };
@@ -4436,6 +4554,17 @@ fn send_interrupt_locked(proc: &Arc<ChatProcess>, turn: &mut TurnQueue) -> Resul
     }
 }
 
+/// The row for a message the user sends: a bubble, or the command row when the text is the context
+/// message shell mode hands the agent. The one place that decides, so tags never reach a bubble.
+fn user_row(id: String, text: &str, images: Vec<ChatImage>, at: Option<i64>) -> ChatRow {
+    if images.is_empty() {
+        if let Some(ctx) = super::shell::parse_context(text) {
+            return super::shell::row(id, at, &ctx, ctx.status());
+        }
+    }
+    ChatRow::User { id, text: text.to_string(), images, at }
+}
+
 /// Submit a prompt to the active turn without changing its clock or draining its queue.
 fn dispatch_steer(
     app: &AppCtx,
@@ -4468,12 +4597,10 @@ fn dispatch_steer(
         SessionKind::Pi | SessionKind::Omp => pi::steer(proc, text, images)?,
         _ => proc.write(&protocol::user_message(text, images))?,
     }
-    if proc.kind != SessionKind::Opencode {
+    if proc.kind != SessionKind::Opencode && !super::shell::is_tagged(text) {
         crate::agent::server::try_auto_rename(app, session_id, text);
     }
-    proc.timeline.lock().unwrap().upsert(ChatRow::User {
-        at: Some(sent_at as i64), id: row_id, text: text.to_string(), images: images.to_vec(),
-    });
+    proc.timeline.lock().unwrap().upsert(user_row(row_id, text, images.to_vec(), Some(sent_at as i64)));
     emit(app, session_id, json!({"type":"steerAccepted"}));
     Ok(())
 }
@@ -4505,12 +4632,7 @@ fn dispatch(
     };
     if newly_started { proc.extras.lock().unwrap().generation = generation::GenerationTiming::default(); }
     let row_id = message_id.map(str::to_owned).unwrap_or_else(|| format!("u-{}", proc.next_request.fetch_add(1, Ordering::Relaxed)));
-    proc.timeline.lock().unwrap().upsert(ChatRow::User {
-        at: Some(sent_at as i64),
-        id: row_id.clone(),
-        text: text.to_string(),
-        images: images.to_vec(),
-    });
+    proc.timeline.lock().unwrap().upsert(user_row(row_id.clone(), text, images.to_vec(), Some(sent_at as i64)));
     if proc.kind == SessionKind::Opencode {
         opencode::dispatch(app, session_id, proc, &row_id, text, images)?;
     } else if matches!(proc.kind, SessionKind::Pi | SessionKind::Omp) {
@@ -4571,7 +4693,8 @@ fn dispatch(
     }
     // Direct sends and dequeued messages share this path. Rename only after a successful write;
     // OpenCode supplies its own title through session.updated and must retain its placeholder until then.
-    if proc.kind != SessionKind::Opencode {
+    // A shell-mode context message is not a title either: the next real prompt names the session.
+    if proc.kind != SessionKind::Opencode && !super::shell::is_tagged(text) {
         crate::agent::server::try_auto_rename(app, session_id, text);
     }
     if newly_started {
@@ -6224,6 +6347,173 @@ mod tests {
             compactions: AtomicU64::new(0),
         });
         (proc, stdout)
+    }
+
+    // ── Shell mode ──
+
+    /// A conversation whose agent is `cat`, registered on the host's own manager so the runner's
+    /// callbacks reach the same timeline the test reads. The session runs `/bin/sh`, whose login profile
+    /// is quiet on every Unix.
+    #[cfg(unix)]
+    fn shell_fixture(tag: &str) -> (AppCtx, Arc<ChatProcess>, Arc<Mutex<Vec<String>>>) {
+        let app = ctx(tag);
+        if let AppCtx::Headless(host) = &app {
+            host.set_hooks(crate::agent::server::HookServer { port: 0, token: "fixture".into() });
+        }
+        {
+            let conn = app.db().conn.lock().unwrap();
+            conn.execute("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','test','/tmp',0)", []).unwrap();
+            conn.execute(
+                "INSERT INTO sessions(id,project_id,name,kind,shell,permission_mode,created_at) VALUES ('s','p','Claude 1','claude','/bin/sh','default',0)",
+                [],
+            ).unwrap();
+        }
+        let (proc, stdout) = cat_process();
+        let wire = Arc::new(Mutex::new(Vec::new()));
+        let captured = wire.clone();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                captured.lock().unwrap().push(line);
+            }
+        });
+        app.chat().sessions.lock().unwrap().insert("s".into(), proc.clone());
+        (app, proc, wire)
+    }
+
+    #[cfg(unix)]
+    fn wait_for_shell_row(app: &AppCtx, status: &str) -> ChatRow {
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        loop {
+            let found = app.chat().snapshot("s").rows.into_iter().find(|row| {
+                matches!(row, ChatRow::Shell { status: current, .. } if *current == status)
+            });
+            if let Some(row) = found {
+                return row;
+            }
+            assert!(std::time::Instant::now() < deadline, "no shell row reached status {status}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// A `!` command shows as its own row, and the agent is told exactly once, as a user message that
+    /// the timeline never shows as a bubble. The session keeps its name: tags are no title.
+    #[cfg(unix)]
+    #[test]
+    fn a_shell_command_reports_once_to_the_agent_and_never_as_a_bubble() {
+        let (app, proc, wire) = shell_fixture("shell-run");
+        app.chat().run_shell(&app, "s", "echo hello; exit 3", "sh-1").unwrap();
+        assert!(matches!(wait_for_shell_row(&app, "running"), ChatRow::Shell { id, command, .. } if id == "sh-1" && command == "echo hello; exit 3"));
+        // A second command while the first runs is refused with the stable code.
+        assert_eq!(app.chat().run_shell(&app, "s", "true", "sh-2").unwrap_err(), "chat_shell_running");
+        let row = wait_for_shell_row(&app, "completed");
+        match &row {
+            ChatRow::Shell { id, stdout, exit_code, .. } => {
+                assert_eq!(id, "sh-1");
+                assert!(stdout.ends_with("hello\n"), "{stdout:?}");
+                assert_eq!(*exit_code, Some(3));
+            }
+            other => panic!("expected a shell row, got {other:?}"),
+        }
+        // The context message went out through the ordinary send path, exactly once.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while wire.lock().unwrap().is_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        std::thread::sleep(Duration::from_millis(200));
+        let lines = wire.lock().unwrap().clone();
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        let frame: Value = serde_json::from_str(&lines[0]).unwrap();
+        assert_eq!(frame["type"], "user");
+        let text = frame["message"]["content"][0]["text"].as_str().unwrap();
+        let context = super::super::shell::parse_context(text).expect("the wire text is the tagged context");
+        assert_eq!(context.command, "echo hello; exit 3");
+        assert_eq!(context.exit_code, Some(3));
+        assert!(text.ends_with("Exit code 3</bash-stderr>"), "{text}");
+        // The timeline holds the command row under the same id and no user bubble at all.
+        let rows = app.chat().snapshot("s").rows;
+        assert_eq!(rows.iter().filter(|row| matches!(row, ChatRow::Shell { .. })).count(), 1);
+        assert!(said(app.chat(), "s").is_empty(), "the tagged message must not become a bubble");
+        assert!(app.chat().shell_runs.lock().unwrap().is_empty());
+        let name = crate::db::repo::get_session_name(&app.db().conn.lock().unwrap(), "s").unwrap().unwrap();
+        assert_eq!(name, "Claude 1");
+        // The second command runs now that the first is done.
+        app.chat().run_shell(&app, "s", "true", "sh-2").unwrap();
+        wait_for_shell_row(&app, "completed");
+        app.chat().stop(&app, "s").unwrap();
+        proc.child.lock().unwrap().wait().unwrap();
+    }
+
+    /// Cancel ends the command as cancelled, and the agent hears that instead of an exit code.
+    #[cfg(unix)]
+    #[test]
+    fn a_cancelled_shell_command_tells_the_agent_it_was_cancelled() {
+        let (app, proc, wire) = shell_fixture("shell-cancel");
+        app.chat().run_shell(&app, "s", "sleep 30", "sh-1").unwrap();
+        wait_for_shell_row(&app, "running");
+        assert_eq!(app.chat().cancel_shell("s", "sh-other").unwrap_err(), "chat_shell_not_found");
+        app.chat().cancel_shell("s", "sh-1").unwrap();
+        let row = wait_for_shell_row(&app, "cancelled");
+        assert!(matches!(row, ChatRow::Shell { exit_code: None, .. }));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while wire.lock().unwrap().is_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let lines = wire.lock().unwrap().clone();
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("Command cancelled by the user"), "{}", lines[0]);
+        assert_eq!(app.chat().cancel_shell("s", "sh-1").unwrap_err(), "chat_shell_not_found");
+        app.chat().stop(&app, "s").unwrap();
+        proc.child.lock().unwrap().wait().unwrap();
+    }
+
+    /// Stopping the conversation takes a running command with it and reports nothing to anyone.
+    #[cfg(unix)]
+    #[test]
+    fn stopping_the_conversation_abandons_a_running_shell_command() {
+        let (app, proc, wire) = shell_fixture("shell-stop");
+        app.chat().run_shell(&app, "s", "sleep 30", "sh-1").unwrap();
+        wait_for_shell_row(&app, "running");
+        let run = app.chat().shell_runs.lock().unwrap().get("s").cloned().unwrap();
+        let pgid = run.pid() as i32;
+        app.chat().stop(&app, "s").unwrap();
+        assert!(app.chat().shell_runs.lock().unwrap().is_empty());
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while unsafe { libc::kill(-pgid, 0) } == 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert_ne!(unsafe { libc::kill(-pgid, 0) }, 0, "the command's process group survived stop");
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(wire.lock().unwrap().is_empty(), "an abandoned command must not report to the agent");
+        proc.child.lock().unwrap().wait().unwrap();
+    }
+
+    /// The one place that decides between a bubble and a command row.
+    #[test]
+    fn user_row_draws_tagged_context_as_a_command_row_and_prose_as_a_bubble() {
+        let text = "<bash-input>ls</bash-input>\n<bash-stdout>a\n</bash-stdout><bash-stderr></bash-stderr>";
+        match user_row("m-1".into(), text, Vec::new(), Some(7)) {
+            ChatRow::Shell { id, command, stdout, status, exit_code, at, .. } => {
+                assert_eq!((id.as_str(), command.as_str(), stdout.as_str()), ("m-1", "ls", "a\n"));
+                assert_eq!((status, exit_code, at), ("completed", Some(0), Some(7)));
+            }
+            other => panic!("expected a shell row, got {other:?}"),
+        }
+        assert!(matches!(user_row("m-2".into(), "hello", Vec::new(), None), ChatRow::User { text, .. } if text == "hello"));
+        // A picture makes it a message even if the text looks tagged.
+        let image = ChatImage { mime_type: "image/png".into(), data: "AA==".into() };
+        assert!(matches!(user_row("m-3".into(), text, vec![image], None), ChatRow::User { .. }));
+    }
+
+    /// Shell rows are not rewind boundaries: the alignment against the recording walks user rows only,
+    /// so the message before a command still finds its own target.
+    #[test]
+    fn user_messages_skip_shell_rows() {
+        let mut timeline = Timeline::default();
+        timeline.upsert(ChatRow::User { id: "a".into(), text: "A".into(), images: Vec::new(), at: None });
+        timeline.upsert(user_row("sh".into(), "<bash-input>ls</bash-input>\n<bash-stdout></bash-stdout>", Vec::new(), None));
+        timeline.upsert(ChatRow::User { id: "b".into(), text: "B".into(), images: Vec::new(), at: None });
+        assert_eq!(timeline.user_messages(), vec![("a".to_string(), "A".to_string()), ("b".to_string(), "B".to_string())]);
     }
 
     /// Text of every user row on the timeline, in order — what the agent has actually been told.

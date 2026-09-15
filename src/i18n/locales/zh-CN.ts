@@ -1573,6 +1573,17 @@ const zhCN: typeof en = {
   "chat.attach.tooMany": (max: number) => `一条消息最多可附带 ${max} 张图片`,
   "chat.attach.tooLarge": (name: string, mb: number) => `${name} 超过 ${mb} MB，未添加为附件`,
   "chat.attach.unreadable": (name: string) => `无法读取 ${name}`,
+  // ── Shell mode: `!` runs a command in the session's shell ──
+  "chat.shell.title": "Shell command", // TODO translate
+  "chat.shell.running": "Running…", // TODO translate
+  "chat.shell.cancel": "Cancel", // TODO translate
+  "chat.shell.cancelled": "Cancelled", // TODO translate
+  "chat.shell.exitCode": (code: number) => `Exit code ${code}`, // TODO translate
+  "chat.shell.stderr": "stderr", // TODO translate
+  "chat.shell.truncated": "Earlier output was cut; only the last part is kept", // TODO translate
+  "chat.shell.emptyCommand": "Type a command after ! to run it in the shell", // TODO translate
+  "chat.shell.noImages": "Shell commands cannot carry images. Remove the attachment or send it as a message.", // TODO translate
+  "chat.shell.alreadyRunning": "A shell command is still running in this conversation. Cancel it or wait for it to finish.", // TODO translate
   // Compacting the conversation… / Context compacted / Context compacted automatically
   "chat.compaction.running": "正在压缩上下文…",
   "chat.compaction.manual": "上下文已压缩",

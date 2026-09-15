@@ -1624,6 +1624,17 @@ const ja: typeof en = {
   "chat.attach.tooMany": (max: number) => `1 通のメッセージに添付できる画像は ${max} 枚までです`,
   "chat.attach.tooLarge": (name: string, mb: number) => `${name} は ${mb} MB を超えるため添付しませんでした`,
   "chat.attach.unreadable": (name: string) => `${name} を読み込めませんでした`,
+  // ── Shell mode: `!` runs a command in the session's shell ──
+  "chat.shell.title": "Shell command", // TODO translate
+  "chat.shell.running": "Running…", // TODO translate
+  "chat.shell.cancel": "Cancel", // TODO translate
+  "chat.shell.cancelled": "Cancelled", // TODO translate
+  "chat.shell.exitCode": (code: number) => `Exit code ${code}`, // TODO translate
+  "chat.shell.stderr": "stderr", // TODO translate
+  "chat.shell.truncated": "Earlier output was cut; only the last part is kept", // TODO translate
+  "chat.shell.emptyCommand": "Type a command after ! to run it in the shell", // TODO translate
+  "chat.shell.noImages": "Shell commands cannot carry images. Remove the attachment or send it as a message.", // TODO translate
+  "chat.shell.alreadyRunning": "A shell command is still running in this conversation. Cancel it or wait for it to finish.", // TODO translate
   // Compacting the conversation… / Context compacted / Context compacted automatically
   "chat.compaction.running": "コンテキストを圧縮しています…",
   "chat.compaction.manual": "コンテキストを圧縮しました",

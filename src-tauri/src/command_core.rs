@@ -1208,6 +1208,40 @@ pub fn chat_send(
     outcome
 }
 
+/// Run a shell command typed with `!` in the conversation view.
+///
+/// The whole text after `!` is the command, handed to the session's shell as one string. It runs in the
+/// agent's directory with the agent's environment; the agent is started first when none is alive, the way
+/// a normal send does, because the result is handed to it as a user message when the command ends.
+pub fn chat_run_shell(
+    ctx: &AppCtx,
+    session_id: &str,
+    command: &str,
+    message_id: &str,
+) -> Result<(), String> {
+    if crate::security::session_active(session_id) {
+        return Err("security_audit_owns_conversation".into());
+    }
+    if command.trim().is_empty() {
+        return Err("chat_shell_empty".into());
+    }
+    if message_id.trim().is_empty() {
+        return Err("A shell command needs a message id".into());
+    }
+    if !ctx.chat().is_alive(session_id) {
+        chat_start(ctx, session_id, None, None, false)?;
+    }
+    ctx.chat().run_shell(ctx, session_id, command, message_id)
+}
+
+/// Stop the shell command `message_id` names, together with everything it started.
+pub fn chat_cancel_shell(ctx: &AppCtx, session_id: &str, message_id: &str) -> Result<(), String> {
+    if crate::security::session_active(session_id) {
+        return Err("security_audit_owns_conversation".into());
+    }
+    ctx.chat().cancel_shell(session_id, message_id)
+}
+
 /// Refuse a message whose attachments are past the limits. The last line of defence rather than the
 /// first: the composer says the same thing in the user's own language before the bytes are ever sent.
 pub(crate) fn check_images(images: &[ChatImage]) -> Result<(), String> {

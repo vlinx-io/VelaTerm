@@ -1574,6 +1574,17 @@ const zhTW: typeof en = {
   "chat.attach.tooMany": (max: number) => `一則訊息最多可附帶 ${max} 張圖片`,
   "chat.attach.tooLarge": (name: string, mb: number) => `${name} 超過 ${mb} MB，未加入附件`,
   "chat.attach.unreadable": (name: string) => `無法讀取 ${name}`,
+  // ── Shell mode: `!` runs a command in the session's shell ──
+  "chat.shell.title": "Shell command", // TODO translate
+  "chat.shell.running": "Running…", // TODO translate
+  "chat.shell.cancel": "Cancel", // TODO translate
+  "chat.shell.cancelled": "Cancelled", // TODO translate
+  "chat.shell.exitCode": (code: number) => `Exit code ${code}`, // TODO translate
+  "chat.shell.stderr": "stderr", // TODO translate
+  "chat.shell.truncated": "Earlier output was cut; only the last part is kept", // TODO translate
+  "chat.shell.emptyCommand": "Type a command after ! to run it in the shell", // TODO translate
+  "chat.shell.noImages": "Shell commands cannot carry images. Remove the attachment or send it as a message.", // TODO translate
+  "chat.shell.alreadyRunning": "A shell command is still running in this conversation. Cancel it or wait for it to finish.", // TODO translate
   // Compacting the conversation… / Context compacted / Context compacted automatically
   "chat.compaction.running": "正在壓縮上下文…",
   "chat.compaction.manual": "上下文已壓縮",

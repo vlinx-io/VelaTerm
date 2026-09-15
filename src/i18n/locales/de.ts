@@ -1629,6 +1629,17 @@ const de: typeof en = {
   "chat.attach.tooMany": (max: number) => `Eine Nachricht kann bis zu ${max} Bilder enthalten`,
   "chat.attach.tooLarge": (name: string, mb: number) => `${name} überschreitet ${mb} MB und wurde nicht angehängt`,
   "chat.attach.unreadable": (name: string) => `${name} konnte nicht gelesen werden`,
+  // ── Shell-Modus: `!` fuehrt einen Befehl in der Shell der Sitzung aus ──
+  "chat.shell.title": "Shell-Befehl",
+  "chat.shell.running": "Läuft…",
+  "chat.shell.cancel": "Abbrechen",
+  "chat.shell.cancelled": "Abgebrochen",
+  "chat.shell.exitCode": (code: number) => `Exit-Code ${code}`,
+  "chat.shell.stderr": "stderr",
+  "chat.shell.truncated": "Frühere Ausgabe wurde gekürzt; nur der letzte Teil bleibt erhalten",
+  "chat.shell.emptyCommand": "Geben Sie nach ! einen Befehl ein, um ihn in der Shell auszuführen",
+  "chat.shell.noImages": "Shell-Befehle können keine Bilder enthalten. Entfernen Sie den Anhang oder senden Sie ihn als Nachricht.",
+  "chat.shell.alreadyRunning": "In dieser Unterhaltung läuft noch ein Shell-Befehl. Brechen Sie ihn ab oder warten Sie, bis er beendet ist.",
   // Compacting the conversation… / Context compacted / Context compacted automatically
   "chat.compaction.running": "Unterhaltung wird komprimiert …",
   "chat.compaction.manual": "Kontext komprimiert",

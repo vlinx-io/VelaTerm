@@ -21,6 +21,7 @@ pub mod opencode_protocol;
 pub mod opencode_timeline;
 pub mod pi_protocol;
 pub mod protocol;
+pub mod shell;
 pub mod skills;
 pub mod submissions;
 

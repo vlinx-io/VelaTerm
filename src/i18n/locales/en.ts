@@ -1629,6 +1629,17 @@ const en = {
   "chat.attach.tooMany": (max: number) => `A message can include up to ${max} images`,
   "chat.attach.tooLarge": (name: string, mb: number) => `${name} exceeds ${mb} MB and was not attached`,
   "chat.attach.unreadable": (name: string) => `${name} could not be read`,
+  // ── Shell mode: `!` runs a command in the session's shell ──
+  "chat.shell.title": "Shell command",
+  "chat.shell.running": "Running…",
+  "chat.shell.cancel": "Cancel",
+  "chat.shell.cancelled": "Cancelled",
+  "chat.shell.exitCode": (code: number) => `Exit code ${code}`,
+  "chat.shell.stderr": "stderr",
+  "chat.shell.truncated": "Earlier output was cut; only the last part is kept",
+  "chat.shell.emptyCommand": "Type a command after ! to run it in the shell",
+  "chat.shell.noImages": "Shell commands cannot carry images. Remove the attachment or send it as a message.",
+  "chat.shell.alreadyRunning": "A shell command is still running in this conversation. Cancel it or wait for it to finish.",
   // ── The conversation summarized to make room in the context window ──
   "chat.compaction.running": "Compacting the conversation…",
   "chat.compaction.manual": "Context compacted",

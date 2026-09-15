@@ -517,6 +517,12 @@ mod tests {
         ] {
             assert!(!allowed_command(cmd), "Public share must deny {cmd}");
         }
+        // Shell mode is the capability pty_spawn grants; a public share visitor has neither, on either
+        // surface.
+        for cmd in ["chat_run_shell", "chat_cancel_shell"] {
+            assert!(!allowed_command(cmd), "Public share must deny {cmd}");
+            assert!(!app_command(cmd), "Public share app shell must deny {cmd}");
+        }
         assert!(allowed_command("chat_send"));
         assert!(allowed_command("chat_snapshot"));
     }
