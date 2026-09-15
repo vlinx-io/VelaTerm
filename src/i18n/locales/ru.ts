@@ -796,6 +796,11 @@ const ru: typeof en = {
   "tree.moveToSession": "Переместить под сессию (сделать дочерней)", // Move under a session (as child)
   "tree.moveTo": "Переместить в…", // Move to…
   "tree.openNewTab": "Открыть в новой вкладке", // Open in New Tab
+  "tree.openSplitRight": "Открыть в панели справа", // Open in Split Right
+  "tree.openSplitDown": "Открыть в панели снизу", // Open in Split Down
+  "tree.openInFocusedPane": "Открыть в активной панели", // Open in Focused Pane
+  "tree.tileSelected": "Разложить выбранные сессии плиткой", // Tile Selected Sessions
+  "tree.tileSelectedTooMany": "Разложить плиткой (не больше 4 сессий)", // Tile Selected Sessions (up to 4)
   "tree.forkSession": "Форкнуть сессию", // Fork Session
   "tree.exportSession": "Экспортировать сессию…", // Export Session…
   "tree.sessionInfo": "Сведения о сессии", // Session Info

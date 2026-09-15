@@ -786,6 +786,11 @@ const ptBR: typeof en = {
   "tree.moveToSession": "Mover para baixo de uma sessão (como filha)", // Move under a session (as child)
   "tree.moveTo": "Mover para…", // Move to…
   "tree.openNewTab": "Abrir em nova aba", // Open in New Tab
+  "tree.openSplitRight": "Abrir em divisão à direita", // Open in Split Right
+  "tree.openSplitDown": "Abrir em divisão abaixo", // Open in Split Down
+  "tree.openInFocusedPane": "Abrir no painel ativo", // Open in Focused Pane
+  "tree.tileSelected": "Organizar sessões selecionadas lado a lado", // Tile Selected Sessions
+  "tree.tileSelectedTooMany": "Organizar lado a lado (até 4 sessões)", // Tile Selected Sessions (up to 4)
   "tree.forkSession": "Bifurcar sessão", // Fork Session
   "tree.exportSession": "Exportar sessão…", // Export Session…
   "tree.sessionInfo": "Informações da sessão", // Session Info

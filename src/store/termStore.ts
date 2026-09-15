@@ -44,6 +44,7 @@ import {
   collectSessionIds,
   findBySession,
   firstLeaf,
+  GRID_MAX,
   makeLeaf,
   type PaneNode,
   removeLeaf,
@@ -52,6 +53,7 @@ import {
   setSizes,
   splitAt,
 } from "../layout/CenterPane/paneTree";
+import { placeInGrid, placeInPane, placeInSplit } from "./paneMoves";
 import {
   collectSidebarViewIds,
   firstSidebarViewId,
@@ -167,6 +169,38 @@ function pickEvictTab(
     });
   };
   return liveTabs.find((tid) => !isActive(tid)) ?? null;
+}
+
+/**
+ * Applies overflow eviction to background tabs, deleting evicted trees from the caller's `paneTrees` copy. `notice`
+ * names the last evicted tab; `ask` means every remaining background tab is active, so the overflow is kept and
+ * `LiveTabsOverLimitDialog` asks the user.
+ */
+function evictLiveOverflow(
+  liveTabs: string[],
+  paneTrees: Record<string, PaneNode>,
+  maxLiveTabs: number,
+  runtimes: Record<string, SessionRuntime>,
+  notifications: Record<string, number>,
+  sessById: Map<string, Session>,
+): { liveTabs: string[]; notice: { label: string; at: number } | null; ask: boolean } {
+  let notice: { label: string; at: number } | null = null;
+  while (liveTabs.length > maxLiveTabs) {
+    const evicted = pickEvictTab(liveTabs, paneTrees, runtimes, notifications);
+    if (!evicted) return { liveTabs, notice, ask: true };
+    liveTabs = liveTabs.filter((tid) => tid !== evicted);
+    const evictedTree = paneTrees[evicted];
+    const label =
+      (evictedTree
+        ? collectSessionIds(evictedTree)
+            .map((sid) => sessById.get(sid)?.name)
+            .filter((n): n is string => !!n)
+            .join(" ⫽ ")
+        : "") || evicted;
+    delete paneTrees[evicted];
+    notice = { label, at: Date.now() };
+  }
+  return { liveTabs, notice, ask: false };
 }
 
 /** Local-storage key for frontend-only tab, split, and activation layout. */
@@ -1229,6 +1263,19 @@ interface TermStore {
     direction: "horizontal" | "vertical",
     source?: SplitSource,
   ) => Promise<void>;
+  /** Show an existing session in a new split next to a pane of the active tab (the focused pane by default),
+   *  moving it out of any other tab without restarting it. `before` places it left of or above the pane. Falls
+   *  back to opening a new tab when the active tab has no panes. */
+  openSessionInSplit: (
+    sessionId: SessionId,
+    direction: "horizontal" | "vertical",
+    opts?: { paneId?: string; before?: boolean; source?: SplitSource },
+  ) => void;
+  /** Show an existing session in a pane of the active tab (the focused pane by default). The pane's previous
+   *  named session keeps running in a background tab; a scratch terminal is closed. */
+  openSessionInPane: (sessionId: SessionId, paneId?: string) => void;
+  /** Tile two to four existing sessions evenly in a new pinned tab, moving them out of their current tabs. */
+  tileSessions: (sessionIds: SessionId[]) => void;
   closePane: () => void;
   closeSession: (sessionId: SessionId) => void;
   collapseToFocused: () => void;
@@ -1508,7 +1555,10 @@ function agentNotifyText(state: AgentState): string {
 }
 
 /** Returns whether a session is visible in any pane of the active tab. */
-function isVisibleSession(store: TermStore, sessionId: string): boolean {
+export function isVisibleSession(
+  store: Pick<TermStore, "activeTabId" | "paneTrees">,
+  sessionId: string,
+): boolean {
   const tree = store.activeTabId ? store.paneTrees[store.activeTabId] : null;
   return !!tree && collectSessionIds(tree).includes(sessionId);
 }
@@ -2799,31 +2849,17 @@ export const useTermStore = create<TermStore>((set, get) => ({
         }
         // On overflow, evict the oldest inactive background tab and show a notice. If all are active, ask
         // through `LiveTabsOverLimitDialog` and preserve overflow when declined.
-        let liveEvictNotice = state.liveEvictNotice;
-        let liveEvictAsk = false;
-        while (liveTabs.length > state.maxLiveTabs) {
-          const evicted = pickEvictTab(
-            liveTabs,
-            paneTrees,
-            state.runtimes,
-            notifications,
-          );
-          if (!evicted) {
-            liveEvictAsk = true;
-            break;
-          }
-          liveTabs = liveTabs.filter((tid) => tid !== evicted);
-          const evictedTree = paneTrees[evicted];
-          const label =
-            (evictedTree
-              ? collectSessionIds(evictedTree)
-                  .map((sid) => sessById.get(sid)?.name)
-                  .filter((n): n is string => !!n)
-                  .join(" ⫽ ")
-              : "") || evicted;
-          delete paneTrees[evicted];
-          liveEvictNotice = { label, at: Date.now() };
-        }
+        const eviction = evictLiveOverflow(
+          liveTabs,
+          paneTrees,
+          state.maxLiveTabs,
+          state.runtimes,
+          notifications,
+          sessById,
+        );
+        liveTabs = eviction.liveTabs;
+        const liveEvictNotice = eviction.notice ?? state.liveEvictNotice;
+        const liveEvictAsk = eviction.ask;
         openTabs[idx] = newTabId;
 
         return {
@@ -3239,31 +3275,17 @@ export const useTermStore = create<TermStore>((set, get) => ({
       }
 
       // Apply standard overflow eviction; the newly backgrounded tab sits at the tail and is evicted last.
-      let liveEvictNotice = state.liveEvictNotice;
-      let liveEvictAsk = false;
-      while (liveTabs.length > state.maxLiveTabs) {
-        const evicted = pickEvictTab(
-          liveTabs,
-          paneTrees,
-          state.runtimes,
-          state.notifications,
-        );
-        if (!evicted) {
-          liveEvictAsk = true;
-          break;
-        }
-        liveTabs = liveTabs.filter((tid) => tid !== evicted);
-        const evictedTree = paneTrees[evicted];
-        const label =
-          (evictedTree
-            ? collectSessionIds(evictedTree)
-                .map((sid) => sessById.get(sid)?.name)
-                .filter((n): n is string => !!n)
-                .join(" ⫽ ")
-            : "") || evicted;
-        delete paneTrees[evicted];
-        liveEvictNotice = { label, at: Date.now() };
-      }
+      const eviction = evictLiveOverflow(
+        liveTabs,
+        paneTrees,
+        state.maxLiveTabs,
+        state.runtimes,
+        state.notifications,
+        sessById,
+      );
+      liveTabs = eviction.liveTabs;
+      const liveEvictNotice = eviction.notice ?? state.liveEvictNotice;
+      const liveEvictAsk = eviction.ask;
 
       return {
         openTabs,
@@ -3353,6 +3375,96 @@ export const useTermStore = create<TermStore>((set, get) => ({
         { sessionIds: [id], parentSessionId: activeSessionId, tabId: activeTabId, direction },
       );
     }
+    saveLayoutTick();
+  },
+
+  openSessionInSplit: (sessionId, direction, opts) => {
+    const st = get();
+    const session = st.sessions.find((s) => s.id === sessionId) ?? st.ephemeralSessions[sessionId];
+    // Browser nodes live in their own tabs, outside pane trees.
+    if (!session || session.kind === "browser") return;
+    const paneId = opts?.paneId ?? st.focusedPaneId;
+    if (!st.activeTabId || !st.paneTrees[st.activeTabId] || !paneId) {
+      st.openSession(sessionId, { newTab: true });
+      return;
+    }
+    // The whole move is computed up front and committed by one `set`, so the session never leaves the rendered
+    // layout in between and its terminal is not unmounted.
+    const placed = placeInSplit(st, sessionId, paneId, direction, !!opts?.before);
+    if (!placed) return;
+    // Placing a session is an intent to run it, exactly like opening it.
+    st.wakeSession(sessionId);
+    set(placed);
+    traceSplit(opts?.source ?? "unknown", `${direction} split ${sessionId} beside ${paneId} in tab ${placed.activeTabId}`, {
+      sessionIds: [sessionId],
+      tabId: placed.activeTabId ?? undefined,
+      direction,
+    });
+    get().pruneEphemeral();
+    saveLayoutTick();
+  },
+
+  openSessionInPane: (sessionId, paneId) => {
+    const st = get();
+    const session = st.sessions.find((s) => s.id === sessionId) ?? st.ephemeralSessions[sessionId];
+    if (!session || session.kind === "browser") return;
+    const target = paneId ?? st.focusedPaneId;
+    if (!st.activeTabId || !st.paneTrees[st.activeTabId] || !target) {
+      st.openSession(sessionId);
+      return;
+    }
+    // A named session displaced from the pane keeps running in the background, like a tab replaced under
+    // single-tab mode; a scratch terminal has nothing to come back to and is closed.
+    const sessById = new Map(st.sessions.map((s) => [s.id, s]));
+    const next = placeInPane(st, sessionId, target, (sid) => sessById.has(sid));
+    if (!next) return;
+    st.wakeSession(sessionId);
+    const { backgrounded, ...layout } = next;
+    const eviction = backgrounded
+      ? evictLiveOverflow(
+          layout.liveTabs,
+          layout.paneTrees,
+          st.maxLiveTabs,
+          st.runtimes,
+          st.notifications,
+          sessById,
+        )
+      : null;
+    set({
+      ...layout,
+      ...(eviction
+        ? {
+            liveTabs: eviction.liveTabs,
+            liveEvictNotice: eviction.notice ?? st.liveEvictNotice,
+            liveEvictAsk: eviction.ask,
+          }
+        : {}),
+    });
+    get().pruneEphemeral();
+    saveLayoutTick();
+  },
+
+  tileSessions: (sessionIds) => {
+    const st = get();
+    const ids = [...new Set(sessionIds)].filter((id) => {
+      const session = st.sessions.find((s) => s.id === id) ?? st.ephemeralSessions[id];
+      return !!session && session.kind !== "browser";
+    });
+    if (ids.length === 0) return;
+    if (ids.length === 1) {
+      st.openSession(ids[0], { newTab: true });
+      return;
+    }
+    const placed = placeInGrid(st, ids);
+    if (!placed) return;
+    const tiled = ids.slice(0, GRID_MAX);
+    for (const id of tiled) st.wakeSession(id);
+    set(placed);
+    traceSplit("tile", `tiled ${tiled.length} sessions in tab ${placed.activeTabId}`, {
+      sessionIds: tiled,
+      tabId: placed.activeTabId ?? undefined,
+    });
+    get().pruneEphemeral();
     saveLayoutTick();
   },
 

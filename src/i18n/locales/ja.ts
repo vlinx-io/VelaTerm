@@ -785,6 +785,11 @@ const ja: typeof en = {
   "tree.moveToSession": "セッションの下へ移動（子にする）", // Move under a session (as child)
   "tree.moveTo": "移動先…", // Move to…
   "tree.openNewTab": "新しいタブで開く", // Open in New Tab
+  "tree.openSplitRight": "右に分割して開く", // Open in Split Right
+  "tree.openSplitDown": "下に分割して開く", // Open in Split Down
+  "tree.openInFocusedPane": "アクティブなペインで開く", // Open in Focused Pane
+  "tree.tileSelected": "選択したセッションをタイル表示", // Tile Selected Sessions
+  "tree.tileSelectedTooMany": "タイル表示（最大 4 セッション）", // Tile Selected Sessions (up to 4)
   "tree.forkSession": "セッションをフォーク", // Fork Session
   "tree.exportSession": "セッションをエクスポート…", // Export Session…
   "tree.sessionInfo": "セッション情報", // Session Info

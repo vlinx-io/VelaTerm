@@ -35,6 +35,7 @@ import {
   prefetchGitBranchInfo,
 } from "../hooks/useGitBranch";
 import { type SelNode, useTermStore } from "../store/termStore";
+import { findLeaf } from "./CenterPane/paneTree";
 import { defaultEngineFor, effectivePermissionMode } from "../store/settings";
 import {
   isVirtualProject,
@@ -194,6 +195,8 @@ export function useSessionMenu(): SessionMenu {
   const addSession = useTermStore((s) => s.addSession);
   const agentPresets = useTermStore((s) => s.agentPresets);
   const openSession = useTermStore((s) => s.openSession);
+  const openSessionInSplit = useTermStore((s) => s.openSessionInSplit);
+  const openSessionInPane = useTermStore((s) => s.openSessionInPane);
   // New Terminal creates an eph- draft only in the center pane, without persistence or a tree node.
   const newScratchTab = useTermStore((s) => s.newScratchTab);
   const openMerge = useTermStore((s) => s.openMerge);
@@ -309,6 +312,28 @@ export function useSessionMenu(): SessionMenu {
       onClick: () => void setNodeMark(kind, id, current === m ? null : m),
     }));
     return { label: t("mark.menu"), submenu };
+  };
+
+  // Place a session beside or into the focused pane of the active tab. They need a visible pane tree, and a focused
+  // pane that already shows this session has nothing to split or replace.
+  const paneItems = (sessionId: string): MenuItem[] => {
+    const st = useTermStore.getState();
+    const tree = st.activeTabId ? st.paneTrees[st.activeTabId] : null;
+    const focused = tree && st.focusedPaneId ? findLeaf(tree, st.focusedPaneId) : null;
+    const disabled = !focused || focused.sessionId === sessionId;
+    return [
+      {
+        label: t("tree.openSplitRight"),
+        disabled,
+        onClick: () => openSessionInSplit(sessionId, "horizontal", { source: "sidebar" }),
+      },
+      {
+        label: t("tree.openSplitDown"),
+        disabled,
+        onClick: () => openSessionInSplit(sessionId, "vertical", { source: "sidebar" }),
+      },
+      { label: t("tree.openInFocusedPane"), disabled, onClick: () => openSessionInPane(sessionId) },
+    ];
   };
 
   // Quick create/resume inherits a parent group's worktree into cwd/path/baseRef for local sessions. Browser nodes
@@ -970,6 +995,7 @@ export function useSessionMenu(): SessionMenu {
     const items: MenuItem[] = [
       { label: t("common.open"), onClick: () => openSession(node.id) },
       { label: t("tree.openNewTab"), onClick: () => openSession(node.id, { newTab: true }) },
+      ...paneItems(node.id),
       { label: t("tree.newChildSession"), submenu: newSessionItems(node.projectId, node.groupId, node.id) },
       ...shellMenu,
       ...(canFork
@@ -1116,6 +1142,7 @@ export function useSessionMenu(): SessionMenu {
         items.push(
           { label: t("common.open"), onClick: () => openSession(node.id) },
           { label: t("tree.openNewTab"), onClick: () => openSession(node.id, { newTab: true }) },
+          ...paneItems(node.id),
         );
       } else {
         items.push({ label: t("common.open"), onClick: () => setActiveTab(node.id) });

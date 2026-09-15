@@ -785,6 +785,11 @@ const de: typeof en = {
   "tree.moveToSession": "Unter eine Sitzung verschieben (als Kind)", // Move under a session (as child)
   "tree.moveTo": "Verschieben nach…", // Move to…
   "tree.openNewTab": "In neuem Tab öffnen", // Open in New Tab
+  "tree.openSplitRight": "In Teilung rechts öffnen", // Open in Split Right
+  "tree.openSplitDown": "In Teilung unten öffnen", // Open in Split Down
+  "tree.openInFocusedPane": "Im aktiven Bereich öffnen", // Open in Focused Pane
+  "tree.tileSelected": "Ausgewählte Sitzungen nebeneinander anordnen", // Tile Selected Sessions
+  "tree.tileSelectedTooMany": "Nebeneinander anordnen (bis zu 4 Sitzungen)", // Tile Selected Sessions (up to 4)
   "tree.forkSession": "Sitzung forken", // Fork Session
   "tree.exportSession": "Sitzung exportieren…", // Export Session…
   "tree.sessionInfo": "Sitzungsinfo", // Session Info

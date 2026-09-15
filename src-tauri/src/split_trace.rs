@@ -10,6 +10,9 @@ pub enum Source {
     Shortcut,
     Menu,
     PaneButton,
+    Sidebar,
+    Drop,
+    Tile,
     Mirror,
     Unknown,
 }
@@ -108,5 +111,16 @@ mod tests {
             "source": "menu", "clientAtMs": 1, "sessionIds": ["eph-123"], "terminalText": "private"
         }))
         .is_err());
+    }
+
+    #[test]
+    fn accepts_every_frontend_split_source() {
+        for source in ["shortcut", "menu", "pane-button", "sidebar", "drop", "tile", "mirror", "unknown"] {
+            let entry: Entry = serde_json::from_value(serde_json::json!({
+                "source": source, "clientAtMs": 1, "sessionIds": ["session-1"]
+            }))
+            .unwrap_or_else(|e| panic!("{source}: {e}"));
+            assert!(entry.validate().is_ok(), "{source}");
+        }
     }
 }

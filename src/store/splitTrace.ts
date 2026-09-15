@@ -1,7 +1,8 @@
 //! Diagnostic trail for split panes: who created one, and when.
 //!
-//! Split panes are only ever produced by `splitNew` (keyboard shortcut, menu bar, pane-header button) or
-//! carried in wholesale by a peer's mirror layout. Both are silent: a new pane shows a bare prompt, and the
+//! Split panes are only ever produced by `splitNew` (keyboard shortcut, menu bar, pane-header button), by
+//! placing an existing session into a split (sidebar menu, drop onto a pane, tiling), or carried in wholesale
+//! by a peer's mirror layout. Both are silent: a new pane shows a bare prompt, and the
 //! pane tree is persisted, so a split created without notice looks like it appeared on its own days later.
 //! This records each event so the source can be identified after the fact.
 //!
@@ -16,6 +17,9 @@ export type SplitSource =
   | "shortcut"
   | "menu"
   | "pane-button"
+  | "sidebar"
+  | "drop"
+  | "tile"
   | "mirror"
   | "unknown";
 

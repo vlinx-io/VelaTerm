@@ -72,29 +72,92 @@ export function replaceSession(
   return a === node.a && b === node.b ? node : { ...node, a, b };
 }
 
-/** Split targetPaneId, keeping the original leaf as a and placing the new session in b. */
+/** Split targetPaneId, keeping the original leaf as a and placing the new session in b. With `before`, the new
+ *  session takes side a instead (left or top). */
 export function splitAt(
   node: PaneNode,
   targetPaneId: string,
   dir: "horizontal" | "vertical",
   newSessionId: string,
+  before = false,
 ): PaneNode {
   if (node.kind === "leaf") {
     if (node.paneId !== targetPaneId) return node;
+    const added = makeLeaf(newSessionId);
     return {
       kind: "split",
       paneId: newId(),
       dir,
       sizes: [50, 50],
-      a: node,
-      b: makeLeaf(newSessionId),
+      a: before ? added : node,
+      b: before ? node : added,
     };
   }
   return {
     ...node,
-    a: splitAt(node.a, targetPaneId, dir, newSessionId),
-    b: splitAt(node.b, targetPaneId, dir, newSessionId),
+    a: splitAt(node.a, targetPaneId, dir, newSessionId, before),
+    b: splitAt(node.b, targetPaneId, dir, newSessionId, before),
   };
+}
+
+/** Bind a different session to one pane while preserving its paneId and the surrounding geometry. */
+export function setLeafSession(
+  node: PaneNode,
+  paneId: string,
+  sessionId: string,
+): PaneNode {
+  if (node.kind === "leaf") {
+    return node.paneId === paneId ? { ...node, sessionId } : node;
+  }
+  const a = setLeafSession(node.a, paneId, sessionId);
+  const b = setLeafSession(node.b, paneId, sessionId);
+  return a === node.a && b === node.b ? node : { ...node, a, b };
+}
+
+/** Exchange the sessions shown by two panes of the same tree; geometry and paneIds stay in place. */
+export function swapLeafSessions(
+  node: PaneNode,
+  paneA: string,
+  paneB: string,
+): PaneNode {
+  const a = findLeaf(node, paneA);
+  const b = findLeaf(node, paneB);
+  if (!a || !b || a === b) return node;
+  return setLeafSession(setLeafSession(node, paneA, b.sessionId), paneB, a.sessionId);
+}
+
+/** Maximum number of sessions `buildGrid` lays out. */
+export const GRID_MAX = 4;
+
+/** Build an evenly divided tile layout in reading order: two side by side, three as one full-height pane beside
+ *  a stacked pair, and four as a 2×2 grid. Extra sessions beyond GRID_MAX are ignored. */
+export function buildGrid(sessionIds: string[]): PaneNode | null {
+  const ids = sessionIds.slice(0, GRID_MAX);
+  const [s0, s1, s2, s3] = ids;
+  const split = (dir: "horizontal" | "vertical", a: PaneNode, b: PaneNode): PaneNode => ({
+    kind: "split",
+    paneId: newId(),
+    dir,
+    sizes: [50, 50],
+    a,
+    b,
+  });
+  switch (ids.length) {
+    case 0:
+      return null;
+    case 1:
+      return makeLeaf(s0);
+    case 2:
+      return split("horizontal", makeLeaf(s0), makeLeaf(s1));
+    case 3:
+      return split("horizontal", makeLeaf(s0), split("vertical", makeLeaf(s1), makeLeaf(s2)));
+    default:
+      return split(
+        "horizontal",
+        split("vertical", makeLeaf(s0), makeLeaf(s2)),
+        split("vertical", makeLeaf(s1), makeLeaf(s3)),
+      );
+  }
 }
 
 /** Remove a leaf and promote its sibling over the parent split; return null when the tree empties. */

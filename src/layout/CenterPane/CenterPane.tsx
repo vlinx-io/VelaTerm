@@ -2,7 +2,7 @@
 //! Every session pane remains mounted in an absolutely positioned percentage-based rectangle.
 //! Inactive tabs use `display:none`, keeping xterm and the PTY alive; dividers overlay the active tab.
 
-import { lazy, Suspense, useCallback, useMemo, useRef } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MemoryRoute } from "../Memory/MemoryRoute";
 import { useMemoryTab } from "../Memory/useMemoryTab";
 import Icons from "../../components/Icons";
@@ -20,6 +20,14 @@ import {
   type DividerInfo,
   type Rect,
 } from "./paneTree";
+import {
+  type DropZone,
+  dropZone,
+  SESSION_DRAG_MIME,
+  SESSION_MULTI_DRAG_MIME,
+  zonePreview,
+  zoneSplit,
+} from "./paneDrop";
 import { BrowserView } from "./browser/BrowserView";
 import { env } from "../../platform/env";
 import { DormantPane } from "./DormantPane";
@@ -43,6 +51,16 @@ const rectToStyle = (r: Rect): React.CSSProperties => ({
 });
 
 const FULL: React.CSSProperties = { left: 0, top: 0, width: "100%", height: "100%" };
+
+const FULL_RECT: Rect = { left: 0, top: 0, width: 100, height: 100 };
+
+/** Where a sidebar session drag would land: a pane and zone, or the whole stage (paneId null) for a tiled or
+ *  new tab. */
+interface DropTarget {
+  paneId: string | null;
+  zone: DropZone;
+  preview: Rect;
+}
 
 /** Draggable divider that converts pixel movement within its container into percentage deltas. */
 function Divider({
@@ -135,6 +153,10 @@ export function CenterPane() {
   const closePane = useTermStore((s) => s.closePane);
   const splitNew = useTermStore((s) => s.splitNew);
   const newScratchTab = useTermStore((s) => s.newScratchTab);
+  const openSession = useTermStore((s) => s.openSession);
+  const openSessionInSplit = useTermStore((s) => s.openSessionInSplit);
+  const openSessionInPane = useTermStore((s) => s.openSessionInPane);
+  const tileSessions = useTermStore((s) => s.tileSessions);
 
   // Index sessions and projects by ID for O(1) lookup. Calling find for every entry in allIds.map
   // would make each tab, split, or session update O(mounted panes x sessions).
@@ -174,6 +196,91 @@ export function CenterPane() {
   );
   const multi = layout.length > 1;
 
+  // Sidebar session drags. Terminals and chat panes let dragover and drop bubble up to the stage, which resolves
+  // the pane under the pointer against the active layout and previews where the session would land.
+  const [dropHint, setDropHint] = useState<DropTarget | null>(null);
+  const isSessionDrag = (e: React.DragEvent) => e.dataTransfer.types.includes(SESSION_DRAG_MIME);
+  const dropTarget = (e: React.DragEvent): DropTarget | null => {
+    const box = stageRef.current?.getBoundingClientRect();
+    if (!box || box.width <= 0 || box.height <= 0) return null;
+    if (e.dataTransfer.types.includes(SESSION_MULTI_DRAG_MIME)) {
+      return { paneId: null, zone: "center", preview: FULL_RECT };
+    }
+    const px = ((e.clientX - box.left) / box.width) * 100;
+    const py = ((e.clientY - box.top) / box.height) * 100;
+    const hit = layout.find(
+      ({ rect }) =>
+        px >= rect.left && px <= rect.left + rect.width && py >= rect.top && py <= rect.top + rect.height,
+    );
+    if (!hit) return { paneId: null, zone: "center", preview: FULL_RECT };
+    const zone = dropZone((px - hit.rect.left) / hit.rect.width, (py - hit.rect.top) / hit.rect.height);
+    return { paneId: hit.leaf.paneId, zone, preview: zonePreview(hit.rect, zone) };
+  };
+  const onStageDragOver = (e: React.DragEvent) => {
+    if (!isSessionDrag(e)) return;
+    const target = dropTarget(e);
+    if (!target) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDropHint((prev) =>
+      prev && prev.paneId === target.paneId && prev.zone === target.zone ? prev : target,
+    );
+  };
+  // dragleave also fires when crossing between child elements, and WebKit reports no relatedTarget, so only a
+  // pointer outside the stage's box counts as leaving.
+  const onStageDragLeave = (e: React.DragEvent) => {
+    const box = stageRef.current?.getBoundingClientRect();
+    const inside =
+      !!box &&
+      e.clientX > box.left &&
+      e.clientX < box.right &&
+      e.clientY > box.top &&
+      e.clientY < box.bottom;
+    if (!inside) setDropHint(null);
+  };
+  const onStageDrop = (e: React.DragEvent) => {
+    if (!isSessionDrag(e)) return;
+    // Cancel the default drop even when the payload turns out unusable, so the JSON never lands in a terminal.
+    e.preventDefault();
+    const target = dropTarget(e);
+    setDropHint(null);
+    let ids: string[] = [];
+    try {
+      const parsed: unknown = JSON.parse(e.dataTransfer.getData(SESSION_DRAG_MIME));
+      if (Array.isArray(parsed)) ids = parsed.filter((id): id is string => typeof id === "string");
+    } catch {
+      return;
+    }
+    if (ids.length === 0 || !target) return;
+    // Several sessions become one tiled tab; tileSessions keeps the first four.
+    if (ids.length > 1) {
+      tileSessions(ids);
+      return;
+    }
+    const [id] = ids;
+    if (!target.paneId) {
+      openSession(id, { newTab: true });
+      return;
+    }
+    const split = zoneSplit(target.zone);
+    if (split) {
+      openSessionInSplit(id, split.dir, { paneId: target.paneId, before: split.before, source: "drop" });
+    } else {
+      openSessionInPane(id, target.paneId);
+    }
+  };
+  // A drag cancelled with Escape or released outside the window never reaches onDrop.
+  useEffect(() => {
+    if (!dropHint) return;
+    const clear = () => setDropHint(null);
+    window.addEventListener("dragend", clear, true);
+    window.addEventListener("drop", clear, true);
+    return () => {
+      window.removeEventListener("dragend", clear, true);
+      window.removeEventListener("drop", clear, true);
+    };
+  }, [dropHint]);
+
   // Collect sessions from visible and background keep-alive tabs. All remain mounted; hidden ones use display:none.
   const allIds = new Set<string>();
   for (const tabId of [...openTabs, ...liveTabs]) {
@@ -184,7 +291,14 @@ export function CenterPane() {
   return (
     <div className="col col-mid">
       <TabBar />
-      <div className="stage" ref={stageRef} style={{ position: "relative" }}>
+      <div
+        className="stage"
+        ref={stageRef}
+        style={{ position: "relative" }}
+        onDragOver={onStageDragOver}
+        onDragLeave={onStageDragLeave}
+        onDrop={onStageDrop}
+      >
         <MemoryRoute />
         {searchOpen && activeSessionId && (sessionsById.get(activeSessionId) ?? ephemeralSessions[activeSessionId])?.engine !== "chat" && <SearchBar />}
 
@@ -312,6 +426,22 @@ export function CenterPane() {
           dividers.map((d) => (
             <Divider key={d.paneId} info={d} tabId={activeTabId} stageRef={stageRef} />
           ))}
+
+        {dropHint && (
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              ...rectToStyle(dropHint.preview),
+              zIndex: 7,
+              pointerEvents: "none",
+              boxSizing: "border-box",
+              border: "2px solid var(--accent)",
+              borderRadius: 4,
+              background: "color-mix(in srgb, var(--accent) 14%, transparent)",
+            }}
+          />
+        )}
       </div>
       <LiveTabsOverLimitDialog />
     </div>

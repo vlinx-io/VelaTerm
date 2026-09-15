@@ -277,6 +277,11 @@ svg { display: block; }
 .row.context { background: var(--bg-active); color: var(--text); box-shadow: inset 0 0 0 1px var(--border-strong); }
 .row.sel.context { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-line); }
 .row.active.session::before { content:""; position:absolute; left:0; top:5px; bottom:5px; width:2px; border-radius:2px; background: var(--accent); }
+/* Other panes of the active tab: the focused row's fill and bar at much lower contrast, so the whole split reads as
+   one group while the focused pane keeps the full highlight. Selection, hover and a context-menu target keep their
+   own fill, and an unread row keeps its full-strength yellow bar. */
+.row.in-view.session:not(.sel):not(.context):not(:hover) { background: color-mix(in srgb, var(--accent-soft) 25%, transparent); }
+.row.in-view.session:not(.unread)::before { content:""; position:absolute; left:0; top:5px; bottom:5px; width:2px; border-radius:2px; background: var(--accent-line); opacity: .35; }
 .row .tw { width: 14px; flex: none; display: grid; place-items: center; color: var(--text-faint); }
 .row .tw.leaf { visibility: hidden; }
 .row .ic { width: 16px; flex: none; display: grid; place-items: center; position: relative; }

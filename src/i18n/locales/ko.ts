@@ -781,6 +781,11 @@ const ko: typeof en = {
   "tree.moveToSession": "세션 아래로 이동 (하위로)", // Move under a session (as child)
   "tree.moveTo": "이동…", // Move to…
   "tree.openNewTab": "새 탭에서 열기", // Open in New Tab
+  "tree.openSplitRight": "오른쪽 분할에서 열기", // Open in Split Right
+  "tree.openSplitDown": "아래쪽 분할에서 열기", // Open in Split Down
+  "tree.openInFocusedPane": "활성 창에서 열기", // Open in Focused Pane
+  "tree.tileSelected": "선택한 세션 바둑판 배열", // Tile Selected Sessions
+  "tree.tileSelectedTooMany": "바둑판 배열 (최대 4개 세션)", // Tile Selected Sessions (up to 4)
   "tree.forkSession": "세션 포크", // Fork Session
   "tree.exportSession": "세션 내보내기…", // Export Session…
   "tree.sessionInfo": "세션 정보", // Session Info

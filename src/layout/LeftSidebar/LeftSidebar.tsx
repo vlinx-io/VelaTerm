@@ -25,6 +25,7 @@ import {
 } from "../../types";
 import { MARK_LABEL_KEYS, NODE_MARKS, normalizeMark } from "../../marks";
 import { useSessionMenu } from "../sessionMenu";
+import { GRID_MAX } from "../CenterPane/paneTree";
 import { GlobalSearch } from "../GlobalSearch/GlobalSearch";
 import { labelWithCombo } from "../../hooks/shortcutRegistry";
 import {
@@ -408,6 +409,7 @@ export function LeftSidebar() {
   const selection = useTermStore((s) => s.selection);
   const clearSelection = useTermStore((s) => s.clearSelection);
   const archiveMany = useTermStore((s) => s.archiveMany);
+  const tileSessions = useTermStore((s) => s.tileSessions);
   const archiveGroup = useTermStore((s) => s.archiveGroup);
   const clearNodeWorktree = useTermStore((s) => s.clearNodeWorktree);
   const globalSearchOpen = useTermStore((s) => s.globalSearchOpen);
@@ -552,6 +554,23 @@ export function LeftSidebar() {
             clearSelection();
           },
         });
+        // Tiling lays out two to four sessions in one tab. A larger selection is offered disabled with the limit in
+        // its label, so the user picks which sessions to tile instead of the menu choosing the first four.
+        const tileIds = selection
+          .filter((s) => s.kind === "session")
+          .map((s) => s.id)
+          .filter((id) => useTermStore.getState().sessions.find((x) => x.id === id)?.kind !== "browser");
+        if (tileIds.length >= 2) {
+          const tooMany = tileIds.length > GRID_MAX;
+          items.push({
+            label: t(tooMany ? "tree.tileSelectedTooMany" : "tree.tileSelected"),
+            disabled: tooMany,
+            onClick: () => {
+              tileSessions(tileIds);
+              clearSelection();
+            },
+          });
+        }
         // Refresh Status re-checks each selected session against this pane's status filter, mirroring the
         // single-session item. It appears only when the pane the menu was opened from filters by status.
         const statusView = sidebarTreeViews.find(

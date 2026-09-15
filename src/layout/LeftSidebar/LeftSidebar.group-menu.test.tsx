@@ -193,5 +193,8 @@ describe("LeftSidebar", () => {
     expect(sessionRowClassName(false, true, false, false)).toBe("row session active");
     expect(sessionRowClassName(true, false, false, false)).toBe("row session sel");
     expect(sessionRowClassName(true, true, false, false)).toBe("row session sel active");
+    // Other panes of the active tab get the quieter marker; the focused pane never does.
+    expect(sessionRowClassName(false, false, false, false, true)).toBe("row session in-view");
+    expect(sessionRowClassName(false, true, false, false, true)).toBe("row session active");
   });
 });

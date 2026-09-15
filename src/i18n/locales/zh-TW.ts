@@ -769,6 +769,11 @@ const zhTW: typeof en = {
   "tree.moveToSession": "移到會話下（成為子會話）", // Move under a session (as child)
   "tree.moveTo": "移動到…", // Move to…
   "tree.openNewTab": "在新分頁開啟", // Open in New Tab
+  "tree.openSplitRight": "在右側分割開啟", // Open in Split Right
+  "tree.openSplitDown": "在下方分割開啟", // Open in Split Down
+  "tree.openInFocusedPane": "在目前分割開啟", // Open in Focused Pane
+  "tree.tileSelected": "並排選取的會話", // Tile Selected Sessions
+  "tree.tileSelectedTooMany": "並排選取的會話（最多 4 個）", // Tile Selected Sessions (up to 4)
   "tree.forkSession": "Fork 會話", // Fork Session
   "tree.exportSession": "匯出會話…", // Export Session…
   "tree.sessionInfo": "會話資訊", // Session Info
