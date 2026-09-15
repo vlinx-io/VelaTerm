@@ -1409,6 +1409,101 @@ const fr: typeof en = {
   "mobile.selCopy": "Copier", // Copy
   "mobile.selCancel": "Annuler", // Cancel
 
+  // ── Mobile connection client (apps/mobile start page) ──
+  "mobile.phaseConnecting": "Connecting over SSH…", // TODO translate
+  "mobile.phaseConfirming": "Confirm the host fingerprint", // TODO translate
+  "mobile.phasePreparing": "Checking or preparing the remote service…", // TODO translate
+  "mobile.phaseForwarding": "Opening the SSH tunnel…", // TODO translate
+  "mobile.phaseReady": "Connected", // TODO translate
+  "mobile.phaseDisconnected": "Disconnected", // TODO translate
+  "mobile.phaseError": "Connection failed", // TODO translate
+  "mobile.accountAndLogin": "Account and sign-in", // TODO translate
+  "mobile.connectionService": "Connection service unavailable", // TODO translate
+  "mobile.nativeOnly": "Connecting is only available in the iOS or Android app. The browser is only for previewing the interface.", // TODO translate
+  "mobile.managedRemotely": "Projects and sessions are managed by the remote service.", // TODO translate
+  "mobile.buildInfo": (version: string, time: string) => `App v${version} · Built ${time}`, // TODO translate
+  "mobile.myDevices": "My devices", // TODO translate
+  "mobile.account": "Account", // TODO translate
+  "mobile.signedInHint": "Signed in. You can view the workspaces, projects, and sessions shared by devices on this account.", // TODO translate
+  "mobile.manageAccount": "Manage account", // TODO translate
+  "mobile.signOut": "Sign out", // TODO translate
+  "mobile.viewMyDevices": "View my devices", // TODO translate
+  "mobile.noDevices": "No devices are signed in to this account yet.", // TODO translate
+  "mobile.online": "Online", // TODO translate
+  "mobile.offline": "Offline", // TODO translate
+  "mobile.deviceNotSharing": "The device is not sharing anything yet.", // TODO translate
+  "mobile.scopeMachine": "Entire workspace", // TODO translate
+  "mobile.scopeProject": "Project", // TODO translate
+  "mobile.scopeSession": "Session", // TODO translate
+  "mobile.sharingNotReady": "Shared content is not ready yet. Check the sharing settings on that device.", // TODO translate
+  "mobile.deviceOffline": "The device is offline. Open VelaTerm on that device and keep it connected to the network.", // TODO translate
+  "mobile.viewShared": "View shared content →", // TODO translate
+  "mobile.devicesUnavailable": "Could not load the device list. Please try again.", // TODO translate
+  "mobile.accountUnavailable": "Could not load the account status. Check your network and try again.", // TODO translate
+  "mobile.signInTitle": "Sign in to VelaTerm", // TODO translate
+  "mobile.signInHint": "Sign in with your email and password or a third-party account to see your devices and shared content.", // TODO translate
+  "mobile.signIn": "Sign in", // TODO translate
+  "mobile.checkSignIn": "Check sign-in status", // TODO translate
+  "mobile.waitingSignIn": "Waiting for sign-in confirmation…", // TODO translate
+  "mobile.workspaceTitle": "Your workspace", // TODO translate
+  "mobile.workspaceHint": "Connect to a remote host and pick up where you left off.", // TODO translate
+  "mobile.newSsh": "+ SSH connection", // TODO translate
+  "mobile.newUrl": "+ URL connection", // TODO translate
+  "mobile.remote": "My devices", // TODO translate
+  "mobile.scanToConnect": "Scan QR code to connect", // TODO translate
+  "mobile.noConnections": "No saved connections yet. Add an SSH or URL connection, or open Remote to see content shared by devices on your account.", // TODO translate
+  "mobile.tapToConnect": "Tap to connect →", // TODO translate
+  "mobile.webPasswordSaved": "Access password saved", // TODO translate
+  "mobile.deleteConnectionTitle": "Delete connection", // TODO translate
+  "mobile.deleteConnectionConfirm": (name: string) => `Delete “${name}” and its saved credentials? Remote projects are not deleted.`, // TODO translate
+  "mobile.connectionMissing": "Connection not found", // TODO translate
+  "mobile.editConnection": "Edit connection", // TODO translate
+  "mobile.addSshHost": "Add SSH connection", // TODO translate
+  "mobile.addUrlConnection": "Add URL connection", // TODO translate
+  "mobile.connectionName": "Connection name", // TODO translate
+  "mobile.serviceUrl": "Service address", // TODO translate
+  "mobile.scanToFill": "Fill in from QR code", // TODO translate
+  "mobile.openingCamera": "Opening the camera…", // TODO translate
+  "mobile.scanCancelled": "Scan cancelled", // TODO translate
+  "mobile.scanDone": "Service address detected. Check it, then save and connect.", // TODO translate
+  "mobile.scanNativeOnly": "QR scanning is only available in the iOS or Android app.", // TODO translate
+  "mobile.webPasswordOptional": "Access password (optional)", // TODO translate
+  "mobile.keepPassword": "Leave empty to keep the current password", // TODO translate
+  "mobile.webPasswordLater": "You can also enter it after connecting", // TODO translate
+  "mobile.webPasswordSavedHint": "The access password is saved and used automatically when you reconnect. Leaving the field empty keeps the saved password.", // TODO translate
+  "mobile.webPasswordStorageHint": "The password is kept in the phone’s secure storage. You can also choose to remember it when you enter it after connecting.", // TODO translate
+  "mobile.sshHost": "SSH host", // TODO translate
+  "mobile.sshHostPlaceholder": "Hostname or IP address", // TODO translate
+  "mobile.sshPort": "SSH port", // TODO translate
+  "mobile.username": "Username", // TODO translate
+  "mobile.authMethod": "Authentication", // TODO translate
+  "mobile.authPassword": "Password", // TODO translate
+  "mobile.authKeyAndroid": "Private key (OpenSSH Ed25519 / RSA)", // TODO translate
+  "mobile.authKey": "Private key (OpenSSH Ed25519)", // TODO translate
+  "mobile.sshPassword": "SSH password", // TODO translate
+  "mobile.privateKey": "Private key", // TODO translate
+  "mobile.keepPrivateKey": "Leave empty to keep the saved private key", // TODO translate
+  "mobile.pastePrivateKey": "Paste an OpenSSH private key", // TODO translate
+  "mobile.passphraseOptional": "Key passphrase (optional)", // TODO translate
+  "mobile.keepPassphrase": "Leave empty to keep the current passphrase", // TODO translate
+  "mobile.sshSecretSavedHint": "SSH credentials are kept in the phone’s secure storage. Leave the fields empty while editing to keep them.", // TODO translate
+  "mobile.remoteService": "Remote service", // TODO translate
+  "mobile.serviceAuto": "Find the VelaTerm service automatically", // TODO translate
+  "mobile.serviceManual": "Use an existing service port", // TODO translate
+  "mobile.remotePort": "Remote loopback HTTP port", // TODO translate
+  "mobile.webPasswordAutoHint": "The access password is saved and used automatically when you reconnect.", // TODO translate
+  "mobile.prepareService": "Download and start the VelaTerm service when none is available", // TODO translate
+  "mobile.prepareServiceHint": "Automatic preparation writes a signature-verified binary, configuration, and logs to ~/.velaterm/ on the remote host and keeps the service running. It needs Python 3 and an OpenSSL with Ed25519 support; reusing an existing service or specifying its port does not.", // TODO translate
+  "mobile.saveConnection": "Save connection", // TODO translate
+  "mobile.saveAndConnect": "Save and connect", // TODO translate
+  "mobile.loginOpening": "Opening the sign-in page in your browser…", // TODO translate
+  "mobile.loginFinishInBrowser": "Complete the sign-in in the browser window, then return to the app.", // TODO translate
+  "mobile.loginChecking": "Checking sign-in status…", // TODO translate
+  "mobile.loginSuccess": "Signed in.", // TODO translate
+  "mobile.loginWaiting": "Waiting for sign-in confirmation. Your account and device list update automatically once sign-in completes.", // TODO translate
+  "mobile.loginExpired": "The sign-in request has expired. Please sign in again.", // TODO translate
+  "mobile.loginRetrying": "The account service is temporarily unreachable. Retrying. You do not need to sign in again.", // TODO translate
+
   // ── Other shared components ──
   "splitter.dragToResize": "Glisser pour redimensionner", // Drag to resize
   "transport.wsDisconnected": "WebSocket déconnecté", // WebSocket disconnected

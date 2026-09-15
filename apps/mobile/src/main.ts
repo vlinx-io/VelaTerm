@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { Remote, type Connection } from './remote';
 import { routeFromHash, editHref, copyHref } from './routes';
-import { initI18n, t } from '../../../src/i18n';
+import { initI18n, getLocale, t } from '../../../src/i18n';
 import { AccountLogin } from './account-login';
 import { ConnectionAttempt } from './connection-attempt';
 import { notificationSettings } from './notification-settings';
@@ -14,7 +14,9 @@ let scanning=false;
 const accountLogin=new AccountLogin(action=>Remote.account({action}));
 let releaseLoginView:()=>void=()=>{};
 let renderGeneration=0;
-const phases:Record<string,string>={connecting:'正在连接 SSH…',confirming:'请确认主机指纹',preparing:'正在检查或准备远端服务…',forwarding:'正在建立 SSH 隧道…',ready:'连接已建立',disconnected:'连接已断开',error:'连接失败'};
+const phases:Record<string,Parameters<typeof t>[0]>={connecting:'mobile.phaseConnecting',confirming:'mobile.phaseConfirming',preparing:'mobile.phasePreparing',forwarding:'mobile.phaseForwarding',ready:'mobile.phaseReady',disconnected:'mobile.phaseDisconnected',error:'mobile.phaseError'};
+// Build time is embedded as UTC ISO text; show it in the device's locale and time zone.
+const buildTime=()=>new Intl.DateTimeFormat(getLocale(),{dateStyle:'medium',timeStyle:'short'}).format(new Date(__MOBILE_BUILD_TIME__));
 function el<K extends keyof HTMLElementTagNameMap>(tag:K,text?:string,cls?:string):HTMLElementTagNameMap[K] {const e=document.createElement(tag);if(text)e.textContent=text;if(cls)e.className=cls;return e}
 function link(text:string,href:string):HTMLAnchorElement {const a=el('a',text);a.href=href;return a}
 function button(text:string,action:()=>void,cls=''):HTMLButtonElement {const b=el('button',text,cls);b.type='button';b.onclick=action;return b}
@@ -63,16 +65,16 @@ async function render() {
   const generation=++renderGeneration;
   releaseLoginView();releaseLoginView=()=>{};
   if(busy) cancelConnection();
-  app.replaceChildren();const header=el('header');const logo=el('img',undefined,'mark');logo.src=new URL('../assets/icon-ios.svg',import.meta.url).href;logo.alt='';logo.width=44;logo.height=44;logo.draggable=false;header.append(logo,el('div','VelaTerm','brand'));const accountButton=link('','#/account');accountButton.className='account-button';accountButton.innerHTML='<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.7 aria-hidden=true><circle cx=12 cy=8 r=4></circle><path d="M4 22v-2a8 8 0 0 1 16 0v2"></path></svg>';accountButton.title='账号与登录';accountButton.setAttribute('aria-label','账号与登录');header.append(accountButton);app.append(header);
+  app.replaceChildren();const header=el('header');const logo=el('img',undefined,'mark');logo.src=new URL('../assets/icon-ios.svg',import.meta.url).href;logo.alt='';logo.width=44;logo.height=44;logo.draggable=false;header.append(logo,el('div','VelaTerm','brand'));const accountButton=link('','#/account');accountButton.className='account-button';accountButton.innerHTML='<svg width=22 height=22 viewBox="0 0 24 24" fill=none stroke=currentColor stroke-width=1.7 aria-hidden=true><circle cx=12 cy=8 r=4></circle><path d="M4 22v-2a8 8 0 0 1 16 0v2"></path></svg>';accountButton.title=t('mobile.accountAndLogin');accountButton.setAttribute('aria-label',t('mobile.accountAndLogin'));header.append(accountButton);app.append(header);
   const notice=el('p');notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');
-  try {records=(await Remote.list()).connections} catch(error) {app.append(el('h1','连接服务'),el('p',Capacitor.isNativePlatform()?String(error):'请在 iOS 或 Android App 中使用连接功能。浏览器仅用于检查界面。'));records=[]}
+  try {records=(await Remote.list()).connections} catch(error) {app.append(el('h1',t('mobile.connectionService')),el('p',Capacitor.isNativePlatform()?String(error):t('mobile.nativeOnly')));records=[]}
   if(generation!==renderGeneration)return;
-  const footer=el('footer');footer.append(notice,el('p','项目与会话由远端服务管理。','hint'),el('p',`App v${__MOBILE_VERSION__} · 构建 ${__MOBILE_BUILD_TIME__}（北京时间）`,'hint build-info'));
+  const footer=el('footer');footer.append(notice,el('p',t('mobile.managedRemotely'),'hint'),el('p',t('mobile.buildInfo',__MOBILE_VERSION__,buildTime()),'hint build-info'));
   const route=routeFromHash(location.hash);
   if(route.page==='notifications') {
     app.append(link('‹ '+t('mobile.backConnections'),'#/'),el('h1',t('mobile.pushTitle')),notificationSettings(records));
   } else if(route.page==='remote' || route.page==='account') {
-    app.append(link('‹ 连接列表','#/'),el('h1',route.page==='remote'?'我的设备':'账号'));
+    app.append(link('‹ '+t('mobile.backConnections'),'#/'),el('h1',route.page==='remote'?t('mobile.myDevices'):t('mobile.account')));
     const panel=el('section',undefined,'remote-account-card');app.append(panel);
     if(route.page==='account') app.append(link(t('mobile.pushTitle'),'#/notifications'));
     let linked=false;let accountKnown=false;let pending=false;
@@ -81,43 +83,43 @@ async function render() {
       if(generation!==renderGeneration)return;
       linked=!!result.linked;pending=!!result.pending;accountKnown=true;
       if(linked) {
-        panel.append(el('h2',result.account?.displayName ?? 'VelaTerm'),el('p','已登录。可查看同账号设备共享的空间、项目和会话。','muted'));
-        if(route.page==='account') panel.append(button('管理账号',()=>void Remote.account({action:'open'}).catch(e=>status(String(e),true))),button('退出登录',()=>void Remote.account({action:'logout'}).then(()=>{accountLogin.reset();return render()}).catch(e=>status(String(e),true))),link('查看我的设备','#/remote'));
+        panel.append(el('h2',result.account?.displayName ?? 'VelaTerm'),el('p',t('mobile.signedInHint'),'muted'));
+        if(route.page==='account') panel.append(button(t('mobile.manageAccount'),()=>void Remote.account({action:'open'}).catch(e=>status(String(e),true))),button(t('mobile.signOut'),()=>void Remote.account({action:'logout'}).then(()=>{accountLogin.reset();return render()}).catch(e=>status(String(e),true))),link(t('mobile.viewMyDevices'),'#/remote'));
         else {
           const list=el('div',undefined,'remote-client-list');app.append(list);
           const refresh=async()=>{
             try {
               const {devices=[]}=await Remote.account({action:'devices'});
               if(!list.isConnected)return;list.replaceChildren();
-              if(!devices.length)list.append(el('p','此账号尚未登录任何设备。'));
+              if(!devices.length)list.append(el('p',t('mobile.noDevices')));
               for(const device of devices){
-                const card=el('section',undefined,'remote-client');card.append(el('h2',device.name),el('p',device.online?'在线':'离线','muted'));
-                if(!device.access.length){card.append(el('p','此设备尚未共享内容。','muted'));list.append(card);continue;}
+                const card=el('section',undefined,'remote-client');card.append(el('h2',device.name),el('p',t(device.online?'mobile.online':'mobile.offline'),'muted'));
+                if(!device.access.length){card.append(el('p',t('mobile.deviceNotSharing'),'muted'));list.append(card);continue;}
                 const scopes=el('ul',undefined,'remote-client-shares');
-                for(const scope of device.access)scopes.append(el('li',scope.scope==='machine'?'整个工作空间':scope.name===scope.scope?(scope.scope==='project'?'项目':'会话'):scope.name));
+                for(const scope of device.access)scopes.append(el('li',scope.scope==='machine'?t('mobile.scopeMachine'):scope.name===scope.scope?t(scope.scope==='project'?'mobile.scopeProject':'mobile.scopeSession'):scope.name));
                 card.append(scopes);
-                if(!device.online || !device.sharing){card.append(el('p',device.online?'共享内容尚未就绪，请在该设备上检查共享设置。':'设备已离线，请在该设备上打开 VelaTerm 并保持网络连接。','muted'));list.append(card);continue;}
-                const open=button('查看共享内容 →',async()=>{
+                if(!device.online || !device.sharing){card.append(el('p',t(device.online?'mobile.sharingNotReady':'mobile.deviceOffline'),'muted'));list.append(card);continue;}
+                const open=button(t('mobile.viewShared'),async()=>{
                   open.disabled=true;
                   try{await Remote.account({action:'open',deviceId:device.id})}catch(error){status(String(error),true)}finally{open.disabled=false}
                 });
                 card.append(open);list.append(card);
               }
-            }catch(error){if(list.isConnected){list.replaceChildren(el('p','无法获取设备列表，请重试。'));status(String(error),true);}}
+            }catch(error){if(list.isConnected){list.replaceChildren(el('p',t('mobile.devicesUnavailable')));status(String(error),true);}}
             if(list.isConnected)setTimeout(()=>void refresh(),5000);
           };void refresh();
         }
       }
-    }catch(error){panel.append(el('p','无法获取账号状态，请检查网络后重试。'),button('重试',()=>void render()));notice.textContent=String(error);notice.classList.add('error');}
+    }catch(error){panel.append(el('p',t('mobile.accountUnavailable')),button(t('common.retry'),()=>void render()));notice.textContent=String(error);notice.classList.add('error');}
     if(!linked && accountKnown) {
-      panel.append(el('h2','登录 VelaTerm'),el('p','通过邮箱密码或第三方账号登录，查看你的设备和共享内容。'));
-      const signIn=button('登录',()=>void accountLogin.start(),'primary');
+      panel.append(el('h2',t('mobile.signInTitle')),el('p',t('mobile.signInHint')));
+      const signIn=button(t('mobile.signIn'),()=>void accountLogin.start(),'primary');
       const progress=el('p');progress.setAttribute('role','status');progress.setAttribute('aria-live','polite');
-      const checkLogin=button('检查登录结果',()=>void accountLogin.check());
+      const checkLogin=button(t('mobile.checkSignIn'),()=>void accountLogin.check());
       panel.append(signIn,progress,checkLogin);
       const update=()=>{
-        signIn.disabled=accountLogin.active;signIn.textContent=accountLogin.active?'正在等待登录确认…':'登录';
-        progress.textContent=accountLogin.state.message;progress.hidden=!progress.textContent;
+        signIn.disabled=accountLogin.active;signIn.textContent=t(accountLogin.active?'mobile.waitingSignIn':'mobile.signIn');
+        progress.textContent=accountLogin.state.message?t(accountLogin.state.message):accountLogin.state.error??'';progress.hidden=!progress.textContent;
         progress.classList.toggle('error',accountLogin.state.phase==='error');checkLogin.hidden=!accountLogin.active;
         if(accountLogin.state.phase==='linked')void render();
       };
@@ -126,71 +128,71 @@ async function render() {
       update();if(pending)void accountLogin.resume();
     }
   } else if(route.page==='list') {
-    app.append(el('h1','你的工作空间'),el('p','连接远程主机，继续项目中的工作。','muted'));
-    const actions=el('nav',undefined,'actions');actions.append(link('＋ SSH 连接','#/connections/new?mode=ssh'),link('＋ URL 连接','#/connections/new?mode=url'),link('Remote','#/remote'),link('扫码连接','#/connections/new?mode=url&scan=1'));app.append(actions);
-    if(!records.length) app.append(el('section','尚未保存连接。可添加 SSH、URL 连接，或通过 Remote 查看同账号设备的共享内容。','empty'));
+    app.append(el('h1',t('mobile.workspaceTitle')),el('p',t('mobile.workspaceHint'),'muted'));
+    const actions=el('nav',undefined,'actions');actions.append(link(t('mobile.newSsh'),'#/connections/new?mode=ssh'),link(t('mobile.newUrl'),'#/connections/new?mode=url'),link(t('mobile.remote'),'#/remote'),link(t('mobile.scanToConnect'),'#/connections/new?mode=url&scan=1'));app.append(actions);
+    if(!records.length) app.append(el('section',t('mobile.noConnections'),'empty'));
     for(const row of records) {
       const card=el('article',undefined,'connection-card');
       const open=button('',()=>void connect(row.id!),'connection-open');open.dataset.connect='true';
       let address=row.mode==='ssh'?`${row.username}@${row.host}:${row.port}`:row.url ?? '';
-      if(row.mode==='url'){try{const url=new URL(address);address=url.origin+url.pathname}catch{/* 保留无法解析的旧地址供用户编辑。 */}}
-      open.append(el('span',row.name,'connection-name'),el('span',address,'connection-address muted'),el('span','点击连接 →','connection-action'));
+      if(row.mode==='url'){try{const url=new URL(address);address=url.origin+url.pathname}catch{/* Keep an unparseable legacy address so the user can edit it. */}}
+      open.append(el('span',row.name,'connection-name'),el('span',address,'connection-address muted'),el('span',t('mobile.tapToConnect'),'connection-action'));
       card.append(open);
-      if(row.hasWebPassword)card.append(el('p','服务密码已保存','saved-secret hint'));
-      const controls=el('div',undefined,'controls');controls.append(el('span',row.mode.toUpperCase(),'badge'),link('编辑',editHref(row.id!)),link(t('mobile.copyConnection'),copyHref(row.id!)),button('删除',()=>{
-        const dialog=el('dialog');dialog.append(el('h2','删除连接'),el('p',`删除“${row.name}”及其保存的凭据？远端项目不会被删除。`),button('取消',()=>dialog.remove()),button('删除',()=>{void Remote.remove({id:row.id!}).then(()=>{dialog.remove();return render()}).catch(e=>status(String(e),true))}));app.append(dialog);dialog.showModal();
+      if(row.hasWebPassword)card.append(el('p',t('mobile.webPasswordSaved'),'saved-secret hint'));
+      const controls=el('div',undefined,'controls');controls.append(el('span',row.mode.toUpperCase(),'badge'),link(t('common.edit'),editHref(row.id!)),link(t('mobile.copyConnection'),copyHref(row.id!)),button(t('common.delete'),()=>{
+        const dialog=el('dialog');dialog.append(el('h2',t('mobile.deleteConnectionTitle')),el('p',t('mobile.deleteConnectionConfirm',row.name)),button(t('common.cancel'),()=>dialog.remove()),button(t('common.delete'),()=>{void Remote.remove({id:row.id!}).then(()=>{dialog.remove();return render()}).catch(e=>status(String(e),true))}));app.append(dialog);dialog.showModal();
       }));card.append(controls);app.append(card);
     }
   } else {
     const sourceId=route.copyFromId ?? route.id;
-    const row=records.find(r=>r.id===sourceId);if(sourceId && !row){app.append(el('p','连接不存在'),link('返回连接列表','#/'));return}
+    const row=records.find(r=>r.id===sourceId);if(sourceId && !row){app.append(el('p',t('mobile.connectionMissing')),link(t('mobile.backConnections'),'#/'));return}
     const mode=row?.mode ?? route.mode;
-    app.append(link('‹ 连接列表','#/'),el('h1',route.copyFromId?t('mobile.copyConnection'):row?'编辑连接':mode==='ssh'?'添加 SSH 主机':'添加 URL 连接'));
+    app.append(link('‹ '+t('mobile.backConnections'),'#/'),el('h1',t(route.copyFromId?'mobile.copyConnection':row?'mobile.editConnection':mode==='ssh'?'mobile.addSshHost':'mobile.addUrlConnection')));
     if(route.copyFromId)app.append(el('p',t('mobile.copyConnectionHint'),'hint'));
-    const form=el('form');const nameInput=field(form,'连接名称','name',row?.name);nameInput.required=true;
+    const form=el('form');const nameInput=field(form,t('mobile.connectionName'),'name',row?.name);nameInput.required=true;
     if(mode==='url') {
-      const urlInput=field(form,'服务地址','url',row?.url,'url','https://your-server.example');urlInput.required=true;
-      const scan=button('扫码填写',()=>void scanURL());scan.className='scan-button';form.append(scan);
+      const urlInput=field(form,t('mobile.serviceUrl'),'url',row?.url,'url','https://your-server.example');urlInput.required=true;
+      const scan=button(t('mobile.scanToFill'),()=>void scanURL());scan.className='scan-button';form.append(scan);
       async function scanURL() {
         if(scanning || busy)return;
         scanning=true;scan.disabled=true;form.querySelectorAll<HTMLButtonElement>('button[type=submit]').forEach(b=>b.disabled=true);
-        status('正在打开相机…');
+        status(t('mobile.openingCamera'));
         try {
           const result=await Remote.scanURL();
           if(!form.isConnected)return;
-          if('cancelled' in result){status('已取消扫码');return}
+          if('cancelled' in result){status(t('mobile.scanCancelled'));return}
           urlInput.value=result.url;if(!nameInput.value.trim())nameInput.value=result.name;
-          status('已识别服务地址，请确认后保存并连接。');
-        } catch(error) {if(form.isConnected)status(Capacitor.isNativePlatform()?String(error):'请在手机 App 中使用相机扫码。',true)}
+          status(t('mobile.scanDone'));
+        } catch(error) {if(form.isConnected)status(Capacitor.isNativePlatform()?String(error):t('mobile.scanNativeOnly'),true)}
         finally {scanning=false;scan.disabled=false;form.querySelectorAll<HTMLButtonElement>('button[type=submit]').forEach(b=>b.disabled=busy)}
       }
       if(route.scan) {
         history.replaceState(null,'','#/connections/new?mode=url');
         setTimeout(()=>{if(form.isConnected)void scanURL()},0);
       }
-      field(form,'服务密码（可选）','webPassword','','password',row?'留空保留原密码':'也可进入网页后登录');
-      form.append(el('p',row?.hasWebPassword?'服务密码已保存，重新连接时会自动使用。留空不会清除已保存的密码。':'密码保存在手机安全存储中，也可在登录时选择记住密码。','hint'));
+      field(form,t('mobile.webPasswordOptional'),'webPassword','','password',t(row?'mobile.keepPassword':'mobile.webPasswordLater'));
+      form.append(el('p',t(row?.hasWebPassword?'mobile.webPasswordSavedHint':'mobile.webPasswordStorageHint'),'hint'));
     } else {
-      field(form,'SSH 主机','host',row?.host,'text','主机名或 IP 地址').required=true;
-      field(form,'SSH 端口','port',String(row?.port ?? 22),'number').required=true;
-      field(form,'用户名','username',row?.username).required=true;
-      const auth=select(form,'认证方式','auth',[['password','密码'],['key',Capacitor.getPlatform()==='android'?'私钥（OpenSSH Ed25519 / RSA）':'私钥（OpenSSH Ed25519）']],row?.auth ?? 'password');
-      const password=field(form,'SSH 密码','password','','password',row?'留空保留原密码':'');
-      const keyWrap=el('label','私钥');const key=el('textarea');key.name='privateKey';key.rows=6;key.spellcheck=false;key.placeholder=row?'留空保留已保存私钥':'粘贴 OpenSSH 私钥';keyWrap.append(key);form.append(keyWrap);
-      const pass=field(form,'私钥口令（可选）','passphrase','','password',row?'留空保留原口令':'');
-      if(row?.hasSecret)form.append(el('p','SSH 凭据已保存在手机安全存储中，编辑时留空即可保留。','hint'));
+      field(form,t('mobile.sshHost'),'host',row?.host,'text',t('mobile.sshHostPlaceholder')).required=true;
+      field(form,t('mobile.sshPort'),'port',String(row?.port ?? 22),'number').required=true;
+      field(form,t('mobile.username'),'username',row?.username).required=true;
+      const auth=select(form,t('mobile.authMethod'),'auth',[['password',t('mobile.authPassword')],['key',t(Capacitor.getPlatform()==='android'?'mobile.authKeyAndroid':'mobile.authKey')]],row?.auth ?? 'password');
+      const password=field(form,t('mobile.sshPassword'),'password','','password',row?t('mobile.keepPassword'):'');
+      const keyWrap=el('label',t('mobile.privateKey'));const key=el('textarea');key.name='privateKey';key.rows=6;key.spellcheck=false;key.placeholder=t(row?'mobile.keepPrivateKey':'mobile.pastePrivateKey');keyWrap.append(key);form.append(keyWrap);
+      const pass=field(form,t('mobile.passphraseOptional'),'passphrase','','password',row?t('mobile.keepPassphrase'):'');
+      if(row?.hasSecret)form.append(el('p',t('mobile.sshSecretSavedHint'),'hint'));
       const updateAuth=()=>{password.parentElement!.hidden=auth.value!=='password';keyWrap.hidden=pass.parentElement!.hidden=auth.value!=='key'};auth.onchange=updateAuth;updateAuth();
-      const service=select(form,'远端服务','service',[['auto','自动查找 VelaTerm 服务'],['manual','指定已有服务端口']],row?.service ?? 'auto');
-      const remotePort=field(form,'远端回环 HTTP 服务端口','remotePort',row?.remotePort?String(row.remotePort):'','number');
-      const webPassword=field(form,'服务密码（可选）','webPassword','','password',row?'留空保留原密码':'');
-      if(row?.hasWebPassword)form.append(el('p','服务密码已保存，重新连接时会自动使用。','hint'));
-      const prepare=check(form,'没有可用服务时，允许下载并启动 VelaTerm 服务','prepare',row?.prepare ?? false);
-      const detail=el('p','自动准备会在远端 ~/.velaterm/ 写入经过签名校验的程序、配置和日志，并保留运行服务。需要 Python 3 和支持 Ed25519 的 OpenSSL；复用已有服务或指定端口不需要安装这些工具。','hint');form.append(detail);
+      const service=select(form,t('mobile.remoteService'),'service',[['auto',t('mobile.serviceAuto')],['manual',t('mobile.serviceManual')]],row?.service ?? 'auto');
+      const remotePort=field(form,t('mobile.remotePort'),'remotePort',row?.remotePort?String(row.remotePort):'','number');
+      const webPassword=field(form,t('mobile.webPasswordOptional'),'webPassword','','password',row?t('mobile.keepPassword'):'');
+      if(row?.hasWebPassword)form.append(el('p',t('mobile.webPasswordAutoHint'),'hint'));
+      const prepare=check(form,t('mobile.prepareService'),'prepare',row?.prepare ?? false);
+      const detail=el('p',t('mobile.prepareServiceHint'),'hint');form.append(detail);
       const updateService=()=>{remotePort.parentElement!.hidden=webPassword.parentElement!.hidden=service.value!=='manual';prepare.parentElement!.hidden=detail.hidden=service.value!=='auto'};service.onchange=updateService;updateService();
     }
     const saves=el('div',undefined,'save-actions');
-    const save=el('button','保存连接');save.type='submit';saves.append(save);
-    if(mode==='url'){const open=el('button','保存并连接','primary');open.type='submit';open.value='connect';saves.append(open)}
+    const save=el('button',t('mobile.saveConnection'));save.type='submit';saves.append(save);
+    if(mode==='url'){const open=el('button',t('mobile.saveAndConnect'),'primary');open.type='submit';open.value='connect';saves.append(open)}
     if(route.copyFromId)saves.append(link(t('common.cancel'),'#/'));
     form.append(saves);
     form.onsubmit=e=>{e.preventDefault();if(busy || scanning)return;const openAfter=(e.submitter as HTMLButtonElement | null)?.value==='connect';const values=new FormData(form);const data:Connection={...(!route.copyFromId && row?{id:row.id}:{}),name:String(values.get('name')??'').trim(),mode};
@@ -206,10 +208,10 @@ window.addEventListener('hashchange',()=>void render());
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)void accountLogin.check()});
 window.addEventListener('focus',()=>void accountLogin.check());
 if(Capacitor.isNativePlatform()) void Remote.addListener('state',event=>{
-  if(event.phase==='disconnected' && !busy && !scanning && routeFromHash(location.hash).page==='list')void render().then(()=>status(phases.disconnected));
-  else status(phases[event.phase]??event.phase,event.phase==='error');
+  if(event.phase==='disconnected' && !busy && !scanning && routeFromHash(location.hash).page==='list')void render().then(()=>status(t(phases.disconnected)));
+  else {const phase=phases[event.phase];status(phase?t(phase):event.phase,event.phase==='error')}
 });
-const initialized = initI18n().then(render);
+const initialized = initI18n().then(()=>{document.documentElement.lang=getLocale();return render()});
 if(Capacitor.isNativePlatform()) void Remote.addListener('notificationOpen',async event=>{
   try {
     await notificationNavigation.open(event, {

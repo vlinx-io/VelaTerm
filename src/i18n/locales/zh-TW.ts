@@ -1348,6 +1348,101 @@ const zhTW: typeof en = {
   "mobile.selCopy": "複製", // Copy
   "mobile.selCancel": "取消", // Cancel
 
+  // ── Mobile connection client (apps/mobile start page) ──
+  "mobile.phaseConnecting": "正在建立 SSH 連線…", // Connecting over SSH…
+  "mobile.phaseConfirming": "請確認主機指紋", // Confirm the host fingerprint
+  "mobile.phasePreparing": "正在檢查或準備遠端服務…", // Checking or preparing the remote service…
+  "mobile.phaseForwarding": "正在建立 SSH 隧道…", // Opening the SSH tunnel…
+  "mobile.phaseReady": "連線已建立", // Connected
+  "mobile.phaseDisconnected": "連線已中斷", // Disconnected
+  "mobile.phaseError": "連線失敗", // Connection failed
+  "mobile.accountAndLogin": "帳號與登入", // Account and sign-in
+  "mobile.connectionService": "連線服務", // Connection service unavailable
+  "mobile.nativeOnly": "請在 iOS 或 Android App 中使用連線功能。瀏覽器僅用於檢查介面。", // Connecting is only available in the iOS or Android app. The browser is only for previewing the interface.
+  "mobile.managedRemotely": "專案與工作階段由遠端服務管理。", // Projects and sessions are managed by the remote service.
+  "mobile.buildInfo": (version: string, time: string) => `App v${version} · 建置 ${time}`,
+  "mobile.myDevices": "我的裝置", // My devices
+  "mobile.account": "帳號", // Account
+  "mobile.signedInHint": "已登入。可查看同帳號裝置共享的空間、專案和工作階段。", // Signed in. You can view the workspaces, projects, and sessions shared by devices on this account.
+  "mobile.manageAccount": "管理帳號", // Manage account
+  "mobile.signOut": "登出", // Sign out
+  "mobile.viewMyDevices": "查看我的裝置", // View my devices
+  "mobile.noDevices": "此帳號尚未登入任何裝置。", // No devices are signed in to this account yet.
+  "mobile.online": "線上", // Online
+  "mobile.offline": "離線", // Offline
+  "mobile.deviceNotSharing": "此裝置尚未共享內容。", // The device is not sharing anything yet.
+  "mobile.scopeMachine": "整個工作空間", // Entire workspace
+  "mobile.scopeProject": "專案", // Project
+  "mobile.scopeSession": "工作階段", // Session
+  "mobile.sharingNotReady": "共享內容尚未就緒，請在該裝置上檢查共享設定。", // Shared content is not ready yet. Check the sharing settings on that device.
+  "mobile.deviceOffline": "裝置已離線，請在該裝置上開啟 VelaTerm 並保持網路連線。", // The device is offline. Open VelaTerm on that device and keep it connected to the network.
+  "mobile.viewShared": "查看共享內容 →", // View shared content →
+  "mobile.devicesUnavailable": "無法取得裝置列表，請重試。", // Could not load the device list. Please try again.
+  "mobile.accountUnavailable": "無法取得帳號狀態，請檢查網路後重試。", // Could not load the account status. Check your network and try again.
+  "mobile.signInTitle": "登入 VelaTerm", // Sign in to VelaTerm
+  "mobile.signInHint": "透過電子郵件密碼或第三方帳號登入，查看你的裝置和共享內容。", // Sign in with your email and password or a third-party account to see your devices and shared content.
+  "mobile.signIn": "登入", // Sign in
+  "mobile.checkSignIn": "檢查登入結果", // Check sign-in status
+  "mobile.waitingSignIn": "正在等待登入確認…", // Waiting for sign-in confirmation…
+  "mobile.workspaceTitle": "你的工作空間", // Your workspace
+  "mobile.workspaceHint": "連線至遠端主機，繼續專案中的工作。", // Connect to a remote host and pick up where you left off.
+  "mobile.newSsh": "＋ SSH 連線", // + SSH connection
+  "mobile.newUrl": "＋ URL 連線", // + URL connection
+  "mobile.remote": "Remote", // My devices
+  "mobile.scanToConnect": "掃碼連線", // Scan QR code to connect
+  "mobile.noConnections": "尚未儲存連線。可新增 SSH、URL 連線，或透過 Remote 查看同帳號裝置的共享內容。", // No saved connections yet. Add an SSH or URL connection, or open Remote to see content shared by devices on your account.
+  "mobile.tapToConnect": "點選連線 →", // Tap to connect →
+  "mobile.webPasswordSaved": "服務密碼已儲存", // Access password saved
+  "mobile.deleteConnectionTitle": "刪除連線", // Delete connection
+  "mobile.deleteConnectionConfirm": (name: string) => `刪除「${name}」及其儲存的憑證？遠端專案不會被刪除。`,
+  "mobile.connectionMissing": "連線不存在", // Connection not found
+  "mobile.editConnection": "編輯連線", // Edit connection
+  "mobile.addSshHost": "新增 SSH 主機", // Add SSH connection
+  "mobile.addUrlConnection": "新增 URL 連線", // Add URL connection
+  "mobile.connectionName": "連線名稱", // Connection name
+  "mobile.serviceUrl": "服務位址", // Service address
+  "mobile.scanToFill": "掃碼填寫", // Fill in from QR code
+  "mobile.openingCamera": "正在開啟相機…", // Opening the camera…
+  "mobile.scanCancelled": "已取消掃碼", // Scan cancelled
+  "mobile.scanDone": "已辨識服務位址，請確認後儲存並連線。", // Service address detected. Check it, then save and connect.
+  "mobile.scanNativeOnly": "請在手機 App 中使用相機掃碼。", // QR scanning is only available in the iOS or Android app.
+  "mobile.webPasswordOptional": "服務密碼（選填）", // Access password (optional)
+  "mobile.keepPassword": "留空保留原密碼", // Leave empty to keep the current password
+  "mobile.webPasswordLater": "也可進入網頁後登入", // You can also enter it after connecting
+  "mobile.webPasswordSavedHint": "服務密碼已儲存，重新連線時會自動使用。留空不會清除已儲存的密碼。", // The access password is saved and used automatically when you reconnect. Leaving the field empty keeps the saved password.
+  "mobile.webPasswordStorageHint": "密碼儲存在手機安全儲存空間中，也可在登入時選擇記住密碼。", // The password is kept in the phone’s secure storage. You can also choose to remember it when you enter it after connecting.
+  "mobile.sshHost": "SSH 主機", // SSH host
+  "mobile.sshHostPlaceholder": "主機名稱或 IP 位址", // Hostname or IP address
+  "mobile.sshPort": "SSH 連接埠", // SSH port
+  "mobile.username": "使用者名稱", // Username
+  "mobile.authMethod": "驗證方式", // Authentication
+  "mobile.authPassword": "密碼", // Password
+  "mobile.authKeyAndroid": "私密金鑰（OpenSSH Ed25519 / RSA）", // Private key (OpenSSH Ed25519 / RSA)
+  "mobile.authKey": "私密金鑰（OpenSSH Ed25519）", // Private key (OpenSSH Ed25519)
+  "mobile.sshPassword": "SSH 密碼", // SSH password
+  "mobile.privateKey": "私密金鑰", // Private key
+  "mobile.keepPrivateKey": "留空保留已儲存私密金鑰", // Leave empty to keep the saved private key
+  "mobile.pastePrivateKey": "貼上 OpenSSH 私密金鑰", // Paste an OpenSSH private key
+  "mobile.passphraseOptional": "私密金鑰通關密語（選填）", // Key passphrase (optional)
+  "mobile.keepPassphrase": "留空保留原通關密語", // Leave empty to keep the current passphrase
+  "mobile.sshSecretSavedHint": "SSH 憑證已儲存在手機安全儲存空間中，編輯時留空即可保留。", // SSH credentials are kept in the phone’s secure storage. Leave the fields empty while editing to keep them.
+  "mobile.remoteService": "遠端服務", // Remote service
+  "mobile.serviceAuto": "自動尋找 VelaTerm 服務", // Find the VelaTerm service automatically
+  "mobile.serviceManual": "指定既有服務連接埠", // Use an existing service port
+  "mobile.remotePort": "遠端回送 HTTP 服務連接埠", // Remote loopback HTTP port
+  "mobile.webPasswordAutoHint": "服務密碼已儲存，重新連線時會自動使用。", // The access password is saved and used automatically when you reconnect.
+  "mobile.prepareService": "沒有可用服務時，允許下載並啟動 VelaTerm 服務", // Download and start the VelaTerm service when none is available
+  "mobile.prepareServiceHint": "自動準備會在遠端 ~/.velaterm/ 寫入經過簽章驗證的程式、設定和日誌，並保留執行服務。需要 Python 3 和支援 Ed25519 的 OpenSSL；重複使用既有服務或指定連接埠不需要安裝這些工具。", // Automatic preparation writes a signature-verified binary, configuration, and logs to ~/.velaterm/ on the remote host and keeps the service running. It needs Python 3 and an OpenSSL with Ed25519 support; reusing an existing service or specifying its port does not.
+  "mobile.saveConnection": "儲存連線", // Save connection
+  "mobile.saveAndConnect": "儲存並連線", // Save and connect
+  "mobile.loginOpening": "正在開啟登入視窗…", // Opening the sign-in page in your browser…
+  "mobile.loginFinishInBrowser": "請在登入視窗中完成登入，然後返回 App。", // Complete the sign-in in the browser window, then return to the app.
+  "mobile.loginChecking": "正在檢查登入結果…", // Checking sign-in status…
+  "mobile.loginSuccess": "登入成功。", // Signed in.
+  "mobile.loginWaiting": "等待登入確認。完成後將自動更新帳號和裝置列表。", // Waiting for sign-in confirmation. Your account and device list update automatically once sign-in completes.
+  "mobile.loginExpired": "登入請求已失效，請重新登入。", // The sign-in request has expired. Please sign in again.
+  "mobile.loginRetrying": "暫時無法連線至帳號服務，正在重試。無需重新登入。", // The account service is temporarily unreachable. Retrying. You do not need to sign in again.
+
   // ── Other shared components ──
   "splitter.dragToResize": "拖曳調整大小", // Drag to resize
   "transport.wsDisconnected": "WebSocket 已斷線", // WebSocket disconnected

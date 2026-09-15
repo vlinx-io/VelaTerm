@@ -1399,6 +1399,101 @@ const de: typeof en = {
   "mobile.selCopy": "Kopieren", // Copy
   "mobile.selCancel": "Abbrechen", // Cancel
 
+  // ── Mobile connection client (apps/mobile start page) ──
+  "mobile.phaseConnecting": "SSH-Verbindung wird aufgebaut…", // Connecting over SSH…
+  "mobile.phaseConfirming": "Host-Fingerabdruck bestätigen", // Confirm the host fingerprint
+  "mobile.phasePreparing": "Remote-Dienst wird geprüft oder vorbereitet…", // Checking or preparing the remote service…
+  "mobile.phaseForwarding": "SSH-Tunnel wird aufgebaut…", // Opening the SSH tunnel…
+  "mobile.phaseReady": "Verbunden", // Connected
+  "mobile.phaseDisconnected": "Verbindung getrennt", // Disconnected
+  "mobile.phaseError": "Verbindung fehlgeschlagen", // Connection failed
+  "mobile.accountAndLogin": "Konto und Anmeldung", // Account and sign-in
+  "mobile.connectionService": "Verbindungsdienst nicht verfügbar", // Connection service unavailable
+  "mobile.nativeOnly": "Verbindungen sind nur in der iOS- oder Android-App möglich. Der Browser dient lediglich der Vorschau der Oberfläche.", // Connecting is only available in the iOS or Android app. The browser is only for previewing the interface.
+  "mobile.managedRemotely": "Projekte und Sitzungen werden vom Remote-Dienst verwaltet.", // Projects and sessions are managed by the remote service.
+  "mobile.buildInfo": (version: string, time: string) => `App v${version} · Build vom ${time}`,
+  "mobile.myDevices": "Meine Geräte", // My devices
+  "mobile.account": "Konto", // Account
+  "mobile.signedInHint": "Angemeldet. Sie können die Arbeitsbereiche, Projekte und Sitzungen sehen, die Geräte dieses Kontos freigeben.", // Signed in. You can view the workspaces, projects, and sessions shared by devices on this account.
+  "mobile.manageAccount": "Konto verwalten", // Manage account
+  "mobile.signOut": "Abmelden", // Sign out
+  "mobile.viewMyDevices": "Meine Geräte anzeigen", // View my devices
+  "mobile.noDevices": "Mit diesem Konto ist noch kein Gerät angemeldet.", // No devices are signed in to this account yet.
+  "mobile.online": "Online", // Online
+  "mobile.offline": "Offline", // Offline
+  "mobile.deviceNotSharing": "Dieses Gerät gibt noch nichts frei.", // The device is not sharing anything yet.
+  "mobile.scopeMachine": "Gesamter Arbeitsbereich", // Entire workspace
+  "mobile.scopeProject": "Projekt", // Project
+  "mobile.scopeSession": "Sitzung", // Session
+  "mobile.sharingNotReady": "Die freigegebenen Inhalte sind noch nicht bereit. Prüfen Sie die Freigabeeinstellungen auf dem betreffenden Gerät.", // Shared content is not ready yet. Check the sharing settings on that device.
+  "mobile.deviceOffline": "Das Gerät ist offline. Öffnen Sie VelaTerm auf dem betreffenden Gerät und halten Sie es mit dem Netzwerk verbunden.", // The device is offline. Open VelaTerm on that device and keep it connected to the network.
+  "mobile.viewShared": "Freigegebene Inhalte anzeigen →", // View shared content →
+  "mobile.devicesUnavailable": "Die Geräteliste konnte nicht geladen werden. Bitte versuchen Sie es erneut.", // Could not load the device list. Please try again.
+  "mobile.accountUnavailable": "Der Kontostatus konnte nicht geladen werden. Prüfen Sie Ihre Netzwerkverbindung und versuchen Sie es erneut.", // Could not load the account status. Check your network and try again.
+  "mobile.signInTitle": "Bei VelaTerm anmelden", // Sign in to VelaTerm
+  "mobile.signInHint": "Melden Sie sich mit E-Mail und Passwort oder einem Drittanbieter-Konto an, um Ihre Geräte und freigegebenen Inhalte zu sehen.", // Sign in with your email and password or a third-party account to see your devices and shared content.
+  "mobile.signIn": "Anmelden", // Sign in
+  "mobile.checkSignIn": "Anmeldestatus prüfen", // Check sign-in status
+  "mobile.waitingSignIn": "Warten auf Anmeldebestätigung…", // Waiting for sign-in confirmation…
+  "mobile.workspaceTitle": "Ihr Arbeitsbereich", // Your workspace
+  "mobile.workspaceHint": "Verbinden Sie sich mit einem Remote-Host und arbeiten Sie an Ihren Projekten weiter.", // Connect to a remote host and pick up where you left off.
+  "mobile.newSsh": "+ SSH-Verbindung", // + SSH connection
+  "mobile.newUrl": "+ URL-Verbindung", // + URL connection
+  "mobile.remote": "Meine Geräte", // My devices
+  "mobile.scanToConnect": "QR-Code scannen", // Scan QR code to connect
+  "mobile.noConnections": "Noch keine Verbindungen gespeichert. Fügen Sie eine SSH- oder URL-Verbindung hinzu oder öffnen Sie Remote, um Inhalte zu sehen, die Geräte Ihres Kontos freigeben.", // No saved connections yet. Add an SSH or URL connection, or open Remote to see content shared by devices on your account.
+  "mobile.tapToConnect": "Zum Verbinden antippen →", // Tap to connect →
+  "mobile.webPasswordSaved": "Zugangspasswort gespeichert", // Access password saved
+  "mobile.deleteConnectionTitle": "Verbindung löschen", // Delete connection
+  "mobile.deleteConnectionConfirm": (name: string) => `„${name}“ und die gespeicherten Zugangsdaten löschen? Remote-Projekte werden nicht gelöscht.`,
+  "mobile.connectionMissing": "Verbindung nicht gefunden", // Connection not found
+  "mobile.editConnection": "Verbindung bearbeiten", // Edit connection
+  "mobile.addSshHost": "SSH-Verbindung hinzufügen", // Add SSH connection
+  "mobile.addUrlConnection": "URL-Verbindung hinzufügen", // Add URL connection
+  "mobile.connectionName": "Verbindungsname", // Connection name
+  "mobile.serviceUrl": "Dienstadresse", // Service address
+  "mobile.scanToFill": "Per QR-Code ausfüllen", // Fill in from QR code
+  "mobile.openingCamera": "Kamera wird geöffnet…", // Opening the camera…
+  "mobile.scanCancelled": "Scan abgebrochen", // Scan cancelled
+  "mobile.scanDone": "Dienstadresse erkannt. Prüfen Sie die Adresse, dann speichern und verbinden.", // Service address detected. Check it, then save and connect.
+  "mobile.scanNativeOnly": "Das Scannen von QR-Codes ist nur in der iOS- oder Android-App möglich.", // QR scanning is only available in the iOS or Android app.
+  "mobile.webPasswordOptional": "Zugangspasswort (optional)", // Access password (optional)
+  "mobile.keepPassword": "Leer lassen, um das Passwort zu behalten", // Leave empty to keep the current password
+  "mobile.webPasswordLater": "Auch nach dem Verbinden möglich", // You can also enter it after connecting
+  "mobile.webPasswordSavedHint": "Das Zugangspasswort ist gespeichert und wird beim erneuten Verbinden automatisch verwendet. Ein leeres Feld behält das gespeicherte Passwort.", // The access password is saved and used automatically when you reconnect. Leaving the field empty keeps the saved password.
+  "mobile.webPasswordStorageHint": "Das Passwort wird im sicheren Speicher des Smartphones abgelegt. Sie können es auch bei der Anmeldung speichern lassen.", // The password is kept in the phone’s secure storage. You can also choose to remember it when you enter it after connecting.
+  "mobile.sshHost": "SSH-Host", // SSH host
+  "mobile.sshHostPlaceholder": "Hostname oder IP-Adresse", // Hostname or IP address
+  "mobile.sshPort": "SSH-Port", // SSH port
+  "mobile.username": "Benutzername", // Username
+  "mobile.authMethod": "Authentifizierung", // Authentication
+  "mobile.authPassword": "Passwort", // Password
+  "mobile.authKeyAndroid": "Privater Schlüssel (OpenSSH Ed25519 / RSA)", // Private key (OpenSSH Ed25519 / RSA)
+  "mobile.authKey": "Privater Schlüssel (OpenSSH Ed25519)", // Private key (OpenSSH Ed25519)
+  "mobile.sshPassword": "SSH-Passwort", // SSH password
+  "mobile.privateKey": "Privater Schlüssel", // Private key
+  "mobile.keepPrivateKey": "Leer lassen, um den gespeicherten Schlüssel zu behalten", // Leave empty to keep the saved private key
+  "mobile.pastePrivateKey": "Privaten OpenSSH-Schlüssel einfügen", // Paste an OpenSSH private key
+  "mobile.passphraseOptional": "Schlüssel-Passphrase (optional)", // Key passphrase (optional)
+  "mobile.keepPassphrase": "Leer lassen, um die Passphrase zu behalten", // Leave empty to keep the current passphrase
+  "mobile.sshSecretSavedHint": "Die SSH-Zugangsdaten sind im sicheren Speicher des Smartphones abgelegt. Lassen Sie die Felder beim Bearbeiten leer, um sie zu behalten.", // SSH credentials are kept in the phone’s secure storage. Leave the fields empty while editing to keep them.
+  "mobile.remoteService": "Remote-Dienst", // Remote service
+  "mobile.serviceAuto": "VelaTerm-Dienst automatisch suchen", // Find the VelaTerm service automatically
+  "mobile.serviceManual": "Port eines vorhandenen Dienstes angeben", // Use an existing service port
+  "mobile.remotePort": "Loopback-HTTP-Port des Remote-Dienstes", // Remote loopback HTTP port
+  "mobile.webPasswordAutoHint": "Das Zugangspasswort ist gespeichert und wird beim erneuten Verbinden automatisch verwendet.", // The access password is saved and used automatically when you reconnect.
+  "mobile.prepareService": "VelaTerm-Dienst herunterladen und starten, wenn keiner verfügbar ist", // Download and start the VelaTerm service when none is available
+  "mobile.prepareServiceHint": "Die automatische Vorbereitung legt ein signaturgeprüftes Programm sowie Konfiguration und Protokolldateien unter ~/.velaterm/ auf dem Remote-Host ab und hält den Dienst am Laufen. Dafür sind Python 3 und ein OpenSSL mit Ed25519-Unterstützung nötig; bei einem vorhandenen Dienst oder einem festen Port entfällt das.", // Automatic preparation writes a signature-verified binary, configuration, and logs to ~/.velaterm/ on the remote host and keeps the service running. It needs Python 3 and an OpenSSL with Ed25519 support; reusing an existing service or specifying its port does not.
+  "mobile.saveConnection": "Verbindung speichern", // Save connection
+  "mobile.saveAndConnect": "Speichern und verbinden", // Save and connect
+  "mobile.loginOpening": "Anmeldefenster wird geöffnet…", // Opening the sign-in page in your browser…
+  "mobile.loginFinishInBrowser": "Schließen Sie die Anmeldung im Browserfenster ab und kehren Sie dann zur App zurück.", // Complete the sign-in in the browser window, then return to the app.
+  "mobile.loginChecking": "Anmeldestatus wird geprüft…", // Checking sign-in status…
+  "mobile.loginSuccess": "Angemeldet.", // Signed in.
+  "mobile.loginWaiting": "Warten auf die Anmeldebestätigung. Konto und Geräteliste werden danach automatisch aktualisiert.", // Waiting for sign-in confirmation. Your account and device list update automatically once sign-in completes.
+  "mobile.loginExpired": "Die Anmeldeanfrage ist abgelaufen. Bitte melden Sie sich erneut an.", // The sign-in request has expired. Please sign in again.
+  "mobile.loginRetrying": "Der Kontodienst ist vorübergehend nicht erreichbar. Es wird erneut versucht; eine neue Anmeldung ist nicht nötig.", // The account service is temporarily unreachable. Retrying. You do not need to sign in again.
+
   // ── Other shared components ──
   "splitter.dragToResize": "Zum Anpassen ziehen", // Drag to resize
   "transport.wsDisconnected": "WebSocket getrennt", // WebSocket disconnected

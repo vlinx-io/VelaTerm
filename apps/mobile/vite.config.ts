@@ -2,11 +2,9 @@ import { defineConfig } from "vite";
 import { readFileSync } from "node:fs";
 
 const { version } = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
-// 构建时固定时间，重新打开 App 时保持不变，便于识别实际安装的包。
-const builtAt = new Intl.DateTimeFormat("sv-SE", {
-  timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
-  hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-}).format(new Date());
+// Fixed at build time so reopening the app shows the same value, which identifies the installed package.
+// Stored as UTC ISO text; the app formats it in the device's locale and time zone.
+const builtAt = new Date().toISOString();
 export default defineConfig({
   define: {
     __MOBILE_VERSION__: JSON.stringify(version),

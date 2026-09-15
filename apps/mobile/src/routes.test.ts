@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { routeFromHash, editHref, copyHref } from './routes.ts';
 test('new and edit connection links restore route state',()=>{
  assert.deepEqual(routeFromHash('#/connections/new?mode=ssh'),{page:'edit',mode:'ssh'});
- assert.deepEqual(routeFromHash(editHref('主机/a?')), {page:'edit',mode:'url',id:'主机/a?'});
+ assert.deepEqual(routeFromHash(editHref('Gerät/a?')), {page:'edit',mode:'url',id:'Gerät/a?'});
  assert.deepEqual(routeFromHash('#/'),{page:'list'});
 });
 
@@ -19,6 +19,6 @@ test('account and Remote pages restore from independent URLs', () => {
 });
 
 test('copy links restore a separate draft without treating the source as an edit', () => {
-  assert.deepEqual(routeFromHash(copyHref('主机/a?')), {page:'edit',mode:'url',copyFromId:'主机/a?'});
+  assert.deepEqual(routeFromHash(copyHref('Gerät/a?')), {page:'edit',mode:'url',copyFromId:'Gerät/a?'});
   assert.notEqual(copyHref('source'), editHref('source'));
 });
