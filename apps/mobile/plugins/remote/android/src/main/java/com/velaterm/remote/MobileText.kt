@@ -8,7 +8,10 @@ import java.util.Locale
 internal class MobileText(context: Context) {
     private val dictionaries = JSONObject(context.assets.open("native-text.json").bufferedReader().use { it.readText() })
     private val languages = context.resources.configuration.locales
-    fun get(key: String): String {
+    /** Resolves `key` for the device language; `{name}` placeholders are replaced with `values["name"]`. */
+    fun get(key: String, values: Map<String, String> = emptyMap()): String =
+        values.entries.fold(lookup(key)) { text, (name, value) -> text.replace("{$name}", value) }
+    private fun lookup(key: String): String {
         for (index in 0 until languages.size()) {
             val language = languages[index].toLanguageTag().lowercase(Locale.ROOT)
             val locale = when {
