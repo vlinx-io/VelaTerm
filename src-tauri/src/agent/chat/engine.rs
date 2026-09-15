@@ -1050,18 +1050,14 @@ impl ChatManager {
             model
         };
 
+        // The mode the view is told about is the mode the process is launched with: one value, two uses.
+        let mode = initial_mode(kind, permission_mode);
         let mut cmd = crate::host::command(bin);
         // OpenCode is reached over HTTP: the port it listens on and the password that guards it.
         let mut opencode_launch: Option<(u16, String)> = None;
-        let claude_permission = protocol::cli_permission_mode(permission_mode);
         match kind {
             SessionKind::Claude => {
-                cmd.args(protocol::launch_args(
-                    resume,
-                    model,
-                    effort,
-                    claude_permission,
-                ));
+                cmd.args(protocol::launch_args(resume, model, effort, &mode));
                 cmd.args(extra_args);
             }
             SessionKind::Codex => {
@@ -1182,7 +1178,7 @@ impl ChatManager {
             settings_change: Mutex::new(()),
             model: Mutex::new(model.map(str::to_string)),
             effort: Mutex::new(effort.map(str::to_string)),
-            mode: Mutex::new(initial_mode(kind, permission_mode)),
+            mode: Mutex::new(mode),
             permission_confirmed: AtomicBool::new(matches!(kind, SessionKind::Opencode | SessionKind::Omp)),
             bypass_capable: kind == SessionKind::Claude
                 && permission_restart::claude_bypass_capable(permission_mode, extra_args),
@@ -5036,6 +5032,19 @@ mod tests {
         let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
         let message = spawn_failure(SessionKind::Codex, "codex", Some("/tmp"), &denied);
         assert!(message.starts_with("Failed to start the agent \"codex\" in /tmp:"));
+    }
+
+    /// What the view is told and what the Claude process is launched with is the same word, for every
+    /// stored value, so "Default" on screen can never mean an inherited `dontAsk` in the process.
+    #[test]
+    fn claude_launches_with_the_mode_the_view_reports() {
+        for (stored, shown) in [(None, "default"), (Some(""), "default"), (Some("nonsense"), "default"),
+            (Some("skip"), "bypassPermissions"), (Some("plan"), "plan")] {
+            let mode = initial_mode(SessionKind::Claude, stored);
+            assert_eq!(mode, shown, "stored {stored:?}");
+            let args = protocol::launch_args(None, None, None, &mode).join(" ");
+            assert!(args.contains(&format!("--permission-mode {shown}")), "{args}");
+        }
     }
 
     #[test]
