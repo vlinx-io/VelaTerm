@@ -1853,6 +1853,95 @@ const ko: typeof en = {
   "settings.completionUnavailable": "설정을 불러오거나 저장할 수 없습니다.",
   "settings.completionHint": "새로 연 Zsh, Bash 4+, Fish 및 PowerShell 터미널에 적용됩니다. CMD는 기본 Tab 동작을 유지합니다. Tab은 선택한 후보를 입력하고, Enter는 후보를 적용하지 않고 현재 명령을 실행합니다.",
 
+  // Native texts of the mobile remote plugin (iOS, Android, download bridge). They reach the apps through native-text.json; {name} placeholders are replaced natively.
+  "mobile.native.trustTitle": "Confirm remote fingerprint", // TODO translate
+  "mobile.native.trustChangedTitle": "Remote fingerprint has changed", // TODO translate
+  "mobile.native.trustBody": "{identity}\n\n{fingerprint}\n\nCheck this fingerprint with the host administrator before you continue.", // TODO translate
+  "mobile.native.trustChangedBody": "{identity}\n\n{fingerprint}\n\nThis fingerprint differs from the one you trusted before. Check it with the host administrator before you continue. The previously trusted fingerprint will be replaced.", // TODO translate
+  "mobile.native.trustAccept": "Trust and continue", // TODO translate
+  "mobile.native.tlsIdentity": "HTTPS certificate · {identity}", // TODO translate
+  "mobile.native.ok": "OK", // TODO translate
+  "mobile.native.reconnect": "Reconnect", // TODO translate
+  "mobile.native.switchConnection": "Switch connection", // TODO translate
+  "mobile.native.currentServer": "Current server", // TODO translate
+  "mobile.native.navigationBlocked": "Navigation away from the current service was blocked: {host}", // TODO translate
+  "mobile.native.pageUnavailable": "The remote page is temporarily unavailable (HTTP {code}). Retry or return to your connections.", // TODO translate
+  "mobile.native.pageLoadFailed": "The remote page could not be loaded. Check your network and retry, or return to your connections.", // TODO translate
+  "mobile.native.pageLoadFailedReason": "The remote page could not be loaded. Check your network and retry, or return to your connections.\n\n{reason}\n{domain} {code}", // TODO translate
+  "mobile.native.pageTerminated": "The page stopped running. Reconnect or return to your connections.", // TODO translate
+  "mobile.native.certificateRejected": "The remote certificate could not be verified. Reconnect or return to your connections.", // TODO translate
+  "mobile.native.webViewOutdated": "Update Android System WebView and try again, or return to your connections.", // TODO translate
+  "mobile.native.downloadFailedTitle": "Download failed", // TODO translate
+  "mobile.native.downloadRetry": "Download failed. Please try again.", // TODO translate
+  "mobile.native.downloadTooLarge": "File export on mobile currently supports files up to 64 MB.", // TODO translate
+  "mobile.native.downloadFileFailed": "The file could not be downloaded. Please try again.", // TODO translate
+  "mobile.native.downloadCreateFailed": "The download file could not be created.", // TODO translate
+  "mobile.native.saveLocationFailed": "The save location could not be opened.", // TODO translate
+  "mobile.native.fileSaved": "File saved", // TODO translate
+  "mobile.native.fileSaveFailed": "The file could not be saved. Please try again.", // TODO translate
+  "mobile.native.savePickerFailed": "The file save dialog could not be opened.", // TODO translate
+  "mobile.native.scanHint": "Point the camera at the URL QR code", // TODO translate
+  "mobile.native.scanPrompt": "Scan the service address QR code. Press Back to cancel.", // TODO translate
+  "mobile.native.scanBusy": "A scan is already in progress. Close the current scanner first.", // TODO translate
+  "mobile.native.scanUnavailable": "The scanner could not be opened. Return to the connections page and try again.", // TODO translate
+  "mobile.native.scannerNotReady": "The scanner is not ready yet.", // TODO translate
+  "mobile.native.scanCancelled": "Scan cancelled.", // TODO translate
+  "mobile.native.cameraPermissionDenied": "Camera access is not allowed. Allow VelaTerm to use the camera in the system settings.", // TODO translate
+  "mobile.native.cameraUnavailable": "The camera cannot be used. Check the device and its camera permission.", // TODO translate
+  "mobile.native.cameraBusy": "The camera is unavailable. Close other apps that use the camera and try again.", // TODO translate
+  "mobile.native.qrOutputUnavailable": "This device cannot read QR codes.", // TODO translate
+  "mobile.native.qrTypeUnavailable": "This device does not support QR code scanning.", // TODO translate
+  "mobile.native.qrTooLong": "The URL in the QR code is too long.", // TODO translate
+  "mobile.native.qrInvalid": "The QR code is not a usable service address. Scan an HTTPS URL without a username or password.", // TODO translate
+  "mobile.native.urlConnectionName": "URL connection", // TODO translate
+  "mobile.native.keychainReadFailed": "The system keychain could not be read ({code}).", // TODO translate
+  "mobile.native.keychainWriteFailed": "The system keychain could not be saved ({code}).", // TODO translate
+  "mobile.native.secureStorageWriteFailed": "The secure storage could not be saved.", // TODO translate
+  "mobile.native.hostKeyUnreadable": "The host public key could not be read.", // TODO translate
+  "mobile.native.portRange": "The port must be between 1 and 65535.", // TODO translate
+  "mobile.native.addressInvalid": "Enter an HTTP or HTTPS address without a username or password.", // TODO translate
+  "mobile.native.httpsRequired": "Use HTTPS for URL connections. HTTP is only allowed for a local SSH tunnel.", // TODO translate
+  "mobile.native.nameRequired": "Enter a connection name.", // TODO translate
+  "mobile.native.sshHostInvalid": "Enter a valid SSH host and username.", // TODO translate
+  "mobile.native.sshHostNameInvalid": "Enter a valid SSH host name.", // TODO translate
+  "mobile.native.sshUsernameRequired": "Enter the SSH username.", // TODO translate
+  "mobile.native.sshCredentialsRequired": "Enter the SSH password or a private key.", // TODO translate
+  "mobile.native.privateKeyRequired": "Enter the private key.", // TODO translate
+  "mobile.native.sshPasswordRequired": "Enter the SSH password.", // TODO translate
+  "mobile.native.serviceModeRequired": "Choose how to connect to the service.", // TODO translate
+  "mobile.native.modeUnsupported": "This connection type is not supported.", // TODO translate
+  "mobile.native.connectionMissing": "This connection does not exist.", // TODO translate
+  "mobile.native.connectionConfigMissing": "The connection settings are missing.", // TODO translate
+  "mobile.native.connectionIdMissing": "The connection ID is missing.", // TODO translate
+  "mobile.native.accountServiceUnavailable": "The account service is unavailable. Please try again.", // TODO translate
+  "mobile.native.loginRequestExpired": "The sign-in request has expired. Please sign in again.", // TODO translate
+  "mobile.native.sessionExpired": "Your sign-in has expired. Please sign in again.", // TODO translate
+  "mobile.native.accountWindowBusy": "The account window cannot be opened. Close the current window first.", // TODO translate
+  "mobile.native.loginResponseInvalid": "Invalid sign-in response.", // TODO translate
+  "mobile.native.loginRestart": "Please start the sign-in again.", // TODO translate
+  "mobile.native.signInFirst": "Please sign in first.", // TODO translate
+  "mobile.native.deviceInvalid": "Invalid device.", // TODO translate
+  "mobile.native.grantInvalid": "Invalid sharing scope.", // TODO translate
+  "mobile.native.connectResponseInvalid": "Invalid connection response.", // TODO translate
+  "mobile.native.remoteWindowFailed": "The remote window could not be opened.", // TODO translate
+  "mobile.native.accountActionInvalid": "Invalid account action.", // TODO translate
+  "mobile.native.accountAddressInvalid": "Invalid account address.", // TODO translate
+  "mobile.native.loginRequestInvalid": "Invalid sign-in request.", // TODO translate
+  "mobile.native.loginStateUpdateFailed": "The sign-in state could not be updated.", // TODO translate
+  "mobile.native.loginFailed": "Sign-in failed.", // TODO translate
+  "mobile.native.connectionFailed": "Connection failed.", // TODO translate
+  "mobile.native.resourceMissing": "A remote setup resource is missing.", // TODO translate
+  "mobile.native.hostKeyRejected": "The SSH host fingerprint was not trusted.", // TODO translate
+  "mobile.native.rsaUnsupported": "The iOS SSH library does not support RSA SHA-2 authentication. Use an Ed25519 private key or a password.", // TODO translate
+  "mobile.native.privateKeyUnreadable": "The private key could not be read. Check the passphrase. Supported: OpenSSH Ed25519 keys, encrypted with AES-CTR.", // TODO translate
+  "mobile.native.connectionCancelled": "The connection was cancelled.", // TODO translate
+  "mobile.native.sourceConnectionMissing": "The source connection is no longer available. Return to the connection list and try again.", // TODO translate
+  "mobile.native.pythonRequired": "Remote setup requires Python 3. Alternatively, enter the port of a service that is already running.", // TODO translate
+  "mobile.native.localPortFailed": "No local port could be allocated for SSH.", // TODO translate
+  "mobile.native.healthCheckFailed": "The remote service failed its health check.", // TODO translate
+  "mobile.native.connectionClosed": "The connection has been closed.", // TODO translate
+  "mobile.native.responseTooLarge": "The remote response is too large.", // TODO translate
+
 
 };
 

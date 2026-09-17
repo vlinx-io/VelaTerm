@@ -1,5 +1,8 @@
 // The isolated project WebView exposes only a user-confirmed file export bridge.
 (() => {
+  // Texts are injected by the Android plugin before this script; the key itself is the last-resort fallback, like MobileText.
+  const texts = window.__VELATERM_DOWNLOAD_TEXT__ || {};
+  const text = key => texts[key] || key;
   let pending = false;
   const limit = 64 * 1024 * 1024;
   const save = async (address, name) => {
@@ -12,8 +15,8 @@
       const token = sessionStorage.getItem('vlx-token');
       if (url.origin === location.origin && ['http:', 'https:'].includes(url.protocol) && token) headers.Authorization = `Bearer ${token}`;
       const response = await fetch(url.href, { headers });
-      if (!response.ok) throw new Error('下载失败，请重试');
-      if (Number(response.headers.get('Content-Length')) > limit) throw new Error('手机文件导出目前支持不超过 64 MB 的文件');
+      if (!response.ok) throw new Error(text('mobile.native.downloadRetry'));
+      if (Number(response.headers.get('Content-Length')) > limit) throw new Error(text('mobile.native.downloadTooLarge'));
       const reader = response.body.getReader();
       const chunks = [];
       let total = 0;
@@ -21,7 +24,7 @@
         const { value, done } = await reader.read();
         if (done) break;
         total += value.byteLength;
-        if (total > limit) { await reader.cancel(); throw new Error('手机文件导出目前支持不超过 64 MB 的文件'); }
+        if (total > limit) { await reader.cancel(); throw new Error(text('mobile.native.downloadTooLarge')); }
         chunks.push(value);
       }
       const blob = new Blob(chunks);
@@ -32,7 +35,7 @@
         reader.readAsDataURL(blob);
       });
       window.VelaFileExport.save(name || 'download', base64);
-    } catch (error) { alert(error instanceof Error ? error.message : '下载失败，请重试'); }
+    } catch (error) { alert(error instanceof Error ? error.message : text('mobile.native.downloadRetry')); }
     finally { pending = false; }
   };
   window.__velaSaveDownload = save;

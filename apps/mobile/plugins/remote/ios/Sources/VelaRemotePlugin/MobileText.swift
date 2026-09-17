@@ -7,7 +7,11 @@ enum MobileText {
               let data = try? Data(contentsOf: url), let value = try? JSONSerialization.jsonObject(with: data) as? [String: [String: String]] else { return [:] }
         return value
     }()
-    static func get(_ key: String) -> String {
+    /// Resolves `key` for the device language; `{name}` placeholders are replaced with `values["name"]`.
+    static func get(_ key: String, _ values: [String: String] = [:]) -> String {
+        values.reduce(lookup(key)) { $0.replacingOccurrences(of: "{\($1.key)}", with: $1.value) }
+    }
+    private static func lookup(_ key: String) -> String {
         for preferred in Locale.preferredLanguages {
             let language = preferred.lowercased()
             let locale: String

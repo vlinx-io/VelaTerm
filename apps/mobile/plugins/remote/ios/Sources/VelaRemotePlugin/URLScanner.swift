@@ -1,14 +1,14 @@
 import UIKit
 import AVFoundation
 
-/// 相机画面仅在设备上用于二维码识别，不拍照、不保存、不上传。
+/// The camera feed is used on the device only to recognize QR codes: no photos are taken, stored or uploaded.
 final class URLScanner: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
     var completion: ((String?, String?) -> Void)?
     private let session = AVCaptureSession()
     private let captureQueue = DispatchQueue(label: "com.velaterm.mobile.qr-camera")
     private var preview: AVCaptureVideoPreviewLayer!
     private var finished = false
-    private var active = false // 仅由 captureQueue 访问。
+    private var active = false // Accessed only from captureQueue.
     private let guide = UIView()
     private let message = UILabel()
 
@@ -19,7 +19,7 @@ final class URLScanner: UIViewController, AVCaptureMetadataOutputObjectsDelegate
         preview.videoGravity = .resizeAspectFill
         view.layer.addSublayer(preview)
         let cancel = UIButton(type: .system)
-        cancel.setTitle("取消", for: .normal)
+        cancel.setTitle(MobileText.get("common.cancel"), for: .normal)
         cancel.tintColor = .white
         cancel.backgroundColor = UIColor.black.withAlphaComponent(0.6)
         cancel.layer.cornerRadius = 12
@@ -31,7 +31,7 @@ final class URLScanner: UIViewController, AVCaptureMetadataOutputObjectsDelegate
         guide.layer.cornerRadius = 16
         guide.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(guide)
-        message.text = "将 URL 二维码放入取景框"
+        message.text = MobileText.get("mobile.native.scanHint")
         message.textColor = .white
         message.textAlignment = .center
         message.numberOfLines = 0
@@ -76,21 +76,21 @@ final class URLScanner: UIViewController, AVCaptureMetadataOutputObjectsDelegate
             guard let camera = AVCaptureDevice.default(for: .video),
                   let input = try? AVCaptureDeviceInput(device: camera), self.session.canAddInput(input) else {
                 self.session.commitConfiguration()
-                DispatchQueue.main.async { self.finish(nil, "无法使用相机，请检查设备和相机权限") }
+                DispatchQueue.main.async { self.finish(nil, MobileText.get("mobile.native.cameraUnavailable")) }
                 return
             }
             self.session.addInput(input)
             let output = AVCaptureMetadataOutput()
             guard self.session.canAddOutput(output) else {
                 self.session.commitConfiguration()
-                DispatchQueue.main.async { self.finish(nil, "此设备无法识别二维码") }
+                DispatchQueue.main.async { self.finish(nil, MobileText.get("mobile.native.qrOutputUnavailable")) }
                 return
             }
             self.session.addOutput(output)
             output.setMetadataObjectsDelegate(self, queue: .main)
             guard output.availableMetadataObjectTypes.contains(.qr) else {
                 self.session.commitConfiguration()
-                DispatchQueue.main.async { self.finish(nil, "此设备不支持二维码识别") }
+                DispatchQueue.main.async { self.finish(nil, MobileText.get("mobile.native.qrTypeUnavailable")) }
                 return
             }
             output.metadataObjectTypes = [.qr]
@@ -113,7 +113,7 @@ final class URLScanner: UIViewController, AVCaptureMetadataOutputObjectsDelegate
     @objc private func cancelScan() { finish(nil, nil) }
     @objc private func backgrounded() { finish(nil, nil) }
     @objc private func cameraFailed() {
-        DispatchQueue.main.async { [weak self] in self?.finish(nil, "相机不可用，请关闭其他使用相机的应用后重试") }
+        DispatchQueue.main.async { [weak self] in self?.finish(nil, MobileText.get("mobile.native.cameraBusy")) }
     }
     private func finish(_ value: String?, _ error: String?) {
         guard !finished else { return }

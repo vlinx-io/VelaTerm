@@ -67,6 +67,7 @@ class VelaRemotePlugin : Plugin() {
     private var downloadBytes:ByteArray? = null
     private var scanCall: PluginCall? = null
     private var scanner: androidx.activity.result.ActivityResultLauncher<com.journeyapps.barcodescanner.ScanOptions>? = null
+    private val texts by lazy { MobileText(context) }
     override fun load() {
         notifications = TaskNotifications(activity)
         consumeNotification(activity.intent)
@@ -74,17 +75,17 @@ class VelaRemotePlugin : Plugin() {
             val call=scanCall;scanCall=null
             if(call!=null) {
                 if(result.originalIntent?.getBooleanExtra("MISSING_CAMERA_PERMISSION",false)==true) {
-                    call.reject("未获得相机权限，请在系统设置中允许 VelaTerm 使用相机", "CAMERA_PERMISSION_DENIED")
+                    call.reject(texts.get("mobile.native.cameraPermissionDenied"), "CAMERA_PERMISSION_DENIED")
                 } else if(result.contents==null) {
                     call.resolve(JSObject().put("cancelled",true))
                 } else {
                     try {
                         val text=result.contents
-                        if(text.toByteArray(Charsets.UTF_8).size>8192) fail("二维码内容过长，请扫描服务地址二维码")
+                        if(text.toByteArray(Charsets.UTF_8).size>8192) fail(texts.get("mobile.native.qrTooLong"))
                         val uri=safeUrl(text.trim())
                         call.resolve(JSObject().put("url",uri.toASCIIString()).put("name",uri.host))
                     } catch(_:Exception) {
-                        call.reject("二维码不是可用的服务地址，请扫描不含账号密码的 HTTPS URL", "INVALID_QR_URL")
+                        call.reject(texts.get("mobile.native.qrInvalid"), "INVALID_QR_URL")
                     }
                 }
             }
@@ -95,9 +96,9 @@ class VelaRemotePlugin : Plugin() {
             val target=result.data?.data
             if(result.resultCode==android.app.Activity.RESULT_OK && target!=null && bytes!=null) worker.execute {
                 try {
-                    context.contentResolver.openOutputStream(target)?.use{it.write(bytes)} ?: fail("无法打开保存位置")
-                    main.post{pageStatus?.text="文件已保存"}
-                } catch(_:Exception){main.post{pageStatus?.text="文件保存失败，请重试"}}
+                    context.contentResolver.openOutputStream(target)?.use{it.write(bytes)} ?: fail(texts.get("mobile.native.saveLocationFailed"))
+                    main.post{pageStatus?.text=texts.get("mobile.native.fileSaved")}
+                } catch(_:Exception){main.post{pageStatus?.text=texts.get("mobile.native.fileSaveFailed")}}
             }
         }
         chooser=activity.activityResultRegistry.register("vela-remote-files",androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
@@ -136,18 +137,18 @@ class VelaRemotePlugin : Plugin() {
     }
     @PluginMethod fun scanURL(call: PluginCall) {
         main.post {
-            if(scanCall!=null) {call.reject("扫码已在进行中", "SCAN_BUSY");return@post}
+            if(scanCall!=null) {call.reject(texts.get("mobile.native.scanBusy"), "SCAN_BUSY");return@post}
             try {
-                val launcher=scanner ?: fail("扫码功能尚未就绪")
+                val launcher=scanner ?: fail(texts.get("mobile.native.scannerNotReady"))
                 scanCall=call;pickingFile=true
                 launcher.launch(com.journeyapps.barcodescanner.ScanOptions()
                     .setDesiredBarcodeFormats(com.journeyapps.barcodescanner.ScanOptions.QR_CODE)
-                    .setPrompt("扫描服务地址二维码；按返回键取消")
+                    .setPrompt(texts.get("mobile.native.scanPrompt"))
                     .setBeepEnabled(false).setBarcodeImageEnabled(false).setOrientationLocked(false)
                     .addExtra("SHOW_MISSING_CAMERA_PERMISSION_DIALOG",false))
             } catch(_:Exception) {
                 scanCall=null;pickingFile=false
-                call.reject("无法打开相机，请检查设备和相机权限", "SCAN_UNAVAILABLE")
+                call.reject(texts.get("mobile.native.cameraUnavailable"), "SCAN_UNAVAILABLE")
             }
         }
     }
@@ -160,11 +161,11 @@ class VelaRemotePlugin : Plugin() {
                 if(e.code=="ACCOUNT_LOGIN_EXPIRED") {
                     accountAttempt=null
                     try {writeStore(readStore().apply {remove("accountAttempt")})}
-                    catch(storageError:Exception) {call.reject(storageError.message ?: "无法更新登录状态","REMOTE_ERROR");return@execute}
+                    catch(storageError:Exception) {call.reject(storageError.message ?: texts.get("mobile.native.loginStateUpdateFailed"),"REMOTE_ERROR");return@execute}
                 }
-                call.reject(e.message ?: "登录失败",e.code)
+                call.reject(e.message ?: texts.get("mobile.native.loginFailed"),e.code)
             }
-            catch (e: Exception) { call.reject(e.message ?: "连接失败", "REMOTE_ERROR") }
+            catch (e: Exception) { call.reject(e.message ?: texts.get("mobile.native.connectionFailed"), "REMOTE_ERROR") }
         }
     }
     private fun key(): SecretKey {
@@ -184,35 +185,35 @@ class VelaRemotePlugin : Plugin() {
     private fun writeStore(store: JSONObject) {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE,key())
         val value = Base64.encodeToString(cipher.iv + cipher.doFinal(store.toString().toByteArray()),Base64.NO_WRAP)
-        if (!prefs.edit().putString("vault",value).commit()) fail("无法保存安全存储")
+        if (!prefs.edit().putString("vault",value).commit()) fail(texts.get("mobile.native.secureStorageWriteFailed"))
     }
     private fun records(store: JSONObject) = store.getJSONArray("connections")
     private fun find(id: String): JSONObject {
         val rows = records(readStore())
         for (i in 0 until rows.length()) if(rows.getJSONObject(i).getString("id")==id) return rows.getJSONObject(i)
-        fail("连接不存在")
+        fail(texts.get("mobile.native.connectionMissing"))
     }
-    private fun port(row: JSONObject, name: String): Int { val n=row.optInt(name,0); if(n !in 1..65535) fail("端口必须介于 1 和 65535 之间"); return n }
+    private fun port(row: JSONObject, name: String): Int { val n=row.optInt(name,0); if(n !in 1..65535) fail(texts.get("mobile.native.portRange")); return n }
     private fun validate(row: JSONObject) {
-        if(row.optString("name").isBlank()) fail("请输入连接名称")
+        if(row.optString("name").isBlank()) fail(texts.get("mobile.native.nameRequired"))
         when(row.optString("mode")) {
             "url" -> safeUrl(row.getString("url"))
             "ssh" -> {
-                if(row.optString("host").isBlank() || row.getString("host").any { it.isWhitespace() || it=='/' || it=='@' }) fail("请输入有效的 SSH 主机名")
-                if(row.optString("username").isBlank()) fail("请输入 SSH 用户名")
+                if(row.optString("host").isBlank() || row.getString("host").any { it.isWhitespace() || it=='/' || it=='@' }) fail(texts.get("mobile.native.sshHostNameInvalid"))
+                if(row.optString("username").isBlank()) fail(texts.get("mobile.native.sshUsernameRequired"))
                 port(row,"port")
-                if(row.optString("auth")=="key") { if(row.optString("privateKey").isBlank()) fail("请输入私钥") }
-                else if(row.optString("auth")!="password" || row.optString("password").isEmpty()) fail("请输入 SSH 密码")
+                if(row.optString("auth")=="key") { if(row.optString("privateKey").isBlank()) fail(texts.get("mobile.native.privateKeyRequired")) }
+                else if(row.optString("auth")!="password" || row.optString("password").isEmpty()) fail(texts.get("mobile.native.sshPasswordRequired"))
                 if(row.optString("service")=="manual") port(row,"remotePort")
-                else if(row.optString("service")!="auto") fail("请选择服务连接方式")
+                else if(row.optString("service")!="auto") fail(texts.get("mobile.native.serviceModeRequired"))
             }
-            else -> fail("不支持的连接方式")
+            else -> fail(texts.get("mobile.native.modeUnsupported"))
         }
     }
     private fun safeUrl(text: String): URI {
         val url=URI(text)
-        if(url.scheme !in listOf("https","http") || url.host.isNullOrBlank() || url.userInfo!=null) fail("请输入不含账号密码的 HTTP 或 HTTPS 地址")
-        if(url.scheme=="http" && url.host !in listOf("localhost","127.0.0.1","[::1]","::1")) fail("URL 连接请使用 HTTPS；HTTP 仅允许本机 SSH 隧道")
+        if(url.scheme !in listOf("https","http") || url.host.isNullOrBlank() || url.userInfo!=null) fail(texts.get("mobile.native.addressInvalid"))
+        if(url.scheme=="http" && url.host !in listOf("localhost","127.0.0.1","[::1]","::1")) fail(texts.get("mobile.native.httpsRequired"))
         return url
     }
     @PluginMethod fun list(call: PluginCall) = run(call) {
@@ -223,10 +224,10 @@ class VelaRemotePlugin : Plugin() {
     }
     @PluginMethod fun save(call: PluginCall) = run(call) {
         val store = readStore()
-        val input = call.getObject("connection") ?: fail("缺少连接配置")
+        val input = call.getObject("connection") ?: fail(texts.get("mobile.native.connectionConfigMissing"))
         val copyId = call.getString("copyFromId")
         val source = if (copyId != null) (0 until records(store).length()).map { records(store).getJSONObject(it) }.firstOrNull { it.optString("id") == copyId } else null
-        if (copyId != null && (input.has("id") || source == null || source.optString("mode") != input.optString("mode"))) fail("The source connection is no longer available. Return to the connection list and try again.")
+        if (copyId != null && (input.has("id") || source == null || source.optString("mode") != input.optString("mode"))) fail(texts.get("mobile.native.sourceConnectionMissing"))
         val row = if (source != null) ConnectionRecords.copied(input, source) else ConnectionRecords.prepared(input, records(store)); validate(row)
         if (copyId == null) input.optString("id").takeIf { it.isNotBlank() }?.let { PushRegistration.get(context).revoke(it) }
         val (saved, rows) = ConnectionRecords.upsert(row, records(store), preserveEquivalent = copyId != null)
@@ -235,13 +236,13 @@ class VelaRemotePlugin : Plugin() {
     }
     private fun saveWebPassword(id: String, password: String) {
         val store = readStore(); val rows = records(store)
-        val row = (0 until rows.length()).map { rows.getJSONObject(it) }.firstOrNull { it.getString("id") == id } ?: fail("连接不存在")
+        val row = (0 until rows.length()).map { rows.getJSONObject(it) }.firstOrNull { it.getString("id") == id } ?: fail(texts.get("mobile.native.connectionMissing"))
         row.put("webPassword", password)
         store.put("connections", ConnectionRecords.upsert(row, rows).second); writeStore(store)
     }
     @PluginMethod fun remove(call: PluginCall) = run(call) {
         PushRegistration.get(context).revoke(call.getString("id") ?: "")
-        val id=call.getString("id") ?: fail("缺少连接 ID"); val store=readStore();val rows=records(store)
+        val id=call.getString("id") ?: fail(texts.get("mobile.native.connectionIdMissing")); val store=readStore();val rows=records(store)
         for(i in rows.length()-1 downTo 0) if(rows.getJSONObject(i).getString("id")==id) rows.remove(i)
         writeStore(store); JSObject()
     }
@@ -268,10 +269,10 @@ class VelaRemotePlugin : Plugin() {
         val latch=CountDownLatch(1); var accepted=false
         main.post {
             if (generation.get() != epoch) { latch.countDown(); return@post }
-            AlertDialog.Builder(activity).setTitle(if(changed) "远端指纹已变化" else "确认远端指纹")
-                .setMessage("$host\n\n$fingerprint\n\n请与主机管理员核对。${if(changed) "原有信任记录将被替换。" else ""}")
-                .setPositiveButton("确认并信任") { _,_ -> accepted=true; latch.countDown() }
-                .setNegativeButton("取消") { _,_ -> latch.countDown() }.setOnCancelListener { latch.countDown() }.show()
+            AlertDialog.Builder(activity).setTitle(texts.get(if(changed) "mobile.native.trustChangedTitle" else "mobile.native.trustTitle"))
+                .setMessage(texts.get(if(changed) "mobile.native.trustChangedBody" else "mobile.native.trustBody", mapOf("identity" to host, "fingerprint" to fingerprint)))
+                .setPositiveButton(texts.get("mobile.native.trustAccept")) { _,_ -> accepted=true; latch.countDown() }
+                .setNegativeButton(texts.get("common.cancel")) { _,_ -> latch.countDown() }.setOnCancelListener { latch.countDown() }.show()
         }
         return latch.await(90,TimeUnit.SECONDS) && accepted
     }
@@ -279,13 +280,15 @@ class VelaRemotePlugin : Plugin() {
         ssh.startSession().use { session ->
             val cmd=session.exec(command)
             val collected=java.io.ByteArrayOutputStream();val chunk=ByteArray(8192)
-            while(true) {val count=cmd.inputStream.read(chunk);if(count<0)break;collected.write(chunk,0,count);if(collected.size()>1024*1024)fail("远端响应过大")}
+            while(true) {val count=cmd.inputStream.read(chunk);if(count<0)break;collected.write(chunk,0,count);if(collected.size()>1024*1024)fail(texts.get("mobile.native.responseTooLarge"))}
             val output=collected.toByteArray()
             cmd.join(180,TimeUnit.SECONDS)
             return String(output,StandardCharsets.UTF_8).trim()
         }
     }
     private fun resource(name: String)=context.assets.open(name).bufferedReader().use { it.readText() }
+    // download.js is shared with the page context and reads its texts from this object instead of carrying them itself.
+    private fun downloadTexts(strings: MobileText)="window.__VELATERM_DOWNLOAD_TEXT__="+JSONObject().put("mobile.native.downloadRetry",strings.get("mobile.native.downloadRetry")).put("mobile.native.downloadTooLarge",strings.get("mobile.native.downloadTooLarge")).toString()+";"
     private fun powershell(script: String)="powershell.exe -NoProfile -NonInteractive -EncodedCommand "+Base64.encodeToString(script.toByteArray(Charsets.UTF_16LE),Base64.NO_WRAP)
     private fun allocate(row: JSONObject): ServerSocket {
         var preferred=row.optInt("localPort",0)
@@ -298,7 +301,7 @@ class VelaRemotePlugin : Plugin() {
                 writeStore(store); return socket
             } catch(e: java.net.BindException) { preferred=0 }
         }
-        fail("无法分配 SSH 本地端口")
+        fail(texts.get("mobile.native.localPortFailed"))
     }
     private fun establish(row: JSONObject, epoch: Int): Pair<String,String> {
         if(row.getString("mode")=="url") return row.getString("url") to row.optString("webPassword")
@@ -312,12 +315,12 @@ class VelaRemotePlugin : Plugin() {
         }
         val ssh=SSHClient()
         synchronized(this) {
-            if (generation.get() != epoch) { ssh.close(); fail("Connection cancelled") }
+            if (generation.get() != epoch) { ssh.close(); fail(texts.get("mobile.native.connectionCancelled")) }
             client=ssh
         }
         ssh.connectTimeout=20000; ssh.timeout=180000
         fun execute(command: String): String {
-            if (generation.get() != epoch) fail("Connection cancelled")
+            if (generation.get() != epoch) fail(texts.get("mobile.native.connectionCancelled"))
             return exec(command, ssh)
         }
         val host=row.getString("host");val remoteSshPort=port(row,"port");val identity="$host:$remoteSshPort"
@@ -336,7 +339,7 @@ class VelaRemotePlugin : Plugin() {
             }
         })
         ssh.connect(host,remoteSshPort)
-        if(generation.get() !=epoch) fail("连接已取消")
+        if(generation.get() !=epoch) fail(texts.get("mobile.native.connectionCancelled"))
         if(row.getString("auth")=="key") {
             val provider=OpenSSHKeyV1KeyFile()
             val pass=row.optString("passphrase")
@@ -353,16 +356,16 @@ class VelaRemotePlugin : Plugin() {
                 val code=resource("bootstrap-code.txt").trim()
                 val command="${if(windows) "python" else "python3"} -c \"$code\"${if(row.optBoolean("prepare")) " --install" else ""}"
                 val output=execute(command)
-                record=try { JSONObject(output) } catch(_: Exception) { fail("远端准备需要 Python 3；也可指定已运行服务的端口") }
+                record=try { JSONObject(output) } catch(_: Exception) { fail(texts.get("mobile.native.pythonRequired")) }
                 if(record.has("error")) fail(record.getString("error"))
             }
             servicePort=port(record,"port");password=record.getString("password")
         }
-        if(generation.get() !=epoch) fail("连接已取消")
+        if(generation.get() !=epoch) fail(texts.get("mobile.native.connectionCancelled"))
         state("forwarding")
         val socket=allocate(row)
         synchronized(this) {
-            if (generation.get() != epoch) { socket.close(); fail("Connection cancelled") }
+            if (generation.get() != epoch) { socket.close(); fail(texts.get("mobile.native.connectionCancelled")) }
             listener=socket
         }
         val forwarder=ssh.newLocalPortForwarder(Parameters("127.0.0.1",socket.localPort,"127.0.0.1",servicePort),socket)
@@ -381,16 +384,16 @@ class VelaRemotePlugin : Plugin() {
             token?.let {connection.setRequestProperty("Authorization","Bearer $it")}
             if(body != null) {connection.requestMethod="POST";connection.doOutput=true;connection.setRequestProperty("Content-Type","application/json");connection.outputStream.use {it.write(body.toString().toByteArray(StandardCharsets.UTF_8))}}
             val status=connection.responseCode
-            if(path.endsWith("/poll") && status in listOf(401,404)) throw AccountFailure("ACCOUNT_LOGIN_EXPIRED","登录请求已失效，请重新登录。")
-            if(status==401) throw AccountFailure("ACCOUNT_AUTH_REQUIRED","登录已失效，请重新登录。")
-            if(status !in 200..299) fail("账号服务不可用，请重试")
+            if(path.endsWith("/poll") && status in listOf(401,404)) throw AccountFailure("ACCOUNT_LOGIN_EXPIRED",texts.get("mobile.native.loginRequestExpired"))
+            if(status==401) throw AccountFailure("ACCOUNT_AUTH_REQUIRED",texts.get("mobile.native.sessionExpired"))
+            if(status !in 200..299) fail(texts.get("mobile.native.accountServiceUnavailable"))
             val text=connection.inputStream.bufferedReader().use {it.readText()}
             return if(text.isBlank() || text=="null") JSONObject.NULL else org.json.JSONTokener(text).nextValue()
         } finally {connection.disconnect()}
     }
     private fun accountPage(address: String) {
         val uri=android.net.Uri.parse(address)
-        if(uri.scheme!="https" || uri.host!="velaterm.com" || uri.port!=-1 || uri.userInfo!=null) fail("无效的账号地址")
+        if(uri.scheme!="https" || uri.host!="velaterm.com" || uri.port!=-1 || uri.userInfo!=null) fail(texts.get("mobile.native.accountAddressInvalid"))
         androidx.browser.customtabs.CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(activity,uri)
     }
     private fun openAccountPage(address: String) {
@@ -411,19 +414,19 @@ class VelaRemotePlugin : Plugin() {
                 JSObject().put("linked",false)
             }
             "poll" -> {
-                val attempt=accountAttempt ?: throw AccountFailure("ACCOUNT_LOGIN_EXPIRED","请重新发起登录")
-                val code=attempt.getString("code");if(!code.matches(Regex("[A-Za-z0-9_-]{43}"))) fail("无效的登录请求")
+                val attempt=accountAttempt ?: throw AccountFailure("ACCOUNT_LOGIN_EXPIRED",texts.get("mobile.native.loginRestart"))
+                val code=attempt.getString("code");if(!code.matches(Regex("[A-Za-z0-9_-]{43}"))) fail(texts.get("mobile.native.loginRequestInvalid"))
                 val value=accountRequest("/api/device-link/$code/poll",attempt.getString("pollToken"),JSONObject())
                 if(value is JSONObject) {store.put("accountToken",value.getString("token"));store.remove("accountAttempt");writeStore(store);accountAttempt=null;JSObject().put("linked",true)}
                 else JSObject().put("linked",false)
             }
             "status" -> (if(token==null) JSObject().put("linked",false) else JSObject((accountRequest("/api/device-link/host/status",token) as JSONObject).toString())).put("pending",accountAttempt!=null)
-            "devices" -> JSObject().put("devices",accountRequest("/api/device-link/host/remote",token ?: fail("请先登录")))
+            "devices" -> JSObject().put("devices",accountRequest("/api/device-link/host/remote",token ?: fail(texts.get("mobile.native.signInFirst"))))
             "logout" -> {PushRegistration.get(context).revokeAccount();if(token!=null && (accountRequest("/api/device-link/host/status",token) as JSONObject).optBoolean("linked")) accountRequest("/api/device-link/host/logout",token,JSONObject());store.remove("accountToken");store.remove("accountAttempt");writeStore(store);accountAttempt=null;JSObject()}
             "open" -> {
                 val body=JSONObject();call.getString("deviceId")?.let {body.put("deviceId",java.util.UUID.fromString(it).toString())}
                 call.getString("grantId")?.let {body.put("grantId",java.util.UUID.fromString(it).toString())}
-                val value=accountRequest("/api/device-link/host/browser-ticket",token ?: fail("请先登录"),body) as JSONObject
+                val value=accountRequest("/api/device-link/host/browser-ticket",token ?: fail(texts.get("mobile.native.signInFirst")),body) as JSONObject
                 if (body.has("deviceId") || body.has("grantId")) {
                     val address = value.getString("url"); val uri = URI(address)
                     check(uri.scheme == "https" && uri.host == "velaterm.com" && uri.port == -1 && uri.userInfo == null)
@@ -435,16 +438,16 @@ class VelaRemotePlugin : Plugin() {
                 } else openAccountPage(value.getString("url"))
                 JSObject()
             }
-            else -> fail("无效的账号操作")
+            else -> fail(texts.get("mobile.native.accountActionInvalid"))
         }
     }
     @PluginMethod fun connect(call: PluginCall) {
-        val id = call.getString("id") ?: run { call.reject("Missing connection ID"); return }
+        val id = call.getString("id") ?: run { call.reject(texts.get("mobile.native.connectionIdMissing")); return }
         val epoch = generation.incrementAndGet(); activeId = id
         closeTransportInBackground()
         run(call) {
         try {
-            if (generation.get() != epoch) fail("Connection cancelled")
+            if (generation.get() != epoch) fail(texts.get("mobile.native.connectionCancelled"))
             val row=find(id);val (address,password)=establish(row,epoch)
             val session = call.getString("sessionId")?.takeIf { it.isNotEmpty() && it.toByteArray().size <= 256 }
             val url = if (session == null) address else {
@@ -453,7 +456,7 @@ class VelaRemotePlugin : Plugin() {
                 for (key in uri.queryParameterNames) if (key != "session") for (value in uri.getQueryParameters(key)) builder.appendQueryParameter(key, value)
                 builder.appendQueryParameter("session", session).build().toString()
             }
-            if(generation.get() !=epoch) fail("连接已取消")
+            if(generation.get() !=epoch) fail(texts.get("mobile.native.connectionCancelled"))
             main.post { if (generation.get() == epoch) showBrowser(url,password,row.getString("name")) }
             state("ready");JSObject().put("id",id)
         } catch(e:Exception) { if (generation.get() == epoch) { closeTransportInBackground(epoch);state("error") };throw e }
@@ -495,7 +498,7 @@ class VelaRemotePlugin : Plugin() {
                         val filename=name.substringAfterLast('/').substringAfterLast('\\').take(180).ifBlank{"download"}
                         try {downloadChooser?.launch(android.content.Intent(android.content.Intent.ACTION_CREATE_DOCUMENT).apply {
                             addCategory(android.content.Intent.CATEGORY_OPENABLE);type="application/octet-stream";putExtra(android.content.Intent.EXTRA_TITLE,filename)
-                        })} catch(_:Exception){downloadBytes=null;downloadPending.set(false);pageStatus?.text="无法打开文件保存界面"}
+                        })} catch(_:Exception){downloadBytes=null;downloadPending.set(false);pageStatus?.text=texts.get("mobile.native.savePickerFailed")}
                     }
                 } catch(_:Exception){downloadPending.set(false)}
             }
@@ -551,10 +554,10 @@ class VelaRemotePlugin : Plugin() {
         recoveryView.onRetry = { reload.performClick() }; recoveryView.onBack = { browser?.dismiss() }
         val status=TextView(activity).apply {text=title;textSize=15f;maxLines=1;ellipsize=android.text.TextUtils.TruncateAt.MIDDLE};pageStatus=status
         fun showConnectionPanel() {
-            android.app.AlertDialog.Builder(activity).setTitle("连接管理").setMessage(if(status.text.toString()==title) title else "$title\n${status.text}")
-                .setPositiveButton("重新连接") { _,_ -> reload.performClick() }
-                .setNeutralButton("切换连接") { _,_ -> browser?.dismiss() }
-                .setNegativeButton("取消",null).show()
+            android.app.AlertDialog.Builder(activity).setTitle(strings.get("mobile.connections")).setMessage(if(status.text.toString()==title) title else "$title\n${status.text}")
+                .setPositiveButton(strings.get("mobile.native.reconnect")) { _,_ -> reload.performClick() }
+                .setNeutralButton(strings.get("mobile.native.switchConnection")) { _,_ -> browser?.dismiss() }
+                .setNegativeButton(strings.get("common.cancel"),null).show()
         }
         layout.addView(view,android.widget.FrameLayout.LayoutParams(-1,-1))
         if (connectionId == "account") {
@@ -581,27 +584,27 @@ class VelaRemotePlugin : Plugin() {
                 val identity="tls:$origin"
                 worker.execute {try {
                     val store=readStore();val keys=store.getJSONObject("keys");val previous=keys.optString(identity)
-                    val trusted=previous==fingerprint || approve("HTTPS 证书 · $origin",fingerprint,previous.isNotEmpty())
+                    val trusted=previous==fingerprint || approve(strings.get("mobile.native.tlsIdentity", mapOf("identity" to origin)),fingerprint,previous.isNotEmpty())
                     if(trusted){keys.put(identity,fingerprint);writeStore(store)}
-                    main.post {if(trusted && web===v)handler.proceed() else {handler.cancel();if(web===v)showPageError("未能验证远端证书，请重新连接，或返回连接列表。")}}
-                } catch(_:Exception){main.post{handler.cancel();if(web===v)showPageError("未能验证远端证书，请重新连接，或返回连接列表。")}}}
+                    main.post {if(trusted && web===v)handler.proceed() else {handler.cancel();if(web===v)showPageError(strings.get("mobile.native.certificateRejected"))}}
+                } catch(_:Exception){main.post{handler.cancel();if(web===v)showPageError(strings.get("mobile.native.certificateRejected"))}}}
             }
             override fun shouldOverrideUrlLoading(v:WebView,request:WebResourceRequest):Boolean {
                 val next=request.url
                 if(next.scheme=="velaterm-ui" && next.host=="close" && request.isForMainFrame) {browser?.dismiss();return true}
                 if(next.scheme=="velaterm-ui" && next.host=="connections" && request.isForMainFrame) {showConnectionPanel();return true}
                 val allowed=next.scheme==uri.scheme && next.host==uri.host && (if(next.port==-1) if(next.scheme=="https")443 else 80 else next.port)==(if(uri.port==-1) if(uri.scheme=="https")443 else 80 else uri.port)
-                if(!allowed && request.isForMainFrame) status.text="已阻止离开当前服务的导航：${next.host ?: next.scheme}"
+                if(!allowed && request.isForMainFrame) status.text=strings.get("mobile.native.navigationBlocked", mapOf("host" to (next.host ?: next.scheme ?: "")))
                 return !allowed
             }
             override fun onReceivedError(v:WebView,r:WebResourceRequest,e:WebResourceError) {
-                if(r.isForMainFrame) { status.text="连接不可用"; showPageError("无法加载远端页面，请检查网络后重试，或返回连接列表。") }
+                if(r.isForMainFrame) { status.text=strings.get("mobile.connectionUnavailable"); showPageError(strings.get("mobile.native.pageLoadFailed")) }
             }
             override fun onReceivedHttpError(v: WebView, request: WebResourceRequest, response: android.webkit.WebResourceResponse) {
-                if (request.isForMainFrame) showPageError("远端页面暂时不可用（HTTP ${response.statusCode}），请重试或返回连接列表。")
+                if (request.isForMainFrame) showPageError(strings.get("mobile.native.pageUnavailable", mapOf("code" to response.statusCode.toString())))
             }
             override fun onRenderProcessGone(v: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
-                showPageError("页面已停止运行，请重新连接，或返回连接列表。")
+                showPageError(strings.get("mobile.native.pageTerminated"))
                 layout.removeView(v); v.destroy(); if (web === v) web = null
                 return true
             }
@@ -666,7 +669,7 @@ class VelaRemotePlugin : Plugin() {
                 if (value.toByteArray(Charsets.UTF_8).size > 4096) throw IllegalArgumentException()
                 worker.execute {
                     val ok = try {
-                        if (connectionId == null || activeId != connectionId || web !== view) fail("连接已关闭")
+                        if (connectionId == null || activeId != connectionId || web !== view) fail(texts.get("mobile.native.connectionClosed"))
                         saveWebPassword(connectionId, value); true
                     } catch (_: Exception) { false }
                     main.post { if (web === view) reply.postMessage(JSONObject().put("id", requestId).put("ok", ok).toString()) }
@@ -674,10 +677,10 @@ class VelaRemotePlugin : Plugin() {
             } catch (_: Exception) { /* Invalid requests cannot write credentials. */ }
         }
         beginLoading()
-        if(!supportsPasswordStorage || !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) { state("error");showPageError("请更新 Android System WebView 后重试，或返回连接列表。") }
+        if(!supportsPasswordStorage || !WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) { state("error");showPageError(strings.get("mobile.native.webViewOutdated")) }
         else {
             val script=if(password.isNotEmpty()) "window.__VLX_AUTOLOGIN__={password:${JSONObject.quote(password)}};" else ""
-            WebViewCompat.addDocumentStartJavaScript(view,"window.__VELATERM_CONNECTION_MENU__=true;"+script+resource("download.js")+if (supportsPasswordStorage) resource("login.js")+"\n"+resource("notifications.js")+"\n"+resource("page-readiness.js") else "",setOf(origin))
+            WebViewCompat.addDocumentStartJavaScript(view,"window.__VELATERM_CONNECTION_MENU__=true;"+script+downloadTexts(strings)+resource("download.js")+if (supportsPasswordStorage) resource("login.js")+"\n"+resource("notifications.js")+"\n"+resource("page-readiness.js") else "",setOf(origin))
             view.loadUrl(pageAddress)
         }
         val dialog=Dialog(activity,android.R.style.Theme_Material_Light_NoActionBar)
@@ -717,5 +720,5 @@ class VelaRemotePlugin : Plugin() {
         if(pickingFile){pickingFile=false;return}
         if (activeId != null) reconnectPage?.invoke()
     }
-    override fun handleOnDestroy() { notifications.close(); scanner?.unregister();scanCall?.reject("扫码已取消", "SCAN_UNAVAILABLE");scanCall=null; generation.incrementAndGet();closeTransportInBackground();cleanupWorker.shutdown();fileResult?.onReceiveValue(null);chooser?.unregister();downloadChooser?.unregister();downloadBytes=null;worker.shutdownNow();super.handleOnDestroy() }
+    override fun handleOnDestroy() { notifications.close(); scanner?.unregister();scanCall?.reject(texts.get("mobile.native.scanCancelled"), "SCAN_UNAVAILABLE");scanCall=null; generation.incrementAndGet();closeTransportInBackground();cleanupWorker.shutdown();fileResult?.onReceiveValue(null);chooser?.unregister();downloadChooser?.unregister();downloadBytes=null;worker.shutdownNow();super.handleOnDestroy() }
 }

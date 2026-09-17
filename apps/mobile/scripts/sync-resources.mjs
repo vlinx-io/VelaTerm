@@ -2,10 +2,14 @@ import { deflateSync } from 'node:zlib';
 import { mkdir, copyFile, readFile, writeFile } from 'node:fs/promises';
 const target = new URL('../plugins/remote/ios/Sources/VelaRemotePlugin/Bootstrap/', import.meta.url);
 await mkdir(target, {recursive:true});
+// Every `mobile.*` key of the English dictionary plus the shared keys below travels to the native plugins, so a new native key cannot be forgotten here.
+const sharedNativeKeys = ['common.loading','common.retry','common.cancel'];
+const nativeLocales = ['en','zh-CN','zh-TW','ja','ko','fr','de','es','pt-BR','ru','vi'];
+const nativeTextKeys = dictionary => [...sharedNativeKeys, ...Object.keys(dictionary).filter(key => key.startsWith('mobile.') && typeof dictionary[key] === 'string')];
 const nativeText = {};
-for (const locale of ['en','zh-CN','zh-TW','ja','ko','fr','de','es','pt-BR','ru','vi']) {
+for (const locale of nativeLocales) {
   const {default: dictionary} = await import(new URL('../../../src/i18n/locales/'+locale+'.ts', import.meta.url).href);
-  nativeText[locale] = Object.fromEntries(['common.loading','common.retry','mobile.backConnections','mobile.loadSlow','mobile.connectionUnavailable','common.cancel','mobile.pushTitle','mobile.pushDisclosure','mobile.pushEnable'].map(key => [key, dictionary[key]]));
+  nativeText[locale] = Object.fromEntries(nativeTextKeys(dictionary).map(key => [key, dictionary[key]]));
 }
 await writeFile(new URL('../plugins/remote/shared/native-text.json', import.meta.url), JSON.stringify(nativeText));
 const source = await readFile(new URL('../plugins/remote/shared/bootstrap.py', import.meta.url));

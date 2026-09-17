@@ -39,7 +39,7 @@ final class Vault {
         var value: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &value)
         if status == errSecItemNotFound { return ["connections": [[String: Any]](), "keys": [String: String]()] }
-        guard status == errSecSuccess, let data = value as? Data, let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw RemoteFailure("无法读取系统钥匙串（\(status)）") }
+        guard status == errSecSuccess, let data = value as? Data, let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw RemoteFailure(MobileText.get("mobile.native.keychainReadFailed", ["code": String(status)])) }
         return object
     }
     func write(_ object: [String: Any]) throws {
@@ -48,7 +48,7 @@ final class Vault {
         let value: [String: Any] = [kSecValueData as String: try JSONSerialization.data(withJSONObject: object), kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
         var status = SecItemUpdate(query as CFDictionary, value as CFDictionary)
         if status == errSecItemNotFound { status = SecItemAdd(query.merging(value) { _, new in new } as CFDictionary, nil) }
-        guard status == errSecSuccess else { throw RemoteFailure("无法保存系统钥匙串（\(status)）") }
+        guard status == errSecSuccess else { throw RemoteFailure(MobileText.get("mobile.native.keychainWriteFailed", ["code": String(status)])) }
     }
 }
 
@@ -57,7 +57,7 @@ private final class HostValidator: NIOSSHClientServerAuthenticationDelegate {
     init(_ verify: @escaping (String) async throws -> Void) { self.verify = verify }
     func validateHostKey(hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>) {
         let representation = String(openSSHPublicKey: hostKey)
-        guard let encoded = representation.split(separator: " ").dropFirst().first, let data = Data(base64Encoded: String(encoded)) else { validationCompletePromise.fail(RemoteFailure("无法读取主机公钥")); return }
+        guard let encoded = representation.split(separator: " ").dropFirst().first, let data = Data(base64Encoded: String(encoded)) else { validationCompletePromise.fail(RemoteFailure(MobileText.get("mobile.native.hostKeyUnreadable"))); return }
         let fingerprint = "SHA256:" + Data(SHA256.hash(data: data)).base64EncodedString().replacingOccurrences(of: "=", with: "")
         Task { do { try await verify(fingerprint); validationCompletePromise.succeed(()) } catch { validationCompletePromise.fail(error) } }
     }
@@ -95,7 +95,9 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
     private var generation = 0
     private var activeID: String?
     private var browser: ProjectBrowser?
+    private var prompts: TrustPromptCoordinator!
     public override func load() {
+        prompts = TrustPromptCoordinator { [weak self] request in guard let self else { return false }; return try await self.presentTrustAlert(request) }
         TaskNotifications.shared.activate()
         TaskNotifications.shared.onOpen = { [weak self] event in self?.notifyListeners("notificationOpen", data: event, retainUntilConsumed: true) }
     }
@@ -116,24 +118,24 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
     private func string(_ row: [String: Any], _ key: String) -> String { row[key] as? String ?? "" }
     private func number(_ row: [String: Any], _ key: String) -> Int { row[key] as? Int ?? 0 }
     private func port(_ row: [String: Any], _ key: String) throws -> Int {
-        let value = number(row, key); guard (1...65535).contains(value) else { throw RemoteFailure("端口必须介于 1 和 65535 之间") }; return value
+        let value = number(row, key); guard (1...65535).contains(value) else { throw RemoteFailure(MobileText.get("mobile.native.portRange")) }; return value
     }
     private func safeURL(_ address: String) throws -> URL {
-        guard let url = URL(string: address), ["https", "http"].contains(url.scheme ?? ""), let host = url.host, !host.isEmpty, url.user == nil, url.password == nil else { throw RemoteFailure("请输入不含账号密码的 HTTP 或 HTTPS 地址") }
-        guard url.scheme != "http" || ["localhost", "127.0.0.1", "[::1]", "::1"].contains(host) else { throw RemoteFailure("URL 连接请使用 HTTPS；HTTP 仅允许本机 SSH 隧道") }
+        guard let url = URL(string: address), ["https", "http"].contains(url.scheme ?? ""), let host = url.host, !host.isEmpty, url.user == nil, url.password == nil else { throw RemoteFailure(MobileText.get("mobile.native.addressInvalid")) }
+        guard url.scheme != "http" || ["localhost", "127.0.0.1", "[::1]", "::1"].contains(host) else { throw RemoteFailure(MobileText.get("mobile.native.httpsRequired")) }
         return url
     }
     private func validate(_ row: [String: Any]) throws {
-        guard !string(row, "name").trimmingCharacters(in: .whitespaces).isEmpty else { throw RemoteFailure("请输入连接名称") }
+        guard !string(row, "name").trimmingCharacters(in: .whitespaces).isEmpty else { throw RemoteFailure(MobileText.get("mobile.native.nameRequired")) }
         if string(row, "mode") == "url" { _ = try safeURL(string(row, "url")); return }
-        guard string(row, "mode") == "ssh", !string(row, "host").isEmpty, !string(row, "username").isEmpty, string(row, "host").rangeOfCharacter(from: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "/@"))) == nil else { throw RemoteFailure("请输入有效的 SSH 主机和用户名") }
+        guard string(row, "mode") == "ssh", !string(row, "host").isEmpty, !string(row, "username").isEmpty, string(row, "host").rangeOfCharacter(from: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "/@"))) == nil else { throw RemoteFailure(MobileText.get("mobile.native.sshHostInvalid")) }
         _ = try port(row, "port")
-        guard ["password", "key"].contains(string(row, "auth")), !string(row, string(row, "auth") == "key" ? "privateKey" : "password").isEmpty else { throw RemoteFailure("请输入 SSH 密码或私钥") }
+        guard ["password", "key"].contains(string(row, "auth")), !string(row, string(row, "auth") == "key" ? "privateKey" : "password").isEmpty else { throw RemoteFailure(MobileText.get("mobile.native.sshCredentialsRequired")) }
         if string(row, "service") == "manual" { _ = try port(row, "remotePort") }
-        else if string(row, "service") != "auto" { throw RemoteFailure("请选择服务连接方式") }
+        else if string(row, "service") != "auto" { throw RemoteFailure(MobileText.get("mobile.native.serviceModeRequired")) }
     }
     private func record(_ id: String) throws -> [String: Any] {
-        guard let row = (try vault.read()["connections"] as? [[String: Any]])?.first(where: { string($0, "id") == id }) else { throw RemoteFailure("连接不存在") }; return row
+        guard let row = (try vault.read()["connections"] as? [[String: Any]])?.first(where: { string($0, "id") == id }) else { throw RemoteFailure(MobileText.get("mobile.native.connectionMissing")) }; return row
     }
     private let diagnosticLock = NSLock()
     private var diagnosticOperation = UUID().uuidString
@@ -159,13 +161,13 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
     private var scanningURL = false
     @objc func scanURL(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
-            guard !self.scanningURL else { call.reject("正在扫码，请先关闭当前扫码窗口", "SCAN_BUSY"); return }
+            guard !self.scanningURL else { call.reject(MobileText.get("mobile.native.scanBusy"), "SCAN_BUSY"); return }
             self.scanningURL = true
             let presentScanner: (Bool) -> Void = { allowed in
                 DispatchQueue.main.async {
-                    guard allowed else { self.scanningURL = false; call.reject("相机权限未开启，请在系统设置中允许 VelaTerm 使用相机", "CAMERA_PERMISSION_DENIED"); return }
+                    guard allowed else { self.scanningURL = false; call.reject(MobileText.get("mobile.native.cameraPermissionDenied"), "CAMERA_PERMISSION_DENIED"); return }
                     guard let presenter = self.bridge?.viewController, presenter.presentedViewController == nil else {
-                        self.scanningURL = false; call.reject("无法打开扫码窗口，请返回连接首页后重试", "SCAN_UNAVAILABLE"); return
+                        self.scanningURL = false; call.reject(MobileText.get("mobile.native.scanUnavailable"), "SCAN_UNAVAILABLE"); return
                     }
                     let scanner = URLScanner()
                     scanner.modalPresentationStyle = .fullScreen
@@ -174,9 +176,9 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
                         if let error { call.reject(error, "SCAN_UNAVAILABLE"); return }
                         guard let value else { call.resolve(["cancelled": true]); return }
                         do {
-                            guard value.utf8.count <= 8192 else { throw RemoteFailure("二维码中的 URL 过长") }
+                            guard value.utf8.count <= 8192 else { throw RemoteFailure(MobileText.get("mobile.native.qrTooLong")) }
                             let url = try self.safeURL(value.trimmingCharacters(in: .whitespacesAndNewlines))
-                            call.resolve(["url": url.absoluteString, "name": url.host ?? "URL 连接"])
+                            call.resolve(["url": url.absoluteString, "name": url.host ?? MobileText.get("mobile.native.urlConnectionName")])
                         } catch { call.reject(error.localizedDescription, "INVALID_QR_URL") }
                     }
                     presenter.present(scanner, animated: true)
@@ -200,18 +202,18 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
         }
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let response = response as? HTTPURLResponse else { throw RemoteFailure("账号服务不可用，请重试") }
+        guard let response = response as? HTTPURLResponse else { throw RemoteFailure(MobileText.get("mobile.native.accountServiceUnavailable")) }
         if path.hasSuffix("/poll") && [401, 404].contains(response.statusCode) {
-            throw AccountFailure(code: "ACCOUNT_LOGIN_EXPIRED", message: "登录请求已失效，请重新登录。")
+            throw AccountFailure(code: "ACCOUNT_LOGIN_EXPIRED", message: MobileText.get("mobile.native.loginRequestExpired"))
         }
-        if response.statusCode == 401 { throw AccountFailure(code: "ACCOUNT_AUTH_REQUIRED", message: "登录已失效，请重新登录。") }
-        guard (200..<300).contains(response.statusCode) else { throw RemoteFailure("账号服务不可用，请重试") }
+        if response.statusCode == 401 { throw AccountFailure(code: "ACCOUNT_AUTH_REQUIRED", message: MobileText.get("mobile.native.sessionExpired")) }
+        guard (200..<300).contains(response.statusCode) else { throw RemoteFailure(MobileText.get("mobile.native.accountServiceUnavailable")) }
         if data.isEmpty { return NSNull() }
         return try JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)
     }
     @MainActor private func accountPage(_ address: String) throws {
         guard let url = URL(string: address), url.scheme == "https", url.host == "velaterm.com", url.user == nil, url.port == nil,
-            let presenter = bridge?.viewController, presenter.presentedViewController == nil else { throw RemoteFailure("无法打开账号窗口，请先关闭当前窗口") }
+            let presenter = bridge?.viewController, presenter.presentedViewController == nil else { throw RemoteFailure(MobileText.get("mobile.native.accountWindowBusy")) }
         let view = SFSafariViewController(url: url); view.modalPresentationStyle = .fullScreen
         accountBrowser = view; presenter.present(view, animated: true)
     }
@@ -227,14 +229,14 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
                     let key = Curve25519.KeyAgreement.PrivateKey()
                     let name = await MainActor.run { UIDevice.current.name }
                     guard let attempt = try await accountRequest("/api/device-link", body:["name":name,"publicKey":key.publicKey.rawRepresentation.base64EncodedString()]) as? [String:String],
-                        let url = attempt["url"], attempt["code"] != nil, attempt["pollToken"] != nil else {throw RemoteFailure("无效的登录响应")}
+                        let url = attempt["url"], attempt["code"] != nil, attempt["pollToken"] != nil else {throw RemoteFailure(MobileText.get("mobile.native.loginResponseInvalid"))}
                     accountAttempt = attempt
                     try vault.update { $0["accountAttempt"] = attempt }
                     do { try await MainActor.run {try accountPage(url)} }
                     catch { accountAttempt = nil; try vault.update { $0.removeValue(forKey:"accountAttempt") }; throw error }
                     call.resolve(["linked":false])
                 case "poll":
-                    guard let attempt = accountAttempt, let code = attempt["code"], let poll = attempt["pollToken"], code.range(of:"^[A-Za-z0-9_-]{43}$",options:.regularExpression) != nil else {throw AccountFailure(code:"ACCOUNT_LOGIN_EXPIRED",message:"请重新发起登录")}
+                    guard let attempt = accountAttempt, let code = attempt["code"], let poll = attempt["pollToken"], code.range(of:"^[A-Za-z0-9_-]{43}$",options:.regularExpression) != nil else {throw AccountFailure(code:"ACCOUNT_LOGIN_EXPIRED",message:MobileText.get("mobile.native.loginRestart"))}
                     let result = try await accountRequest("/api/device-link/\(code)/poll", token:poll, body:[:])
                     if let value = result as? [String:Any], let credential = value["token"] as? String {
                         try vault.update {$0["accountToken"] = credential; $0.removeValue(forKey:"accountAttempt")}
@@ -249,7 +251,7 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
                     status["pending"] = accountAttempt != nil
                     call.resolve(status)
                 case "devices":
-                    guard let token else {throw RemoteFailure("请先登录")}
+                    guard let token else {throw RemoteFailure(MobileText.get("mobile.native.signInFirst"))}
                     call.resolve(["devices":try await accountRequest("/api/device-link/host/remote",token:token)])
                 case "logout":
                     guard let token else {call.resolve();return}
@@ -261,21 +263,21 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
                     try vault.update {$0.removeValue(forKey:"accountToken"); $0.removeValue(forKey:"accountAttempt")}
                     accountAttempt = nil; call.resolve()
                 case "open":
-                    guard let token else {throw RemoteFailure("请先登录")}
+                    guard let token else {throw RemoteFailure(MobileText.get("mobile.native.signInFirst"))}
                     var body:[String:Any] = [:]
-                    if let id = call.getString("deviceId") {guard UUID(uuidString:id) != nil else {throw RemoteFailure("无效的客户端")};body["deviceId"] = id}
-                    if let id = call.getString("grantId") {guard UUID(uuidString:id) != nil else {throw RemoteFailure("无效的共享范围")};body["grantId"] = id}
-                    guard let value = try await accountRequest("/api/device-link/host/browser-ticket",token:token,body:body) as? [String:String], let url = value["url"] else {throw RemoteFailure("无效的连接响应")}
+                    if let id = call.getString("deviceId") {guard UUID(uuidString:id) != nil else {throw RemoteFailure(MobileText.get("mobile.native.deviceInvalid"))};body["deviceId"] = id}
+                    if let id = call.getString("grantId") {guard UUID(uuidString:id) != nil else {throw RemoteFailure(MobileText.get("mobile.native.grantInvalid"))};body["grantId"] = id}
+                    guard let value = try await accountRequest("/api/device-link/host/browser-ticket",token:token,body:body) as? [String:String], let url = value["url"] else {throw RemoteFailure(MobileText.get("mobile.native.connectResponseInvalid"))}
                     if body["deviceId"] != nil || body["grantId"] != nil {
                         try await MainActor.run {
-                            guard browser == nil, let address = URL(string: url), address.scheme == "https", address.host == "velaterm.com" else { throw RemoteFailure("无法打开远端窗口") }
+                            guard browser == nil, let address = URL(string: url), address.scheme == "https", address.host == "velaterm.com" else { throw RemoteFailure(MobileText.get("mobile.native.remoteWindowFailed")) }
                             activeID = "account"
                             openBrowser(address, "", "VelaTerm")
                             browser?.requestedSession = call.getString("sessionId")
                         }
                     } else { try await MainActor.run {try accountPage(url)} }
                     call.resolve()
-                default: throw RemoteFailure("无效的账号操作")
+                default: throw RemoteFailure(MobileText.get("mobile.native.accountActionInvalid"))
                 }
             } catch let error as AccountFailure {
                 if error.code == "ACCOUNT_LOGIN_EXPIRED" {
@@ -300,7 +302,7 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
     @objc func save(_ call: CAPPluginCall) {
         Task {
             do {
-                guard let input = call.getObject("connection") else { throw RemoteFailure("缺少连接配置") }
+                guard let input = call.getObject("connection") else { throw RemoteFailure(MobileText.get("mobile.native.connectionConfigMissing")) }
                 if let id = input["id"] as? String, call.getString("copyFromId") == nil {
                     let rows = try vault.read()["connections"] as? [[String: Any]] ?? []
                     try validate(ConnectionRecords.prepared(input, in: rows))
@@ -312,7 +314,7 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
                     let prepared: [String: Any]
                     if let copyID {
                         guard input["id"] == nil, let source = rows.first(where: { string($0, "id") == copyID }), string(source, "mode") == string(input, "mode") else {
-                            throw RemoteFailure("The source connection is no longer available. Return to the connection list and try again.")
+                            throw RemoteFailure(MobileText.get("mobile.native.sourceConnectionMissing"))
                         }
                         prepared = ConnectionRecords.copied(input, from: source)
                     } else { prepared = ConnectionRecords.prepared(input, in: rows) }
@@ -328,7 +330,7 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
     func saveWebPassword(_ password: String, for id: String) throws {
         try vault.update { store in
             var rows = store["connections"] as? [[String: Any]] ?? []
-            guard let index = rows.firstIndex(where: { string($0, "id") == id }) else { throw RemoteFailure("连接不存在") }
+            guard let index = rows.firstIndex(where: { string($0, "id") == id }) else { throw RemoteFailure(MobileText.get("mobile.native.connectionMissing")) }
             var row = rows[index]; row["webPassword"] = password
             _ = ConnectionRecords.upsert(row, into: &rows)
             store["connections"] = rows
@@ -342,20 +344,46 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
             } catch { call.reject((error as? PushFailure)?.code ?? error.localizedDescription, "STORAGE_ERROR") }
         }
     }
+    // Concurrent challenges for one fingerprint share a single alert; distinct prompts wait until the previous one is dismissed.
     private func approve(_ identity: String, _ fingerprint: String, _ changed: Bool) async -> Bool {
         let epoch = generation
+        return await prompts.decide(.init(identity: identity, fingerprint: fingerprint, changed: changed)) { [weak self] in self?.generation == epoch }
+    }
+    // Top-most controller that is fully in the window hierarchy; retries on the main run loop for about 5 s while a presentation is still animating.
+    @MainActor private func settledPresenter() async throws -> UIViewController {
+        for _ in 0..<50 {
+            var top = bridge?.viewController
+            while let next = top?.presentedViewController { top = next }
+            if let top, !(top is UIAlertController), !top.isBeingPresented, !top.isBeingDismissed, top.view.window != nil { return top }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        throw RemoteFailure("No view controller available for the fingerprint prompt")
+    }
+    // Shows one fingerprint alert; the continuation is resumed exactly once, also when the alert never appears or vanishes without an action.
+    @MainActor private func presentTrustAlert(_ request: TrustPromptCoordinator.Request) async throws -> Bool {
+        let host = try await settledPresenter()
         return await withCheckedContinuation { continuation in
-            DispatchQueue.main.async {
-                guard self.generation == epoch else { continuation.resume(returning: false); return }
-                let alert = UIAlertController(title: changed ? "远端指纹已变化" : "确认远端指纹", message: "\(identity)\n\n\(fingerprint)\n\n请与主机管理员核对。\(changed ? "原有信任记录将被替换。" : "")", preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in continuation.resume(returning: false) })
-                alert.addAction(UIAlertAction(title: "确认并信任", style: .destructive) { _ in continuation.resume(returning: true) })
-                (self.browser ?? self.bridge?.viewController)?.present(alert, animated: true)
+            var done = false, shown = false, ticks = 0, gone = 0
+            let finish: (Bool) -> Void = { value in guard !done else { return }; done = true; continuation.resume(returning: value) }
+            let alert = UIAlertController(title: MobileText.get(request.changed ? "mobile.native.trustChangedTitle" : "mobile.native.trustTitle"), message: MobileText.get(request.changed ? "mobile.native.trustChangedBody" : "mobile.native.trustBody", ["identity": request.identity, "fingerprint": request.fingerprint]), preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: MobileText.get("common.cancel"), style: .cancel) { _ in finish(false) })
+            let trust = UIAlertAction(title: MobileText.get("mobile.native.trustAccept"), style: .default) { _ in finish(true) }
+            alert.addAction(trust)
+            // Trusting a verified fingerprint is the expected action, so it carries the bold highlight instead of Cancel.
+            alert.preferredAction = trust
+            host.present(alert, animated: true) { shown = true }
+            func watch() {
+                guard !done else { return }
+                ticks += 1; if shown, alert.view.window == nil { gone += 1 }
+                // Not on screen after 5 s (presentation refused) or gone for 1 s without an action (dismissed with its presenter): answer false.
+                if (!shown && ticks >= 50) || gone >= 10 { finish(false); return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: watch)
             }
+            watch()
         }
     }
     private func resource(_ name: String) throws -> String {
-        guard let url = Bundle.module.url(forResource: name, withExtension: nil, subdirectory: "Bootstrap") else { throw RemoteFailure("缺少远端准备资源") }; return try String(contentsOf: url, encoding: .utf8)
+        guard let url = Bundle.module.url(forResource: name, withExtension: nil, subdirectory: "Bootstrap") else { throw RemoteFailure(MobileText.get("mobile.native.resourceMissing")) }; return try String(contentsOf: url, encoding: .utf8)
     }
     private func exec(_ command: String, using client: SSHClient) async throws -> String {
         let output = try await client.executeCommand(command, maxResponseSize: 1024*1024)
@@ -390,20 +418,20 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
             let store = try self.vault.read(); let previous = (store["keys"] as? [String: String])?[identity]
             if previous == fingerprint { return }
             self.state("confirming")
-            guard self.generation == epoch, await self.approve(identity, fingerprint, previous != nil), self.generation == epoch else { throw RemoteFailure("未信任 SSH 主机指纹") }
+            guard self.generation == epoch, await self.approve(identity, fingerprint, previous != nil), self.generation == epoch else { throw RemoteFailure(MobileText.get("mobile.native.hostKeyRejected")) }
             try self.vault.update { updated in var keys = updated["keys"] as? [String: String] ?? [:]; keys[identity] = fingerprint; updated["keys"] = keys }
         }
         let authentication: SSHAuthenticationMethod
         if string(row,"auth") == "key" {
             let text = string(row,"privateKey"), pass = string(row,"passphrase").data(using: .utf8)!
             if let key = try? Curve25519.Signing.PrivateKey(sshEd25519: text, decryptionKey: pass.isEmpty ? nil : pass) { authentication = .ed25519(username: username, privateKey: key) }
-            else if (try? Insecure.RSA.PrivateKey(sshRsa: text, decryptionKey: pass.isEmpty ? nil : pass)) != nil { throw RemoteFailure("当前 iOS SSH 库不支持 RSA SHA-2 认证；请使用 Ed25519 私钥或密码") }
-            else { throw RemoteFailure("私钥无法读取；请检查口令。支持 OpenSSH Ed25519，私钥加密格式为 AES-CTR") }
+            else if (try? Insecure.RSA.PrivateKey(sshRsa: text, decryptionKey: pass.isEmpty ? nil : pass)) != nil { throw RemoteFailure(MobileText.get("mobile.native.rsaUnsupported")) }
+            else { throw RemoteFailure(MobileText.get("mobile.native.privateKeyUnreadable")) }
         } else { authentication = .passwordBased(username: username, password: string(row,"password")) }
         let ssh = try await SSHClient.connect(host: host, port: sshPort, authenticationMethod: authentication, hostKeyValidator: .custom(validator), reconnect: .never, connectTimeout: .seconds(120))
-        if generation != epoch { try? await ssh.close(); throw RemoteFailure("连接已取消") }; client = ssh
+        if generation != epoch { try? await ssh.close(); throw RemoteFailure(MobileText.get("mobile.native.connectionCancelled")) }; client = ssh
         func execute(_ command: String) async throws -> String {
-            guard self.generation == epoch else { throw RemoteFailure("Connection cancelled") }
+            guard self.generation == epoch else { throw RemoteFailure(MobileText.get("mobile.native.connectionCancelled")) }
             return try await self.exec(command, using: ssh)
         }
         state("preparing")
@@ -419,13 +447,13 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
                 let suffix = row["prepare"] as? Bool == true ? " --install" : ""
                 let command = "\(windows ? "python" : "python3") -c \"\(code)\"\(suffix)"
                 let output = (try? await execute(command)) ?? ""
-                guard let object = (try? JSONSerialization.jsonObject(with: Data(output.utf8))) as? [String: Any] else { throw RemoteFailure("远端准备需要 Python 3；也可指定已运行服务的端口") }
+                guard let object = (try? JSONSerialization.jsonObject(with: Data(output.utf8))) as? [String: Any] else { throw RemoteFailure(MobileText.get("mobile.native.pythonRequired")) }
                 record = object
                 if let error = object["error"] as? String { throw RemoteFailure(error) }
             }
             servicePort = try port(record,"port"); password = string(record,"password")
         }
-        guard generation == epoch else { throw RemoteFailure("连接已取消") }
+        guard generation == epoch else { throw RemoteFailure(MobileText.get("mobile.native.connectionCancelled")) }
         state("forwarding")
         let group = MultiThreadedEventLoopGroup.singleton
         let targetPort = servicePort
@@ -438,7 +466,7 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
                     let peer = try await ssh.createDirectTCPIPChannel(using: SSHChannelType.DirectTCPIP(targetHost: "127.0.0.1", targetPort: targetPort, originatorAddress: local.remoteAddress!)) { remote in
                         remote.setOption(ChannelOptions.autoRead, value: false).flatMap { remote.pipeline.addHandler(Relay(peer: local)) }
                     }
-                    guard self.generation == epoch else { try? await peer.close().get(); throw RemoteFailure("Connection cancelled") }
+                    guard self.generation == epoch else { try? await peer.close().get(); throw RemoteFailure(MobileText.get("mobile.native.connectionCancelled")) }
                     self.addChild(peer)
                     try await local.pipeline.addHandler(Relay(peer: peer)).get()
                     local.read(); peer.read(); promise.succeed(())
@@ -449,14 +477,14 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
         var preferred = number(row,"localPort")
         for _ in 0..<100 {
             let candidate = (10000...49151).contains(preferred) ? preferred : Int.random(in: 10000...49151)
-            guard generation == epoch else { throw RemoteFailure("Connection cancelled") }
+            guard generation == epoch else { throw RemoteFailure(MobileText.get("mobile.native.connectionCancelled")) }
             do {
                 let bound = try await bootstrap.bind(host:"127.0.0.1",port:candidate).get()
-                guard generation == epoch else { try? await bound.close().get(); throw RemoteFailure("Connection cancelled") }
+                guard generation == epoch else { try? await bound.close().get(); throw RemoteFailure(MobileText.get("mobile.native.connectionCancelled")) }
                 listener = bound; break
             } catch { preferred = 0 }
         }
-        guard let localPort = listener?.localAddress?.port else { throw RemoteFailure("无法分配 SSH 本地端口") }
+        guard let localPort = listener?.localAddress?.port else { throw RemoteFailure(MobileText.get("mobile.native.localPortFailed")) }
         try vault.update { store in
             var rows = store["connections"] as? [[String: Any]] ?? []
             if let index = rows.firstIndex(where: { string($0,"id") == string(row,"id") }) { rows[index]["localPort"] = localPort }
@@ -465,24 +493,24 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
         let url = URL(string:"http://127.0.0.1:\(localPort)")!
         var request = URLRequest(url: url.appendingPathComponent("api/mode")); request.timeoutInterval = 15
         let (_, response) = try await URLSession.shared.data(for: request)
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw RemoteFailure("远端服务未通过健康检查") }
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw RemoteFailure(MobileText.get("mobile.native.healthCheckFailed")) }
         return (url,password)
     }
     @objc func connect(_ call: CAPPluginCall) {
-        guard let id = call.getString("id") else { call.reject("缺少连接 ID"); return }
+        guard let id = call.getString("id") else { call.reject(MobileText.get("mobile.native.connectionIdMissing")); return }
         generation += 1; let epoch = generation; task?.cancel(); activeID = id
         let cleanup = detachTransport()
         task = Task { @MainActor in
             await cleanup()
             do {
-                guard generation == epoch else { throw RemoteFailure("Connection cancelled") }
+                guard generation == epoch else { throw RemoteFailure(MobileText.get("mobile.native.connectionCancelled")) }
                 let row = try record(id); var (url,password) = try await establish(row,epoch)
                 if let session = call.getString("sessionId"), !session.isEmpty, session.utf8.count <= 256 {
                     var parts = URLComponents(url: url, resolvingAgainstBaseURL: false)!
                     var query = parts.queryItems ?? []; query.removeAll { $0.name == "session" }; query.append(URLQueryItem(name: "session", value: session)); parts.queryItems = query
                     url = parts.url ?? url
                 }
-                guard generation == epoch else { throw RemoteFailure("连接已取消") }
+                guard generation == epoch else { throw RemoteFailure(MobileText.get("mobile.native.connectionCancelled")) }
                 self.openBrowser(url,password,string(row,"name")); state("ready"); call.resolve(["id":id])
             } catch { if generation == epoch { let cleanup = detachTransport(); state("error"); Task { await cleanup() } }; call.reject(error.localizedDescription,"REMOTE_ERROR") }
         }
@@ -502,7 +530,7 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
         view.connectionID = activeID
         let connectionID = activeID
         view.onSavePassword = { [weak self] value in
-            guard let self, let id = connectionID, self.activeID == id, self.browser != nil else { throw RemoteFailure("连接已关闭") }
+            guard let self, let id = connectionID, self.activeID == id, self.browser != nil else { throw RemoteFailure(MobileText.get("mobile.native.connectionClosed")) }
             try self.saveWebPassword(value, for: id)
         }
         view.onClose = { [weak self, weak view] in
@@ -532,14 +560,16 @@ public class VelaRemotePlugin: CAPPlugin, CAPBridgedPlugin {
                 }
             }
         }
-        view.onCertificate = { [weak self] identity, fingerprint in
+        view.onCertificate = { [weak self, weak view] identity, fingerprint in
             guard let self else { return false }
+            // A declined or failed prompt explains itself on the page, like Android does, instead of waiting for WebKit's error, which some builds report as a plain cancellation.
+            let declined: () async -> Bool = { await MainActor.run { view?.showError(MobileText.get("mobile.native.certificateRejected")) }; return false }
             do {
                 let store=try self.vault.read();let previous=(store["keys"] as? [String:String])?[identity]
                 if previous==fingerprint {return true}
-                guard await self.approve("HTTPS 证书 · \(identity)",fingerprint,previous != nil) else{return false}
+                guard await self.approve(MobileText.get("mobile.native.tlsIdentity", ["identity": identity]),fingerprint,previous != nil) else{return await declined()}
                 try self.vault.update { updated in var keys=updated["keys"] as? [String:String] ?? [:];keys[identity]=fingerprint;updated["keys"]=keys };return true
-            } catch {return false}
+            } catch {return await declined()}
         }
         browser=view;view.modalPresentationStyle = .fullScreen
         bridge?.viewController?.present(view,animated:true)
@@ -559,6 +589,8 @@ private final class ProjectBrowser: UIViewController, WKNavigationDelegate, WKUI
     private let message = UILabel()
     private let recovery = ConnectionRecoveryView()
     private var navigationFailed = false
+    // Fingerprints the user declined during the current load: WebKit opens further connections after a refusal, and each would ask again. Cleared when a new load starts (retry).
+    private var declinedFingerprints = Set<String>()
     private var reconnecting = false
     private var loadTimeout: DispatchWorkItem?
     private var closed = false
@@ -602,11 +634,11 @@ private final class ProjectBrowser: UIViewController, WKNavigationDelegate, WKUI
         NotificationCenter.default.addObserver(self,selector:#selector(resumed),name:UIApplication.willEnterForegroundNotification,object:nil)
     }
     @objc private func showConnectionPanel() {
-        let details = [title ?? "当前服务器", message.text == title ? nil : message.text].compactMap { $0 }.joined(separator:"\n")
-        let panel = UIAlertController(title:"连接管理", message:details, preferredStyle:.actionSheet)
-        panel.addAction(UIAlertAction(title:"重新连接", style:.default) { [weak self] _ in self?.reconnect() })
-        panel.addAction(UIAlertAction(title:"切换连接", style:.default) { [weak self] _ in self?.close() })
-        panel.addAction(UIAlertAction(title:"取消", style:.cancel))
+        let details = [title ?? MobileText.get("mobile.native.currentServer"), message.text == title ? nil : message.text].compactMap { $0 }.joined(separator:"\n")
+        let panel = UIAlertController(title:MobileText.get("mobile.connections"), message:details, preferredStyle:.actionSheet)
+        panel.addAction(UIAlertAction(title:MobileText.get("mobile.native.reconnect"), style:.default) { [weak self] _ in self?.reconnect() })
+        panel.addAction(UIAlertAction(title:MobileText.get("mobile.native.switchConnection"), style:.default) { [weak self] _ in self?.close() })
+        panel.addAction(UIAlertAction(title:MobileText.get("common.cancel"), style:.cancel))
         panel.popoverPresentationController?.sourceView = view
         panel.popoverPresentationController?.sourceRect = CGRect(x:view.bounds.maxX-44,y:view.safeAreaInsets.top,width:44,height:44)
         present(panel, animated:true)
@@ -637,7 +669,7 @@ private final class ProjectBrowser: UIViewController, WKNavigationDelegate, WKUI
     }
     private func beginLoading() {
         guard !closed else { return }
-        loadTimeout?.cancel(); navigationFailed = false; recovery.showLoading()
+        loadTimeout?.cancel(); navigationFailed = false; declinedFingerprints.removeAll(); recovery.showLoading()
         let timeout = DispatchWorkItem { [weak self] in
             guard let self, !self.closed, !self.navigationFailed else { return }
             self.reconnecting = false
@@ -700,8 +732,8 @@ private final class ProjectBrowser: UIViewController, WKNavigationDelegate, WKUI
     }
     private func showDownloadError(_ text: String) {
         message.text = text
-        let alert = UIAlertController(title: "下载失败", message: text, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "确定", style: .cancel))
+        let alert = UIAlertController(title: MobileText.get("mobile.native.downloadFailedTitle"), message: text, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: MobileText.get("mobile.native.ok"), style: .cancel))
         if presentedViewController == nil { present(alert, animated: true) }
     }
     @objc private func resumed() { reconnect() }
@@ -733,12 +765,12 @@ private final class ProjectBrowser: UIViewController, WKNavigationDelegate, WKUI
             }
         }
         let allowed=sameOrigin || localDownload
-        if !allowed && action.targetFrame?.isMainFrame != false {message.text="已阻止离开当前服务的导航：\(url.host ?? url.scheme ?? "")"}
+        if !allowed && action.targetFrame?.isMainFrame != false {message.text=MobileText.get("mobile.native.navigationBlocked", ["host": url.host ?? url.scheme ?? ""])}
         decisionHandler(allowed ? (action.shouldPerformDownload ? .download:.allow):.cancel)
     }
     func webView(_ webView:WKWebView,decidePolicyFor response:WKNavigationResponse,decisionHandler:@escaping(WKNavigationResponsePolicy)->Void) {
         if response.isForMainFrame, let http = response.response as? HTTPURLResponse, http.statusCode >= 400 {
-            showError("远端页面暂时不可用（HTTP \(http.statusCode)），请重试或返回连接列表。")
+            showError(MobileText.get("mobile.native.pageUnavailable", ["code": String(http.statusCode)]))
             decisionHandler(.cancel); return
         }
         decisionHandler(response.canShowMIMEType ? .allow:.download)
@@ -752,7 +784,7 @@ private final class ProjectBrowser: UIViewController, WKNavigationDelegate, WKUI
             let name=(suggestedFilename as NSString).lastPathComponent
             let file=directory.appendingPathComponent(name.isEmpty || name=="." || name==".." ? "download":name)
             downloads[ObjectIdentifier(download)]=file;completionHandler(file)
-        } catch {showDownloadError("无法创建下载文件");completionHandler(nil)}
+        } catch {showDownloadError(MobileText.get("mobile.native.downloadCreateFailed"));completionHandler(nil)}
     }
     func downloadDidFinish(_ download:WKDownload) {
         guard let file=downloads.removeValue(forKey:ObjectIdentifier(download)) else{return}
@@ -762,21 +794,21 @@ private final class ProjectBrowser: UIViewController, WKNavigationDelegate, WKUI
     }
     func download(_ download:WKDownload,didFailWithError error:Error,resumeData:Data?) {
         if let file=downloads.removeValue(forKey:ObjectIdentifier(download)) {try? FileManager.default.removeItem(at:file.deletingLastPathComponent())}
-        showDownloadError("文件未能下载，请重试。")
+        showDownloadError(MobileText.get("mobile.native.downloadFileFailed"))
     }
     func webView(_ webView:WKWebView,runJavaScriptAlertPanelWithMessage text:String,initiatedByFrame frame:WKFrameInfo,completionHandler:@escaping()->Void) {
         let alert=UIAlertController(title:title,message:text,preferredStyle:.alert)
-        alert.addAction(UIAlertAction(title:"确定",style:.default){_ in completionHandler()});present(alert,animated:true)
+        alert.addAction(UIAlertAction(title:MobileText.get("mobile.native.ok"),style:.default){_ in completionHandler()});present(alert,animated:true)
     }
     func webView(_ webView:WKWebView,runJavaScriptConfirmPanelWithMessage text:String,initiatedByFrame frame:WKFrameInfo,completionHandler:@escaping(Bool)->Void) {
         let alert=UIAlertController(title:title,message:text,preferredStyle:.alert)
-        alert.addAction(UIAlertAction(title:"取消",style:.cancel){_ in completionHandler(false)})
-        alert.addAction(UIAlertAction(title:"确定",style:.default){_ in completionHandler(true)});present(alert,animated:true)
+        alert.addAction(UIAlertAction(title:MobileText.get("common.cancel"),style:.cancel){_ in completionHandler(false)})
+        alert.addAction(UIAlertAction(title:MobileText.get("mobile.native.ok"),style:.default){_ in completionHandler(true)});present(alert,animated:true)
     }
     func webView(_ webView:WKWebView,runJavaScriptTextInputPanelWithPrompt prompt:String,defaultText:String?,initiatedByFrame frame:WKFrameInfo,completionHandler:@escaping(String?)->Void) {
         let alert=UIAlertController(title:title,message:prompt,preferredStyle:.alert);alert.addTextField{$0.text=defaultText}
-        alert.addAction(UIAlertAction(title:"取消",style:.cancel){_ in completionHandler(nil)})
-        alert.addAction(UIAlertAction(title:"确定",style:.default){_ in completionHandler(alert.textFields?.first?.text)});present(alert,animated:true)
+        alert.addAction(UIAlertAction(title:MobileText.get("common.cancel"),style:.cancel){_ in completionHandler(nil)})
+        alert.addAction(UIAlertAction(title:MobileText.get("mobile.native.ok"),style:.default){_ in completionHandler(alert.textFields?.first?.text)});present(alert,animated:true)
     }
     func webView(_ webView:WKWebView,createWebViewWith configuration:WKWebViewConfiguration,for action:WKNavigationAction,windowFeatures:WKWindowFeatures)->WKWebView? {
         if action.targetFrame == nil,let url=action.request.url,url.scheme==target.scheme,url.host==target.host,(url.port ?? (url.scheme=="https" ? 443:80))==(target.port ?? (target.scheme=="https" ? 443:80)) {webView.load(action.request)}
@@ -791,16 +823,21 @@ private final class ProjectBrowser: UIViewController, WKNavigationDelegate, WKUI
         guard let chain=SecTrustCopyCertificateChain(trust) as? [SecCertificate],let leaf=chain.first else {completionHandler(.cancelAuthenticationChallenge,nil);return}
         let fingerprint="SHA256:"+Data(SHA256.hash(data:SecCertificateCopyData(leaf) as Data)).base64EncodedString().replacingOccurrences(of:"=",with:"")
         let identity="tls:https://\(target.host!):\(target.port ?? 443)"
-        Task {let accepted=await onCertificate?(identity,fingerprint) ?? false;await MainActor.run {completionHandler(accepted ? .useCredential:.cancelAuthenticationChallenge,accepted ? URLCredential(trust:trust):nil)}}
+        if declinedFingerprints.contains(fingerprint) {completionHandler(.cancelAuthenticationChallenge,nil);return}
+        Task {let accepted=await onCertificate?(identity,fingerprint) ?? false;await MainActor.run {if !accepted {self.declinedFingerprints.insert(fingerprint)};completionHandler(accepted ? .useCredential:.cancelAuthenticationChallenge,accepted ? URLCredential(trust:trust):nil)}}
     }
     private func failedNavigation(_ error: Error) {
-        if (error as NSError).domain == NSURLErrorDomain && (error as NSError).code == NSURLErrorCancelled { return }
-        showError("无法加载远端页面，请检查网络后重试，或返回连接列表。")
+        let failure = error as NSError
+        if failure.domain == NSURLErrorDomain && failure.code == NSURLErrorCancelled { return }
+        // The first failure of a load owns the page; a declined fingerprint prompt has already explained itself.
+        if navigationFailed { return }
+        // Append the system sentence (already localized by iOS) plus domain and code so the real cause is visible on the page.
+        showError(MobileText.get("mobile.native.pageLoadFailedReason", ["reason": failure.localizedDescription, "domain": failure.domain, "code": String(failure.code)]))
     }
     func webView(_ webView:WKWebView,didFailProvisionalNavigation navigation:WKNavigation!,withError error:Error) { failedNavigation(error) }
     func webView(_ webView:WKWebView,didFail navigation:WKNavigation!,withError error:Error) { failedNavigation(error) }
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { beginLoading() }
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { showError("页面已停止运行，请重新连接，或返回连接列表。") }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { showError(MobileText.get("mobile.native.pageTerminated")) }
     deinit {loadTimeout?.cancel(); NotificationCenter.default.removeObserver(self)}
 }
 
