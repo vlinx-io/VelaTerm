@@ -7,7 +7,7 @@ import { create } from "zustand";
 import { DEFAULT_CONVERSATION_FONT_SIZE, normalizeTextSize, normalizeTextLineHeight } from "../theme";
 import { t } from "../i18n";
 import { setBrowserUrl } from "../ipc/browser";
-import { chatClear, chatSend, chatStart, setSessionEngine } from "../ipc/chat";
+import { chatClear, chatSend, chatStart, setSessionEngine, type ChatBackgroundTask } from "../ipc/chat";
 import {
   createWorktree,
   getSessionCwd,
@@ -623,8 +623,8 @@ function pruneTree(
   return t;
 }
 
-/** Reconciles pane trees and active/focused state after data changes. Document and browser tabs are exempt
- * because they have metadata but no pane tree. */
+/** Reconciles pane trees and active/focused state after data changes. Document, browser and task tabs are
+ * exempt because they have metadata but no pane tree. */
 function reconcileTabs(state: {
   sessions: Session[];
   ephemeralSessions: Record<string, Session>;
@@ -636,6 +636,7 @@ function reconcileTabs(state: {
   liveTabs: string[];
   docTabs: Record<string, DocTab>;
   browserTabs: Record<string, BrowserTab>;
+  taskTabs: Record<string, TaskTab>;
 }) {
   const valid = new Set([
     ...state.sessions.map((s) => s.id),
@@ -644,9 +645,9 @@ function reconcileTabs(state: {
   const paneTrees: Record<string, PaneNode> = {};
   const openTabs: string[] = [];
   for (const tabId of state.openTabs) {
-    if (state.docTabs[tabId] || state.browserTabs[tabId]) {
-      // Preserve metadata-backed document/browser tabs without pane trees. A browser tab bound to a tree
-      // node uses the node ID and closes when that node is deleted or archived.
+    if (state.docTabs[tabId] || state.browserTabs[tabId] || state.taskTabs[tabId]) {
+      // Preserve metadata-backed document/browser/task tabs without pane trees. A browser tab bound to a
+      // tree node uses the node ID and closes when that node is deleted or archived.
       if (
         state.browserTabs[tabId] &&
         !tabId.startsWith("browser-") &&
@@ -663,7 +664,7 @@ function reconcileTabs(state: {
       openTabs.push(tabId);
     }
   }
-  // Remove orphan document/browser metadata absent from `openTabs`.
+  // Remove orphan document/browser/task metadata absent from `openTabs`.
   const inOpen = new Set(openTabs);
   const docTabs: Record<string, DocTab> = {};
   for (const [id, d] of Object.entries(state.docTabs)) {
@@ -673,12 +674,16 @@ function reconcileTabs(state: {
   for (const [id, b] of Object.entries(state.browserTabs)) {
     if (inOpen.has(id)) browserTabs[id] = b;
   }
+  const taskTabs: Record<string, TaskTab> = {};
+  for (const [id, task] of Object.entries(state.taskTabs)) {
+    if (inOpen.has(id)) taskTabs[id] = task;
+  }
   let { activeTabId, activeSessionId, focusedPaneId } = state;
   if (!activeTabId || !openTabs.includes(activeTabId)) {
     activeTabId = openTabs[0] ?? null;
   }
-  if (activeTabId && (docTabs[activeTabId] || browserTabs[activeTabId])) {
-    // Document/browser tabs have no active session or focused pane.
+  if (activeTabId && (docTabs[activeTabId] || browserTabs[activeTabId] || taskTabs[activeTabId])) {
+    // Document/browser/task tabs have no active session or focused pane.
     activeSessionId = null;
     focusedPaneId = null;
   } else {
@@ -712,6 +717,7 @@ function reconcileTabs(state: {
     liveTabs,
     docTabs,
     browserTabs,
+    taskTabs,
   };
 }
 
@@ -764,6 +770,27 @@ export interface BrowserTab {
   openerTabId?: string;
   /** URL of the page that opened this tab; the standalone back control falls back to navigating here. */
   openerUrl?: string;
+}
+
+/**
+ * Tab showing one of a Claude conversation's background tasks, parallel to `DocTab` and `BrowserTab`: no pane
+ * tree, no session of its own, so session reuse never replaces it. Client-local: neither persisted across
+ * restart (the process behind it is gone by then) nor published to mirror peers, who lack the conversation's
+ * context. Live content stays in the mounted `TaskView`, which subscribes to the session's chat events itself.
+ */
+export interface TaskTab {
+  /** `"task-" + genId()`, used in `openTabs`. */
+  id: string;
+  /** The conversation the task belongs to. */
+  sessionId: string;
+  /** Claude's task_id, the key into `extras.backgroundTasks`. */
+  taskId: string;
+  /** Static title chosen when the tab opened; the live "Phase: agent" line stays inside the view. */
+  title: string;
+  /** "local_workflow", "local_agent", "local_bash" or empty; picks the tab icon. */
+  taskType: string;
+  /** The task as the opener saw it, for the first paint before the view's own snapshot arrives. */
+  seed?: ChatBackgroundTask;
 }
 
 /**
@@ -851,6 +878,8 @@ interface TermStore {
   docTabs: Record<string, DocTab>;
   /** Metadata for `browser-` entries in `openTabs`. */
   browserTabs: Record<string, BrowserTab>;
+  /** Metadata for `task-` entries in `openTabs`. Client-local, see `TaskTab`. */
+  taskTabs: Record<string, TaskTab>;
 
   // Mirror mode: one shared arrangement across every client of this service (see mirrorSync.ts).
   /**
@@ -1197,6 +1226,10 @@ interface TermStore {
   openDocTab: (path: string) => void;
   /** Creates an untitled plain-text draft whose first Save As establishes path and syntax. */
   newDocTab: () => void;
+  /**
+   * Opens a tab for one of a conversation's background tasks, or focuses the tab already showing that task.
+   */
+  openTaskTab: (sessionId: string, task: ChatBackgroundTask) => void;
   /** Applies Save As path/title/kind and converts a draft to normal read/write mode. */
   setDocTabPath: (id: string, path: string) => void;
   /** Refreshes a document by incrementing its reload nonce. */
@@ -1819,6 +1852,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
   liveEvictAsk: false,
   docTabs: {},
   browserTabs: {},
+  taskTabs: {},
 
   mirrorEnabled: false,
   remoteClients: 0,
@@ -1933,9 +1967,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
               activeSessionId: saved.activeSessionId,
               focusedPaneId: saved.focusedPaneId,
               liveTabs: saved.liveTabs ?? [],
-              // Document and browser tabs are not persisted across restart.
+              // Document, browser and task tabs are not persisted across restart.
               docTabs: {},
               browserTabs: {},
+              taskTabs: {},
             });
             // Restore visible tabs, background tabs, and split trees intact.
             layoutPatch = {
@@ -1971,6 +2006,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
           liveTabs: state.liveTabs,
           docTabs: state.docTabs,
           browserTabs: state.browserTabs,
+          taskTabs: state.taskTabs,
         });
       }
       const sidebarTreeViews = state.sidebarTreeViews;
@@ -2875,8 +2911,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
 
   setActiveTab: (tabId) => {
     set((state) => {
-      if (state.docTabs[tabId] || state.browserTabs[tabId]) {
-        // Document/browser tabs have no session or focused pane, naturally disabling session-only controls.
+      if (state.docTabs[tabId] || state.browserTabs[tabId] || state.taskTabs[tabId]) {
+        // Document/browser/task tabs have no session or focused pane, naturally disabling session-only controls.
         return {
           activeTabId: tabId,
           activeSessionId: null,
@@ -2927,11 +2963,13 @@ export const useTermStore = create<TermStore>((set, get) => ({
       const openTabs = state.openTabs.filter((t) => t !== tabId);
       const paneTrees = { ...state.paneTrees };
       delete paneTrees[tabId];
-      // Remove document/browser metadata when those tabs close.
+      // Remove document/browser/task metadata when those tabs close.
       const docTabs = { ...state.docTabs };
       delete docTabs[tabId];
       const browserTabs = { ...state.browserTabs };
       delete browserTabs[tabId];
+      const taskTabs = { ...state.taskTabs };
+      delete taskTabs[tabId];
 
       let { activeTabId, activeSessionId, focusedPaneId } = state;
       if (activeTabId === tabId) {
@@ -2942,7 +2980,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
           activeSessionId = leaf.sessionId;
           focusedPaneId = leaf.paneId;
         } else {
-          // A document/browser next tab, or no tab, means no active session.
+          // A document/browser/task next tab, or no tab, means no active session.
           activeSessionId = null;
           focusedPaneId = null;
         }
@@ -2961,6 +2999,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
         paneTrees,
         docTabs,
         browserTabs,
+        taskTabs,
         pinnedTabs,
         activeTabId,
         lastActiveSessionTabId,
@@ -3029,6 +3068,37 @@ export const useTermStore = create<TermStore>((set, get) => ({
       };
       return {
         docTabs: { ...state.docTabs, [id]: tab },
+        openTabs: [...state.openTabs, id],
+        activeTabId: id,
+        activeSessionId: null,
+        focusedPaneId: null,
+      };
+    });
+    saveLayoutTick();
+  },
+
+  // ── Task tabs opened from a conversation's background-task list ──
+  openTaskTab: (sessionId, task) => {
+    set((state) => {
+      // One tab per task: a second open focuses it, the way `openDocTab` treats an already-open path.
+      const existing = Object.values(state.taskTabs).find(
+        (tab) => tab.sessionId === sessionId && tab.taskId === task.task_id,
+      );
+      if (existing) {
+        return { activeTabId: existing.id, activeSessionId: null, focusedPaneId: null };
+      }
+      const id = `task-${genId()}`;
+      const tab: TaskTab = {
+        id,
+        sessionId,
+        taskId: task.task_id,
+        // The static text rather than the live "Phase: agent" line, which would make the title flicker.
+        title: task.summary || task.description || task.task_id,
+        taskType: task.task_type,
+        seed: task,
+      };
+      return {
+        taskTabs: { ...state.taskTabs, [id]: tab },
         openTabs: [...state.openTabs, id],
         activeTabId: id,
         activeSessionId: null,
@@ -4040,6 +4110,12 @@ export const useTermStore = create<TermStore>((set, get) => ({
         traceSplit("mirror", `peer layout brought ${sessionIds.join(", ")}`, { sessionIds });
       }
     }
+    // A task tab is client-local: the peer never sees it, so the tab its frame names as active is only the
+    // anchor this client published in its place (or whatever the peer is looking at). Following it would
+    // pull the user out of the task tab on every peer interaction; stay until they leave it themselves.
+    const local = get();
+    const inTaskTab = !!(local.activeTabId && local.taskTabs[local.activeTabId]);
+    const activeSessionId = inTaskTab ? local.activeSessionId : c.activeSessionId;
     set((s) => ({
       // A leaf arriving from a peer is not a request to start anything. If the backend says no process
       // stands behind that session, render a placeholder: mounting a terminal is what starts one, and
@@ -4056,13 +4132,15 @@ export const useTermStore = create<TermStore>((set, get) => ({
         },
         { ...s.dormantSessions } as Record<SessionId, true>,
       ),
-      openTabs: c.openTabs,
+      // Task tabs are client-local and absent from the peer's snapshot; keep this client's own at the end
+      // so following the layout never closes them.
+      openTabs: [...c.openTabs, ...s.openTabs.filter((id) => s.taskTabs[id] && !c.openTabs.includes(id))],
       liveTabs: c.liveTabs,
       pinnedTabs: c.pinnedTabs,
-      activeTabId: c.activeTabId,
+      activeTabId: inTaskTab ? s.activeTabId : c.activeTabId,
       lastActiveSessionTabId: c.lastActiveSessionTabId,
-      activeSessionId: c.activeSessionId,
-      focusedPaneId: c.focusedPaneId,
+      activeSessionId,
+      focusedPaneId: inTaskTab ? s.focusedPaneId : c.focusedPaneId,
       paneTrees: c.paneTrees,
       // Merge rather than replace: the publisher only carries the ephemeral sessions its own trees
       // reference, and dropping the rest would strand a split this client is still showing.
@@ -4090,8 +4168,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
       // Only an activation that actually changes which session is active can steal focus, so repeated
       // frames from a peer's drag leave an already-consumed marker alone.
       mirrorFocusSessionId:
-        c.activeSessionId !== s.activeSessionId
-          ? c.activeSessionId
+        activeSessionId !== s.activeSessionId
+          ? activeSessionId
           : s.mirrorFocusSessionId,
     }));
     // A mirrored arrangement counts as the layout for this session. Without this, a first `loadTree`

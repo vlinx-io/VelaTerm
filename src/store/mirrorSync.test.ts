@@ -95,6 +95,7 @@ const emitClients = (count: number, clients: unknown[] = []) =>
   h.cbs.clients!(count, clients);
 
 import { markMirrorDetach } from "../ipc/commands";
+import { listTree } from "../ipc/tree";
 import { buildMirrorLayout } from "./mirrorLayout";
 import { startMirrorSync } from "./mirrorSync";
 import { useTermStore } from "./termStore";
@@ -119,10 +120,17 @@ function seed(tab: string) {
     ephemeralSessions: {},
     docTabs: {},
     browserTabs: {},
+    taskTabs: {},
     selection: [],
     inspectTarget: null,
     mirrorFocusSessionId: null,
   });
+}
+
+/** Open a task tab for `sessionId` the way the Tasks chip does and return its id; the store sits in it afterwards. */
+function openTaskTab(sessionId: string) {
+  useTermStore.getState().openTaskTab(sessionId, { task_id: "t1", task_type: "local_workflow", description: "probe", status: "running" });
+  return useTermStore.getState().activeTabId!;
 }
 
 /** A published snapshot for a single tab, as another client would send it. */
@@ -133,7 +141,12 @@ function peerLayout(tab: string, rev: number, source = "ws-2"): MirrorSnapshot {
 
 let peerState: unknown = null;
 function seedSnapshotSource(tab: string) {
-  peerState = buildMirrorLayout({
+  peerState = buildMirrorLayout(snapshotSource(tab));
+}
+
+/** The store fields another client would build its single-tab snapshot from. */
+function snapshotSource(tab: string): Parameters<typeof buildMirrorLayout>[0] {
+  return {
     openTabs: [tab],
     liveTabs: [],
     pinnedTabs: [],
@@ -145,6 +158,7 @@ function seedSnapshotSource(tab: string) {
     ephemeralSessions: {},
     docTabs: {},
     browserTabs: {},
+    taskTabs: {},
     selection: [],
     inspectTarget: null,
     leftCollapsed: false,
@@ -170,7 +184,7 @@ function seedSnapshotSource(tab: string) {
     ],
     primarySidebarTreeViewId: "main",
     activeSidebarTreeViewId: "main",
-  });
+  };
 }
 
 /** Let the `mirrorGet` promise chain in `align` settle. */
@@ -339,6 +353,110 @@ describe("following a peer", () => {
     expect(useTermStore.getState().openTabs).toEqual(["B"]);
     expect(useTermStore.getState().activeSessionId).toBe("B");
     expect(mirrorPush).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it("keeps a publisher's task tab in front: its snapshot names a session tab, so reconciling echoes nothing", async () => {
+    alignEnabledEmpty();
+    const stop = start();
+    await settle();
+    mirrorPush.mockClear();
+
+    // The peer sits in a task tab, which it never publishes. Its snapshot must still name an active tab,
+    // or this client shows an empty stage and its next reconcile publishes its first tab back, pulling the
+    // peer out of the task tab.
+    // The publisher's real store state in front of a task tab: no active session and no focused pane
+    // (`openTaskTab`/`setActiveTab` null both). Those must not travel as null either, or the reconcile
+    // below would repair them to the first leaf and push that repair back.
+    const taskTab = { id: "task-1", sessionId: "B", taskId: "t1", title: "probe", taskType: "local_workflow" };
+    const published = buildMirrorLayout({
+      ...snapshotSource("B"),
+      openTabs: ["B", "task-1"],
+      activeTabId: "task-1",
+      activeSessionId: null,
+      focusedPaneId: null,
+      taskTabs: { "task-1": taskTab },
+    });
+    emitLayout({ rev: 2, source: "ws-2", state: JSON.parse(JSON.stringify(published)) });
+    expect(useTermStore.getState().openTabs).toEqual(["B"]);
+    expect(useTermStore.getState().activeTabId).toBe("B");
+    expect(useTermStore.getState().activeSessionId).toBe("B");
+    expect(useTermStore.getState().focusedPaneId).toBe("p-B");
+
+    // A tree refresh reconciles the adopted arrangement with the real `reconcileTabs`.
+    vi.mocked(listTree).mockResolvedValueOnce({
+      projects: [{ id: "p1", name: "p1", rootPath: "/tmp", sortOrder: 0, collapsed: false, createdAt: 0 }],
+      groups: [],
+      sessions: [{ id: "B", projectId: "p1", groupId: null, name: "B", kind: "terminal", sortOrder: 0, collapsed: false, createdAt: 0 }],
+    });
+    await useTermStore.getState().loadTree();
+    vi.advanceTimersByTime(500);
+
+    expect(useTermStore.getState().activeTabId).toBe("B");
+    expect(useTermStore.getState().activeSessionId).toBe("B");
+    expect(useTermStore.getState().focusedPaneId).toBe("p-B");
+    expect(mirrorPush).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it("stays in its own task tab as a publisher: neither the reconcile echo nor a peer's push names it", async () => {
+    alignEnabledEmpty();
+    const stop = start();
+    await settle();
+    mirrorPush.mockClear();
+
+    const taskTabId = openTaskTab("A");
+    vi.advanceTimersByTime(500);
+    await settle();
+    expect(mirrorPush).toHaveBeenCalledTimes(1);
+    const published = mirrorPush.mock.calls[0][0] as { center: { activeTabId: string | null } };
+    expect(published.center.activeTabId).toBe("A");
+
+    // The peer adopted our snapshot and echoes it back: the anchor A is what it now names as active.
+    emitLayout({ rev: 2, source: "ws-2", state: JSON.parse(JSON.stringify(published)) });
+    expect(useTermStore.getState().activeTabId).toBe(taskTabId);
+    expect(useTermStore.getState().activeSessionId).toBeNull();
+    expect(useTermStore.getState().focusedPaneId).toBeNull();
+    expect(useTermStore.getState().openTabs).toEqual(["A", taskTabId]);
+
+    // An ordinary peer push (the peer clicked a sidebar row, resized a split): the arrangement follows,
+    // the task tab stays in front.
+    emitLayout(peerLayout("B", 3));
+    expect(useTermStore.getState().openTabs).toEqual(["B", taskTabId]);
+    expect(useTermStore.getState().activeTabId).toBe(taskTabId);
+    expect(useTermStore.getState().activeSessionId).toBeNull();
+    expect(useTermStore.getState().focusedPaneId).toBeNull();
+    expect(useTermStore.getState().lastActiveSessionTabId).toBe("B");
+    expect(useTermStore.getState().mirrorFocusSessionId).toBeNull();
+    stop();
+  });
+
+  it("stays in its own task tab as a follower while the publisher keeps pushing", async () => {
+    alignEnabledEmpty();
+    const stop = start();
+    await settle();
+    emitLayout(peerLayout("B", 2));
+    expect(useTermStore.getState().activeTabId).toBe("B");
+    mirrorPush.mockClear();
+
+    const taskTabId = openTaskTab("B");
+    vi.advanceTimersByTime(500);
+    await settle();
+
+    emitLayout(peerLayout("B", 3));
+    expect(useTermStore.getState().activeTabId).toBe(taskTabId);
+    expect(useTermStore.getState().activeSessionId).toBeNull();
+    expect(useTermStore.getState().focusedPaneId).toBeNull();
+    expect(useTermStore.getState().openTabs).toEqual(["B", taskTabId]);
+
+    // Leaving the task tab hands the active trio back to the mirror.
+    useTermStore.getState().setActiveTab("B");
+    vi.advanceTimersByTime(500);
+    await settle();
+    emitLayout(peerLayout("C", 4));
+    expect(useTermStore.getState().activeTabId).toBe("C");
+    expect(useTermStore.getState().activeSessionId).toBe("C");
+    expect(useTermStore.getState().focusedPaneId).toBe("p-C");
     stop();
   });
 
