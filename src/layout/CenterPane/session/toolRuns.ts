@@ -301,6 +301,8 @@ export function estimateRowHeight(row: DisplayRow | undefined): number {
     case "assistant":
     case "command":
       return textHeight(row.row.text, 40) + head;
+    case "shell":
+      return textHeight(row.row.stdout + row.row.stderr, 70) + head;
   }
 }
 

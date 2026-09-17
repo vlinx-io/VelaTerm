@@ -732,6 +732,50 @@ export function CommandRow({ text }: { text: string }): ReactNode {
   );
 }
 
+/**
+ * A shell command the user ran with `!`, with its output as it arrives.
+ *
+ * Neither a bubble nor a tool card: the user ran it and the agent is only told. Monospace throughout,
+ * stderr set apart from stdout, and the exit state in the footer; while it runs, the footer offers Cancel.
+ */
+export function ShellRow({ row, onCancel }: {
+  row: Extract<ChatRow, { kind: "shell" }>;
+  onCancel?: (rowId: string) => void;
+}): ReactNode {
+  const t = useT();
+  const running = row.status === "running";
+  const truncated = row.stdoutTruncated || row.stderrTruncated;
+  return (
+    <div className={`sv-row-shell${running ? " sv-row-shell-running" : ""}`} role="group" aria-label={t("chat.shell.title")}>
+      <div className="sv-shell-head">
+        <span className="sv-shell-mark" aria-hidden>!</span>
+        <code className="sv-shell-command">{row.command}</code>
+      </div>
+      {truncated && <div className="sv-shell-truncated">{t("chat.shell.truncated")}</div>}
+      {row.stdout && <pre className="sv-shell-out">{row.stdout}</pre>}
+      {row.stderr && (
+        <pre className="sv-shell-err" aria-label={t("chat.shell.stderr")}>{row.stderr}</pre>
+      )}
+      <div className="sv-shell-foot">
+        {running ? (
+          <>
+            <span className="sv-shell-status">{t("chat.shell.running")}</span>
+            <button type="button" className="sv-shell-cancel" onClick={() => onCancel?.(row.id)}>
+              {t("chat.shell.cancel")}
+            </button>
+          </>
+        ) : row.status === "cancelled" ? (
+          <span className="sv-shell-status sv-shell-cancelled">{t("chat.shell.cancelled")}</span>
+        ) : (
+          <span className={`sv-shell-status${row.exitCode === 0 ? "" : " sv-shell-failed"}`}>
+            {t("chat.shell.exitCode", row.exitCode ?? 0)}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** A remark about the conversation rather than part of it, such as history left out of a replay. */
 export function NoticeRow({ message }: { message: string }): ReactNode {
   return <div className="sv-row-notice">{message}</div>;

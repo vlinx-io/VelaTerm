@@ -1559,6 +1559,79 @@ select.sv-pill {
   margin-bottom: 0;
 }
 
+/* A shell command run with `!` from the composer. Monospace and boxed, so it reads as neither side of
+   the conversation: not a bubble the user wrote, not a tool card the agent opened. */
+.sv-row-shell {
+  margin: 10px 0 10px calc(var(--sv-gutter) + var(--sv-gutter-gap));
+  border-left: 3px solid var(--border-strong);
+  border-radius: 0 4px 4px 0;
+  background: var(--bg-hover);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: calc(var(--ui-fs) - 1px);
+  overflow: hidden;
+}
+.sv-row-shell-running {
+  border-left-color: var(--accent);
+}
+.sv-shell-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 11px;
+  border-bottom: 1px solid var(--border);
+}
+.sv-shell-mark {
+  color: var(--accent);
+  font-weight: 700;
+}
+.sv-shell-command {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.sv-shell-out,
+.sv-shell-err {
+  margin: 0;
+  padding: 6px 11px;
+  max-height: 60vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.sv-shell-err {
+  color: var(--red);
+  border-top: 1px dashed var(--border);
+}
+.sv-shell-truncated {
+  padding: 4px 11px;
+  color: var(--text-faint);
+  border-bottom: 1px dashed var(--border);
+}
+.sv-shell-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 11px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.sv-shell-failed,
+.sv-shell-cancelled {
+  color: var(--red);
+}
+.sv-shell-cancel {
+  margin-left: auto;
+  padding: 1px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.sv-shell-cancel:hover {
+  background: var(--bg-active, var(--bg-hover));
+}
+
 /* A remark about the conversation, such as replayed history that was cut short. Quiet on purpose: it is
    not a failure, and it must not compete with the messages around it. */
 .sv-row-notice {

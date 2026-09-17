@@ -134,6 +134,25 @@ export type ChatRow =
    * the model with words it never wrote.
    */
   | { kind: "command"; id: string; text: string }
+  /**
+   * A shell command the user ran with `!` from the composer, with what it printed.
+   *
+   * Neither a prompt nor a tool call: the user ran it and the agent is only told. `running` while it
+   * runs, then `completed` with its exit code, or `cancelled`.
+   */
+  | {
+      kind: "shell";
+      id: string;
+      command: string;
+      stdout: string;
+      stderr: string;
+      /** The head of the stream was cut; only the tail is kept. */
+      stdoutTruncated: boolean;
+      stderrTruncated: boolean;
+      status: "running" | "completed" | "cancelled";
+      exitCode?: number;
+      at?: number;
+    }
   /** A remark about the conversation itself, such as history that was too long to replay in full. */
   | { kind: "notice"; id: string; message: string }
   /**
@@ -586,6 +605,21 @@ export function chatSend(
 /** Stop waiting for the usage limit to reset; the conversation will not continue on its own. */
 export function chatAutoContinueCancel(sessionId: string): Promise<void> {
   return invoke("chat_auto_continue_cancel", { sessionId });
+}
+
+/**
+ * Run a shell command typed with `!` in the composer.
+ *
+ * The command runs in the agent's directory and environment, shows on a row of its own, and its result is
+ * handed to the agent as context when it ends. `messageId` is that row's id and the handle for cancel.
+ */
+export function chatRunShell(sessionId: string, command: string, messageId: string): Promise<void> {
+  return invoke("chat_run_shell", { sessionId, command, messageId });
+}
+
+/** Stop a running shell command together with everything it started. */
+export function chatCancelShell(sessionId: string, messageId: string): Promise<void> {
+  return invoke("chat_cancel_shell", { sessionId, messageId });
 }
 
 /** Add an existing queued message to the running turn. */

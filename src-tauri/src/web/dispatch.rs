@@ -778,6 +778,17 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
                 opt_str(args, "messageId").as_deref(),
             )?)
         }
+        "chat_run_shell" => to_value(core::chat_run_shell(
+            app,
+            &req_str(args, "sessionId")?,
+            &req_str(args, "command")?,
+            &req_str(args, "messageId")?,
+        )?),
+        "chat_cancel_shell" => to_value(core::chat_cancel_shell(
+            app,
+            &req_str(args, "sessionId")?,
+            &req_str(args, "messageId")?,
+        )?),
         "chat_queue_steer" => to_value(core::chat_queue_steer(
             app,
             &req_str(args, "sessionId")?,
@@ -2097,6 +2108,48 @@ mod tests {
         assert_eq!(diff["modified"], json!("{\"pairing_token\":\"top-secret\"}"));
 
         let _ = std::fs::remove_dir_all(&project);
+    }
+
+    /// Shell mode reaches the core through the same arm from the desktop (`Local`) and from a paired
+    /// remote client (`Remote`): the answer comes from the core, never from a path ACL or an unknown
+    /// command. The session's agent points at a binary that does not exist, so the start the core
+    /// performs first fails with the core's own stable code instead of launching a real agent.
+    #[test]
+    fn shell_mode_arms_reach_the_core_from_both_origins() {
+        let app = test_ctx();
+        if let AppCtx::Headless(host) = &app {
+            host.set_hooks(crate::agent::server::HookServer { port: 0, token: "fixture".into() });
+        }
+        {
+            let conn = app.db().conn.lock().unwrap();
+            conn.execute("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','test','/tmp',0)", []).unwrap();
+            conn.execute(
+                "INSERT INTO sessions(id,project_id,name,kind,permission_mode,agent_path,created_at) VALUES ('s','p','Claude','claude','default','/nonexistent/vlx-test-agent',0)",
+                [],
+            ).unwrap();
+        }
+        for origin in [CallOrigin::Local, CallOrigin::Remote] {
+            let err = dispatch(
+                &app,
+                "chat_run_shell",
+                &json!({ "sessionId": "s", "command": "echo x", "messageId": "sh-1" }),
+                if origin == CallOrigin::Local { DESKTOP_SOURCE } else { "ws-1" },
+                origin,
+            )
+            .unwrap_err();
+            assert!(err.starts_with("agent_not_installed:"), "{origin:?}: {err}");
+            let err = dispatch(
+                &app,
+                "chat_cancel_shell",
+                &json!({ "sessionId": "s", "messageId": "sh-1" }),
+                if origin == CallOrigin::Local { DESKTOP_SOURCE } else { "ws-1" },
+                origin,
+            )
+            .unwrap_err();
+            assert_eq!(err, "chat_shell_not_found", "{origin:?}");
+        }
+        let err = dispatch(&app, "chat_run_shell", &json!({ "sessionId": "s", "command": "  ", "messageId": "sh-1" }), DESKTOP_SOURCE, CallOrigin::Local).unwrap_err();
+        assert_eq!(err, "chat_shell_empty");
     }
 
     /// Argument keys that carry a caller-chosen filesystem path anywhere in this dispatch match.

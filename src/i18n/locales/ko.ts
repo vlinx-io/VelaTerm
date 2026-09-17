@@ -1701,6 +1701,17 @@ const ko: typeof en = {
   "chat.attach.tooMany": (max: number) => `메시지 한 통에는 이미지를 ${max}장까지 첨부할 수 있습니다`,
   "chat.attach.tooLarge": (name: string, mb: number) => `${name}은(는) ${mb} MB를 초과하여 첨부하지 않았습니다`,
   "chat.attach.unreadable": (name: string) => `${name}을(를) 읽지 못했습니다`,
+  // ── Shell mode: `!` runs a command in the session's shell ──
+  "chat.shell.title": "Shell command", // TODO translate
+  "chat.shell.running": "Running…", // TODO translate
+  "chat.shell.cancel": "Cancel", // TODO translate
+  "chat.shell.cancelled": "Cancelled", // TODO translate
+  "chat.shell.exitCode": (code: number) => `Exit code ${code}`, // TODO translate
+  "chat.shell.stderr": "stderr", // TODO translate
+  "chat.shell.truncated": "Earlier output was cut; only the last part is kept", // TODO translate
+  "chat.shell.emptyCommand": "Type a command after ! to run it in the shell", // TODO translate
+  "chat.shell.noImages": "Shell commands cannot carry images. Remove the attachment or send it as a message.", // TODO translate
+  "chat.shell.alreadyRunning": "A shell command is still running in this conversation. Cancel it or wait for it to finish.", // TODO translate
   // Compacting the conversation… / Context compacted / Context compacted automatically
   "chat.compaction.running": "컨텍스트를 압축하는 중…",
   "chat.compaction.manual": "컨텍스트를 압축했습니다",

@@ -10,6 +10,7 @@
 //! sent starts it again where the conversation left off.
 
 import { useAgentPermissions, savePermissionDefault } from "../../../hooks/useAgentPermissions";
+import { genId } from "../../../genId";
 import { useSessionPermissionState } from "../../../hooks/useSessionPermissionState";
 import { currentPermissionLabel, PermissionStateDetails } from "../../../components/PermissionStateDetails";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -47,7 +48,9 @@ import {
   chatBackgroundTasks,
   extrasOf,
   chatAttach,
+  chatCancelShell,
   chatDetach,
+  chatRunShell,
   chatSnapshot,
   chatCommands,
   chatStart,
@@ -97,6 +100,7 @@ import {
   CompactionRow,
   ChatImageView,
   CommandRow,
+  ShellRow,
   ErrorRow,
   MessageBubble,
   NoticeRow,
@@ -121,6 +125,7 @@ import { useOutbox, emptySubmissions, acknowledgeSubmissions, createSubmission, 
 import { cachedChat, cacheChat, mergeRows, reconcileChat, chatSyncMetrics } from "./chatCache";
 import { ChatSearch } from "./ChatSearch";
 import { QueuedMessageText } from "./QueuedMessageText";
+import { parseShellContext, parseShellSubmission, shellErrorKey } from "./shellMode";
 import { SessionLinkDirectory } from "./links";
 
 interface MessageReplacement {
@@ -1175,6 +1180,11 @@ export function ChatPane({
     await chatStart(session.id, model, effort || undefined, extras.fastMode === true);
   };
 
+  /** Stop a running `!` command; its row reports the cancelled state through the event channel. */
+  const cancelShell = useCallback((rowId: string) => {
+    chatCancelShell(session.id, rowId).catch((err) => setError(String(err)));
+  }, [session.id]);
+
   /** Hand a one-click install to the terminal view: it is the view with a shell to run the recipe in,
    *  and its own card completes the installation and detects the new executable path. */
   const installAgent = () => {
@@ -1211,6 +1221,38 @@ export function ChatPane({
     if (!text && attachments.length === 0) return;
     if (attachments.length > MAX_IMAGES) {
       setAttachNote(t("chat.attach.tooMany", MAX_IMAGES));
+      return;
+    }
+    // `!` runs the rest in the session's shell, as the terminal UI does: never a prompt, so it takes no
+    // send behavior and no images. The row it produces comes back through the event channel; the agent
+    // is told the result when the command ends, so it is started first like for any message.
+    const shell = parseShellSubmission(text);
+    if (shell) {
+      if (attachments.length > 0) {
+        setAttachNote(t("chat.shell.noImages"));
+        return;
+      }
+      if (!shell.command) {
+        setAttachNote(t("chat.shell.emptyCommand"));
+        return;
+      }
+      setError(null);
+      setDismissed(null);
+      setAttachNote(null);
+      toEnd();
+      void (async () => {
+        try {
+          if (!engineRunning) await startAgent();
+          await chatRunShell(session.id, shell.command, `sh-${genId()}`);
+          // The typed line leaves the composer only once the command was accepted; a refusal or a
+          // failed start keeps it there for a retry, like the outbox keeps a failed message.
+          updateDraft("");
+          setCaret(0);
+        } catch (err) {
+          const key = shellErrorKey(err);
+          setError(key ? t(key) : String(err));
+        }
+      })();
       return;
     }
     // Paseo treats these as client commands: they change the surrounding session UI and must never be
@@ -1897,6 +1939,7 @@ export function ChatPane({
                           rewindScopes={rewindScopes}
                           rewindRequest={rewindRequest}
                           onRewindRequestHandled={finishRewindRequest}
+                          onCancelShell={cancelShell}
                         />
                         {submissionFeedback(entry.id)}
                       </div>
@@ -1919,6 +1962,7 @@ export function ChatPane({
                     rewindScopes={rewindScopes}
                     rewindRequest={rewindRequest}
                     onRewindRequestHandled={finishRewindRequest}
+                    onCancelShell={cancelShell}
                   />
                   {submissionFeedback(entry.id)}
                 </div>
@@ -2083,9 +2127,11 @@ export function ChatPane({
                         }}
                       />
                     ) : (
+                      // A shell command waiting for the turn to end is shown as what was typed, not as
+                      // the tagged context message it carries; the text itself is not for editing.
                       <QueuedMessageText
-                        text={item.text}
-                        disabled={steeringQueue}
+                        text={queuedShellCommand(item.text) ?? item.text}
+                        disabled={steeringQueue || queuedShellCommand(item.text) !== null}
                         onEdit={() => setEditing({ id: item.id, text: item.text })}
                       />
                     )}
@@ -2396,6 +2442,7 @@ const Entry = memo(function Entry({
   rewindScopes,
   rewindRequest,
   onRewindRequestHandled,
+  onCancelShell,
 }: {
   entry: DisplayRow;
   label: string;
@@ -2409,6 +2456,7 @@ const Entry = memo(function Entry({
   rewindScopes: ChatRewindScope[];
   rewindRequest: { rowId: string; token: number } | null;
   onRewindRequestHandled: (token: number) => void;
+  onCancelShell?: (rowId: string) => void;
 }) {
   // The author line the pass in `toolRuns` placed on the first entry of an agent turn. Everything the
   // agent did in that turn sits under it, so reasoning and tool calls read as the agent's.
@@ -2452,10 +2500,17 @@ const Entry = memo(function Entry({
         rewindScopes={rewindScopes}
         rewindRequest={rewindRequest}
         onRewindRequestHandled={onRewindRequestHandled}
+        onCancelShell={onCancelShell}
       />
     </>
   );
 });
+
+/** How a queued shell-mode context message reads in the queue: the command as it was typed. */
+function queuedShellCommand(text: string): string | null {
+  const shell = parseShellContext(text);
+  return shell ? `! ${shell.command}` : null;
+}
 
 /** Drop a leading "<name> · " from a model's description, where the name is already the row's label. */
 function withoutNamePrefix(description: string, label: string): string {
@@ -2475,6 +2530,7 @@ function Row({
   rewindScopes,
   rewindRequest,
   onRewindRequestHandled,
+  onCancelShell,
 }: {
   row: ChatRow;
   label: string;
@@ -2487,6 +2543,8 @@ function Row({
   rewindScopes?: ChatRewindScope[];
   rewindRequest?: { rowId: string; token: number } | null;
   onRewindRequestHandled?: (token: number) => void;
+  /** Stop a running shell command; the row knows only its own id. */
+  onCancelShell?: (rowId: string) => void;
 }) {
   const t = useT();
   switch (row.kind) {
@@ -2522,6 +2580,8 @@ function Row({
       return <ErrorRow message={row.message} />;
     case "command":
       return <CommandRow text={row.text} />;
+    case "shell":
+      return <ShellRow row={row} onCancel={onCancelShell} />;
     case "notice":
       return <NoticeRow message={row.message} />;
     case "compaction":
