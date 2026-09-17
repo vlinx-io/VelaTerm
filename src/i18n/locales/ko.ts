@@ -625,6 +625,21 @@ const ko: typeof en = {
   "settings.chatFont": "대화 글꼴",
   "settings.chatFontSize": "대화 글꼴 크기",
   "settings.chatLineHeight": "대화 줄 높이",
+  "settings.composerChips": "Composer toolbar", // TODO translate
+  "settings.composerChipsHint": "Chips that are on always appear beside the message in this order, even while they have nothing to show: a chip whose feature is momentarily unavailable (no running agent process, no background tasks, an unresolved sign-in) is shown empty or disabled rather than hidden. Only a chip the current agent does not have at all is left out. When the chips do not fit, the ones that overflow move into a More menu together with the chips that are off. Chips that are off never appear in the row and stay available here and in that menu.", // TODO translate
+  "settings.composerChipUp": (chip: string) => `Move ${chip} up`, // TODO translate
+  "settings.composerChipDown": (chip: string) => `Move ${chip} down`, // TODO translate
+  "settings.composerChip.model": "Model", // TODO translate
+  "settings.composerChip.effort": "Thinking effort", // TODO translate
+  "settings.composerChip.collaboration": "Collaboration mode", // TODO translate
+  "settings.composerChip.permission": "Permission mode", // TODO translate
+  "settings.composerChip.fastMode": "Fast mode", // TODO translate
+  "settings.composerChip.serviceTier": "Speed", // TODO translate
+  "settings.composerChip.personality": "Tone", // TODO translate
+  "settings.composerChip.mcp": "MCP servers", // TODO translate
+  "settings.composerChip.tasks": "Background tasks", // TODO translate
+  "settings.composerChip.account": "Account", // TODO translate
+  "settings.composerChip.codexCredits": "Codex reset credits", // TODO translate
   "settings.fontDefault": "Default", // TODO translate
   "settings.fontCustom": "Custom…", // TODO translate
   "settings.fontListUnavailable": "시스템 글꼴 목록을 가져올 수 없습니다. 글꼴 이름을 직접 입력할 수 있습니다.",
@@ -1843,6 +1858,7 @@ const ko: typeof en = {
   "chat.tasks.backgroundAll": "진행 중인 작업을 백그라운드로 보내기",
   "chat.tasks.none": "백그라운드 작업이 없습니다",
   "chat.tasks.stop": "중지",
+  "chat.chipAgentNotRunning": "The agent process is not running. Send a message to start it.", // TODO translate
   "chat.retry.line": (attempt: number, max: number, seconds: number, message: string) =>
     `${seconds}초 후 다시 시도합니다(${attempt}/${max}): ${message}`,
   "chat.notify.dismiss": "닫기",

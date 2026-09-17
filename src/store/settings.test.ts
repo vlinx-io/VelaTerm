@@ -2,8 +2,9 @@
 //! migration from the retired app-wide setting. Every chat-capable agent shares the conversation fallback;
 //! saved per-agent choices can still override it.
 
-import { beforeEach, describe, expect, it } from "vitest";
-import { SETTINGS_KEY, defaultEngineFor, loadSettings } from "./settings";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { COMPOSER_CHIP_IDS, DEFAULT_COMPOSER_INLINE_CHIPS, SETTINGS_KEY, defaultEngineFor, loadSettings, sanitizeComposerInlineChips } from "./settings";
+import { useTermStore } from "./termStore";
 
 describe("terminal renderer migration", () => {
   beforeEach(() => localStorage.clear());
@@ -134,5 +135,35 @@ describe("legacy defaultSessionEngine migration", () => {
     loadSettings();
     localStorage.clear();
     expect(loadSettings().agentDefaults).toEqual({});
+  });
+});
+
+describe("composer inline chips", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("defaults to the four chips that used to sit beside the message", () => {
+    expect(loadSettings().composerInlineChips).toEqual(["model", "effort", "collaboration", "permission"]);
+    expect(DEFAULT_COMPOSER_INLINE_CHIPS).toEqual(["model", "effort", "collaboration", "permission"]);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ termFontSize: 18 }));
+    expect(loadSettings().composerInlineChips).toEqual(DEFAULT_COMPOSER_INLINE_CHIPS);
+  });
+
+  it("keeps the saved order, drops unknown ids and duplicates, and accepts an empty list", () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ composerInlineChips: ["account", "bogus", "model", "account", 7] }));
+    expect(loadSettings().composerInlineChips).toEqual(["account", "model"]);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ composerInlineChips: [] }));
+    expect(loadSettings().composerInlineChips).toEqual([]);
+    expect(sanitizeComposerInlineChips("model")).toEqual(DEFAULT_COMPOSER_INLINE_CHIPS);
+    expect(sanitizeComposerInlineChips(null)).toEqual(DEFAULT_COMPOSER_INLINE_CHIPS);
+    expect(sanitizeComposerInlineChips([...COMPOSER_CHIP_IDS])).toEqual([...COMPOSER_CHIP_IDS]);
+  });
+
+  it("round-trips through the store setter and the cache hydration", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    useTermStore.getState().setComposerInlineChips(["permission", "model", "mcp"]);
+    expect(loadSettings().composerInlineChips).toEqual(["permission", "model", "mcp"]);
+    useTermStore.setState({ composerInlineChips: [] });
+    useTermStore.getState().hydrateSettingsFromCache();
+    expect(useTermStore.getState().composerInlineChips).toEqual(["permission", "model", "mcp"]);
   });
 });

@@ -26,6 +26,7 @@ import {
 import { pushSetting } from "../../ipc/settingsSync";
 import { env, platform } from "../../platform";
 import type { VelaCommandStatus } from "../../platform/types";
+import { COMPOSER_CHIP_IDS, type ComposerChipId } from "../../store/settings";
 import { useTermStore, type TermRenderer } from "../../store/termStore";
 import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT } from "../../theme";
 import type {
@@ -140,6 +141,55 @@ function ShellSelect() {
         ariaLabel={t("settings.defaultShell")}
       />
     </Field>
+  );
+}
+
+/** One row per composer chip: the chips that are on come first in their toolbar order, then the rest.
+ * Turning a chip on appends it; the arrows swap neighbours within the enabled list. */
+function ComposerChipsSection() {
+  const t = useT();
+  const inline = useTermStore((s) => s.composerInlineChips);
+  const setInline = useTermStore((s) => s.setComposerInlineChips);
+  const rows: ComposerChipId[] = [...inline, ...COMPOSER_CHIP_IDS.filter((id) => !inline.includes(id))];
+  const move = (id: ComposerChipId, delta: -1 | 1) => {
+    const from = inline.indexOf(id);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= inline.length) return;
+    const next = [...inline];
+    next.splice(from, 1);
+    next.splice(to, 0, id);
+    setInline(next);
+  };
+  return (
+    <div style={{ marginTop: 20 }}>
+      <SectionTitle>{t("settings.composerChips")}</SectionTitle>
+      <p style={{ color: "var(--text-dim)", fontSize: 12, lineHeight: 1.5, margin: "0 0 12px" }}>
+        {t("settings.composerChipsHint")}
+      </p>
+      {rows.map((id) => {
+        const name = t(`settings.composerChip.${id}`);
+        const at = inline.indexOf(id);
+        const on = at >= 0;
+        return (
+          <Field key={id} label={name}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button style={STEP_BTN} disabled={!on || at === 0} aria-label={t("settings.composerChipUp", name)}
+                onClick={() => move(id, -1)}>↑</button>
+              <button style={STEP_BTN} disabled={!on || at === inline.length - 1} aria-label={t("settings.composerChipDown", name)}
+                onClick={() => move(id, 1)}>↓</button>
+              <Seg<"on" | "off">
+                value={on ? "on" : "off"}
+                options={[
+                  ["on", t("common.on")],
+                  ["off", t("common.off")],
+                ]}
+                onChange={(v) => setInline(v === "on" ? [...inline, id] : inline.filter((other) => other !== id))}
+              />
+            </div>
+          </Field>
+        );
+      })}
+    </div>
   );
 }
 
@@ -550,6 +600,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     onChange={(v) => setChatLineHeight(v ?? DEFAULT_TERMINAL_LINE_HEIGHT)}
                     min={1} max={2} defaultValue={DEFAULT_TERMINAL_LINE_HEIGHT} stepSize={0.1} unit="×" />
                 </Field>
+                <ComposerChipsSection />
               </>
             )}
 

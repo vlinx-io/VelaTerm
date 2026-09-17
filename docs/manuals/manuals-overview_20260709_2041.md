@@ -14,7 +14,7 @@ Created: 2026-07-09 20:41
 | 4 | [Session Spawning & Git Collaboration](session-spawning-and-git_20260709_2041.md) | Spawning sub-sessions with vspawn, parallel work in isolated worktrees, graphical merge | Parallel tasks / multi-agent workflows |
 | 5 | [Terminal Usage](terminal-usage_20260709_2041.md) | In-terminal search, copy/paste and image paste, vopen, shell selection on Windows, session recording, shortcut table | All users |
 | 6 | [Document & Browser Tabs](document-and-browser-tabs_20260709_2041.md) | Built-in Markdown / source editor, PDF export, embedded browser tabs | As needed |
-| 7 | [Settings & Shortcuts](settings-and-shortcuts_20260709_2041.md) | Item-by-item reference for the seven settings categories, default key bindings and rebinding | Reference |
+| 7 | [Settings & Shortcuts](settings-and-shortcuts_20260709_2041.md) | Item-by-item reference for the eight settings categories, default key bindings and rebinding | Reference |
 | 8 | [Remote Development & Management](remote-development-guide_20260709_2041.md) | Browser remote access, SSH remote development, URL pairing, disconnect semantics and state retention, security model | Remote / mobile access users |
 
 ## Three mental models worth knowing first

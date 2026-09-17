@@ -635,6 +635,21 @@ const ru: typeof en = {
   "settings.chatFont": "Шрифт диалога",
   "settings.chatFontSize": "Размер шрифта диалога",
   "settings.chatLineHeight": "Высота строки диалога",
+  "settings.composerChips": "Composer toolbar", // TODO translate
+  "settings.composerChipsHint": "Chips that are on always appear beside the message in this order, even while they have nothing to show: a chip whose feature is momentarily unavailable (no running agent process, no background tasks, an unresolved sign-in) is shown empty or disabled rather than hidden. Only a chip the current agent does not have at all is left out. When the chips do not fit, the ones that overflow move into a More menu together with the chips that are off. Chips that are off never appear in the row and stay available here and in that menu.", // TODO translate
+  "settings.composerChipUp": (chip: string) => `Move ${chip} up`, // TODO translate
+  "settings.composerChipDown": (chip: string) => `Move ${chip} down`, // TODO translate
+  "settings.composerChip.model": "Model", // TODO translate
+  "settings.composerChip.effort": "Thinking effort", // TODO translate
+  "settings.composerChip.collaboration": "Collaboration mode", // TODO translate
+  "settings.composerChip.permission": "Permission mode", // TODO translate
+  "settings.composerChip.fastMode": "Fast mode", // TODO translate
+  "settings.composerChip.serviceTier": "Speed", // TODO translate
+  "settings.composerChip.personality": "Tone", // TODO translate
+  "settings.composerChip.mcp": "MCP servers", // TODO translate
+  "settings.composerChip.tasks": "Background tasks", // TODO translate
+  "settings.composerChip.account": "Account", // TODO translate
+  "settings.composerChip.codexCredits": "Codex reset credits", // TODO translate
   "settings.fontDefault": "Default", // TODO translate
   "settings.fontCustom": "Custom…", // TODO translate
   "settings.fontListUnavailable": "Не удалось получить список системных шрифтов. Название шрифта можно ввести вручную.",
@@ -1883,6 +1898,7 @@ const ru: typeof en = {
   "chat.tasks.backgroundAll": "Перевести текущую работу в фон",
   "chat.tasks.none": "Фоновых задач нет",
   "chat.tasks.stop": "Остановить",
+  "chat.chipAgentNotRunning": "The agent process is not running. Send a message to start it.", // TODO translate
   "chat.retry.line": (attempt: number, max: number, seconds: number, message: string) =>
     `Повторная попытка (${attempt}/${max}) через ${seconds} с: ${message}`,
   "chat.notify.dismiss": "Закрыть",

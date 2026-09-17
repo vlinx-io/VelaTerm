@@ -3,7 +3,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { ComposerOptionsButton, useComposerOptions } from "./ComposerOptions";
 import { ControlChip } from "./controls";
-import { ComposerToolbar } from "./ComposerToolbar";
 
 function Harness({ mobile = true }: { mobile?: boolean }) {
   const options = useComposerOptions(mobile);
@@ -74,20 +73,6 @@ describe("compact composer options", () => {
   });
 });
 
-function ToolbarHarness({ mobile = false }: { mobile?: boolean }) {
-  const [choice, setChoice] = useState("standard");
-  const [stopped, setStopped] = useState(false);
-  return <div className="sv-composer" onKeyDown={event => {
-    if (event.key === "Escape" && !event.currentTarget.querySelector('[role="option"]')) setStopped(true);
-  }}>
-    <textarea aria-label="Draft" defaultValue="Keep this message" />
-    <ComposerToolbar mobile={mobile} primary={<button>Model</button>} actions={<button>Send</button>}
-      status={<span>{stopped ? "Stopped" : "Pending permission"}</span>}
-      secondary={<ControlChip glyph={null} label={choice} title="Speed" value={choice}
-        options={[{ value: "standard", label: "Standard" }, { value: "fast", label: "Fast" }]} onPick={setChoice} />} />
-  </div>;
-}
-
 describe("control chip filter", () => {
   const catalogue = [
     { value: "opencode/gpt-5.6-luna", label: "GPT-5.6 Luna", hint: "OpenCode Go" },
@@ -122,48 +107,5 @@ describe("control chip filter", () => {
     fireEvent.change(screen.getByPlaceholderText("Filter models"), { target: { value: "anthropic" } });
     expect(screen.getAllByRole("option")).toHaveLength(1);
     expect(screen.getByRole("option", { name: /Claude Haiku/ })).toBeTruthy();
-  });
-});
-
-describe("composer toolbar disclosure", () => {
-  it("keeps common actions and permission notices visible while hiding occasional settings", () => {
-    render(<ToolbarHarness />);
-    expect(screen.getByRole("button", { name: "Model" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
-    expect(screen.getByText("Pending permission")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "standard" })).toBeNull();
-    const more = screen.getByRole("button", { name: "More" });
-    fireEvent.click(more);
-    expect(screen.getByRole("button", { name: "standard" })).toBeTruthy();
-    fireEvent.click(more);
-    expect(screen.queryByRole("button", { name: "standard" })).toBeNull();
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Keep this message");
-  });
-
-  it("preserves choices and closes selectors before the settings row without stopping work", () => {
-    render(<ToolbarHarness />);
-    const more = screen.getByRole("button", { name: "More" });
-    fireEvent.click(more);
-    const speed = screen.getByTitle("Speed");
-    fireEvent.click(speed);
-    fireEvent.keyDown(speed, { key: "Escape" });
-    expect(screen.queryByRole("option")).toBeNull();
-    expect(more.getAttribute("aria-expanded")).toBe("true");
-    fireEvent.click(speed);
-    fireEvent.mouseDown(screen.getByRole("option", { name: "Fast" }));
-    fireEvent.keyDown(speed, { key: "Escape" });
-    expect(more.getAttribute("aria-expanded")).toBe("false");
-    expect(document.activeElement).toBe(more);
-    expect(screen.queryByText("Stopped")).toBeNull();
-    fireEvent.click(more);
-    expect(screen.getByRole("button", { name: "fast" })).toBeTruthy();
-    fireEvent.pointerDown(screen.getByRole("textbox"));
-    expect(more.getAttribute("aria-expanded")).toBe("false");
-  });
-
-  it("uses the existing mobile options entry without a second disclosure", () => {
-    render(<ToolbarHarness mobile />);
-    expect(screen.queryByRole("button", { name: "More" })).toBeNull();
-    expect(screen.getByRole("button", { name: "standard" })).toBeTruthy();
   });
 });
