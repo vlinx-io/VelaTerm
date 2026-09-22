@@ -130,6 +130,8 @@ fn map_session(row: &Row) -> rusqlite::Result<Session> {
         engine: row.get(24)?,
         // Append the Codex collaboration style at index 25.
         collaboration_mode: row.get(25)?,
+        // Append the activity timestamp (milliseconds) at index 26.
+        last_active_at: row.get(26)?,
     })
 }
 
@@ -137,7 +139,8 @@ fn map_session(row: &Row) -> rusqlite::Result<Session> {
 const SESSION_COLUMNS: &str = "id, project_id, group_id, name, shell, cwd, env_json, init_cmd, \
      hotkey, sort_order, created_at, kind, agent_session_id, \
      parent_session_id, collapsed, worktree_path, archived_at, browser_url, agent_args, \
-     permission_mode, worktree_base_ref, mark, agent_preset_id, agent_path, engine, collaboration_mode";
+     permission_mode, worktree_base_ref, mark, agent_preset_id, agent_path, engine, collaboration_mode, \
+     last_active_at";
 
 /// Import an existing directory as a project, using its directory name.
 pub fn import_project(conn: &Connection, root_path: &str) -> Result<Project, String> {
@@ -388,6 +391,7 @@ pub fn create_session_full(
         archived_at: None,
         browser_url: None,
         mark: None,
+        last_active_at: None,
         // A preset's launch values are copied here by the caller; this ID is display data only.
         agent_preset_id: agent_preset_id
             .map(|s| s.to_string())
@@ -482,6 +486,8 @@ pub fn create_fresh_chat_session(
         archived_at: None,
         browser_url: None,
         mark: source.mark.clone(),
+        // A fresh line of work starts without activity, even when the source has a timestamp.
+        last_active_at: None,
         // The archived source disappears from the live tree, so reusing its order puts the fresh session
         // in the same sidebar position instead of making `/clear` move the reader elsewhere.
         sort_order: source.sort_order,
@@ -571,6 +577,7 @@ pub fn persist_session(
         archived_at: None,
         browser_url: None,
         mark: None,
+        last_active_at: None,
         sort_order: now_millis(),
         created_at: now_secs(),
     };
@@ -888,6 +895,22 @@ pub fn set_browser_url(conn: &Connection, id: &str, url: &str) -> Result<(), Str
     Ok(())
 }
 
+/// Record activity on a session at `at_ms` (milliseconds since the epoch) for the sidebar's activity order.
+///
+/// Bursts are coalesced in SQL: the row is written only when it has no timestamp yet or the stored one is
+/// at least one second older than `at_ms`, so a typing burst costs one write per second and an older stamp
+/// never moves the row backwards. Returns whether the row changed; an unknown id is `Ok(false)`.
+pub fn touch_session_activity(conn: &Connection, id: &str, at_ms: i64) -> Result<bool, String> {
+    let changed = conn
+        .execute(
+            "UPDATE sessions SET last_active_at = ?2
+             WHERE id = ?1 AND (last_active_at IS NULL OR last_active_at + 1000 <= ?2)",
+            params![id, at_ms],
+        )
+        .map_err(|e| format!("Failed to record session activity: {e}"))?;
+    Ok(changed > 0)
+}
+
 // ─────────────────────────── Application preferences shared across shells ───────────────────────────
 
 /// Read all app preferences as key/value pairs using frontend localStorage-compatible keys.
@@ -906,6 +929,17 @@ pub fn get_app_settings(conn: &Connection) -> Result<HashMap<String, String>, St
         map.insert(k, v);
     }
     Ok(map)
+}
+
+/// Read one app preference, or `None` when it was never written.
+pub fn get_app_setting(conn: &Connection, key: &str) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT value FROM app_settings WHERE key = ?1",
+        params![key],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map_err(|e| format!("Failed to read app setting {key}: {e}"))
 }
 
 /// Delete an app preference. Used to remove the plaintext Gitea fallback after keyring storage succeeds.
@@ -1210,6 +1244,7 @@ pub fn fork_session(conn: &Connection, source_id: &str) -> Result<Session, Strin
         browser_url: None,
         // A fork continues the same line of work, so it keeps the source's marker.
         mark: source.mark.clone(),
+        last_active_at: None,
         sort_order: now_millis(),
         created_at: now_secs(),
     };
@@ -2834,6 +2869,52 @@ mod tests {
             let _ = std::fs::remove_file(alias);
         }
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// The activity timestamp starts empty, is written at most once per second per session, never moves
+    /// backwards, ignores unknown ids, and comes back with the tree snapshot so the sidebar can order by it
+    /// right after startup. Archiving hides the row from the tree but keeps its stamp.
+    #[test]
+    fn touch_session_activity_coalesces_and_roundtrips() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        let session = create_session(
+            &conn,
+            &project.id,
+            None,
+            "api",
+            SessionKind::Terminal,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(list_tree(&conn).unwrap().sessions[0].last_active_at, None);
+
+        // First stamp is written and visible in the snapshot.
+        assert!(touch_session_activity(&conn, &session.id, 1_000).unwrap());
+        assert_eq!(list_tree(&conn).unwrap().sessions[0].last_active_at, Some(1_000));
+        // Within one second the burst is coalesced: nothing written, value unchanged.
+        assert!(!touch_session_activity(&conn, &session.id, 1_500).unwrap());
+        assert_eq!(list_tree(&conn).unwrap().sessions[0].last_active_at, Some(1_000));
+        // Exactly one second later the next write goes through.
+        assert!(touch_session_activity(&conn, &session.id, 2_000).unwrap());
+        assert_eq!(list_tree(&conn).unwrap().sessions[0].last_active_at, Some(2_000));
+        // An older stamp never rewinds the row.
+        assert!(!touch_session_activity(&conn, &session.id, 1_200).unwrap());
+        assert_eq!(list_tree(&conn).unwrap().sessions[0].last_active_at, Some(2_000));
+        // Unknown ids are not an error, just nothing to write.
+        assert!(!touch_session_activity(&conn, "missing", 9_000).unwrap());
+
+        // Archived sessions leave the tree but keep their stamp for a later restore.
+        set_archived(&conn, &session.id, true).unwrap();
+        assert!(list_tree(&conn).unwrap().sessions.is_empty());
+        assert_eq!(
+            get_session(&conn, &session.id).unwrap().unwrap().last_active_at,
+            Some(2_000)
+        );
     }
 
     /// Markers round-trip through list_tree for all three node kinds, and an empty marker clears an existing one.

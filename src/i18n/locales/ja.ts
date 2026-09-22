@@ -884,6 +884,9 @@ const ja: typeof en = {
   "tree.refreshStatusMatch": "ステータスを更新",
   "tree.filterStatusSection": "ステータス", // Status
   "tree.filterMarkSection": "マーク", // Mark
+  "tree.sortSection": "並び順", // Order
+  "tree.sortByActivity": "アクティビティ順に並べ替え", // Sort by activity
+  "tree.sortByActivityHint": "最近アクティブなプロジェクトとセッションを上に保ちます。オフにすると手動の並び順に戻ります。", // Keeps the most recently active projects and sessions at the top; off restores the manual order.
   "tree.viewMainName": "メイン",
   "tree.viewUntitled": "名称未設定ビュー",
   "tree.viewDefaultName": (n) => `ビュー ${n}`,

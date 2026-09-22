@@ -867,6 +867,9 @@ const zhTW: typeof en = {
   "tree.refreshStatusMatch": "重新整理狀態",
   "tree.filterStatusSection": "狀態", // Status
   "tree.filterMarkSection": "標記", // Mark
+  "tree.sortSection": "排序", // Order
+  "tree.sortByActivity": "按活動排序", // Sort by activity
+  "tree.sortByActivityHint": "將最近活躍的專案和會話保持在頂端；關閉後恢復手動排序。", // Keeps the most recently active projects and sessions at the top; off restores the manual order.
   "tree.viewMainName": "主分身",
   "tree.viewUntitled": "未命名分身",
   "tree.viewDefaultName": (n) => `分身 ${n}`,

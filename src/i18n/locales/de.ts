@@ -884,6 +884,9 @@ const de: typeof en = {
   "tree.refreshStatusMatch": "Status aktualisieren",
   "tree.filterStatusSection": "Status", // Status
   "tree.filterMarkSection": "Markierung", // Mark
+  "tree.sortSection": "Reihenfolge", // Order
+  "tree.sortByActivity": "Nach Aktivität sortieren", // Sort by activity
+  "tree.sortByActivityHint": "Hält die zuletzt aktiven Projekte und Sitzungen oben; aus stellt die manuelle Reihenfolge wieder her.", // Keeps the most recently active projects and sessions at the top; off restores the manual order.
   "tree.viewMainName": "Hauptansicht",
   "tree.viewUntitled": "Unbenannte Ansicht",
   "tree.viewDefaultName": (n) => `Ansicht ${n}`,

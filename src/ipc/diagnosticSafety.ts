@@ -233,6 +233,7 @@ const commands = new Set([
   "stat_file",
   "system_stats",
   "terminal_completion_config",
+  "touch_session_activity",
   "uninstall_spawn_skills",
   "update_agent_preset",
   "update_session",

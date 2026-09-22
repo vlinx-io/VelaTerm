@@ -709,6 +709,7 @@ mod tests {
             archived_at: None,
             browser_url: None,
             mark: None,
+            last_active_at: None,
             sort_order: 0,
             created_at: 0,
         }

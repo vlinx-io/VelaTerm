@@ -199,6 +199,9 @@ export interface PersistedSettings {
   /** Composer chips shown inline under the message input, in display order. Chips missing from the list
    * are off: they stay reachable in the settings and move into the More row whenever it appears. */
   composerInlineChips: ComposerChipId[];
+  /** Sidebar order: on keeps the most recently active projects and sessions at the top, off renders the
+   * manual order. Off by default; the manual order is never changed by the mode. */
+  sortByActivity: boolean;
 }
 
 /** Every composer chip the toolbar can show, in the order the toolbar used before the list became
@@ -260,6 +263,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   showSystemResources: true,
   infoCollapsed: {},
   composerInlineChips: DEFAULT_COMPOSER_INLINE_CHIPS,
+  sortByActivity: false,
 };
 
 /** Keeps only known chip ids, once each and in the saved order. A missing or malformed value falls back
@@ -336,6 +340,8 @@ export function loadSettings(): PersistedSettings {
     merged.memoryPrefs = sanitizeLaunchChoice(parsed.memoryPrefs);
     merged.referSummary = sanitizeReferSummary(parsed.referSummary);
     merged.composerInlineChips = sanitizeComposerInlineChips(parsed.composerInlineChips);
+    // Only an explicit boolean true switches the activity order on; anything else keeps the manual order.
+    merged.sortByActivity = parsed.sortByActivity === true;
     // Migrate boolean gpuRender to termRenderer only when the new key is absent, preserving WebGL for
     // existing users. Future saves write only the new structure and naturally discard the old field.
     if (parsed.termRenderer === undefined && typeof parsed.gpuRender === "boolean") {

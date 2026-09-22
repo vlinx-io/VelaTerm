@@ -233,6 +233,12 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         conn.execute("ALTER TABLE groups ADD COLUMN mark TEXT", [])
             .map_err(|e| format!("Failed to migrate groups.mark: {e}"))?;
     }
+    // Nullable activity timestamp for the sidebar's activity order. Existing rows stay NULL, which the
+    // order treats as "never active" and keeps in manual order behind active items.
+    if !column_exists(conn, "sessions", "last_active_at") {
+        conn.execute("ALTER TABLE sessions ADD COLUMN last_active_at INTEGER", [])
+            .map_err(|e| format!("Failed to migrate sessions.last_active_at: {e}"))?;
+    }
     // Add ssh_hosts.shared_db to restore the host's last remote-database choice, defaulting to independent.
     if table_exists(conn, "ssh_hosts") && !column_exists(conn, "ssh_hosts", "shared_db") {
         conn.execute(
@@ -315,6 +321,7 @@ mod tests {
         assert!(column_exists(&conn, "sessions", "worktree_path"));
         assert!(column_exists(&conn, "sessions", "mark"));
         assert!(column_exists(&conn, "sessions", "collaboration_mode"));
+        assert!(column_exists(&conn, "sessions", "last_active_at"));
 
         let idx: i64 = conn
             .query_row(

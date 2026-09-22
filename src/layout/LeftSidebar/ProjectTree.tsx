@@ -28,6 +28,7 @@ import { SESSION_DRAG_MIME, SESSION_MULTI_DRAG_MIME } from "../CenterPane/paneDr
 import { DEFAULT_BINDINGS, formatCombo } from "../../hooks/shortcutRegistry";
 import { useGitBranch } from "../../hooks/useGitBranch";
 import { stripControlChars, useCtrlCharGuard } from "../../hooks/textInputGuards";
+import { isDropZoneAllowed, orderTreeByActivity } from "./activityOrder";
 
 /** Reference to a node targeted by a context menu or operation. */
 export interface TreeNodeRef {
@@ -281,7 +282,7 @@ export function ProjectTree(h: TreeHandlers) {
     isPrimary,
   } = h;
 
-  const projects = useTermStore((s) => s.projects);
+  const rawProjects = useTermStore((s) => s.projects);
   const treeLoaded = useTermStore((s) => s.treeLoaded);
   // Delay the loading row so a fast load stays blank instead of flashing a spinner for one frame.
   const [showLoadingHint, setShowLoadingHint] = useState(false);
@@ -296,8 +297,20 @@ export function ProjectTree(h: TreeHandlers) {
   // Format the user override or default Open Project shortcut for the empty-state hint.
   const openProjectCombo =
     useTermStore((s) => s.shortcutOverrides.openProject) || DEFAULT_BINDINGS.openProject;
-  const groups = useTermStore((s) => s.groups);
-  const sessions = useTermStore((s) => s.sessions);
+  const rawGroups = useTermStore((s) => s.groups);
+  const rawSessions = useTermStore((s) => s.sessions);
+  const sortByActivity = useTermStore((s) => s.sortByActivity);
+  // Subscribe to the live activity map only while the mode is on, so recording activity costs no rerender
+  // in the manual order.
+  const sessionActivity = useTermStore((s) => (s.sortByActivity ? s.sessionActivity : null));
+  // With the mode off the store arrays pass through untouched, so the manual order renders exactly as delivered.
+  const { projects, groups, sessions } = useMemo(
+    () =>
+      sortByActivity && sessionActivity
+        ? orderTreeByActivity(rawProjects, rawGroups, rawSessions, sessionActivity)
+        : { projects: rawProjects, groups: rawGroups, sessions: rawSessions },
+    [sortByActivity, sessionActivity, rawProjects, rawGroups, rawSessions],
+  );
   const ephemeralSessions = useTermStore((s) => s.ephemeralSessions);
   const toggleCollapsed = useTermStore((s) => s.toggleCollapsed);
   const openSession = useTermStore((s) => s.openSession);
@@ -901,10 +914,19 @@ export function ProjectTree(h: TreeHandlers) {
     return y < h * 0.5 ? "top" : "bottom";
   };
   const allowDrop = (e: React.DragEvent, id: string, hasCenter: boolean) => {
+    const zone = calcZone(e, hasCenter);
+    if (!isDropZoneAllowed(zone, sortByActivity)) {
+      // Edge zones reorder siblings, which the activity order would hide. Without preventDefault the browser
+      // refuses the drop and shows it, so a reorder never appears to silently do nothing. Center drops that
+      // move a node into a group, project or under a session stay allowed.
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = "none";
+      setDragOver((prev) => (prev?.id === id ? null : prev));
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
-    const zone = calcZone(e, hasCenter);
     setDragOver((prev) =>
       prev?.id === id && prev.zone === zone ? prev : { id, zone },
     );

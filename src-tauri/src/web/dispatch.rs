@@ -496,6 +496,9 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             )?;
             Ok(Value::Null)
         }
+        // Record session activity for the sidebar's activity order. Returns whether the timestamp was written
+        // (false while a burst is being coalesced); the core broadcasts tree://changed only on a real write.
+        "touch_session_activity" => to_value(core::touch_session_activity(app, &req_str(args, "id")?)?),
         // Binds an existing group to a worktree. Sessions already inside keep their own working directory;
         // only sessions created later inherit it.
         "set_group_worktree" => {
@@ -2150,6 +2153,42 @@ mod tests {
         }
         let err = dispatch(&app, "chat_run_shell", &json!({ "sessionId": "s", "command": "  ", "messageId": "sh-1" }), DESKTOP_SOURCE, CallOrigin::Local).unwrap_err();
         assert_eq!(err, "chat_shell_empty");
+    }
+
+    /// The activity arm reaches the core from the desktop (`Local`) and from a paired remote client
+    /// (`Remote`) alike: the first call writes (`true`), an immediate second call is coalesced (`false`),
+    /// and a call without an id fails on argument extraction.
+    #[test]
+    fn touch_session_activity_arm_reaches_the_core_from_both_origins() {
+        let app = test_ctx();
+        {
+            let conn = app.db().conn.lock().unwrap();
+            conn.execute("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','test','/tmp',0)", []).unwrap();
+            conn.execute(
+                "INSERT INTO sessions(id,project_id,name,kind,created_at) VALUES ('s-local','p','A','terminal',0), ('s-remote','p','B','terminal',0)",
+                [],
+            ).unwrap();
+        }
+        for (origin, id) in [(CallOrigin::Local, "s-local"), (CallOrigin::Remote, "s-remote")] {
+            let source = if origin == CallOrigin::Local { DESKTOP_SOURCE } else { "ws-1" };
+            let first = dispatch(&app, "touch_session_activity", &json!({ "id": id }), source, origin).unwrap();
+            assert_eq!(first, Value::Bool(true), "{origin:?}: first touch writes");
+            let second = dispatch(&app, "touch_session_activity", &json!({ "id": id }), source, origin).unwrap();
+            assert_eq!(second, Value::Bool(false), "{origin:?}: a burst is coalesced");
+            let stamp: Option<i64> = app
+                .db()
+                .conn
+                .lock()
+                .unwrap()
+                .query_row("SELECT last_active_at FROM sessions WHERE id = ?1", [id], |r| r.get(0))
+                .unwrap();
+            assert!(stamp.is_some(), "{origin:?}: the stamp is persisted");
+        }
+        let err = dispatch(&app, "touch_session_activity", &json!({}), DESKTOP_SOURCE, CallOrigin::Local).unwrap_err();
+        assert_eq!(err, "Missing string parameter id");
+        if let Ok(dir) = app.data_dir() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 
     /// Argument keys that carry a caller-chosen filesystem path anywhere in this dispatch match.

@@ -21,6 +21,14 @@ use crate::models::{AgentPreset, Group, NodeKind, Project, Session, SessionKind,
 
 // Private helpers.
 
+/// Current wall-clock time in milliseconds since the epoch, the unit `sessions.last_active_at` stores.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 /// Reads a session's `(kind, captured agent-native session ID)`, returning a specific error if either is absent.
 /// Shared by the four transcript/usage commands for consistent lookup and error messages.
 fn session_kind_and_agent(ctx: &AppCtx, session_id: &str) -> Result<(SessionKind, String), String> {
@@ -409,6 +417,42 @@ pub fn set_node_mark(
     }
     ctx.emit(TREE_CHANGED, ());
     Ok(())
+}
+
+/// The shared preferences block the frontend persists as JSON under this app_settings key (`SETTINGS_KEY` in
+/// src/store/settings.ts); `sortByActivity` inside it is the sidebar's activity-order switch.
+const SETTINGS_BLOCK_KEY: &str = "vlx-settings";
+
+/// Whether "Sort by activity" is switched on. Preferences are shared across shells, so this one backend copy is
+/// authoritative; a missing or unparsable block means off.
+fn sort_by_activity_enabled(conn: &rusqlite::Connection) -> bool {
+    repo::get_app_setting(conn, SETTINGS_BLOCK_KEY)
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|block| block.get("sortByActivity").and_then(|v| v.as_bool()))
+        .unwrap_or(false)
+}
+
+/// Records activity on a session for the sidebar's activity order and returns whether anything was written.
+/// The repository coalesces bursts to at most one write per second per session. The stamp is always kept, so
+/// switching the mode on later shows the real history, but `tree://changed` is broadcast only while the mode
+/// is on: with it off nobody orders by the stamp, and every broadcast makes every client reload the tree.
+pub fn touch_session_activity(ctx: &AppCtx, id: &str) -> Result<bool, String> {
+    touch_session_activity_at(ctx, id, now_ms())
+}
+
+/// `touch_session_activity` with an explicit timestamp, so tests can step the clock past the coalescing window.
+fn touch_session_activity_at(ctx: &AppCtx, id: &str, at_ms: i64) -> Result<bool, String> {
+    let (changed, broadcast) = {
+        let conn = ctx.db().conn.lock().unwrap();
+        let changed = repo::touch_session_activity(&conn, id, at_ms)?;
+        (changed, changed && sort_by_activity_enabled(&conn))
+    };
+    if broadcast {
+        ctx.emit(TREE_CHANGED, ());
+    }
+    Ok(changed)
 }
 
 /// Binds an existing group to a worktree so sessions created in it afterwards start there and it shows the
@@ -2117,7 +2161,8 @@ pub fn web_server_autostart(ctx: &AppCtx) -> Result<Option<crate::web::WebServer
 mod tests {
     use super::{
         autostart_config, check_images, claim_spawn, get_app_settings, install_id,
-        release_spawn_claim, set_app_settings, spawn_claim_key, web_server_autostart,
+        release_spawn_claim, set_app_settings, spawn_claim_key, touch_session_activity_at,
+        web_server_autostart,
         web_server_status, web_server_stop, ChatImage, MAX_IMAGES_PER_MESSAGE, MAX_IMAGE_BYTES,
     };
     use std::collections::HashMap;
@@ -2226,6 +2271,69 @@ mod tests {
             "the payload must never carry values: {}",
             payloads[0]
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The activity stamp is always persisted, but the tree broadcast that makes every client reload is sent
+    /// only while "Sort by activity" is on in the shared preferences: with the mode off nobody orders by the
+    /// stamp, and a typing burst must not cost every client a tree reload per second.
+    #[test]
+    fn touch_session_activity_broadcasts_only_while_the_mode_is_on() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let dir = std::env::temp_dir().join(format!("vlx-activity-broadcast-{}", std::process::id()));
+        let ctx = headless_ctx(&dir);
+        {
+            let conn = ctx.db().conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','test','/tmp',0)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO sessions(id,project_id,name,kind,created_at) VALUES ('s','p','A','terminal',0)",
+                [],
+            )
+            .unwrap();
+        }
+        let seen = std::sync::Arc::new(AtomicUsize::new(0));
+        let sink = seen.clone();
+        ctx.listen(crate::host::TREE_CHANGED, move |_| {
+            sink.fetch_add(1, Ordering::SeqCst);
+        });
+        let stamp = |ctx: &crate::host::AppCtx| -> Option<i64> {
+            ctx.db()
+                .conn
+                .lock()
+                .unwrap()
+                .query_row("SELECT last_active_at FROM sessions WHERE id = 's'", [], |r| r.get(0))
+                .unwrap()
+        };
+
+        // Mode never written (off): the stamp is persisted, nothing is broadcast.
+        assert!(touch_session_activity_at(&ctx, "s", 1_000).unwrap());
+        assert_eq!(stamp(&ctx), Some(1_000));
+        assert_eq!(seen.load(Ordering::SeqCst), 0, "off: written but silent");
+
+        set_app_settings(
+            &ctx,
+            HashMap::from([("vlx-settings".to_string(), r#"{"sortByActivity":true}"#.to_string())]),
+        )
+        .unwrap();
+        // A coalesced call writes nothing and therefore broadcasts nothing even with the mode on.
+        assert!(!touch_session_activity_at(&ctx, "s", 1_500).unwrap());
+        assert_eq!(seen.load(Ordering::SeqCst), 0, "coalesced: silent");
+        // A real write with the mode on broadcasts once.
+        assert!(touch_session_activity_at(&ctx, "s", 3_000).unwrap());
+        assert_eq!(seen.load(Ordering::SeqCst), 1, "on: one broadcast per real write");
+
+        set_app_settings(
+            &ctx,
+            HashMap::from([("vlx-settings".to_string(), r#"{"sortByActivity":false}"#.to_string())]),
+        )
+        .unwrap();
+        assert!(touch_session_activity_at(&ctx, "s", 5_000).unwrap());
+        assert_eq!(stamp(&ctx), Some(5_000), "off again: the stamp still advances");
+        assert_eq!(seen.load(Ordering::SeqCst), 1, "off again: silent");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

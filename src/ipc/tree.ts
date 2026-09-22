@@ -169,6 +169,12 @@ export function setNodeMark(
   return invoke("set_node_mark", { kind, id, mark: mark ?? "" });
 }
 
+/** Record activity on a session for the sidebar's activity order. Resolves to whether the timestamp was
+ *  written; the backend coalesces bursts to one write per second per session and broadcasts the tree only then. */
+export function touchSessionActivity(id: string): Promise<boolean> {
+  return invoke("touch_session_activity", { id });
+}
+
 export interface UpdateSessionInput {
   name: string;
   shell?: string | null;

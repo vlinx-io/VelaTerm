@@ -884,6 +884,9 @@ const ptBR: typeof en = {
   "tree.refreshStatusMatch": "Atualizar status",
   "tree.filterStatusSection": "Status", // Status
   "tree.filterMarkSection": "Marca", // Mark
+  "tree.sortSection": "Ordem", // Order
+  "tree.sortByActivity": "Ordenar por atividade", // Sort by activity
+  "tree.sortByActivityHint": "Mantém no topo os projetos e sessões com atividade mais recente; desligado restaura a ordem manual.", // Keeps the most recently active projects and sessions at the top; off restores the manual order.
   "tree.viewMainName": "Principal",
   "tree.viewUntitled": "Visualização sem nome",
   "tree.viewDefaultName": (n) => `Visualização ${n}`,

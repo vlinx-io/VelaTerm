@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { chatSend, type ChatImage, type SendBehavior } from "../../../ipc/chat";
+import { useTermStore } from "../../../store/termStore";
 
 export interface Submission {
   id: string;
@@ -32,6 +33,9 @@ export function acknowledgeSubmissions(session: string, ids: string[]) {
 export function createSubmission(session: string, text: string, images: ChatImage[], behavior: SendBehavior): Submission {
   const item: Submission = { id: `msg-${crypto.randomUUID()}`, text, images, behavior, status: "sending" };
   change(session, items => [...items, item]);
+  // Composing a message is the user's action, and so is the retry button, which re-creates a failed submission
+  // here; automatic redelivery of an uncertain send goes through deliverSubmission only.
+  useTermStore.getState().noteSessionActivity(session);
   return item;
 }
 

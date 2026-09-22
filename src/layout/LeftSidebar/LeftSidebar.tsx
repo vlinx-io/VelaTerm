@@ -66,6 +66,8 @@ function TreeFilter({ view }: { view: SidebarTreeView }) {
   const runtimes = useTermStore((s) => s.runtimes);
   const notifications = useTermStore((s) => s.notifications);
   const dynamicStatusFilter = useTermStore((s) => s.dynamicStatusFilter);
+  const sortByActivity = useTermStore((s) => s.sortByActivity);
+  const setSortByActivity = useTermStore((s) => s.setSortByActivity);
   const setStatusFilter = useTermStore((s) => s.setSidebarTreeViewStatusFilter);
   const appendStatusMatches = useTermStore((s) => s.appendSidebarTreeViewStatusMatches);
   const setMarkFilter = useTermStore((s) => s.setSidebarTreeViewMarkFilter);
@@ -177,6 +179,16 @@ function TreeFilter({ view }: { view: SidebarTreeView }) {
                 </button>
               );
             })}
+            {/* The order is a global preference rather than a per-view filter, so it does not count toward the badge. */}
+            <div className="filter-menu-title">{t("tree.sortSection")}</div>
+            <button
+              className={sortByActivity ? "filter-menu-item on" : "filter-menu-item"}
+              title={t("tree.sortByActivityHint")}
+              onClick={() => setSortByActivity(!sortByActivity)}
+            >
+              <span className="ck">{sortByActivity && <Icons.check size={12} />}</span>
+              <span className="lbl">{t("tree.sortByActivity")}</span>
+            </button>
           </div>
         </>
       )}

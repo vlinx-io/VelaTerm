@@ -894,6 +894,9 @@ const ru: typeof en = {
   "tree.refreshStatusMatch": "Обновить статус",
   "tree.filterStatusSection": "Статус", // Status
   "tree.filterMarkSection": "Метка", // Mark
+  "tree.sortSection": "Порядок", // Order
+  "tree.sortByActivity": "Сортировать по активности", // Sort by activity
+  "tree.sortByActivityHint": "Держит недавно активные проекты и сессии сверху; при выключении возвращается ручной порядок.", // Keeps the most recently active projects and sessions at the top; off restores the manual order.
   "tree.viewMainName": "Основной",
   "tree.viewUntitled": "Безымянное представление",
   "tree.viewDefaultName": (n) => `Представление ${n}`,

@@ -54,6 +54,7 @@ The **More** menu in the composer appears only while the chips that are on do no
 |------|-------------|
 | Tabs | Tab mode: Multi (default) / Single (single reused tab) |
 | Background limit | Cap on background keep-alive tabs (default 32); past it, the oldest inactive tab is ended automatically |
+| Sort by activity | Keep the most recently active projects and sessions at the top of the sidebar tree (off by default, same switch as in the sidebar filter menu); off restores the manual order. See [Interface & Session Management](interface-and-sessions_20260709_2041.md) |
 | Confirm before spawn | Show the confirmation card before spawning child sessions (on by default) — see [Session Spawning & Git Collaboration](session-spawning-and-git_20260709_2041.md) |
 | Usage refresh | Refresh interval for the Usage quota in the Info panel |
 | Image paste | Image paste behavior: Upload as file (materialize to a path) / Agent default |

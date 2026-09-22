@@ -26,6 +26,7 @@ import {
 } from "../ipc/sessionState";
 import { pushSetting } from "../ipc/settingsSync";
 import { isTauri } from "../ipc/transport";
+import { isShareSurface } from "../ipc/shareBase";
 import { env } from "../platform";
 import { genId } from "../genId";
 import type { SpawnRequest, StatusSignal } from "../ipc/events";
@@ -1100,6 +1101,14 @@ interface TermStore {
   infoCollapsed: Record<string, boolean>;
   /** Composer chips shown inline under the message input, in display order; the rest are off. */
   composerInlineChips: ComposerChipId[];
+  /** Sidebar order: on keeps the most recently active projects and sessions at the top, off is the manual order. */
+  sortByActivity: boolean;
+  /**
+   * Live copy of each persistent session's last activity in milliseconds, keyed by session id. Seeded from the
+   * tree snapshot's `lastActiveAt` and advanced immediately by `noteSessionActivity`, so the sidebar reorders
+   * without waiting for the coalesced backend write. Ids without activity are absent.
+   */
+  sessionActivity: Record<SessionId, number>;
 
   /** Saved agent launch configurations shown in the new-session menu, in menu order. */
   agentPresets: AgentPreset[];
@@ -1486,6 +1495,17 @@ interface TermStore {
   toggleInfoSection: (id: string) => void;
   /** Replaces the ordered list of composer chips shown inline; chips left out are off. */
   setComposerInlineChips: (ids: ComposerChipId[]) => void;
+  /** Switches the sidebar between the activity order and the manual order, persisted like the other preferences. */
+  setSortByActivity: (v: boolean) => void;
+  /**
+   * Records activity on a persistent session: advances the live copy and asks the backend to persist the stamp.
+   * Called by the two input paths (terminal input, chat submission) and by the agent-state observer. Reading is
+   * not activity: opening a session, switching to its tab or focusing its pane records nothing, so a session
+   * the user only looks at keeps its place. Calls for the same session within one second are ignored (one
+   * burst counts once); ids that are not in the tree (drafts, browser tabs) are ignored; on the share surface
+   * it does nothing. `now` exists for tests.
+   */
+  noteSessionActivity: (id: SessionId, now?: number) => void;
   /** Turns the backend's automatic usage polling on or off. */
   setUsageAutoRefresh: (v: boolean) => void;
   /** Sets how often the backend refreshes the usage snapshot, in seconds. */
@@ -1565,6 +1585,9 @@ const NOTIFY_STATES: AgentState[] = ["asking", "waiting"];
  * Only the legacy arbitration path below reads this; the backend keeps its own copy for the same purpose.
  */
 const workingPulseAt = new Map<string, number>();
+/** Last time `noteSessionActivity` accepted a call per session; calls within this window are one burst. */
+const activityNotedAt = new Map<string, number>();
+const ACTIVITY_BURST_MS = 1000;
 
 /** Escape hatch: set `vlx-arbitration` to `frontend` to decide agent state in the client again. */
 const ARBITRATION_KEY = "vlx-arbitration";
@@ -1691,6 +1714,7 @@ function persistAndApplyVisual(getState: () => TermStore) {
     showSystemResources: s.showSystemResources,
     infoCollapsed: s.infoCollapsed,
     composerInlineChips: s.composerInlineChips,
+    sortByActivity: s.sortByActivity,
   };
   saveSettings(ps);
   applyVisual(visualOf(ps));
@@ -1881,6 +1905,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
   projects: [],
   groups: [],
   sessions: [],
+  sessionActivity: {},
   archivedSessions: [],
   treeLoaded: false,
   runtimes: {},
@@ -1978,8 +2003,13 @@ export const useTermStore = create<TermStore>((set, get) => ({
     }
     set((state) => {
       const runtimes = { ...state.runtimes };
+      // Merge the persisted activity with the live copy: a stamp noted here moments ago may be newer than
+      // what the coalesced write has persisted, and sessions that left the tree drop out of the map.
+      const sessionActivity: Record<SessionId, number> = {};
       for (const s of t.sessions) {
         if (!runtimes[s.id]) runtimes[s.id] = { status: "idle" };
+        const at = Math.max(state.sessionActivity[s.id] ?? 0, s.lastActiveAt ?? 0);
+        if (at > 0) sessionActivity[s.id] = at;
       }
       let layoutPatch = {};
       if (!layoutRestored) {
@@ -2077,6 +2107,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
         sessions: t.sessions,
         treeLoaded: true,
         runtimes,
+        sessionActivity,
         sidebarTreeViews,
         treeFilter: primaryView.treeFilter,
         statusFilter: primaryView.statusFilter,
@@ -4722,6 +4753,28 @@ export const useTermStore = create<TermStore>((set, get) => ({
   setComposerInlineChips: (ids) => {
     set({ composerInlineChips: sanitizeComposerInlineChips(ids) });
     persistAndApplyVisual(get);
+  },
+  setSortByActivity: (v) => {
+    set({ sortByActivity: v });
+    persistAndApplyVisual(get);
+    // Stamps other clients wrote while the mode was off were persisted without a broadcast; re-read the tree
+    // once so this client orders by the real history instead of its stale live copy.
+    if (v && get().treeLoaded) void get().loadTree().catch(() => {});
+  },
+  noteSessionActivity: (id, now = Date.now()) => {
+    // A share visitor's focus is not the host's activity, and the restricted share dispatch rejects the write,
+    // which would log one failed request per focus.
+    if (isShareSurface) return;
+    const state = get();
+    if (!state.sessions.some((s) => s.id === id)) return;
+    const noted = activityNotedAt.get(id);
+    if (noted !== undefined && now - noted < ACTIVITY_BURST_MS) return;
+    activityNotedAt.set(id, now);
+    if ((state.sessionActivity[id] ?? 0) < now) {
+      set({ sessionActivity: { ...state.sessionActivity, [id]: now } });
+    }
+    // The backend coalesces on its own clock and broadcasts the tree only on a real write.
+    tree.touchSessionActivity(id).catch(() => {});
   },
   setUsageAutoRefresh: (v) => {
     set({ usageAutoRefresh: v });

@@ -167,3 +167,29 @@ describe("composer inline chips", () => {
     expect(useTermStore.getState().composerInlineChips).toEqual(["permission", "model", "mcp"]);
   });
 });
+
+describe("sortByActivity", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("is off by default and only an explicit boolean true switches it on", () => {
+    expect(loadSettings().sortByActivity).toBe(false);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ sortByActivity: "true" }));
+    expect(loadSettings().sortByActivity).toBe(false);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ sortByActivity: 1 }));
+    expect(loadSettings().sortByActivity).toBe(false);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ sortByActivity: true }));
+    expect(loadSettings().sortByActivity).toBe(true);
+  });
+
+  it("round-trips through the store setter and the cache hydration", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    useTermStore.getState().setSortByActivity(true);
+    // Proves the field is part of the explicit persist list, not just of the state.
+    expect(loadSettings().sortByActivity).toBe(true);
+    useTermStore.setState({ sortByActivity: false });
+    useTermStore.getState().hydrateSettingsFromCache();
+    expect(useTermStore.getState().sortByActivity).toBe(true);
+    useTermStore.getState().setSortByActivity(false);
+    expect(loadSettings().sortByActivity).toBe(false);
+  });
+});
