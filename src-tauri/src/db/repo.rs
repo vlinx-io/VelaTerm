@@ -2701,6 +2701,37 @@ mod tests {
         assert!(move_node(&conn, NodeKind::Group, "g2", Some("p1"), None, None, 0).is_ok());
     }
 
+    /// Projects reorder through `move_node` as well: the sidebar drops a project between two others and sends
+    /// only the new sort_order, and the tree listing must reflect that order.
+    #[test]
+    fn move_node_reorders_projects_by_sort_order() {
+        let conn = mem_conn();
+        for (id, order) in [("a", 1000), ("b", 2000), ("c", 3000)] {
+            conn.execute(
+                "INSERT INTO projects (id, name, root_path, sort_order, created_at)
+                 VALUES (?1, ?1, '/tmp', ?2, 0)",
+                params![id, order],
+            )
+            .unwrap();
+        }
+        let ids = |conn: &Connection| -> Vec<String> {
+            list_tree(conn).unwrap().projects.into_iter().map(|p| p.id).collect()
+        };
+        assert_eq!(ids(&conn), ["a", "b", "c"]);
+
+        // Drop "c" onto the top zone of "b": midpoint between "a" and "b", exactly what the sidebar computes.
+        move_node(&conn, NodeKind::Project, "c", None, None, None, 1500).unwrap();
+        let order: i64 = conn
+            .query_row("SELECT sort_order FROM projects WHERE id = 'c'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(order, 1500);
+        assert_eq!(ids(&conn), ["a", "c", "b"]);
+
+        // Before the first project: first.sort_order minus 1000.
+        move_node(&conn, NodeKind::Project, "b", None, None, None, 0).unwrap();
+        assert_eq!(ids(&conn), ["b", "a", "c"]);
+    }
+
     #[test]
     fn windows_verbatim_paths_are_normalized_for_display_and_launch() {
         assert_eq!(

@@ -38,9 +38,17 @@ export interface TreeNodeRef {
   groupId: string | null;
 }
 
+/**
+ * What is being dragged right now, shared by every ProjectTree in this window: a split sidebar renders
+ * one tree per pane, and a project dragged from one pane must be recognised by the others during
+ * dragover, where the browser hides the payload. Set at dragstart, cleared on dragend and on drop.
+ */
+let dragSource: { kind: DragPayload["kind"]; id: string } | null = null;
+
 interface DragPayload {
-  kind: "group" | "session";
+  kind: "project" | "group" | "session";
   id: string;
+  /** For a project payload this is the project's own id. */
   projectId: string;
   /** For multi-session dragging, carries all selected IDs in the same project when at least two are selected.
    *  Drop uses the same moveMany logic as Move Selected To. */
@@ -842,6 +850,7 @@ export function ProjectTree(h: TreeHandlers) {
   };
   const onDragStart = (payload: DragPayload) => (e: React.DragEvent) => {
     e.stopPropagation();
+    dragSource = { kind: payload.kind, id: payload.id };
     let out = payload;
     // Dragging a selected session carries every selected session in the same project. Mixed-project selection falls
     // back to one item, matching context-menu batch restrictions.
@@ -900,7 +909,18 @@ export function ProjectTree(h: TreeHandlers) {
     }
     return y < h * 0.5 ? "top" : "bottom";
   };
-  const allowDrop = (e: React.DragEvent, id: string, hasCenter: boolean) => {
+  const allowDrop = (
+    e: React.DragEvent,
+    id: string,
+    hasCenter: boolean,
+    targetKind: DragPayload["kind"] = "session",
+  ) => {
+    const src = dragSource;
+    if (src?.kind === "project") {
+      // A dragged project reorders only among other projects: no center zone, no drop on itself or on rows below.
+      if (targetKind !== "project" || src.id === id) return;
+      hasCenter = false;
+    }
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
@@ -928,8 +948,9 @@ export function ProjectTree(h: TreeHandlers) {
     e.stopPropagation();
     const zone = dragOver?.id === target.id ? dragOver.zone : "center";
     setDragOver(null);
+    dragSource = null;
     const p = readPayload(e);
-    if (!p) return;
+    if (!p || p.kind === "project") return;
 
     // Batch drop moves all sessions into this group at center or its parent at an edge through one moveMany call.
     if (p.ids && p.ids.length >= 2) {
@@ -972,8 +993,19 @@ export function ProjectTree(h: TreeHandlers) {
     e.stopPropagation();
     const zone = dragOver?.id === projectId ? dragOver.zone : "center";
     setDragOver(null);
+    dragSource = null;
     const p = readPayload(e);
     if (!p) return;
+
+    // A dragged project lands before or after the target among all projects; the center zone and the project
+    // itself are no-ops. Projects have no parent, so every target column stays null and only sort_order moves.
+    if (p.kind === "project") {
+      if (zone === "center" || p.id === projectId) return;
+      const siblings = [...projects].sort((a, b) => a.sortOrder - b.sortOrder);
+      const order = sortBetween(siblings, projectId, zone === "top" ? "before" : "after");
+      void moveNode("project", p.id, null, null, null, order);
+      return;
+    }
 
     // Batch drop moves all sessions to the ungrouped project root.
     if (p.ids && p.ids.length >= 2) {
@@ -1003,6 +1035,7 @@ export function ProjectTree(h: TreeHandlers) {
     e.stopPropagation();
     const zone = dragOver?.id === target.id ? dragOver.zone : "center";
     setDragOver(null);
+    dragSource = null;
     const p = readPayload(e);
     if (!p) return;
 
@@ -1177,7 +1210,12 @@ export function ProjectTree(h: TreeHandlers) {
               (contextId === p.id ? " context" : "")
             }
             style={{ paddingLeft: 6, ...dragStyle(p.id) }}
-            onDragOver={(e) => allowDrop(e, p.id, true)}
+            draggable={!isShareSurface && !filtering && !renaming}
+            onDragStart={onDragStart({ kind: "project", id: p.id, projectId: p.id })}
+            onDragEnd={() => {
+              dragSource = null;
+            }}
+            onDragOver={(e) => allowDrop(e, p.id, true, "project")}
             onDragLeave={() => setDragOver((d) => (d?.id === p.id ? null : d))}
             onDrop={dropOnProject(p.id)}
             onMouseDown={preventModifierSelect}
@@ -1233,7 +1271,7 @@ export function ProjectTree(h: TreeHandlers) {
             style={{ paddingLeft: 6 + row.depth * 13, ...dragStyle(g.id) }}
             draggable={!filtering && !renaming}
             onDragStart={onDragStart({ kind: "group", id: g.id, projectId: g.projectId })}
-            onDragOver={(e) => allowDrop(e, g.id, true)}
+            onDragOver={(e) => allowDrop(e, g.id, true, "group")}
             onDragLeave={() => setDragOver((d) => (d?.id === g.id ? null : d))}
             onDrop={dropOnGroup(g)}
             onMouseDown={preventModifierSelect}
