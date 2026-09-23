@@ -32,6 +32,18 @@ describe("mapBackendError", () => {
     );
   });
 
+  it("maps the listen-address codes to their i18n keys with the value as detail", () => {
+    expect(mapBackendError("remote_bind_invalid:host.example")).toBe(
+      "remote.bindInvalid|host.example",
+    );
+    expect(mapBackendError("remote_bind_unavailable:192.0.2.10")).toBe(
+      "remote.bindUnavailable|192.0.2.10",
+    );
+    expect(mapBackendError("remote_pairing_host_invalid:x:8799")).toBe(
+      "remote.pairingHostInvalid|x:8799",
+    );
+  });
+
   it("passes unknown backend errors through unchanged", () => {
     expect(mapBackendError("Session has been deleted")).toBe("Session has been deleted");
     expect(mapBackendError("Failed to open file: no such file")).toBe(

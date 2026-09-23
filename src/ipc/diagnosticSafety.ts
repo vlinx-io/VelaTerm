@@ -246,6 +246,7 @@ const commands = new Set([
   "web_devices_list",
   "web_pairing_create",
   "web_server_start",
+  "web_server_set_listen",
   "web_server_status",
   "web_server_stop",
   "worktrees_in_subtree",

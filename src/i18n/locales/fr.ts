@@ -740,6 +740,19 @@ const fr: typeof en = {
   "remote.mirror": "Refléter la disposition sur tous les appareils", // Mirror layout across devices
   "remote.mirrorHint":
     "Les onglets, les divisions et la session active restent identiques sur tous les appareils connectés. Le focus clavier ne bouge pas.", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
+  "remote.listenLabel": "Listen on", // TODO translate
+  "remote.listenAll": "All networks", // TODO translate
+  "remote.listenLoopback": "This computer only (tunnel)", // TODO translate
+  "remote.listenUnavailable": (ip: string) => `${ip} (not available)`, // TODO translate
+  "remote.reachAll": "Reachable from every network this computer is connected to.", // TODO translate
+  "remote.reachOnly": (addr: string) => `Reachable only at ${addr}.`, // TODO translate
+  "remote.reachTunnel": "Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.", // TODO translate
+  "remote.pairingHostLabel": "Address for pairing links", // TODO translate
+  "remote.pairingHostPlaceholder": "host.tailnet.ts.net", // TODO translate
+  "remote.pairingHostNeeded": "Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.", // TODO translate
+  "remote.bindInvalid": (value: string) => `"${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.`, // TODO translate
+  "remote.bindUnavailable": (ip: string) => `The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.`, // TODO translate
+  "remote.pairingHostInvalid": (value: string) => `"${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.`, // TODO translate
 
   // ── Remote connection panel ──
   "connect.title": "Se connecter à un serveur distant", // Connect to Remote Server

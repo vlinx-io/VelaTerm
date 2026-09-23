@@ -588,12 +588,20 @@ pub fn install_id(ctx: &AppCtx) -> Result<String, String> {
 /// exactly like `TREE_CHANGED`: client-side reconciliation is idempotent, so the extra pass is harmless.
 pub fn set_app_settings(
     ctx: &AppCtx,
-    entries: std::collections::HashMap<String, String>,
+    mut entries: std::collections::HashMap<String, String>,
 ) -> Result<(), String> {
     if let Some(mode) = entries.get(crate::pty::completion::MODE_KEY) {
         if !matches!(mode.as_str(), "auto" | "tab" | "off") {
             return Err("Invalid terminal completion mode".into());
         }
+    }
+    // The remote-access listen settings are validated and stored canonically, whoever writes them; an
+    // invalid value rejects the whole batch (error codes are mapped to localized text by the frontend).
+    if let Some(bind) = entries.get_mut(REMOTE_BIND_KEY) {
+        *bind = crate::web::BindChoice::parse(bind)?.as_setting();
+    }
+    if let Some(host) = entries.get_mut(REMOTE_PAIRING_HOST_KEY) {
+        *host = crate::web::validate_pairing_host(host)?.unwrap_or_default();
     }
     {
         let conn = ctx.db().conn.lock().unwrap();
@@ -1790,12 +1798,13 @@ pub fn export_session_context(
 }
 
 // Remote-access web service. WS/headless dispatch toggles LAN remote mode through `ctx.remote_web()`. Desktop
-// Tauri commands access the same managed WebServer directly. LAN remote mode uses 0.0.0.0 with self-signed TLS,
-// independently of Electron sidecar's persistent plaintext loopback instance.
+// Tauri commands access the same managed WebServer directly. LAN remote mode uses self-signed TLS on every
+// interface by default, or on the one address (or loopback) the owner chose, independently of Electron
+// sidecar's persistent plaintext loopback instance.
 //
 // The run state persists in app_settings so a restart can restore it (GitHub issue #15): enabled flag, port,
-// mode, and an Argon2id PHC hash of the password — never the plaintext. Persistence lives only here in the
-// core; the transport adapters (commands.rs / dispatch.rs) stay thin.
+// mode, listen address, and an Argon2id PHC hash of the password, never the plaintext. Persistence lives only
+// here in the core; the transport adapters (commands.rs / dispatch.rs) stay thin.
 
 /// app_settings key: "1" while remote access should auto-start on launch, "0" after a manual stop.
 const REMOTE_ENABLED_KEY: &str = "remoteAccess.enabled";
@@ -1805,6 +1814,42 @@ const REMOTE_PORT_KEY: &str = "remoteAccess.port";
 const REMOTE_LAN_HTTP_KEY: &str = "remoteAccess.lanHttp";
 /// app_settings key: Argon2id PHC verifier of the access password; the only password-derived value on disk.
 const REMOTE_PASSWORD_HASH_KEY: &str = "remoteAccess.passwordHash";
+
+/// app_settings key: where remote access listens, canonical `all` (absent means all), `loopback`, or an IPv4.
+const REMOTE_BIND_KEY: &str = "remoteAccess.bind";
+/// app_settings key: host name or IP used in pairing links when listening on loopback behind a tunnel.
+const REMOTE_PAIRING_HOST_KEY: &str = "remoteAccess.pairingHost";
+
+/// Pure: the listen configuration from app settings. `bind_override` (the `--bind` flag of the headless CLI)
+/// replaces the stored bind choice, which is then not parsed at all. Invalid stored values are errors, never a
+/// silent fallback to every interface.
+fn listen_config_from(
+    settings: &std::collections::HashMap<String, String>,
+    bind_override: Option<crate::web::BindChoice>,
+) -> Result<crate::web::ListenConfig, String> {
+    let bind = match bind_override {
+        Some(bind) => bind,
+        None => crate::web::BindChoice::parse(
+            settings.get(REMOTE_BIND_KEY).map(String::as_str).unwrap_or(""),
+        )?,
+    };
+    let pairing_host = crate::web::validate_pairing_host(
+        settings
+            .get(REMOTE_PAIRING_HOST_KEY)
+            .map(String::as_str)
+            .unwrap_or(""),
+    )?;
+    Ok(crate::web::ListenConfig { bind, pairing_host })
+}
+
+/// The persisted remote-access listen configuration, optionally with the bind choice overridden for this
+/// process (see [`listen_config_from`]). Used by the desktop start paths and the headless CLI instance.
+pub fn remote_listen_config(
+    ctx: &AppCtx,
+    bind_override: Option<crate::web::BindChoice>,
+) -> Result<crate::web::ListenConfig, String> {
+    listen_config_from(&get_app_settings(ctx)?, bind_override)
+}
 
 /// Persist remote-access settings; failures are logged and never abort the running service.
 fn persist_remote_settings(ctx: &AppCtx, entries: std::collections::HashMap<String, String>) {
@@ -1824,11 +1869,12 @@ fn lan_http_guard(ctx: &AppCtx, lan_http: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Starts LAN remote access with password login and session gating. `lan_http=false` binds 0.0.0.0 with TLS;
+/// Starts LAN remote access with password login and session gating. `lan_http=false` uses TLS;
 /// `lan_http=true` provides plaintext for native mobile shells that cannot bypass self-signed certificates in RN
-/// WebView (architecture section 20). Runtime stops any old instance before starting so changes take effect.
-/// After a successful start, the enabled flag, port, mode, and password hash persist so the next launch
-/// auto-starts the same configuration.
+/// WebView (architecture section 20). The listen address comes from the persisted setting (every interface by
+/// default); an invalid or absent address fails the start. Runtime stops any old instance before starting so
+/// changes take effect. After a successful start, the enabled flag, port, mode, and password hash persist so
+/// the next launch auto-starts the same configuration.
 pub fn web_server_start(
     ctx: &AppCtx,
     password: &str,
@@ -1845,13 +1891,15 @@ pub fn web_server_start(
     if password.trim().is_empty() {
         return Err("Please set an access password first".into());
     }
+    let listen = remote_listen_config(ctx, None)?;
     // Hash here in the core so the same PHC string both starts the server and gets persisted for auto-start.
     let phc = crate::web::hash_password(password)?;
-    let status = ctx.remote_web().start(
+    let status = ctx.remote_web().start_with_listen(
         ctx.clone(),
         crate::web::StartAuth::PasswordHash(phc.clone()),
         port,
         mode,
+        listen,
     )?;
     persist_remote_settings(
         ctx,
@@ -1868,7 +1916,9 @@ pub fn web_server_start(
             (REMOTE_PASSWORD_HASH_KEY.to_string(), phc),
         ]),
     );
-    Ok(status)
+    // Return the same merged view as web_server_status and web_server_set_listen (saved bind and pairing
+    // host included), so the panel never compares against a status that lacks the saved values.
+    Ok(web_server_status(ctx))
 }
 
 /// Stops LAN remote access and disables auto-start. Port and password hash stay persisted for prefill;
@@ -1880,6 +1930,47 @@ pub fn web_server_stop(ctx: &AppCtx) -> Result<(), String> {
         std::collections::HashMap::from([(REMOTE_ENABLED_KEY.to_string(), "0".to_string())]),
     );
     Ok(())
+}
+
+/// Changes where remote access listens. `bind` is `all`, `loopback`, or an IPv4 address; `pairing_host`
+/// None keeps the stored pairing address, `Some("")` clears it. Both are validated first; nothing changes on
+/// an invalid value. While the service runs, it is restarted on the new address with the same port, mode, and
+/// password verifier (see `WebServer::restart_listen`), so the owner never retypes the password and pairing
+/// credentials survive; an absent address fails and leaves the running instance untouched. A change that does
+/// not affect the listener (same bind, or a pairing address outside loopback mode) is stored without a
+/// restart. The settings are persisted only after success. Returns the merged status for the panel.
+pub fn web_server_set_listen(
+    ctx: &AppCtx,
+    bind: &str,
+    pairing_host: Option<&str>,
+) -> Result<crate::web::WebServerStatus, String> {
+    let bind = crate::web::BindChoice::parse(bind)?;
+    let pairing_host = match pairing_host {
+        Some(raw) => crate::web::validate_pairing_host(raw)?,
+        None => remote_listen_config(ctx, Some(bind.clone()))?.pairing_host,
+    };
+    let listen = crate::web::ListenConfig { bind, pairing_host };
+    let entries = std::collections::HashMap::from([
+        (REMOTE_BIND_KEY.to_string(), listen.bind.as_setting()),
+        (
+            REMOTE_PAIRING_HOST_KEY.to_string(),
+            listen.pairing_host.clone().unwrap_or_default(),
+        ),
+    ]);
+    match ctx.remote_web().listen_config() {
+        Some(current) => {
+            let listener_changes = current.bind != listen.bind
+                || (listen.bind == crate::web::BindChoice::Loopback
+                    && current.pairing_host != listen.pairing_host);
+            if listener_changes {
+                ctx.remote_web().restart_listen(ctx.clone(), listen)?;
+            }
+            persist_remote_settings(ctx, entries);
+        }
+        // Stopped: persisting is the whole effect, so a failed write is reported.
+        None => set_app_settings(ctx, entries)?,
+    }
+    Ok(web_server_status(ctx))
 }
 
 /// app_settings key: "1" (or absent, the default) while mirror mode is on, "0" once the host turns it off.
@@ -2042,6 +2133,8 @@ pub fn web_server_status(ctx: &AppCtx) -> crate::web::WebServerStatus {
             .get(REMOTE_ENABLED_KEY)
             .map(|v| v == "1")
             .unwrap_or(false);
+        status.saved_bind = settings.get(REMOTE_BIND_KEY).cloned();
+        status.saved_pairing_host = settings.get(REMOTE_PAIRING_HOST_KEY).cloned();
     }
     status
 }
@@ -2099,11 +2192,21 @@ pub fn web_server_autostart(ctx: &AppCtx) -> Result<Option<crate::web::WebServer
     } else {
         crate::web::ServeMode::LanTls
     };
-    match ctx.remote_web().start(
+    // An invalid persisted listen address is a visible auto-start failure, never a silent skip and never
+    // a fallback to every interface.
+    let listen = match listen_config_from(&settings, None) {
+        Ok(listen) => listen,
+        Err(e) => {
+            ctx.remote_web().set_autostart_error(Some(e.clone()));
+            return Err(e);
+        }
+    };
+    match ctx.remote_web().start_with_listen(
         ctx.clone(),
         crate::web::StartAuth::PasswordHash(phc),
         Some(port),
         mode,
+        listen,
     ) {
         Ok(status) => Ok(Some(status)),
         Err(e) => {
@@ -2117,8 +2220,9 @@ pub fn web_server_autostart(ctx: &AppCtx) -> Result<Option<crate::web::WebServer
 mod tests {
     use super::{
         autostart_config, check_images, claim_spawn, get_app_settings, install_id,
-        release_spawn_claim, set_app_settings, spawn_claim_key, web_server_autostart,
-        web_server_status, web_server_stop, ChatImage, MAX_IMAGES_PER_MESSAGE, MAX_IMAGE_BYTES,
+        listen_config_from, release_spawn_claim, set_app_settings, spawn_claim_key,
+        web_server_autostart, web_server_set_listen, web_server_status, web_server_stop, ChatImage,
+        MAX_IMAGES_PER_MESSAGE, MAX_IMAGE_BYTES,
     };
     use std::collections::HashMap;
 
@@ -2447,6 +2551,222 @@ mod tests {
         let mut lan = full;
         lan.insert("remoteAccess.lanHttp".into(), "1".into());
         assert!(matches!(autostart_config(&lan), Some((_, true, _))));
+    }
+
+    #[test]
+    fn listen_config_from_settings() {
+        use crate::web::{BindChoice, ListenConfig};
+        // Absent keys keep the historical default: every interface, no pairing host.
+        assert_eq!(listen_config_from(&HashMap::new(), None), Ok(ListenConfig::default()));
+        let got = listen_config_from(
+            &settings(&[
+                ("remoteAccess.bind", "loopback"),
+                ("remoteAccess.pairingHost", "vela.example.ts.net"),
+            ]),
+            None,
+        )
+        .unwrap();
+        assert_eq!(got.bind, BindChoice::Loopback);
+        assert_eq!(got.pairing_host.as_deref(), Some("vela.example.ts.net"));
+        // Invalid stored values are errors with their code, never a fallback.
+        let err = listen_config_from(&settings(&[("remoteAccess.bind", "bogus")]), None).unwrap_err();
+        assert!(err.starts_with("remote_bind_invalid:"), "{err}");
+        let err = listen_config_from(&settings(&[("remoteAccess.pairingHost", "a/b")]), None).unwrap_err();
+        assert!(err.starts_with("remote_pairing_host_invalid:"), "{err}");
+        // The CLI override replaces the stored bind without parsing it.
+        let got = listen_config_from(&settings(&[("remoteAccess.bind", "bogus")]), Some(BindChoice::All)).unwrap();
+        assert_eq!(got.bind, BindChoice::All);
+    }
+
+    /// Writes of the listen keys are validated for every caller and stored canonically; an invalid value
+    /// rejects the whole batch.
+    #[test]
+    fn set_app_settings_validates_listen_keys() {
+        let tmp = std::env::temp_dir().join(format!(
+            "vlx-cc-listen-keys-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        let ctx = headless_ctx(&tmp);
+        for (key, bad, code) in [
+            ("remoteAccess.bind", "host.example", "remote_bind_invalid:"),
+            ("remoteAccess.bind", "224.0.0.1", "remote_bind_invalid:"),
+            ("remoteAccess.pairingHost", "evil.example/#", "remote_pairing_host_invalid:"),
+        ] {
+            let err = set_app_settings(
+                &ctx,
+                HashMap::from([
+                    (key.to_string(), bad.to_string()),
+                    ("vlx-theme".to_string(), "dark".to_string()),
+                ]),
+            )
+            .unwrap_err();
+            assert!(err.starts_with(code), "{key}={bad}: {err}");
+            let stored = get_app_settings(&ctx).unwrap();
+            assert!(stored.get(key).is_none() && stored.get("vlx-theme").is_none(), "nothing persisted");
+        }
+        set_app_settings(
+            &ctx,
+            HashMap::from([
+                ("remoteAccess.bind".to_string(), " 127.0.0.1 ".to_string()),
+                ("remoteAccess.pairingHost".to_string(), " vela.example.ts.net ".to_string()),
+            ]),
+        )
+        .unwrap();
+        let stored = get_app_settings(&ctx).unwrap();
+        assert_eq!(stored.get("remoteAccess.bind").map(String::as_str), Some("loopback"));
+        assert_eq!(
+            stored.get("remoteAccess.pairingHost").map(String::as_str),
+            Some("vela.example.ts.net")
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// On a stopped service a listen change persists (canonically) and shows in the status; an invalid
+    /// value changes nothing; a None pairing host keeps the stored one and an empty string clears it.
+    #[test]
+    fn web_server_set_listen_when_stopped_persists_and_validates() {
+        let tmp = std::env::temp_dir().join(format!(
+            "vlx-cc-set-listen-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        let ctx = headless_ctx(&tmp);
+        let status = web_server_set_listen(&ctx, "loopback", Some("vela.example.ts.net")).unwrap();
+        assert!(!status.running);
+        assert_eq!(status.saved_bind.as_deref(), Some("loopback"));
+        assert_eq!(status.saved_pairing_host.as_deref(), Some("vela.example.ts.net"));
+
+        assert!(web_server_set_listen(&ctx, "bogus", None).unwrap_err().starts_with("remote_bind_invalid:"));
+        assert!(web_server_set_listen(&ctx, "all", Some("x:1"))
+            .unwrap_err()
+            .starts_with("remote_pairing_host_invalid:"));
+        let status = web_server_status(&ctx);
+        assert_eq!(status.saved_bind.as_deref(), Some("loopback"), "invalid input changes nothing");
+
+        // Switching the bind keeps the stored pairing host; an explicit empty string clears it.
+        let status = web_server_set_listen(&ctx, "100.100.83.2", None).unwrap();
+        assert_eq!(status.saved_bind.as_deref(), Some("100.100.83.2"));
+        assert_eq!(status.saved_pairing_host.as_deref(), Some("vela.example.ts.net"));
+        let status = web_server_set_listen(&ctx, "all", Some("")).unwrap();
+        assert_eq!(status.saved_bind.as_deref(), Some("all"));
+        assert_eq!(status.saved_pairing_host.as_deref(), Some(""));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// An invalid persisted listen address makes auto-start fail visibly: an error, the panel's
+    /// autostart_error, and no running server (never a silent skip or a fallback to every interface).
+    #[test]
+    fn autostart_with_invalid_or_absent_bind_fails_visibly() {
+        for (raw, code) in [
+            ("bogus", "remote_bind_invalid:bogus"),
+            ("192.0.2.10", "remote_bind_unavailable:192.0.2.10"),
+        ] {
+            let tmp = std::env::temp_dir().join(format!(
+                "vlx-cc-autostart-bind-{}-{}",
+                std::process::id(),
+                uuid::Uuid::new_v4().simple()
+            ));
+            let ctx = headless_ctx(&tmp);
+            seed_remote_settings(&ctx, "0");
+            // Bypass write validation to simulate a corrupt or foreign database value.
+            {
+                let conn = ctx.db().conn.lock().unwrap();
+                crate::db::repo::set_app_settings(
+                    &conn,
+                    &HashMap::from([("remoteAccess.bind".to_string(), raw.to_string())]),
+                )
+                .unwrap();
+            }
+            let Err(err) = web_server_autostart(&ctx) else {
+                panic!("auto-start must fail for bind={raw}");
+            };
+            assert_eq!(err, code);
+            assert!(!ctx.remote_web().status().running, "no server may bind");
+            assert_eq!(web_server_status(&ctx).autostart_error.as_deref(), Some(code));
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+    }
+
+    /// The desktop start path reads the persisted listen address: an absent address fails the start with
+    /// its code and binds nothing (no fallback to every interface), and nothing is persisted as enabled.
+    #[test]
+    fn web_server_start_honours_persisted_bind_without_fallback() {
+        let tmp = std::env::temp_dir().join(format!(
+            "vlx-cc-start-bind-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        let ctx = headless_ctx(&tmp);
+        web_server_set_listen(&ctx, "192.0.2.10", None).unwrap();
+        let err = super::web_server_start(&ctx, "pw", Some(9), false).unwrap_err();
+        assert_eq!(err, "remote_bind_unavailable:192.0.2.10");
+        assert!(!ctx.remote_web().status().running, "no server may bind");
+        assert_ne!(
+            get_app_settings(&ctx).unwrap().get("remoteAccess.enabled").map(String::as_str),
+            Some("1"),
+            "a failed start must not persist the enabled flag"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A listen change on a running desktop instance (loopback only, so no network address is bound)
+    /// restarts it on the same port with the stored verifier, keeps the pairing token, moves the advertised
+    /// host, and persists the new setting; an absent address fails, keeps the instance running, and leaves
+    /// the persisted setting unchanged.
+    #[test]
+    fn web_server_set_listen_restarts_running_instance_and_persists_only_on_success() {
+        let tmp = std::env::temp_dir().join(format!(
+            "vlx-cc-set-listen-running-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        let ctx = headless_ctx(&tmp);
+        web_server_set_listen(&ctx, "loopback", Some("")).unwrap();
+
+        let mut started = Err("never attempted".to_string());
+        let mut port = 0;
+        for _ in 0..5 {
+            port = std::net::TcpListener::bind(("127.0.0.1", 0))
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            started = super::web_server_start(&ctx, "pw", Some(port), false);
+            if started.is_ok() {
+                break;
+            }
+        }
+        let status = started.expect("failed to start the loopback LanTls server after retries");
+        assert_eq!(status.bind.as_deref(), Some("loopback"));
+        assert_eq!(status.urls, [format!("https://127.0.0.1:{port}")]);
+        // Start returns the merged view like status and set_listen, saved values included, so the panel
+        // compares against what is actually stored.
+        assert_eq!(status.saved_bind.as_deref(), Some("loopback"), "start returns the saved bind");
+        assert_eq!(status.saved_pairing_host.as_deref(), Some(""), "start returns the saved pairing host");
+        assert!(status.auto_start, "start returns the persisted enabled flag");
+        let token = ctx.remote_web().create_pairing(None, false).unwrap().device_token;
+
+        let status = web_server_set_listen(&ctx, "loopback", Some("vela.example.ts.net")).unwrap();
+        assert!(status.running);
+        assert_eq!(status.port, Some(port), "the port is kept");
+        assert_eq!(status.urls, [format!("https://vela.example.ts.net:{port}")], "the listener was restarted");
+        assert_eq!(status.saved_pairing_host.as_deref(), Some("vela.example.ts.net"));
+        assert_eq!(
+            ctx.remote_web().create_pairing(None, false).unwrap().device_token,
+            token,
+            "pairing credentials survive the restart"
+        );
+
+        let err = web_server_set_listen(&ctx, "192.0.2.10", None).unwrap_err();
+        assert_eq!(err, "remote_bind_unavailable:192.0.2.10");
+        let status = web_server_status(&ctx);
+        assert!(status.running, "the previous instance keeps running");
+        assert_eq!(status.bind.as_deref(), Some("loopback"));
+        assert_eq!(status.saved_bind.as_deref(), Some("loopback"), "a failed change is not persisted");
+
+        ctx.remote_web().stop();
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
 

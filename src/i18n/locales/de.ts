@@ -738,6 +738,19 @@ const de: typeof en = {
   "remote.mirror": "Layout auf allen Geräten spiegeln", // Mirror layout across devices
   "remote.mirrorHint":
     "Tabs, Splits und die aktive Sitzung bleiben auf allen verbundenen Geräten gleich. Der Tastaturfokus bleibt auf jedem Gerät, wo er ist.", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
+  "remote.listenLabel": "Lauscht auf", // Listen on
+  "remote.listenAll": "Alle Netzwerke", // All networks
+  "remote.listenLoopback": "Nur dieser Computer (Tunnel)", // This computer only (tunnel)
+  "remote.listenUnavailable": (ip: string) => `${ip} (nicht verfügbar)`, // ${ip} (not available)
+  "remote.reachAll": "Aus jedem Netzwerk erreichbar, mit dem dieser Computer verbunden ist.", // Reachable from every network this computer is connected to.
+  "remote.reachOnly": (addr: string) => `Nur unter ${addr} erreichbar.`, // Reachable only at ${addr}.
+  "remote.reachTunnel": "Nur über einen Tunnel oder Proxy auf diesem Computer erreichbar, zum Beispiel tailscale serve oder ssh -L.", // Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.
+  "remote.pairingHostLabel": "Adresse für Kopplungslinks", // Address for pairing links
+  "remote.pairingHostPlaceholder": "host.tailnet.ts.net", // host.tailnet.ts.net
+  "remote.pairingHostNeeded": "Clients erreichen diesen Computer über einen Tunnel. Geben Sie den Hostnamen oder die IP ein, die sie verwenden. Ohne Angabe zeigen Kopplungslinks auf 127.0.0.1, was nur mit ssh -L funktioniert.", // Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.
+  "remote.bindInvalid": (value: string) => `„${value}“ ist keine gültige Lauschadresse. Wählen Sie alle Netzwerke, nur diesen Computer oder eine IPv4-Adresse dieses Computers.`, // "${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.
+  "remote.bindUnavailable": (ip: string) => `Die Adresse ${ip} ist auf diesem Computer nicht verfügbar. Verbinden Sie das Netzwerk oder VPN, oder wählen Sie eine andere Adresse. Der Fernzugriff weicht nie auf alle Netzwerke aus.`, // The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.
+  "remote.pairingHostInvalid": (value: string) => `„${value}“ ist keine gültige Adresse für Kopplungslinks. Geben Sie einen Hostnamen oder eine IPv4-Adresse ein, ohne Schema, Port oder Pfad.`, // "${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.
 
   // ── Remote connection panel ──
   "connect.title": "Mit Remote-Server verbinden", // Connect to Remote Server

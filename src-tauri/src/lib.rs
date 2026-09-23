@@ -1341,6 +1341,10 @@ struct ServeArgs {
     /// SSH connections carry the client's choice here, because the machine running the service is headless
     /// and has no panel to switch it in. None leaves the stored setting in charge.
     mirror: Option<bool>,
+    /// `--bind <all|loopback|IPv4>`: where this process's CLI-configured instance listens, overriding the
+    /// persisted remote-access setting for this process only (never written back). None follows the setting.
+    /// Only `loopback` is accepted together with `--local-http`, which always binds 127.0.0.1.
+    bind: Option<crate::web::BindChoice>,
 }
 
 /// Recommended headless password environment variable, avoiding exposure in process arguments.
@@ -1358,6 +1362,7 @@ fn parse_serve_args(args: &[String], env_password: Option<String>) -> Result<Ser
     let mut lan_http = false;
     let mut print_pairing = false;
     let mut mirror: Option<bool> = None;
+    let mut bind: Option<crate::web::BindChoice> = None;
 
     let mut it = args.iter().skip(2); // Skip executable name and --serve.
     while let Some(arg) = it.next() {
@@ -1391,8 +1396,23 @@ fn parse_serve_args(args: &[String], env_password: Option<String>) -> Result<Ser
                     other => return Err(format!("--mirror has invalid value: {other} (use 0 or 1)")),
                 });
             }
+            "--bind" => {
+                let v = it.next().ok_or("--bind requires a value")?;
+                if v.trim().is_empty() {
+                    return Err("--bind requires a value".into());
+                }
+                bind = Some(crate::web::BindChoice::parse(v).map_err(|_| {
+                    format!("--bind has invalid value: {v} (use all, loopback, or an IPv4 address of this machine)")
+                })?);
+            }
             other => return Err(format!("unknown argument: {other}")),
         }
+    }
+
+    // --local-http classifies every client as local (full management rights), so its listener must never
+    // be widened beyond loopback.
+    if local_http && bind.as_ref().is_some_and(|b| *b != crate::web::BindChoice::Loopback) {
+        return Err("--local-http always listens on 127.0.0.1; it can only be combined with --bind loopback".into());
     }
 
     let password = password
@@ -1410,7 +1430,37 @@ fn parse_serve_args(args: &[String], env_password: Option<String>) -> Result<Ser
         lan_http,
         print_pairing,
         mirror,
+        bind,
     })
+}
+
+/// Turn a listen-address error code from the core into an English terminal sentence. The terminal is not an
+/// i18n surface; the panel maps the same codes to localized text. Other errors pass through unchanged.
+fn describe_listen_error(e: &str) -> String {
+    let (code, detail) = e.split_once(':').unwrap_or((e, ""));
+    match code {
+        "remote_bind_invalid" => format!(
+            "invalid listen address \"{detail}\": use all, loopback, or an IPv4 address of this machine"
+        ),
+        "remote_bind_unavailable" => format!(
+            "listen address {detail} is not present on this machine (is the network or VPN connected?); not falling back to all interfaces"
+        ),
+        "remote_pairing_host_invalid" => format!(
+            "invalid pairing address \"{detail}\" in the remote-access settings: use a host name or an IPv4 address"
+        ),
+        _ => e.to_string(),
+    }
+}
+
+/// One terminal line stating where a LAN-mode instance is reachable.
+fn describe_listen_scope(bind: &crate::web::BindChoice) -> String {
+    match bind {
+        crate::web::BindChoice::All => "  listening on: all interfaces".to_string(),
+        crate::web::BindChoice::Address(ip) => format!("  listening on: {ip} only"),
+        crate::web::BindChoice::Loopback => {
+            "  listening on: 127.0.0.1 only (reach it through a tunnel or proxy on this machine)".to_string()
+        }
+    }
 }
 
 /// Whether `--serve` may print the full pairing URL including the long-lived `#pair` token fragment:
@@ -1447,7 +1497,7 @@ pub fn run_serve(args: &[String]) {
         Err(e) => {
             crate::diagnostic_warn!("vlx-term --serve failed to start: {e}");
             crate::diagnostic_warn!(
-                "usage: vlx-term --serve [--port 8799] [--password <password>] [--data-dir <dir>] [--local-http] [--lan-http] [--print-pairing] [--mirror 0|1]"
+                "usage: vlx-term --serve [--port 8799] [--password <password>] [--data-dir <dir>] [--local-http] [--lan-http] [--bind all|loopback|<IPv4>] [--print-pairing] [--mirror 0|1]"
             );
             std::process::exit(1);
         }
@@ -1512,18 +1562,38 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
         && crate::web::is_production_identifier(&identifier)
     {
         return Err(format!(
-            "LAN plaintext (--lan-http, binds 0.0.0.0 in plaintext) is only available in dev builds; this is a release build (identifier={identifier}). \
+            "LAN plaintext (--lan-http, unencrypted on the network) is only available in dev builds; this is a release build (identifier={identifier}). \
              For production use the default TLS mode, or HTTPS with certificate pinning (see architecture §20)."
         ));
     }
-    let status = web.start(
-        ctx.clone(),
-        crate::web::StartAuth::Password(args.password.clone()),
-        Some(args.port),
+    // The LAN modes follow the persisted listen setting unless --bind overrides it for this process; the
+    // loopback mode (--local-http, the Electron sidecar and SSH connect path) always binds 127.0.0.1.
+    let lan = matches!(
         mode,
-    )?;
+        crate::web::ServeMode::LanTls | crate::web::ServeMode::LanHttp
+    );
+    let listen = if lan {
+        command_core::remote_listen_config(&ctx, args.bind.clone())
+            .map_err(|e| describe_listen_error(&e))?
+    } else {
+        crate::web::ListenConfig::default()
+    };
+    let loopback_without_host =
+        listen.bind == crate::web::BindChoice::Loopback && listen.pairing_host.is_none();
+    let status = web
+        .start_with_listen(
+            ctx.clone(),
+            crate::web::StartAuth::Password(args.password.clone()),
+            Some(args.port),
+            mode,
+            listen.clone(),
+        )
+        .map_err(|e| describe_listen_error(&e))?;
 
     println!("vlx-term headless server started");
+    if lan {
+        println!("{}", describe_listen_scope(&listen.bind));
+    }
     diagnostics::record("INFO","database_ready",serde_json::json!({"status":"success"}));
 
     // Print a fully usable preferred URL first. LAN TLS requires the complete #pair fragment with
@@ -1551,6 +1621,11 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
     if let Some(url) = &primary {
         println!("  open in browser: {url}");
     }
+    if lan && loopback_without_host {
+        println!(
+            "  links use 127.0.0.1: with ssh -L that is right; behind tailscale serve or another proxy, replace it with the address clients use (or set the pairing address in the app)"
+        );
+    }
     // Print other interface URLs without repeating the long pairing fragment; users can append it.
     if status.urls.len() > 1 {
         if matches!(mode, crate::web::ServeMode::LanTls)
@@ -1573,12 +1648,23 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
     // primary CLI-configured server so a port conflict deterministically hits this secondary instance,
     // where it is logged and nonfatal — the CLI server semantics stay untouched.
     match command_core::web_server_autostart(&ctx) {
-        Ok(Some(remote)) => println!(
-            "  remote access auto-started on port {}",
-            remote.port.unwrap_or(0)
-        ),
+        Ok(Some(remote)) => {
+            println!(
+                "  remote access auto-started on port {} (from the saved settings; --bind does not apply to it)",
+                remote.port.unwrap_or(0)
+            );
+            // This instance follows the saved listen setting, not --bind, so say where it listens: an
+            // operator who started the command-line instance on loopback must not assume the whole
+            // process is loopback-only.
+            if let Ok(listen) = command_core::remote_listen_config(&ctx, None) {
+                println!("{}", describe_listen_scope(&listen.bind));
+            }
+        }
         Ok(None) => {}
-        Err(e) => crate::diagnostic_warn!("  remote access auto-start failed: {e}"),
+        Err(e) => crate::diagnostic_warn!(
+            "  remote access auto-start failed: {}",
+            describe_listen_error(&e)
+        ),
     }
 
     let _ = web::public_relay::start(&ctx);
@@ -1703,6 +1789,7 @@ mod tests {
                 lan_http: false,
                 print_pairing: false,
                 mirror: None,
+                bind: None,
             }
         );
     }
@@ -1793,6 +1880,66 @@ mod tests {
     }
 
     #[test]
+    fn parse_serve_args_bind_flag() {
+        use crate::web::BindChoice;
+        let bind = |v: &str| {
+            parse_serve_args(&argv(&["--bind", v, "--password", "pw"]), None)
+                .expect("parsing should succeed")
+                .bind
+        };
+        assert_eq!(bind("all"), Some(BindChoice::All));
+        assert_eq!(bind("loopback"), Some(BindChoice::Loopback));
+        assert_eq!(
+            bind("100.100.83.2"),
+            Some(BindChoice::Address("100.100.83.2".parse().unwrap()))
+        );
+        // Without the flag the persisted setting stays in charge.
+        let got = parse_serve_args(&argv(&["--password", "pw"]), None).expect("parsing should succeed");
+        assert_eq!(got.bind, None);
+        // --lan-http may choose its address.
+        let got = parse_serve_args(&argv(&["--lan-http", "--bind", "192.168.1.5", "--password", "pw"]), None)
+            .expect("parsing should succeed");
+        assert_eq!(got.bind, Some(BindChoice::Address("192.168.1.5".parse().unwrap())));
+    }
+
+    #[test]
+    fn parse_serve_args_rejects_bad_bind() {
+        assert!(parse_serve_args(&argv(&["--password", "pw", "--bind"]), None).is_err());
+        assert!(parse_serve_args(&argv(&["--bind", "", "--password", "pw"]), None).is_err());
+        for bad in ["nonsense", "::1", "224.0.0.1", "10.0.0.1:80"] {
+            let err = parse_serve_args(&argv(&["--bind", bad, "--password", "pw"]), None).unwrap_err();
+            assert!(err.starts_with("--bind has invalid value"), "{bad}: {err}");
+        }
+    }
+
+    /// --local-http treats every client as local, so --bind must never widen it beyond loopback.
+    #[test]
+    fn parse_serve_args_local_http_never_widens() {
+        for wide in ["all", "192.168.1.5"] {
+            assert!(
+                parse_serve_args(&argv(&["--local-http", "--bind", wide, "--password", "pw"]), None).is_err(),
+                "--local-http --bind {wide} must be rejected"
+            );
+        }
+        let got = parse_serve_args(&argv(&["--local-http", "--bind", "loopback", "--password", "pw"]), None)
+            .expect("--local-http --bind loopback is consistent");
+        assert!(got.local_http);
+    }
+
+    #[test]
+    fn describe_listen_error_is_english_prose() {
+        let msg = describe_listen_error("remote_bind_unavailable:192.0.2.10");
+        assert!(msg.starts_with("listen address 192.0.2.10 is not present"), "{msg}");
+        assert!(!msg.contains("remote_bind"), "{msg}");
+        let msg = describe_listen_error("remote_bind_invalid:bogus");
+        assert!(msg.contains("\"bogus\"") && !msg.contains("remote_bind"), "{msg}");
+        let msg = describe_listen_error("remote_pairing_host_invalid:a/b");
+        assert!(msg.contains("\"a/b\"") && !msg.contains("remote_pairing"), "{msg}");
+        // Unrelated errors pass through unchanged.
+        assert_eq!(describe_listen_error("Port 8799 is already in use: x"), "Port 8799 is already in use: x");
+    }
+
+    #[test]
     fn serve_data_dir_prefers_explicit() {
         let args = ServeArgs {
             port: 8799,
@@ -1802,6 +1949,7 @@ mod tests {
             lan_http: false,
             print_pairing: false,
             mirror: None,
+            bind: None,
         };
         assert_eq!(
             serve_data_dir(&args, "io.vlinx.vlxterm").unwrap(),

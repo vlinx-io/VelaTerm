@@ -59,6 +59,8 @@ const MANAGEMENT_CMDS: &[&str] = &[
     // Mirror mode is host-side service configuration (the checkbox lives in the desktop remote-access
     // panel), so a paired device may follow the shared layout but never switch the feature for everyone.
     "mirror_set_enabled",
+    // Where the service listens decides who can reach it at all; a paired device must never widen it.
+    "web_server_set_listen",
 ];
 
 /// Commands that read or write stored secrets and are therefore gated to local origins — the class
@@ -1167,6 +1169,13 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             Ok(Value::Null)
         }
         "web_server_status" => to_value(core::web_server_status(app)),
+        // Listen-address change; restarts a running instance with its stored verifier (no password needed).
+        // `pairingHost` absent or null keeps the stored pairing address, an empty string clears it.
+        "web_server_set_listen" => to_value(core::web_server_set_listen(
+            app,
+            &req_str(args, "bind")?,
+            opt_str(args, "pairingHost").as_deref(),
+        )?),
         // UI mirror: every client publishes its layout here and follows what the others publish. `source`
         // comes from the transport, never from the arguments, so the echo filter cannot be spoofed.
         "mirror_get" => Ok(core::mirror_get(app)),
@@ -1612,7 +1621,8 @@ mod tests {
         let app = test_ctx();
         // Valid-looking args per command prove the gate fires before extraction, not on missing params.
         let args = json!({
-            "password": "pw", "deviceId": "dev-a", "address": "127.0.0.1", "rotate": true
+            "password": "pw", "deviceId": "dev-a", "address": "127.0.0.1", "rotate": true,
+            "bind": "all"
         });
         // Pin the gated set literally: iterating over the production constant alone would stay green if a
         // command were removed from MANAGEMENT_CMDS, silently un-gating it. The acceptance criterion names
@@ -1628,6 +1638,8 @@ mod tests {
             // Added with mirror mode: the switch belongs to the host running the service, not to the
             // devices connecting to it.
             "mirror_set_enabled",
+            // Added with the listen-address setting: who can reach the service is the host's decision.
+            "web_server_set_listen",
         ];
         assert_eq!(
             MANAGEMENT_CMDS, EXPECTED_GATED,
@@ -2548,6 +2560,8 @@ mod tests {
             std::collections::HashMap::from([
                 ("remoteAccess.passwordHash".to_string(), "$argon2id$fake".to_string()),
                 ("remoteAccess.port".to_string(), "9123".to_string()),
+                ("remoteAccess.bind".to_string(), "100.100.83.2".to_string()),
+                ("remoteAccess.pairingHost".to_string(), "vela.example.ts.net".to_string()),
                 ("gitea.token".to_string(), "secret-token".to_string()),
                 ("vlx-theme".to_string(), "dark".to_string()),
             ]),
@@ -2559,12 +2573,16 @@ mod tests {
         assert_eq!(remote["vlx-theme"], "dark");
         assert!(remote.get("remoteAccess.passwordHash").is_none());
         assert!(remote.get("remoteAccess.port").is_none());
+        assert!(remote.get("remoteAccess.bind").is_none());
+        assert!(remote.get("remoteAccess.pairingHost").is_none());
         assert!(remote.get("gitea.token").is_none());
 
         let local = dispatch(&app, "get_app_settings", &json!({}), DESKTOP_SOURCE, CallOrigin::Local)
             .expect("local settings read must stay unfiltered");
         assert_eq!(local["remoteAccess.passwordHash"], "$argon2id$fake");
         assert_eq!(local["gitea.token"], "secret-token");
+        assert_eq!(local["remoteAccess.bind"], "100.100.83.2");
+        assert_eq!(local["remoteAccess.pairingHost"], "vela.example.ts.net");
         assert_eq!(local["vlx-theme"], "dark");
     }
 
@@ -2600,6 +2618,22 @@ mod tests {
         .unwrap_err();
         assert_eq!(err, "remote_setting_forbidden:gitea.token");
 
+        // The listen-address keys are protected like the verifier: a remote client can neither widen
+        // the listener nor redirect pairing links.
+        for key in ["remoteAccess.bind", "remoteAccess.pairingHost"] {
+            let err = dispatch(
+                &app,
+                "set_app_settings",
+                &json!({ "entries": { key: "all" } }),
+                "ws-1",
+                CallOrigin::Remote,
+            )
+            .unwrap_err();
+            assert_eq!(err, format!("remote_setting_forbidden:{key}"));
+            let settings = crate::command_core::get_app_settings(&app).unwrap();
+            assert!(settings.get(key).is_none(), "rejected write of {key} must not persist");
+        }
+
         // Unprotected remote writes still work.
         dispatch(
             &app,
@@ -2621,5 +2655,38 @@ mod tests {
         let settings = crate::command_core::get_app_settings(&app).unwrap();
         assert_eq!(settings.get("vlx-theme").map(String::as_str), Some("light"));
         assert_eq!(settings.get("remoteAccess.port").map(String::as_str), Some("9123"));
+    }
+
+    /// web_server_set_listen is wired for local origins: a stopped service persists a valid choice
+    /// canonically, and an invalid one fails with its code and changes nothing. No socket is bound.
+    #[test]
+    fn web_server_set_listen_is_dispatched() {
+        let app = test_ctx();
+        let status = dispatch(
+            &app,
+            "web_server_set_listen",
+            &json!({ "bind": "LOOPBACK", "pairingHost": "vela.example.ts.net" }),
+            DESKTOP_SOURCE,
+            CallOrigin::Local,
+        )
+        .expect("a valid listen change on a stopped service must succeed");
+        assert_eq!(status["running"], false);
+        assert_eq!(status["savedBind"], "loopback");
+        assert_eq!(status["savedPairingHost"], "vela.example.ts.net");
+
+        let err = dispatch(
+            &app,
+            "web_server_set_listen",
+            &json!({ "bind": "host.example" }),
+            DESKTOP_SOURCE,
+            CallOrigin::Local,
+        )
+        .unwrap_err();
+        assert_eq!(err, "remote_bind_invalid:host.example");
+        let err = dispatch(&app, "web_server_set_listen", &json!({}), DESKTOP_SOURCE, CallOrigin::Local)
+            .unwrap_err();
+        assert_eq!(err, "Missing string parameter bind");
+        let settings = crate::command_core::get_app_settings(&app).unwrap();
+        assert_eq!(settings.get("remoteAccess.bind").map(String::as_str), Some("loopback"));
     }
 }

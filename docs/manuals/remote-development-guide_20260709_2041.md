@@ -40,7 +40,7 @@ To connect: send the **pairing link** to your own device (AirDrop, message-to-se
 - The link is a key. Only share it with your own devices. If you suspect it leaked, hit Regenerate link — the old link is invalidated immediately and all connected devices are disconnected until they use the new one.
 - On first connect the browser will warn about an untrusted certificate — normal for a self-signed cert. Compare the fingerprint the browser shows with the Certificate fingerprint in the panel; if they match, you're talking to your own machine.
 
-With multiple network interfaces (wired, Wi-Fi, VPN), the panel shows the preferred address and folds the rest under "1 more url" — pick the one on the same network as the connecting device.
+With multiple network interfaces (wired, Wi-Fi, VPN), the panel shows the preferred address and folds the rest under "1 more url"; pick the one on the same network as the connecting device. This list follows the listen address (§2.6): with a single address chosen, only that address is offered; in "This computer only (tunnel)" mode, only the address for pairing links is.
 
 Opening the same link on a phone automatically switches to the mobile layout (two-level navigation plus a terminal key bar) — no setup.
 
@@ -67,6 +67,37 @@ To ban a device, click Block next to it and confirm — it's disconnected immedi
 ### 2.5 Stop the server
 
 Stop Server at the bottom of the panel. Browser clients disconnect; running sessions are unaffected — they belong to the desktop app itself.
+
+### 2.6 Where remote access listens
+
+By default the server accepts connections on every network this computer is connected to. The **Listen on** selector (next to Port while the server is stopped, below the status line while it runs) narrows that down, and the panel states where the server is reachable:
+
+| Choice | Listens on | Use it when |
+|--------|------------|-------------|
+| All networks (default) | Every interface, as in earlier versions | Any device on your LAN or VPN may reach the pairing page |
+| One address of this computer (for example a LAN IP or a Tailscale `100.x.y.z` IP) | Only that IPv4 address | Only one network should reach the server |
+| This computer only (tunnel) | Only `127.0.0.1` | Clients arrive through a tunnel or reverse proxy on this computer (`tailscale serve --tcp`, `ssh -L`) |
+
+The setting is saved with the other remote access settings and applies to start, restart, and autostart. Remote clients can neither read nor change it. Changing it while the server runs restarts the listener on the same port; the access password and the pairing credentials are kept, so connected devices can reconnect without pairing again.
+
+If the chosen address is not present when the server starts (for example the VPN is disconnected), the start fails with an error naming the address. Remote access never falls back to all networks.
+
+**Tunnel mode keeps the full remote security model.** A connection arriving through the tunnel is still a remote client: TLS, pairing link, access password, and end-to-end encryption all apply, exactly as on the LAN. Because the addresses of this computer are not what clients use in this mode, the panel asks for an **Address for pairing links**: the host name or IP clients connect to (for example your machine's Tailscale name `host.tailnet.ts.net`). It becomes the host of the pairing link. It is added to the certificate's names only when a new certificate is created; an existing certificate is kept on purpose, because clients pin its fingerprint and would otherwise all have to pair again (they check the fingerprint, not the host name). The link always carries the port the server listens on, so the tunnel must forward the same port (for example `tailscale serve --tcp=8799 tcp://127.0.0.1:8799`, or `ssh -L 8799:127.0.0.1:8799`). Without a pairing address, pairing links point to `127.0.0.1`, which only works with `ssh -L`.
+
+Example, reachable only inside your tailnet: choose "This computer only (tunnel)", enter the machine's Tailscale name as the address for pairing links, start the server on port 8799, then run
+
+```bash
+tailscale serve --tcp=8799 tcp://127.0.0.1:8799
+```
+
+Never use `tailscale funnel` for this; funnel publishes the port to the internet.
+
+Two things to know:
+
+- Choosing one address is weaker than tunnel mode on a machine that forwards packets between networks or accepts traffic for any of its local addresses on any interface (the "weak host model"). Devices on another network may then still reach the chosen address. Loopback plus a tunnel does not have this gap.
+- The login rate limit counts failed attempts per client address. Behind a tunnel every client arrives from `127.0.0.1`, so all tunnel clients share one budget: one device typing the password wrong repeatedly can briefly lock out the others.
+
+**Headless (`vela-server --serve`).** The saved setting applies here too: to the instance started from the saved remote access settings, and to the instance configured on the command line in its TLS or `--lan-http` mode. That command-line instance also takes `--bind all`, `--bind loopback`, or `--bind <IPv4>`; this overrides the saved setting for the command-line instance only. If remote access is also switched on in the saved settings, the process starts a second instance from them, and that one keeps following the saved setting; its startup lines say where it listens. To keep the whole process on loopback, save the listen setting as well, not only the flag. `--local-http` always listens on `127.0.0.1` and can only be combined with `--bind loopback`. The startup output prints a `listening on:` line. The address for pairing links has no command-line flag; it is read from the saved settings (set it in the app's panel).
 
 ## 3. Connecting out (Connect to Remote Server)
 

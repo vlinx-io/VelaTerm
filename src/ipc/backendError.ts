@@ -35,6 +35,12 @@ export function mapBackendError(raw: string): string {
       return t("transport.remoteSettingForbidden", detail);
     case "remote_path_forbidden":
       return t("transport.remotePathForbidden", detail);
+    case "remote_bind_invalid":
+      return t("remote.bindInvalid", detail);
+    case "remote_bind_unavailable":
+      return t("remote.bindUnavailable", detail);
+    case "remote_pairing_host_invalid":
+      return t("remote.pairingHostInvalid", detail);
     default:
       return raw;
   }

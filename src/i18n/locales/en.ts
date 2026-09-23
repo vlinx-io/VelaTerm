@@ -738,6 +738,19 @@ const en = {
   "remote.mirror": "Mirror layout across devices",
   "remote.mirrorHint":
     "Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.",
+  "remote.listenLabel": "Listen on",
+  "remote.listenAll": "All networks",
+  "remote.listenLoopback": "This computer only (tunnel)",
+  "remote.listenUnavailable": (ip: string) => `${ip} (not available)`,
+  "remote.reachAll": "Reachable from every network this computer is connected to.",
+  "remote.reachOnly": (addr: string) => `Reachable only at ${addr}.`,
+  "remote.reachTunnel": "Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.",
+  "remote.pairingHostLabel": "Address for pairing links",
+  "remote.pairingHostPlaceholder": "host.tailnet.ts.net",
+  "remote.pairingHostNeeded": "Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.",
+  "remote.bindInvalid": (value: string) => `"${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.`,
+  "remote.bindUnavailable": (ip: string) => `The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.`,
+  "remote.pairingHostInvalid": (value: string) => `"${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.`,
 
   // ── Remote connection panel ──
   "connect.title": "Connect to Remote Server",

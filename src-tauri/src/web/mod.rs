@@ -4,7 +4,8 @@
 //! resolves PtyManager, Db, and HookServer and exchanges events, so browser and desktop/headless clients naturally
 //! use the same PTY manager and SQLite database (see `host.rs`).
 //!
-//! - LAN mode binds `0.0.0.0` and authenticates through the password login flow (see `auth`).
+//! - LAN mode binds `0.0.0.0` by default, or the single address chosen by the owner (see [`BindChoice`]), and
+//!   authenticates through the password login flow (see `auth`).
 //! - `rust-embed` bundles `../dist` for offline release use.
 //! - `/ws` multiplexes invokes, events, and PTY traffic (see `ws`).
 
@@ -34,6 +35,7 @@ mod tls;
 pub mod tunnel;
 mod ws;
 
+use std::net::Ipv4Addr;
 use std::sync::Mutex;
 
 use axum::extract::State;
@@ -74,8 +76,8 @@ pub(crate) struct Ctx {
     pub tunnel_secret: Option<String>,
 }
 
-/// Public web-service status returned to the frontend in camelCase.
-#[derive(Clone, serde::Serialize)]
+/// Public web-service status returned to the frontend in camelCase. Carries no secrets, so Debug is safe.
+#[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WebServerStatus {
     pub running: bool,
@@ -96,6 +98,13 @@ pub struct WebServerStatus {
     /// stopped. Explicit so the frontend can synthesize a URL for an interface that appeared after start
     /// (absent from the `urls` snapshot) without guessing the scheme from the snapshot's first entry.
     pub scheme: Option<String>,
+    /// Canonical listen address of the running service (`all`, `loopback`, or an IPv4 address, see
+    /// [`BindChoice::as_setting`]); None when stopped.
+    pub bind: Option<String>,
+    /// Persisted listen-address setting (`remoteAccess.bind`); filled in command_core.
+    pub saved_bind: Option<String>,
+    /// Persisted address for pairing links in loopback mode (`remoteAccess.pairingHost`); filled in command_core.
+    pub saved_pairing_host: Option<String>,
 }
 
 impl WebServerStatus {
@@ -110,6 +119,9 @@ impl WebServerStatus {
             saved_port: None,
             auto_start: false,
             scheme: None,
+            bind: None,
+            saved_bind: None,
+            saved_pairing_host: None,
         }
     }
 }
@@ -118,7 +130,9 @@ impl WebServerStatus {
 /// the plaintext-LAN combination required by native mobile shells.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ServeMode {
-    /// LAN with self-signed TLS on `0.0.0.0`, including HTTP-to-HTTPS sniffing redirect; desktop remote default.
+    /// LAN with self-signed TLS, including HTTP-to-HTTPS sniffing redirect; desktop remote default. Binds
+    /// `0.0.0.0` unless the owner chose one address or loopback (see [`BindChoice`]); the security model
+    /// (TLS, pairing, password, E2EE, remote origin) is the same for every bind choice.
     LanTls,
     /// Plain HTTP/ws on `127.0.0.1` for Electron sidecar; loopback never leaves the host.
     LoopbackHttp,
@@ -136,19 +150,163 @@ impl ServeMode {
     fn plaintext(self) -> bool {
         !matches!(self, ServeMode::LanTls)
     }
-    /// Bind address octets: loopback modes use 127.0.0.1; both LAN modes use 0.0.0.0.
-    fn bind_octets(self) -> [u8; 4] {
+    /// Whether this mode is one of the two LAN modes whose listen address the owner may choose.
+    fn is_lan(self) -> bool {
+        matches!(self, ServeMode::LanTls | ServeMode::LanHttp)
+    }
+}
+
+/// Where a LAN-mode listener binds. Orthogonal to [`ServeMode`] on purpose: the trust class of a client
+/// (`CallOrigin`) depends only on the mode, so a LanTls listener bound to loopback for a tunnel still treats
+/// everyone as remote. The default keeps the historical behaviour (every interface).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum BindChoice {
+    /// Every interface (`0.0.0.0`), the historical and default behaviour.
+    #[default]
+    All,
+    /// `127.0.0.1` only, for tunnels and reverse proxies on this machine (tailscale serve, ssh -L).
+    Loopback,
+    /// One IPv4 address of this machine, e.g. a LAN or Tailscale (CGNAT) address.
+    Address(Ipv4Addr),
+}
+
+impl BindChoice {
+    /// Parse the setting or `--bind` value: `all` (also `0.0.0.0` or empty), `loopback` (also `127.0.0.1`),
+    /// or a dotted IPv4 address. Surrounding whitespace is trimmed and keywords are case-insensitive.
+    /// Loopback addresses other than 127.0.0.1, multicast, and broadcast addresses are rejected; whether an
+    /// address is actually present on this machine is only checked when the server starts.
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        let value = raw.trim();
+        match value.to_ascii_lowercase().as_str() {
+            "" | "all" | "0.0.0.0" => return Ok(BindChoice::All),
+            "loopback" | "127.0.0.1" => return Ok(BindChoice::Loopback),
+            _ => {}
+        }
+        let invalid = || format!("remote_bind_invalid:{}", clip(value));
+        let ip: Ipv4Addr = value.parse().map_err(|_| invalid())?;
+        if ip.is_loopback() || ip.is_multicast() || ip.is_broadcast() || ip.is_unspecified() {
+            return Err(invalid());
+        }
+        Ok(BindChoice::Address(ip))
+    }
+
+    /// Canonical stored form: `all`, `loopback`, or the dotted IPv4 address.
+    pub fn as_setting(&self) -> String {
         match self {
-            ServeMode::LoopbackHttp | ServeMode::ShareTunnel => [127, 0, 0, 1],
-            _ => [0, 0, 0, 0],
+            BindChoice::All => "all".to_string(),
+            BindChoice::Loopback => "loopback".to_string(),
+            BindChoice::Address(ip) => ip.to_string(),
         }
     }
-    /// Bind-host string used for port preflight.
-    fn bind_host(self) -> &'static str {
-        match self {
-            ServeMode::LoopbackHttp | ServeMode::ShareTunnel => "127.0.0.1",
-            _ => "0.0.0.0",
+}
+
+/// Listen configuration of a LAN-mode instance: the bind choice plus the host name or IP that pairing links
+/// carry in loopback mode, where the machine's own interface addresses are not what clients connect to.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ListenConfig {
+    pub bind: BindChoice,
+    /// Only used with [`BindChoice::Loopback`]; kept otherwise so switching modes does not lose it.
+    pub pairing_host: Option<String>,
+}
+
+/// Bound the length of a user-supplied value echoed back inside an error code.
+fn clip(value: &str) -> String {
+    value.chars().take(64).collect()
+}
+
+/// Validate the address for pairing links: empty means none; otherwise an IPv4 literal (not `0.0.0.0`) or a
+/// DNS name (labels of 1 to 63 letters, digits, or hyphens, not starting or ending with a hyphen, at most 253
+/// characters, no trailing dot, not an all-numeric last label). No scheme, port, path, fragment, or IPv6: the
+/// value becomes the host of a URL whose fragment carries the pairing secret, so nothing that could end or
+/// redirect the host part may pass.
+pub fn validate_pairing_host(raw: &str) -> Result<Option<String>, String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    let invalid = || format!("remote_pairing_host_invalid:{}", clip(value));
+    if let Ok(ip) = value.parse::<Ipv4Addr>() {
+        if ip.is_unspecified() || ip.is_multicast() || ip.is_broadcast() {
+            return Err(invalid());
         }
+        return Ok(Some(value.to_string()));
+    }
+    if value.len() > 253 {
+        return Err(invalid());
+    }
+    let labels: Vec<&str> = value.split('.').collect();
+    let label_ok = |l: &&str| {
+        !l.is_empty()
+            && l.len() <= 63
+            && !l.starts_with('-')
+            && !l.ends_with('-')
+            && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    };
+    if !labels.iter().all(label_ok) {
+        return Err(invalid());
+    }
+    // An all-numeric last label reads as a (malformed) IPv4 address, never as a host name.
+    if labels
+        .last()
+        .is_some_and(|l| l.chars().all(|c| c.is_ascii_digit()))
+    {
+        return Err(invalid());
+    }
+    Ok(Some(value.to_string()))
+}
+
+/// Pure: resolve the socket IP for a mode and bind choice against the machine's current IPv4 addresses.
+/// The loopback modes always bind 127.0.0.1 and refuse a specific address (a `--local-http` listener
+/// treats its clients as local, so it must never be reachable from a network). The LAN modes bind
+/// `0.0.0.0`, `127.0.0.1`, or the chosen address, which must be present; there is no fallback.
+fn resolve_bind_ip(mode: ServeMode, bind: &BindChoice, local_v4: &[Ipv4Addr]) -> Result<Ipv4Addr, String> {
+    match (mode.is_lan(), bind) {
+        (false, BindChoice::Address(ip)) => Err(format!("remote_bind_invalid:{ip}")),
+        (false, _) => Ok(Ipv4Addr::LOCALHOST),
+        (true, BindChoice::All) => Ok(Ipv4Addr::UNSPECIFIED),
+        (true, BindChoice::Loopback) => Ok(Ipv4Addr::LOCALHOST),
+        (true, BindChoice::Address(ip)) if local_v4.contains(ip) => Ok(*ip),
+        (true, BindChoice::Address(ip)) => Err(format!("remote_bind_unavailable:{ip}")),
+    }
+}
+
+/// Every IPv4 address currently assigned to this machine, unfiltered: `--bind` may name any local address
+/// (a public one on a VPS too), while the panel only offers the filtered [`network_interfaces_list`].
+fn local_ipv4_addrs() -> Vec<Ipv4Addr> {
+    if_addrs::get_if_addrs()
+        .map(|ifaces| {
+            ifaces
+                .into_iter()
+                .filter_map(|i| match i.addr {
+                    if_addrs::IfAddr::V4(v4) => Some(v4.ip),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Pure: the hosts clients should use for this listen configuration, in preference order. Every interface
+/// advertises the enumerated LAN addresses (historical behaviour); one address advertises only itself;
+/// loopback advertises the pairing host, or 127.0.0.1 (correct for `ssh -L`) when none is set.
+fn advertised_hosts(listen: &ListenConfig, lan_ips: Vec<String>) -> Vec<String> {
+    match &listen.bind {
+        BindChoice::All => lan_ips,
+        BindChoice::Address(ip) => vec![ip.to_string()],
+        BindChoice::Loopback => vec![listen
+            .pairing_host
+            .clone()
+            .unwrap_or_else(|| Ipv4Addr::LOCALHOST.to_string())],
+    }
+}
+
+/// Extra certificate SAN hosts for a listen configuration: the chosen address (which may be absent from the
+/// filtered LAN list, e.g. a public address) or, in loopback mode, the pairing host.
+fn extra_san_hosts(listen: &ListenConfig) -> Vec<String> {
+    match &listen.bind {
+        BindChoice::All => Vec::new(),
+        BindChoice::Address(ip) => vec![ip.to_string()],
+        BindChoice::Loopback => listen.pairing_host.clone().into_iter().collect(),
     }
 }
 
@@ -163,7 +321,13 @@ pub fn is_production_identifier(identifier: &str) -> bool {
 /// Handle for a running service.
 struct Running {
     port: u16,
-    lan_ips: Vec<String>,
+    /// Hosts clients should use, derived once at start by [`advertised_hosts`].
+    hosts: Vec<String>,
+    /// Listen configuration this instance was started with.
+    listen: ListenConfig,
+    /// Argon2id verifier the instance runs with, so a listen-address change can restart it without the
+    /// plaintext password (which no longer exists after start). AuthState holds the same value.
+    verifier_phc: String,
     fingerprint: Option<String>,
     /// Startup mode, determining status URL scheme and host.
     mode: ServeMode,
@@ -223,13 +387,8 @@ impl WebServer {
         *self.autostart_error.lock().unwrap() = msg;
     }
 
-    /// Starts the service, first stopping any running instance so password, port, and mode changes apply.
-    ///
-    /// Modes (see [`ServeMode`]): LanTls is self-signed TLS on 0.0.0.0 with sniff redirect; LoopbackHttp is
-    /// plaintext 127.0.0.1 for Electron without per-message TLS overhead; LanHttp is plaintext 0.0.0.0 for native
-    /// mobile shells that cannot bypass self-signed certificates.
-    ///
-    /// All modes retain authentication because other local/LAN clients can reach even plaintext ports.
+    /// Starts the service on the default listen configuration (every interface for the LAN modes); see
+    /// [`WebServer::start_with_listen`].
     pub fn start(
         &self,
         app: AppCtx,
@@ -237,6 +396,34 @@ impl WebServer {
         port: Option<u16>,
         mode: ServeMode,
     ) -> Result<WebServerStatus, String> {
+        self.start_with_listen(app, auth, port, mode, ListenConfig::default())
+    }
+
+    /// Starts the service, first stopping any running instance so password, port, mode, and listen changes
+    /// apply.
+    ///
+    /// Modes (see [`ServeMode`]): LanTls is self-signed TLS with sniff redirect; LoopbackHttp is plaintext
+    /// 127.0.0.1 for Electron without per-message TLS overhead; LanHttp is plaintext for native mobile shells
+    /// that cannot bypass self-signed certificates. The LAN modes bind according to `listen.bind` (0.0.0.0 by
+    /// default); a chosen address that is not present fails the start before any running instance is stopped,
+    /// and never falls back to every interface.
+    ///
+    /// All modes retain authentication because other local/LAN clients can reach even plaintext ports.
+    pub fn start_with_listen(
+        &self,
+        app: AppCtx,
+        auth: StartAuth,
+        port: Option<u16>,
+        mode: ServeMode,
+        listen: ListenConfig,
+    ) -> Result<WebServerStatus, String> {
+        // Resolve the socket address first: an absent or invalid address must fail without touching a
+        // running instance. Interfaces are only enumerated when a specific address needs checking.
+        let local_v4 = match listen.bind {
+            BindChoice::Address(_) => local_ipv4_addrs(),
+            _ => Vec::new(),
+        };
+        let bind_ip = resolve_bind_ip(mode, &listen.bind, &local_v4)?;
         // Normalize both password variants to an Argon2id PHC verifier; plaintext never outlives this
         // scope. Tunnel-only mode hashes a random throwaway password so the same AuthState plumbing
         // applies while no usable password ever exists.
@@ -269,14 +456,20 @@ impl WebServer {
         }
 
         let port = port.unwrap_or(DEFAULT_PORT);
-        let bind_host = mode.bind_host();
-        // Synchronously preflight port availability, release it immediately, then let axum-server bind.
-        drop(
-            std::net::TcpListener::bind((bind_host, port))
-                .map_err(|e| format!("Port {port} is already in use: {e}"))?,
-        );
+        let addr = std::net::SocketAddr::from((bind_ip, port));
+        // Synchronously preflight port availability on the exact address the server will use, release it
+        // immediately, then let axum-server bind. An address that vanished since resolution is reported as
+        // unavailable rather than as a busy port.
+        drop(std::net::TcpListener::bind(addr).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AddrNotAvailable {
+                format!("remote_bind_unavailable:{bind_ip}")
+            } else {
+                format!("Port {port} is already in use: {e}")
+            }
+        })?);
 
         let lan_ips = lan_ips();
+        let hosts = advertised_hosts(&listen, lan_ips.clone());
         // Persist the E2EE server key, device registry, and self-signed TLS certificate in the data directory.
         let data_dir = app.data_dir()?;
         let e2ee_keys = Arc::new(e2ee::ServerKeys::load_or_create(&data_dir)?);
@@ -287,7 +480,8 @@ impl WebServer {
             tls_pem = None;
             fingerprint = None;
         } else {
-            let (cert_pem, key_pem) = tls::ensure_cert(&data_dir, &lan_ips)?;
+            let (cert_pem, key_pem) =
+                tls::ensure_cert(&data_dir, &lan_ips, &extra_san_hosts(&listen))?;
             fingerprint = tls::fingerprint_sha256(&cert_pem);
             tls_pem = Some((cert_pem, key_pem));
         }
@@ -296,6 +490,7 @@ impl WebServer {
         // pairing state in access_store.
         let _ = std::fs::remove_file(data_dir.join("vlx-devices.json"));
         let auth = Arc::new(AuthState::load_or_create(&verifier_phc, &data_dir)?);
+        let status = status_from(port, hosts.clone(), fingerprint.clone(), mode, &listen);
         let ctx = Ctx {
             app,
             auth: auth.clone(),
@@ -306,8 +501,6 @@ impl WebServer {
         };
         let handle = axum_server::Handle::new();
         let handle_clone = handle.clone();
-        let bind_octets = mode.bind_octets();
-        let addr = std::net::SocketAddr::from((bind_octets, port));
 
         let thread = std::thread::Builder::new()
             .name("vlx-web".into())
@@ -371,8 +564,10 @@ impl WebServer {
 
         *guard = Some(Running {
             port,
-            lan_ips: lan_ips.clone(),
-            fingerprint: fingerprint.clone(),
+            hosts,
+            listen,
+            verifier_phc,
+            fingerprint,
             mode,
             auth,
             e2ee_keys,
@@ -383,7 +578,62 @@ impl WebServer {
         // Any successful start supersedes a previous auto-start failure.
         self.set_autostart_error(None);
 
-        Ok(status_from(port, lan_ips, fingerprint, mode))
+        Ok(status)
+    }
+
+    /// Listen configuration of the running instance; None while stopped.
+    pub fn listen_config(&self) -> Option<ListenConfig> {
+        self.inner.lock().unwrap().as_ref().map(|r| r.listen.clone())
+    }
+
+    /// Restarts the running LAN instance on a new listen configuration with the same port, mode, and password
+    /// verifier, so the owner never retypes the password. Pairing token, device registry, E2EE key, and
+    /// certificate live in the data directory and survive; clients reconnect as after any restart.
+    ///
+    /// The new address is resolved before the old instance stops, so an absent address leaves it running
+    /// untouched. Should the restart still fail after the stop (a port race), the previous configuration is
+    /// restarted once and the original error returned: that restores what ran, it never widens the bind.
+    /// Accepted limit: a concurrent `web_server_start` between stop and rollback can interleave; the panel
+    /// is single-user, so this is documented rather than locked.
+    pub fn restart_listen(&self, app: AppCtx, listen: ListenConfig) -> Result<WebServerStatus, String> {
+        let (port, mode, verifier_phc, previous) = {
+            let guard = self.inner.lock().unwrap();
+            let running = guard.as_ref().ok_or("Web server not started")?;
+            (
+                running.port,
+                running.mode,
+                running.verifier_phc.clone(),
+                running.listen.clone(),
+            )
+        };
+        if !mode.is_lan() {
+            return Err(format!("remote_bind_invalid:{}", listen.bind.as_setting()));
+        }
+        match self.start_with_listen(
+            app.clone(),
+            StartAuth::PasswordHash(verifier_phc.clone()),
+            Some(port),
+            mode,
+            listen,
+        ) {
+            Ok(status) => Ok(status),
+            Err(e) => {
+                if !self.status().running {
+                    if let Err(rollback) = self.start_with_listen(
+                        app,
+                        StartAuth::PasswordHash(verifier_phc),
+                        Some(port),
+                        mode,
+                        previous,
+                    ) {
+                        crate::diagnostic_warn!(
+                            "remote access could not be restored after a failed listen change: {rollback}"
+                        );
+                    }
+                }
+                Err(e)
+            }
+        }
     }
 
     /// Stops the service. A manual stop also retires any stale auto-start error: the panel must show the
@@ -399,7 +649,7 @@ impl WebServer {
     /// Returns current status, including the last auto-start failure for the panel.
     pub fn status(&self) -> WebServerStatus {
         let mut status = match &*self.inner.lock().unwrap() {
-            Some(r) => status_from(r.port, r.lan_ips.clone(), r.fingerprint.clone(), r.mode),
+            Some(r) => status_from(r.port, r.hosts.clone(), r.fingerprint.clone(), r.mode, &r.listen),
             None => WebServerStatus::stopped(),
         };
         status.autostart_error = self.autostart_error.lock().unwrap().clone();
@@ -408,6 +658,8 @@ impl WebServer {
 
     /// Generates a browser pairing URL containing the current shared token and server public key. `address` chooses
     /// an interface IP; `rotate=true` replaces the token, invalidates old links, and clears all registrations.
+    /// When the instance listens on one address or on loopback, `address` is only honoured if it is one of the
+    /// advertised hosts, so a link never points at an address the server does not listen on.
     pub fn create_pairing(
         &self,
         address: Option<String>,
@@ -427,9 +679,15 @@ impl WebServer {
         } else {
             "http"
         };
+        let address = address.filter(|s| !s.trim().is_empty());
+        let address = match running.listen.bind {
+            // Every interface: any address is allowed; the panel synthesizes URLs for interfaces that
+            // appeared after start.
+            BindChoice::All => address,
+            _ => address.filter(|a| running.hosts.contains(a)),
+        };
         let host = address
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| running.lan_ips.first().cloned())
+            .or_else(|| running.hosts.first().cloned())
             .unwrap_or_else(|| "localhost".to_string());
         // Put token and server public key in the URL fragment so they never reach the server, proxy logs, or Referer.
         let offer = serde_json::json!({
@@ -469,11 +727,13 @@ impl Default for WebServer {
     }
 }
 
+/// Builds the running status. `hosts` are the advertised hosts from [`advertised_hosts`].
 fn status_from(
     port: u16,
-    lan_ips: Vec<String>,
+    hosts: Vec<String>,
     fingerprint: Option<String>,
     mode: ServeMode,
+    listen: &ListenConfig,
 ) -> WebServerStatus {
     // The single scheme of this serve mode, reported explicitly in the status so the frontend never
     // has to infer it from the URL snapshot.
@@ -487,13 +747,13 @@ fn status_from(
         ServeMode::LoopbackHttp | ServeMode::ShareTunnel => {
             vec![format!("http://127.0.0.1:{port}")]
         }
-        // LAN modes enumerate LAN addresses and choose HTTP for mobile or HTTPS for browser remote access.
+        // LAN modes list the advertised hosts and choose HTTP for mobile or HTTPS for browser remote access.
         ServeMode::LanHttp | ServeMode::LanTls => {
             // Fall back to localhost when no LAN IP is found, preserving local access.
-            let hosts = if lan_ips.is_empty() {
+            let hosts = if hosts.is_empty() {
                 vec!["localhost".to_string()]
             } else {
-                lan_ips
+                hosts
             };
             hosts
                 .iter()
@@ -511,6 +771,14 @@ fn status_from(
         saved_port: None,
         auto_start: false,
         scheme: Some(scheme.to_string()),
+        // The loopback modes always bind 127.0.0.1, whatever the (default) listen configuration says.
+        bind: Some(if mode.is_lan() {
+            listen.bind.as_setting()
+        } else {
+            BindChoice::Loopback.as_setting()
+        }),
+        saved_bind: None,
+        saved_pairing_host: None,
     }
 }
 
@@ -798,8 +1066,9 @@ fn is_network_or_broadcast(ip: std::net::Ipv4Addr, netmask: std::net::Ipv4Addr) 
 #[cfg(test)]
 mod tests {
     use super::{
-        hash_password, is_cgnat, is_network_or_broadcast, is_production_identifier,
-        is_virtual_iface, order_candidates, NetworkInterface, ServeMode, StartAuth, WebServer,
+        advertised_hosts, hash_password, is_cgnat, is_network_or_broadcast, is_production_identifier,
+        is_virtual_iface, order_candidates, resolve_bind_ip, validate_pairing_host, BindChoice,
+        ListenConfig, NetworkInterface, ServeMode, StartAuth, WebServer,
     };
     use std::net::Ipv4Addr;
 
@@ -989,11 +1258,338 @@ mod tests {
     #[test]
     fn status_reports_the_explicit_scheme_per_mode() {
         use super::{status_from, WebServerStatus};
-        let s = |mode| status_from(8799, vec![], None, mode);
+        let s = |mode| status_from(8799, vec![], None, mode, &super::ListenConfig::default());
         assert_eq!(s(ServeMode::LanTls).scheme.as_deref(), Some("https"));
         assert_eq!(s(ServeMode::LanHttp).scheme.as_deref(), Some("http"));
         assert_eq!(s(ServeMode::LoopbackHttp).scheme.as_deref(), Some("http"));
         assert!(WebServerStatus::stopped().scheme.is_none());
+    }
+
+    fn v4(s: &str) -> Ipv4Addr {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn bind_choice_parse_accepts_and_canonicalizes() {
+        for raw in ["all", "", "0.0.0.0", "ALL", "  all  "] {
+            assert_eq!(BindChoice::parse(raw), Ok(BindChoice::All), "{raw:?}");
+        }
+        for raw in ["loopback", "127.0.0.1", "Loopback", " loopback "] {
+            assert_eq!(BindChoice::parse(raw), Ok(BindChoice::Loopback), "{raw:?}");
+        }
+        for raw in ["100.100.83.2", "192.168.1.5", "10.0.0.5", "203.0.113.7"] {
+            let parsed = BindChoice::parse(raw).unwrap();
+            assert_eq!(parsed, BindChoice::Address(v4(raw)));
+            // Round trip through the canonical stored form.
+            assert_eq!(parsed.as_setting(), raw);
+            assert_eq!(BindChoice::parse(&parsed.as_setting()), Ok(parsed));
+        }
+        assert_eq!(BindChoice::All.as_setting(), "all");
+        assert_eq!(BindChoice::Loopback.as_setting(), "loopback");
+        assert_eq!(BindChoice::default(), BindChoice::All, "the default must stay every interface");
+    }
+
+    #[test]
+    fn bind_choice_parse_rejects_invalid() {
+        for raw in [
+            "::1",
+            "fe80::1",
+            "300.1.1.1",
+            "224.0.0.1",
+            "255.255.255.255",
+            "127.0.0.2",
+            "host.example",
+            "10.0.0.1:80",
+            "lo opback",
+        ] {
+            let err = BindChoice::parse(raw).unwrap_err();
+            assert!(err.starts_with("remote_bind_invalid:"), "{raw:?}: {err}");
+        }
+    }
+
+    /// The default bind is byte-identical to the historical behaviour: 0.0.0.0 for both LAN modes,
+    /// 127.0.0.1 for the loopback modes.
+    #[test]
+    fn resolve_bind_ip_default_unchanged() {
+        let none: &[Ipv4Addr] = &[];
+        assert_eq!(resolve_bind_ip(ServeMode::LanTls, &BindChoice::All, none), Ok(Ipv4Addr::UNSPECIFIED));
+        assert_eq!(resolve_bind_ip(ServeMode::LanHttp, &BindChoice::All, none), Ok(Ipv4Addr::UNSPECIFIED));
+        assert_eq!(resolve_bind_ip(ServeMode::LoopbackHttp, &BindChoice::All, none), Ok(Ipv4Addr::LOCALHOST));
+        assert_eq!(resolve_bind_ip(ServeMode::ShareTunnel, &BindChoice::All, none), Ok(Ipv4Addr::LOCALHOST));
+    }
+
+    #[test]
+    fn resolve_bind_ip_loopback_and_specific() {
+        let local = [v4("192.168.1.5"), v4("100.100.83.2")];
+        assert_eq!(resolve_bind_ip(ServeMode::LanTls, &BindChoice::Loopback, &local), Ok(Ipv4Addr::LOCALHOST));
+        assert_eq!(
+            resolve_bind_ip(ServeMode::LanTls, &BindChoice::Address(v4("100.100.83.2")), &local),
+            Ok(v4("100.100.83.2"))
+        );
+        assert_eq!(
+            resolve_bind_ip(ServeMode::LanHttp, &BindChoice::Address(v4("192.168.1.5")), &local),
+            Ok(v4("192.168.1.5"))
+        );
+    }
+
+    /// An address that is not present fails with its own code; there is no fallback to 0.0.0.0.
+    #[test]
+    fn resolve_bind_ip_absent_address_fails() {
+        let local = [v4("192.168.1.5")];
+        assert_eq!(
+            resolve_bind_ip(ServeMode::LanTls, &BindChoice::Address(v4("192.0.2.10")), &local),
+            Err("remote_bind_unavailable:192.0.2.10".to_string())
+        );
+        assert_eq!(
+            resolve_bind_ip(ServeMode::LanTls, &BindChoice::Address(v4("192.0.2.10")), &[]),
+            Err("remote_bind_unavailable:192.0.2.10".to_string())
+        );
+    }
+
+    /// A loopback mode (local trust for --local-http) never binds a network address, even if present.
+    #[test]
+    fn resolve_bind_ip_never_widens_loopback_modes() {
+        let local = [v4("192.168.1.5")];
+        for mode in [ServeMode::LoopbackHttp, ServeMode::ShareTunnel] {
+            assert!(resolve_bind_ip(mode, &BindChoice::Address(v4("192.168.1.5")), &local)
+                .unwrap_err()
+                .starts_with("remote_bind_invalid:"));
+            assert_eq!(resolve_bind_ip(mode, &BindChoice::Loopback, &local), Ok(Ipv4Addr::LOCALHOST));
+        }
+    }
+
+    #[test]
+    fn validate_pairing_host_accepts_names_and_ipv4() {
+        assert_eq!(validate_pairing_host(""), Ok(None));
+        assert_eq!(validate_pairing_host("   "), Ok(None));
+        for ok in ["vela.tailnet-abc.ts.net", "my-mac", "100.100.83.2", "127.0.0.1", "a1.example"] {
+            assert_eq!(validate_pairing_host(ok), Ok(Some(ok.to_string())), "{ok}");
+        }
+        assert_eq!(validate_pairing_host(" my-mac "), Ok(Some("my-mac".to_string())));
+        // 63-character labels and a 253-character name are the limits, inclusive.
+        let label63 = "a".repeat(63);
+        assert!(validate_pairing_host(&format!("{label63}.example")).is_ok());
+        let name253 = format!("{}.{}.{}.{}", "a".repeat(63), "b".repeat(63), "c".repeat(63), "d".repeat(61));
+        assert_eq!(name253.len(), 253);
+        assert!(validate_pairing_host(&name253).is_ok());
+    }
+
+    #[test]
+    fn validate_pairing_host_rejects_injection_and_malformed() {
+        let label64 = "a".repeat(64);
+        let name254 = format!("{}.{}.{}.{}", "a".repeat(63), "b".repeat(63), "c".repeat(63), "d".repeat(62));
+        for bad in [
+            "https://x",
+            "x:8799",
+            "x/y",
+            "a b",
+            "-bad.example",
+            "bad-.example",
+            "evil.example/#",
+            "evil.example#pair=x",
+            "user@host",
+            "0.0.0.0",
+            "[::1]",
+            "::1",
+            "host.example.",
+            "a..b",
+            "300.1.1.1",
+            "1.2.3",
+            label64.as_str(),
+            name254.as_str(),
+        ] {
+            let err = validate_pairing_host(bad).unwrap_err();
+            assert!(err.starts_with("remote_pairing_host_invalid:"), "{bad:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn advertised_hosts_follow_listen_config() {
+        let lan = || vec!["192.168.1.5".to_string(), "100.100.83.2".to_string()];
+        let cfg = |bind, host: Option<&str>| ListenConfig { bind, pairing_host: host.map(str::to_string) };
+        assert_eq!(advertised_hosts(&cfg(BindChoice::All, Some("ignored.example")), lan()), lan());
+        assert_eq!(
+            advertised_hosts(&cfg(BindChoice::Address(v4("100.100.83.2")), Some("ignored.example")), lan()),
+            vec!["100.100.83.2"]
+        );
+        assert_eq!(
+            advertised_hosts(&cfg(BindChoice::Loopback, Some("vela.example.ts.net")), lan()),
+            vec!["vela.example.ts.net"]
+        );
+        assert_eq!(advertised_hosts(&cfg(BindChoice::Loopback, None), lan()), vec!["127.0.0.1"]);
+    }
+
+    #[test]
+    fn status_urls_reflect_listen_config() {
+        use super::status_from;
+        let cfg = |bind, host: Option<&str>| ListenConfig { bind, pairing_host: host.map(str::to_string) };
+        let lan = vec!["192.168.1.5".to_string(), "100.100.83.2".to_string()];
+
+        let all = cfg(BindChoice::All, None);
+        let s = status_from(8799, advertised_hosts(&all, lan.clone()), None, ServeMode::LanTls, &all);
+        assert_eq!(s.urls, ["https://192.168.1.5:8799", "https://100.100.83.2:8799"]);
+        assert_eq!(s.bind.as_deref(), Some("all"));
+
+        let one = cfg(BindChoice::Address(v4("100.100.83.2")), None);
+        let s = status_from(8799, advertised_hosts(&one, lan.clone()), None, ServeMode::LanTls, &one);
+        assert_eq!(s.urls, ["https://100.100.83.2:8799"]);
+        assert_eq!(s.bind.as_deref(), Some("100.100.83.2"));
+
+        let tunnel = cfg(BindChoice::Loopback, Some("vela.example.ts.net"));
+        let s = status_from(8799, advertised_hosts(&tunnel, lan), None, ServeMode::LanTls, &tunnel);
+        assert_eq!(s.urls, ["https://vela.example.ts.net:8799"]);
+        assert_eq!(s.bind.as_deref(), Some("loopback"));
+
+        // The loopback modes report their real bind regardless of the (default) listen configuration.
+        let s = status_from(8799, vec![], None, ServeMode::LoopbackHttp, &ListenConfig::default());
+        assert_eq!(s.bind.as_deref(), Some("loopback"));
+    }
+
+    fn temp_ctx(tag: &str) -> (std::path::PathBuf, crate::host::AppCtx) {
+        let tmp = std::env::temp_dir().join(format!(
+            "vlx-web-{tag}-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let db = crate::db::Db::open(&tmp.join("t.db")).unwrap();
+        let host = std::sync::Arc::new(crate::host::HeadlessHost::new(tmp.clone(), db));
+        (tmp, crate::host::AppCtx::Headless(host))
+    }
+
+    /// Start a LanTls instance bound to loopback on a free 127.0.0.1 port, retrying against port theft.
+    fn start_loopback_lan_tls(web: &WebServer, ctx: &crate::host::AppCtx, pairing_host: Option<&str>) -> u16 {
+        let mut last = Err("never attempted".to_string());
+        for _ in 0..5 {
+            let port = free_port();
+            last = web.start_with_listen(
+                ctx.clone(),
+                StartAuth::Password("pw".into()),
+                Some(port),
+                ServeMode::LanTls,
+                ListenConfig { bind: BindChoice::Loopback, pairing_host: pairing_host.map(str::to_string) },
+            );
+            if last.is_ok() {
+                return port;
+            }
+        }
+        panic!("failed to start the loopback LanTls server: {last:?}");
+    }
+
+    /// Plaintext HTTP to the port returns the response head; retries until the listener accepts.
+    fn plaintext_get(port: u16) -> String {
+        use std::io::{Read, Write};
+        for _ in 0..100 {
+            if let Ok(mut s) = std::net::TcpStream::connect(("127.0.0.1", port)) {
+                let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                let req = format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+                s.write_all(req.as_bytes()).unwrap();
+                let mut resp = String::new();
+                let _ = s.read_to_string(&mut resp);
+                return resp;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        panic!("server never accepted connections");
+    }
+
+    /// A LanTls listener bound to loopback keeps the LanTls security model: plaintext is answered by the
+    /// HTTPS sniff redirect (TLS acceptor), clients are remote, and status and pairing links carry the
+    /// pairing host instead of any interface address, even when another address is requested.
+    #[test]
+    fn loopback_bound_lan_tls_keeps_tls_and_pairing_host() {
+        let (tmp, ctx) = temp_ctx("loopback-tls");
+        let web = WebServer::new();
+        let port = start_loopback_lan_tls(&web, &ctx, Some("vela.example.ts.net"));
+
+        let resp = plaintext_get(port);
+        assert!(resp.starts_with("HTTP/1.1 301"), "expected the TLS sniff redirect, got: {resp}");
+
+        let status = web.status();
+        assert_eq!(status.urls, [format!("https://vela.example.ts.net:{port}")]);
+        assert_eq!(status.bind.as_deref(), Some("loopback"));
+        assert!(status.fingerprint.is_some(), "a TLS instance reports its fingerprint");
+
+        for requested in [None, Some("192.168.1.5".to_string())] {
+            let url = web.create_pairing(requested, false).unwrap().url;
+            assert!(
+                url.starts_with(&format!("https://vela.example.ts.net:{port}/#pair=")),
+                "unexpected pairing link: {url}"
+            );
+        }
+        {
+            let guard = web.inner.lock().unwrap();
+            let mode = guard.as_ref().unwrap().mode;
+            assert!(
+                crate::web::dispatch::CallOrigin::for_serve_mode(mode)
+                    == crate::web::dispatch::CallOrigin::Remote,
+                "a loopback-bound LAN listener must never treat its clients as local"
+            );
+        }
+        web.stop();
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A listen change on a running instance keeps the pairing token and the password verifier and
+    /// moves the advertised host; an absent address fails and leaves the old instance running untouched.
+    /// Every step binds 127.0.0.1 only.
+    #[test]
+    fn restart_listen_keeps_credentials_and_rejects_absent_address() {
+        let (tmp, ctx) = temp_ctx("restart-listen");
+        let web = WebServer::new();
+        let port = start_loopback_lan_tls(&web, &ctx, None);
+        let token = web.create_pairing(None, false).unwrap().device_token;
+        assert_eq!(web.status().urls, [format!("https://127.0.0.1:{port}")]);
+
+        let status = web
+            .restart_listen(
+                ctx.clone(),
+                ListenConfig { bind: BindChoice::Loopback, pairing_host: Some("vela.example.ts.net".into()) },
+            )
+            .expect("restart on loopback with a pairing host");
+        assert_eq!(status.port, Some(port), "the port is kept");
+        assert_eq!(status.urls, [format!("https://vela.example.ts.net:{port}")]);
+        assert_eq!(web.create_pairing(None, false).unwrap().device_token, token, "pairing token survives");
+        {
+            let guard = web.inner.lock().unwrap();
+            let running = guard.as_ref().unwrap();
+            assert!(running.auth.verify_password("pw"), "the password verifier survives");
+        }
+
+        let err = web
+            .restart_listen(
+                ctx.clone(),
+                ListenConfig { bind: BindChoice::Address(v4("192.0.2.10")), pairing_host: None },
+            )
+            .unwrap_err();
+        assert_eq!(err, "remote_bind_unavailable:192.0.2.10");
+        let after = web.status();
+        assert!(after.running, "the previous instance keeps running");
+        assert_eq!(after.urls, [format!("https://vela.example.ts.net:{port}")]);
+        assert_eq!(after.bind.as_deref(), Some("loopback"));
+
+        web.stop();
+        assert!(web.restart_listen(ctx, ListenConfig::default()).is_err(), "nothing to restart");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// A start on an absent address fails before anything is bound and never falls back to 0.0.0.0.
+    #[test]
+    fn start_with_absent_address_fails_without_fallback() {
+        let (tmp, ctx) = temp_ctx("absent");
+        let web = WebServer::new();
+        let err = web
+            .start_with_listen(
+                ctx,
+                StartAuth::Password("pw".into()),
+                Some(free_port()),
+                ServeMode::LanTls,
+                ListenConfig { bind: BindChoice::Address(v4("192.0.2.10")), pairing_host: None },
+            )
+            .unwrap_err();
+        assert_eq!(err, "remote_bind_unavailable:192.0.2.10");
+        assert!(!web.status().running);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
