@@ -193,6 +193,12 @@ fn latest_path_for(shell: Option<&str>) -> Option<OsString> {
 #[cfg(unix)]
 pub(crate) fn probe_environment(command: &mut std::process::Command) {
     command.env_clear().envs(baseline().iter().map(|(k, v)| (k, v)));
+    // The probe runs the user's startup files, and whatever they launch may outlive it. `run_serve`
+    // removes the access password before calling hydrate, but a password that reached the baseline some
+    // other way must not travel into that probe either.
+    for key in crate::SERVE_PASSWORD_ENV_KEYS {
+        command.env_remove(key);
+    }
 }
 
 #[cfg(unix)]
@@ -527,6 +533,33 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[test]
+    fn the_login_shell_probe_never_inherits_the_serve_password() {
+        let _guard = crate::SERVE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let saved: Vec<_> = crate::SERVE_PASSWORD_ENV_KEYS
+            .iter()
+            .map(|key| (*key, std::env::var_os(key)))
+            .collect();
+        for key in crate::SERVE_PASSWORD_ENV_KEYS {
+            std::env::set_var(key, "probe-secret");
+        }
+        let mut command = crate::host::command("sh");
+        probe_environment(&mut command);
+        let out = command
+            .arg("-c")
+            .arg("printf %s \"${VELA_SERVE_PASSWORD-unset}|${VLX_SERVE_PASSWORD-unset}\"")
+            .output()
+            .expect("sh must run");
+        for (key, value) in saved {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+        // The probe sees neither variable, even though both are set in this process when it is built.
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "unset|unset");
+    }
+
     #[test]
     fn rejects_malformed_paths() {
         assert!(valid_path(OsStr::new("/usr/bin:/bin")));
