@@ -119,7 +119,7 @@ pub struct ModelOption {
 pub fn models(app: &AppCtx, agent: &str) -> Result<Vec<ModelOption>, String> {
     let bin = process::executable(app, agent)?;
     if agent == "claude" {
-        Ok(crate::agent::claude_models::list_for_bin(&bin)
+        Ok(crate::agent::claude_models::list_for_bin(app, &bin)
             .into_iter()
             .map(|m| ModelOption {
                 id: m.id,
@@ -148,7 +148,21 @@ fn validate_selection(app: &AppCtx, agent: &str, model: &str, effort: &str) -> R
     if model.is_empty() && effort.is_empty() {
         return Ok(());
     }
-    let options = models(app, agent)?;
+    // Acceptance is wider than the offer for Claude: a job saved with an identifier the CLI's shortlist no
+    // longer names must still retry (see claude_models::accepted_for_bin).
+    let options = if agent == "claude" {
+        let bin = process::executable(app, agent)?;
+        crate::agent::claude_models::accepted_for_bin(app, &bin, Some(model))
+            .into_iter()
+            .map(|m| ModelOption {
+                id: m.id,
+                label: m.label,
+                effort_levels: m.effort_levels,
+            })
+            .collect()
+    } else {
+        models(app, agent)?
+    };
     validate_model(&options, model, effort)
 }
 

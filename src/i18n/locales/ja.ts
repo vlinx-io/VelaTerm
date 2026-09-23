@@ -1653,10 +1653,12 @@ const ja: typeof en = {
   "chat.keepChoiceFor": (model) => `${model} の既定にする`,
   "chat.followModelDefault": (agent: string) => `${agent} の既定設定を使用`,
   "chat.followModelDefaultHint": "エージェントの設定に基づくモデルを使用します。",
+  "chat.followModelDefaultHintNamed": (model: string) => `Uses the model selected by the agent’s configuration (currently ${model}).`, // TODO translate
   "chat.savedModelDefault": "アプリの既定",
   "chat.catalogWebsite": "ウェブサイトのモデル一覧",
   "chat.catalogCache": "キャッシュ済みのモデル一覧",
   "chat.catalogBundled": "内蔵のモデル一覧",
+  "chat.catalogCli": "Installed Claude CLI", // TODO translate
   "chat.catalogChecked": (time: string) => `最終確認：${time}`,
   "chat.catalogFailed": "更新に失敗しました。既存の一覧は引き続き使用できます。",
   "chat.catalogRefresh": "更新",

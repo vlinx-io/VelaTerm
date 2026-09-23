@@ -77,7 +77,7 @@ pub fn list(app: &AppCtx, kind: SessionKind, context: &Context) -> Result<Catalo
         &super::session_settings::without_selection_args(kind, args),
     ));
     let value = match kind {
-        SessionKind::Claude => serde_json::to_value(super::claude_models::list_for_bin(&bin)),
+        SessionKind::Claude => serde_json::to_value(super::claude_models::list_for_bin(app, &bin)),
         SessionKind::Codex => {
             serde_json::to_value(super::codex_models::list_in_dir(&bin, &extra, cwd)?)
         }
@@ -185,6 +185,12 @@ mod tests {
         assert_eq!(codex.models[1].effort_levels, ["low"]);
         let claude = list(&app, SessionKind::Claude, &context).unwrap();
         assert!(claude.models.iter().any(|m| !m.effort_levels.is_empty()));
+        // The fixture answers the CLI probe; the identifiers only it knows are appended to the catalogue.
+        let ids: Vec<&str> = claude.models.iter().map(|m| m.id.as_str()).collect();
+        assert!(ids.contains(&"claude-opus-4-8"), "the catalogue stays the base");
+        let at = ids.iter().position(|id| *id == "fixture-claude-model").unwrap();
+        assert_eq!(ids[at..at + 2], ["fixture-claude-model", "fixture-claude-model-b"]);
+        assert_eq!(claude.models[at].label, "Fixture Claude");
         for kind in [SessionKind::Pi, SessionKind::Omp] {
             let result = list(&app, kind, &context).unwrap();
             assert_eq!(

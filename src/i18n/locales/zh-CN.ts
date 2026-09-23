@@ -1602,10 +1602,12 @@ const zhCN: typeof en = {
   "chat.keepChoiceFor": (model) => `设为 ${model} 的默认`,
   "chat.followModelDefault": (agent: string) => `跟随 ${agent} 默认设置`,
   "chat.followModelDefaultHint": "使用智能体配置决定的模型。",
+  "chat.followModelDefaultHintNamed": (model: string) => `Uses the model selected by the agent’s configuration (currently ${model}).`, // TODO translate
   "chat.savedModelDefault": "应用默认",
   "chat.catalogWebsite": "网站模型目录",
   "chat.catalogCache": "已缓存的模型目录",
   "chat.catalogBundled": "内置模型目录",
+  "chat.catalogCli": "Installed Claude CLI", // TODO translate
   "chat.catalogChecked": (time: string) => `上次检查：${time}`,
   "chat.catalogFailed": "更新失败，仍可使用原有目录。",
   "chat.catalogRefresh": "刷新",

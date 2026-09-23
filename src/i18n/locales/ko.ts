@@ -1635,10 +1635,12 @@ const ko: typeof en = {
   "chat.keepChoiceFor": (model) => `${model}의 기본값으로 설정`,
   "chat.followModelDefault": (agent: string) => `${agent} 기본 설정 사용`,
   "chat.followModelDefaultHint": "에이전트 설정에 따라 결정된 모델을 사용합니다.",
+  "chat.followModelDefaultHintNamed": (model: string) => `Uses the model selected by the agent’s configuration (currently ${model}).`, // TODO translate
   "chat.savedModelDefault": "앱 기본값",
   "chat.catalogWebsite": "웹사이트 모델 목록",
   "chat.catalogCache": "캐시된 모델 목록",
   "chat.catalogBundled": "내장 모델 목록",
+  "chat.catalogCli": "Installed Claude CLI", // TODO translate
   "chat.catalogChecked": (time: string) => `마지막 확인: ${time}`,
   "chat.catalogFailed": "업데이트하지 못했습니다. 기존 목록은 계속 사용할 수 있습니다.",
   "chat.catalogRefresh": "새로 고침",

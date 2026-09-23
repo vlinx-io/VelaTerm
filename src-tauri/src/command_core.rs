@@ -1417,17 +1417,28 @@ pub fn chat_set_effort(ctx: &AppCtx, session_id: &str, effort: Option<&str>) -> 
 
 /// Models reported by the agent behind this session.
 pub fn chat_models(ctx: &AppCtx, session_id: &str) -> Result<serde_json::Value, String> {
+    chat_models_with(ctx, session_id, crate::agent::cli_model_catalog::Probe::Allow)
+}
+
+/// `chat_models` with an explicit probing policy for Claude: the public share surface passes
+/// `CacheOnly` so a visitor can never start a process on the host.
+pub fn chat_models_with(
+    ctx: &AppCtx,
+    session_id: &str,
+    probe: crate::agent::cli_model_catalog::Probe,
+) -> Result<serde_json::Value, String> {
     let session = {
         let conn = ctx.db().conn.lock().unwrap();
         repo::get_session(&conn, session_id)?.ok_or("Session not found")?
     };
     match session.kind {
-        // Live capabilities enrich the complete catalogue; the CLI picker only lists a subset.
-        SessionKind::Claude => serde_json::to_value(
-            ctx.chat()
-                .live_claude_models(session_id)
-                .unwrap_or_else(crate::agent::claude_models::list),
-        ),
+        // The catalogue with the CLI merged in: a running process's own list for its own menu, otherwise
+        // the session's binary is asked (or its cache).
+        SessionKind::Claude => {
+            let bin = crate::agent::executable::for_session(ctx, &session);
+            let live = ctx.chat().live_claude_models(session_id);
+            serde_json::to_value(crate::agent::claude_models::list_for_session(ctx, &bin, probe, live.as_deref()))
+        }
         SessionKind::Codex => {
             let bin = crate::agent::executable::for_session(ctx, &session);
             let args = crate::agent::inject::split_extra_args(session.agent_args.as_deref());
@@ -1541,7 +1552,14 @@ pub fn chat_snapshot_window(
     let mut snapshot = ctx.chat().snapshot_window(session_id, window);
     if !snapshot.running {
         let session = session_settings::session(ctx, session_id)?;
-        let selection = session_settings::resolve(ctx, &session)?;
+        let mut selection = session_settings::resolve(ctx, &session)?;
+        if session.kind == SessionKind::Claude {
+            // A stored spelling (`claude-opus-5-5[1m]`, a dated id) names the same menu row as the
+            // catalogue's identifier; the chip compares identifiers, so it is shown folded. Only the
+            // spelling: this value goes back to the backend on the next send and is persisted, so aliases
+            // such as `opus` stay what the user chose instead of being pinned to today's model.
+            selection.model = selection.model.as_deref().map(crate::agent::claude_models::fold_stored);
+        }
         snapshot.model = selection.model.clone();
         snapshot.effort = selection.effort.clone();
         snapshot.selection = Some(selection);

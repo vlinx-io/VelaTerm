@@ -943,6 +943,9 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             // Sends the continuation prompt to conversations waiting for a usage limit to reset.
             agent::chat::auto_continue::start(AppCtx::Tauri(app.handle().clone()));
             agent::remote_model_catalog::start(AppCtx::Tauri(app.handle().clone()));
+            // Asks the installed Claude CLI for its models once, so the menus know a new model after an
+            // update without anyone editing a catalogue.
+            agent::cli_model_catalog::start(AppCtx::Tauri(app.handle().clone()));
 
             // Refresh the search index in the background so the first search only pays for what changed
             // since startup.
@@ -1588,6 +1591,7 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
     agent::usage_store::start(ctx.clone());
     agent::chat::auto_continue::start(ctx.clone());
     agent::remote_model_catalog::start(ctx.clone());
+    agent::cli_model_catalog::start(ctx.clone());
 
     // Same background index warm-up as the desktop entry point.
     search::warm_index(ctx.clone());

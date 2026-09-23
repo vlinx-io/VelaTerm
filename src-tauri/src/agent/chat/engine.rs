@@ -1262,11 +1262,12 @@ impl ChatManager {
 
         // Native 1M models such as Opus 5 have no second selectable `[1m]` entry in Paseo, so old saved
         // spellings must follow the same canonical path.
-        let model = if kind == SessionKind::Claude {
+        let normalized = if kind == SessionKind::Claude {
             model.map(crate::agent::claude_models::normalize_id)
         } else {
-            model
+            model.map(str::to_string)
         };
+        let model = normalized.as_deref();
 
         // The mode the view is told about is the mode the process is launched with: one value, two uses.
         let mode = initial_mode(kind, permission_mode);
@@ -1932,11 +1933,12 @@ impl ChatManager {
     /// Change the model of the running conversation. `None` restores the default.
     pub fn set_model(&self, session_id: &str, model: Option<&str>) -> Result<(), String> {
         let proc = self.get(session_id)?;
-        let model = if proc.kind == SessionKind::Claude {
+        let normalized = if proc.kind == SessionKind::Claude {
             model.map(crate::agent::claude_models::normalize_id)
         } else {
-            model
+            model.map(str::to_string)
         };
+        let model = normalized.as_deref();
         let _change = proc.settings_change.lock().unwrap();
         if proc.kind == SessionKind::Claude {
             proc.request_and_wait("set_model", |id| {
@@ -2150,14 +2152,14 @@ impl ChatManager {
         Some(commands)
     }
 
-    /// The catalogue the running Claude process reported, or None before it has answered.
-    pub fn live_claude_models(&self, session_id: &str) -> Option<Vec<crate::agent::claude_models::ClaudeModel>> {
+    /// The raw `models` rows the running Claude process reported, or None before it has answered.
+    pub fn live_claude_models(&self, session_id: &str) -> Option<Vec<Value>> {
         let proc = self.sessions.lock().unwrap().get(session_id).cloned()?;
         if proc.kind != SessionKind::Claude {
             return None;
         }
         let list = proc.claude_models.lock().unwrap().clone();
-        (!list.is_empty()).then(|| crate::agent::claude_models::from_live(&list))
+        (!list.is_empty()).then_some(list)
     }
 
     /// Add a measured stream rate when this process observed matching output and usage events.
@@ -3173,7 +3175,7 @@ fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, line: &s
     match protocol::parse_line(line) {
         Incoming::Init { session_id: agent_id, model } => {
             let model = model
-                .map(|value| crate::agent::claude_models::normalize_id(&value).to_string());
+                .map(|value| crate::agent::claude_models::normalize_id(&value));
             *proc.agent_session_id.lock().unwrap() = Some(agent_id.clone());
             if model.is_some() {
                 *proc.model.lock().unwrap() = model.clone();
@@ -5250,8 +5252,15 @@ fn handle_control_response(
                 .cloned()
                 .unwrap_or_default();
             if !models.is_empty() {
-                *proc.claude_models.lock().unwrap() = models;
+                *proc.claude_models.lock().unwrap() = models.clone();
                 emit(app, session_id, json!({"type":"models"}));
+                // Identifiers this process reports are remembered for its binary as additions, so a model
+                // it knows appears in the menus of sessions that are not running; its list never replaces
+                // the probe's. Off the reader thread, because recording may read `claude --version` once.
+                let (app, bin) = (app.clone(), proc.bin.clone());
+                std::thread::spawn(move || {
+                    crate::agent::cli_model_catalog::record_live(&app, &bin, &models);
+                });
             }
             return;
         }

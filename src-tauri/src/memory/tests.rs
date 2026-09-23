@@ -613,7 +613,10 @@ fn compilation_preserves_effort_on_retry_and_replaces_completed_results() {
         let args = std::fs::read_to_string(f.dir.join("args")).unwrap();
         let calls: Vec<Vec<String>> = args
             .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
+            .map(|line| serde_json::from_str::<Vec<String>>(line).unwrap())
+            // The model catalogue probes the Claude fixture once over stream-json before the first job;
+            // only the compilation runs are counted here.
+            .filter(|args| !args.iter().any(|arg| arg == "--input-format"))
             .collect();
         assert_eq!(calls.len(), 8);
         for (index, args) in calls.iter().enumerate() {

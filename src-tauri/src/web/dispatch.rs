@@ -88,7 +88,11 @@ const SECRET_CMDS: &[&str] = &[
 /// target) and the autostart port/enabled keys the next restart trusts; `gitea.token` is a plaintext
 /// credential fallback when no keyring is available.
 fn is_protected_setting(key: &str) -> bool {
-    key.starts_with("remoteAccess.") || key == "gitea.token"
+    key.starts_with("remoteAccess.")
+        || key == "gitea.token"
+        // The CLI probe cache reveals which models the host's account can use, and remote clients read
+        // the catalogue through `chat_models` anyway.
+        || key.starts_with("model-catalog.claude.cli")
 }
 
 /// Deny remote clients direct file access inside the app data directory, which holds the secret files
@@ -857,8 +861,8 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         }
         // The catalogue belongs to an agent installation, but the session selects both its kind and any
         // custom executable/configuration used to query it.
-        "model_catalog_status" => to_value(crate::agent::remote_model_catalog::status()),
-        "model_catalog_refresh" => to_value(crate::agent::remote_model_catalog::refresh(app)),
+        "model_catalog_status" => to_value(crate::agent::cli_model_catalog::catalog_status(app)),
+        "model_catalog_refresh" => to_value(crate::agent::cli_model_catalog::catalog_refresh(app)),
         "chat_models" => core::chat_models(app, &req_str(args, "sessionId")?),
         "chat_commands" => to_value(core::chat_commands(app, &req_str(args, "sessionId")?)?),
         "chat_snapshot" => {
@@ -2538,6 +2542,32 @@ mod tests {
         assert_eq!(after["rev"], 1);
     }
 
+    /// `model_catalog_status` reports the installed CLI once a conversation's list has been recorded for the
+    /// configured binary, and the website module's status before that. Same arm on both transports.
+    #[cfg(unix)]
+    #[test]
+    fn model_catalog_status_reports_the_installed_cli_once_a_list_is_known() {
+        use crate::agent::cli_model_catalog::{self, testing};
+        let app = test_ctx();
+        let dir = app.data_dir().unwrap();
+        let bin = testing::fake_bin(&dir, json!({"version": "2.1.280"}));
+        testing::configure_bin(&app, &bin);
+        let before = dispatch(&app, "model_catalog_status", &json!({}), "ws-1", CallOrigin::Remote).unwrap();
+        assert_ne!(before["source"], "cli");
+        assert!(before.get("cliVersion").is_none());
+        cli_model_catalog::record_live(&app, &bin, &testing::fixture_models());
+        let after = dispatch(&app, "model_catalog_status", &json!({}), "ws-1", CallOrigin::Remote).unwrap();
+        assert_eq!(after["source"], "cli");
+        assert_eq!(after["cliVersion"], "2.1.280");
+        assert!(after["checkedAt"].as_u64().is_some());
+        assert!(after["error"].is_null());
+        // The cache itself stays hidden from remote clients.
+        let settings = dispatch(&app, "get_app_settings", &json!({}), "ws-1", CallOrigin::Remote).unwrap();
+        assert!(settings.get(cli_model_catalog::KEY).is_none());
+        let local = dispatch(&app, "get_app_settings", &json!({}), DESKTOP_SOURCE, CallOrigin::Local).unwrap();
+        assert!(local.get(cli_model_catalog::KEY).is_some());
+    }
+
     /// get_app_settings hides the security-relevant keys (remoteAccess.* verifier/autostart config and
     /// the plaintext gitea.token fallback) from remote clients while local callers keep the full map.
     #[test]
@@ -2550,6 +2580,7 @@ mod tests {
                 ("remoteAccess.port".to_string(), "9123".to_string()),
                 ("gitea.token".to_string(), "secret-token".to_string()),
                 ("vlx-theme".to_string(), "dark".to_string()),
+                (crate::agent::cli_model_catalog::KEY.to_string(), "{}".to_string()),
             ]),
         )
         .unwrap();
@@ -2560,6 +2591,7 @@ mod tests {
         assert!(remote.get("remoteAccess.passwordHash").is_none());
         assert!(remote.get("remoteAccess.port").is_none());
         assert!(remote.get("gitea.token").is_none());
+        assert!(remote.get(crate::agent::cli_model_catalog::KEY).is_none());
 
         let local = dispatch(&app, "get_app_settings", &json!({}), DESKTOP_SOURCE, CallOrigin::Local)
             .expect("local settings read must stay unfiltered");
@@ -2588,6 +2620,17 @@ mod tests {
         let settings = crate::command_core::get_app_settings(&app).unwrap();
         assert!(settings.get("remoteAccess.port").is_none(), "rejected write must not persist");
         assert!(settings.get("vlx-theme").is_none(), "a rejected batch must persist nothing");
+
+        // The CLI probe cache is protected by prefix.
+        let err = dispatch(
+            &app,
+            "set_app_settings",
+            &json!({ "entries": { crate::agent::cli_model_catalog::KEY: "{}" } }),
+            "ws-1",
+            CallOrigin::Remote,
+        )
+        .unwrap_err();
+        assert_eq!(err, format!("remote_setting_forbidden:{}", crate::agent::cli_model_catalog::KEY));
 
         // gitea.token is protected by exact key.
         let err = dispatch(

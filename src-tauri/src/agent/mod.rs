@@ -26,6 +26,7 @@ pub mod model_catalog;
 pub mod launch_options;
 pub mod launch_models;
 pub mod remote_model_catalog;
+pub mod cli_model_catalog;
 pub mod permission_catalog;
 pub mod omp;
 pub mod opencode;

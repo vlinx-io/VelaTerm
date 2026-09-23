@@ -1613,10 +1613,12 @@ const vi: typeof en = {
   "chat.keepChoiceFor": (model) => `Đặt làm mặc định cho ${model}`,
   "chat.followModelDefault": (agent: string) => `Dùng mô hình mặc định của ${agent}`,
   "chat.followModelDefaultHint": "Sử dụng mô hình được xác định trong cấu hình tác nhân.",
+  "chat.followModelDefaultHintNamed": (model: string) => `Uses the model selected by the agent’s configuration (currently ${model}).`, // TODO translate
   "chat.savedModelDefault": "Mặc định của ứng dụng",
   "chat.catalogWebsite": "Danh mục mô hình từ trang web",
   "chat.catalogCache": "Danh mục mô hình đã lưu đệm",
   "chat.catalogBundled": "Danh mục mô hình tích hợp",
+  "chat.catalogCli": "Installed Claude CLI", // TODO translate
   "chat.catalogChecked": (time: string) => `Lần kiểm tra gần nhất: ${time}`,
   "chat.catalogFailed": "Cập nhật thất bại. Bạn vẫn có thể sử dụng danh mục trước đó.",
   "chat.catalogRefresh": "Làm mới",

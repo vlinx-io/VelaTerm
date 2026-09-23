@@ -1669,10 +1669,12 @@ const ru: typeof en = {
   "chat.keepChoiceFor": (model) => `По умолчанию для ${model}`,
   "chat.followModelDefault": (agent: string) => `Использовать модель по умолчанию ${agent}`,
   "chat.followModelDefaultHint": "Модель определяется настройками агента.",
+  "chat.followModelDefaultHintNamed": (model: string) => `Uses the model selected by the agent’s configuration (currently ${model}).`, // TODO translate
   "chat.savedModelDefault": "По умолчанию в приложении",
   "chat.catalogWebsite": "Каталог моделей с сайта",
   "chat.catalogCache": "Каталог моделей из кеша",
   "chat.catalogBundled": "Встроенный каталог моделей",
+  "chat.catalogCli": "Installed Claude CLI", // TODO translate
   "chat.catalogChecked": (time: string) => `Последняя проверка: ${time}`,
   "chat.catalogFailed": "Не удалось обновить каталог. Предыдущий каталог остаётся доступным.",
   "chat.catalogRefresh": "Обновить",

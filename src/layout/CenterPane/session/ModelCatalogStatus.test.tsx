@@ -29,6 +29,25 @@ it("shows restored cache and switches to the new website revision on a backend e
   await waitFor(() => expect(stop).toHaveBeenCalledOnce());
 });
 
+it("names the installed CLI with its version when the list comes from a probe or a conversation", async () => {
+  const changed = vi.fn();
+  vi.mocked(invoke).mockResolvedValue({ source: "cli", revision: null, cliVersion: "2.1.280", checkedAt: 1, error: null, refreshing: false });
+  render(<ModelCatalogStatus onChanged={changed} />);
+  await screen.findByText("Installed Claude CLI");
+  expect(screen.getByText("· 2.1.280")).toBeTruthy();
+  expect(screen.queryByText(/· v/)).toBeNull();
+  expect(screen.getByText(/Last checked:/)).toBeTruthy();
+  expect(screen.queryByText("Update failed. The previous catalog is still available.")).toBeNull();
+  // A failed re-probe keeps the CLI list and shows the existing failure text.
+  await act(async () => receive({ source: "cli", revision: null, cliVersion: "2.1.280", checkedAt: 1, error: "probeFailed:timeout", refreshing: false }));
+  expect(screen.getByText("Installed Claude CLI")).toBeTruthy();
+  expect(screen.getByText("Update failed. The previous catalog is still available.")).toBeTruthy();
+  // A newer CLI version is a change worth re-reading the catalogue for.
+  await act(async () => receive({ source: "cli", revision: null, cliVersion: "2.1.300", checkedAt: 1, error: null, refreshing: false }));
+  expect(screen.getByText("· 2.1.300")).toBeTruthy();
+  expect(changed).toHaveBeenCalledTimes(2);
+});
+
 it("keeps the cached revision visible when manual refresh cannot reach the backend", async () => {
   render(<ModelCatalogStatus onChanged={vi.fn()} />);
   await screen.findByText("Cached model catalog");

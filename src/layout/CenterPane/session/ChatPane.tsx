@@ -121,7 +121,7 @@ import {
   type TurnFold,
 } from "./toolRuns";
 import "./session-view.css";
-import { onTransportReconnect } from "../../../ipc/transport";
+import { listen, onTransportReconnect } from "../../../ipc/transport";
 import { useOutbox, emptySubmissions, acknowledgeSubmissions, createSubmission, deliverSubmission, retrySubmission, submissionsFor, ChatVersions } from "./outbox";
 import { cachedChat, cacheChat, mergeRows, reconcileChat, chatSyncMetrics } from "./chatCache";
 import { ChatSearch } from "./ChatSearch";
@@ -844,6 +844,21 @@ export function ChatPane({
       void chatDetach(session.id).catch(() => {});
     };
   }, [session.id]);
+
+  // The Claude catalogue can change while this pane is open: the start-up probe finishes, Refresh is pressed,
+  // or another conversation reports a newer list from an updated CLI. Re-read it then, as on this session's
+  // own "models" event, so a resting session's chip offers a new model without reopening the pane.
+  useEffect(() => {
+    if (session.kind !== "claude") return;
+    let disposed = false;
+    const subscription = listen("model-catalog://changed", () => {
+      if (!disposed) setCatalogueVersion((v) => v + 1);
+    });
+    return () => {
+      disposed = true;
+      void subscription.then((stop) => stop()).catch(() => {});
+    };
+  }, [session.kind]);
 
   // Read the installed agent's model catalogue once per pane. Discovery may spawn a short-lived CLI, so
   // it stays out of the snapshot path; failure is silent because an empty list simply hides the chip.
@@ -1667,13 +1682,15 @@ export function ChatPane({
   // The agent's own mark, drawn in the margin beside each of its answers.
   const kindIcon = useMemo(() => kindIconEl(session.kind, 12), [session.kind]);
 
+  // The CLI says what its default currently resolves to; the default entry names it when known.
+  const defaultRow = catalogue.find((m) => m.isDefault);
   const modelOptions: ChipOption<string>[] = [
     // The default names no model, so it carries the settings mark, in the accent colour, rather than the
     // agent's.
     {
       value: "",
       label: t("chat.followModelDefault", label),
-      hint: t("chat.followModelDefaultHint"),
+      hint: defaultRow ? t("chat.followModelDefaultHintNamed", defaultRow.label) : t("chat.followModelDefaultHint"),
       glyph: (
         <span style={{ color: "var(--accent)", display: "inline-flex" }}>
           <Icons.sliders size={14} />

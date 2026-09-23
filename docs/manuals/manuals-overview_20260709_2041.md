@@ -27,6 +27,9 @@ Knowledge tools: [Local Notebooks](knowledge-notebooks_20260910.md),
 [Session Knowledge Base](global-memory_20260905_2027.md), and
 [Code Graph & Knowledge Base](codegraph_20260905_2027.md).
 
+Model catalogues: [Claude model catalogue: website catalogue merged with the installed CLI](claude-model-catalog_20260922.md)
+and [Website model catalogue sync](model-catalog-sync_20260909.md).
+
 ## About the screenshots
 
 Manual screenshots live in `docs/assets/manuals/` (the remote guide's are in `docs/assets/remote-guide/`). They were captured against a development environment with demo data, in English UI (the product default) and dark theme; account usage figures, paths, and similar details in some screenshots are sample values.

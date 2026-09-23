@@ -13,10 +13,10 @@ vi.mock("./engineSwitch", () => ({ useEngineSwitch: () => ({ switchTo: vi.fn(), 
 vi.mock("./controls", () => ({
   LevelBar: () => null,
   ControlChip: ({ title, value, options, onPick }: {
-    title: string; value: string; options: { value: string; label: string; tag?: string }[];
+    title: string; value: string; options: { value: string; label: string; tag?: string; hint?: string }[];
     onPick: (value: string, keep: boolean) => void;
   }) => <select aria-label={title} value={value} onChange={(event) => onPick(event.target.value, true)}>
-    {options.map((option) => <option key={option.value} value={option.value}>{option.label}{option.tag ? ` — ${option.tag}` : ""}</option>)}
+    {options.map((option) => <option key={option.value} value={option.value} title={option.hint}>{option.label}{option.tag ? ` — ${option.tag}` : ""}</option>)}
   </select>,
 }));
 vi.mock("./permissionCards", () => ({
@@ -38,6 +38,7 @@ let complete: (value?: unknown) => void;
 let reject: (reason: Error) => void;
 let snapshotOverrides: Partial<ChatSnapshot>;
 let reconnectCallback: () => void;
+let catalogChanged: () => void;
 
 beforeEach(() => {
   clearChatCache();
@@ -52,9 +53,16 @@ beforeEach(() => {
   });
   const chatListeners = new Set<(event: ChatEvent) => void>();
   eventCallback = event => chatListeners.forEach(callback => callback(event));
+  const catalogListeners = new Set<() => void>();
+  catalogChanged = () => catalogListeners.forEach(callback => callback());
   vi.mocked(listen).mockImplementation((name, callback) => {
     const listener = callback as (event: ChatEvent) => void;
     if (name === "chat://event/s") chatListeners.add(listener);
+    if (name === "model-catalog://changed") {
+      const onCatalog = () => (callback as () => void)();
+      catalogListeners.add(onCatalog);
+      return Promise.resolve(() => { catalogListeners.delete(onCatalog); });
+    }
     return Promise.resolve(() => { chatListeners.delete(listener); });
   });
   // Every chip inline: jsdom reports no widths, so nothing folds into a More row and the assertions below
@@ -601,6 +609,59 @@ it("retains the confirmed pending choice when saving another permission mode fai
   expect(select.value).toBe("full-access");
   expect((await screen.findByRole("option", { name: /Full Access — Next turn/ })).textContent).toContain("Full Access");
   expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "chat_interrupt" || command === "chat_permission")).toBe(false);
+});
+
+it("re-reads the model list when the catalogue changes while the pane is open", async () => {
+  await mountPane();
+  const reads = () => vi.mocked(invoke).mock.calls.filter(([command]) => command === "chat_models").length;
+  const before = reads();
+  const previous = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) => command === "chat_models"
+    ? Promise.resolve([
+      { id: "old-model", label: "Old", description: "", effortLevels: ["high"] },
+      { id: "fresh-model", label: "Fresh", description: "", effortLevels: ["high"] },
+    ]) as Promise<never>
+    : previous(command, args));
+  act(() => catalogChanged());
+  await waitFor(() => expect(reads()).toBe(before + 1));
+  expect(await screen.findByRole("option", { name: "Fresh" })).toBeTruthy();
+});
+
+it("listens for catalogue changes only in Claude panes and stops listening on unmount", async () => {
+  // The mock's call log outlives a single test, so count from here on.
+  const count = () => vi.mocked(listen).mock.calls.filter(([name]) => name === "model-catalog://changed").length;
+  const start = count();
+  const subscribed = () => count() - start;
+  const codex = await mountPane("codex");
+  expect(subscribed()).toBe(0);
+  codex.unmount();
+  const claude = await mountPane();
+  expect(subscribed()).toBe(1);
+  claude.unmount();
+  const reads = () => vi.mocked(invoke).mock.calls.filter(([command]) => command === "chat_models").length;
+  const before = reads();
+  act(() => catalogChanged());
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(reads()).toBe(before);
+});
+
+it("names the model the agent's default currently resolves to on the default entry", async () => {
+  const previous = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) => command === "chat_models"
+    ? Promise.resolve([
+      { id: "old-model", label: "Old", description: "", effortLevels: ["high"] },
+      { id: "new-model", label: "New", description: "", effortLevels: ["high"], isDefault: true },
+    ]) as Promise<never>
+    : previous(command, args));
+  await mountPane();
+  const select = screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement;
+  await waitFor(() => expect(select.options[0].title).toBe("Uses the model selected by the agent’s configuration (currently New)."));
+  expect(select.options[0].value).toBe("");
+  // Without a marked default the hint stays generic.
+  await act(async () => { eventCallback({ type: "models" } as ChatEvent); });
+  vi.mocked(invoke).mockImplementation(previous);
+  await act(async () => { eventCallback({ type: "models" } as ChatEvent); });
+  await waitFor(() => expect(select.options[0].title).toBe("Uses the model selected by the agent’s configuration."));
 });
 
 it("clears the Codex effort override when switching to a model without a saved level", async () => {

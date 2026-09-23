@@ -53,6 +53,18 @@ else:
                 raise RuntimeError("Catalogue fixture received a non-catalogue method")
             if "id" in request:
                 print(json.dumps({"id": request["id"], "result": result}), flush=True)
+        elif request.get("type") == "control_request":
+            # The Claude model probe: initialize and list_models both carry the models array.
+            models = [
+                {"value": "fixture-claude-model", "resolvedModel": "fixture-claude-model", "displayName": "Fixture Claude",
+                 "description": "Fixture model", "supportedEffortLevels": ["low", "high"]},
+                {"value": "fixture-claude-model-b", "displayName": "Fixture Claude B", "supportedEffortLevels": ["low"]},
+            ]
+            subtype = request["request"].get("subtype")
+            if subtype not in ("initialize", "list_models"):
+                raise RuntimeError("Catalogue fixture received a non-catalogue control request")
+            print(json.dumps({"type": "control_response", "response": {"subtype": "success", "request_id": request["request_id"],
+                              "response": {"commands": [], "models": models}}}), flush=True)
         else:
             command = request["type"]
             if command not in ("get_available_models", "negotiate_protocol"):

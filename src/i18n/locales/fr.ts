@@ -1668,10 +1668,12 @@ const fr: typeof en = {
   "chat.keepChoiceFor": (model) => `Par défaut pour ${model}`,
   "chat.followModelDefault": (agent: string) => `Utiliser le modèle par défaut de ${agent}`,
   "chat.followModelDefaultHint": "Utilise le modèle défini dans la configuration de l’agent.",
+  "chat.followModelDefaultHintNamed": (model: string) => `Uses the model selected by the agent’s configuration (currently ${model}).`, // TODO translate
   "chat.savedModelDefault": "Par défaut dans l’application",
   "chat.catalogWebsite": "Catalogue de modèles du site",
   "chat.catalogCache": "Catalogue de modèles en cache",
   "chat.catalogBundled": "Catalogue de modèles intégré",
+  "chat.catalogCli": "Installed Claude CLI", // TODO translate
   "chat.catalogChecked": (time: string) => `Dernière vérification : ${time}`,
   "chat.catalogFailed": "Échec de la mise à jour. Le catalogue précédent reste disponible.",
   "chat.catalogRefresh": "Actualiser",

@@ -1603,10 +1603,12 @@ const zhTW: typeof en = {
   "chat.keepChoiceFor": (model) => `設為 ${model} 的預設`,
   "chat.followModelDefault": (agent: string) => `使用 ${agent} 預設設定`,
   "chat.followModelDefaultHint": "使用智慧體設定所決定的模型。",
+  "chat.followModelDefaultHintNamed": (model: string) => `Uses the model selected by the agent’s configuration (currently ${model}).`, // TODO translate
   "chat.savedModelDefault": "應用程式預設",
   "chat.catalogWebsite": "網站模型目錄",
   "chat.catalogCache": "已快取的模型目錄",
   "chat.catalogBundled": "內建模型目錄",
+  "chat.catalogCli": "Installed Claude CLI", // TODO translate
   "chat.catalogChecked": (time: string) => `上次檢查：${time}`,
   "chat.catalogFailed": "更新失敗，仍可使用原有目錄。",
   "chat.catalogRefresh": "重新整理",

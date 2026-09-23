@@ -232,6 +232,8 @@ export interface ChatModel {
   largeContext: boolean;
   /** Reported by the running agent for models that honour fast mode; absent from the curated table. */
   supportsFastMode?: boolean;
+  /** Claude: the model the CLI's own `default` currently resolves to, so the default entry can name it. */
+  isDefault?: boolean;
   /** Codex: the speeds this model offers besides its standard one, such as `priority` ("Fast"). */
   serviceTiers?: ChatServiceTier[];
   /** Codex: the tier the catalogue runs this model at unless told otherwise. */
