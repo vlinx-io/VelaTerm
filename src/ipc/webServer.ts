@@ -21,6 +21,12 @@ export interface WebServerStatus {
   /** URL scheme of the running service ("https" for LAN TLS, "http" for the plaintext modes); null when
    * stopped. Explicit so URL synthesis for late-appearing interfaces never guesses from the URL list. */
   scheme: string | null;
+  /** Canonical listen address of the running service: "all", "loopback", or an IPv4 address; null when stopped. */
+  bind: string | null;
+  /** Persisted listen-address setting ("all", "loopback", or an IPv4 address); null when never set (= all). */
+  savedBind: string | null;
+  /** Persisted address for pairing links in loopback mode; null or "" when none is set. */
+  savedPairingHost: string | null;
 }
 
 /**
@@ -39,6 +45,18 @@ export function webServerStart(
     port: port ?? null,
     lanHttp,
   });
+}
+
+/**
+ * Change where remote access listens: `bind` is "all", "loopback", or an IPv4 address of this computer.
+ * `pairingHost` null keeps the stored pairing address, "" clears it. A running service restarts on the
+ * new address without the password (pairing credentials survive); returns the merged status.
+ */
+export function webServerSetListen(
+  bind: string,
+  pairingHost: string | null,
+): Promise<WebServerStatus> {
+  return invoke<WebServerStatus>("web_server_set_listen", { bind, pairingHost });
 }
 
 /** Stop the Web service. */

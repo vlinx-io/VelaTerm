@@ -12,6 +12,7 @@ import {
   webDeviceRevoke,
   webDevicesList,
   webPairingCreate,
+  webServerSetListen,
   webServerStart,
   webServerStatus,
   webServerStop,
@@ -23,6 +24,7 @@ import { copyText } from "../../ipc/info";
 import { mirrorSetEnabled } from "../../ipc/mirror";
 import { useTermStore } from "../../store/termStore";
 import { invoke } from "../../ipc/transport";
+import { mapBackendError } from "../../ipc/backendError";
 
 /** app_settings key persisting the selected advertised IP; empty string means automatic (backend default). */
 const SHARE_IP_KEY = "vlx-share-ip";
@@ -64,6 +66,16 @@ export function urlsForSelectedIp(
   if (urls.length === 0 || port == null) return urls;
   const s = scheme ?? (urls[0].startsWith("http://") ? "http" : "https");
   return [`${s}://${ip}:${port}`, ...urls];
+}
+
+/**
+ * Localize a backend rejection for display. The desktop Tauri path does not map error codes (only the
+ * WebSocket client does), so the panel maps them itself; a stringified Error's prefix is dropped first,
+ * and messages without a known code pass through unchanged.
+ */
+function errorText(e: unknown): string {
+  const raw = String(e);
+  return mapBackendError(raw.startsWith("Error: ") ? raw.slice("Error: ".length) : raw);
 }
 
 export function RemoteAccessPanel({
@@ -110,6 +122,14 @@ export function RemoteAccessPanel({
   // Address the latest pairing request was issued with; null until the first request. Drives the
   // regeneration effect below independently of whether that request has already resolved.
   const pairRequestedIp = useRef<string | null>(null);
+  // Listen bind of the service when the latest pairing request was issued; a change (listen restart)
+  // regenerates the link like an address change does.
+  const pairRequestedBind = useRef<string | null>(null);
+  // Listen-address choice while stopped ("all", "loopback", or an IPv4); the running service reports its own.
+  const [listenBind, setListenBind] = useState("all");
+  // Address for pairing links in loopback mode, as typed; committed on blur or Enter.
+  const [pairingHost, setPairingHost] = useState("");
+  const [listenBusy, setListenBusy] = useState(false);
 
   useEffect(() => {
     webServerStatus()
@@ -119,6 +139,8 @@ export function RemoteAccessPanel({
         if (s.savedPort != null && !portTouched.current) {
           setPort(String(s.savedPort));
         }
+        setListenBind(s.bind ?? (s.savedBind || "all"));
+        setPairingHost(s.savedPairingHost ?? "");
       })
       .catch(() => setStatus(null));
     networkInterfacesList()
@@ -130,9 +152,15 @@ export function RemoteAccessPanel({
       .catch(() => {});
   }, []);
 
+  // Where the service listens: the running instance's real bind, otherwise the stored choice.
+  const activeBind = status?.running ? (status.bind ?? "all") : listenBind;
+
   // A persisted IP that is currently absent (e.g. VPN down) falls back to automatic without erasing
-  // the stored value; only an explicit re-selection overwrites it.
-  const effectiveIp = ifaces.some((i) => i.ip === selectedIp) ? selectedIp : "";
+  // the stored value; only an explicit re-selection overwrites it. The advertised-IP choice only
+  // applies when listening on every interface: otherwise the backend lists exactly the one reachable
+  // address, and synthesizing a URL for another interface would point at an address nobody listens on.
+  const effectiveIp =
+    activeBind === "all" && ifaces.some((i) => i.ip === selectedIp) ? selectedIp : "";
 
   // Report status after initial discovery or service changes, only when running/port actually changes.
   useEffect(() => {
@@ -172,11 +200,12 @@ export function RemoteAccessPanel({
     if (
       status?.running &&
       pairRequestedIp.current !== null &&
-      pairRequestedIp.current !== effectiveIp
+      (pairRequestedIp.current !== effectiveIp ||
+        pairRequestedBind.current !== (status.bind ?? null))
     )
       void genPairing(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveIp]);
+  }, [effectiveIp, status?.bind]);
 
   // Persist the selection and apply it immediately; the effect above regenerates the link if running.
   const chooseIp = (ip: string) => {
@@ -201,10 +230,38 @@ export function RemoteAccessPanel({
     try {
       setStatus(await webServerStart(password.trim(), portNum));
     } catch (e) {
-      setError(String(e));
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }
+  };
+
+  // Store a new listen address (and, in loopback mode, the pairing address). A running service is
+  // restarted on it by the backend with the same password and pairing credentials; the returned status
+  // replaces ours, and the regeneration effect above re-pairs when the bind changed. On failure the
+  // previous choice stays shown, because it is still what applies.
+  const applyListen = async (bind: string, host: string | null) => {
+    setListenBusy(true);
+    setError("");
+    try {
+      const s = await webServerSetListen(bind, host);
+      setStatus(s);
+      setListenBind(s.bind ?? (s.savedBind || bind));
+      setPairingHost(s.savedPairingHost ?? "");
+    } catch (e) {
+      setError(errorText(e));
+      // The backend stops the service before rebinding; if the restart and its rollback both failed it is
+      // no longer running, so show what is actually true instead of the last known "running".
+      await webServerStatus().then(setStatus).catch(() => {});
+    } finally {
+      setListenBusy(false);
+    }
+  };
+
+  const commitPairingHost = () => {
+    const next = pairingHost.trim();
+    if (next === (status?.savedPairingHost ?? "")) return;
+    void applyListen("loopback", next);
   };
 
   const stop = async () => {
@@ -232,6 +289,7 @@ export function RemoteAccessPanel({
     // late-arriving persisted IP); the sequence guard lets only the latest request take effect.
     const seq = ++pairSeq.current;
     pairRequestedIp.current = effectiveIp;
+    pairRequestedBind.current = status?.bind ?? null;
     setPairBusy(true);
     setError("");
     try {
@@ -348,6 +406,96 @@ export function RemoteAccessPanel({
       onChange={chooseIp}
     />
   );
+  // Listen-address selector: every interface, one candidate address, or loopback for a tunnel. A stored
+  // address that is currently absent stays selected under its own label instead of showing "All
+  // networks", which would misstate who can reach the service.
+  const bindKnown =
+    activeBind === "all" ||
+    activeBind === "loopback" ||
+    ifaces.some((i) => i.ip === activeBind);
+  const listenOptions = [
+    { value: "all", label: t("remote.listenAll") },
+    ...ifaces.map((i) => ({
+      value: i.ip,
+      label: `${i.ip} · ${i.name}${i.vpn ? ` (${t("remote.ipVpn")})` : ""}`,
+    })),
+    ...(bindKnown
+      ? []
+      : [
+          {
+            value: activeBind,
+            // A running instance really listens there (the list is only filtered); a stored one is gone.
+            label: running ? activeBind : t("remote.listenUnavailable", activeBind),
+          },
+        ]),
+    { value: "loopback", label: t("remote.listenLoopback") },
+  ];
+  const listenSelect = (
+    <Select
+      value={activeBind}
+      onChange={(v) => void applyListen(v, null)}
+      options={listenOptions}
+      width="100%"
+      menuWidth={250}
+      align="right"
+      leading={t("remote.listenLabel")}
+      ariaLabel={t("remote.listenLabel")}
+      disabled={listenBusy}
+    />
+  );
+  const reachText =
+    activeBind === "all"
+      ? t("remote.reachAll")
+      : activeBind === "loopback"
+        ? t("remote.reachTunnel")
+        : t("remote.reachOnly", activeBind);
+  // Reachability statement plus, in loopback mode, the address that pairing links should carry.
+  const listenDetails = (
+    <>
+      <div
+        style={{
+          fontSize: 11,
+          color: "var(--text-dim)",
+          lineHeight: 1.5,
+          marginBottom: 8,
+        }}
+      >
+        {reachText}
+      </div>
+      {activeBind === "loopback" && (
+        <>
+          <div style={fieldBoxStyle}>
+            <span style={fieldCaptionStyle}>{t("remote.pairingHostLabel")}</span>
+            <input
+              type="text"
+              value={pairingHost}
+              placeholder={t("remote.pairingHostPlaceholder")}
+              aria-label={t("remote.pairingHostLabel")}
+              disabled={listenBusy}
+              onChange={(e) => setPairingHost(e.target.value)}
+              onBlur={commitPairingHost}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitPairingHost();
+              }}
+              style={fieldInputStyle}
+            />
+          </div>
+          {!pairingHost.trim() && (
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--text-dim)",
+                lineHeight: 1.5,
+                marginBottom: 8,
+              }}
+            >
+              {t("remote.pairingHostNeeded")}
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
   // Pairing fragments are interface-independent. Reuse the first link's `#pair=...` fragment with each host URL.
   const pairFragment = pairUrl ? pairUrl.slice(pairUrl.indexOf("/#") + 1) : "";
   const pairUrls =
@@ -425,6 +573,9 @@ export function RemoteAccessPanel({
               </span>
             </div>
 
+            <div style={{ marginBottom: 6 }}>{listenSelect}</div>
+            {listenDetails}
+
             <div
               style={{
                 fontSize: 11,
@@ -501,7 +652,7 @@ export function RemoteAccessPanel({
 
             <div style={{ height: 6 }} />
 
-            {ipSelector}
+            {activeBind === "all" && ipSelector}
 
             <button
               onClick={() => void genPairing(true)}
@@ -663,55 +814,36 @@ export function RemoteAccessPanel({
           </>
         ) : (
           <>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                width: "100%",
-                boxSizing: "border-box",
-                marginBottom: 8,
-                border: "1px solid var(--border)",
-                borderRadius: "var(--r-sm, 6px)",
-                background: "var(--bg-0)",
-                overflow: "hidden",
-              }}
-            >
-              <span
+            {/* Port and listen address share one row; the reachability statement follows below. */}
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              <div
                 style={{
-                  padding: "8px 10px",
-                  fontSize: 13,
-                  color: "var(--text-dim)",
-                  whiteSpace: "nowrap",
-                  borderRight: "1px solid var(--border)",
+                  ...fieldBoxStyle,
+                  width: 108,
+                  flex: "none",
+                  marginBottom: 0,
                 }}
               >
-                {t("remote.portLabel")}
-              </span>
-              <input
-                type="text"
-                inputMode="numeric"
-                value={port}
-                placeholder="8799"
-                onChange={(e) => {
-                  portTouched.current = true;
-                  setPort(e.target.value.replace(/[^0-9]/g, ""));
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void start();
-                }}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  padding: "8px 10px",
-                  border: "none",
-                  background: "transparent",
-                  color: "var(--text)",
-                  fontSize: 13,
-                  outline: "none",
-                }}
-              />
+                <span style={fieldCaptionStyle}>{t("remote.portLabel")}</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={port}
+                  placeholder="8799"
+                  onChange={(e) => {
+                    portTouched.current = true;
+                    setPort(e.target.value.replace(/[^0-9]/g, ""));
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void start();
+                  }}
+                  style={fieldInputStyle}
+                />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>{listenSelect}</div>
             </div>
-            {ipSelector}
+            {listenDetails}
+            {activeBind === "all" && ipSelector}
             <PasswordField
               value={password}
               placeholder={t("remote.passwordPlaceholder")}
@@ -725,7 +857,7 @@ export function RemoteAccessPanel({
             {mirrorToggle}
             <button
               onClick={start}
-              disabled={busy}
+              disabled={busy || listenBusy}
               style={btnStyle("accent", busy)}
             >
               {busy ? t("remote.starting") : t("remote.start")}
@@ -742,7 +874,7 @@ export function RemoteAccessPanel({
               lineHeight: 1.4,
             }}
           >
-            {t("remote.autostartFailed")} {status.autostartError}
+            {t("remote.autostartFailed")} {mapBackendError(status.autostartError)}
           </div>
         )}
 
@@ -940,6 +1072,38 @@ export function RemoteAccessPanel({
     </>
   );
 }
+
+/** Bordered input row with a caption on the left (port field, pairing address field). */
+const fieldBoxStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  width: "100%",
+  boxSizing: "border-box",
+  marginBottom: 8,
+  border: "1px solid var(--border)",
+  borderRadius: "var(--r-sm, 6px)",
+  background: "var(--bg-0)",
+  overflow: "hidden",
+};
+
+const fieldCaptionStyle: React.CSSProperties = {
+  padding: "8px 10px",
+  fontSize: 13,
+  color: "var(--text-dim)",
+  whiteSpace: "nowrap",
+  borderRight: "1px solid var(--border)",
+};
+
+const fieldInputStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  padding: "8px 10px",
+  border: "none",
+  background: "transparent",
+  color: "var(--text)",
+  fontSize: 13,
+  outline: "none",
+};
 
 function btnStyle(
   kind: "accent" | "danger",

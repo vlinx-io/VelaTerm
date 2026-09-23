@@ -254,11 +254,16 @@ mod tests {
 
         let web = crate::web::WebServer::new();
         let port = free_port();
-        web.start(
+        // Bound to loopback (same LanTls security model) so the test never listens on 0.0.0.0.
+        web.start_with_listen(
             ctx,
             crate::web::StartAuth::Password("pw".into()),
             Some(port),
             crate::web::ServeMode::LanTls,
+            crate::web::ListenConfig {
+                bind: crate::web::BindChoice::Loopback,
+                pairing_host: None,
+            },
         )
         .expect("the web service should start");
 

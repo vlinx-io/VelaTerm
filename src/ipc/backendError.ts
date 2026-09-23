@@ -79,6 +79,12 @@ export function mapBackendError(raw: string): string {
     case "zcode_no_models":
       if (detail !== "zai" && detail !== "bigmodel") return raw;
       return t(detail === "zai" ? "chat.auth.zcode.noModels.zai" : "chat.auth.zcode.noModels.bigmodel");
+    case "remote_bind_invalid":
+      return t("remote.bindInvalid", detail);
+    case "remote_bind_unavailable":
+      return t("remote.bindUnavailable", detail);
+    case "remote_pairing_host_invalid":
+      return t("remote.pairingHostInvalid", detail);
     default:
       return raw;
   }
