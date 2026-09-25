@@ -68,6 +68,37 @@ To ban a device, click Block next to it and confirm — it's disconnected immedi
 
 Stop Server at the bottom of the panel. Browser clients disconnect; running sessions are unaffected — they belong to the desktop app itself.
 
+### 2.6 Running headless (vela-server)
+
+The same remote access server also runs without any window: the headless build `vela-server` (built with `cargo build --no-default-features`) or the desktop binary started with `--serve`. This suits an always-on machine, for example as a launchd or systemd service.
+
+```bash
+vela-server --serve [--port 8799] [--password-file <path>] [--data-dir <dir>]
+```
+
+The server needs an access password. It takes the first source that is set, in this order:
+
+1. `--password <password>`: visible in the process list, so avoid it outside quick tests.
+2. `--password-file <path>`: recommended for services.
+3. The `VELA_SERVE_PASSWORD` environment variable (this is how SSH mode and the Electron shell pass it).
+4. The legacy `VLX_SERVE_PASSWORD` environment variable.
+
+When `--password` is given, the file is not read at all. When `--password-file` is given without `--password`, the file must be usable: a missing, unreadable or empty file stops the server with an error instead of falling back to the environment.
+
+**The password file.** The password is the first line of the file; a trailing line break (LF or CRLF) is removed, and anything after the first line is ignored. An empty first line is an error. On Unix systems (macOS, Linux) the file must not be readable or writable by group or others, otherwise the server refuses to start and names the file and the fix. Create it like this:
+
+```bash
+umask 077
+mkdir -p ~/.velaterm
+printf '%s\n' 'your-access-password' > ~/.velaterm/serve-password
+chmod 600 ~/.velaterm/serve-password
+vela-server --serve --password-file ~/.velaterm/serve-password
+```
+
+If the file (or any other `--serve` argument) is rejected, the server prints the error on stderr, followed by the usage line with the password precedence, and exits with status 1. For a file that is too open, the error names the path and the command that fixes it (`chmod 600 <path>`); a test pins that text. Error messages name the file path but never its content, and the password is never printed.
+
+**Child processes never see the password.** The very first thing the server does at startup, before it launches any process or starts any server, engine or terminal session, is read both password variables and remove them from its own environment. Only then does it run the login-shell probe that recovers your shell environment when it was started without a terminal (SSH mode, a service, a Dock launch of the Electron shell), so that shell and anything its startup files launch start without the password; the probe command also drops both variables on its own. If one of your shell startup files exports `VELA_SERVE_PASSWORD` itself, that value takes the place of an inherited variable (it still ranks below `--password` and `--password-file`) and is removed again right after the probe. Terminal sessions, chat engine processes, the model catalog probe and every other helper the server launches therefore do not inherit `VELA_SERVE_PASSWORD` or `VLX_SERVE_PASSWORD`. Tests cover the removal step, the order (a stand-in for the login-shell probe sees neither variable, and neither is left afterwards) and the probe command itself; that the server entry point runs this step before anything else is not covered by a test. Note that the removal does not reach back into the environment the server itself was started with: whoever can inspect that (the same user or root, for example via `/proc/<pid>/environ` on Linux or `ps eww` on macOS) still finds a variable passed at launch. A password file avoids that.
+
 ## 3. Connecting out (Connect to Remote Server)
 
 Click the connect button in the title bar; the panel offers SSH and URL modes.

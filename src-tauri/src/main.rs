@@ -65,18 +65,20 @@ fn main() {
     // desktop app. Short-lived shims above have already returned. Child agents inherit this limit;
     // without it, Node-based agents can fail under macOS's default limit of 256 descriptors.
     raise_fd_limit();
-    // Dock and desktop launches inherit a minimal environment: no login-shell PATH, no variables a
-    // startup file exports. Both are needed by the GUI and by the headless server's chat engine, so
-    // recover them before anything spawns a child process. Terminal launches already carry the shell
-    // environment and skip this.
-    #[cfg(unix)]
-    velaterm_lib::login_env::hydrate();
     // Headless server mode starts browser remote access (HTTPS, login, WebSocket, and PTY) from the CLI
-    // without creating a window or requiring a display server.
+    // without creating a window or requiring a display server. It must run before anything below spawns
+    // a thread or child: run_serve first removes the access password from the environment and only then
+    // recovers the login-shell environment itself, so the login-shell probe never inherits the password.
     if args.get(1).map(String::as_str) == Some("--serve") {
         velaterm_lib::run_serve(&args);
         return;
     }
+    // Dock and desktop launches inherit a minimal environment: no login-shell PATH, no variables a
+    // startup file exports. The GUI needs both, so recover them before anything spawns a child process
+    // (--serve does the same inside run_serve, after its password scrub). Terminal launches already
+    // carry the shell environment and skip this.
+    #[cfg(unix)]
+    velaterm_lib::login_env::hydrate();
     // Everything below is GUI-only. The minimal server either ran --serve above or reaches the
     // not(gui) misuse branch below when invoked without a subcommand.
     #[cfg(feature = "gui")]
@@ -107,7 +109,7 @@ fn main() {
     #[cfg(not(feature = "gui"))]
     {
         velaterm_lib::diagnostic_warn!(
-            "vela-server: headless build (no GUI). usage: vela-server --serve [--port <p>] [--data-dir <dir>]; password via VELA_SERVE_PASSWORD env. also: --version"
+            "vela-server: headless build (no GUI). usage: vela-server --serve [--port <p>] [--data-dir <dir>] [--password <pw> | --password-file <path>]; password precedence: --password > --password-file (chmod 600) > VELA_SERVE_PASSWORD env > VLX_SERVE_PASSWORD env. also: --version"
         );
         std::process::exit(2);
     }
