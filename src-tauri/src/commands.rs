@@ -681,7 +681,7 @@ pub async fn open_remote_window(
         .parse()
         .map_err(|e| format!("Failed to build tunnel address: {e}"))?;
 
-    let label = format!("remote-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let label = format!("{}{}", crate::main_window::URL_REMOTE_PREFIX, &uuid::Uuid::new_v4().to_string()[..8]);
 
     let addr_js = serde_json::to_string(&display_addr).unwrap_or_else(|_| "\"\"".into());
 
@@ -765,7 +765,7 @@ pub async fn open_account_remote_window(
     .await
     .map_err(|e| format!("Remote window task failed: {e}"))??;
     let parsed: url::Url = url.parse().map_err(|e| format!("Invalid remote URL: {e}"))?;
-    let label = format!("account-remote-{}", uuid::Uuid::new_v4().simple());
+    let label = format!("{}{}", crate::main_window::ACCOUNT_REMOTE_PREFIX, uuid::Uuid::new_v4().simple());
     // Force the browser transport: the external page has no Tauri IPC capability, and the app talks to the
     // host over the WebSocket tunnel instead. Keep __TAURI_INTERNALS__ for clipboard and notification APIs.
     let init_script = r#"(function(){
@@ -1127,7 +1127,7 @@ fn open_login_window(
     let parsed: url::Url = format!("http://127.0.0.1:{local_port}/")
         .parse()
         .map_err(|e| format!("failed to build local forward address: {e}"))?;
-    let label = format!("ssh-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let label = format!("{}{}", crate::main_window::SSH_REMOTE_PREFIX, &uuid::Uuid::new_v4().to_string()[..8]);
     let addr_js = serde_json::to_string(host).unwrap_or_else(|_| "\"\"".into());
     let pw_js = serde_json::to_string(password).unwrap_or_else(|_| "\"\"".into());
     let session_js = serde_json::to_string(session).unwrap_or_else(|_| "\"\"".into());

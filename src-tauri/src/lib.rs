@@ -40,6 +40,8 @@ mod mobile_push;
 mod split_trace;
 pub mod diagnostics;
 #[cfg(feature = "gui")]
+mod main_window;
+#[cfg(feature = "gui")]
 mod native_menu;
 // GUI-only watchdog reporting stalls of the platform event loop, which are what a frozen window actually is.
 #[cfg(feature = "gui")]
@@ -1226,11 +1228,28 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                         label,
                         event: tauri::WindowEvent::CloseRequested { api, .. },
                         ..
-                    } if label == "main"
+                    } if label == main_window::MAIN_LABEL
                         && !app.state::<QuitState>().confirmed.load(Ordering::SeqCst) =>
                     {
                         api.prevent_close();
-                        request_quit_confirmation(app);
+                        // While a remote window is open, closing main only hides it so remote-only work
+                        // continues; local sessions keep running in the background.
+                        if !main_window::hide_main_for_remote(app) {
+                            request_quit_confirmation(app);
+                        }
+                    }
+                    // The last remote window closing brings a hidden main window back.
+                    tauri::RunEvent::WindowEvent {
+                        label,
+                        event: tauri::WindowEvent::Destroyed,
+                        ..
+                    } if !app.state::<QuitState>().confirmed.load(Ordering::SeqCst) => {
+                        main_window::on_window_destroyed(app, label);
+                    }
+                    // A Dock click brings a hidden main window back.
+                    #[cfg(target_os = "macos")]
+                    tauri::RunEvent::Reopen { .. } => {
+                        main_window::reveal_hidden_main(app);
                     }
                     _ => {}
                 }
@@ -1270,6 +1289,8 @@ fn request_quit_confirmation(app: &tauri::AppHandle) {
     if st.confirmed.load(Ordering::SeqCst) {
         return;
     }
+    // The frontend dialog lives in the main webview, which may be hidden behind remote-only work.
+    main_window::reveal_hidden_main(app);
     // A request arriving while one is already pending is not a duplicate to drop: the frontend that
     // acknowledged the first one may since have reloaded or crashed, taking its dialog with it. Dropping
     // it would latch `pending` forever and leave the application unquittable, because only the frontend

@@ -122,6 +122,14 @@ The first two layers are safe by construction. The only layer to think about is 
 
 **URL mode**: you were a guest on a program that was already running over there. Closing your window just means you leave; the other side keeps going, and everything is there when you come back.
 
+**The local main window** (desktop app): if you work fully remotely, you can close the local main window while at least one remote window is open. VelaTerm then only hides it instead of quitting. There is no quit prompt, the remote windows keep working, and your local sessions keep running in the background. The main window comes back when:
+
+- you click the VelaTerm icon in the Dock (macOS),
+- you close the last remote window, so the app is never left running without a window,
+- you quit the app (for example ⌘Q, the Quit menu item or Quit from the Dock on macOS). The main window shows up first, because the quit prompt appears in it.
+
+With no remote window open, closing the main window asks whether to quit, as before.
+
 ### 4.3 Drops and reconnects
 
 On network hiccups, a red reconnect bar appears at the top of the remote window and retries automatically; running sessions are unaffected — in SSH mode the remote server is detached from the SSH session (it survives network drops by design).
