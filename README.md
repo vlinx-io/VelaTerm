@@ -91,7 +91,9 @@ pnpm dev:stop <label> # stop one instance by label
 
 Every dev instance picks a random port and carries a label, so several can run side by side. `dev:web`
 binds `0.0.0.0`, so it also prints a LAN address that another computer or a phone can open, and it
-defaults to an isolated database under `.dev-data/`, leaving your real session tree untouched.
+defaults to an isolated database under `.dev-data/`, leaving your real session tree untouched. On a
+machine that must not expose ports to its network, `VLX_DEV_BIND=loopback pnpm dev:web` binds
+`127.0.0.1` only (see the [remote development guide](docs/manuals/remote-development-guide_20260709_2041.md#51-for-contributors-a-dev-instance-that-stays-off-the-lan)).
 
 Build and test:
 

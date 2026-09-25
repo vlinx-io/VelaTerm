@@ -146,6 +146,20 @@ Passwords (SSH account passwords, remote login passwords) are stored only in the
 
 One more: if the remote window's title bar shows a red "⚠ vX ≠ vY" badge, your client UI and the remote server are on different versions — features may not line up; upgrade both ends to the same version.
 
+### 5.1 For contributors: a dev instance that stays off the LAN
+
+This applies only to working on VelaTerm from source, not to the Remote Access server above. `pnpm dev:web` (`scripts/dev-serve.sh`) is a plaintext development setup: by default Vite and the debug backend bind `0.0.0.0` (`--lan-http`), so a phone or another computer on the same network can open it, and the banner prints the login password and a pairing link. On a machine that must not expose ports to its network (a shared or always-on dev machine reached only through SSH or a VPN such as Tailscale), start it in loopback mode instead:
+
+```bash
+VLX_DEV_BIND=loopback pnpm dev:web
+```
+
+In loopback mode the backend runs with `--local-http`, Vite binds `127.0.0.1`, and free ports are probed on `127.0.0.1`, so nothing listens on the LAN. The banner shows only the local URL (`http://localhost:<port>`), one hint for reaching it from your own machine (`ssh -L <port>:localhost:<port> <this-host>`), and instead of the password only where it comes from: `VELA_SERVE_PASSWORD` if set; otherwise a random password is generated, kept in `<data dir>/dev-password` with mode `0600` and reused on the next start, instead of the well-known default `dev`. No pairing link is printed. Do not publish a loopback dev instance with `tailscale serve` or another shared proxy: the backend runs with `--local-http`, where every client has the local management level, so everyone who can reach the proxy would have it (and Vite also refuses host names it does not know). The instance is still registered and listed by `pnpm dev:ls` (its registry entry carries an extra `bind` field that `dev:ls` and `dev:stop` ignore), and `pnpm dev:stop <label>` works as in the default mode. An inherited `TAURI_DEV_HOST` is cleared in loopback mode, so no separate hot-reload socket opens on a network address.
+
+`VLX_DEV_BIND` accepts `lan` and `loopback`; unset or empty means `lan`, which is the unchanged default. Any other value stops the script with an error before anything is registered or started. A service profile for such a machine can simply set `VLX_DEV_BIND=loopback` in its environment.
+
+The bindings, the banner, the registry entry, the `dev:ls` listing and the error path are covered by `scripts/dev-serve.test.mjs`; `dev:stop` in loopback mode is not covered by a test. Hot reload is meant to follow the page origin through a tunnel, because loopback mode leaves the HMR host unset; that has not been tested through a real `ssh -L` tunnel.
+
 ## 6. FAQ
 
 **Connected, but the sidebar stays empty or the red bar spins forever?** Most likely the SSH tunnel or the remote server is gone — in-window reconnect can't fix that (§4.3). Go back to the main window and Connect again.

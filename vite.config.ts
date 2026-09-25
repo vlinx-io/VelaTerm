@@ -10,7 +10,8 @@ const host = process.env.TAURI_DEV_HOST;
 // @ts-expect-error process is a nodejs global
 const vitePort = Number(process.env.VLX_VITE_PORT) || 1420;
 
-// Host binding: dev:web sets VLX_VITE_HOST=0.0.0.0 so other devices on the LAN can connect. Otherwise, retain
+// Host binding: dev:web sets VLX_VITE_HOST=0.0.0.0 so other devices on the LAN can connect, or 127.0.0.1 with
+// VLX_DEV_BIND=loopback so nothing listens on the network. Otherwise, retain
 // TAURI_DEV_HOST for Tauri testing on a physical device; if neither is set, listen only on localhost.
 // @ts-expect-error process is a nodejs global
 const bindHost = process.env.VLX_VITE_HOST || host || false;
