@@ -861,7 +861,7 @@ const de: typeof en = {
   "settings.fontPreviewChat": "Ich habe die Einstellungsseite aktualisiert. Jede Schrifteinstellung wird sofort wirksam, und Sie können die Standardwerte jederzeit wiederherstellen.",
   "settings.fontResetGroup": "Standardschriften wiederherstellen",
   "settings.composerChips": "Symbolleiste im Eingabebereich",
-  "settings.composerChipsHint": "Aktivierte Elemente erscheinen in dieser Reihenfolge neben der Nachricht. Ist eine Funktion vorübergehend nicht verfügbar (der Agent läuft nicht, es gibt keine Hintergrundaufgaben oder die Anmeldung steht noch aus), bleibt ihr Element sichtbar, aber leer oder deaktiviert. Funktionen, die der aktuelle Agent nicht unterstützt, werden ausgelassen. Elemente, für die der Platz nicht reicht, erscheinen im Menü „Mehr“. Hier ausgeschaltete Elemente erscheinen nur in diesem Menü und können weiterhin hier konfiguriert werden.",
+  "settings.composerChipsHint": "Aktivierte Elemente erscheinen in dieser Reihenfolge neben der Nachricht. Ist eine Funktion vorübergehend nicht verfügbar (der Agent läuft nicht, es gibt keine Hintergrundaufgaben oder die Anmeldung steht noch aus), bleibt ihr Element sichtbar, aber leer oder deaktiviert. Funktionen, die der aktuelle Agent nicht unterstützt, werden ausgelassen. Elemente, für die der Platz nicht reicht, erscheinen im Menü „Mehr“. Hier ausgeschaltete Elemente werden nirgends angezeigt, bis Sie sie wieder einschalten.",
   "settings.composerChipUp": (chip: string) => `${chip} nach oben verschieben`,
   "settings.composerChipDown": (chip: string) => `${chip} nach unten verschieben`,
   "settings.composerChip.model": "Modell",

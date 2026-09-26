@@ -61,7 +61,7 @@ function Harness({ mobile = false, inline }: { mobile?: boolean; inline: Compose
 }
 
 describe("composer toolbar", () => {
-  it("keeps hidden available chips reachable even when the enabled chips fit", () => {
+  it("never renders a chip that is off, not even behind More", () => {
     widths = { row: 400, more: 70, model: 80, effort: 60, permission: 90 };
     render(<Harness inline={["model", "effort", "permission"]} />);
     expect(screen.getByRole("button", { name: "Model" })).toBeTruthy();
@@ -69,9 +69,9 @@ describe("composer toolbar", () => {
     expect(screen.getByRole("button", { name: "Permission" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
     expect(screen.getByText("Pending permission")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "standard" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.getByRole("button", { name: "standard" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+    expect(document.querySelector('[data-chip="serviceTier"]')).toBeNull();
+    expect(document.querySelector(".sv-controls-secondary")).toBeNull();
   });
 
   it("orders inline chips by the preference, not by the pane", () => {
@@ -81,7 +81,7 @@ describe("composer toolbar", () => {
     expect(names).toEqual(["Permission", "Model"]);
   });
 
-  it("folds the chips that do not fit together with the disabled ones behind a More toggle", () => {
+  it("folds only the enabled chips that do not fit behind a More toggle", () => {
     // 80 + 6 + 60 = 146 fits; adding the 90 wide permission chip or the toggle does not.
     widths = { row: 220, more: 70, model: 80, effort: 60, permission: 90 };
     render(<Harness inline={["model", "effort", "permission"]} />);
@@ -96,16 +96,16 @@ describe("composer toolbar", () => {
     const row = document.getElementById(more.getAttribute("aria-controls")!)!;
     expect(row.hidden).toBe(false);
     const folded = [...row.querySelectorAll(".sv-chip-slot")].map((el) => (el as HTMLElement).dataset.chip);
-    expect(folded).toEqual(["effort", "permission", "serviceTier"]);
+    expect(folded).toEqual(["effort", "permission"]);
     fireEvent.click(more);
     expect(screen.queryByRole("button", { name: "Effort" })).toBeNull();
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Keep this message");
   });
 
   it("closes selectors before the settings row and folds on Escape or outside click without stopping work", () => {
-    // Not even the one enabled chip fits, so the toggle stands alone and everything is folded.
+    // Not even the first enabled chip fits, so the toggle stands alone and everything is folded.
     widths = { row: 60, more: 70, model: 80 };
-    render(<Harness inline={["model"]} />);
+    render(<Harness inline={["model", "serviceTier"]} />);
     const more = screen.getByRole("button", { name: "More" });
     fireEvent.click(more);
     const speed = screen.getByTitle("Speed");
@@ -125,7 +125,7 @@ describe("composer toolbar", () => {
     expect(more.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("brings a folded chip back without removing access to hidden chips", () => {
+  it("brings a folded chip back and drops More once nothing is folded", () => {
     // 80 + 60 + 6 = 146 does not fit in 130; the model chip plus the 30 wide toggle (116) does.
     widths = { row: 130, more: 30, model: 80, effort: 60 };
     render(<Harness inline={["model", "effort"]} />);
@@ -136,20 +136,20 @@ describe("composer toolbar", () => {
     widths.row = 300;
     act(() => observers.forEach((callback) => callback()));
     expect(screen.getByRole("button", { name: "Effort" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "More" })).toBe(more);
-    fireEvent.click(more);
+    expect(screen.queryByRole("button", { name: "More" })).toBeNull();
     widths.row = 130;
     act(() => observers.forEach((callback) => callback()));
     expect(screen.queryByRole("button", { name: "Effort" })).toBeNull();
     expect(screen.getByRole("button", { name: "More" }).getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("keeps an explicitly empty inline configuration accessible and omits an empty More", () => {
+  it("renders no chip and no More when every chip is off", () => {
     widths = { row: 400, more: 70, model: 80 };
     const { rerender } = render(<Harness inline={[]} />);
-    expect(document.querySelectorAll(".sv-controls-primary .sv-chip-slot")).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "More" }));
-    expect(screen.getByRole("button", { name: "Model" })).toBeTruthy();
+    expect(document.querySelectorAll(".sv-chip-slot")).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+    expect(document.querySelector(".sv-more-toggle")).toBeNull();
+    expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
     rerender(<ComposerToolbar chips={[]} inline={[]} mobile={false} actions={<button>Send</button>} status={null} />);
     expect(screen.queryByRole("button", { name: "More" })).toBeNull();
     expect(document.querySelector(".sv-controls-secondary")).toBeNull();
@@ -187,14 +187,13 @@ describe("composer toolbar", () => {
     expect(observed.size).toBe(0);
   });
 
-  it("keeps both rows visible on mobile without measuring or a toggle", () => {
+  it("wraps the enabled chips on mobile without measuring, a toggle or the chips that are off", () => {
     widths = { row: 10, more: 70, model: 80, effort: 60, permission: 90 };
     render(<Harness mobile inline={["model", "effort"]} />);
     expect(screen.queryByRole("button", { name: "More" })).toBeNull();
     expect(screen.getByRole("button", { name: "Model" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Effort" })).toBeTruthy();
-    const row = document.querySelector<HTMLElement>(".sv-controls-secondary")!;
-    expect(row.hidden).toBe(false);
-    expect([...row.querySelectorAll(".sv-chip-slot")].map((el) => (el as HTMLElement).dataset.chip)).toEqual(["permission", "serviceTier"]);
+    expect(document.querySelector(".sv-controls-secondary")).toBeNull();
+    expect([...document.querySelectorAll(".sv-chip-slot")].map((el) => (el as HTMLElement).dataset.chip)).toEqual(["model", "effort"]);
   });
 });
