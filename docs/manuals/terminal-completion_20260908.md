@@ -1,62 +1,81 @@
 # Command suggestions
 
-Command suggestions use the current shell's completion definitions. Commands remain in the terminal's normal input line; choosing a suggestion inserts text without executing it. This feature does not call an AI model.
+Created: 2026-09-08
+
+Updated: 2026-09-25 10:21
+
+Command suggestions show a list of candidates taken from your shell's own completion definitions while you type in a plain terminal session. The command stays in the terminal's normal input line, and choosing a suggestion inserts text without running it. This feature does not use an AI model.
+
+Suggestions are available on macOS and Linux. On Windows the feature is currently turned off (see [Windows](#windows)).
 
 ## Settings and controls
 
-Under **Settings → Terminal → Command suggestions**, choose:
+Settings ▸ Terminal ▸ "Command suggestions" offers three modes:
 
-- **Automatic** (default): coalesce input for 25 ms before requesting suggestions. Continued typing does not restart that window. While a request is running, only the latest input is retained for an immediate follow-up; stale results are discarded. Exact matches remain visible. Further input requests fresh suggestions.
-- **On Tab**: request suggestions only when Tab is pressed.
-- **Off**: hide suggestions and stop requesting candidates. Tab retains the shell’s native behavior. Changes apply to open terminals; switching back enables suggestions again.
+- **Automatic** (default): VelaTerm collects your input for about 25 ms and then asks the shell for suggestions; typing more does not restart that wait. If you keep typing while a request is running, only your latest input is used for the next request, and outdated results are discarded. An exact match stays in the list.
+- **On Tab**: suggestions appear only when you press Tab.
+- **Off**: no suggestion list is shown, and Tab keeps the shell's native behavior.
 
-Use the arrow keys to select a candidate, then Tab to insert it. A mouse click also inserts the selected candidate. Enter always passes through to the shell to run the current command without applying a suggestion. Escape dismisses the list. An arrow that cannot move the selection any further is handed back to the shell, so Up on the first candidate recalls the previous command instead of being swallowed.
+A change takes effect in open terminals immediately, and the choice is shared by every client connected to the same VelaTerm backend.
 
-The backend ranks candidates by exact match, prefix match, substring match, and other native matches, preferring case-sensitive matches within exact and prefix groups. Shorter candidates come first within each group, with alphabetical ordering for ties. Native selection indices remain unchanged.
+Keys and mouse:
 
-The compact suggestion list highlights the shell's current completion token and displays native descriptions when the provider supplies them. The selected candidate and popup position are retained while results refresh. Page Up and Page Down move through longer lists; Ctrl+Space requests suggestions manually. If input changes while a selection is pending, insertion waits for a current shell result and only applies the same candidate if it is still available. Accepting a suggestion closes the list, including for directories ending in `/`. Another Tab press explicitly requests suggestions again, including the next directory level. Further typing requests suggestions automatically in Automatic mode.
+- Up and Down select a candidate; Page Up and Page Down move through longer lists.
+- Tab, or a mouse click, inserts the selected candidate.
+- Enter always goes to the shell and runs the current command as typed, without applying a suggestion.
+- Escape closes the list.
+- Ctrl+Space requests suggestions manually.
+- When the selection cannot move any further, Up and Down go back to the shell. Pressing Up on the first candidate therefore recalls the previous command from history.
 
-The popup follows the Monaco styling used by vlx-sql: compact rows, a thin border, subdued shadow and a single selection background. Width adapts to the content, up to 430 px. The persistent status bar and duplicate description panel are hidden; hover over a candidate to read its full description.
+Candidates are ordered as exact matches, prefix matches, substring matches and then other matches from the shell. Within exact and prefix matches, case-sensitive matches come first; within each group, shorter candidates come first, and ties are ordered alphabetically.
 
-The setting is saved by the backend and synchronized between clients. Shell integration is loaded when a new terminal starts, so restart terminals that were already running before this feature was installed. Your shell startup files are not modified. A custom terminal startup command still runs after integration is loaded.
+The list highlights the part of each candidate that matches what you typed and shows the shell's description when one is available; hover over a candidate to read a long description. The list keeps its position and selection while results refresh. Accepting a suggestion closes the list, including when the candidate is a directory ending in `/`. Press Tab again to see the next directory level. In Automatic mode, further typing opens the list again.
 
-Zsh loads integration through temporary startup wrappers, after the user's login files. The wrappers preserve startup order and restore `ZDOTDIR`; no initialization command is typed into the terminal. This requires a build containing the startup-wrapper fix; existing processes retain their original integration.
+If you change the input while an insertion is pending, VelaTerm waits for a fresh result from the shell and inserts the candidate only if it is still offered.
 
 ## Shell support
 
-| Shell or environment | Integration |
+| Shell | Suggestions |
 | --- | --- |
-| Zsh | Native completion widgets and `compadd`; existing completion definitions are retained. |
-| Bash 4 or later | Registered completion functions and specifications; command and file completion when no registered candidates are available. |
+| Zsh | Native completion widgets and `compadd`; your existing completion definitions are used. |
+| Bash 4 or later | Registered completion functions and specifications; command and file names when nothing is registered. |
 | Fish | Native `complete -C` candidates and descriptions. |
-| PowerShell with PSReadLine | Native `CommandCompletion.CompleteInput`; PSReadLine applies the replacement range. |
-| Git Bash | Bash integration, using that shell's paths and installed definitions. |
-| WSL | The selected distribution's default Bash, Zsh or Fish; paths are resolved inside that distribution. |
-| CMD, Bash 3.2, unintegrated shells | Native Tab behavior is retained; no suggestion list is provided. |
+| PowerShell (pwsh) with PSReadLine | Native `CommandCompletion.CompleteInput`. |
+| Bash 3.2 and other shells | Native Tab behavior only; no suggestion list. |
 
-On Windows no integration is loaded at all for now, whatever the setting holds, and the setting itself is hidden there. Git Bash, Windows PowerShell and WSL sessions keep their native Tab behavior. Loading Bash-family integration would require typing an initialization command into the terminal, and each suggestion request creates helper processes, which is slow enough on that platform to stall typing.
+The Bash that ships with macOS is version 3.2. To use suggestions with Bash on macOS, set a newer Bash (for example one installed with Homebrew) as your login shell.
 
-PowerShell execution policy still applies to the generated integration script. This feature does not bypass that policy. Windows PowerShell scripts are written with a UTF-8 BOM so non-ASCII user paths are preserved.
+Suggestions are available only in plain terminal sessions. Agent sessions are not changed.
 
-Entering SSH or another nested shell does not automatically install integration in that environment. Managed agent sessions are not modified. Suggestions pause during detected command execution, alternate-screen programs, IME composition and shell history navigation, which covers Ctrl+R, Ctrl+S and the arrow keys. Arrow keys never start an automatic request: the request runs a completion widget inside the shell, and Zsh ends its continuing history search after the first recalled entry once another widget runs, so Up would stop moving through earlier commands. An unmodified Tab falls back to the shell when integration is unavailable or no candidates were extracted.
+## How the integration is loaded
 
-## Compatibility limits
+VelaTerm loads its shell integration when a terminal starts. Your shell startup files are never modified, and a custom startup command still runs after the integration is loaded. Terminals that were already running before you installed a version with this feature need to be restarted.
 
-Candidates depend on the completion definitions installed in the shell. VelaTerm does not supply a complete command catalog or a separate history-based prediction engine. Complex Bash providers may depend on Readline completion internals that a `bind -x` callback cannot reproduce exactly.
+- **Zsh** loads the integration through temporary startup files after your own login files, and restores `ZDOTDIR` afterwards. Nothing is typed into the terminal.
+- **Bash** starts with a temporary `--rcfile` that first reads your login files in Bash's usual order (`/etc/profile`, then the first of `~/.bash_profile`, `~/.bash_login` and `~/.profile`) and then loads the integration. Nothing is typed into the terminal. Two differences from a normal login shell remain: `shopt -q login_shell` reports false, and `~/.bash_logout` does not run when the shell exits.
+- **Fish** and **PowerShell** have no comparable startup hook, so VelaTerm sends one command that loads the integration when the shell starts; that line appears at the top of the new terminal.
 
-Native completion functions can run external programs and may be slow. After a request is acknowledged, the interface limits polling to two seconds; it does not kill a shell function that is still running. Ctrl+C can interrupt the shell normally. Requests are serialized per session, and both the backend and the shell reject stale selections.
+PowerShell's execution policy still applies to the integration script; VelaTerm does not bypass it.
 
-The integration reserves Ctrl+F12 for candidate collection and Ctrl+F11 for applying a selection. A shell configuration that rebinds these keys after integration starts can disable the feature. Bash 4.0–4.3 additionally wraps Enter and Ctrl+J because those versions do not provide the `PS0` pre-execution hook.
+Suggestions pause while a command is running, while a full-screen program is open, during input method (IME) composition and during history navigation (Ctrl+R, Ctrl+S and the arrow keys). The arrow keys never start an automatic request, so repeated Up presses keep moving through earlier commands. When no integration is active or no candidates were found, Tab keeps its native behavior.
 
-## Verification status
+Starting SSH or another nested shell inside the terminal does not install the integration in that environment.
 
-Verified on macOS with Zsh and Bash 5.2, and in a local Linux container with Bash, Zsh, Fish and PowerShell 7.4. Tests cover native candidates, Unicode and space quoting, unchanged input after querying, stale selection rejection and insertion without execution. Browser checks use vlx-browser and cover the default automatic mode, Tab mode, setting changes and candidate insertion.
+## Windows
 
-The editor-style interaction revision also verifies continuous narrowing without closing or moving the popup, native description extraction, UTF-16 highlight ranges, selection during pending updates, repeated manual requests and nested Zsh directory completion with Unicode and spaces. Descriptions come from the native provider; providers without descriptions, including many Bash definitions, keep that field empty.
+On Windows no integration is loaded, whatever the setting says, and the "Command suggestions" setting is hidden. cmd, Windows PowerShell, pwsh, Git Bash and WSL terminals keep their native Tab behavior. The feature stays off because loading it there would require typing a command into every new terminal and each request would start helper processes, which slows down typing.
 
-Windows ConPTY, Windows PowerShell 5.1, Git Bash and WSL are deliberately excluded for now: no integration is loaded there, so only the native Tab behavior applies.
+## Limits
 
-The PTY checks can be repeated with:
+- Candidates depend on the completion definitions installed for your shell. VelaTerm does not provide its own command catalog or history-based predictions.
+- Some complex Bash completion scripts rely on Readline internals that the integration cannot reproduce exactly.
+- Completion functions can run external programs and may be slow. The list stops waiting after two seconds, but a shell function that is still running is not killed; press Ctrl+C to interrupt it as usual.
+- The integration reserves Ctrl+F12 for collecting candidates and Ctrl+F11 for inserting a selection. A shell configuration that rebinds these keys after the terminal starts can disable suggestions. With Bash 4.0 to 4.3, the integration also wraps Enter and Ctrl+J.
+- Descriptions come from the shell. Many Bash completion definitions provide none, so their candidates show no description.
+
+## Testing
+
+The feature has been tested on macOS with Zsh and Bash 5.2, and on Linux with Bash, Zsh, Fish and PowerShell 7.4. The PTY checks in the repository can be repeated with:
 
 ```sh
 python3 scripts/test-terminal-completion.py --zsh /bin/zsh --bash /path/to/bash

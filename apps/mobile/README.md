@@ -33,10 +33,10 @@ pnpm android
 
 ```sh
 cd android
-./gradlew :app:assembleDebug
+./gradlew :app:assembleChinaDebug
 ```
 
-产物为 `android/app/build/outputs/apk/debug/app-debug.apk`。Kotlin 增量编译在 `android/gradle.properties` 显式开启；日常构建不执行 `clean`。依赖、编译参数或源码变化会重新编译相关任务，缓存损坏或发布复现检查才需要清理。
+产物为 `android/app/build/outputs/apk/china/debug/app-china-debug.apk`。Kotlin 增量编译在 `android/gradle.properties` 显式开启；日常构建不执行 `clean`。依赖、编译参数或源码变化会重新编译相关任务，缓存损坏或发布复现检查才需要清理。
 
 iOS 模拟器构建：
 
@@ -47,6 +47,21 @@ xcodebuild -project ios/App/App.xcodeproj -scheme App \
 ```
 
 真机安装需要在 Xcode 中设置开发团队及签名。2026-09-09 曾完成开发签名构建并安装到 iPhone 17 Pro，当时自动启动因锁屏被拒绝。2026-09-20 复核时，该设备已使用 iOS 27.0（24A437），现有 Xcode 26.2 无法挂载所需的开发者磁盘映像（DDI），因此本批没有安装或运行真机新包。当前没有生成可分发 IPA，也没有发布应用或创建推送资源。
+
+### Android 渠道与签名
+
+Android 分为两个渠道（product flavor）：`china` 集成个推及华为、小米、OPPO、vivo、魅族、荣耀厂商推送通道，是默认渠道；`play` 不包含上述推送 SDK，任务通知显示为“此构建尚未配置推送通道”。个推国内版 SDK 不符合 Google Play 的上架要求，因此两个渠道分开构建。推送 SDK 的调用集中在 `PushProvider`，两个渠道分别位于 `plugins/remote/android/src/china/` 与 `src/play/`。推送服务部署前，自行分发的 APK 同样使用 `play` 渠道。
+
+release 构建使用发布密钥签名。密钥与密码不进仓库，默认从 `~/.config/velaterm/android-release.properties` 读取（权限 0600，字段为 `storeFile`、`storePassword`、`keyAlias`、`keyPassword`），也可以用 Gradle 属性或环境变量 `VELA_ANDROID_SIGNING` 指定其他路径；文件不存在时 release 构建不签名。已安装的 APK 只能被同一密钥签名的新版本覆盖升级，密钥遗失后用户须卸载重装，因此须另行备份 `~/.config/velaterm/` 下的密钥库与配置文件。日后上架 Google Play 时，在 Play 应用签名中选择使用现有密钥并上传这把密钥，已安装的用户即可从 Play 继续升级。
+
+```sh
+cd apps/mobile
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+pnpm apk:play      # 自行分发的 APK：android/app/build/outputs/apk/play/release/app-play-release.apk
+pnpm bundle:play   # Google Play 的 AAB：android/app/build/outputs/bundle/playRelease/app-play-release.aab
+```
+
+GraalVM JDK 的 `jlink` 无法处理 Android SDK 36 的 `core-for-system-modules.jar`，需使用 Android Studio 自带的 JDK。每次发布新版本前须递增 `android/app/build.gradle` 中的 `versionCode`。APK 上传到 `dl.velaterm.com/android/<版本>/`（R2 与腾讯云 COS 同名镜像，国内使用 `dl.velaterm.cn`）。
 
 `pnpm dev` 仅预览连接首页，固定监听 `127.0.0.1:41571`，浏览器中不会模拟原生 SSH 功能。远端项目 Web 界面仍从仓库根目录构建。
 

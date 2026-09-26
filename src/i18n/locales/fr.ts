@@ -280,6 +280,7 @@ const fr: typeof en = {
   "common.save": "Enregistrer", // Save
   "common.create": "Créer", // Create
   "common.close": "Fermer", // Close
+  "chat.copyAsMarkdown": "Copier au format Markdown",
   "chat.imageViewOriginal": "Afficher l’image originale",
   "chat.imageCopy": "Copier l’image",
   "chat.imageSave": "Enregistrer l’image",

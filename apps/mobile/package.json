@@ -10,6 +10,8 @@
     "test": "node --test --experimental-strip-types src/*.test.ts",
     "ios": "cap open ios",
     "android": "cap open android",
+    "bundle:play": "pnpm sync && cd android && ./gradlew :app:bundlePlayRelease",
+    "apk:play": "pnpm sync && cd android && ./gradlew :app:assemblePlayRelease",
     "icons": "node scripts/sync-icons.mjs",
     "check:icons": "node scripts/check-icons.mjs"
   },

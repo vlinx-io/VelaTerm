@@ -290,6 +290,7 @@ const ru: typeof en = {
   "common.save": "Сохранить", // Save
   "common.create": "Создать", // Create
   "common.close": "Закрыть", // Close
+  "chat.copyAsMarkdown": "Копировать в формате Markdown",
   "chat.imageViewOriginal": "Открыть исходное изображение",
   "chat.imageCopy": "Копировать изображение",
   "chat.imageSave": "Сохранить изображение",

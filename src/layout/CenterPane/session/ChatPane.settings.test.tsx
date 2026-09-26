@@ -113,9 +113,9 @@ it("replays newer events over a late snapshot without losing history or restorin
   expect(screen.getByText("New queue")).toBeTruthy();
 });
 
-async function mountPane(kind: "claude" | "codex" | "opencode" = "claude", expectedModel: string | null = "old-model") {
+async function mountPane(kind: "claude" | "codex" | "opencode" = "claude", expectedModel: string | null = "old-model", mobile = false) {
   const view = render(<ChatPane session={{ id: "s", projectId: "p", name: "Claude", kind, engine: "chat", collapsed: false, sortOrder: 0, createdAt: 0 }}
-    area={{}} hidden={false} focused multi={false} onActivate={() => {}} onSplit={() => {}} onClose={() => {}} />);
+    area={{}} hidden={false} focused multi={false} mobile={mobile} onActivate={() => {}} onSplit={() => {}} onClose={() => {}} />);
   if (expectedModel !== null) await waitFor(() => expect((screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement).value).toBe(expectedModel));
   else await waitFor(() => expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "chat_snapshot")).toBe(true));
   return view;
@@ -672,6 +672,19 @@ it("sends normally when Alt+Enter arrives with no running turn", async () => {
   fireEvent.change(input, { target: { value: "Hello" } });
   fireEvent.keyDown(input, { key: "Enter", altKey: true });
   await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_send", expect.objectContaining({ behavior: "queue", text: "Hello" })));
+});
+
+it("keeps the mobile send button beside the input while the options are collapsed", async () => {
+  const { container } = await mountPane("claude", "old-model", true);
+  const input = container.querySelector<HTMLTextAreaElement>(".sv-box textarea")!;
+  fireEvent.change(input, { target: { value: "Hello" } });
+  expect(container.querySelector(".sv-composer")!.getAttribute("data-options-expanded")).toBe("false");
+  const sends = container.querySelectorAll<HTMLButtonElement>(".sv-send");
+  expect(sends).toHaveLength(1);
+  expect(sends[0].closest(".sv-quick-actions")).not.toBeNull();
+  expect(sends[0].closest(".sv-controls")).toBeNull();
+  fireEvent.click(sends[0]);
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_send", expect.objectContaining({ text: "Hello" })));
 });
 
 it("shows stopping immediately on one Escape and completion only after confirmation", async () => {

@@ -280,6 +280,7 @@ const zhTW: typeof en = {
   "common.save": "儲存", // Save
   "common.create": "建立", // Create
   "common.close": "關閉", // Close
+  "chat.copyAsMarkdown": "複製為 Markdown",
   "chat.imageViewOriginal": "檢視原圖",
   "chat.imageCopy": "複製圖片",
   "chat.imageSave": "儲存圖片",

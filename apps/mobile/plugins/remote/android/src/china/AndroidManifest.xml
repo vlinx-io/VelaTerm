@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <service android:name="com.velaterm.remote.VelaPushService" android:exported="false" android:process=":pushservice" />
+        <service android:name="com.velaterm.remote.VelaPushReceiver" android:exported="false">
+            <intent-filter><action android:name="com.igexin.sdk.action.RECEIVE" /></intent-filter>
+        </service>
+    </application>
+</manifest>

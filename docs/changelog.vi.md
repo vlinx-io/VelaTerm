@@ -1,3 +1,21 @@
+## v0.2.4 — 2026-09-26
+
+- 📋 Sao chép từ cuộc hội thoại sẽ cho đúng phần văn bản hiển thị trên màn hình: mã nội dòng không kèm dấu huyền ngược, phần nhấn mạnh không kèm dấu sao, liên kết chỉ lấy chữ, khối mã không kèm hàng rào, ô bảng ngăn cách bằng ký tự tab, danh sách giữ nguyên dấu đầu dòng đang thấy. Bản có định dạng vẫn được đưa vào bộ nhớ tạm cùng lúc, và menu chuột phải có thêm "Sao chép dạng Markdown" để lấy mã nguồn Markdown của vùng chọn.
+
+- ⏳ Tùy chọn tự động chạy tiếp sau khi hạn mức sử dụng được đặt lại nay bật sẵn. Nếu bạn từng tự thay đổi tùy chọn này, lựa chọn của bạn được giữ nguyên.
+
+- ↩️ Việc quay lui cuộc hội thoại không còn bị chặn bởi tác vụ đã kết thúc: tác vụ chạy ở tiền cảnh được coi là xong khi lượt của nó kết thúc, và tiến độ đến sau đó không đánh dấu nó đang chạy trở lại. Khi thực sự còn tác vụ nền đang chạy, thông báo sẽ nêu tên tác vụ đó.
+
+- 🧹 Các luồng agent con của Codex không còn xuất hiện trong danh sách lịch sử phiên, giống như sidechain của Claude.
+
+- ⌨️ Tự động hoàn thành trong terminal: sau khi dùng phím mũi tên di chuyển qua các gợi ý, phím Enter nhận gợi ý đang chọn giống như phím Tab. Enter vẫn được chuyển cho shell nếu bạn chưa di chuyển lựa chọn, nếu bạn tiếp tục gõ sau khi chọn, hoặc nếu đang giữ phím bổ trợ.
+
+- 📱 Android được dựng theo hai kênh. Bản mặc định có các kênh đẩy thông báo của Getui, Huawei, Xiaomi, OPPO, vivo, Meizu và Honor; bản cho Play không kèm các kênh này và báo rằng thông báo tác vụ chưa có kênh đẩy được cấu hình.
+
+- 🎨 Thay đổi nhỏ về giao diện: danh sách tác vụ không còn lặp lại ô đánh dấu; thanh thông báo và lời nhắc tự động chạy tiếp nằm giữa cuộc hội thoại và khung soạn tin, rộng bằng phần nội dung; trên điện thoại, nút gửi vẫn nằm cạnh ô nhập khi các tùy chọn được thu gọn.
+
+---
+
 ## v0.2.3 — 2026-09-24
 
 - 🪟 Các phiên hiện có đã có thể đưa vào khung chia. Menu chuột phải ở thanh bên mở một phiên trong khung chia bên phải, khung chia bên dưới hoặc khung đang chọn; kéo một phiên từ thanh bên tới mép một khung thì chia theo hướng đó, còn thả vào giữa thì thay thế phiên đang hiển thị ở đó. Chọn từ hai đến bốn phiên để xếp chúng cạnh nhau trong một thẻ được chia đều, và những phiên nằm ở các khung khác của thẻ hiện tại được đánh dấu trên thanh bên.

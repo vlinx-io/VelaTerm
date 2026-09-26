@@ -280,6 +280,7 @@ const ptBR: typeof en = {
   "common.save": "Salvar", // Save
   "common.create": "Criar", // Create
   "common.close": "Fechar", // Close
+  "chat.copyAsMarkdown": "Copiar como Markdown",
   "chat.imageViewOriginal": "Ver imagem original",
   "chat.imageCopy": "Copiar imagem",
   "chat.imageSave": "Salvar imagem",

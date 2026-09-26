@@ -1,5 +1,11 @@
 apply plugin: 'com.android.application'
 
+// The release key and its passwords live outside the repository; see README "Android 渠道与签名".
+def signingPath = providers.gradleProperty('VELA_ANDROID_SIGNING').orElse(providers.environmentVariable('VELA_ANDROID_SIGNING'))
+    .getOrElse("${System.getProperty('user.home')}/.config/velaterm/android-release.properties")
+def releaseSigning = new Properties()
+if (file(signingPath).isFile()) file(signingPath).withInputStream { releaseSigning.load(it) }
+
 android {
     namespace = "com.velaterm.mobile"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -17,8 +23,24 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    flavorDimensions += 'store'
+    productFlavors {
+        china { dimension 'store'; isDefault = true }
+        play { dimension 'store' }
+    }
+    signingConfigs {
+        if (!releaseSigning.isEmpty()) {
+            release {
+                storeFile file(releaseSigning.getProperty('storeFile'))
+                storePassword releaseSigning.getProperty('storePassword')
+                keyAlias releaseSigning.getProperty('keyAlias')
+                keyPassword releaseSigning.getProperty('keyPassword')
+            }
+        }
+    }
     buildTypes {
         release {
+            if (!releaseSigning.isEmpty()) signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

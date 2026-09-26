@@ -2296,6 +2296,17 @@ select.sv-pill {
   word-break: break-word;
 }
 
+/* Notices stand between the conversation and the composer, on the centred column the two of them share. */
+.sv-notices {
+  flex: none;
+  padding: 0 18px;
+}
+.sv-notices > * {
+  width: var(--sv-col);
+  margin-left: auto;
+  margin-right: auto;
+}
+
 /* A notification from the agent's own loop, above the permission cards, dismissable. */
 .sv-notify {
   display: flex;

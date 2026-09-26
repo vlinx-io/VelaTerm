@@ -1949,6 +1949,33 @@ export function ChatPane({
   ) });
   if (session.kind === "codex") composerChips.push({ id: "codexCredits", node: <CodexResetCredits /> });
 
+  // What is typed decides the button, not what the agent is doing: with text in the box the action is
+  // always "send" — queued while a turn runs — and only an empty box during a turn turns it into the
+  // stop button. Mobile keeps it beside the input, outside the collapsible options.
+  const sendButton = busy && !clientCommandRunning && !draft.trim() && attachments.length === 0 ? (
+    <button
+      className="sv-send sv-stop"
+      onClick={stop}
+      title={t("chat.interruptTooltip")}
+    >
+      <span className="sv-stop-square" />
+    </button>
+  ) : (
+    <button
+      className="sv-send"
+      disabled={sending || clientCommandRunning || (!draft.trim() && attachments.length === 0)}
+      onPointerDown={mobile ? (event) => event.preventDefault() : undefined}
+      onClick={() => send()}
+      title={
+        busy
+          ? `${t("chat.queueTooltip", interruptCombo)} · ${t("chat.steerTooltip", steerCombo)}`
+          : t("session.send")
+      }
+    >
+      <Icons.arrowRight size={mobile ? 20 : 14} />
+    </button>
+  );
+
   return (
     <SessionLinkDirectory.Provider value={cwd}>
     <div
@@ -2149,14 +2176,20 @@ export function ChatPane({
             )}
           </div>
 
-          {autoContinue && !readOnly && (
-            <AutoContinueBar
-              waiting={autoContinue}
-              onCancel={() => void chatAutoContinueCancel(session.id).then(() => setAutoContinue(null), (err) => setError(String(err)))}
-            />
-          )}
-          {notice && (
-            <NotificationBar text={notice.text} priority={notice.priority} onClose={() => setNotice(null)} />
+          {/* Both notices stand between the conversation and the composer, on the same centred column as
+              both, the way the permission lane does. */}
+          {((autoContinue && !readOnly) || notice) && (
+            <div className="sv-notices">
+              {autoContinue && !readOnly && (
+                <AutoContinueBar
+                  waiting={autoContinue}
+                  onCancel={() => void chatAutoContinueCancel(session.id).then(() => setAutoContinue(null), (err) => setError(String(err)))}
+                />
+              )}
+              {notice && (
+                <NotificationBar text={notice.text} priority={notice.priority} onClose={() => setNotice(null)} />
+              )}
+            </div>
           )}
           {permissions.length > 0 && (
             <div className="sv-permissions">
@@ -2413,7 +2446,10 @@ export function ChatPane({
                   }
                 }}
               />
-              {mobile && <ComposerOptionsButton expanded={composerOptions.expanded} onToggle={composerOptions.toggle} />}
+              {mobile && <div className="sv-quick-actions">
+                <ComposerOptionsButton expanded={composerOptions.expanded} onToggle={composerOptions.toggle} />
+                {sendButton}
+              </div>}
               {/* Model, effort, collaboration style, and permission mode sit under the input, where they belong to the message
                   about to be sent rather than to the pane. */}
               {(busy || actionFeedback) && (
@@ -2435,31 +2471,7 @@ export function ChatPane({
                       {t("chat.steer")}
                     </button>
                   )}
-                  {/* What is typed decides the button, not what the agent is doing: with text in the box the
-                      action is always "send" — queued while a turn runs — and only an empty box during a
-                      turn turns it into the stop button. */}
-                  {busy && !clientCommandRunning && !draft.trim() && attachments.length === 0 ? (
-                    <button
-                      className="sv-send sv-stop"
-                      onClick={stop}
-                      title={t("chat.interruptTooltip")}
-                    >
-                      <span className="sv-stop-square" />
-                    </button>
-                  ) : (
-                    <button
-                      className="sv-send"
-                      disabled={sending || clientCommandRunning || (!draft.trim() && attachments.length === 0)}
-                      onClick={() => send()}
-                      title={
-                        busy
-                          ? `${t("chat.queueTooltip", interruptCombo)} · ${t("chat.steerTooltip", steerCombo)}`
-                          : t("session.send")
-                      }
-                    >
-                      <Icons.arrowRight size={14} />
-                    </button>
-                  )}
+                  {!mobile && sendButton}
                 </>}
                 status={hasPermissionControl ? <>
                   {permissionCatalog?.error && <span role="alert">{permissionCatalog.error}</span>}

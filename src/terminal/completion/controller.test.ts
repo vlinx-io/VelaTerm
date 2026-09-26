@@ -188,6 +188,34 @@ describe("native completion interaction", () => {
     expect(write).not.toHaveBeenCalled();
   });
 
+  it("accepts a keyboard-selected candidate on Enter like Tab", async () => {
+    const second = { index: 1, label: "another", description: "", matches: [] };
+    mocks.invoke.mockResolvedValue({ ...state, items: [...state.items, second] });
+    controller.input("a"); await vi.advanceTimersByTimeAsync(350);
+    controller.key(new KeyboardEvent("keydown", { key: "ArrowDown", cancelable: true }));
+    const enter = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    expect(controller.key(enter)).toBe(false);
+    expect(enter.defaultPrevented).toBe(true);
+    expect(mocks.invoke).toHaveBeenCalledWith("pty_completion", {
+      sessionId: "session", action: "accept", revision: 5, index: 1,
+    });
+    expect(document.querySelector<HTMLElement>('[role="listbox"]')!.hidden).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("returns Enter to the shell once input follows a keyboard selection", async () => {
+    const second = { index: 1, label: "another", description: "", matches: [] };
+    mocks.invoke.mockResolvedValue({ ...state, items: [...state.items, second] });
+    controller.input("a"); await vi.advanceTimersByTimeAsync(350);
+    controller.key(new KeyboardEvent("keydown", { key: "ArrowDown", cancelable: true }));
+    controller.input("n"); await vi.advanceTimersByTimeAsync(350);
+    expect(document.querySelector('[aria-selected="true"]')?.textContent).toContain("another");
+    const enter = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    expect(controller.key(enter)).toBe(true);
+    expect(enter.defaultPrevented).toBe(false);
+    expect(mocks.invoke.mock.calls.some(([, args]) => args.action === "accept")).toBe(false);
+  });
+
   it.each(["push", "-lh", "中文"])("keeps automatic exact matches visible for %s during input", async token => {
     const candidate = { index: 1, label: token, description: "", matches: [] };
     mocks.invoke.mockResolvedValue({ ...state, query: token, items: [

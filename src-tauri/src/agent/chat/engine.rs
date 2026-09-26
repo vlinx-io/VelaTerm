@@ -1026,6 +1026,10 @@ struct TurnQueue {
     active_tasks: HashSet<String>,
     /// The most recent background-task inventory, also covering tasks without a task_started frame.
     background_tasks: HashSet<String>,
+    /// Tasks started with `is_backgrounded: false` and not moved to the background since. Such a task
+    /// cannot outlive the turn that ran it, so the turn's end drops it from `active_tasks` even when its
+    /// final frame never came.
+    foreground_tasks: HashSet<String>,
     /// Tasks the inventory dropped whose `task_notification` has not arrived yet, with the instant the
     /// release stops waiting for it (see `TASK_SETTLE_GRACE`).
     settling: HashMap<String, std::time::Instant>,
@@ -2804,14 +2808,23 @@ fn track_claude_task(proc: &Arc<ChatProcess>, subtype: &str, message: &Value) {
     let status = message.pointer("/patch/status").or_else(|| message.get("status")).and_then(Value::as_str);
     let finished = status.is_some_and(|status| FINISHED_TASK_STATUSES.contains(&status))
         || (subtype == "task_notification" && status.is_none());
+    let backgrounded = message.get("is_backgrounded").or_else(|| message.pointer("/patch/is_backgrounded")).and_then(Value::as_bool);
     let mut turn = proc.turn.lock().unwrap();
     if subtype == "task_notification" {
         turn.settling.remove(id);
     }
+    if subtype == "task_started" && backgrounded == Some(false) {
+        turn.foreground_tasks.insert(id.to_string());
+    } else if subtype == "task_started" || backgrounded == Some(true) {
+        turn.foreground_tasks.remove(id);
+    }
     if finished {
         turn.active_tasks.remove(id);
         turn.background_tasks.remove(id);
-    } else if matches!(subtype, "task_started" | "task_progress") || matches!(status, Some("pending" | "running" | "paused")) {
+        turn.foreground_tasks.remove(id);
+    } else if subtype == "task_started" || matches!(status, Some("pending" | "running" | "paused")) {
+        // Progress alone never marks a task live: Claude can report progress after the final frame, and
+        // for observer agents that never get a start or final frame at all.
         turn.active_tasks.insert(id.to_string());
     }
 }
@@ -3100,13 +3113,30 @@ fn ensure_rewind_idle(proc: &ChatProcess) -> Result<(), String> {
         return Err("Remove queued messages before rewinding".to_string());
     }
     if proc.shell_running.load(Ordering::Relaxed) || !turn.active_tasks.is_empty() || !turn.background_tasks.is_empty() {
-        return Err("Wait for background tasks to finish before rewinding".into());
+        let blocking = blocking_task_names(proc, &turn);
+        return Err(if blocking.is_empty() {
+            "Wait for background tasks to finish before rewinding".into()
+        } else {
+            format!("Wait for background tasks to finish before rewinding: {}", blocking.join(", "))
+        });
     }
     drop(turn);
     if !proc.permissions.lock().unwrap().is_empty() {
         return Err("Answer the pending permission request before rewinding".to_string());
     }
     Ok(())
+}
+
+/// Name the tasks that keep the session busy, so a refusal says what to wait for or stop.
+fn blocking_task_names(proc: &ChatProcess, turn: &TurnQueue) -> Vec<String> {
+    let mut ids: Vec<&String> = turn.background_tasks.union(&turn.active_tasks).collect();
+    ids.sort();
+    let extras = proc.extras.lock().unwrap();
+    ids.into_iter().map(|id| {
+        extras.background_tasks.iter().find(|task| &task.task_id == id)
+            .map(|task| task.description.trim()).filter(|name| !name.is_empty())
+            .unwrap_or(id).to_string()
+    }).collect()
 }
 
 /// Resolve the view's stable row id to the provider identity stored in its native recording.
@@ -4931,6 +4961,10 @@ fn handle_turn_end(
         let interrupted = std::mem::take(&mut turn.interrupted);
         let started_at = turn.started_at.take();
         turn.waking = None;
+        let TurnQueue { active_tasks, foreground_tasks, .. } = &mut *turn;
+        for id in foreground_tasks.drain() {
+            active_tasks.remove(&id);
+        }
         let next = if turn.steering || turn.waiting.is_empty() || auth::blocks_queue(proc) {
             turn.running = false;
             None
@@ -8943,6 +8977,45 @@ mod tests {
         handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_notification","task_id":"shell","status":"completed"}"#);
         assert!(!running(&manager, "s"));
         assert!(manager.snapshot("s").rows.iter().any(|row| matches!(row, ChatRow::Tool { output: Some(output), .. } if output == "done")));
+    }
+
+    /// A foreground task is over once its turn ends, whether or not its final frame arrived; one moved to
+    /// the background in the meantime still counts.
+    #[test]
+    fn foreground_tasks_do_not_block_rewinding_after_their_turn() {
+        let app = ctx("foreground-task-turn-end");
+        let proc = inert_process(SessionKind::Claude);
+        proc.turn.lock().unwrap().running = true;
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_started","task_id":"lost","task_type":"local_agent","is_backgrounded":false}"#);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_started","task_id":"moved","task_type":"local_bash","is_backgrounded":false}"#);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_updated","task_id":"moved","patch":{"is_backgrounded":true}}"#);
+        handle_turn_end(&app, "s", &proc, "success", None);
+        let active = proc.turn.lock().unwrap().active_tasks.clone();
+        assert_eq!(active, HashSet::from(["moved".to_string()]));
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_notification","task_id":"moved","status":"completed"}"#);
+        assert_eq!(ensure_rewind_idle(&proc), Ok(()));
+    }
+
+    /// Progress reported after the final frame, or for a task that never had a start frame, does not mark
+    /// the task live again.
+    #[test]
+    fn late_task_progress_does_not_block_rewinding() {
+        let app = ctx("late-task-progress");
+        let proc = inert_process(SessionKind::Claude);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_started","task_id":"agent","task_type":"local_agent","is_backgrounded":true}"#);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_notification","task_id":"agent","status":"stopped"}"#);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_progress","task_id":"agent","usage":{"total_tokens":1}}"#);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_progress","task_id":"observer","usage":{"total_tokens":1}}"#);
+        assert!(proc.turn.lock().unwrap().active_tasks.is_empty());
+        assert_eq!(ensure_rewind_idle(&proc), Ok(()));
+    }
+
+    #[test]
+    fn rewind_refusal_names_the_tasks_still_running() {
+        let app = ctx("rewind-names-tasks");
+        let proc = inert_process(SessionKind::Claude);
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1","task_type":"local_bash","description":"Build jdk21u"}]}"#);
+        assert_eq!(ensure_rewind_idle(&proc).unwrap_err(), "Wait for background tasks to finish before rewinding: Build jdk21u");
     }
 
     /// A turn Claude opens by itself, answering a finished background task, reports working to the

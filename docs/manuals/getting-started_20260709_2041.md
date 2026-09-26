@@ -1,72 +1,82 @@
 # Getting Started with VelaTerm
 
 Created: 2026-07-09 20:41
-Updated: 2026-08-09 19:45
 
-> This guide takes you from installation to your first terminal and your first AI agent session. It's enough to start working; details of each feature live in the rest of the manual series (see the [Manuals Overview](manuals-overview_20260709_2041.md)).
+Updated: 2026-09-25 10:21
 
-## 1. What is VelaTerm
+> This guide takes you from installation to your first terminal and your first AI agent session. It is enough to start working; each feature is described in detail in the other manuals (see the [Manuals Overview](manuals-overview_20260709_2041.md)).
 
-In one sentence: a terminal manager built for the AI-agent era. It organizes scattered terminal sessions into a **project → group → session** tree, and treats coding agents like Claude Code and Codex as first-class citizens — you can see in real time whether they're working, asking for input, or done, and reopening a session automatically resumes its conversation. Add browser remote access and SSH remote development, and you can take over your sessions from anywhere.
+## 1. What VelaTerm is
+
+VelaTerm is a terminal manager built for working with AI coding agents. It organizes terminal and agent sessions in a **project → group → session** tree and runs coding agents such as Claude Code and Codex as dedicated sessions: you can see at any time whether an agent is working, needs your input or has finished, and reopening a session continues its conversation. Agents can run in their own terminal interface or in a conversation view with messages, tool cards and permission buttons. Browser remote access and SSH remote development let you continue your sessions from other devices.
 
 ## 2. Installation
 
-Grab the package for your platform:
+Download the package for your platform:
 
 | Platform | Package | Notes |
 |----------|---------|-------|
-| macOS | `.dmg` (separate Apple Silicon / Intel builds) | Open and drag VelaTerm into Applications; the app is notarized, so it opens without security workarounds |
-| Windows | `-setup.exe` installer, in min / full variants | full (~360MB) bundles a complete Git Bash and works out of the box; min (~25MB) is small and downloads missing commands on demand. Both install to the same location — pick one |
-| Linux | `.AppImage` (x86_64 / aarch64) | Make it executable and run; no installation needed |
+| macOS | `.dmg` (separate Apple Silicon and Intel builds) | Open it and drag VelaTerm into Applications. The app is notarized by Apple |
+| Windows | `-setup.exe` installer, in min and full variants | full (about 360 MB) includes a complete Git Bash; min (about 25 MB) downloads missing commands when needed. Both install to the same location, so choose one |
+| Linux | `.AppImage` (x86_64 and aarch64) | Make it executable and run it; no installation is needed |
 
-The app checks for updates automatically (there's also a "Check for Updates…" menu item), so it stays current with the release channel.
+VelaTerm checks for updates automatically; "Check for Updates…" in the app menu checks immediately.
 
-## 3. First launch: import a project
+## 3. First launch: add a project
 
-On first launch the window is empty and the left sidebar prompts you to import a directory. Click the folder button at the top of the sidebar (or press ⌘O) and pick a directory you're working in — it becomes the first "project" in the tree. You can also use "Clone from Git" to create a project straight from a repository URL.
+On first launch the sidebar is empty and offers three ways to add a project:
 
-Once a project is in, you can create **groups** under it (nested arbitrarily deep — e.g. frontend / backend / testing), with **sessions** inside. The tree looks like this:
+- "Create Project" creates a new folder and adds it.
+- "Open Project" (⌘O, Ctrl+Alt+O on Windows and Linux) adds an existing folder.
+- "Clone from Git" clones a repository and adds it.
+
+The same actions are available as buttons in the sidebar header. Inside a project you can create **groups**, nested as deeply as you like (for example frontend, backend, testing), and **sessions** inside them:
 
 ![Project tree in the left sidebar](../assets/manuals/left-tree.png)
 
 ## 4. Open your first terminal
 
-Any of the three:
+Any of these opens a scratch terminal:
 
-1. Press ⌘T (Ctrl+Alt+T on Windows/Linux) — you instantly get a scratch terminal tab. Terminals are always drafts: they live in the center pane only, never join the tree, and are discarded when closed, which is what makes them handy for quick commands.
-2. Hover a project, group, or session row in the sidebar and click the ＋ button → "New Terminal". You get the same kind of draft, except it starts in that node's working directory. Project and group context menus carry the same entry.
-3. When the center pane is empty, just click the "Create Terminal" button.
+1. Press ⌘T (Ctrl+Alt+T on Windows and Linux).
+2. Hover a project, group or session in the sidebar, click the ＋ button, and choose "New Terminal". The terminal starts in that node's directory. Project and group context menus have the same item.
+3. When the center pane is empty, click "Create Terminal".
 
 ![Center pane with no session open](../assets/manuals/empty-state.png)
 
+Scratch terminals exist only as tabs: they never become tree nodes and are discarded when closed, which makes them suitable for quick commands.
+
 ## 5. Open your first AI agent session
 
-Right-click a project or group → "New Claude Session" (the menu also offers Codex and the rest under "More Agent Session"). VelaTerm launches Claude Code in that project's directory and automatically injects its status-reporting hooks:
+Right-click a project or group and choose "New Claude Session". The first level of the menu offers Claude, Codex and OpenCode; "More Agent Session" lists all fourteen supported agents. You can also press ⌘N (Ctrl+Alt+N on Windows, Linux and in regular browsers) to open a searchable list of agents.
+
+VelaTerm starts the agent in the project directory. Claude, Codex, OpenCode, Pi and OMP sessions open in the **conversation view**: type your message in the box at the bottom and press Enter. The other agents open in the **terminal view**, which shows the agent's own terminal interface. The switch button in the pane header moves a session between the two views; see [Conversation View](conversation-view_20260925_1012.md).
 
 ![A running Claude session with the Info panel](../assets/manuals/agent-info.png)
 
-From that moment you get three things:
+From then on you get three things:
 
-- **Status dots**: the small dot next to the session in the sidebar reflects the agent's state in real time — green means working, yellow means it needs you (a question or a permission prompt), magenta means it has replied and you've seen it. No more clicking through windows to check.
-- **System notifications**: when the agent stops and waits for your input or confirmation, you get a system notification; when you're already looking at the session, it stays quiet.
-- **Auto-resume**: close the tab — or quit the whole app — and the next time you open that session node, the conversation picks up right where it left off. Want a brand-new conversation? Create a new session node.
+- **Status dots**: the dot next to the session in the sidebar shows the agent's state. Green means working, yellow means it needs you (a question or a permission request), and magenta means it has replied and you have seen it.
+- **System notifications**: when the agent stops and waits for you, you receive a notification. If you are already looking at the session, no notification appears.
+- **Automatic resume**: close the tab, or quit the app, and the next time you open the session the conversation continues where it stopped. For a new conversation, create a new session.
 
-This assumes the corresponding CLI is installed. If it isn't, you won't hit a dead end: an install-guide card appears in the session with the recommended install command for your platform, a one-click install, and a retry button.
+If the agent's CLI is not installed yet, the session shows an install card with the recommended install command for your system and an "Install now" button.
 
-## 6. UI tour
+## 6. A quick tour
 
 ![Main window](../assets/manuals/main-ui.png)
 
-- **Left sidebar**: project tree + search box + four header buttons (import project, clone from Git, global search, archived sessions).
-- **Center pane**: tab bar + terminal area. Tabs behave like a browser: clicking a session in the tree reuses the current tab by default; tabs you switch away from keep running in the background; closing a tab is what actually ends the process. A tab can also be split into panes (⌘D right, ⌘⇧D down).
-- **Right panel**: follows the current session, with three tabs — Files (file tree), Info (basics, model, usage, resource footprint), and Git (branch and changes).
-- **Status bar**: session count, current session state, Git branch, notification toggle, and the global Working / Pending / Viewed counters — click one to filter the sidebar to sessions in that state.
-- **Title bar, right side**: light/dark theme switch, Remote Access, Connect to Remote Server, Settings.
+- **Left sidebar**: the project tree with a search box and a status filter. Header buttons: Create Project, Import Project, Clone from Git, Search All Sessions, and Archived Sessions.
+- **Center pane**: the tab bar and the open sessions. By default, clicking an agent session in the tree reuses the current tab, and the previous tab keeps running in the background. Closing a tab ends its processes. Tabs can be split into panes (⌘D right, ⌘⇧D down).
+- **Right panel**: follows the current session, with four tabs: Files, Info (session details, account usage, context and resource use), Git (branch, changes and commits), and Knowledge Base.
+- **Status bar**: session count, current session type, Git branch, permission mode, notification switch, and the Working / Pending / Viewed counters. Click a counter to show only those sessions in the sidebar.
+- **Title bar, right side**: theme switch, Remote Access, Connect to Remote Server, Share, Settings, Account, Feedback, and the buttons that show or hide the side panels.
 
 ## 7. Where to go next
 
-- The full story on trees and tabs (splits, archiving, global search, multi-select batch operations): [Interface & Session Management](interface-and-sessions_20260709_2041.md).
-- Terminal features (search, image paste, Windows shell selection): [Terminal Usage](terminal-usage_20260709_2041.md).
-- Agent capability differences, resume / fork / permission modes: [AI Agent Sessions](ai-agent-sessions_20260709_2041.md).
-- Letting agents split subtasks into isolated worktrees and work in parallel: [Session Spawning & Git Collaboration](session-spawning-and-git_20260709_2041.md).
-- Taking all of this with you on a phone or another machine: [Remote Development & Management](remote-development-guide_20260709_2041.md).
+- Trees, tabs, split panes, archiving and global search: [Interface & Session Management](interface-and-sessions_20260709_2041.md).
+- Agent capabilities, resume, fork and permissions: [AI Agent Sessions](ai-agent-sessions_20260709_2041.md).
+- Working in the conversation view: [Conversation View](conversation-view_20260925_1012.md).
+- Letting agents start child sessions in separate worktrees: [Session Spawning & Git Collaboration](session-spawning-and-git_20260709_2041.md).
+- Terminal features (search, image paste, command suggestions): [Terminal Usage](terminal-usage_20260709_2041.md).
+- Using VelaTerm from a phone or another computer: [Remote Development & Management](remote-development-guide_20260709_2041.md).

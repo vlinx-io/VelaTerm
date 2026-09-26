@@ -57,6 +57,8 @@ function blocks(tokens: Token[]): ReactNode[] {
 function Block({ token }: { token: Token }): ReactNode {
   switch (token.type) {
     case "space":
+    // A task item's box is already drawn as its list marker.
+    case "checkbox":
       return null;
     case "heading": {
       const h = token as Tokens.Heading;

@@ -280,6 +280,7 @@ const zhCN: typeof en = {
   "common.save": "保存",
   "common.create": "新建",
   "common.close": "关闭",
+  "chat.copyAsMarkdown": "复制为 Markdown",
   "chat.imageViewOriginal": "查看原图",
   "chat.imageCopy": "复制图片",
   "chat.imageSave": "保存图片",

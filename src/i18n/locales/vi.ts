@@ -280,6 +280,7 @@ const vi: typeof en = {
   "common.save": "Lưu",
   "common.create": "Tạo",
   "common.close": "Đóng",
+  "chat.copyAsMarkdown": "Sao chép dưới dạng Markdown",
   "chat.imageViewOriginal": "Xem ảnh gốc",
   "chat.imageCopy": "Sao chép ảnh",
   "chat.imageSave": "Lưu ảnh",

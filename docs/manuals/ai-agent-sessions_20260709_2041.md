@@ -2,115 +2,134 @@
 
 Created: 2026-07-09 20:41
 
-> This chapter covers VelaTerm's core differentiator: hosting AI coding agents as **typed sessions** — live status, automatic conversation resume, forking, and permission control.
+Updated: 2026-09-25 10:21
+
+> This chapter covers how VelaTerm hosts AI coding agents as typed sessions: supported agents, live status, automatic conversation resume, importing and forking conversations, permission modes, launch settings, install guidance and the Info panel. The conversation view has its own chapter: [Conversation View](conversation-view_20260925_1012.md).
 
 ## 1. Supported agents
 
-The New Session menus offer these local agent types: **Claude Code**, **Codex**, **OpenCode**, **Copilot CLI**, **Cursor CLI**, **Antigravity**, **Cline**, **Pi**, **Crush**, and **Kiro**. Capabilities differ slightly:
+VelaTerm can start these agents: **Claude Code** (shown as "Claude"), **Codex**, **OpenCode**, **Copilot**, **Cursor**, **Antigravity**, **Cline**, **Pi**, **OMP**, **Crush**, **Kimi Code (K3)**, **Kiro**, **Grok Build (Grok 4.5)** and **Zoo Code**. Each agent's own CLI must be installed and signed in.
 
-| Agent | Status awareness | Auto-resume | Fork | "Skip permissions" toggle |
-|-------|-----------------|:-----------:|:----:|:------------------------:|
-| Claude Code | Authoritative (incl. asking) | ✅ | ✅ | ✅ |
-| Codex | Weakly authoritative + screen detection | ✅ | ✅ | ✅ |
-| OpenCode | Authoritative (incl. asking) | ✅ | ✗ | ✗ (own config) |
-| Copilot CLI | Authoritative (incl. asking) | ✅ | ✗ | ✅ |
-| Cursor CLI | Authoritative | ✅ | ✗ | ✅ |
-| Antigravity | Authoritative | ✅ | ✗ | ✅ |
-| Cline | Authoritative | ✅ | ✗ | ✅ (explicit both ways) |
-| Pi | Authoritative | ✅ | ✅ | ✗ (no permission system) |
-| Crush | Partially authoritative + screen detection | ✅ | ✗ | ✅ |
-| Kiro | Authoritative | ✅ | ✗ | ✅ |
+Capabilities differ by agent:
 
-"Authoritative" means VelaTerm injects the agent's official callback mechanism (hooks / plugin / extension) at launch, so state changes are **actively reported** by the agent rather than guessed from terminal output. For agents that don't report everything (codex, crush), a screen-detection fallback fills the gaps. Agents you run yourself in a plain terminal are untouched — injection only applies to sessions VelaTerm launches.
+| Agent | Status reporting | "Needs you" state | Resume | Fork | Permission control | Conversation view |
+|-------|------------------|:-----------------:|:------:|:----:|--------------------|:-----------------:|
+| Claude Code | Reported by the agent | ✅ | ✅ | ✅ | Five modes | ✅ |
+| Codex | Reported by the agent | ✅ | ✅ | ✅ | Three modes | ✅ |
+| OpenCode | Reported by the agent | ✅ | ✅ | ✗ | Two modes | ✅ |
+| Copilot | Reported by the agent | ✅ | ✅ | ✗ | Skip switch | ✗ |
+| Cursor | Reported by the agent | ✗ | ✅ | ✗ | Skip switch | ✗ |
+| Antigravity | Reported by the agent | ✗ | ✅ | ✗ | Skip switch | ✗ |
+| Cline | Reported by the agent | ✗ | ✅ | ✗ | Skip switch | ✗ |
+| Pi | Reported by the agent | — | ✅ | ✅ | None (Pi does not ask) | ✅ |
+| OMP | Reported by the agent | ✅ | ✅ | ✅ | Skip switch; two modes in the conversation view | ✅ |
+| Crush | Partly reported, partly read from the screen | ✅ | ✅ | ✗ | Skip switch | ✗ |
+| Kimi Code (K3) | Reported by the agent | ✅ | ✅ | ✗ | Skip switch | ✗ |
+| Kiro | Reported by the agent | ✗ | ✅ | ✗ | Skip switch | ✗ |
+| Grok Build | Reported by the agent | ✅ | ✅ | ✗ | Skip switch | ✗ |
+| Zoo Code | Read from the screen | ✅ | ✅ | ✗ | Skip switch | ✗ |
 
-## 2. Status dots: who's working, who's waiting on me
+- **Reported by the agent** means the agent itself tells VelaTerm when it starts working, needs you and finishes, so the status is exact. Codex reports every stage when its version supports lifecycle hooks; older Codex versions only report when a turn ends. Where a column shows ✗ under "Needs you", the agent does not report questions or permission prompts, so the session shows "working" until the turn ends.
+- **Read from the screen** means VelaTerm recognizes the agent's state from its terminal interface.
+- For Copilot, Cursor, Antigravity, Kimi Code, Kiro and Grok Build, VelaTerm adds its own entries to the agent's user configuration the first time you start such a session. These entries do nothing when the agent runs outside VelaTerm.
+- Agents you start yourself in a plain terminal are not affected; status reporting applies only to agent sessions that VelaTerm starts.
 
-The dot next to each agent session updates live: green = working; yellow = needs you (question, permission prompt, or unread notification); magenta = replied and seen. The status bar's three counters are clickable filters — with many agents in flight, that's how you find the ones waiting for you.
+## 2. Creating an agent session
 
-Paired with **system notifications**: when an agent stops for you (a question, or end of turn) you get a notification, the session gets an unread badge, and the Dock badge counts it; if you're already looking at that session, nothing fires. On the signed macOS build, clicking a notification jumps straight to the session. The "Notify" item in the status bar is the global toggle.
+- **Context menu.** Right-click a project, group or session. The first level of the menu offers three agents: Claude, Codex and OpenCode at first, and later the three agent types you created most recently. "More Agent Session" lists every agent, your saved presets, "New with launch args…", and "New agent session" (the searchable picker).
+- **New agent session picker.** ⌘N on macOS (Ctrl+Alt+N on Windows, Linux and in regular browsers) opens a searchable list of agents and presets, with recent choices marked "Last used". See [Settings & Shortcuts](settings-and-shortcuts_20260709_2041.md) §9.
+- **Child sessions.** A session's "New Child Session" submenu creates the new session under it. Sessions can also be started from inside a conversation; see [Session Spawning & Git Collaboration](session-spawning-and-git_20260709_2041.md).
 
-## 3. Auto-resume: close it, reopen it, the conversation is still there
+**New with launch args…** opens a dialog with the agent type ("Agent type"), an optional name ("Session name (leave empty to auto-name)"), "Launch args (optional)", "Executable (optional)" for a replacement executable used by this session only, the permission setting, "Opens in" ("Terminal view" or "Conversation view") for agents that support both, and a "Worktree" choice. "Save as a preset" stores the settings under a name, with an optional icon. Presets appear in the menu and in the picker and start with their saved executable, arguments and permission setting.
 
-The mental model in one line: **each agent session node in the tree = one ongoing conversation.**
+Claude, Codex, OpenCode, Pi and OMP sessions open in the conversation view by default; the other agents open in the terminal view. Settings ▸ Agents ▸ "Default view" changes this per agent.
 
-- On first run, VelaTerm remembers the agent's own session id automatically.
-- After that — whether you closed the tab or quit the app — reopening the node relaunches the agent with its resume flag (e.g. `claude --resume <id>`) and the context comes right back. Before resuming, VelaTerm verifies the conversation still exists; if it was deleted, it silently falls back to a fresh start instead of hanging.
-- Want a fresh conversation? Create a new node. The whole mechanism is automatic — no switches, no cleanup.
+## 3. Status dots: who is working, who needs you
 
-**Manual resume**: if you have an agent session id from elsewhere (say, a conversation you ran in a plain terminal), use "Resume Session…" at the bottom of the New Session menu — pick the type, paste the id, and that conversation joins the tree as a proper session node.
+The dot next to each agent session updates live:
 
-**Import existing sessions**: open a project directory, right-click the project, then choose **Import Sessions**. VelaTerm lists Codex, Claude and OpenCode conversations whose working directory matches that project. Search by title, agent name or native session ID, select individual rows or all visible available rows, then click **Import**. Importing adds the conversations to the project tree; open a node to continue it with the original agent session ID. It does not copy or rewrite the native history.
+| Dot | Meaning |
+|-----|---------|
+| Green, pulsing | Working |
+| Yellow, pulsing | Needs you: a question or a permission request |
+| Yellow, rippling, with a yellow bar on the row | Unread: the agent finished or asked while you were elsewhere |
+| Magenta | Replied, and you have seen it |
+| Blue | Running, with no agent activity reported |
+| Red | Error |
+| Gray | Status unavailable |
 
-Sessions already present anywhere in VelaTerm, including archived sessions, are marked **Already imported** and cannot be selected again. If a history source cannot be read, the dialog displays a warning while retaining results from the other sources. The dialog and search have a copyable URL and survive refresh. Native histories are read on the machine running the VelaTerm backend; when connected remotely, this is the remote machine. Subdirectories and separate worktrees must be opened as their own projects to import their sessions.
+When an agent stops for you (a question, a permission request or the end of a turn), you get a system notification, the session is marked unread, and the Dock badge counts it. If you are already looking at that session, no notification appears. On the signed macOS build, clicking a notification opens the session. The "Notify: On/Off" item in the status bar turns system notifications on or off; unread marks and badges remain. When badges exist, the sidebar header shows a button that clears all of them.
 
-## 4. Fork: branch off the current conversation
+The status bar's "Working", "Pending" and "Viewed" counters filter the sidebar to sessions in that state; see [Interface & Session Management](interface-and-sessions_20260709_2041.md) §6.
 
-Right-click a claude / codex / pi session that has a conversation → "Fork Session". You get a sibling node that branches off the **current history** of the source conversation, leaving the source untouched — think git branch. Great for "same context, try two approaches".
+## 4. Auto-resume: close it, reopen it, the conversation continues
 
-## 5. Permission modes and launch arguments
+The mental model in one line: **each agent session node in the tree is one ongoing conversation.**
 
-**Two-level permissions**: each supported session can run in "Default" (step-by-step confirmation) or "skip all permission confirmations" — a.k.a. YOLO mode, which launches the agent with its corresponding flag (e.g. claude's `--dangerously-skip-permissions`). Toggle per session via "Skip all permission confirmations" in the session's edit form; set the per-type global default in Settings ▸ Agents.
+- On the first run, VelaTerm remembers the agent's own conversation ID.
+- After that, whether you closed the tab or quit the app, opening the node again continues the same conversation. Before resuming, VelaTerm checks that the conversation still exists; if it was deleted, the session starts fresh instead of failing.
+- For a fresh conversation, create a new session node. In the conversation view, `/clear` replaces the session with a new empty one in the same place.
 
-**Custom launch args**: the session edit form's "Launch args" appends extra command-line arguments for that session; Settings ▸ Agents holds a per-type default template, and "New with launch args…" in the New Session menu is a one-off parameterized create.
+**Resume Session…** at the end of the New Session menu adds a conversation you already have, for example one you ran in a plain terminal. Pick the "Agent type", paste the agent's conversation ID, and choose "Resume & Open". Every agent type in §1 can be resumed this way.
 
-**Executable path**: if an agent is installed outside PATH, set its "Executable path" per type in Settings ▸ Agents; leave empty to look the command up on PATH.
+**Import Sessions…** in a project's context menu lists existing Codex, Claude, OpenCode and Kiro conversations whose working directory is exactly the project directory. Search by title, agent or session ID ("Search by title, agent or session ID"), select rows, and choose "Import". The conversations join the project tree; open one to continue it. Importing does not copy or change the agent's own history. Conversations already in VelaTerm, including archived ones, are marked "Already imported". Conversations in subdirectories or separate worktrees appear only when that directory is opened as its own project. Kiro history can be viewed for text-only records. When connected to a remote VelaTerm, the list comes from the remote computer.
+
+## 5. Fork: branch off a conversation
+
+For Claude, Codex, Pi and OMP sessions that already have a conversation, right-click → "Fork Session". This creates a sibling node that starts from the source conversation's current history and leaves the source unchanged, similar to a git branch. Use it to try two approaches from the same context.
+
+## 6. Permissions
+
+Permission settings decide how much the agent may do without asking you.
+
+- **Claude, Codex and OpenCode** have named modes. Claude: "Plan Mode", "Always Ask", "Accept File Edits", "Auto mode", "Bypass". Codex: "Read Only", "Auto mode", "Full Access". OpenCode: "Always Ask", "Bypass".
+- **Copilot, Cursor, Antigravity, Cline, OMP, Crush, Kimi Code, Kiro, Grok Build and Zoo Code** have a single switch, "Skip all permission confirmations", which launches the agent with its own bypass option. In the conversation view, OMP offers "Always Ask" and "Bypass".
+- **Pi** runs tools without asking, so it has no permission setting.
+
+Where to change it:
+
+- **Per session**: the session's "Edit" form ("Permission", or the "Skip all permission confirmations" checkbox); in the terminal view, the permission item in the status bar ("Perms: Ask" / "Perms: Skip", or the current mode name); in the conversation view, the permission control under the message box.
+- **Default for new sessions**: Settings ▸ Agents ▸ "Permission". The status bar and conversation view menus also offer "Set as default".
+
+Some changes apply only after the agent restarts. VelaTerm then offers "Restart now" or "Later"; restarting resumes the conversation but interrupts a running task. "Bypass", "Full Access" and "Skip all permission confirmations" skip every confirmation, so use them with care.
+
+## 7. Launch settings and install guidance
+
+**Launch args.** The session's "Edit" form has "Launch args (optional)", which adds command-line arguments for that session. Settings ▸ Agents holds a default for each agent type.
+
+**Executable path.** If an agent is installed outside your PATH, set its "Executable path (optional)" in Settings ▸ Agents. When it is empty, the command is looked up on PATH.
 
 ![Settings · Agents](../assets/manuals/settings-agents.png)
 
-## 6. Not installed? Install guidance
+**Not installed?** Starting an agent that is not installed shows a card in the session: "<Agent> is not installed", with the recommended install command for your system.
 
-Launching an agent that isn't installed doesn't dead-end in `command not found`: an install-guide card appears in the session with the recommended install command for your OS — copy it, or run it in place with one click. After install, the binary's location is auto-detected and filled into the path setting, and a retry button relaunches the session. Remember each agent still needs its own login / API key setup; the card links to the docs.
+- "Install now" runs the command in the session. When the installed program is found, its path is saved to Settings, and a dialog offers "Relaunch now" or "Later".
+- "Retry launch" starts the session again, for example after you installed the agent yourself.
+- If the agent is already installed outside PATH, enter the full path in "Executable path" and choose "Use this path", or use "Browse…".
+- "Install docs" opens the agent's installation documentation; "I'll do it myself" closes the card.
 
-## 7. The Info panel: model, usage, resources
+Each agent still needs its own sign-in or API key after installation.
 
-With an agent session open, the right panel's Info tab shows its runtime details:
+## 8. The Info panel: usage, context and resources
+
+With an agent session open, the Info tab of the right panel shows:
 
 ![Info panel](../assets/manuals/agent-info.png)
 
-- **AGENT**: session name, type, run state, working directory, Git branch, start time, uptime.
-- **MODEL / This turn** (claude): current model, context usage, tool in flight.
-- **USAGE** (claude / codex): official quota usage (5-hour and 7-day windows); refresh interval is configurable (Usage refresh).
-- **RESOURCES**: measured CPU / memory of the session's process tree.
+- **Agent**: the agent type, session name, working directory, Git branch, start time and uptime. For Kiro sessions it also links to a read-only view of the conversation history.
+- **Usage** (Claude, Codex, Grok Build): account quota usage, for example the five-hour and seven-day windows, with their reset times. The ↻ button refreshes immediately. Automatic refresh and its interval are set in Settings ▸ Behavior ("Usage auto-refresh", "Usage refresh"). When a refresh fails, the last values stay visible with a "stale" mark.
+- **This turn** (Claude, Codex, Grok Build, OpenCode, Pi, OMP, Kiro): the model, how full the context window is, and the current turn's token counts and tools.
+- **Resources**: CPU and memory of the session's processes; the "system" option adds figures for the whole computer.
 
-## 8. Transcripts, export, and archiving
+## 9. Transcripts, export and archiving
 
-- Right-click → "Export Session…" (claude / codex, shown once a conversation has been captured) writes the full context to Markdown — including assistant thinking and every tool call with its inputs and results.
-- Archived agent sessions are readable as parsed transcripts in the archive panel (no terminal replay needed); restoring re-enables resume as usual. See [Interface & Session Management](interface-and-sessions_20260709_2041.md) §7.
+- Right-click → "Export Session…" (Claude and Codex, once a conversation exists) writes the full conversation to a Markdown file, including reasoning and every tool call with its input and result.
+- "Organize into Session Knowledge Base" in the session menu has an agent extract reusable knowledge from the conversation; see [Session Knowledge Base](global-memory_20260905_2027.md).
+- Archived sessions can be read in the knowledge base's "Archived Sessions" view. Conversations of Claude, Codex, OpenCode, Pi, OMP, Grok Build and Kiro show as messages; for other agents, the terminal recording is shown when one exists. Restoring an archived session keeps its conversation ID, so it resumes as usual. See [Interface & Session Management](interface-and-sessions_20260709_2041.md) §8.
 
-## 9. Odds and ends
+## 10. Other behavior
 
-- **Auto-naming**: unnamed sessions take their name from your first message (claude and others).
-- **Live theme following**: switching light/dark re-skins running claude sessions instantly, no restart.
-- **Vela Skills**: the "Vela Skills" toggle in Settings ▸ General installs `vspawn`, `vspawn-tree`, and `vopen` for both Claude and Codex, letting either agent spawn sub-sessions and open documents from inside a conversation (see [Session Spawning & Git Collaboration](session-spawning-and-git_20260709_2041.md)).
-- **Windows**: claude / codex fully supported (via PowerShell); the other types are best-effort.
-
-
-## 10. Sign in and out from a Claude or Codex conversation
-
-The **Claude account** or **Codex account** menu is a composer chip that is off by default. Open it from **More** on desktop without changing its toolbar setting, or turn it on under Settings > Conversation view > Composer toolbar to place it beside the input when space permits. More remains available when a supported chip is off, even if the input row has plenty of room or every chip is off. On mobile, chips that are off remain in the second row. The menu offers **Sign in again** and **Sign out**, even when no authentication error has occurred. The menu closes when you click outside it or press Escape. While a sign-in is unresolved or an account operation is in progress, the chip stays in place but is dimmed and cannot be opened; the panel below the conversation handles that flow. After sign-in succeeds or is canceled, that panel closes automatically. Wait for the current turn to finish before changing accounts. Claude also requires any background tasks and permission requests to finish. Read-only conversation views do not expose account controls.
-
-A sign-in prompt appears when a Codex request reports an authentication error, such as a revoked refresh token, `unauthorized`, or a requirement to sign in. The prompt does not open the browser automatically. Select **Sign in again**, open the authorization link, and enter the displayed device code. The conversation shows the result automatically, and you can send another message after sign-in succeeds. The existing conversation and its native thread ID are retained.
-
-The device code remains available when you switch panes or reload the page while the backend and Codex process are running. **Cancel** stops the pending login; an unsuccessful attempt can be retried.
-
-**Sign out** asks for confirmation before clearing the shared Codex account credentials on the connected host. This affects other sessions that use the same credential store; conversation history is kept. After Codex confirms sign-out, the view offers **Sign in**. If the result cannot be confirmed, the view reports that outcome and allows a retry. Signing out pauses automatic delivery of queued messages.
-
-This uses [Codex-managed device code authentication](https://learn.chatgpt.com/docs/app-server). Enable device code login in your [ChatGPT security settings or workspace permissions](https://learn.chatgpt.com/docs/auth), and use a Codex CLI version that supports it. Authentication changes apply to the Codex credential store on the connected host, including other sessions that share that store. VelaTerm displays the temporary device code; Codex manages the account credentials.
-
-For Claude, **Sign in again** opens a sign-in prompt with an authorization link. Open that link, sign in on the official page, and paste the full authorization code, including the part after `#`, into **Authorization code**. Select **Submit code** to finish. The backend checks that the code belongs to the current attempt; the code is never sent as a chat message or retained in the conversation. Pending authorization remains available across page reloads while the backend and Claude process are running. **Cancel** waits for the native flow to end before closing the prompt; cancellation is unavailable while Claude verifies a submitted code.
-
-Claude manages OAuth and credential storage through its native control protocol. Its temporary callback listener uses an automatically assigned port on the connected host's loopback address. The manual authorization link and code submission work when the browser is on another device. The CLI must support `claude_authenticate`, `claude_oauth_callback`, and `claude_oauth_wait_for_completion`; an unsupported CLI or an unsuccessful attempt produces a retryable sign-in error.
-
-For Claude, confirmed **Sign out** runs `claude auth logout` with the session's executable, working directory and configuration-source arguments. The current idle process is then released to discard cached credentials. The next operation resumes the native conversation and restores the visible history and queued messages. Sign-out clears the saved account credentials; configured API keys and other authentication methods are unchanged. Other running sessions can retain cached credentials until they restart.
-
-## 11. Shell mode with `!` in the conversation view
-
-Type `!` followed by a command into the composer, for example `! az login --tenant <id>`, and VelaTerm runs the command itself instead of sending it to the agent as text. This mirrors the terminal UI's shell mode: the agent neither interprets nor approves the command. Leading whitespace and spaces after the `!` are ignored; `!` alone does nothing and shows a hint. Send behaviors (queue, steer and so on) do not apply, and a shell command cannot carry images: with an attachment present the composer keeps your draft and asks you to remove it or send it as a message.
-
-The command runs in the session's shell as a login shell (the same shell resolution the terminal view uses; PowerShell or cmd on Windows), in the agent's working directory and with the environment the agent process receives. The text after `!` is passed to the shell as one string, exactly as typed. If no agent process is running yet, VelaTerm starts it first, as it does for any message, so the agent can react afterwards.
-
-While the command runs, a dedicated row appears in the timeline: the command line, its live stdout and stderr, a running indicator and a **Cancel** button. It is neither a user bubble nor a tool call. Cancel kills the command together with every process still in its process group; a process that detached itself into its own group keeps running, as it would in the terminal. There is no timeout, so a command that waits for a browser login keeps running until it finishes or you cancel it. When the command ends, the row shows the exit code, or that you cancelled it. Very long output is trimmed to its last part and the row says so.
-
-When the command has ended, the agent receives the command with its stdout, stderr and exit state (or the cancellation) as one user message and responds to it like it would in the terminal UI. This message is shown only as the command row, never as raw text, also after the conversation is reloaded, and mirrored or remote views show the same row. Only one shell command runs per conversation at a time; a second `!` while one is running is refused with a hint. Shell mode works the same way for every agent kind, because the command runs locally.
-
-Limits: there is no interactive input. A command that prompts on stdin ends without input or waits until you cancel it, as in the terminal UI's shell mode. `!` is recognized only at the start of the message, and there is no history or path completion.
+- **Automatic names**: a session you did not name takes its name from your first message.
+- **Theme changes**: switching between light and dark updates running Claude sessions in the terminal view without a restart.
+- **Vela Skills**: Settings ▸ General ▸ "Vela Skills" installs skills for Claude Code and Codex that start child sessions, open files, and read or message other sessions; see [Session Commands](session-commands_20260925_1012.md).
+- **Windows**: Claude Code and Codex are fully supported (they run in PowerShell); the other agents are provided on a best-effort basis.

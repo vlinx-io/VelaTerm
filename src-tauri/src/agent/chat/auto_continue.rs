@@ -93,7 +93,7 @@ fn now_secs() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
-/// Whether the setting is on. Missing or unreadable settings mean off, matching the frontend default.
+/// Whether the setting is on. Missing or unreadable settings mean on, matching the frontend default.
 pub fn enabled(ctx: &AppCtx) -> bool {
     let json = {
         let Ok(conn) = ctx.db().conn.lock() else { return false };
@@ -101,7 +101,7 @@ pub fn enabled(ctx: &AppCtx) -> bool {
     };
     json.and_then(|s| serde_json::from_str::<Value>(&s).ok())
         .and_then(|v| v.get(SETTING).and_then(Value::as_bool))
-        .unwrap_or(false)
+        .unwrap_or(true)
 }
 
 /// The wait in progress for this session, for its snapshot.

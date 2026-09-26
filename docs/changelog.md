@@ -1,9 +1,27 @@
 # Changelog
 
-> Created: 2026-07-09 16:10 · Updated: 2026-09-24
+> Created: 2026-07-09 16:10 · Updated: 2026-09-26
 
 All notable changes to VelaTerm are documented here, newest first.
 v0.1.91 is the first public release; earlier version numbers were internal iterations and are not covered.
+
+---
+
+## v0.2.4 — 2026-09-26
+
+- 📋 Copying from a conversation gives you the text as it appears on screen: no backticks around inline code, no asterisks around emphasis, links as their text, code blocks without fences, table cells separated by tabs, and lists keeping the markers you see. Rich formatting is still placed on the clipboard alongside it, and the right-click menu gains "Copy as Markdown" for the Markdown source of the selection.
+
+- ⏳ Continuing automatically after a usage limit resets is now on by default. If you changed the setting yourself, your choice is kept.
+
+- ↩️ Rolling back a conversation is no longer blocked by a task that has already finished: a foreground task counts as finished when its turn ends, and progress arriving afterwards no longer marks it as running again. When a background task really is still running, the message names it.
+
+- 🧹 Codex subagent threads no longer appear in the session history list, the same as Claude's sidechains.
+
+- ⌨️ Terminal completion: after moving through the candidates with the arrow keys, Enter accepts the highlighted one just as Tab does. Enter still goes to the shell if you have not moved the selection, if you kept typing after selecting, or if a modifier key is held.
+
+- 📱 Android is built in two channels. The default build carries the Getui, Huawei, Xiaomi, OPPO, vivo, Meizu and Honor push channels; the Play build ships without them and reports task notifications as having no push channel configured.
+
+- 🎨 Smaller interface changes: task lists no longer repeat the checkbox, the notification bar and the auto-continue notice sit between the conversation and the composer at the same width as the message text, and on the phone the send button stays beside the input when the options are collapsed.
 
 ---
 

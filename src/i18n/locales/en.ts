@@ -279,6 +279,7 @@ const en = {
   "common.save": "Save",
   "common.create": "Create",
   "common.close": "Close",
+  "chat.copyAsMarkdown": "Copy as Markdown",
   "chat.imageViewOriginal": "View original image",
   "chat.imageCopy": "Copy image",
   "chat.imageSave": "Save image",

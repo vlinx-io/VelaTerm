@@ -1,71 +1,102 @@
-# 本地笔记与知识库
+# Local Knowledge Bases
 
-知识库用于日常写作和资料整理。每个本地知识库对应一个普通文件夹，Markdown 正文和附件直接保存在该文件夹中；可以继续用其他编辑器打开这些文件。
+Created: 2026-09-10
 
-内置的“会话知识库”与所有打开的本地知识库并列，包含知识条目和整理记录，保留原有的会话整理流程。会话生成的知识独立保存，不随项目文件变化自动更新；再次主动生成会覆盖同一会话此前的生成结果。具体规则见[会话知识库](global-memory_20260905_2027.md)。
+Updated: 2026-09-25 10:21
 
-## 打开已有文件夹或新建知识库
+A local knowledge base is an ordinary folder of Markdown files that you write and organize in VelaTerm. Notes and attachments stay in that folder, so you can keep editing them with other editors. Some menu items call a local knowledge base a "notebook"; both words refer to the same folder.
 
-点击右侧书本图标进入知识库。首页列出会话知识库和已打开的本地知识库；点击右侧目录顶部的“知识库”可以返回首页。右侧页签仅显示图标，悬停可查看名称，默认页签为 Info。导航顶部的文件夹按钮用于“打开知识库”，带加号的文件夹按钮用于“新建知识库”。点击打开按钮会直接弹出目录选择器，选定已有 Markdown 文件夹后立即打开，不经过单独的页面。取消操作会保留当前笔记。已有 Obsidian 仓库也可以直接打开：文件保留在原位置，`.obsidian` 等隐藏配置不参与索引，也不会被修改。
+The built-in "Session Knowledge Base" sits next to your local knowledge bases. It holds knowledge that agents organize from your sessions and keeps its own entries, sources and revision history; see [Session Knowledge Base](global-memory_20260905_2027.md).
 
-点击“新建知识库”会弹出名称和存放文件夹对话框，确认后创建目录并直接打开。父目录必须存在，目标目录不能已存在；已有目录应使用“打开知识库”。右侧是一棵目录树：会话知识库和本地知识库都是根文件夹，仅用图标区分。点击箭头展开或收起目录，内容直接显示在父目录下面，可以同时展开多个知识库。点击文件夹名称查看其内容；点击文件会在中间区域以文档标签打开，与从文件浏览器打开 Markdown 文件的行为一致。会话知识库依次按项目、会话和条目展开，较长的条目列表支持“加载更多”。
+## Opening the knowledge base
 
-这里的“本地”指当前连接后端所在的电脑。通过远程浏览器使用时，打开目录操作访问服务器文件系统；导入操作则把浏览器选择的文件上传到该服务器。关闭知识库仅从列表中隐藏该目录，不删除磁盘上的文件。再次打开同一目录时，收藏和回收记录仍然保留。
+Click the knowledge icon in the right panel (tooltip "Knowledge Base"). A "Knowledge Base" tab opens in the center with the home page:
 
-## 文件与文件夹导入
+- a search box ("Search session knowledge and local notes…", see [Searching](#searching));
+- the "Session Knowledge Base";
+- your "Local knowledge bases";
+- the "Open knowledge base" and "Create knowledge base" buttons.
 
-1. 打开目标知识库，点击内容区工具栏的“导入”。
-2. 选择目标文件夹，再选择文件、选择整个文件夹，或将文件和文件夹拖入导入区域。
-3. 检查文件列表，确认后开始复制。导入期间可以切换页面或打开笔记，复制会继续进行；工具栏的进度入口和“导入记录”页面随时可以看到进度，也可以在那里取消。
+The right panel shows a tree with three roots: "Session Knowledge Base", "Archived Sessions" and "Local knowledge bases". Click an arrow to expand a folder in place; several knowledge bases can be expanded at once. Click a folder name to show its contents, and click a note to open it. The "Knowledge bases" link at the top of the tree returns to the home page, and the "Up one level" button in a page header goes to the parent page without leaving the knowledge base.
 
-导入保留原始文件内容、中文文件名、相对目录和附件，不修改来源文件。文件夹导入包含所选文件夹本身。目标重名时整批拒绝，不自动覆盖。隐藏文件和隐藏配置目录会跳过；浏览器文件选择器不提供空目录，因此空目录不会导入。
+Notes open in ordinary document tabs, with the same editing, saving, search and PDF export as any other Markdown file (see [Document & Browser Tabs](document-and-browser-tabs_20260709_2041.md)). The "Knowledge Base" tab stays in the tab bar so that you can return to where you were.
 
-每批最多导入 5,000 个文件、总计 1 GiB，单个文件最多 100 MiB。文件先暂存，全部上传完成后再发布到目标目录；上传中断不会把不完整文件当作笔记展示。
+## Opening or creating a local knowledge base
 
-“导入记录”保存每次导入的时间、目标目录、文件数、导入数和跳过数，可以展开查看每个文件及跳过原因，也可以删除记录；删除记录不会删除已经导入的文件。应用意外退出时，未完成的导入会标记为已中断，残留的 `.vkb-import` 暂存目录在删除该记录时一并清理。
+- **Open:** click "Open knowledge base" and choose a folder. The desktop app shows the system folder picker; a browser client shows a folder browser for the connected computer. An existing Obsidian vault can be opened directly: files stay where they are, and hidden folders such as `.obsidian` are neither indexed nor changed.
+- **Create:** click "Create knowledge base", enter a "Name", choose a "Folder" (or "Browse"; the suggestion is `~/Notes`), and confirm. VelaTerm creates the folder and opens it. The parent folder must exist, and a folder with the same name must not; otherwise VelaTerm shows "The destination already exists. Choose another name or folder." To use an existing folder, choose "Open knowledge base" instead.
+- **Rename:** right-click a knowledge base in the tree and choose "Rename". This renames the folder on disk.
+- **Close:** click "Close notebook" in the knowledge base toolbar, or right-click it in the tree. Closing removes the folder from the list; its files remain on disk. When you open the same folder again, its trash and import history are still there.
 
-## 写作、阅读与整理
+"Local" means the computer that runs the VelaTerm backend you are connected to. In a browser client, "Open knowledge base" browses that computer's folders, and importing uploads the files you choose in the browser to that computer.
 
-- 右侧“知识库”目录树用于浏览文件夹和文件。内容区工具栏提供新建文件夹、导入和关闭入口，新建笔记在笔记列表头部，最近笔记、收藏、回收站和导入记录也在内容区切换。点击文件或列表中的笔记会在中间区域打开文档标签，编辑、保存、查找和导出与打开普通 Markdown 文件完全相同。
-- `Cmd/Ctrl+N` 新建笔记，`Cmd/Ctrl+O` 快速打开，`Cmd/Ctrl+Shift+F` 聚焦内容区搜索框。
-- 知识库首页顶部、右栏“知识库”目录上方与内容区工具栏各有一个搜索框。首页搜索同时覆盖会话知识与本地笔记，结果按来源分组；右栏与内容区搜索按名称、路径与正文查找笔记，多个关键词之间采用 AND 条件。每条结果显示所属知识库或会话分组、命中片段、命中行号与命中次数，并列出直接链接到的相关条目或笔记，点击可打开。
-- 精确匹配优先：查询词先按子串精确匹配，没有精确结果时才退回模糊匹配。模糊匹配支持英文缩写与字符顺序（`knwl` 命中 `knowledge`，`kb` 命中 `knowledge base`）以及长度 4 以上的拼写误差（`knoledge` 命中 `knowledge`）；中文词仍按子串匹配。界面会说明当前显示的是近似结果。结果排序依次为名称/路径命中、命中次数、最近更新，最多列出 100 条，超出时在列表末尾说明。
-- 内容区搜索可用“搜索范围”在“当前知识库”和“全部知识库”之间切换；结果支持上下键选择、回车打开、Esc 清空。查询非空时，标签、收藏筛选与排序让位给搜索结果，清空后恢复原来的列表。
-- 标签识别正文中的 `#标签`，以及常见 YAML `tags` 数组或列表。
-- 把文件拖入正文会把文件复制到当前笔记所在目录并插入 Markdown 链接；图片链接在正文内显示。
-- “重命名或移动”填写相对于知识库根目录的目标路径，目标父目录需要已经存在。程序会更新当前知识库内能够解析的笔记链接，保留链接显示名称和代码中的字面文本。
-- 删除操作移入知识库自身的 `.vkb-trash`，在“回收站”中恢复。同名文件已存在时不会覆盖。关闭知识库后，回收文件和恢复记录仍然保留。
+## Importing files and folders
 
-正在查看的文档标签会定期检查磁盘上的外部修改，并按普通文档的方式提示重新加载或忽略；知识库目录在页面可见时约每 5 秒刷新。
+1. Open the target knowledge base and click "Import" in its toolbar.
+2. Choose the destination "Folder", then "Choose files", "Choose folder", or drag files and folders into the import area.
+3. Check the list and confirm.
 
-知识库、笔记、导入、导入记录和管理页面，以及打开、新建对话框均有可直接访问的 URL。路径选择、搜索、搜索范围、标签、排序、导入记录分页和快速打开状态可通过 URL 恢复；尚未保存的正文和表单输入不属于 URL 内容。
+The import runs in the background, so you can switch pages or open notes while it copies. Its progress appears in the knowledge base toolbar and on the home page, and it can be canceled from the import dialog or from "Import history". When it finishes, a banner shows the number of imported and skipped files; if the window is not in focus, a system notification ("Import finished" or "Import failed") appears. Only one import can run in a knowledge base at a time.
 
-## 链接与现有文件兼容
+An import copies files as they are, including non-ASCII file names, relative folder structure and attachments, and never modifies the originals. Importing a folder includes the folder itself. If any file would overwrite an existing one, the whole batch is rejected. Hidden files and hidden configuration folders are skipped. Browser file pickers do not provide empty folders, so empty folders are not imported.
 
-支持常用的 `[[笔记]]`、`[[目录/笔记|显示名称]]`、`[[笔记#标题]]` 和标准 Markdown 相对链接。文件名重复时，短链接只在目标唯一时解析；否则应补全目录路径。图片支持标准 Markdown 图片链接和常见 `![[图片.png]]` 写法。
+One import can contain up to 5,000 files (hidden files that are skipped count toward this limit) and up to 1 GiB in total, with at most 100 MiB per file. Files are staged first and appear in the destination only after the whole batch has arrived, so an interrupted upload never shows up as a half-written note.
 
-文件仍是普通 Markdown；YAML 属性保留在源文件中。非 UTF-8 的 Markdown 文件作为附件保留，不作为可编辑笔记。单篇可编辑笔记最多 5 MiB，知识库最多扫描 50,000 个文件和文件夹；符号链接与不支持的路径不会跟随读取。
+"Import history" lists every import with its time, destination ("Knowledge base root" for the top folder), status ("Importing", "Completed", "Failed", "Cancelled" or "Interrupted"), the number of imported and skipped files, the size and the duration. Click "Files (N)" to see each file and why it was skipped. "Delete record" removes the entry from the history; the imported files are not removed. An import whose progress has stopped for more than two minutes, for example because the app quit unexpectedly, is marked "Interrupted"; deleting its record also removes the files that were staged for it.
 
-这提供了本地文件、目录、Markdown 编辑、链接和检索的日常工作流。Obsidian 的插件、主题、Canvas、块引用、嵌入整篇笔记和 YAML 别名解析尚未实现；相关原文件保持原样。文件模型和常用链接语法可参考 [Obsidian 仓库说明](https://help.obsidian.md/vault)、[内部链接](https://help.obsidian.md/links)和[附件](https://help.obsidian.md/attachments)。
+## Writing and organizing notes
 
-## 从会话知识库复制与 Agent 查询
+A knowledge base page has the views "Recent notes", "Trash" and "Import history", a "New note" button, and toolbar buttons for "New folder", "Import" and "Close notebook". The note list can be filtered by tag ("All tags") and sorted by "Recently updated" or "Title".
 
-在“会话知识库”中打开条目，选择“复制到本地知识库”，再选择目标知识库和文件名。复制生成独立 Markdown 笔记，原条目、来源快照和版本历史仍保留在原处。
+- While a knowledge base page is shown, ⌘N / Ctrl+N creates a "New note", ⌘O / Ctrl+O opens "Quick open" (find a note by its path), and ⌘⇧F / Ctrl+Shift+F moves to the "Search notes…" box.
+- To rename a note, right-click it in the tree and choose "Rename". To move it, drag it onto another folder of the same knowledge base. "Delete" moves it to the knowledge base's trash.
+- When a folder is open, "Rename or move" moves the folder to a path relative to the knowledge base root; the parent folder must already exist. Links in other notes of the same knowledge base are updated when a note or folder moves, keeping the link text and leaving code untouched.
+- Deleted items go to a `.vkb-trash` folder inside the knowledge base. Open "Trash" and click "Restore" to bring an item back; an existing file with the same name is never overwritten.
+- Tags come from `#tag` in the text and from a YAML `tags` list or array.
+- Images pasted into a note are saved in an `assets` folder next to the note.
 
-在 VelaTerm 会话中，Agent 或用户可以按需读取已登记的本地笔记：
+The tree and lists refresh about every five seconds while the page is visible, and when the window regains focus. An open document tab detects changes made by other programs and offers to reload.
+
+Knowledge base pages, dialogs, the import history, searches, search scope, tags, sorting and quick open all have their own URLs, so you can refresh the page or use the browser's back and forward buttons. Unsaved text and form input are not part of the URL.
+
+## Searching
+
+- **Home page:** searches the Session Knowledge Base and all local knowledge bases at once and groups the results by source. Archived sessions are not included.
+- **Right panel:** "Search notes…" above the tree searches all local knowledge bases.
+- **Knowledge base page:** "Search notes…" searches note names, paths and text. "Search scope" switches between "This knowledge base" and "All knowledge bases".
+
+Several words must all match. Each result shows its knowledge base or session group, a snippet, the line number, the number of matches and the "Related notes" the note links to; click any of them to open it. Use Up and Down to select a result, Enter to open it and Esc to clear the search. Results are ordered by matches in the name or path, then by the number of matches, then by the most recent update. Up to 100 results are listed; when there are more, the list ends with "Only the first results are listed. Narrow the search to see the rest."
+
+VelaTerm looks for exact matches first and falls back to approximate matches only when there are none, showing "No exact matches. Showing approximate results." Approximate matching applies to words made of Latin letters and digits: letters in order (`knwl` finds `knowledge`), initials (`kb` finds `knowledge base`), and small typing errors (one error in words of four or more characters, two in words of eight or more; `knoledge` finds `knowledge`). Chinese and other non-Latin text is matched exactly.
+
+## Links and compatibility with existing files
+
+VelaTerm recognizes the common `[[note]]`, `[[folder/note|label]]` and `[[note#heading]]` forms, standard relative Markdown links, and `![[image.png]]`. It uses them to update links when notes move, to list "Related notes" in search results, and for the `vkb` commands below. In the editor, `[[…]]` links are shown as plain text. When several files share a name, a short link is resolved only if the target is unique; otherwise write the folder path.
+
+Files remain plain Markdown, and YAML front matter stays in the file; Source mode in the editor shows it exactly. Markdown files that are not UTF-8 or larger than 5 MiB are not listed as notes and are counted under "Skipped". A knowledge base can contain up to 50,000 files and folders; a larger folder cannot be opened and shows "The file or selection exceeds the notebook limits." Symbolic links are not followed.
+
+These features cover everyday work with local files, folders, Markdown, links and search. Obsidian plugins, themes, Canvas, block references, embedded notes and YAML aliases are not supported; the corresponding files are left unchanged. For the file model and link syntax, see Obsidian's documentation on [vaults](https://help.obsidian.md/vault), [internal links](https://help.obsidian.md/links) and [attachments](https://help.obsidian.md/attachments).
+
+## Copying from the Session Knowledge Base and agent queries
+
+Open an entry in the Session Knowledge Base, choose "Copy to a local notebook", then pick the target knowledge base and file name. The copy is an independent Markdown note; the original entry, its source snapshots and its revision history stay where they are.
+
+In a VelaTerm session, you or an agent can read registered local knowledge bases with `vkb`:
 
 ```sh
-vkb notes "读书笔记"
-vkb note <知识库ID> "阅读/如何做读书笔记.md"
-vkb search "架构决策"
+vkb notes "reading notes"
+vkb note <knowledge-base-ID> "reading/how-to-take-notes.md"
+vkb search "architecture decision"
 ```
 
-`notes` 跨当前后端登记的知识库检索，结果包含 `vaultId`、`vaultName`、`path`、`absolutePath`、`line`、`matches`、`score`、`matched`（实际命中的字面量）、`related`（该笔记正文直接链接到的其他笔记）与 `fuzzy`（是否为模糊匹配结果），其中 `summary` 是命中行周围的片段。`note` 读取指定笔记的正文、链接和反向引用。`search` 同时返回会话知识库、本地笔记和可用的代码查询结果；没有代码索引也可以查询本地笔记。搜索最多返回 100 条，并通过 `total`、`hasMore` 和 `unavailable` 说明数量及不可用的知识库。
+- `notes` searches every local knowledge base registered on the current backend. Each result includes `vaultId`, `vaultName`, `path`, `absolutePath`, `line`, `matches`, `score`, `matched` (the text that actually matched), `related` (notes this note links to) and `summary` (the text around the match). The response also reports `total`, `hasMore`, `unavailable` (knowledge bases that could not be read) and `fuzzy` (whether the results are approximate). Up to 100 results are returned.
+- `note` returns a note's text, outline, links, backlinks and tags.
+- `search` returns matches from the Session Knowledge Base, local notes and, when a code index exists, the code graph (see [Code Graph & Knowledge Base](codegraph_20260905_2027.md)).
 
-这些命令只读，不会修改笔记，也不会自动把全部知识库注入每个会话。
+These commands are read-only. They never change notes, and VelaTerm does not add knowledge base content to sessions automatically.
 
-## 存储与日志
+## Storage and logs
 
-正文及附件以本地文件为准。SQLite 的 `kb_*` 表仅保存知识库登记、收藏、回收记录、导入记录和可重建的搜索缓存；会话知识库继续使用 `memory_*` 表。
+The files on disk are the authoritative copy of your notes and attachments. The application database (`kb_*` tables) stores only the list of registered knowledge bases, trash records, import history and a search cache that can be rebuilt. The Session Knowledge Base uses its own `memory_*` tables.
 
-新建、保存、移动、回收、恢复和导入会写入运行日志，包含操作 ID、数量及耗时；导入记录本身保存在数据库中，可在“导入记录”页面查看。日志不记录正文或附件内容，文件位置和通用日志设置见[运行日志与隐私保护](runtime-diagnostics_20260909.md)。备份时建议同时保留知识库文件夹和应用数据，以保留收藏、回收及导入记录。
+Opening, writing, moving, deleting, restoring and importing are recorded in the runtime log with an operation ID, counts and the time taken, never with note contents. These lines use the `knowledge` event; when `VLX_LOG_DIR` is not set, `VLX_KNOWLEDGE_LOG_DIR` sets their directory. Import history is stored in the database and shown on the "Import history" page. See [Runtime logs and privacy](runtime-diagnostics_20260909.md) for log locations and privacy. To back up a knowledge base completely, keep both its folder and the application data, which holds its trash and import records.

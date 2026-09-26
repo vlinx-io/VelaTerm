@@ -248,7 +248,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   saveWorkspaceOnQuit: true,
   usageAutoRefresh: true,
   usageRefreshSec: 300,
-  autoContinueAtUsageLimit: false,
+  autoContinueAtUsageLimit: true,
   imagePasteMode: "upload",
   chatModel: "",
   chatModelByKind: {},

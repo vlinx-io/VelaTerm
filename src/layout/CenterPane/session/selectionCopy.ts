@@ -5,6 +5,10 @@
 //! their source semantics as data attributes; this module clones only the selected range, restores those
 //! semantics, and serializes the result. The clipboard therefore follows the message content rather than
 //! whichever `div` structure the current design happens to use.
+//!
+//! One selection serializes two ways. The plain-text flavor is what the selection shows on screen, so a
+//! path or command pasted into a terminal carries no backticks or emphasis markers. The Markdown flavor
+//! keeps the source syntax and is offered separately as "Copy as Markdown".
 
 import TurndownService from "turndown";
 import { gfm } from "turndown-plugin-gfm";
@@ -73,7 +77,10 @@ export function listItemCopyAttributes(task: boolean, checked: boolean | undefin
 }
 
 export interface MessageClipboardContent {
+  /** The selection as displayed, without Markdown syntax; written by an ordinary copy. */
   plainText: string;
+  /** The selection as Markdown source; written by "Copy as Markdown". */
+  markdown: string;
   html: string;
 }
 
@@ -107,6 +114,8 @@ turndown.addRule("compactListItem", {
       // This renderer wraps even tight-list text in a paragraph-like div. Turndown turns that wrapper into
       // terminal newlines; remove them before the list rule adds its single item separator.
       .replace(/\n+$/, "")
+      // A task box is restored in front of the item's first paragraph; keep them on one line.
+      .replace(/^(\[[ x]\])\s+/, "$1 ")
       .replace(/\n(?=\S)/g, "\n    ");
     const parent = node.parentElement;
     if (parent?.nodeName !== "OL") return `${options.bulletListMarker} ${item}\n`;
@@ -116,7 +125,75 @@ turndown.addRule("compactListItem", {
   },
 });
 
-/** Build stable plain-text Markdown and rich HTML for a non-empty selection inside one message body. */
+/**
+ * Serializes the same semantic tree as `turndown`, but only into what is visible: inline code without
+ * backticks, emphasis without markers, links as their text, code blocks without fences, and table cells
+ * separated by tabs. List markers stay because the view draws them as text.
+ */
+const displayText = new TurndownService();
+// Visible text needs no protection from Markdown parsers.
+displayText.escape = (text) => text;
+displayText.addRule("plainBlock", {
+  filter: ["h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "hr"],
+  replacement: (content) => `\n\n${content}\n\n`,
+});
+displayText.addRule("plainInline", {
+  filter: (node) =>
+    ["A", "B", "DEL", "EM", "I", "S", "STRONG"].includes(node.nodeName) ||
+    (node.nodeName === "CODE" && node.parentNode?.nodeName !== "PRE"),
+  replacement: (content) => content,
+});
+displayText.addRule("plainCodeBlock", {
+  filter: "pre",
+  replacement: (_content, node) => `\n\n${(node.textContent ?? "").replace(/\n$/, "")}\n\n`,
+});
+displayText.addRule("plainLineBreak", {
+  filter: "br",
+  replacement: () => "\n",
+});
+// Images show no text of their own; task checkboxes are drawn by the list item marker below.
+displayText.addRule("plainHidden", {
+  filter: ["img", "input"],
+  replacement: () => "",
+});
+// Paragraphs inside a list item are its lines; a blank line would split an item from its nested list.
+displayText.addRule("plainListParagraph", {
+  filter: (node) => node.nodeName === "P" && node.parentNode?.nodeName === "LI",
+  replacement: (content) => `\n${content}\n`,
+});
+displayText.addRule("plainListItem", {
+  filter: "li",
+  replacement: (content, node) => {
+    const parent = node.parentElement;
+    const checkbox = node.querySelector<HTMLInputElement>(":scope > input[type=checkbox]");
+    let marker = "•";
+    if (parent?.nodeName === "OL") {
+      marker = `${Number(parent.getAttribute("start") ?? 1) + Array.from(parent.children).indexOf(node)}.`;
+    } else if (checkbox) {
+      marker = checkbox.hasAttribute("checked") ? "☑" : "☐";
+    }
+    const indent = " ".repeat(marker.length + 1);
+    const item = content.replace(/^\s+/, "").replace(/\n+$/, "").replace(/\n(?=\S)/g, `\n${indent}`);
+    return `${marker} ${item}\n`;
+  },
+});
+displayText.addRule("plainTableSection", {
+  filter: ["thead", "tbody"],
+  replacement: (content) => content,
+});
+displayText.addRule("plainTableRow", {
+  filter: "tr",
+  replacement: (content) => `${content}\n`,
+});
+displayText.addRule("plainTableCell", {
+  filter: ["th", "td"],
+  replacement: (content, node) => {
+    const first = node.parentNode?.firstChild === node;
+    return `${first ? "" : "\t"}${content.replace(/\s*\n\s*/g, " ").trim()}`;
+  },
+});
+
+/** Build displayed text, Markdown source, and rich HTML for a non-empty selection inside one message body. */
 export function createMessageSelectionClipboardContent(
   selection: Selection | null,
   messageBody: Element,
@@ -135,9 +212,12 @@ export function createMessageSelectionClipboardContent(
 
   // At this point whitespace comes from semantic Markdown boundaries, not layout divs. Canonicalizing the
   // outer boundary removes serializer padding while keeping all meaningful spacing inside the selection.
-  const markdown = turndown.turndown(container.innerHTML).trim();
+  // Leading spaces of displayed text are kept: they may be the indentation of a selected code block.
+  const html = container.innerHTML;
+  const markdown = turndown.turndown(html).trim();
   if (!markdown) return null;
-  return { plainText: markdown, html: `<meta charset="utf-8">${container.innerHTML}` };
+  const text = displayText.turndown(html).replace(/^\n+|\s+$/g, "");
+  return { plainText: text, markdown, html: `<meta charset="utf-8">${html}` };
 }
 
 function containsBoundary(root: Element, node: Node): boolean {
@@ -197,7 +277,7 @@ function createSelectedCodeContent(range: Range, messageBody: Element): MessageC
     fence && code.includes("\n")
       ? `<meta charset="utf-8"><pre><code${className}>${escaped}</code></pre>`
       : `<meta charset="utf-8">${escaped}`;
-  return { plainText: code, html };
+  return { plainText: code, markdown: code, html };
 }
 
 function closestCodeRegion(node: Node, messageBody: Element): Element | null {
@@ -427,7 +507,8 @@ function restoreTaskCheckbox(item: HTMLElement, state: string | null): void {
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.disabled = true;
-  checkbox.checked = state === "checked";
+  // The attribute, not the property: serialization goes through innerHTML, which drops live checkedness.
+  checkbox.defaultChecked = state === "checked";
   item.prepend(checkbox, " ");
 }
 

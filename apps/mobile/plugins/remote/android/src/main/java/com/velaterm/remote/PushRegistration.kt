@@ -8,7 +8,6 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.core.app.NotificationManagerCompat
-import com.igexin.sdk.PushManager
 import org.json.JSONObject
 import org.json.JSONArray
 import java.net.URL
@@ -65,6 +64,7 @@ internal class PushRegistration private constructor(private val context: Context
         }
     }
     fun configured(): Boolean {
+        if (!PushProvider.AVAILABLE) return false
         val info = context.packageManager.getApplicationInfo(context.packageName, android.content.pm.PackageManager.GET_META_DATA)
         val metadata = info.metaData ?: return false
         if (metadata.getString("GETUI_APPID").isNullOrBlank()) return false
@@ -117,15 +117,9 @@ internal class PushRegistration private constructor(private val context: Context
     // Called only after the app has shown its provider disclosure and obtained notification consent.
     fun initialize() {
         check(configured()) { "PUSH_NOT_CONFIGURED" }
-        if (context.assets.list("")?.contains("agconnect-services.json") == true) {
-            context.assets.open("agconnect-services.json").use {
-                com.huawei.agconnect.AGConnectInstance.initialize(context, com.huawei.agconnect.AGConnectOptionsBuilder().setInputStream(it))
-            }
-        }
         if (Build.VERSION.SDK_INT >= 26) context.getSystemService(NotificationManager::class.java)
             .createNotificationChannel(NotificationChannel("task-updates", "VelaTerm", NotificationManager.IMPORTANCE_HIGH))
-        PushManager.getInstance().initialize(context, VelaPushService::class.java)
-        PushManager.getInstance().registerPushIntentService(context, VelaPushReceiver::class.java)
+        PushProvider.initialize(context)
     }
     fun enable() {
         check(NotificationManagerCompat.from(context).areNotificationsEnabled()) { "PUSH_DENIED" }
@@ -133,7 +127,7 @@ internal class PushRegistration private constructor(private val context: Context
         tokenWaiter = CountDownLatch(1)
         try {
             initialize()
-            val existing = PushManager.getInstance().getClientid(context)
+            val existing = PushProvider.clientId(context)
             if (!existing.isNullOrBlank()) token(existing)
             check(tokenWaiter?.await(20, TimeUnit.SECONDS) == true) { "PUSH_REGISTRATION_FAILED" }
             register(read().getString("token")); lastError = null
@@ -164,7 +158,7 @@ internal class PushRegistration private constructor(private val context: Context
             if (!saved.optBoolean("enabled")) return@execute
             if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) { disable(); return@execute }
             initialize()
-            val token = PushManager.getInstance().getClientid(context)
+            val token = PushProvider.clientId(context)
             if (!token.isNullOrBlank() && (saved.optString("registeredToken") != token || System.currentTimeMillis() - saved.optLong("registeredAt") > 86400000)) register(token)
         } catch (_: Exception) { lastError = "PUSH_RELAY_UNAVAILABLE" }
     } }
@@ -199,7 +193,7 @@ internal class PushRegistration private constructor(private val context: Context
     @Synchronized fun disable() {
         if (read().has("registeredToken")) request("/installation", "DELETE")
         update { it.put("enabled", false).remove("registeredToken"); it.put("subscriptions", JSONObject()) }
-        PushManager.getInstance().turnOffPush(context); lastError = null
+        PushProvider.turnOff(context); lastError = null
     }
     fun test(connection: String) {
         val id = read().optJSONObject("subscriptions")?.optJSONObject(connection)?.optString("subscriptionId") ?: error("PUSH_HOST_UNAVAILABLE")

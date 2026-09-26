@@ -1,3 +1,21 @@
+## v0.2.4 — 2026-09-26
+
+- 📋 Al copiar desde la conversación se obtiene el texto tal como aparece en pantalla: sin comillas invertidas alrededor del código en línea, sin asteriscos en el énfasis, los enlaces reducidos a su texto, los bloques de código sin delimitadores, las celdas de tabla separadas por tabuladores y las listas con las viñetas que se ven. El formato enriquecido se sigue colocando también en el portapapeles, y el menú contextual incorpora «Copiar como Markdown» para obtener el código Markdown de la selección.
+
+- ⏳ La continuación automática tras el reinicio de un límite de uso viene activada de forma predeterminada. Si usted ya había cambiado ese ajuste, se respeta su elección.
+
+- ↩️ Revertir una conversación ya no queda bloqueado por una tarea que ha terminado: una tarea en primer plano se considera finalizada al acabar su turno, y el progreso que llegue después no vuelve a marcarla como en ejecución. Cuando realmente queda una tarea en segundo plano en marcha, el aviso indica su nombre.
+
+- 🧹 Los hilos de subagentes de Codex ya no aparecen en la lista del historial de sesiones, igual que ocurre con las cadenas laterales de Claude.
+
+- ⌨️ Autocompletado en el terminal: después de recorrer los candidatos con las flechas, Intro acepta el resaltado igual que el tabulador. Intro se sigue enviando al shell si no ha movido la selección, si siguió escribiendo tras elegirla o si mantiene pulsada una tecla modificadora.
+
+- 📱 Android se compila en dos canales. La versión predeterminada incluye los canales de notificaciones de Getui, Huawei, Xiaomi, OPPO, vivo, Meizu y Honor; la versión de Play prescinde de ellos e indica que las notificaciones de tareas no tienen canal configurado.
+
+- 🎨 Cambios menores de interfaz: las listas de tareas ya no repiten la casilla, la barra de notificaciones y el aviso de continuación automática se sitúan entre la conversación y el campo de escritura con el ancho del texto de los mensajes, y en el teléfono el botón de enviar permanece junto al campo cuando las opciones están plegadas.
+
+---
+
 ## v0.2.3 — 2026-09-24
 
 - 🪟 Las sesiones existentes se pueden llevar a los paneles divididos. El menú contextual de la barra lateral abre una sesión en un panel a la derecha, un panel abajo o el panel activo; al arrastrar una sesión desde la barra lateral hasta el borde de un panel, la división sigue esa dirección, y al soltarla en el centro se sustituye la sesión que se mostraba allí. Entre dos y cuatro sesiones seleccionadas se pueden disponer en mosaico dentro de una misma pestaña dividida a partes iguales, y las sesiones presentes en los demás paneles de la pestaña actual quedan señaladas en la barra lateral.

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ComposerOptionsButton, useComposerOptions } from "../layout/CenterPane/session/ComposerOptions";
+import Icons from "../components/Icons";
 import { useT } from "../i18n";
 import { ptyWrite, readAgentChat, type ChatEvent } from "../ipc/commands";
 import { MessageBubble, ReasoningRow, ShellRow, ToolCard } from "../layout/CenterPane/session/rows";
@@ -11,7 +11,6 @@ import "../layout/CenterPane/session/session-view.css";
 export function MobileRecordedConversation({ session, cwd }: { session: Session; cwd?: string }) {
   const t = useT();
   const readOnly = session.kind === "kiro";
-  const composerOptions = useComposerOptions(true);
   const [rows, setRows] = useState<ChatEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,13 +64,18 @@ export function MobileRecordedConversation({ session, cwd }: { session: Session;
         : row.kind === "user" && row.shell ? <ShellRow key={row.index} row={row.shell} />
         : <MessageBubble key={row.index} who={row.kind === "user" ? t("archive.you") : assistantLabel(session.kind)} isUser={row.kind === "user"} text={row.text ?? ""} at={row.timestamp ?? undefined} />)}
     </div>
-    {!readOnly && <form className="m-recorded-composer" ref={composerOptions.ref} data-options-expanded={composerOptions.expanded} onSubmit={e => { e.preventDefault(); void send(); }}>
+    {!readOnly && <form className="m-recorded-composer" onSubmit={e => { e.preventDefault(); void send(); }}>
       {sendError && <p role="alert">{t("chat.submission.failed")}: {sendError}</p>}
       <div className="m-recorded-input">
       <textarea value={draft} onChange={e => setDraft(e.target.value)} aria-label={t("session.send")} placeholder={t("chat.empty")} />
-      <ComposerOptionsButton expanded={composerOptions.expanded} onToggle={composerOptions.toggle} />
+      {/* Keeps the keyboard up after sending, the same way the options toggle does. */}
+      <button type="submit" className="sv-send" disabled={sending || !draft.trim() || loading || !!error}
+        aria-label={sending ? t("chat.submission.sending") : t("session.send")}
+        title={sending ? t("chat.submission.sending") : t("session.send")}
+        onPointerDown={e => e.preventDefault()}>
+        <Icons.arrowRight size={20} />
+      </button>
       </div>
-      <button type="submit" disabled={sending || !draft.trim() || loading || !!error}>{sending ? t("chat.submission.sending") : t("session.send")}</button>
     </form>}
   </div>;
 }

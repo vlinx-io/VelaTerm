@@ -125,7 +125,7 @@ fn parse_rollout_meta(line: &str) -> Option<RolloutMeta> {
 /// only carry `source`, either a provider string (`cli`, `vscode`) or an object such as
 /// `{"subagent": {...}}`. Only the user kind may own a VelaTerm session. Missing metadata keeps the
 /// permissive legacy behavior so rollouts written before either field appeared still resume.
-fn is_user_thread_payload(payload: &serde_json::Value) -> bool {
+pub(super) fn is_user_thread_payload(payload: &serde_json::Value) -> bool {
     match payload.get("thread_source") {
         Some(serde_json::Value::String(source)) => return source == "user",
         // Any structured value is a feature or helper source, never the foreground conversation.

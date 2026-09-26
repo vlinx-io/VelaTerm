@@ -92,6 +92,8 @@ fn jsonl(path: &Path, kind: SessionKind, directory: &Path) -> Result<Option<Hist
         let Ok(v) = serde_json::from_str::<Value>(&line) else { continue; };
         if kind == SessionKind::Codex {
             if v["type"] == "session_meta" {
+                // Subagent threads are helpers of another conversation, like Claude sidechains.
+                if !super::resume::is_user_thread_payload(&v["payload"]) { return Ok(None); }
                 id = v["payload"]["id"].as_str().unwrap_or_default().to_string();
                 cwd = v["payload"]["cwd"].as_str().unwrap_or_default().to_string();
             }
@@ -367,6 +369,13 @@ mod tests {
         ]);
         assert_eq!(jsonl(&current, SessionKind::Codex, &temp.0).unwrap().unwrap().title, "Fix current history");
         assert!(jsonl(&codex, SessionKind::Codex, &temp.0.join("another")).unwrap().is_none());
+        let subagent = temp.0.join("codex/subagent.jsonl");
+        write(&subagent, &[
+            serde_json::json!({"type":"session_meta","payload":{"id":"codex-3","cwd":cwd,"thread_source":"subagent",
+                "source":{"subagent":{"thread_spawn":{"parent_thread_id":"codex-2","depth":1}}}}}),
+            serde_json::json!({"type":"event_msg","payload":{"type":"user_message","message":"Fix current history"}}),
+        ]);
+        assert!(jsonl(&subagent, SessionKind::Codex, &temp.0).unwrap().is_none());
         let claude = temp.0.join("claude/project/c1.jsonl");
         write(&claude, &[
             serde_json::json!({"type":"queue-operation","sessionId":"claude-1"}),

@@ -1,3 +1,21 @@
+## v0.2.4 — 2026-09-26
+
+- 📋 Une copie depuis la conversation reprend le texte tel qu'il apparaît à l'écran : pas d'accents graves autour du code en ligne, pas d'astérisques autour de la mise en valeur, les liens réduits à leur libellé, les blocs de code sans délimiteurs, les cellules de tableau séparées par des tabulations et les listes conservant les puces visibles. La mise en forme enrichie reste placée dans le presse-papiers en parallèle, et le menu contextuel propose désormais « Copier en Markdown » pour obtenir le source Markdown de la sélection.
+
+- ⏳ La reprise automatique après la réinitialisation d'un quota est activée par défaut. Si vous aviez modifié ce réglage vous-même, votre choix est conservé.
+
+- ↩️ Le retour en arrière dans une conversation n'est plus bloqué par une tâche déjà terminée : une tâche au premier plan est considérée comme terminée à la fin de son tour, et une progression qui arrive ensuite ne la remet plus en cours d'exécution. Lorsqu'une tâche d'arrière-plan tourne réellement encore, le message indique son nom.
+
+- 🧹 Les fils des sous-agents de Codex n'apparaissent plus dans la liste de l'historique des sessions, comme c'est déjà le cas des chaînes latérales de Claude.
+
+- ⌨️ Complétion dans le terminal : après un déplacement parmi les candidats avec les flèches, Entrée valide celui qui est sélectionné, exactement comme Tab. Entrée est toujours transmise au shell si vous n'avez pas déplacé la sélection, si vous avez continué à taper après l'avoir faite, ou si une touche de modification est enfoncée.
+
+- 📱 Android est construit sur deux canaux. La version par défaut intègre les canaux de notification Getui, Huawei, Xiaomi, OPPO, vivo, Meizu et Honor ; la version Play en est dépourvue et signale les notifications de tâche comme dépourvues de canal configuré.
+
+- 🎨 Changements d'interface mineurs : les listes de tâches n'affichent plus la case à cocher en double, la barre de notification et l'avis de reprise automatique se placent entre la conversation et la zone de saisie, à la largeur du texte des messages, et sur le téléphone le bouton d'envoi reste à côté du champ lorsque les options sont repliées.
+
+---
+
 ## v0.2.3 — 2026-09-24
 
 - 🪟 Les sessions existantes peuvent être placées dans les volets. Le menu contextuel de la barre latérale ouvre une session dans un volet à droite, un volet en bas ou le volet actif ; en faisant glisser une session depuis la barre latérale vers le bord d'un volet, la division suit cette direction, et un dépôt au centre remplace la session affichée. Deux à quatre sessions sélectionnées se disposent en mosaïque dans un même onglet divisé à parts égales, et les sessions présentes dans les autres volets de l'onglet courant sont signalées dans la barre latérale.

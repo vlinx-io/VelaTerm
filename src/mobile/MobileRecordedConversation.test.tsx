@@ -50,6 +50,7 @@ describe("手机读取终端会话",()=>{
   rpc.readAgentChat.mockResolvedValue([{index:0,kind:"assistant",text:"远端继续运行"}]);rpc.ptyWrite.mockResolvedValue(undefined);
   render(<MobileRecordedConversation session={session}/>);
   expect(await screen.findByText("远端继续运行")).toBeTruthy();
+  expect(screen.queryByRole("button",{name:"mobile.inputOptions"})).toBeNull();
   fireEvent.change(screen.getByRole("textbox"),{target:{value:"第一行\n第二行"}});
   fireEvent.click(screen.getByRole("button",{name:"session.send"}));
   await waitFor(()=>expect(rpc.ptyWrite).toHaveBeenCalledTimes(2));

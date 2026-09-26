@@ -280,6 +280,7 @@ const ja: typeof en = {
   "common.save": "保存", // Save
   "common.create": "作成", // Create
   "common.close": "閉じる", // Close
+  "chat.copyAsMarkdown": "Markdown 形式でコピー",
   "chat.imageViewOriginal": "元の画像を表示",
   "chat.imageCopy": "画像をコピー",
   "chat.imageSave": "画像を保存",

@@ -1,3 +1,21 @@
+## v0.2.4 — 2026-09-26
+
+- 📋 Kopieren aus der Unterhaltung liefert den Text so, wie er auf dem Bildschirm steht: keine Backticks um Inline-Code, keine Sternchen um Hervorhebungen, Links nur als ihr Text, Codeblöcke ohne Begrenzungszeilen, Tabellenzellen durch Tabulatoren getrennt und Listen mit den sichtbaren Aufzählungszeichen. Die formatierte Fassung landet weiterhin zusätzlich in der Zwischenablage, und das Kontextmenü bietet nun „Als Markdown kopieren“ für den Markdown-Quelltext der Auswahl.
+
+- ⏳ Das automatische Fortsetzen nach dem Zurücksetzen eines Nutzungslimits ist jetzt standardmäßig eingeschaltet. Wer die Einstellung selbst geändert hat, behält seine Wahl.
+
+- ↩️ Das Zurücksetzen einer Unterhaltung wird nicht mehr von einer bereits beendeten Aufgabe blockiert: Eine Aufgabe im Vordergrund gilt mit dem Ende ihrer Runde als beendet, und ein danach eintreffender Fortschritt markiert sie nicht erneut als laufend. Läuft tatsächlich noch eine Hintergrundaufgabe, nennt die Meldung ihren Namen.
+
+- 🧹 Die Subagenten-Threads von Codex erscheinen nicht mehr in der Liste des Sitzungsverlaufs – genau wie Claudes Sidechains.
+
+- ⌨️ Terminal-Vervollständigung: Nachdem Sie mit den Pfeiltasten durch die Vorschläge gegangen sind, übernimmt die Eingabetaste den markierten Vorschlag ebenso wie die Tabulatortaste. An die Shell geht die Eingabetaste weiterhin, wenn Sie die Auswahl nicht bewegt haben, nach dem Auswählen weitergetippt haben oder eine Modifikatortaste gedrückt halten.
+
+- 📱 Android wird in zwei Kanälen gebaut. Der Standard-Build enthält die Push-Kanäle von Getui sowie Huawei, Xiaomi, OPPO, vivo, Meizu und Honor; der Play-Build kommt ohne sie aus und weist Aufgabenbenachrichtigungen als ohne konfigurierten Push-Kanal aus.
+
+- 🎨 Kleinere Änderungen an der Oberfläche: Aufgabenlisten zeigen das Kontrollkästchen nicht mehr doppelt, die Benachrichtigungsleiste und der Hinweis zum automatischen Fortsetzen sitzen zwischen Unterhaltung und Eingabefeld in der Breite des Nachrichtentexts, und auf dem Telefon bleibt die Senden-Schaltfläche neben dem Eingabefeld, wenn die Optionen eingeklappt sind.
+
+---
+
 ## v0.2.3 — 2026-09-24
 
 - 🪟 Bestehende Sitzungen lassen sich in Teilungen verschieben. Über das Kontextmenü der Seitenleiste öffnet eine Sitzung in einer rechten Teilung, einer unteren Teilung oder im fokussierten Bereich; zieht man sie aus der Seitenleiste an den Rand eines Bereichs, wird in diese Richtung geteilt, und ein Ablegen in der Mitte ersetzt die dort gezeigte Sitzung. Zwei bis vier ausgewählte Sitzungen lassen sich in einem gleichmäßig geteilten Tab nebeneinander anordnen, und Sitzungen in den übrigen Bereichen des aktuellen Tabs sind in der Seitenleiste gekennzeichnet.

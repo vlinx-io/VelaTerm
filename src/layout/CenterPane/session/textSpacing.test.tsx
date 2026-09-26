@@ -26,7 +26,7 @@ it("updates streamed text and newly completed Markdown without leaving stale spa
   expect(container.querySelector(".sv-cjk")).toBeNull();
 });
 
-it("copies the original Markdown without adding spacing characters", () => {
+it("copies displayed text and the original Markdown without adding spacing characters", () => {
   const text = "中文 English，保持间距。\n\n**重点中文**";
   const { container } = render(<div className="sv-msg-body"><Markdown text={text} /></div>);
   const body = container.firstElementChild!;
@@ -34,7 +34,9 @@ it("copies the original Markdown without adding spacing characters", () => {
   range.selectNodeContents(body);
   const selection = window.getSelection()!;
   selection.addRange(range);
-  expect(createMessageSelectionClipboardContent(selection, body)?.plainText).toBe(text);
+  const content = createMessageSelectionClipboardContent(selection, body);
+  expect(content?.plainText).toBe("中文 English，保持间距。\n\n重点中文");
+  expect(content?.markdown).toBe(text);
 });
 
 it("preserves highlighted code and copies its exact text", () => {

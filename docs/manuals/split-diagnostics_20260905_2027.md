@@ -1,36 +1,54 @@
-# 分屏异常诊断
+# Split Diagnostics
 
-- 创建时间: 2026-09-05 20:27
+Created: 2026-09-05 20:27
 
-原生菜单中的分屏命令（包括 macOS 的 `⌘D`、`⌘⇧D`）只发送给当前焦点窗口。没有焦点窗口时不执行命令。本地窗口、SSH 窗口和配对 URL 窗口不会因为另一个窗口的菜单操作而同时分屏。
+Updated: 2026-09-25 10:21
 
-界面镜像功能仍按其配置同步布局。开启镜像的客户端可能正常接收到其他客户端创建的分屏，这类事件的来源记录为 `mirror`。
+Split commands from the application menu, including ⌘D and ⌘⇧D on macOS, go only to the window that has focus. When no window has focus, nothing happens. A local window, an SSH window and a pairing-link window therefore never split at the same time because of one menu command.
 
-## 日志位置
+"Mirror layout across devices" still synchronizes layouts as configured. A client with mirroring on can receive a split that another client created; such events are recorded with the source `mirror`.
 
-分屏事件写入应用数据目录下的 `logs/runtime-*.log`，与其他诊断共用有界后台写入器。每个进程使用独立文件，按大小和保留期限轮转；位置、权限和故障边界见[运行日志与隐私保护](runtime-diagnostics_20260909.md)。
+## Where the log is written
 
-原生 SSH、配对 URL 窗口仍写入承载窗口的本地桌面日志；普通浏览器和 Electron 写入所连接后端的数据目录。`VLX_LOG_DIR` 优先控制通用目录，未设置时 `VLX_SPLIT_LOG_DIR` 继续控制分屏日志目录。`VLX_SPLIT_LOG_LEVEL` 继续作为分屏事件的额外级别过滤条件。
+Split events go to `logs/runtime-*.log` in the application data directory and share the background writer used by the other diagnostics. Each process writes its own file, which is rotated by size and age. Locations, permissions and limits are described in [Runtime logs and privacy](runtime-diagnostics_20260909.md).
 
-## 记录内容
+SSH and pairing-link windows log to the desktop app that hosts them. Browser clients and the Electron app log to the data directory of the backend they are connected to. `VLX_LOG_DIR` sets the directory for all logs; when it is not set, `VLX_SPLIT_LOG_DIR` still sets the directory for split events. `VLX_SPLIT_LOG_LEVEL` filters split events further.
 
-控制台和文件使用相同格式：`yyyy-MM-dd HH:mm:ss [INFO ] [requestId或system] event=split {...}`。行首为服务端时间；结构化数据中的 `clientAtMs` 是客户端触发时的 Unix 毫秒时间，可用于跨窗口对照。
+## What is recorded
 
-记录包含来源、通过 UUID 格式检查的会话 ID、父会话 ID、页签 ID 及分屏方向。不符合安全字段格式的标识不会直接输出。来源分别为：
+The console and the file use the same format:
 
-| `source` | 含义 |
+```
+yyyy-MM-dd HH:mm:ss [INFO ] [requestId or system] event=split {...}
+```
+
+The timestamp at the start of the line is the server time. The `clientAtMs` field is the client's Unix time in milliseconds when the split was triggered, which helps compare events across windows.
+
+A split line contains the client identifier, `clientAtMs`, the source, the session IDs, the parent session ID, the tab ID, the split direction and the number of sessions. Identifiers that are not in a valid format are left out. The `source` field has these values:
+
+| `source` | Meaning |
 | --- | --- |
-| `shortcut` | 前端快捷键 |
-| `menu` | 原生菜单或应用菜单，包括原生菜单快捷键 |
-| `pane-button` | 终端标题栏的分屏按钮 |
-| `mirror` | 通过界面镜像收到的分屏 |
-| `unknown` | 未标注来源的内部调用 |
+| `shortcut` | Keyboard shortcut in the interface |
+| `menu` | Application menu, including its keyboard shortcuts |
+| `pane-button` | Split button in the pane header |
+| `sidebar` | Split item in a session's context menu |
+| `drop` | A session dragged onto a pane |
+| `tile` | Several sessions tiled at once |
+| `mirror` | A split received through layout mirroring |
+| `unknown` | An internal call without a source |
 
-日志不包含终端输入输出、会话名称、工作目录、服务器地址或认证信息。镜像事件只记录收到的会话 ID，不伪造本地父会话或方向。
+The log does not contain terminal input or output, session names, working directories, server addresses or credentials. Mirror events record only the session IDs that arrived; they do not invent a local parent session or direction.
 
-当前窗口最近 200 条记录仍可通过开发者工具中的 `window.__vlxSplitLog` 查看。`persistence` 为 `pending`、`saved`、`disabled` 或 `failed`，分别表示正在写入、后端已接受进入写入队列、后端配置为不记录信息级事件或写入失败。窗口重载会清空内存记录，已写入的文件不受影响。后端请求失败不会阻止分屏，控制台会提示失败，不会自动重试；异步磁盘写入失败由后端诊断状态报告，不能根据 `saved` 判断文件一定已写入；窗口关闭前尚未完成的请求也可能未落盘。
+The last 200 split records of the current window are also available in the developer tools as `window.__vlxSplitLog`. Each record's `persistence` value is one of:
 
-## 回归验证
+- `pending`: being sent to the backend;
+- `saved`: the backend accepted it into its write queue;
+- `disabled`: the backend is configured not to log `INFO` events (`VLX_SPLIT_LOG_LEVEL` or `VLX_LOG_LEVEL` is set above `INFO`);
+- `failed`: the request failed or the write queue was full.
+
+Reloading the window clears these in-memory records; files already written are not affected. A failed log request never blocks the split: the console reports the failure, and the request is not retried. `saved` does not guarantee that the line reached the disk, because disk errors are reported through the backend's diagnostic state. Requests still pending when a window closes may not be written.
+
+## Regression checks
 
 ```sh
 cargo test --manifest-path src-tauri/Cargo.toml --lib --features native-menu-tests native_menu::tests
@@ -39,4 +57,4 @@ pnpm exec vitest run src/store/splitTrace.test.ts src/hooks/shortcutRegistry.tes
 pnpm exec tsc --noEmit
 ```
 
-原生事件测试使用 Tauri 模拟运行时建立三个窗口，验证命令只送达指定窗口，以及无焦点或焦点标签失效时不向其他窗口发送。此测试不启动真实桌面窗口。
+The menu test uses Tauri's mock runtime with three windows. It checks that a command reaches only the intended window and that nothing is sent to other windows when there is no focused window or the focused tab no longer exists. It does not open real desktop windows.

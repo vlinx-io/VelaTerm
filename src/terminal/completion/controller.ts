@@ -19,7 +19,8 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
   let snapshot: Snapshot | null = null, displayed: Snapshot | null = null;
   let queuedSelection: { generation: number; label: string } | null = null;
   let queuedQuery: boolean | null = null;
-  let searchMode = false, autoDue = false;
+  // Set once the user moves the selection with the keyboard; Enter then accepts it like Tab.
+  let searchMode = false, autoDue = false, picked = false;
   let canComplete = false, bootstrapping = true, checkingSupport = false;
   let above: boolean | null = null;
   let anchorColumn = 0;
@@ -53,7 +54,7 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
   const focused = () => !disposed && !composing && document.activeElement === term.textarea
     && !!term.element?.getClientRects().length && term.buffer.active.type === "normal";
   function hide() {
-    menu.hidden = true; snapshot = null; displayed = null; queuedSelection = null; above = null;
+    menu.hidden = true; snapshot = null; displayed = null; queuedSelection = null; above = null; picked = false;
     menu.removeAttribute("aria-busy");
     term.textarea?.removeAttribute("aria-activedescendant");
     term.textarea?.removeAttribute("aria-controls");
@@ -191,7 +192,7 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
     }
   }
   function input(data: string) {
-    generation++; autoDue = false; queuedSelection = null; queuedQuery = null; snapshot = null;
+    generation++; autoDue = false; queuedSelection = null; queuedQuery = null; snapshot = null; picked = false;
     const paste = data.startsWith("\x1b[200~") && data.endsWith("\x1b[201~");
     if (/[\x12\x13]/.test(data) || data === "\x1b") searchMode = true;
     if (/[\r\n\x03]/.test(data)) searchMode = false;
@@ -211,7 +212,13 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
   function key(event: KeyboardEvent): boolean {
     if (event.type !== "keydown" || event.isComposing || composing || !focused()) return true;
     if (getCompletionConfig()?.mode === "off") { cancel(); return true; }
-    if (event.key === "Enter") { cancel(); return true; }
+    if (event.key === "Enter") {
+      // An untouched list leaves Enter to the shell so typed commands still run as written.
+      if (!menu.hidden && picked && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+        event.preventDefault(); void accept(active); return false;
+      }
+      cancel(); return true;
+    }
     if (!menu.hidden && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
       if (["ArrowDown", "ArrowUp", "PageDown", "PageUp"].includes(event.key)) {
         const last = list.children.length - 1;
@@ -220,7 +227,7 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
         // A plain arrow that cannot move the selection belongs to the shell: closing the list here keeps
         // the previous command reachable with Up instead of swallowing the key on the first candidate.
         if (next === active && (event.key === "ArrowUp" || event.key === "ArrowDown")) { cancel(); return true; }
-        active = next;
+        active = next; picked = true;
         highlight(); event.preventDefault(); return false;
       }
       if (event.key === "Tab") { event.preventDefault(); void accept(active); return false; }

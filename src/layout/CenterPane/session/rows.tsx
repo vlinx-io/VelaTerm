@@ -31,7 +31,8 @@ import { Markdown } from "./markdown";
 import { parseAnsweredQuestions, type AnsweredQuestion } from "./questionForm";
 import { ToolBody, toolSummary } from "./toolCards";
 import { runSummaryText, type ToolRow, type TurnFold } from "./toolRuns";
-import { copyAttributes, createMessageSelectionClipboardContent } from "./selectionCopy";
+import { copyAttributes } from "./selectionCopy";
+import { handleMessageCopy, useMessageCopyMenu } from "./useMessageCopyMenu";
 
 /**
  * What to show for the instant a message was written.
@@ -75,15 +76,6 @@ function LiveTurnDuration({ startedAt }: { startedAt: number }) {
     return () => window.clearInterval(timer);
   }, [startedAt]);
   return <span className="sv-working-time">{formatTurnDuration(now - startedAt)}</span>;
-}
-
-/** Copy message content from its Markdown semantics instead of the layout DOM's block separators. */
-function handleMessageCopy(event: ClipboardEvent<HTMLDivElement>) {
-  const content = createMessageSelectionClipboardContent(window.getSelection(), event.currentTarget);
-  if (!content) return;
-  event.preventDefault();
-  event.clipboardData.setData("text/plain", content.plainText);
-  event.clipboardData.setData("text/html", content.html);
 }
 
 /** Copy the original message text without its timestamp, attachments, or action labels. */
@@ -335,6 +327,7 @@ export function MessageBubble({
   const [rewindMenu, setRewindMenu] = useState(false);
   const [editing, setEditing] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const { onContextMenu: onBodyContextMenu, copyMenu } = useMessageCopyMenu();
   useEffect(() => {
     if (openRewindToken === undefined) return;
     setRewindMenu(true);
@@ -393,7 +386,7 @@ export function MessageBubble({
       <div className="sv-msg sv-msg-user" ref={rootRef}>
         <div className="sv-msg-turn">
           <MessageHead who={who} icon={icon ?? <span className="sv-user-sail">{velaSailMarkEl(14)}</span>} at={at} />
-          <div className="sv-msg-body" onCopy={handleMessageCopy}>
+          <div className="sv-msg-body" onCopy={handleMessageCopy} onContextMenu={onBodyContextMenu}>
             {!editing && (text || rewind || onEditSend) ? <div className="sv-message-tools" {...copyAttributes.ignore}>
               {rewind}
               {onEditSend ? <button className="sv-message-edit-button" disabled={!!editDisabledReason} title={editDisabledReason || t("chat.rewind.edit")} aria-label={t("chat.rewind.edit")} onClick={() => setEditing(true)}><Icons.rename size={16} /></button> : null}
@@ -403,6 +396,7 @@ export function MessageBubble({
             {editing ? <MessageEditor text={text} images={images} disabled={!!editDisabledReason}
               onCancel={() => setEditing(false)} onSend={onEditSend} /> : <>{pictures}{body}{footnote}</>}
             </div>
+            {copyMenu}
           </div>
         </div>
       </div>
@@ -413,9 +407,10 @@ export function MessageBubble({
       {showHead ? <MessageHead who={who} icon={icon} at={at} durationMs={durationMs} /> : null}
       {pictures}
       {body || footnote ? (
-        <div className="sv-msg-body" onCopy={handleMessageCopy}>
+        <div className="sv-msg-body" onCopy={handleMessageCopy} onContextMenu={onBodyContextMenu}>
           {body}
           {footnote}
+          {copyMenu}
         </div>
       ) : null}
     </div>

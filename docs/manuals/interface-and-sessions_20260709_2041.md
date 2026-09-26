@@ -1,9 +1,10 @@
 # Interface & Session Management
 
 Created: 2026-07-09 20:41
-Updated: 2026-08-09 19:45
 
-> This chapter covers VelaTerm's organizational model: the three-pane layout, managing the tree, how tabs and split panes behave, status dots and filtering, archiving, and global search. Everything else builds on these.
+Updated: 2026-09-25 10:21
+
+> This chapter covers VelaTerm's organizational model: the window layout, managing the tree, how tabs and split panes behave, status dots and filtering, archiving, global search, and saving the workspace on quit. The other chapters build on these.
 
 ## 1. The layout
 
@@ -11,92 +12,140 @@ Updated: 2026-08-09 19:45
 
 | Area | Contents |
 |------|----------|
-| Left sidebar | Project tree (project → group → session), name search box, status filter; header buttons: Import Project / Clone from Git / Global Search / Archived Sessions |
-| Center pane | Tab bar + terminals (or document / browser tabs); each tab can be split into panes |
-| Right panel | Follows the current session: Files tree / Info / Git branch & changes |
-| Status bar | Session count, current session state, Git branch, notification toggle, global three-state counters |
+| Title bar (right side) | Theme switch (follow system, dark, light), Remote Access (Browser), Connect to Remote Server, Share, Settings, Account, Feedback, and the buttons that show or hide the sidebar and the info panel |
+| Left sidebar | "Workspace": the project tree with a search box and filter; header buttons Create Project, Import Project, Clone from Git, Search All Sessions and Archived Sessions |
+| Center pane | Tab bar and the open sessions, documents, browser pages and background tasks; each session tab can be split into panes |
+| Right panel | Four tabs that follow the current session: Files, Info, Git, and Knowledge Base |
+| Status bar | Session count, current session type, Git branch, permission mode, notification switch, the Working / Pending / Viewed counters, background tabs, and update notices |
 
-Both side panels can be collapsed (the two rightmost title-bar buttons) and resized by dragging.
+Remote Access and Connect to Remote Server appear in the desktop app; see [Remote Development & Management](remote-development-guide_20260709_2041.md). Feedback opens the VelaTerm feedback page in your browser. On Windows and Linux, pressing Alt shows a menu bar with File, Terminal and Help.
 
-## 2. The tree: projects, groups, sessions
+Both side panels can be hidden with the title bar buttons and resized by dragging their edges.
 
-A **project** maps to a directory on disk and is the root of a subtree. A **group** is a purely organizational node and can nest arbitrarily. A **session** is the working unit — a terminal or an agent process. Its working directory defaults to the project root and can be overridden in the session's edit form.
+## 2. The tree: projects, collections, groups, sessions
 
-Most operations live in the context menus:
+- A **project** is a directory on disk and the root of a subtree. Create one with "Create Project" (makes a new folder), "Import Project" (opens an existing folder, ⌘O), or "Clone from Git".
+- A **collection** is a top-level container without a folder, for sessions that do not belong to one project. Create it with the "New Collection" button at the bottom of the sidebar.
+- A **group** is an organizational node and can be nested at any depth.
+- A **session** is the working unit: an agent, a browser page, or a terminal. Its working directory defaults to the project root and can be changed in the session's "Edit" form.
+
+Hovering a row shows a ＋ button ("New Session" on projects and groups, "New Child Session" on sessions) and, on projects and groups, a button for a new group.
+
+Most operations are in the context menus:
 
 ![Project context menu](../assets/manuals/project-menu.png)
 
-- **Create**: project / group menus offer New Claude Session, more agent types under More Agent Session, New Browser Page (desktop), and New Group. Project and group menus also carry New Terminal, and so does the ＋ button that appears when you hover any project / group / session row — both create a center-pane draft terminal rather than a tree node. At the bottom you'll also find "New with launch args…" (create with custom launch arguments) and "Resume Session…" (attach a known agent session id as a new node — see the agents manual).
-- **Move**: drag nodes directly, or right-click → "Move to…". A session can also be moved under another session to become its child.
-- **Rename / Edit**: Rename changes the name; Edit opens the full form (name, working directory, startup command, launch args, permission toggle, and so on). If you don't name a claude session, it names itself after your first message.
-- **Multi-select**: ⌘/Ctrl-click several sessions, then right-click for batch open, batch archive, batch move, or batch delete.
-- **Collapse state** is persisted across restarts.
+**Project and group menus** start with the creation items:
 
-Session context menus are richer (entries appear based on session type and state):
+- "New Browser Page" (desktop app) and "New Terminal", which opens a scratch terminal in that directory (§5).
+- Three direct "New … Session" items for recently used agents, and "More Agent Session" with every agent, saved presets, "New agent session" (the searchable picker) and "New with launch args…".
+- "New Worktree Session…" and "New Plan/Execute Session…"; see [Session Spawning & Git Collaboration](session-spawning-and-git_20260709_2041.md) and [Planning and Execution](planning-and-execution_20260925_1012.md).
+- "Import Sessions…" (projects only) and "Resume Session…"; see [AI Agent Sessions](ai-agent-sessions_20260709_2041.md) §4.
+
+A project menu then offers "New Group", "Mark", "Experimental" (Code Graph and Code audit), "Project Info" (or "Collection Info"), "Rename", and "Remove Project" (or "Delete Collection"). A group menu offers the "Git" submenu, "New Subgroup", "Move to Worktree…", "Mark", "Rename", "Archive Group" and "Delete Group".
+
+**Session menus** show items that fit the session's type and state:
 
 ![Session context menu](../assets/manuals/session-menu.png)
 
-## 3. Tabs: deliberately browser-like
+- "Open", "Open in New Tab", "Open in Split Right", "Open in Split Down", "Open in Focused Pane" (§4).
+- "New Child Session", "Fork Session", "Export Session…", "Organize into Session Knowledge Base", and the "Git" submenu.
+- "Mark", "Session Info" (hold Option/Alt for the full launch command), "Edit", "Rename", "Move to…".
+- "Kill Process" (while running), "Archive Session", "Delete Session".
 
-Three rules explain everything tabs do:
+Other tree operations:
 
-1. **Clicking a session in the tree reuses the current tab** by default; use right-click → "Open in New Tab" to open more.
-2. **Switching away is not closing**: the displaced tab moves to background keep-alive — its processes keep running and output keeps flowing; switch back any time. Background tabs have a cap (default 32, adjustable via "Background limit" in Settings); past the cap, the oldest inactive one is ended automatically, and if all are active you'll be asked.
-3. **Closing a tab (⌘W or ×) actually ends the process.** For agent sessions that's not scary: the conversation is remembered, and reopening the node resumes it.
+- **Move**: drag nodes, or use "Move to…". A session can be moved under another session to become its child.
+- **Rename**: "Rename" edits the name in place. A session you do not name takes its name from your first message.
+- **Marks**: "Mark" adds an emoji marker to a project, group or session: 🔥 Urgent, ⭐ Important, 🐛 Bug, ✅ Done, 🚧 In progress, 📌 Pinned, 💡 Idea, ⚠️ Caution. Choosing the current marker again removes it.
+- **Multi-select**: ⌘/Ctrl-click toggles sessions, Shift-click selects a range. The context menu then offers "Open Selected Sessions", "Tile Selected Sessions" (two to four sessions), "Move Selected to…", "Archive Selected Sessions" and "Delete N Selected Items". Dragging a selection moves all of it.
+- **Collapse state** is kept across restarts.
 
-⌘1–9 switches between tabs. The ＋ area at the right end of the tab bar creates scratch terminals, new documents, and browser tabs.
+## 3. Tabs
+
+Settings ▸ Behavior ▸ "Tabs" chooses how sessions open:
+
+- **Single** (default): clicking an agent session in the tree reuses the current session tab, like following a link in a browser. The tab you leave moves to the background with all its panes, and its processes keep running. Terminal sessions open in their own tabs.
+- **Multi**: each session opens in its own tab.
+
+"Open in New Tab" always opens a new tab. In both modes, switching to another tab does not stop anything; **closing a tab (⌘W or ×) ends its processes**. For agent sessions this is safe: the conversation is kept, and opening the node again resumes it.
+
+Background tabs appear in the status bar as "Background N/M"; click it to bring a tab back or end it. In Single mode, "Background limit" (default 32) caps their number. Past the limit, the oldest inactive background tab ends automatically. If every background tab is working or waiting for you, VelaTerm asks which one to end.
+
+Tab bar details:
+
+- ⌘1–9 (Ctrl+1–9 on Windows and Linux) switches to a tab by position. A middle click closes a tab.
+- The ＋ after the tabs opens a scratch terminal. The buttons on the right open a new terminal, a new document, a built-in browser tab (desktop app), and the Game Center.
+- A tab's context menu has "Close Tab", "Close Other Tabs", "Close Tabs to the Right", "Close All Tabs", "Send to Background" (keeps the tab's processes running), and the same session items as the tree.
+
+Document and browser tabs are covered in [Document & Browser Tabs](document-and-browser-tabs_20260709_2041.md).
 
 ## 4. Split panes
 
-Within one tab you can split the terminal: ⌘D splits right, ⌘⇧D splits down (pane headers have split buttons too), and the dividers are draggable. A new pane inherits the current pane's working directory:
+A tab can hold several panes:
+
+- ⌘D splits right and ⌘⇧D splits down (Ctrl+Alt+D and Ctrl+Alt+E on Windows and Linux); the pane header has the same buttons. The new pane is a scratch terminal that starts in the current pane's working directory.
+- To show an existing session in the current tab, use "Open in Split Right", "Open in Split Down" or "Open in Focused Pane" from its menu, or drag it from the sidebar onto the center pane.
+- "Tile Selected Sessions" arranges two to four selected sessions in one tab.
+- Sessions shown in another pane of the current tab are highlighted in the sidebar.
 
 ![Split panes](../assets/manuals/split-pane.png)
 
-Keep-alive operates on the **whole tab** — switch away and back, and the entire split layout is preserved. ⌘W closes the current pane; closing the last pane closes the tab.
+Dividers can be dragged. Background keep-alive applies to the **whole tab**, so leaving a tab and returning preserves its layout. ⌘W closes the current pane; closing the last pane closes the tab.
 
-## 5. Scratch sessions (drafts)
+## 5. Scratch terminals
 
-The terminal you get with ⌘T is a draft: it exists only as a center-pane tab, never touches the tree or the database, and is discarded on close (the tab carries a scratch badge). Use it for quick command checks or a throwaway ssh — your tree stays clean. Terminals only exist in this form: no menu action converts a draft into a tree node, so treat every terminal as disposable and keep long-lived work in agent sessions. The draft's context menu is correspondingly short — Open, Open in New Tab, Rename, Session Info, Close Scratch.
+"New Terminal", ⌘T, and the ＋ in the tab bar open a scratch terminal. It exists only as a tab: it never becomes a tree node and is discarded when closed. The tab is marked "scratch". Use scratch terminals for quick commands; keep long-running work in agent sessions. A scratch terminal's menu is short: "Open", "Open in New Tab", the split items, "Rename", "Session Info" and "Close Scratch".
 
 ## 6. Status dots and filtering
 
-The dot next to each agent session shows its live state:
+The dot next to each agent session shows its state: green while working, yellow when it needs you, magenta after it replied and you have seen it. The full legend is in [AI Agent Sessions](ai-agent-sessions_20260709_2041.md) §3.
 
-| Color | Meaning |
-|-------|---------|
-| Green | Working |
-| Yellow | Needs you — asking a question / awaiting permission, or has an unread notification |
-| Magenta | Replied, and you've already seen it |
+The status bar shows how many sessions are "Working", "Pending" (need you) and "Viewed"; a counter with no sessions is hidden. Click a counter to show only those sessions in the sidebar; click it again to clear the filter.
 
-The status bar shows global counters for the three states (Working / Pending / Viewed); click one and the sidebar shows only sessions in that state — with a dozen agents in flight, this is how you find "who's waiting on me" at a glance. The sidebar search box filters tree nodes by name.
+The sidebar has its own tools:
 
-## 7. Archiving: put away, don't delete
+- The **search box** ("Search sessions / groups…") filters the tree by name.
+- The **filter button** ("Filter by status") selects one or more states and, separately, one marker.
+- A status filter keeps the sessions that matched when you set it, so the list does not jump while you work. With "Dynamic status filter additions" (Settings ▸ Behavior, on by default), sessions that start to match are added. "Refresh status filter" at the bottom of the sidebar checks every session again; "Refresh Status" in a session's menu checks only that session.
+- "Split tree view down" at the bottom of the sidebar adds a second view of the tree with its own search and filters, for example one view for sessions that need you and one for the full tree. Each additional view can be closed.
 
-Finished work doesn't need deleting. Right-click a session → "Archive Session" to soft-hide it — the whole subtree (children included) leaves the tree and its processes end, but **all data is kept**. The archive button in the sidebar header opens the Archived Sessions panel:
+## 7. Right panel
 
-![Archived Sessions panel](../assets/manuals/archive-panel.png)
+- **Files**: the file tree of the session's working directory. Double-click a file to open it in a document tab.
+- **Info**: session details, account usage, the current turn and resource use; see [AI Agent Sessions](ai-agent-sessions_20260709_2041.md) §8.
+- **Git**: branch, staged and unstaged changes, untracked files, committing, and the commit history.
+- **Knowledge Base**: the Session Knowledge Base, archived sessions and your local knowledge bases; see [Local Knowledge Bases](knowledge-notebooks_20260910.md) and [Session Knowledge Base](global-memory_20260905_2027.md).
 
-- Each archived session's content is **viewable**: agent sessions show a parsed transcript (user/assistant messages, searchable and copyable); when a transcript isn't available it falls back to a read-only replay of the terminal recording.
-- **Restore** puts it back exactly where it was in the tree — with its agent session id intact, so reopening resumes the original conversation. It really is the same session again.
-- **Export** writes the full conversation (including tool calls and results) to a Markdown file.
-- **Delete forever** here is the only physical deletion.
-- Groups can be archived wholesale (right-click → "Archive Group"): all sessions inside go to the archive panel, and restoring any of them re-creates the group.
+## 8. Archiving: put away, do not delete
 
-The search box at the top of the panel does full-text search within archived content only.
+Finished work does not need to be deleted. Right-click a session → "Archive Session" to hide it: the session and its children leave the tree and their processes end, but **all data is kept**. "Archive Group" archives every session in a group, and "Archive Selected Sessions" archives a selection.
 
-## 8. Global search (⌘⇧F)
+Archived sessions are in the knowledge base. Open them with the "Archived Sessions" button in the sidebar header. Archived sessions are grouped by project, and the search box ("Search archived content…") searches their content. For each archived session:
 
-Search across **the historical content of all sessions** — not just names, but agent transcripts and terminal output:
+- The conversation can be read. Agent sessions show their messages; when no conversation is available, the terminal recording is shown if one exists. A second tab lists the knowledge entries generated from the session.
+- "Restore to normal session" returns it to its place in the tree, with its conversation ID intact, so opening it resumes the original conversation.
+- "Organize into Session Knowledge Base" extracts reusable knowledge from it.
+- "Export full context as Markdown" (Claude and Codex) writes the whole conversation to a file.
+- "Delete permanently (with recording)" is the only action that removes the data.
+
+## 9. Global search (⌘⇧F)
+
+"Search All Sessions" (⌘⇧F, Ctrl+Alt+G on Windows and Linux) searches **the content of all sessions**: agent conversations and recorded terminal output, not only names.
 
 ![Global search](../assets/manuals/global-search.png)
 
-- Multiple keywords (order-independent), CJK substrings, millisecond responses, relevance-ranked.
-- Results grouped by session on the left; the preview on the right follows and highlights the current hit; ↑↓ / Enter steps through hits across sessions.
-- The "open session" button jumps straight to that session in the workspace.
-- By default only live sessions are searched; the "Include archived" toggle widens the scope.
+- Several words can be combined in any order; partial words and Chinese, Japanese or Korean text are found as well. Results are ranked by relevance.
+- Results are grouped by session on the left; the preview on the right highlights the current match. ↑/↓ and Enter step through matches across sessions.
+- "Open session" opens the session in the workspace.
+- Archived sessions are excluded unless you tick "Include archived".
 
-> Terminal output is only searchable if session recording is enabled (Settings ▸ Advanced ▸ Record session logs, off by default); agent transcripts are always searchable.
+Terminal output can be searched only when session recording is on (Settings ▸ Advanced ▸ "Record session logs", off by default). Agent conversations can always be searched.
 
-## 9. The safety net around deletion
+## 10. Deleting safely
 
-Deleting a session is real deletion (its recording file is cleaned up too). But when you delete a group or project that still contains **archived** sessions, the archives don't die with it — they stay in the archive panel, and restoring one re-creates its containing group. In other words: archive first if you're worried; archived content can always be brought back.
+Deleting a session removes it permanently, together with its recording. When you delete a group or project that contains **archived** sessions, those archives are kept, and restoring one brings back its project and group. If in doubt, archive first: archived content can always be restored.
+
+## 11. Quitting and restoring the workspace
+
+Quitting asks "Quit VelaTerm?" and stops running terminal and agent sessions. With "Save workspace" checked, the next start reopens the same tabs and splits. Restored sessions do not start on their own: each pane shows "Restored from your saved workspace. No process is running yet." with a "Start" button. The checkbox remembers your last choice.

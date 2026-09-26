@@ -280,6 +280,7 @@ const ko: typeof en = {
   "common.save": "저장", // Save
   "common.create": "생성", // Create
   "common.close": "닫기", // Close
+  "chat.copyAsMarkdown": "Markdown 형식으로 복사",
   "chat.imageViewOriginal": "원본 이미지 보기",
   "chat.imageCopy": "이미지 복사",
   "chat.imageSave": "이미지 저장",

@@ -1,3 +1,21 @@
+## v0.2.4 — 2026-09-26
+
+- 📋 Copiar da conversa entrega o texto como ele aparece na tela: sem crases em torno do código em linha, sem asteriscos no destaque, links apenas com seu texto, blocos de código sem cercas, células de tabela separadas por tabulações e listas com os marcadores que você vê. O formato com estilos continua indo junto para a área de transferência, e o menu de contexto ganha "Copiar como Markdown" para obter o código Markdown da seleção.
+
+- ⏳ A continuação automática após o limite de uso ser reiniciado agora vem ligada. Se você já tinha alterado essa opção, sua escolha é mantida.
+
+- ↩️ Reverter uma conversa não fica mais bloqueado por uma tarefa que já terminou: uma tarefa em primeiro plano é considerada concluída quando seu turno acaba, e o progresso que chega depois não volta a marcá-la como em execução. Quando de fato há uma tarefa em segundo plano rodando, a mensagem informa o nome dela.
+
+- 🧹 As threads de subagentes do Codex não aparecem mais na lista do histórico de sessões, assim como já acontece com as sidechains do Claude.
+
+- ⌨️ Autocompletar no terminal: depois de percorrer os candidatos com as setas, o Enter aceita o item destacado da mesma forma que o Tab. O Enter continua indo para o shell se você não moveu a seleção, se continuou digitando após escolhê-la ou se há uma tecla modificadora pressionada.
+
+- 📱 O Android é compilado em dois canais. A versão padrão traz os canais de push da Getui, Huawei, Xiaomi, OPPO, vivo, Meizu e Honor; a versão da Play vem sem eles e indica que as notificações de tarefa estão sem canal de push configurado.
+
+- 🎨 Mudanças menores de interface: listas de tarefas não repetem mais a caixa de seleção, a barra de notificações e o aviso de continuação automática ficam entre a conversa e o campo de escrita com a mesma largura do texto das mensagens, e no celular o botão de enviar permanece ao lado do campo quando as opções estão recolhidas.
+
+---
+
 ## v0.2.3 — 2026-09-24
 
 - 🪟 Sessões existentes podem ser movidas para os painéis divididos. O menu de contexto da barra lateral abre uma sessão em um painel à direita, um painel abaixo ou no painel em foco; ao arrastar uma sessão da barra lateral até a borda de um painel, a divisão segue aquela direção, e soltá-la no meio substitui a sessão ali exibida. De duas a quatro sessões selecionadas podem ser dispostas lado a lado em uma mesma aba dividida igualmente, e as sessões presentes nos demais painéis da aba atual ficam sinalizadas na barra lateral.
