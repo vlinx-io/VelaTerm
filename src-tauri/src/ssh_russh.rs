@@ -62,6 +62,11 @@ impl RusshTransport {
     /// Connect and authenticate after trust_host has stored the host key. `Auto` tries unencrypted
     /// default keys; `Password` uses password plus keyboard-interactive fallback. Rejected public-key
     /// auth returns [`AUTH_REQUIRED_TAG`] so the frontend can request a password.
+    ///
+    /// `~/.ssh/config` is consulted for the target host: `IdentityFile` entries are tried before the
+    /// built-in default keys, `IdentitiesOnly yes` disables the default-key fallback, and
+    /// `PreferredAuthentications` without `password`/`keyboard-interactive` skips the password prompt
+    /// entirely so a publickey-only config is not silently downgraded to a password request.
     pub fn connect(
         host: &str,
         session: &str,
@@ -69,11 +74,29 @@ impl RusshTransport {
         _progress: Progress,
     ) -> Result<Self, String> {
         let (target, port_opt) = split_ssh_target(host);
-        let port: u16 = port_opt.and_then(|p| p.parse().ok()).unwrap_or(22);
-        let (user, hostname) = match target.rsplit_once('@') {
-            Some((u, h)) => (u.to_string(), h.to_string()),
-            None => return Err(format!("SSH target must be user@host: {host}")),
+        let port_from_target: Option<u16> = port_opt.and_then(|p| p.parse().ok());
+        let (user_from_target, host_from_target) = match target.rsplit_once('@') {
+            Some((u, h)) => (Some(u.to_string()), h.to_string()),
+            None => (None, target.to_string()),
         };
+
+        // Read ~/.ssh/config for the literal target host; missing file yields defaults so the previous
+        // hard-coded behaviour is preserved when no config exists.
+        let host_key = host_from_target.as_str();
+        let ssh_cfg = crate::ssh_config::lookup(host_key, crate::host::home_dir().as_deref());
+        let hostname = ssh_cfg.hostname.clone().unwrap_or_else(|| host_from_target.clone());
+        let user = match user_from_target {
+            Some(u) => u,
+            None => match ssh_cfg.user.clone() {
+                Some(u) => u,
+                None => {
+                    return Err(format!(
+                        "SSH target must be user@host or set User in ~/.ssh/config: {host}"
+                    ))
+                }
+            },
+        };
+        let port: u16 = port_from_target.or(ssh_cfg.port).unwrap_or(22);
 
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -92,6 +115,9 @@ impl RusshTransport {
             port,
         };
 
+        // Captured by the async block; kept out of the move to avoid cloning during setup.
+        let ssh_cfg_for_auth = ssh_cfg.clone();
+
         let handle = rt.block_on(async move {
             let mut h = client::connect(config, (hostname.as_str(), port), handler)
                 .await
@@ -99,11 +125,30 @@ impl RusshTransport {
 
             match auth {
                 SshAuth::Auto => {
-                    if !authenticate_default_keys(&mut h, &user).await? {
-                        // No usable passwordless key; ask the frontend for a password like the OpenSSH path.
-                        return Err(format!(
-                            "{AUTH_REQUIRED_TAG}public-key authentication failed"
-                        ));
+                    // Try IdentityFile keys first, then the built-in defaults unless IdentitiesOnly
+                    // says otherwise. This preserves the previous behaviour when no config is present.
+                    let mut got = false;
+                    for path in &ssh_cfg_for_auth.identity_files {
+                        if try_publickey_at(&mut h, &user, path).await? {
+                            got = true;
+                            break;
+                        }
+                    }
+                    if !got
+                        && !ssh_cfg_for_auth.identities_only.unwrap_or(false)
+                        && authenticate_default_keys(&mut h, &user).await?
+                    {
+                        got = true;
+                    }
+                    if !got {
+                        // A user who has pinned PreferredAuthentications away from password (typically
+                        // publickey-only) must not be silently downgraded to a password prompt; return a
+                        // plain error instead of AUTH_REQUIRED_TAG so the frontend does not ask for one.
+                        return Err(if ssh_cfg_for_auth.allows_password() {
+                            format!("{AUTH_REQUIRED_TAG}public-key authentication failed")
+                        } else {
+                            "SSH public-key authentication failed and ~/.ssh/config forbids password fallback (PreferredAuthentications does not list password or keyboard-interactive)".to_string()
+                        });
                     }
                 }
                 SshAuth::Password(pw) => {
@@ -129,6 +174,33 @@ impl RusshTransport {
             forwards: Mutex::new(Vec::new()),
         })
     }
+}
+
+/// Load a single unencrypted key from `path` and try it as `user`. Returns `Ok(false)` for a missing,
+/// encrypted, or malformed file so the caller can move on to the next `IdentityFile` or to defaults.
+/// Auto is a passwordless flow; passphrase-protected keys need agent support (out of scope here).
+async fn try_publickey_at(
+    h: &mut client::Handle<ClientHandler>,
+    user: &str,
+    path: &Path,
+) -> Result<bool, String> {
+    if !path.is_file() {
+        return Ok(false);
+    }
+    let key = match load_secret_key(path, None) {
+        Ok(k) => Arc::new(k),
+        Err(_) => return Ok(false),
+    };
+    let hash = h.best_supported_rsa_hash().await.ok().flatten().flatten();
+    if let Ok(res) = h
+        .authenticate_publickey(user, PrivateKeyWithHashAlg::new(key, hash))
+        .await
+    {
+        if res.success() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Try unencrypted `~/.ssh/{id_ed25519,id_ecdsa,id_rsa}` keys in order. Skip encrypted or unparseable
