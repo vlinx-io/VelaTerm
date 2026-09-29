@@ -377,7 +377,11 @@ fn last_codex_context_info(text: &str) -> AgentContextInfo {
 /// Unknown models conservatively use 200k rather than overstating capacity; extend the table for new models.
 fn context_limit_for_model(model: &str) -> u64 {
     // Known 1M models; Haiku 4.5, older unspecified models, and others use the 200k fallback.
+    // Bare "opus-5" and "sonnet-5" also cover "opus-5-5", "sonnet-5-5" and dated suffixes as substring
+    // matches, and do not collide with "opus-4-5" since that string does not contain "opus-5".
     const ONE_M_MODELS: &[&str] = &[
+        "opus-5",
+        "sonnet-5",
         "opus-4-8",
         "opus-4-7",
         "opus-4-6",
@@ -1625,6 +1629,10 @@ printf '%s\n' '{"id":1,"result":{"outcome":"alreadyRedeemed"}}'
     #[test]
     fn context_limit_for_model_maps_window() {
         for m in [
+            "claude-opus-5",
+            "claude-opus-5-5",
+            "claude-sonnet-5",
+            "claude-sonnet-5-5",
             "claude-opus-4-8",
             "claude-opus-4-7",
             "claude-opus-4-6",
@@ -1643,11 +1651,17 @@ printf '%s\n' '{"id":1,"result":{"outcome":"alreadyRedeemed"}}'
             context_limit_for_model("claude-opus-4-8-20260101"),
             CONTEXT_LIMIT_1M
         );
-        // 200k and unknown models use the fallback.
+        assert_eq!(
+            context_limit_for_model("claude-opus-5-5-20260201"),
+            CONTEXT_LIMIT_1M
+        );
+        // 200k and unknown models use the fallback. `claude-opus-4-5` in particular must NOT match
+        // `opus-5`, since that would incorrectly classify the older 200k model as 1M.
         for m in [
             "claude-haiku-4-5",
             "claude-haiku-4-5-20251001",
             "claude-opus-4-1",
+            "claude-opus-4-5",
             "weird-model",
         ] {
             assert_eq!(
