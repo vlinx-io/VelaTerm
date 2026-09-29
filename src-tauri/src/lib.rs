@@ -47,6 +47,9 @@ mod stall;
 // GUI-only vela-server provisioning: R2 download, minisign verification, and cache.
 #[cfg(feature = "gui")]
 mod server_supply;
+// Minimal ~/.ssh/config parser shared by the SSH transports. Consulted by the russh path so a user's
+// existing publickey configuration is honoured instead of falling through to a password prompt.
+mod ssh_config;
 // GUI-only client-side SSH orchestration, provisioning, serve, forwarding, and auto-login.
 #[cfg(feature = "gui")]
 mod ssh_remote;
