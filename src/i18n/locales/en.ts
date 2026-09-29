@@ -623,6 +623,7 @@ const en = {
   "settings.fonts": "Fonts",
   "settings.uiFont": "Interface font",
   "settings.uiFontSize": "Interface size",
+  "settings.uiZoom": "Interface zoom",
   "settings.termFont": "Terminal font",
   "settings.termFontSize": "Terminal size",
   "settings.termLineHeight": "Terminal line height",

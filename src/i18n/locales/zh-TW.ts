@@ -614,6 +614,7 @@ const zhTW: typeof en = {
   "settings.fonts": "字型", // Fonts
   "settings.uiFont": "介面字型", // Interface font
   "settings.uiFontSize": "介面字級", // Interface size
+  "settings.uiZoom": "介面縮放", // Interface zoom
   "settings.termFont": "終端機字型", // Terminal font
   "settings.termFontSize": "終端機字級", // Terminal size
   "settings.termLineHeight": "終端機行高",

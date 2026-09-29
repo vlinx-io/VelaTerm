@@ -620,6 +620,7 @@ const vi: typeof en = {
   "settings.fonts": "Phông chữ",
   "settings.uiFont": "Phông giao diện",
   "settings.uiFontSize": "Cỡ chữ giao diện",
+  "settings.uiZoom": "Thu phóng giao diện", // Interface zoom
   "settings.termFont": "Phông terminal",
   "settings.termFontSize": "Cỡ chữ terminal",
   "settings.termLineHeight": "Chiều cao dòng terminal",

@@ -613,6 +613,7 @@ const zhCN: typeof en = {
   "settings.fonts": "字体",
   "settings.uiFont": "界面字体",
   "settings.uiFontSize": "界面字号",
+  "settings.uiZoom": "界面缩放", // Interface zoom
   "settings.termFont": "终端字体",
   "settings.termFontSize": "终端字号",
   "settings.termLineHeight": "终端行高",

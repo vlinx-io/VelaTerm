@@ -624,6 +624,7 @@ const ptBR: typeof en = {
   "settings.fonts": "Fonts", // TODO translate
   "settings.uiFont": "Interface font", // TODO translate
   "settings.uiFontSize": "Interface size", // TODO translate
+  "settings.uiZoom": "Zoom da interface", // Interface zoom
   "settings.termFont": "Terminal font", // TODO translate
   "settings.termFontSize": "Terminal size", // TODO translate
   "settings.termLineHeight": "Altura da linha do terminal",
