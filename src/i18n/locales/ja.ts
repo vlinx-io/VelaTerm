@@ -1991,6 +1991,7 @@ const ja: typeof en = {
   "chat.tasks.outputTruncated": "最新の出力のみを表示しています。",
   "chat.tasks.phases": "フェーズ",
   "chat.tasks.noProgress": "このタスクでは、エージェントごとの進捗は報告されません。",
+  "chat.tasks.detailUnavailable": "現在、この接続ではワークフローの詳細を表示できません。",
   "chat.tasks.attempt": (n: number) => `${n} 回目`,
   "chat.tasks.prompt": "プロンプト",
   "chat.tasks.result": "結果",

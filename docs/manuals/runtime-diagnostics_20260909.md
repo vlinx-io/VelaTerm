@@ -2,7 +2,7 @@
 
 Created: 2026-09-09
 
-Updated: 2026-09-25 10:21
+Updated: 2026-09-27 12:00
 
 Runtime logs help you find out where an operation failed or what it was waiting for. They do not record terminal input or output, conversation text, file contents, credentials or full URLs.
 
@@ -64,6 +64,27 @@ Each step has a start and a completion line with `durationMs` for the step and `
 `event=ssh_connect` records the connection steps in order: `connect`, `probe`, `supply`, `prepare` (which includes copying the server to the remote machine), `start` and `forward`. When "Mirror the remote desktop app" attaches to a desktop app that is already running, only `connect`, `probe` and `forward` appear.
 
 Other requests are recorded as `rpc` lines with their start, success or failure (`rpc_failure`). Keystrokes and terminal resizes are not logged individually. Logging never changes how requests are retried or canceled.
+
+## When a remote window responds slowly
+
+A browser, mobile or Electron window receives replies, events and terminal output over one WebSocket connection. On a slow link the backend can produce more than the link carries. Replies to requests and the connection's heartbeat are sent ahead of queued events and terminal output, so a slow link delays the event stream rather than the answers. The one exception is the reply that attaches a terminal: it follows that terminal's replayed output. The backend on the remote machine records how full each connection's outgoing queue is:
+
+- `event=ws_outbound` (`INFO`) is written with every connection heartbeat and once more when the connection ends. `queuedBytes` and `queuedFrames` are what is still waiting at that moment; `peakQueuedBytes`, `sentBytes`, `sentFrames`, `coalescedCount` and `resyncCount` count since the previous line of the same connection (`clientId`). `classes` splits the sent frames and bytes by traffic class (`reply`, `ping`, `hello`, `ptyOutput`, `ptyReply`, `ptyResync`, `chatRows`, `chatExtras`, `chatQueue`, `chatOther`, `ptyEvent`, `sessionState`, `tree`, `otherEvent`) and lists only classes that sent something. Sizes are measured before end-to-end encryption, which adds about a third to text frames on the wire; terminal output is sent as binary frames without that overhead.
+- `coalescedCount` counts status updates that were replaced by a newer copy before they were sent: a conversation's status details, the session tree and the preset list. Only the newest copy is delivered, after everything queued before it. Conversation messages, the conversation's message queue and all other events are never merged or reordered. For a window that reports which conversations it shows (see below), a conversation's status details travel as changes to the previous copy, so they are never merged either.
+- `event=pty_resync` (`INFO`, with `sessionId` and `bytes`) means a terminal's unsent output grew too large for the link. VelaTerm drops that terminal's unsent output for this window only, then the window clears the terminal and reattaches, showing the terminal's recent output again. The session itself keeps running and no output is lost for other windows, but the reattach makes the terminal redraw once, so every window that shows it repaints.
+- `event=ws_slow_consumer` (`WARN`, with `bytes`) means the connection's queue exceeded its limit. The backend drops the queue and closes the connection with code 1013; the window reconnects and loads its state again.
+
+A connection whose queue is still being sent is not closed as unresponsive while it keeps making progress, even if the window has not sent anything for a while. A connection that neither sends anything nor makes progress is closed as before.
+
+Conversation traffic depends on what a window shows. A browser, mobile or Electron window of this version tells the backend which conversations and background task tabs it currently shows, and the backend forwards a conversation's updates only while it is shown:
+
+- A hidden tab or a closed conversation receives no conversation updates, except while a message sent from that tab still waits for the agent to accept it. When the conversation is shown again, the window loads only what changed in the meantime; a conversation with no changes answers with almost nothing.
+- A streamed answer sends the newly written text rather than the whole message again, so `chatRows` grows with the length of the answer.
+- Background tasks arrive as a compact status in `chatExtras`. A task's workflow tree is sent only while that task's tab is open: once in full, then only its changes. An update that changes nothing, or only a task's elapsed time, is not sent.
+- If a window notices that it missed an update, it asks for that conversation again and reloads it once; nothing is shown twice.
+- If the backend declines to follow a task tab, for example because the window already follows too many conversations and tabs or the session lies outside what an account share includes, the tab says that its workflow details cannot be shown over this connection instead of loading indefinitely. A workflow tree that still arrives replaces that note.
+
+Windows running an older version, for example a browser tab opened before the backend was updated, keep receiving full updates as before. Windows of the desktop app itself (not the Electron shell) keep receiving live conversation updates in the previous format and do not report which conversations they show. When they open or reload a conversation, however, they send the same request as a remote window, so the backend also answers them with compact task statuses and leaves out the parts that have not changed.
 
 ## What is recorded
 

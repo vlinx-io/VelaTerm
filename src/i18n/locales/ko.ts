@@ -1973,6 +1973,7 @@ const ko: typeof en = {
   "chat.tasks.outputTruncated": "최근 출력만 표시합니다.",
   "chat.tasks.phases": "단계",
   "chat.tasks.noProgress": "이 작업은 에이전트별 진행 상황을 보고하지 않습니다.",
+  "chat.tasks.detailUnavailable": "현재 이 연결에서는 워크플로 세부 정보를 표시할 수 없습니다.",
   "chat.tasks.attempt": (n: number) => `${n}번째 시도`,
   "chat.tasks.prompt": "프롬프트",
   "chat.tasks.result": "결과",

@@ -10,10 +10,25 @@
 //!   { t:"invoke",    id, cmd, args }      Generic commands (list_tree, pty_write, git, etc.)
 //!   { t:"pty-spawn", id, sid, args }      Spawn or attach to a PTY; returns { pid, launch, subId }
 //!   { t:"pty-detach", sid, subId }        Leave the session locally (detach; never kill it)
+//!   { t:"caps", chat:1 }                  First frame once online: this client decodes the chat codec
+//!   { t:"watch" | "unwatch", name }       A `chat://` name gained its first / lost its last local listener
+//!   { t:"chat-resync", sid }              The chat decoder found a gap in this session
 //! Server -> client:
 //!   { t:"reply", id, ok, result | error } Command response
 //!   { t:"event", name, payload }          Forwarded Tauri events (pty://status|exit, spawn://, notify://)
+//!   { t:"pty-resync", sid }               The server dropped this terminal's backlog on a slow link;
+//!                                         reset it and reattach (replay), as after a reconnect
+//!   { t:"watch-rejected", name }          The server will not forward this watched name (limit, invalid
+//!                                         or out-of-scope name); its listeners get `{type:"watchRejected"}`
 //!   Binary frame                            PTY output routed to subscribers by sid
+//!
+//! Chat channels (see `chatWire.ts` and `src-tauri/src/web/chat_wire.rs`): after `caps` the server forwards a
+//! session's chat events only while this client watches `chat://event/{sid}`, and a task's workflow tree
+//! only while it watches `chat://task/{sid}/{taskId}`; watches mirror the local listeners and are sent
+//! again after every reconnect. Chat events arrive as patches and are decoded here, before any listener
+//! sees them. On a gap the session's events are dropped, `chat-resync` is sent, and the server's
+//! `{type:"resync"}` barrier event is handed to the listeners, which then reload the conversation in full.
+//! An older server ignores all of this and sends full frames, which pass through the decoder unchanged.
 //!
 //! Reconnection: after a disconnect, reconnect automatically with exponential backoff from
 //! 1s to 30s. Before each retry, probe `GET /api/me` to distinguish failures. A 401 means
@@ -37,6 +52,7 @@ import nacl from "tweetnacl";
 
 import { t } from "../i18n";
 import { handshakeFailureReason, mapBackendError, type HandshakeFailure } from "./backendError";
+import { CHAT_WIRE_VERSION, ChatWireDecoder, ChatWireGap } from "./chatWire";
 import { recordRequestError } from "./reqLog";
 import { apiUrl, shareBasePath } from "./shareBase";
 import type { PtySpawnArgs, PtySpawnResult } from "./transport";
@@ -71,6 +87,10 @@ const IDLE_CHECK_MS = 15_000;
  * This applies to focus/visibility wakeups; `online` is an explicit recovery signal and ignores it.
  */
 const WAKE_STALE_MS = 35_000;
+
+/** Event names whose local listeners are mirrored to the server with watch/unwatch. */
+const WATCHED_PREFIX = "chat://";
+const CHAT_EVENT_PREFIX = "chat://event/";
 
 interface Pending {
   resolve: (v: unknown) => void;
@@ -236,6 +256,10 @@ class WsClient {
   private lastInbound = Date.now();
   /** Idle-detection timer, started when a connection opens and stopped when it closes. */
   private idleTimer: ReturnType<typeof setInterval> | undefined;
+  /** Rebuilds full chat payloads from the patches of this connection. */
+  private readonly chatDecoder = new ChatWireDecoder();
+  /** Sessions whose chat events are dropped until the server's resync barrier arrives. */
+  private readonly chatResyncing = new Set<string>();
 
   // ── E2EE (end-to-end encryption) state ──
   /** Pairing data for this visit (token + server public key); null selects unencrypted token auth. */
@@ -377,10 +401,19 @@ class WsClient {
     return nacl.box.open.after(ct, nonce, this.sharedKey);
   }
 
+  /**
+   * Whether application frames may be sent: the socket is open and, in pairing mode, the E2EE handshake has
+   * finished. An open pairing socket still negotiating its key would send them in plaintext, which the server
+   * treats as a failed handshake and closes the connection. The single gate for `ensure()` and `send()`.
+   */
+  private isOnline(): boolean {
+    return !!this.ws && this.ws.readyState === WebSocket.OPEN && (!this.pairing || this.e2eeReady);
+  }
+
   /** Ensure the socket is connected; concurrent callers share one connection promise. */
   private ensure(): Promise<void> {
     if(this.shareRevoked)return Promise.reject(new TransportError(t("transport.wsDisconnected")));
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) return Promise.resolve();
+    if (this.isOnline()) return Promise.resolve();
     if (this.connectPromise) return this.connectPromise;
     // Pairing mode must wait for its second-factor password. An empty-password handshake would be
     // rejected, causing endless reconnects and a false "wrong password" message before the user
@@ -502,6 +535,12 @@ class WsClient {
    * the handshake receives `e2ee_authenticated`.
    */
   private goOnline(ws: WebSocket) {
+    // Announce the chat codec first, then mirror every chat name that has local listeners, so the server
+    // forwards exactly what this client shows before any request of this connection is answered.
+    this.send({ t: "caps", chat: CHAT_WIRE_VERSION });
+    for (const [name, set] of this.events) {
+      if (set.size && name.startsWith(WATCHED_PREFIX)) this.send({ t: "watch", name });
+    }
     this.connectPromise = null;
     this.reconnectAttempts = 0;
     this.everConnected = true;
@@ -525,31 +564,38 @@ class WsClient {
     // Recover by reattaching every registered PTY. attachOnly never revives a session closed by
     // another client during the outage as an empty shell; the server replays the mode prelude and
     // current screen.
-    for (const sid of this.ptySinks.keys()) {
-      const args = this.ptyArgs.get(sid);
-      if (!args) continue;
-      const startCbs = this.reattachStartCbs.get(sid);
-      if (startCbs) for (const cb of startCbs) cb();
-      void this.sendPtySpawn(sid, args, true)
-        .then((res) => {
-          const cbs = this.reattachCbs.get(sid);
-          if (cbs) for (const cb of cbs) cb(res);
-        })
-        .catch((err) => {
-          // An attach-only failure means another client closed or deleted the session while this
-          // one was offline. Finish as a terminated session: remove local registrations and emit
-          // an exit event so usePtySession closes the view.
-          const msg = String(err instanceof Error ? err.message : err);
-          if (msg.includes("is not running") || msg.includes("has been deleted")) {
-            this.ptySinks.delete(sid);
-            this.ptyArgs.delete(sid);
-            this.subIds.delete(sid);
-            this.dispatchLocalEvent(`pty://exit/${sid}`, null);
-          }
-        });
-    }
+    for (const sid of this.ptySinks.keys()) this.reattachPty(sid);
     this.pendingConnect?.resolve();
     this.pendingConnect = null;
+  }
+
+  /**
+   * Reattach one registered PTY: close its replay gate and reset the terminal (reattachStart), then
+   * pty-spawn with attachOnly so the server replays the mode prelude and current screen. Used after a
+   * reconnect and when the server announces `pty-resync`. Unknown sids are ignored.
+   */
+  private reattachPty(sid: string) {
+    const args = this.ptyArgs.get(sid);
+    if (!args || !this.ptySinks.has(sid)) return;
+    const startCbs = this.reattachStartCbs.get(sid);
+    if (startCbs) for (const cb of startCbs) cb();
+    void this.sendPtySpawn(sid, args, true)
+      .then((res) => {
+        const cbs = this.reattachCbs.get(sid);
+        if (cbs) for (const cb of cbs) cb(res);
+      })
+      .catch((err) => {
+        // An attach-only failure means another client closed or deleted the session while this
+        // one was offline. Finish as a terminated session: remove local registrations and emit
+        // an exit event so usePtySession closes the view.
+        const msg = String(err instanceof Error ? err.message : err);
+        if (msg.includes("is not running") || msg.includes("has been deleted")) {
+          this.ptySinks.delete(sid);
+          this.ptyArgs.delete(sid);
+          this.subIds.delete(sid);
+          this.dispatchLocalEvent(`pty://exit/${sid}`, null);
+        }
+      });
   }
 
   /** Retire the socket a new connection replaces. Its `onclose` is ignored from this point on, so
@@ -723,6 +769,9 @@ class WsClient {
     } else if (msg.t === "hello") {
       // The first frame supplies this connection's source ID; replace it after reconnection.
       this.source = String(msg.source ?? "");
+      // Chat patches of a previous connection never apply to this one.
+      this.chatDecoder.reset();
+      this.chatResyncing.clear();
     } else if (msg.t === "reply") {
       const p = this.pending.get(msg.id as number);
       if (!p) return;
@@ -732,8 +781,23 @@ class WsClient {
       // where every backend error enters the UI; other errors pass through unchanged.
       else p.reject(new Error(mapBackendError(String(msg.error ?? t("transport.cmdFailed")))));
     } else if (msg.t === "event") {
-      const subs = this.events.get(msg.name as string);
-      if (subs) for (const cb of subs) cb(msg.payload);
+      const name = msg.name as string;
+      let payload = msg.payload;
+      if (name.startsWith(CHAT_EVENT_PREFIX)) {
+        const decoded = this.decodeChat(name, payload);
+        if (decoded === DROP) return;
+        payload = decoded;
+      }
+      const subs = this.events.get(name);
+      if (subs) for (const cb of subs) cb(payload);
+    } else if (msg.t === "watch-rejected") {
+      // A watch the server did not honour would otherwise look like a quiet channel forever. Tell the
+      // listeners of that name, which decide how to recover; a later reconnect watches it again.
+      this.dispatchLocalEvent(String(msg.name ?? ""), { type: "watchRejected" });
+    } else if (msg.t === "pty-resync") {
+      // The server dropped this terminal's unsent output because the link could not keep up, and
+      // stopped streaming it. Everything before the marker has arrived; replace it with a replay.
+      this.reattachPty(String(msg.sid ?? ""));
     } else if (msg.t === "error") {
       // The server reports connection-level failures such as rejected WS authentication before
       // closing the socket. Record them in the central error buffer for console/banner visibility;
@@ -746,12 +810,43 @@ class WsClient {
     }
   }
 
+  /**
+   * Decode one chat event, or DROP it. A session waiting for its resync barrier drops everything before it:
+   * a partly applied rows event would advance the view's revision past a row it never received. The barrier
+   * itself reaches the listeners, which reload the conversation in full.
+   */
+  private decodeChat(name: string, payload: unknown): unknown {
+    const sid = name.slice(CHAT_EVENT_PREFIX.length);
+    const isBarrier = (payload as { type?: unknown } | null)?.type === "resync";
+    if (this.chatResyncing.has(sid)) {
+      if (!isBarrier) return DROP;
+      this.chatResyncing.delete(sid);
+      this.chatDecoder.forget(sid);
+      return payload;
+    }
+    if (isBarrier) return payload;
+    try {
+      return this.chatDecoder.decode(sid, payload);
+    } catch (error) {
+      if (!(error instanceof ChatWireGap)) throw error;
+      this.chatDecoder.forget(sid);
+      // Without listeners the server has already been told to stop; there is nothing to repair.
+      if (this.events.get(name)?.size) {
+        this.chatResyncing.add(sid);
+        this.send({ t: "chat-resync", sid });
+      }
+      return DROP;
+    }
+  }
+
   private send(obj: unknown) {
     const text = JSON.stringify(obj);
-    // The socket is owned from construction, so it can be CONNECTING here; sending then throws
-    // InvalidStateError. Encrypt all outbound text after E2EE is ready — handshake hello/auth
-    // frames bypass this path.
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    // The socket is owned from construction, so it can be CONNECTING here, where sending throws
+    // InvalidStateError, or open but still in its E2EE handshake. Drop the frame until the connection is
+    // online: goOnline mirrors every watched chat name again, and a new connection holds no server-side
+    // state that an unwatch or detach from before would have to clear. Encrypt all outbound text after
+    // E2EE is ready; handshake hello/auth frames bypass this path.
+    if (!this.ws || !this.isOnline()) return;
     this.ws.send(this.e2eeReady ? this.encryptText(text) : text);
   }
 
@@ -788,9 +883,16 @@ class WsClient {
       this.events.set(name, set);
     }
     const wrapped: EventCb = (p) => cb(p as T);
+    const first = set.size === 0;
     set.add(wrapped);
+    // The server forwards a chat name only while this client listens to it (see the protocol notes).
+    if (first && name.startsWith(WATCHED_PREFIX)) this.send({ t: "watch", name });
+    const listeners = set;
     return () => {
-      set?.delete(wrapped);
+      if (!listeners.delete(wrapped) || listeners.size > 0 || this.events.get(name) !== listeners) return;
+      // Drop the empty set so a reconnect does not watch the name again.
+      this.events.delete(name);
+      if (name.startsWith(WATCHED_PREFIX)) this.send({ t: "unwatch", name });
     };
   }
 
@@ -934,6 +1036,9 @@ class WsClient {
     };
   }
 }
+
+/** Marks a chat event the decoder withheld. */
+const DROP = Symbol("drop");
 
 /** Browser-side singleton. */
 export const wsClient = new WsClient();

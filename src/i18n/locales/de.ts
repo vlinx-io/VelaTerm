@@ -1997,6 +1997,7 @@ const de: typeof en = {
   "chat.tasks.outputTruncated": "Nur die neueste Ausgabe wird angezeigt.",
   "chat.tasks.phases": "Phasen",
   "chat.tasks.noProgress": "Für diese Aufgabe wird kein Fortschritt der einzelnen Agenten gemeldet.",
+  "chat.tasks.detailUnavailable": "Die Workflow-Details können über diese Verbindung gerade nicht angezeigt werden.",
   "chat.tasks.attempt": (n: number) => `Versuch ${n}`,
   "chat.tasks.prompt": "Prompt",
   "chat.tasks.result": "Ergebnis",

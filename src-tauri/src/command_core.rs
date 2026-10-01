@@ -1635,33 +1635,108 @@ pub fn chat_snapshot_window(
         }
     }
     if snapshot.pid.is_none() {
-        snapshot.total_rows = snapshot.rows.len();
-        snapshot.positions = snapshot
-            .rows
-            .iter()
-            .enumerate()
-            .map(|(index, row)| (row.id().to_owned(), index))
-            .collect();
-        if let Some(window) = window {
-            let end = window
-                .before
-                .as_ref()
-                .and_then(|id| snapshot.rows.iter().position(|row| row.id() == id))
-                .unwrap_or(snapshot.rows.len());
-            let start = end.saturating_sub(crate::agent::chat::engine::SNAPSHOT_PAGE_ROWS);
-            snapshot.page_kind = if window.before.is_some() && end < snapshot.rows.len() {
-                "history"
-            } else {
-                "recent"
-            };
-            snapshot.has_more = start > 0;
-            snapshot.rows = snapshot.rows[start..end].to_vec();
-            snapshot
-                .positions
-                .retain(|_, index| *index >= start && *index < end);
-        }
+        page_replayed(&mut snapshot, window);
+    }
+    if let Some(window) = window {
+        apply_meta_tag(&mut snapshot, window.meta_tag.as_deref());
     }
     Ok(snapshot)
+}
+
+/// Page the rows replayed from a recording for `window`.
+///
+/// Replayed rows have index-based ids and no revisions, so a reopen cannot ask "what changed since". The
+/// `historyTag` stands in: `"{rows}:{hash}"` of the whole replay. When the client's tag still describes the
+/// first rows of this replay (the usual, appending recording), only the rows after them are sent as a
+/// delta; an unchanged recording answers with none. Anything else gets the recent page, as before.
+pub(crate) fn page_replayed(
+    snapshot: &mut crate::agent::chat::engine::ChatSnapshot,
+    window: Option<&crate::agent::chat::engine::ChatWindow>,
+) {
+    use std::hash::{Hash, Hasher};
+    let total = snapshot.rows.len();
+    snapshot.total_rows = total;
+    snapshot.positions = snapshot
+        .rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| (row.id().to_owned(), index))
+        .collect();
+    let Some(window) = window else { return };
+    let claimed = window.history_tag.as_deref().and_then(|tag| {
+        let (rows, hash) = tag.split_once(':')?;
+        Some((rows.parse::<usize>().ok()?, hash))
+    });
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    let mut prefix_matches = false;
+    for index in 0..=total {
+        if claimed.is_some_and(|(rows, hash)| rows == index && format!("{:016x}", hasher.finish()) == hash) {
+            prefix_matches = true;
+        }
+        if let Some(row) = snapshot.rows.get(index) {
+            serde_json::to_string(row).unwrap_or_default().hash(&mut hasher);
+        }
+    }
+    snapshot.history_tag = Some(format!("{total}:{:016x}", hasher.finish()));
+    // The client's first row must still be part of this replay, or its view cannot be extended.
+    let from = window
+        .from
+        .as_ref()
+        .map(|id| snapshot.rows.iter().position(|row| row.id() == id));
+    let delta_from = claimed
+        .map(|(rows, _)| rows)
+        .filter(|_| prefix_matches && window.before.is_none() && !matches!(from, Some(None)));
+    if let Some(start) = delta_from {
+        snapshot.page_kind = "delta";
+        snapshot.has_more = matches!(from, Some(Some(index)) if index > 0);
+        snapshot.rows.drain(..start);
+        snapshot.positions.retain(|_, index| *index >= start);
+        return;
+    }
+    let end = window
+        .before
+        .as_ref()
+        .and_then(|id| snapshot.rows.iter().position(|row| row.id() == id))
+        .unwrap_or(total);
+    let start = end.saturating_sub(window.page_rows());
+    snapshot.page_kind = if window.before.is_some() && end < total {
+        "history"
+    } else {
+        "recent"
+    };
+    snapshot.has_more = start > 0;
+    snapshot.rows = snapshot.rows[start..end].to_vec();
+    snapshot
+        .positions
+        .retain(|_, index| *index >= start && *index < end);
+}
+
+/// Tag the bulky, rarely changing parts of a snapshot, and leave them out when the client already holds
+/// exactly these (`metaUnchanged`); the client then keeps the copy from the snapshot that produced the tag.
+pub(crate) fn apply_meta_tag(snapshot: &mut crate::agent::chat::engine::ChatSnapshot, known: Option<&str>) {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for part in [
+        serde_json::to_string(&snapshot.commands),
+        serde_json::to_string(&snapshot.config_keys),
+        serde_json::to_string(&snapshot.collaboration_modes),
+        serde_json::to_string(&snapshot.extras.context_usage),
+        serde_json::to_string(&snapshot.extras.rate_limit),
+        serde_json::to_string(&snapshot.extras.native_usage),
+    ] {
+        part.unwrap_or_default().hash(&mut hasher);
+    }
+    let tag = format!("{:016x}", hasher.finish());
+    if known == Some(tag.as_str()) {
+        snapshot.commands.clear();
+        snapshot.config_keys.clear();
+        snapshot.collaboration_modes.clear();
+        snapshot.extras.context_usage = None;
+        snapshot.extras.rate_limit = None;
+        snapshot.extras.native_usage = None;
+        snapshot.meta_unchanged = true;
+    }
+    snapshot.meta_tag = Some(tag);
 }
 
 /// Expanded tool details remain available when an inactive conversation is replayed from disk.
@@ -2201,6 +2276,124 @@ mod tests {
             "the payload must never carry values: {}",
             payloads[0]
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn snapshot_bytes_without_queue(snapshot: &crate::agent::chat::engine::ChatSnapshot) -> usize {
+        let mut value = serde_json::to_value(snapshot).unwrap();
+        value.as_object_mut().unwrap().remove("queue");
+        value.to_string().len()
+    }
+
+    /// AC5 (running): a reconnect that changed nothing costs almost nothing, and a change of the meta
+    /// parts brings them back.
+    #[test]
+    fn a_running_conversation_answers_an_unchanged_reconnect_with_almost_nothing() {
+        use crate::agent::chat::engine::ChatWindow;
+        let dir = std::env::temp_dir().join(format!("vlx-meta-tag-{}", uuid::Uuid::new_v4()));
+        let ctx = headless_ctx(&dir);
+        ctx.chat().insert_test_process("s");
+        ctx.chat().update_test_process("s", |commands, _| {
+            commands.extend((0..40).map(|i| serde_json::json!({"name": format!("command-{i}"), "description": "d".repeat(80)})));
+        });
+        ctx.chat().update_test_extras("s", |extras| {
+            extras.background_tasks = crate::agent::chat::engine::test_support::workflow_tasks(2, 5);
+            extras.rate_limit = Some(serde_json::json!({"status": "allowed", "resetsAt": 1}));
+        });
+        let first = super::chat_snapshot_window(&ctx, "s", Some(&ChatWindow { compact_tasks: Some(true), ..ChatWindow::default() })).unwrap();
+        assert!(!first.meta_unchanged);
+        assert_eq!(first.commands.len(), 40);
+        let tag = first.meta_tag.clone().expect("a windowed snapshot carries its meta tag");
+        let known = ChatWindow {
+            since: Some(first.rows_revision),
+            epoch: first.started_at,
+            meta_tag: Some(tag.clone()),
+            compact_tasks: Some(true),
+            ..ChatWindow::default()
+        };
+        let again = super::chat_snapshot_window(&ctx, "s", Some(&known)).unwrap();
+        assert_eq!(again.page_kind, "delta");
+        assert!(again.rows.is_empty());
+        assert!(again.commands.is_empty() && again.config_keys.is_empty());
+        assert!(again.meta_unchanged);
+        assert_eq!(again.meta_tag.as_deref(), Some(tag.as_str()));
+        assert!(again.extras.rate_limit.is_none());
+        let bytes = snapshot_bytes_without_queue(&again);
+        assert!(bytes < 1024, "an unchanged reconnect serialized to {bytes} bytes");
+
+        // A new row and a new command: the row comes as a delta and the meta parts come back whole.
+        {
+            let known = ChatWindow { since: Some(again.rows_revision), ..known };
+            ctx.chat().update_test_process("s", |commands, _| commands.push(serde_json::json!({"name": "new"})));
+            let changed = super::chat_snapshot_window(&ctx, "s", Some(&known)).unwrap();
+            assert!(!changed.meta_unchanged);
+            assert_eq!(changed.commands.len(), 41);
+            assert_ne!(changed.meta_tag.as_deref(), Some(tag.as_str()));
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn notices(n: usize, text: &str) -> Vec<crate::agent::chat::engine::ChatRow> {
+        (0..n)
+            .map(|i| crate::agent::chat::engine::ChatRow::Notice { id: format!("h-{i}"), message: format!("{text} {i}") })
+            .collect()
+    }
+
+    /// AC5 (replayed): a conversation without a process answers a matching history tag with a delta: none
+    /// when unchanged, only the appended rows after a new round, and the recent page after a rewrite.
+    #[test]
+    fn a_replayed_conversation_answers_with_a_prefix_delta() {
+        use crate::agent::chat::engine::ChatWindow;
+        let dir = std::env::temp_dir().join(format!("vlx-history-tag-{}", uuid::Uuid::new_v4()));
+        let ctx = headless_ctx(&dir);
+        let replay = |rows| {
+            let mut snapshot = ctx.chat().snapshot_window("idle", None);
+            snapshot.rows = rows;
+            snapshot
+        };
+        let window = ChatWindow { compact_tasks: Some(true), ..ChatWindow::default() };
+        let mut first = replay(notices(100, "said"));
+        super::page_replayed(&mut first, Some(&window));
+        assert_eq!(first.page_kind, "recent");
+        assert_eq!(first.rows.len(), crate::agent::chat::engine::SNAPSHOT_PAGE_ROWS);
+        assert!(first.has_more);
+        let tag = first.history_tag.clone().unwrap();
+        assert!(tag.starts_with("100:"));
+
+        let known = ChatWindow { history_tag: Some(tag.clone()), from: Some(first.rows[0].id().to_string()), ..window };
+        let mut unchanged = replay(notices(100, "said"));
+        super::page_replayed(&mut unchanged, Some(&known));
+        assert_eq!(unchanged.page_kind, "delta");
+        assert!(unchanged.rows.is_empty() && unchanged.positions.is_empty());
+        assert!(unchanged.has_more, "the client still has older rows to page in");
+        assert_eq!(unchanged.history_tag.as_deref(), Some(tag.as_str()));
+        let bytes = snapshot_bytes_without_queue(&unchanged);
+        assert!(bytes < 1024, "an unchanged reopen serialized to {bytes} bytes");
+
+        let mut appended_rows = notices(100, "said");
+        appended_rows.extend(notices(103, "said").into_iter().skip(100));
+        let mut appended = replay(appended_rows);
+        super::page_replayed(&mut appended, Some(&known));
+        assert_eq!(appended.page_kind, "delta");
+        let ids: Vec<&str> = appended.rows.iter().map(|row| row.id()).collect();
+        assert_eq!(ids, ["h-100", "h-101", "h-102"]);
+        assert_eq!(appended.positions.get("h-100"), Some(&100));
+        assert!(appended.history_tag.as_deref().unwrap().starts_with("103:"));
+
+        let mut rewritten = replay(notices(100, "rewound"));
+        super::page_replayed(&mut rewritten, Some(&known));
+        assert_eq!(rewritten.page_kind, "recent", "a rewritten recording is never extended");
+        assert_eq!(rewritten.rows.len(), crate::agent::chat::engine::SNAPSHOT_PAGE_ROWS);
+
+        let gone = ChatWindow { from: Some("h-999".into()), ..known.clone() };
+        let mut lost = replay(notices(100, "said"));
+        super::page_replayed(&mut lost, Some(&gone));
+        assert_eq!(lost.page_kind, "recent", "a client whose first row is gone gets a fresh page");
+
+        let tab = ChatWindow { limit: Some(0), ..ChatWindow::default() };
+        let mut none = replay(notices(10, "said"));
+        super::page_replayed(&mut none, Some(&tab));
+        assert!(none.rows.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

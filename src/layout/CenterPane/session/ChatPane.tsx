@@ -123,7 +123,8 @@ import {
   type TurnFold,
 } from "./toolRuns";
 import "./session-view.css";
-import { onTransportReconnect } from "../../../ipc/transport";
+import { isTauri, onTransportReconnect } from "../../../ipc/transport";
+import { usePageVisible } from "../../../hooks/usePageVisible";
 import { useOutbox, emptySubmissions, acknowledgeSubmissions, createSubmission, deliverSubmission, retrySubmission, submissionsFor, ChatVersions } from "./outbox";
 import { cachedChat, cacheChat, mergeRows, reconcileChat, chatSyncMetrics } from "./chatCache";
 import { ChatSearch } from "./ChatSearch";
@@ -287,6 +288,14 @@ export function ChatPane({
   const prependScroll = useRef<{ height: number; top: number; anchor?: { id: string; offset: number } } | null>(null);
   const [submissionReceipts, setSubmissionReceipts] = useState<boolean | null>(null);
   const pendingSubmissions = useOutbox(state => state.sessions[session.id] ?? emptySubmissions);
+  // Over a remote connection a pane follows its conversation only while someone can see it, plus while a
+  // message it sent still waits for its receipt. Everything missed is fetched incrementally when it is
+  // shown again. The desktop keeps every mounted pane subscribed, as before.
+  const pageVisible = usePageVisible();
+  const awaitingReceipt = pendingSubmissions.some(item => item.status !== "failed");
+  const watching = isTauri || (!hidden && pageVisible) || awaitingReceipt;
+  const watchingRef = useRef(watching);
+  const watchControl = useRef<{ watch: () => void; unwatch: () => void } | null>(null);
   // Messages typed while the agent was busy. They belong to the backend, not to this pane: a second view
   // of the same session has to show the same queue, and the queue has to outlive this pane being closed.
   const [queue, setQueueState] = useState<QueuedMessage[]>(() => cachedChat(session.id)?.queue ?? []);
@@ -331,7 +340,7 @@ export function ChatPane({
     permissionMode: effectivePermissionMode(session, useTermStore.getState().agentDefaults),
   }));
   const [pendingPermissionMode, setPendingPermissionMode] = useState<PendingPermissionMode | null>(null);
-  const permissionState = useSessionPermissionState(hidden ? undefined : session.id,
+  const permissionState = useSessionPermissionState(hidden || !watching ? undefined : session.id,
     `${session.permissionMode}:${mode}:${pendingPermissionMode?.current}:${pendingPermissionMode?.next}`);
   const [collaborationMode, setCollaborationMode] = useState<CollaborationMode>(() =>
     storedCollaborationMode(session),
@@ -622,6 +631,12 @@ export function ChatPane({
           setAutoContinue(event.waiting);
           if (event.reason) setNotice({ text: t(AUTO_CONTINUE_REASONS[event.reason]), priority: "high" });
           break;
+        // The connection dropped this conversation's events until a barrier; reload it in full.
+        case "resync":
+          fullRefresh = true;
+          if (loading) again = true;
+          else void refresh();
+          break;
         default:
           break;
       }
@@ -632,6 +647,9 @@ export function ChatPane({
       handleEvent(event);
     }).catch(error => { un = null; throw error; });
     let loading = false;
+    /** Another refresh is due once the running one ends (the pane was shown again, or a resync). */
+    let again = false;
+    let fullRefresh = false;
     let receiptsAvailable = false;
     const refresh = async () => {
       if (loading || disposed) return;
@@ -644,8 +662,11 @@ export function ChatPane({
       try {
         await subscribe();
         if (disposed) return;
-        const known = snapshotRef.current;
-        const response = await chatSnapshot(session.id, known ? { since: known.rowsRevision, epoch: known.startedAt, from: known.rows[0]?.id } : {});
+        const known = fullRefresh ? undefined : snapshotRef.current;
+        fullRefresh = false;
+        const response = await chatSnapshot(session.id, known
+          ? { since: known.rowsRevision, epoch: known.startedAt, from: known.rows[0]?.id, metaTag: known.metaTag, historyTag: known.historyTag, compactTasks: true }
+          : { compactTasks: true }, known);
         if (disposed) return;
         const pendingEvents = buffered ?? [];
         const snapshot = reconcileChat(response, rowsRef.current, pendingEvents);
@@ -724,7 +745,7 @@ export function ChatPane({
           setModel(remembered || undefined);
           setEffort(isEffort(rememberedEffort) ? rememberedEffort : "");
         }
-        pendingEvents.filter(event => !["rows", "replaceRows", "queued", "reset", "notification", "models"].includes(event.type)).forEach(handleEvent);
+        pendingEvents.filter(event => !["rows", "replaceRows", "queued", "reset", "notification", "models", "resync"].includes(event.type)).forEach(handleEvent);
       } catch (err) {
         if (!disposed) { setError(String(err)); setSyncState("failed"); }
       } finally {
@@ -733,11 +754,24 @@ export function ChatPane({
         loading = false;
         // Events were rendered as they arrived, including when the snapshot failed.
         void events;
+        if (again && !disposed) {
+          again = false;
+          if (watchingRef.current) void refresh();
+        }
       }
     };
     refreshRef.current = refresh;
-    void refresh();
+    watchControl.current = {
+      watch: () => { if (loading) again = true; else void refresh(); },
+      unwatch: () => {
+        const current = un;
+        un = null;
+        void current?.then((f) => f()).catch(() => {});
+      },
+    };
+    if (watchingRef.current) void refresh();
     const reconnect = onTransportReconnect(() => {
+      if (!watchingRef.current) return;
       void refresh().then(() => {
         if (!disposed && receiptsAvailable) for (const item of submissionsFor(session.id)) {
           if (item.status === "unknown") void retrySubmission(session.id, item);
@@ -748,9 +782,18 @@ export function ChatPane({
       disposed = true;
       historyGeneration.current += 1;
       reconnect();
+      watchControl.current = null;
       void un?.then((f) => f()).catch(() => {});
     };
   }, [session.id, session.kind, applyRows, t]);
+
+  // Showing a pane subscribes it and catches up with what it missed; hiding it unsubscribes.
+  useEffect(() => {
+    if (watchingRef.current === watching) return;
+    watchingRef.current = watching;
+    if (watching) watchControl.current?.watch();
+    else watchControl.current?.unwatch();
+  }, [watching]);
 
   useEffect(() => {
     if (snapshotRef.current) {

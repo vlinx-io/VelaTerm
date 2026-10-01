@@ -1999,6 +1999,7 @@ const en = {
   "chat.tasks.outputTruncated": "Only the most recent output is shown.",
   "chat.tasks.phases": "Phases",
   "chat.tasks.noProgress": "This task reports no per-agent progress.",
+  "chat.tasks.detailUnavailable": "The workflow details cannot be shown over this connection right now.",
   "chat.tasks.attempt": (n: number) => `Attempt ${n}`,
   "chat.tasks.prompt": "Prompt",
   "chat.tasks.result": "Result",

@@ -1,7 +1,9 @@
 //! One of a Claude conversation's background tasks, opened as a tab of its own.
 //!
 //! The view subscribes independently of its conversation pane. Reconnection registers the new socket
-//! with a snapshot without starting an agent; backend facts own lifecycle and elapsed time.
+//! with a snapshot without starting an agent; backend facts own lifecycle and elapsed time. Over a remote
+//! connection the tab follows its task only while it is visible, and asks for its workflow tree, which the
+//! server otherwise leaves out of the task list, only while it follows it.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -15,12 +17,14 @@ import {
   extrasOf,
   isTaskFinished,
   onChatEvent,
+  onChatTaskDetail,
   type ChatBackgroundTask,
   type ChatTaskOutput,
   type ChatWorkflowAgent,
   type ChatWorkflowPhase,
 } from "../../../ipc/chat";
-import { onTransportReconnect, onTransportDisconnect } from "../../../ipc/transport";
+import { isTauri, onTransportReconnect, onTransportDisconnect } from "../../../ipc/transport";
+import { usePageVisible } from "../../../hooks/usePageVisible";
 import { useTermStore, type TaskTab } from "../../../store/termStore";
 
 /** The icon a task kind is drawn with, here and on its tab. */
@@ -96,16 +100,23 @@ export function TaskView({ tab, hidden }: { tab: TaskTab; hidden: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
   const [syncFailed, setSyncFailed] = useState(false);
+  /** The server refused to send this task's workflow tree, so a compact status will not fill in. */
+  const [detailRejected, setDetailRejected] = useState(false);
   const [retry, setRetry] = useState(0);
   const [sampledAt, setSampledAt] = useState(() => performance.now());
   const [now, setNow] = useState(() => performance.now());
   const frozenDelta = useRef(0);
+  const pageVisible = usePageVisible();
+  const watching = isTauri || (!hidden && pageVisible);
 
   useEffect(() => {
+    if (!watching) return;
     let disposed = false;
+    setDetailRejected(false);
     let eventVersion = 0;
     let requestVersion = 0;
     let unlisten: (() => void) | undefined;
+    let unlistenDetail: (() => void) | undefined;
     const apply = (tasks: ChatBackgroundTask[] | undefined) => {
       const mine = tasks?.find((candidate) => candidate.task_id === tab.taskId);
       if (mine) {
@@ -126,7 +137,7 @@ export function TaskView({ tab, hidden }: { tab: TaskTab; hidden: boolean }) {
       const request = ++requestVersion;
       const version = eventVersion;
       try {
-        const snapshot = await chatSnapshot(tab.sessionId, {});
+        const snapshot = await chatSnapshot(tab.sessionId, { limit: 0, compactTasks: true, detailTask: tab.taskId });
         if (!disposed && request === requestVersion && version === eventVersion) {
           apply(extrasOf(snapshot).backgroundTasks);
         }
@@ -148,19 +159,26 @@ export function TaskView({ tab, hidden }: { tab: TaskTab; hidden: boolean }) {
         eventVersion++;
         // Retain any final backend facts; absence is unavailable, never an invented task outcome.
         setStale(true);
+      } else if (event.type === "resync") {
+        void synchronize();
       }
     }).then((fn) => {
       if (disposed) fn();
       else { unlisten = fn; void synchronize(); }
     }).catch(() => { if (!disposed) setSyncFailed(true); });
+    void onChatTaskDetail(tab.sessionId, tab.taskId, () => { if (!disposed) setDetailRejected(true); }).then((fn) => {
+      if (disposed) fn();
+      else unlistenDetail = fn;
+    }).catch(() => {});
     return () => {
       disposed = true;
       requestVersion++;
       unlisten?.();
+      unlistenDetail?.();
       offReconnect();
       offDisconnect();
     };
-  }, [tab.sessionId, tab.taskId, retry]);
+  }, [tab.sessionId, tab.taskId, retry, watching]);
 
   const finished = !!task && isTaskFinished(task);
   const ticking = !!task && !finished && !stale && !offline && !syncFailed;
@@ -247,7 +265,7 @@ export function TaskView({ tab, hidden }: { tab: TaskTab; hidden: boolean }) {
         <section className="sv-task-section">
           <h3>{t("chat.tasks.phases")}</h3>
           {agents.length === 0 && phases.length === 0 ? (
-            <div className="sv-task-empty">{t("chat.tasks.noProgress")}</div>
+            <div className="sv-task-empty">{t(!task?.detail_omitted ? "chat.tasks.noProgress" : detailRejected ? "chat.tasks.detailUnavailable" : "common.loading")}</div>
           ) : (
             <>
               {phases.map((phase) => (

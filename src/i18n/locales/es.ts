@@ -2004,6 +2004,7 @@ const es: typeof en = {
   "chat.tasks.outputTruncated": "Solo se muestra la salida más reciente.",
   "chat.tasks.phases": "Fases",
   "chat.tasks.noProgress": "Esta tarea no informa del progreso de cada agente.",
+  "chat.tasks.detailUnavailable": "Los detalles del flujo de trabajo no se pueden mostrar ahora a través de esta conexión.",
   "chat.tasks.attempt": (n: number) => `Intento ${n}`,
   "chat.tasks.prompt": "Instrucciones",
   "chat.tasks.result": "Resultado",

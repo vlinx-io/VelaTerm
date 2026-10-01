@@ -2014,6 +2014,7 @@ const ru: typeof en = {
   "chat.tasks.outputTruncated": "Показана только последняя часть вывода.",
   "chat.tasks.phases": "Этапы",
   "chat.tasks.noProgress": "Для этой задачи нет данных о ходе работы отдельных агентов.",
+  "chat.tasks.detailUnavailable": "Сейчас подробности рабочего процесса нельзя показать через это подключение.",
   "chat.tasks.attempt": (n: number) => `Попытка ${n}`,
   "chat.tasks.prompt": "Запрос",
   "chat.tasks.result": "Результат",

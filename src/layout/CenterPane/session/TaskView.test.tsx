@@ -3,9 +3,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { ChatBackgroundTask, ChatEvent } from "../../../ipc/chat";
 import type { TaskTab } from "../../../store/termStore";
 
+const mode = vi.hoisted(() => ({ desktop: false }));
 vi.mock("../../../ipc/transport", async (original) => ({
   ...await original<typeof import("../../../ipc/transport")>(), invoke: vi.fn(), listen: vi.fn(),
   onTransportReconnect: vi.fn(() => vi.fn()), onTransportDisconnect: vi.fn(() => vi.fn()),
+  get isTauri() { return mode.desktop; },
 }));
 
 import { invoke, listen, onTransportReconnect, onTransportDisconnect } from "../../../ipc/transport";
@@ -41,13 +43,15 @@ const progress: ChatBackgroundTask["workflow_progress"] = [
 
 beforeEach(() => {
   setLang("en");
+  mode.desktop = false;
   eventCallback = undefined;
   // The backend omits an empty list, so an undefined list means "no tasks"; by default the snapshot confirms the seed.
   snapshotTasks = [seed];
   unlisten = vi.fn();
   vi.mocked(listen).mockReset();
-  vi.mocked(listen).mockImplementation((_name, callback) => {
-    eventCallback = callback as (event: ChatEvent) => void;
+  vi.mocked(listen).mockImplementation((name, callback) => {
+    // The task-detail name only asks the server for the tree; its listener never receives anything.
+    if (name.startsWith("chat://event/")) eventCallback = callback as (event: ChatEvent) => void;
     return Promise.resolve(unlisten as unknown as () => void);
   });
   vi.mocked(invoke).mockReset();
@@ -80,8 +84,11 @@ it("paints the seed at once, subscribes to the session, and reads one paged snap
   expect(screen.getByText("1.2k")).toBeTruthy();
   expect(screen.getByText("Running")).toBeTruthy();
   expect(listen).toHaveBeenCalledWith("chat://event/s", expect.any(Function));
-  // A window, even an empty one, makes the engine return a page: the view reads only the extras.
-  expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "chat_snapshot")).toEqual([["chat_snapshot", { sessionId: "s", window: {} }]]);
+  // The view reads only the extras: no rows, and no workflow tree but its own task's.
+  expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "chat_snapshot")).toEqual([
+    ["chat_snapshot", { sessionId: "s", window: { limit: 0, compactTasks: true, detailTask: "worwyzf75" } }],
+  ]);
+  expect(listen).toHaveBeenCalledWith("chat://task/s/worwyzf75", expect.any(Function));
 });
 
 it("follows extras events for its own task and ignores other tasks", async () => {
@@ -199,7 +206,7 @@ it("ticks the elapsed time once a second while the task runs", async () => {
   expect(screen.getByText("1:07")).toBeTruthy();
 });
 
-it("stays mounted but invisible while hidden, and pauses the ticker until shown again", async () => {
+it("stays mounted but invisible while hidden, follows nothing remotely, and catches up when shown", async () => {
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "setTimeout", "clearTimeout", "Date", "performance"] });
   vi.setSystemTime(1_000_000 + 65_000);
   const view = render(<TaskView tab={tab} hidden={true} />);
@@ -207,16 +214,72 @@ it("stays mounted but invisible while hidden, and pauses the ticker until shown 
   const root = view.container.querySelector(".sv-task-view") as HTMLElement;
   expect(root.style.display).toBe("none");
   expect(screen.getByText("1:05")).toBeTruthy(); // Painted while hidden: the state is kept, not rebuilt.
-  expect(listen).toHaveBeenCalledTimes(1); // The subscription lives regardless of visibility.
+  // A hidden remote tab neither subscribes nor reads a snapshot, so the server sends it nothing.
+  expect(listen).not.toHaveBeenCalled();
+  expect(invoke).not.toHaveBeenCalled();
   act(() => { vi.advanceTimersByTime(3000); });
   expect(screen.getByText("1:05")).toBeTruthy(); // No ticking behind a hidden tab.
 
+  snapshotTasks = [{ ...seed, elapsed_ms: 68_000 }];
   view.rerender(<TaskView tab={tab} hidden={false} />);
+  await act(async () => {});
   expect(root.style.display).toBe("");
-  expect(screen.getByText("1:08")).toBeTruthy(); // Showing it catches up at once.
+  expect(listen).toHaveBeenCalledWith("chat://event/s", expect.any(Function));
+  expect(listen).toHaveBeenCalledWith("chat://task/s/worwyzf75", expect.any(Function));
+  expect(screen.getByText("1:08")).toBeTruthy(); // Showing it catches up at once from a fresh snapshot.
   act(() => { vi.advanceTimersByTime(1000); });
   expect(screen.getByText("1:09")).toBeTruthy();
-  expect(listen).toHaveBeenCalledTimes(1); // Toggling visibility does not resubscribe.
+
+  view.rerender(<TaskView tab={tab} hidden={true} />);
+  expect(unlisten).toHaveBeenCalledTimes(2); // Hiding it again leaves both names.
+});
+
+it("keeps a hidden tab subscribed on the desktop, as before", async () => {
+  mode.desktop = true;
+  const view = render(<TaskView tab={tab} hidden={true} />);
+  await act(async () => {});
+  expect(listen).toHaveBeenCalledWith("chat://event/s", expect.any(Function));
+  view.rerender(<TaskView tab={tab} hidden={false} />);
+  await act(async () => {});
+  expect(vi.mocked(listen).mock.calls.filter(([name]) => name === "chat://event/s")).toHaveLength(1); // No resubscribe.
+  expect(unlisten).not.toHaveBeenCalled();
+});
+
+it("shows loading, not an empty tree, while the server has left the tree out", async () => {
+  await mount();
+  extras([{ ...seed, detail_omitted: true }]);
+  expect(screen.getByText("Loading…")).toBeTruthy();
+  expect(screen.queryByText("This task reports no per-agent progress.")).toBeNull();
+  extras([{ ...seed, workflow_progress: progress }]);
+  expect(screen.getByText("Reply GAMMA")).toBeTruthy();
+  extras([{ ...seed }]);
+  expect(screen.getByText("This task reports no per-agent progress.")).toBeTruthy();
+});
+
+it("says the tree is unavailable instead of loading forever when the server rejects the detail watch", async () => {
+  let detailCallback: ((event: unknown) => void) | undefined;
+  vi.mocked(listen).mockImplementation((name, callback) => {
+    if (name.startsWith("chat://event/")) eventCallback = callback as (event: ChatEvent) => void;
+    if (name.startsWith("chat://task/")) detailCallback = callback as (event: unknown) => void;
+    return Promise.resolve(unlisten as unknown as () => void);
+  });
+  await mount();
+  extras([{ ...seed, detail_omitted: true }]);
+  expect(screen.getByText("Loading…")).toBeTruthy();
+  act(() => detailCallback?.({ type: "watchRejected" }));
+  expect(screen.queryByText("Loading…")).toBeNull();
+  expect(screen.getByText("The workflow details cannot be shown over this connection right now.")).toBeTruthy();
+  // A tree that does arrive (an older server, or the desktop) still wins.
+  extras([{ ...seed, workflow_progress: progress }]);
+  expect(screen.getByText("Reply GAMMA")).toBeTruthy();
+});
+
+it("reads a fresh snapshot at a resync barrier", async () => {
+  await mount();
+  snapshotTasks = [{ ...seed, description: "After resync" }];
+  await act(async () => eventCallback?.({ type: "resync" }));
+  expect(screen.getByText("After resync")).toBeTruthy();
+  expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "chat_snapshot")).toHaveLength(2);
 });
 
 it("stops exactly this task and reports a refusal", async () => {
@@ -233,7 +296,7 @@ it("stops exactly this task and reports a refusal", async () => {
 it("unsubscribes on unmount", async () => {
   const view = await mount();
   view.unmount();
-  expect(unlisten).toHaveBeenCalledTimes(1);
+  expect(unlisten).toHaveBeenCalledTimes(2); // The session channel and the task-detail name.
 });
 
 it("formats durations as m:ss and h:mm:ss", () => {

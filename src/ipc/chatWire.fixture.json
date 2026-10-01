@@ -1,0 +1,635 @@
+{
+  "frames": [
+    {
+      "decoded": {
+        "epoch": 10,
+        "positions": {
+          "r1": 1,
+          "u1": 0
+        },
+        "revision": 2,
+        "rows": [
+          {
+            "at": 1,
+            "id": "u1",
+            "images": [],
+            "kind": "user",
+            "text": "hi"
+          },
+          {
+            "at": 2,
+            "id": "r1",
+            "kind": "assistant",
+            "streaming": true,
+            "text": "Hel"
+          }
+        ],
+        "type": "rows"
+      },
+      "name": "chat://event/s1",
+      "payload": {
+        "epoch": 10,
+        "positions": {
+          "r1": 1,
+          "u1": 0
+        },
+        "retain": [
+          "r1"
+        ],
+        "revision": 2,
+        "rows": [
+          {
+            "at": 1,
+            "id": "u1",
+            "images": [],
+            "kind": "user",
+            "text": "hi"
+          },
+          {
+            "at": 2,
+            "id": "r1",
+            "kind": "assistant",
+            "streaming": true,
+            "text": "Hel"
+          }
+        ],
+        "type": "rows"
+      }
+    },
+    {
+      "decoded": {
+        "epoch": 10,
+        "positions": {
+          "r1": 1
+        },
+        "revision": 3,
+        "rows": [
+          {
+            "at": 3,
+            "id": "r1",
+            "kind": "assistant",
+            "streaming": true,
+            "text": "Hello 中文 😀"
+          }
+        ],
+        "type": "rows"
+      },
+      "name": "chat://event/s1",
+      "payload": {
+        "epoch": 10,
+        "positions": {
+          "r1": 1
+        },
+        "retain": [
+          "r1"
+        ],
+        "revision": 3,
+        "rows": [
+          {
+            "id": "r1",
+            "patch": {
+              "app": {
+                "text": "lo 中文 😀"
+              },
+              "len": {
+                "text": 3
+              },
+              "set": {
+                "at": 3
+              }
+            }
+          }
+        ],
+        "type": "rows"
+      }
+    },
+    {
+      "decoded": {
+        "epoch": 10,
+        "positions": {
+          "r1": 1,
+          "t1": 2
+        },
+        "revision": 4,
+        "rows": [
+          {
+            "at": 4,
+            "durationMs": 9,
+            "id": "r1",
+            "kind": "assistant",
+            "streaming": false,
+            "text": "Hello 中文 😀!"
+          },
+          {
+            "childCount": 0,
+            "children": [],
+            "detailAvailable": false,
+            "id": "t1",
+            "input": {
+              "command": "ls"
+            },
+            "isError": false,
+            "kind": "tool",
+            "name": "Bash",
+            "status": "running"
+          }
+        ],
+        "type": "rows"
+      },
+      "name": "chat://event/s1",
+      "payload": {
+        "epoch": 10,
+        "positions": {
+          "r1": 1,
+          "t1": 2
+        },
+        "retain": [
+          "t1"
+        ],
+        "revision": 4,
+        "rows": [
+          {
+            "id": "r1",
+            "patch": {
+              "app": {
+                "text": "!"
+              },
+              "len": {
+                "text": 11
+              },
+              "set": {
+                "at": 4,
+                "durationMs": 9,
+                "streaming": false
+              }
+            }
+          },
+          {
+            "childCount": 0,
+            "children": [],
+            "detailAvailable": false,
+            "id": "t1",
+            "input": {
+              "command": "ls"
+            },
+            "isError": false,
+            "kind": "tool",
+            "name": "Bash",
+            "status": "running"
+          }
+        ],
+        "type": "rows"
+      }
+    },
+    {
+      "decoded": {
+        "epoch": 10,
+        "positions": {
+          "t1": 2
+        },
+        "revision": 5,
+        "rows": [
+          {
+            "childCount": 0,
+            "children": [],
+            "detailAvailable": false,
+            "id": "t1",
+            "input": {
+              "command": "ls"
+            },
+            "isError": false,
+            "kind": "tool",
+            "name": "Bash",
+            "output": "a\nb",
+            "status": "completed"
+          }
+        ],
+        "type": "rows"
+      },
+      "name": "chat://event/s1",
+      "payload": {
+        "epoch": 10,
+        "positions": {
+          "t1": 2
+        },
+        "revision": 5,
+        "rows": [
+          {
+            "id": "t1",
+            "patch": {
+              "set": {
+                "output": "a\nb",
+                "status": "completed"
+              }
+            }
+          }
+        ],
+        "type": "rows"
+      }
+    },
+    {
+      "decoded": {
+        "extras": {
+          "backgroundTasks": [
+            {
+              "can_stop": true,
+              "description": "Build: dev",
+              "detail_omitted": true,
+              "elapsed_ms": 1000,
+              "finished": false,
+              "status": "running",
+              "task_id": "w1",
+              "task_type": "local_workflow",
+              "usage": {
+                "total_tokens": 5
+              }
+            },
+            {
+              "can_stop": true,
+              "description": "sleep",
+              "elapsed_ms": 1000,
+              "finished": false,
+              "status": "running",
+              "task_id": "b1",
+              "task_type": "local_bash"
+            }
+          ],
+          "contextTokens": 100,
+          "fastMode": false
+        },
+        "type": "extras"
+      },
+      "name": "chat://event/s1",
+      "payload": {
+        "extras": {
+          "backgroundTasks": [
+            {
+              "can_stop": true,
+              "description": "Build: dev",
+              "detail_omitted": true,
+              "elapsed_ms": 1000,
+              "finished": false,
+              "status": "running",
+              "task_id": "w1",
+              "task_type": "local_workflow",
+              "usage": {
+                "total_tokens": 5
+              }
+            },
+            {
+              "can_stop": true,
+              "description": "sleep",
+              "elapsed_ms": 1000,
+              "finished": false,
+              "status": "running",
+              "task_id": "b1",
+              "task_type": "local_bash"
+            }
+          ],
+          "contextTokens": 100,
+          "fastMode": false
+        },
+        "type": "extras"
+      }
+    },
+    {
+      "decoded": {
+        "extras": {
+          "backgroundTasks": [
+            {
+              "can_stop": true,
+              "description": "new",
+              "elapsed_ms": 0,
+              "finished": false,
+              "status": "running",
+              "task_id": "n1",
+              "task_type": "local_agent"
+            },
+            {
+              "can_stop": true,
+              "description": "Build: dev",
+              "detail_omitted": true,
+              "elapsed_ms": 3000,
+              "finished": false,
+              "status": "running",
+              "task_id": "w1",
+              "task_type": "local_workflow",
+              "usage": {
+                "total_tokens": 7
+              }
+            },
+            {
+              "can_stop": false,
+              "description": "sleep",
+              "elapsed_ms": 2500,
+              "finished": true,
+              "status": "completed",
+              "summary": "done",
+              "task_id": "b1",
+              "task_type": "local_bash"
+            }
+          ],
+          "fastMode": false
+        },
+        "type": "extras"
+      },
+      "name": "chat://event/s1",
+      "payload": {
+        "patch": {
+          "arr": {
+            "backgroundTasks": {
+              "items": {
+                "b1": {
+                  "set": {
+                    "can_stop": false,
+                    "elapsed_ms": 2500,
+                    "finished": true,
+                    "status": "completed",
+                    "summary": "done"
+                  }
+                },
+                "n1": {
+                  "new": {
+                    "can_stop": true,
+                    "description": "new",
+                    "elapsed_ms": 0,
+                    "finished": false,
+                    "status": "running",
+                    "task_id": "n1",
+                    "task_type": "local_agent"
+                  }
+                },
+                "w1": {
+                  "set": {
+                    "elapsed_ms": 3000
+                  },
+                  "sub": {
+                    "usage": {
+                      "set": {
+                        "total_tokens": 7
+                      }
+                    }
+                  }
+                }
+              },
+              "key": "task_id",
+              "order": [
+                "n1",
+                "w1",
+                "b1"
+              ]
+            }
+          },
+          "del": [
+            "contextTokens"
+          ]
+        },
+        "type": "extras"
+      }
+    },
+    {
+      "decoded": {
+        "extras": {
+          "backgroundTasks": [
+            {
+              "can_stop": true,
+              "description": "new",
+              "elapsed_ms": 0,
+              "finished": false,
+              "status": "running",
+              "task_id": "n1",
+              "task_type": "local_agent"
+            },
+            {
+              "can_stop": true,
+              "description": "Build: dev",
+              "elapsed_ms": 3000,
+              "finished": false,
+              "status": "running",
+              "task_id": "w1",
+              "task_type": "local_workflow",
+              "usage": {
+                "total_tokens": 7
+              },
+              "workflow_progress": [
+                {
+                  "id": "p1",
+                  "index": 1,
+                  "title": "Build",
+                  "type": "workflow_phase"
+                },
+                {
+                  "elapsedMs": 400,
+                  "id": "a1",
+                  "label": "dev 😀",
+                  "phaseIndex": 1,
+                  "state": "start",
+                  "tokens": 7,
+                  "type": "workflow_agent"
+                }
+              ]
+            }
+          ],
+          "fastMode": false
+        },
+        "type": "extras"
+      },
+      "name": "chat://event/s1",
+      "payload": {
+        "patch": {
+          "arr": {
+            "backgroundTasks": {
+              "items": {
+                "w1": {
+                  "del": [
+                    "detail_omitted"
+                  ],
+                  "set": {
+                    "workflow_progress": [
+                      {
+                        "id": "p1",
+                        "index": 1,
+                        "title": "Build",
+                        "type": "workflow_phase"
+                      },
+                      {
+                        "elapsedMs": 400,
+                        "id": "a1",
+                        "label": "dev 😀",
+                        "phaseIndex": 1,
+                        "state": "start",
+                        "tokens": 7,
+                        "type": "workflow_agent"
+                      }
+                    ]
+                  }
+                }
+              },
+              "key": "task_id",
+              "order": [
+                "n1",
+                "w1"
+              ]
+            }
+          }
+        },
+        "type": "extras"
+      }
+    },
+    {
+      "decoded": {
+        "extras": {
+          "backgroundTasks": [
+            {
+              "can_stop": true,
+              "description": "Build: dev",
+              "elapsed_ms": 4000,
+              "finished": false,
+              "status": "running",
+              "task_id": "w1",
+              "task_type": "local_workflow",
+              "usage": {
+                "total_tokens": 8
+              },
+              "workflow_progress": [
+                {
+                  "id": "p1",
+                  "index": 1,
+                  "title": "Build",
+                  "type": "workflow_phase"
+                },
+                {
+                  "elapsedMs": 400,
+                  "id": "a1",
+                  "label": "dev 😀",
+                  "phaseIndex": 1,
+                  "state": "start",
+                  "tokens": 8,
+                  "type": "workflow_agent"
+                }
+              ]
+            }
+          ],
+          "fastMode": true
+        },
+        "type": "extras"
+      },
+      "name": "chat://event/s1",
+      "payload": {
+        "patch": {
+          "arr": {
+            "backgroundTasks": {
+              "items": {
+                "w1": {
+                  "arr": {
+                    "workflow_progress": {
+                      "items": {
+                        "a1": {
+                          "set": {
+                            "tokens": 8
+                          }
+                        }
+                      },
+                      "key": "id"
+                    }
+                  },
+                  "set": {
+                    "elapsed_ms": 4000
+                  },
+                  "sub": {
+                    "usage": {
+                      "set": {
+                        "total_tokens": 8
+                      }
+                    }
+                  }
+                }
+              },
+              "key": "task_id",
+              "order": [
+                "w1"
+              ]
+            }
+          },
+          "set": {
+            "fastMode": true
+          }
+        },
+        "type": "extras"
+      }
+    },
+    {
+      "decoded": {
+        "epoch": 10,
+        "items": [],
+        "revision": 1,
+        "type": "queued"
+      },
+      "name": "chat://event/s1",
+      "payload": {
+        "epoch": 10,
+        "items": [],
+        "revision": 1,
+        "type": "queued"
+      }
+    },
+    {
+      "decoded": {
+        "epoch": 11,
+        "hasMore": false,
+        "positions": {},
+        "revision": 1,
+        "rows": [],
+        "type": "reset"
+      },
+      "name": "chat://event/s1",
+      "payload": {
+        "epoch": 11,
+        "hasMore": false,
+        "positions": {},
+        "revision": 1,
+        "rows": [],
+        "type": "reset"
+      }
+    },
+    {
+      "decoded": {
+        "epoch": 11,
+        "positions": {
+          "r1": 0
+        },
+        "revision": 2,
+        "rows": [
+          {
+            "id": "r1",
+            "kind": "reasoning",
+            "streaming": true,
+            "text": "think"
+          }
+        ],
+        "type": "rows"
+      },
+      "name": "chat://event/s1",
+      "payload": {
+        "epoch": 11,
+        "positions": {
+          "r1": 0
+        },
+        "retain": [
+          "r1"
+        ],
+        "revision": 2,
+        "rows": [
+          {
+            "id": "r1",
+            "kind": "reasoning",
+            "streaming": true,
+            "text": "think"
+          }
+        ],
+        "type": "rows"
+      }
+    }
+  ],
+  "version": 1
+}

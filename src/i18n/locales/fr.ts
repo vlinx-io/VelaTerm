@@ -2008,6 +2008,7 @@ const fr: typeof en = {
   "chat.tasks.outputTruncated": "Seule la sortie la plus récente est affichée.",
   "chat.tasks.phases": "Phases",
   "chat.tasks.noProgress": "Cette tâche ne fournit pas la progression de chaque agent.",
+  "chat.tasks.detailUnavailable": "Les détails du workflow ne peuvent pas être affichés sur cette connexion pour le moment.",
   "chat.tasks.attempt": (n: number) => `Tentative ${n}`,
   "chat.tasks.prompt": "Instructions",
   "chat.tasks.result": "Résultat",

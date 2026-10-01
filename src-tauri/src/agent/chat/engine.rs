@@ -16,6 +16,8 @@
 //! **Why a flush cadence.** Text arrives token by token. Emitting an event per token would put thousands of
 //! messages a minute through the same channel that serves every other client, so rows are marked dirty and
 //! swept a few times a second. That is fast enough to read as live typing and slow enough to stay cheap.
+//! The `extras` object that task, inventory and usage frames change rides the same sweep: those frames only
+//! mark it for publication, so a busy workflow sends it at most once per sweep instead of once per frame.
 //!
 //! **Why rows are addressed by id.** The agent describes a message twice: first as fragments while it is
 //! being written, then once more, complete, when it is done. Both carry the same message id and block index,
@@ -613,13 +615,29 @@ struct CodexPermissionState {
 }
 
 /// Optional bounded synchronization request. Missing options preserve the legacy full snapshot.
-#[derive(Default, serde::Deserialize)]
+#[derive(Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatWindow {
     pub before: Option<String>,
     pub from: Option<String>,
     pub since: Option<u64>,
     pub epoch: Option<u64>,
+    /// Page size for a recent or history page, at most `SNAPSHOT_PAGE_ROWS`; 0 asks for no rows at all.
+    pub limit: Option<usize>,
+    /// Leave background tasks' workflow trees out (flagged `detail_omitted`), except `detail_task`'s.
+    pub compact_tasks: Option<bool>,
+    pub detail_task: Option<String>,
+    /// The `metaTag` of the snapshot the client holds; when unchanged the bulky meta fields are left out.
+    pub meta_tag: Option<String>,
+    /// The `historyTag` of the replayed conversation the client holds (conversations without a process).
+    pub history_tag: Option<String>,
+}
+
+impl ChatWindow {
+    /// Rows of a recent or history page for this window.
+    pub(crate) fn page_rows(&self) -> usize {
+        self.limit.map_or(SNAPSHOT_PAGE_ROWS, |limit| limit.min(SNAPSHOT_PAGE_ROWS))
+    }
 }
 
 /// A conversation's full state, as handed to a client that just connected or reopened the view.
@@ -694,6 +712,16 @@ pub struct ChatSnapshot {
     /// instant to redraw only the small elapsed-time label once per second.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_started_at: Option<u64>,
+    /// Hash of the bulky, rarely changing parts (commands, config keys, collaboration modes, context usage,
+    /// rate limit, native usage). Set for windowed requests; see `ChatWindow::meta_tag`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta_tag: Option<String>,
+    /// The client's `metaTag` still matches: those parts were left out and the client keeps its own.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub meta_unchanged: bool,
+    /// `"{rows}:{hash}"` of a replayed conversation, for an incremental reopen (see `ChatWindow::history_tag`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history_tag: Option<String>,
     /// What the Claude process reports about itself beyond the conversation. Empty for other agents.
     #[serde(flatten)]
     pub extras: ClaudeExtras,
@@ -765,6 +793,9 @@ pub struct BackgroundTask {
     pub workflow_progress: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_file: Option<String>,
+    /// The task has a workflow tree that was left out of this copy; a client that shows it asks for it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub detail_omitted: bool,
     /// Seen in a `background_tasks_changed` inventory; only listed tasks are published.
     #[serde(skip)]
     pub listed: bool,
@@ -861,6 +892,9 @@ pub struct ClaudeExtras {
     /// Codex account rate-limit buckets merged from `account/rateLimits/updated`, keyed by limit id.
     #[serde(skip)]
     pub codex_rate_limits: Value,
+    /// Changed by a high-frequency protocol frame and not yet published; the next flush sends it.
+    #[serde(skip)]
+    publish_pending: bool,
 }
 
 impl ClaudeExtras {
@@ -872,6 +906,16 @@ impl ClaudeExtras {
         let now = now_ms();
         for task in &mut extras.background_tasks { task.publish(now); }
         extras
+    }
+
+    /// Leave out every workflow tree except `detail_task`'s, flagging each omission. The compact status a
+    /// remote client needs until it opens a task; the WebSocket codec applies the same rule to events.
+    pub(crate) fn compact_tasks(&mut self, detail_task: Option<&str>) {
+        for task in &mut self.background_tasks {
+            if Some(task.task_id.as_str()) != detail_task && task.workflow_progress.take().is_some() {
+                task.detail_omitted = true;
+            }
+        }
     }
 }
 
@@ -2504,6 +2548,9 @@ impl ChatManager {
                 pid: None,
                 started_at: None,
                 turn_started_at: None,
+                meta_tag: None,
+                meta_unchanged: false,
+                history_tag: None,
                 extras: ClaudeExtras::default(),
             };
         };
@@ -2529,7 +2576,7 @@ impl ChatManager {
                         }
                     }
                 }
-                start = end.saturating_sub(SNAPSHOT_PAGE_ROWS);
+                start = end.saturating_sub(if delta.is_some() { SNAPSHOT_PAGE_ROWS } else { window.page_rows() });
             }
             let selected: Vec<ChatRow> = if let Some(since) = delta {
                 start = window.and_then(|w| w.from.as_ref()).and_then(|id| timeline.at.get(id)).copied().unwrap_or(start);
@@ -2554,7 +2601,10 @@ impl ChatManager {
         let collaboration_modes = proc.collaboration_modes.lock().unwrap().clone();
         let service_tier = proc.service_tier.lock().unwrap().clone();
         let personality = proc.personality.lock().unwrap().clone();
-        let extras = proc.extras.lock().unwrap().published();
+        let mut extras = proc.extras.lock().unwrap().published();
+        if let Some(window) = window.filter(|window| window.compact_tasks == Some(true)) {
+            extras.compact_tasks(window.detail_task.as_deref());
+        }
         ChatSnapshot {
             positions, page_kind, has_more, total_rows,
             submission_receipts: true,
@@ -2582,8 +2632,20 @@ impl ChatManager {
             pid: Some(proc.pid),
             started_at: Some(proc.started_at),
             turn_started_at,
+            meta_tag: None,
+            meta_unchanged: false,
+            history_tag: None,
             extras,
         }
+    }
+
+    /// This session's `extras` as a publish would send it, for the one connection that just asked for a task's
+    /// workflow tree; publishing instead would reach every listener. Read-only: unlike most lookups it never
+    /// restarts an agent, and it takes no lock that is held while events are emitted into a caller's lock.
+    pub fn published_extras(&self, session_id: &str) -> Option<Value> {
+        let proc = self.sessions.lock().unwrap().get(session_id).cloned()?;
+        let extras = proc.extras.lock().unwrap().published();
+        serde_json::to_value(extras).ok()
     }
 
     /// Resolve one attachment reference from a slim snapshot.
@@ -3523,30 +3585,36 @@ fn spawn_flusher(app: AppCtx, session_id: String, proc: Arc<ChatProcess>) {
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(FLUSH_INTERVAL);
-            let (flush, revision, positions) = {
-                let mut timeline = proc.timeline.lock().unwrap();
-                timeline.revision += 1;
-                let flush = timeline.take_flush();
-                let rows = match &flush { TimelineFlush::Rows(rows) => rows.as_slice(), TimelineFlush::Replace(rows) => &rows[rows.len().saturating_sub(SNAPSHOT_PAGE_ROWS)..], TimelineFlush::None => &[] };
-                let positions: HashMap<_, _> = rows.iter().filter_map(|row| timeline.at.get(row.id()).map(|index| (row.id().to_owned(), *index))).collect();
-                (flush, timeline.revision, positions)
-            };
-            match flush {
-                TimelineFlush::None => {}
-                TimelineFlush::Rows(rows) => {
-                    emit(&app, &session_id, json!({"type":"rows","positions":positions,"rows":rows.iter().map(snapshot_row).collect::<Vec<_>>(),"revision":revision,"epoch":proc.started_at}));
-                }
-                TimelineFlush::Replace(rows) => {
-                    let start = rows.len().saturating_sub(SNAPSHOT_PAGE_ROWS);
-                    emit(&app, &session_id, json!({"type":"replaceRows","positions":positions,"rows":rows[start..].iter().map(snapshot_row).collect::<Vec<_>>(),"hasMore":start > 0,"revision":revision,"epoch":proc.started_at}));
-                }
-            }
+            flush_once(&app, &session_id, &proc);
             if !proc.alive.load(Ordering::Relaxed) {
                 // One last sweep has just run, so nothing written before exit is lost.
                 return;
             }
         }
     });
+}
+
+/// One sweep of the flusher: the rows changed since the last one, then a pending `extras` publish.
+fn flush_once(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
+    let (flush, revision, positions) = {
+        let mut timeline = proc.timeline.lock().unwrap();
+        timeline.revision += 1;
+        let flush = timeline.take_flush();
+        let rows = match &flush { TimelineFlush::Rows(rows) => rows.as_slice(), TimelineFlush::Replace(rows) => &rows[rows.len().saturating_sub(SNAPSHOT_PAGE_ROWS)..], TimelineFlush::None => &[] };
+        let positions: HashMap<_, _> = rows.iter().filter_map(|row| timeline.at.get(row.id()).map(|index| (row.id().to_owned(), *index))).collect();
+        (flush, timeline.revision, positions)
+    };
+    match flush {
+        TimelineFlush::None => {}
+        TimelineFlush::Rows(rows) => {
+            emit(app, session_id, json!({"type":"rows","positions":positions,"rows":rows.iter().map(snapshot_row).collect::<Vec<_>>(),"revision":revision,"epoch":proc.started_at}));
+        }
+        TimelineFlush::Replace(rows) => {
+            let start = rows.len().saturating_sub(SNAPSHOT_PAGE_ROWS);
+            emit(app, session_id, json!({"type":"replaceRows","positions":positions,"rows":rows[start..].iter().map(snapshot_row).collect::<Vec<_>>(),"hasMore":start > 0,"revision":revision,"epoch":proc.started_at}));
+        }
+    }
+    flush_pending_extras(app, session_id, proc);
 }
 
 // ─────────────────────────── Line handling ───────────────────────────
@@ -3638,7 +3706,7 @@ fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, line: &s
                         }
                     }
                     drop(extras);
-                    emit_extras(app, session_id, proc);
+                    mark_extras(proc);
                 }
             }
             handle_assistant(proc, &message, parent.as_deref())
@@ -3691,7 +3759,7 @@ fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, line: &s
                     });
                 }
             }
-            emit_extras(app, session_id, proc);
+            mark_extras(proc);
             if drained {
                 settle_background_state(app, session_id, proc);
             }
@@ -3712,7 +3780,7 @@ fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, line: &s
             fold_task_frame(&mut proc.extras.lock().unwrap(), &subtype, &message);
             track_claude_task(proc, &subtype, &message);
             handle_claude_task(proc, &subtype, &message);
-            emit_extras(app, session_id, proc);
+            mark_extras(proc);
             // A final status can retire the last live task before the inventory says so.
             let drained = {
                 let turn = proc.turn.lock().unwrap();
@@ -5851,10 +5919,33 @@ fn mcp_set_servers_error(response: &Value) -> Option<String> {
     (!reasons.is_empty()).then(|| format!("Claude did not attach the MCP server ({})", reasons.join("; ")))
 }
 
-/// Publish the whole `extras` object. See `ClaudeExtras`.
+/// Publish the whole `extras` object now. See `ClaudeExtras`. This also satisfies a pending mark.
 fn emit_extras(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
-    let extras = proc.extras.lock().unwrap().published();
+    let extras = {
+        let mut extras = proc.extras.lock().unwrap();
+        extras.publish_pending = false;
+        extras.published()
+    };
     emit(app, session_id, json!({"type":"extras","extras":extras}));
+}
+
+/// Mark `extras` for the next flush instead of publishing it now. For frames that arrive many times a
+/// second (task progress, inventories, per-message usage): the flush sends the latest state once.
+fn mark_extras(proc: &Arc<ChatProcess>) {
+    proc.extras.lock().unwrap().publish_pending = true;
+}
+
+/// The flusher's share of `extras`: publish once if marked since the last sweep. Returns whether it did.
+fn flush_pending_extras(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) -> bool {
+    let extras = {
+        let mut extras = proc.extras.lock().unwrap();
+        if !std::mem::take(&mut extras.publish_pending) {
+            return false;
+        }
+        extras.published()
+    };
+    emit(app, session_id, json!({"type":"extras","extras":extras}));
+    true
 }
 
 /// A frame that proves the API answered ends any retry banner still showing.
@@ -9545,14 +9636,55 @@ mod tests {
         assert_eq!(listed[0].status, "failed", "the inventory drop must not overwrite a terminal status");
         assert_eq!(listed[0].ended_at, Some(1789036359792));
 
-        let extras: Vec<Value> = events.lock().unwrap().iter().filter(|event| event["type"] == "extras").cloned().collect();
-        assert!(extras.len() >= 3, "every inventory and task frame republishes extras, got {}", extras.len());
+        let extras_events = || events.lock().unwrap().iter().filter(|event| event["type"] == "extras").cloned().collect::<Vec<Value>>();
+        assert!(extras_events().is_empty(), "inventory and task frames only mark extras for the next flush");
+        assert!(flush_pending_extras(&app, "s", &proc));
+        let extras = extras_events();
+        assert_eq!(extras.len(), 1, "one flush publishes the frames' combined result once");
         let last = &extras.last().unwrap()["extras"]["backgroundTasks"];
         assert_eq!(last.as_array().map(Vec::len), Some(1), "the final state rides in the event, not only the snapshot");
         assert_eq!(last[0]["task_id"], "agent-z");
         assert_eq!(last[0]["status"], "failed");
         assert_eq!(last[0]["ended_at"], 1789036359792u64);
         assert!(last[0].get("listed").is_none(), "the internal `listed` flag never reaches the wire");
+        manager.stop(&app, "s").unwrap();
+    }
+
+    /// Task, inventory and per-message usage frames arrive many times a second while a workflow runs. Each
+    /// one used to publish the whole extras object; now they mark it, and the flusher publishes the latest
+    /// state at most once per sweep. An immediate publication satisfies a pending mark.
+    #[test]
+    fn high_frequency_frames_publish_extras_at_most_once_per_flush() {
+        let app = ctx("extras-throttle");
+        let manager = manager_with_session("s");
+        let proc = manager.get("s").unwrap();
+        let events = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let captured = events.clone();
+        app.listen(&event_name("s"), move |payload| {
+            captured.lock().unwrap().push(serde_json::from_str(payload).unwrap());
+        });
+        let extras_events = || events.lock().unwrap().iter().filter(|event| event["type"] == "extras").cloned().collect::<Vec<Value>>();
+
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"shell-a","task_type":"local_bash","description":"npm test"}]}"#);
+        for n in 0..20 {
+            let frame = json!({"type":"system","subtype":"task_progress","task_id":"shell-a","description":format!("step {n}")});
+            handle_line(&app, "s", &proc, &frame.to_string());
+        }
+        handle_line(&app, "s", &proc, r#"{"type":"assistant","message":{"id":"m1","model":"claude-test","role":"assistant","content":[],"usage":{"input_tokens":1200,"cache_read_input_tokens":300}}}"#);
+        assert!(extras_events().is_empty(), "no frame publishes on its own");
+
+        assert!(flush_pending_extras(&app, "s", &proc));
+        assert!(!flush_pending_extras(&app, "s", &proc), "a sweep with nothing new publishes nothing");
+        let published = extras_events();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0]["extras"]["contextTokens"], 1500, "the flush carries the latest state");
+        assert_eq!(published[0]["extras"]["backgroundTasks"][0]["task_id"], "shell-a");
+
+        // A rate-limit frame still publishes at once, and that publication clears a pending mark.
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_progress","task_id":"shell-a","description":"late"}"#);
+        handle_line(&app, "s", &proc, r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","utilization":0.9}}"#);
+        assert_eq!(extras_events().len(), 2, "other extras changes stay immediate");
+        assert!(!flush_pending_extras(&app, "s", &proc), "the immediate publication already carried the mark");
         manager.stop(&app, "s").unwrap();
     }
 
@@ -9949,5 +10081,180 @@ mod tests {
         assert!(!timeline.trim_from_user("missing"));
         assert_eq!(timeline.rows.len(), 1);
         assert!(matches!(timeline.take_flush(), TimelineFlush::None));
+    }
+}
+
+/// Drives the real engine paths (delta handling, the flusher sweep, `extras` publishing) for tests in other
+/// modules that measure what a client receives.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+
+    /// Stream an answer of `total` bytes in `chunk`-byte text deltas through `handle_delta`, sweeping the
+    /// flusher every `per_flush` deltas as the timer would. Returns the streamed text and the sweep count.
+    pub(crate) fn stream_answer(app: &AppCtx, session_id: &str, total: usize, chunk: usize, per_flush: usize) -> (String, usize) {
+        let proc = tests::inert_process(SessionKind::Claude);
+        let feed = |line: &str| {
+            if let Incoming::Delta(delta) = protocol::parse_line(line) {
+                handle_delta(&proc, delta);
+            }
+        };
+        feed(r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg"}}}"#);
+        feed(r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}}}"#);
+        let mut text = String::new();
+        let mut flushes = 0;
+        for i in 0..total / chunk {
+            let piece: String = std::iter::repeat_n(char::from(b'a' + (i % 26) as u8), chunk).collect();
+            feed(&json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":piece}}}).to_string());
+            text.push_str(&piece);
+            if (i + 1) % per_flush == 0 {
+                flush_once(app, session_id, &proc);
+                flushes += 1;
+            }
+        }
+        if !proc.timeline.lock().unwrap().dirty.is_empty() {
+            flush_once(app, session_id, &proc);
+            flushes += 1;
+        }
+        (text, flushes)
+    }
+
+    /// `workflows` running workflow tasks with `agents` agents each, as the inventory lists them.
+    pub(crate) fn workflow_tasks(workflows: usize, agents: usize) -> Vec<BackgroundTask> {
+        let start = now_ms().saturating_sub(60_000);
+        (0..workflows)
+            .map(|w| {
+                let mut tree = vec![json!({"type":"workflow_phase","id":format!("p{w}"),"index":1,"title":"Implement"})];
+                tree.extend((0..agents).map(|a| json!({"type":"workflow_agent","id":format!("w{w}a{a}"),"index":a,
+                    "label":format!("agent {a}"),"phaseIndex":1,"state":"start","startedAt":start,"tokens":1000 + a,
+                    "toolCalls":a,"model":"opus","promptPreview":"Implement the change described in the brief and report back. ".repeat(3)})));
+                BackgroundTask {
+                    task_id: format!("task{w}"),
+                    task_type: "local_workflow".into(),
+                    description: format!("Implement: agent {w}"),
+                    status: "running".into(),
+                    started_at: Some(start),
+                    workflow_name: Some("feature-team".into()),
+                    usage: Some(json!({"total_tokens": 5000, "tool_uses": 12})),
+                    workflow_progress: Some(Value::Array(tree)),
+                    listed: true,
+                    ..BackgroundTask::default()
+                }
+            })
+            .collect()
+    }
+
+    impl ChatManager {
+        /// Register an idle Claude process under `session_id`, without starting anything.
+        pub(crate) fn insert_test_process(&self, session_id: &str) {
+            self.sessions.lock().unwrap().insert(session_id.to_string(), tests::inert_process(SessionKind::Claude));
+        }
+
+        pub(crate) fn update_test_extras(&self, session_id: &str, update: impl FnOnce(&mut ClaudeExtras)) {
+            update(&mut self.get(session_id).unwrap().extras.lock().unwrap());
+        }
+
+        pub(crate) fn update_test_process(&self, session_id: &str, update: impl FnOnce(&mut Vec<Value>, &mut Vec<ConfigKey>)) {
+            let proc = self.get(session_id).unwrap();
+            update(&mut proc.commands.lock().unwrap(), &mut proc.config_keys.lock().unwrap());
+        }
+    }
+
+    /// The flusher's `extras` share for a registered process. Returns whether it published.
+    pub(crate) fn flush_extras(app: &AppCtx, session_id: &str) -> bool {
+        flush_pending_extras(app, session_id, &app.chat().get(session_id).unwrap())
+    }
+
+    /// Publish a registered process's `extras` now, as a low-frequency change does.
+    pub(crate) fn publish_extras(app: &AppCtx, session_id: &str) {
+        emit_extras(app, session_id, &app.chat().get(session_id).unwrap());
+    }
+
+    /// A task tab asks for no rows and only its own task's tree; the conversation pane for no tree at all.
+    #[test]
+    fn a_windowed_snapshot_honors_limit_and_task_compaction() {
+        let manager = ChatManager::new();
+        manager.insert_test_process("s");
+        {
+            let proc = manager.get("s").unwrap();
+            let mut timeline = proc.timeline.lock().unwrap();
+            for i in 0..80 {
+                timeline.upsert(ChatRow::Notice { id: format!("n{i}"), message: "x".into() });
+            }
+        }
+        manager.update_test_extras("s", |extras| extras.background_tasks = workflow_tasks(3, 2));
+        let tab = ChatWindow { limit: Some(0), compact_tasks: Some(true), detail_task: Some("task1".into()), ..ChatWindow::default() };
+        let snapshot = manager.snapshot_window("s", Some(&tab));
+        assert!(snapshot.rows.is_empty(), "limit 0 sends no rows");
+        assert!(snapshot.has_more);
+        let tasks = &snapshot.extras.background_tasks;
+        assert_eq!(tasks.len(), 3);
+        assert!(tasks[1].workflow_progress.is_some() && !tasks[1].detail_omitted, "the opened task keeps its tree");
+        for task in [&tasks[0], &tasks[2]] {
+            assert!(task.workflow_progress.is_none() && task.detail_omitted);
+        }
+        let value = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(value["backgroundTasks"][0]["detail_omitted"], true);
+        assert!(value["backgroundTasks"][1].get("detail_omitted").is_none(), "false is left out of the wire");
+
+        let pane = ChatWindow { compact_tasks: Some(true), ..ChatWindow::default() };
+        let snapshot = manager.snapshot_window("s", Some(&pane));
+        assert_eq!(snapshot.rows.len(), SNAPSHOT_PAGE_ROWS);
+        assert!(snapshot.extras.background_tasks.iter().all(|task| task.detail_omitted));
+        let big = ChatWindow { limit: Some(10_000), ..ChatWindow::default() };
+        let snapshot = manager.snapshot_window("s", Some(&big));
+        assert_eq!(snapshot.rows.len(), SNAPSHOT_PAGE_ROWS, "a limit never enlarges the page");
+        assert!(snapshot.extras.background_tasks.iter().all(|task| task.workflow_progress.is_some()), "trees stay unless asked");
+        let legacy = manager.snapshot("s");
+        assert_eq!(legacy.rows.len(), 80, "a window-less snapshot stays whole");
+    }
+
+    /// The codec's compaction of a published event and the snapshot's compaction agree on the wire.
+    #[test]
+    fn event_and_snapshot_compaction_agree() {
+        let manager = ChatManager::new();
+        manager.insert_test_process("s");
+        manager.update_test_extras("s", |extras| extras.background_tasks = workflow_tasks(2, 3));
+        let published = manager.get("s").unwrap().extras.lock().unwrap().published();
+        let mut compacted = published.clone();
+        compacted.compact_tasks(Some("task0"));
+        let from_codec = crate::web::chat_wire::compact_extras(serde_json::to_value(&published).unwrap(), |task| task == "task0");
+        assert_eq!(serde_json::to_value(&compacted).unwrap(), from_codec);
+    }
+
+    /// Opening a task tab reads the published `extras` without publishing anything to other listeners.
+    #[test]
+    fn published_extras_reads_without_publishing() {
+        let dir = std::env::temp_dir().join(format!("vlx-published-extras-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(&dir.join("t.db")).unwrap();
+        let app = AppCtx::Headless(Arc::new(crate::host::HeadlessHost::new(dir.clone(), db)));
+        app.chat().insert_test_process("s");
+        app.chat().update_test_extras("s", |extras| extras.background_tasks = workflow_tasks(2, 3));
+        let seen = Arc::new(Mutex::new(0));
+        let sink = seen.clone();
+        app.listen(&event_name("s"), move |_| *sink.lock().unwrap() += 1);
+        // Running tasks get their elapsed time stamped at publish time, so two reads may straddle a millisecond.
+        fn without_elapsed(mut value: Value) -> Value {
+            fn strip(value: &mut Value) {
+                match value {
+                    Value::Object(map) => {
+                        map.remove("elapsed_ms");
+                        map.remove("elapsedMs");
+                        map.values_mut().for_each(strip);
+                    }
+                    Value::Array(items) => items.iter_mut().for_each(strip),
+                    _ => {}
+                }
+            }
+            strip(&mut value);
+            value
+        }
+        let published = serde_json::to_value(app.chat().get("s").unwrap().extras.lock().unwrap().published()).unwrap();
+        assert_eq!(app.chat().published_extras("s").map(without_elapsed), Some(without_elapsed(published)));
+        assert_eq!(app.chat().published_extras("missing"), None);
+        assert!(!flush_extras(&app, "s"), "nothing was marked for a publish");
+        assert_eq!(*seen.lock().unwrap(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

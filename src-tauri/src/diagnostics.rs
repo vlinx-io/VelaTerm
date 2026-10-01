@@ -265,6 +265,13 @@ pub fn safe_fields(data: &Value) -> Value {
                 | "line"
                 | "blockedMs"
                 | "subscribers"
+                | "queuedBytes"
+                | "queuedFrames"
+                | "peakQueuedBytes"
+                | "sentBytes"
+                | "sentFrames"
+                | "coalescedCount"
+                | "resyncCount"
         );
         if numeric && (value.is_u64() || value.is_i64() || value.is_null()) {
             out.insert(key.clone(), value.clone());
@@ -294,6 +301,26 @@ pub fn safe_fields(data: &Value) -> Value {
                         ) && v.is_u64()
                     })
                     .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                out.insert(key.clone(), Value::Object(safe));
+            }
+            continue;
+        }
+        // Per-class WebSocket outbound counters: only the fixed class names, each with two counts.
+        if key == "classes" {
+            if let Some(map) = value.as_object() {
+                let safe: Map<String, Value> = map
+                    .iter()
+                    .filter(|(k, _)| crate::web::outbound::CLASSES.contains(&k.as_str()))
+                    .filter_map(|(k, v)| {
+                        let counts: Map<String, Value> = v
+                            .as_object()?
+                            .iter()
+                            .filter(|(f, n)| matches!(f.as_str(), "frames" | "bytes") && n.is_u64())
+                            .map(|(f, n)| (f.clone(), n.clone()))
+                            .collect();
+                        Some((k.clone(), Value::Object(counts)))
+                    })
                     .collect();
                 out.insert(key.clone(), Value::Object(safe));
             }
@@ -1089,6 +1116,15 @@ mod tests {
         assert_eq!(
             safe_fields(&json!({"bytes":65536,"subscribers":3,"durationMs":180})),
             json!({"bytes":65536,"subscribers":3,"durationMs":180})
+        );
+        let outbound = json!({"clientId":"ws-12","queuedBytes":900,"queuedFrames":3,"peakQueuedBytes":4096,
+            "sentBytes":2048,"sentFrames":7,"coalescedCount":5,"resyncCount":1,
+            "classes":{"chatExtras":{"frames":2,"bytes":1000},"reply":{"frames":5,"bytes":1048}}});
+        assert_eq!(safe_fields(&outbound), outbound, "every ws_outbound field must reach the log");
+        assert_eq!(
+            safe_fields(&json!({"classes":{"secret/path":{"frames":1},"tree":{"frames":1,"bytes":"x","raw":"y"}}})),
+            json!({"classes":{"tree":{"frames":1}}}),
+            "unknown class names and non-count fields are dropped"
         );
         assert_eq!(
             safe_fields(&json!({"file":"src/pty/manager.rs","line":1466})),

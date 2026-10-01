@@ -285,7 +285,9 @@ impl ModeTracker {
 /// subscriber to duplicate a chunk contained in both snapshot and fan-out or miss one contained in neither. One lock
 /// makes each path atomic: subscribers receive exactly the snapshot followed by each later chunk once.
 ///
-/// Calling sinks under lock is safe because Tauri Channel send and unbounded Tokio send only enqueue without blocking.
+/// Calling sinks under lock is safe because Tauri Channel send and the WebSocket outbound queue only enqueue without
+/// blocking. The WebSocket sink never waits for a slow client: it refuses a chunk instead (connection closed, or that
+/// session's backlog replaced by a resync), which removes it here, and the client reattaches.
 pub struct OutputStream {
     ring: ScrollbackBuffer,
     modes: ModeTracker,

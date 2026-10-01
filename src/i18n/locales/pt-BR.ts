@@ -2002,6 +2002,7 @@ const ptBR: typeof en = {
   "chat.tasks.outputTruncated": "Apenas a saída mais recente é exibida.",
   "chat.tasks.phases": "Fases",
   "chat.tasks.noProgress": "Esta tarefa não informa o progresso de cada agente.",
+  "chat.tasks.detailUnavailable": "Os detalhes do fluxo de trabalho não podem ser exibidos por esta conexão agora.",
   "chat.tasks.attempt": (n: number) => `Tentativa ${n}`,
   "chat.tasks.prompt": "Instruções",
   "chat.tasks.result": "Resultado",

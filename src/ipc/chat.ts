@@ -318,6 +318,8 @@ export interface ChatBackgroundTask {
   usage?: { total_tokens?: number; tool_uses?: number; duration_ms?: number };
   workflow_progress?: ChatWorkflowEntry[];
   output_file?: string;
+  /** The task has a workflow tree this copy leaves out; a view that shows it asks for it (`onChatTaskDetail`). */
+  detail_omitted?: boolean;
 }
 
 /** Whether a task reports nothing more. A task without a status is one the backend still lists as live. */
@@ -490,6 +492,45 @@ export interface ChatSnapshot {
   backgroundTasks?: ChatBackgroundTask[];
   fastMode?: boolean;
   apiRetry?: ChatApiRetry;
+  /** Provider-reported cumulative token counters. */
+  nativeUsage?: unknown;
+  /** Tag of the bulky, rarely changing parts; see `withKnownMeta`. */
+  metaTag?: string;
+  /** Those parts were left out because the client's `metaTag` still matches. */
+  metaUnchanged?: boolean;
+  /** Tag of a replayed conversation (no running process), for an incremental reopen. */
+  historyTag?: string;
+}
+
+/** Which part of a conversation a snapshot request asks for. Unknown fields are ignored by older servers. */
+export interface ChatSnapshotWindow {
+  before?: string;
+  from?: string;
+  since?: number;
+  epoch?: number;
+  /** Page size; 0 asks for no rows at all. */
+  limit?: number;
+  /** Leave background tasks' workflow trees out, except `detailTask`'s. */
+  compactTasks?: boolean;
+  detailTask?: string;
+  metaTag?: string;
+  historyTag?: string;
+}
+
+/** The snapshot keys a matching `metaTag` leaves out. */
+const META_KEYS = ["commands", "configKeys", "collaborationModes", "contextUsage", "rateLimit", "nativeUsage"] as const;
+
+/**
+ * Fill in what a snapshot left out because the client's `metaTag` still matched, from the snapshot the client
+ * already holds (the one that produced that tag). Anything else passes through unchanged.
+ */
+export function withKnownMeta(snapshot: ChatSnapshot, known?: ChatSnapshot): ChatSnapshot {
+  if (!snapshot.metaUnchanged || !known) return snapshot;
+  const restored: ChatSnapshot = { ...snapshot, metaUnchanged: false };
+  for (const key of META_KEYS) (restored as unknown as Record<string, unknown>)[key] = known[key];
+  restored.commands ??= [];
+  restored.configKeys ??= [];
+  return restored;
 }
 
 /** A conversation waiting for its usage limit to reset before it continues on its own. */
@@ -566,6 +607,8 @@ export type ChatEvent =
   | { type: "autoContinue"; waiting: ChatAutoContinue | null; reason?: ChatAutoContinueReason | null }
   /** The agent reported its own model catalogue; `chatModels` now answers from it. */
   | { type: "models" }
+  /** The remote connection lost track of this conversation's events; reload it in full. */
+  | { type: "resync" }
   | { type: "notification"; text: string; priority: string; timeoutMs?: number | null };
 
 /**
@@ -787,13 +830,16 @@ export function chatModels(sessionId: string): Promise<ChatModel[]> {
   return invoke("chat_models", { sessionId });
 }
 
-/** Read the whole conversation; snapshot image bytes stay deferred until their individual views mount. */
-export async function chatSnapshot(sessionId: string, window?: { before?: string; from?: string; since?: number; epoch?: number }): Promise<ChatSnapshot> {
+/**
+ * Read the whole conversation; snapshot image bytes stay deferred until their individual views mount.
+ * `known` is the snapshot the caller holds, whose meta parts fill in a `metaUnchanged` answer.
+ */
+export async function chatSnapshot(sessionId: string, window?: ChatSnapshotWindow, known?: ChatSnapshot): Promise<ChatSnapshot> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const snapshot = await Promise.race([
+  const snapshot = withKnownMeta(await Promise.race([
     invoke<ChatSnapshot>("chat_snapshot", { sessionId, ...(window ? { window } : {}) }),
     new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Conversation synchronization timed out")), 30_000); }),
-  ]).finally(() => clearTimeout(timer));
+  ]).finally(() => clearTimeout(timer)), known);
   registerRowPositions(snapshot.rows, snapshot.positions);
   const cacheOwner = `${sessionId}\u0000${snapshot.startedAt ?? "stopped"}`;
   registerSnapshotImages(cacheOwner, sessionId, snapshot.rows);
@@ -857,6 +903,18 @@ export function onChatEvent(
       registerToolDetails(sessionId, event.epoch, event.rows);
     }
     cb(event);
+  });
+}
+
+/**
+ * Ask for one background task's workflow tree while the returned function is not called. Over a remote
+ * connection the server otherwise sends tasks as a compact status (`detail_omitted`); on the desktop the
+ * tree always arrives and this listener simply never fires. `onRejected` runs when the server refuses the
+ * request (too many watched names, or an id it does not accept), so the tree will not arrive.
+ */
+export function onChatTaskDetail(sessionId: string, taskId: string, onRejected?: () => void): Promise<UnlistenFn> {
+  return listen<{ type?: string } | null>(`chat://task/${sessionId}/${taskId}`, event => {
+    if (event?.type === "watchRejected") onRejected?.();
   });
 }
 

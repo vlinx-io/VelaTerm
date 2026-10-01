@@ -1941,6 +1941,7 @@ const zhTW: typeof en = {
   "chat.tasks.outputTruncated": "僅顯示最近的輸出。",
   "chat.tasks.phases": "階段",
   "chat.tasks.noProgress": "此工作未回報各智慧代理的進度。",
+  "chat.tasks.detailUnavailable": "目前無法透過此連線顯示工作流程詳細資訊。",
   "chat.tasks.attempt": (n: number) => `第 ${n} 次嘗試`,
   "chat.tasks.prompt": "提示詞",
   "chat.tasks.result": "結果",

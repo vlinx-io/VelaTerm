@@ -46,8 +46,10 @@ export function useSessionPermissionState(sessionId?: string, revision?: string)
       if (["agent", "hook_ready", "agent_missing"].includes(event.kind ?? "")) schedule();
     });
     subscribe(`pty://exit/${sessionId}`, schedule);
+    // `resync` is the barrier after a gap: the connection dropped this session's events, so any of the others
+    // may have been among them.
     subscribe(`chat://event/${sessionId}`, event => {
-      if (["settingsChanged", "process", "reset", "exited"].includes(event.type ?? "")) schedule();
+      if (["settingsChanged", "process", "reset", "exited", "resync"].includes(event.type ?? "")) schedule();
     });
     unlisteners.push(onTransportReconnect(() => { setState({ id: sessionId }); refresh(); }));
     unlisteners.push(onTransportDisconnect(() => {

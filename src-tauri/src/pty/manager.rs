@@ -65,7 +65,7 @@ const HEAL_POLL: Duration = Duration::from_millis(500);
 const QUIET_HEAL: Duration = Duration::from_secs(6);
 
 /// Output replay limit. Roughly 512 KB covers several full TUI redraws and recent history for new subscribers.
-const SCROLLBACK_CAP: usize = 512 * 1024;
+pub(crate) const SCROLLBACK_CAP: usize = 512 * 1024;
 /// Report waiting for the session map at least this long. `pty_write` takes that lock on the UI thread for
 /// every keystroke, so a holder that runs long freezes the whole application rather than one session, and
 /// 50 ms is roughly where the delay stops being invisible.

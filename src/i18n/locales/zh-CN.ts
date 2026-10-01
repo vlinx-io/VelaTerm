@@ -1940,6 +1940,7 @@ const zhCN: typeof en = {
   "chat.tasks.outputTruncated": "仅显示最近的输出。",
   "chat.tasks.phases": "阶段",
   "chat.tasks.noProgress": "此任务未报告各智能体的进度。",
+  "chat.tasks.detailUnavailable": "当前无法通过此连接显示工作流详情。",
   "chat.tasks.attempt": (n: number) => `第 ${n} 次尝试`,
   "chat.tasks.prompt": "提示词",
   "chat.tasks.result": "结果",

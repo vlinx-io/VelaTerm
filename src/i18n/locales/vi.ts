@@ -1952,6 +1952,7 @@ const vi: typeof en = {
   "chat.tasks.outputTruncated": "Chỉ hiển thị phần đầu ra mới nhất.",
   "chat.tasks.phases": "Các giai đoạn",
   "chat.tasks.noProgress": "Tác vụ này không báo cáo tiến độ của từng tác nhân.",
+  "chat.tasks.detailUnavailable": "Hiện không thể hiển thị chi tiết quy trình làm việc qua kết nối này.",
   "chat.tasks.attempt": (n: number) => `Lần thử ${n}`,
   "chat.tasks.prompt": "Lời nhắc",
   "chat.tasks.result": "Kết quả",
