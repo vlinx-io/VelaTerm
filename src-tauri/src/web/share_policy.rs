@@ -523,6 +523,12 @@ mod tests {
             assert!(!allowed_command(cmd), "Public share must deny {cmd}");
             assert!(!app_command(cmd), "Public share app shell must deny {cmd}");
         }
+        // The resume picker lists the host's recordings and rebinds the host's session: neither is part
+        // of what a share grants.
+        for cmd in ["chat_resume_list", "chat_resume"] {
+            assert!(!allowed_command(cmd), "Public share must deny {cmd}");
+            assert!(!app_command(cmd), "Public share app shell must deny {cmd}");
+        }
         assert!(allowed_command("chat_send"));
         assert!(allowed_command("chat_snapshot"));
     }
@@ -604,6 +610,8 @@ mod shared_surface_tests {
             "set_session_engine",
             "chat_rewind",
             "chat_clear",
+            "chat_resume_list",
+            "chat_resume",
             "web_pairing_create",
             "future_command",
         ] {

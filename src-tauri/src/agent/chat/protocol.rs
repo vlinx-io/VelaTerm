@@ -83,6 +83,7 @@ pub fn reported_permission_mode(v: &Value) -> Option<&str> {
 ///   design document.
 /// - `fork` marks the first launch of a forked session. `--fork-session` makes Claude copy the source
 ///   conversation into a new one instead of appending to it, so the source and the fork stay separate.
+///   Without a conversation to resume the flag means nothing, so it is never passed alone.
 pub fn launch_args(
     resume: Option<&str>,
     fork: bool,
@@ -105,7 +106,9 @@ pub fn launch_args(
         "--thinking-display".into(),
         "summarized".into(),
     ];
-    if let Some(id) = resume {
+    // An ID that fails the native-ID check (a leading `-` would read as a flag of its own) is never put
+    // on the command line; the conversation then starts fresh instead of passing a foreign token.
+    if let Some(id) = resume.filter(|id| crate::agent::history::valid_id(id)) {
         args.push("--resume".into());
         args.push(id.into());
         if fork {
@@ -775,6 +778,16 @@ mod tests {
         assert!(args.contains("--resume source --fork-session"), "{args}");
         let fresh = launch_args(None, true, None, None, "default").join(" ");
         assert!(!fresh.contains("--fork-session"), "there is nothing to fork without a source: {fresh}");
+    }
+
+    #[test]
+    fn an_id_that_would_read_as_a_flag_is_never_passed() {
+        for hostile in ["--dangerously-skip-permissions", "-r", "a b", "../x"] {
+            let args = launch_args(Some(hostile), true, None, None, "default");
+            assert!(!args.iter().any(|arg| arg == "--resume" || arg == "--fork-session"), "{args:?}");
+            assert!(!args.iter().any(|arg| arg == hostile), "{args:?}");
+            assert!(!args.iter().any(|arg| arg == "--dangerously-skip-permissions"), "{args:?}");
+        }
     }
 
     #[test]

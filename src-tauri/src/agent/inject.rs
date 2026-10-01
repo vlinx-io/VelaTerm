@@ -539,10 +539,12 @@ pub fn merge_permission_flag(
 /// Validates a nonempty resume session ID containing only `[0-9a-zA-Z_-]`, which includes UUIDs.
 ///
 /// The value is inserted unquoted into commands such as `claude --resume <id>`, so rejecting spaces,
-/// quotes, and shell metacharacters prevents command injection. Invalid IDs disable resume.
+/// quotes, and shell metacharacters prevents command injection. A leading `-` is refused as well, since
+/// the value would read as a flag of its own. Invalid IDs disable resume.
 fn valid_resume_id(id: &str) -> Option<&str> {
     let id = id.trim();
     if !id.is_empty()
+        && !id.starts_with('-')
         && id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
@@ -3175,6 +3177,8 @@ mod tests {
         assert!(valid_resume_id("a b").is_none(), "a space should be rejected");
         assert!(valid_resume_id("a;b").is_none(), "a semicolon should be rejected");
         assert!(valid_resume_id("$(x)").is_none(), "command substitution should be rejected");
+        assert!(valid_resume_id("--dangerously-skip-permissions").is_none(), "a leading dash reads as a flag");
+        assert!(valid_resume_id(" -r").is_none());
     }
 
     #[test]

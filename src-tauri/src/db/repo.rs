@@ -1178,6 +1178,59 @@ pub fn get_fork_pending(conn: &Connection, id: &str) -> Result<bool, String> {
     .map_err(|e| format!("Failed to read fork flag: {e}"))
 }
 
+/// Put another recorded conversation behind a live session, for the conversation view's resume picker.
+///
+/// Resuming continues that conversation in place, so it succeeds only while no other session of the same
+/// kind (live or archived) owns it: two agents must never write one recording. A fork only branches from
+/// it, so any conversation may serve as the anchor; `fork_pending` makes the next launch branch, and the
+/// new id the agent then reports clears it. Returns false when nothing was rebound.
+pub fn rebind_conversation(
+    conn: &Connection,
+    id: &str,
+    agent_session_id: &str,
+    kind: SessionKind,
+    fork: bool,
+) -> Result<bool, String> {
+    let n = if fork {
+        conn.execute(
+            "UPDATE sessions SET agent_session_id = ?1, fork_pending = 1
+             WHERE id = ?2 AND kind = ?3 AND archived_at IS NULL",
+            params![agent_session_id, id, kind.as_str()],
+        )
+    } else {
+        conn.execute(
+            "UPDATE sessions SET agent_session_id = ?1, fork_pending = 0
+             WHERE id = ?2 AND kind = ?3 AND archived_at IS NULL
+               AND NOT EXISTS (
+                 SELECT 1 FROM sessions AS owner
+                  WHERE owner.id <> ?2
+                    AND owner.kind = ?3
+                    AND owner.agent_session_id = ?1
+                    AND owner.fork_pending = 0
+               )",
+            params![agent_session_id, id, kind.as_str()],
+        )
+    }
+    .map_err(|e| format!("Failed to rebind conversation: {e}"))?;
+    Ok(n > 0)
+}
+
+/// Sessions of one kind other than `except` that own a conversation of their own, archived ones included.
+pub fn conversation_owners(conn: &Connection, kind: SessionKind, except: &str) -> Result<Vec<Session>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {SESSION_COLUMNS} FROM sessions
+              WHERE kind = ?1 AND id <> ?2 AND fork_pending = 0
+                AND agent_session_id IS NOT NULL AND agent_session_id <> ''"
+        ))
+        .map_err(|e| format!("Failed to read conversation owners: {e}"))?;
+    let rows = stmt
+        .query_map(params![kind.as_str(), except], map_session)
+        .map_err(|e| format!("Failed to read conversation owners: {e}"))?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to read conversation owners: {e}"))
+}
+
 /// Fork a **sibling** node from a source template, anchored to its conversation with fork_pending=1.
 /// First launch branches from source history without modifying it; capture of the new ID clears the flag.
 ///
@@ -3208,6 +3261,45 @@ mod tests {
             get_agent_session_id(&conn, &second.id).unwrap().as_deref(),
             Some("thread-b")
         );
+    }
+
+    #[test]
+    fn rebinding_a_conversation_never_shares_it_but_may_fork_from_it() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        let session = |name: &str| {
+            create_session(&conn, &project.id, None, name, SessionKind::Claude, None, None, None, None, None)
+                .unwrap()
+        };
+        let (owner, current, other) = (session("owner"), session("current"), session("other"));
+        assert!(set_agent_session_id(&conn, &owner.id, "conv-owned", SessionKind::Claude).unwrap());
+
+        // Resume in place binds the id and leaves the session on normal exact resume.
+        assert!(rebind_conversation(&conn, &current.id, "conv-free", SessionKind::Claude, false).unwrap());
+        assert_eq!(get_agent_session_id(&conn, &current.id).unwrap().as_deref(), Some("conv-free"));
+        assert!(!get_fork_pending(&conn, &current.id).unwrap());
+
+        // A conversation another session owns is refused, archived owners included.
+        assert!(!rebind_conversation(&conn, &current.id, "conv-owned", SessionKind::Claude, false).unwrap());
+        set_archived(&conn, &owner.id, true).unwrap();
+        assert!(!rebind_conversation(&conn, &current.id, "conv-owned", SessionKind::Claude, false).unwrap());
+        assert_eq!(get_agent_session_id(&conn, &current.id).unwrap().as_deref(), Some("conv-free"));
+        let owners = conversation_owners(&conn, SessionKind::Claude, &current.id).unwrap();
+        assert_eq!(owners.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), [owner.id.as_str()]);
+
+        // A fork may anchor on it and branches on the next launch.
+        assert!(rebind_conversation(&conn, &current.id, "conv-owned", SessionKind::Claude, true).unwrap());
+        assert!(get_fork_pending(&conn, &current.id).unwrap());
+        // A pending fork does not own its anchor, so it does not block a resume elsewhere.
+        assert!(conversation_owners(&conn, SessionKind::Claude, &other.id).unwrap().iter().all(|s| s.id != current.id));
+        // The branch's own id, once the agent reports it, returns the session to exact resume.
+        assert!(set_agent_session_id(&conn, &current.id, "conv-branch", SessionKind::Claude).unwrap());
+        assert!(!get_fork_pending(&conn, &current.id).unwrap());
+
+        // The kind and the archive state are part of the guard.
+        assert!(!rebind_conversation(&conn, &current.id, "conv-x", SessionKind::Codex, false).unwrap());
+        set_archived(&conn, &other.id, true).unwrap();
+        assert!(!rebind_conversation(&conn, &other.id, "conv-x", SessionKind::Claude, true).unwrap());
     }
 
     #[test]

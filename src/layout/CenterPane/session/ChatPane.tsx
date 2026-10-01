@@ -131,6 +131,7 @@ import { QueuedMessageText } from "./QueuedMessageText";
 import { MessageSender, messageSenderName } from "./MessageSender";
 import { parseShellSubmission, shellErrorKey, shellSubmissionFor, acknowledgeShellSubmission } from "./shellMode";
 import { SessionLinkDirectory } from "./links";
+import { ResumePicker } from "./ResumePicker";
 
 interface MessageReplacement {
   text: string;
@@ -377,6 +378,12 @@ export function ChatPane({
   };
   const [turnStartedAt, setTurnStartedAt] = useState<number | undefined>();
   const [error, setError] = useState<string | null>(null);
+  /** The earlier-conversation picker, open with the search it was asked for. */
+  const [resumePicker, setResumePicker] = useState<{ query: string } | null>(null);
+  // Only Claude records conversations this picker can read, and a share visitor may neither list the
+  // host's recordings nor rebind the host's session. A read-only embedding offers no action that
+  // would change the conversation behind it.
+  const canResume = session.kind === "claude" && !isShareSurface && !readOnly;
   /** Which failed send's missing-agent notice the user closed, so it does not reappear until the next one. */
   const [agentNoticeDismissed, setAgentNoticeDismissed] = useState<string | null>(null);
   const keepRestartPermission = useRef(false);
@@ -1323,6 +1330,22 @@ export function ChatPane({
       })();
       return;
     }
+    // `/resume` opens the picker of earlier conversations; any text after it becomes its search.
+    const resumeCommand =
+      canResume && behavior !== "steer" && attachments.length === 0 ? /^\/resume(?:\s+([\s\S]*))?$/.exec(text) : null;
+    if (resumeCommand) {
+      // Switching conversations needs an idle agent; say so here rather than after picking one.
+      if (busy || queue.length > 0 || pendingSubmissions.length > 0) {
+        setError(t("chat.resume.error.busy"));
+        return;
+      }
+      setError(null);
+      updateDraft("");
+      setCaret(0);
+      setDismissed(null);
+      setResumePicker({ query: resumeCommand[1]?.trim() ?? "" });
+      return;
+    }
     if (localCommand === "rewind") {
       const latestUser = [...rows].reverse().find((row) => row.kind === "user");
       if (!canRewind || !latestUser) {
@@ -1646,6 +1669,10 @@ export function ChatPane({
     const local: ChatCommand[] = [
       { name: "clear", description: t("chat.command.clearDescription") },
     ];
+    // Claude's own picker exists only in its terminal interface; this pane offers its own.
+    if (canResume) {
+      local.push({ name: "resume", description: t("chat.command.resumeDescription") });
+    }
     // What Codex's own interface offers as commands and this pane asks for through requests of its own.
     if (session.kind === "codex") {
       local.push(
@@ -1673,7 +1700,7 @@ export function ChatPane({
     }
     const localNames = new Set(local.map((command) => command.name).concat("new"));
     return [...local, ...commands.filter((command) => command.invocation || !localNames.has(command.name))];
-  }, [commands, session.kind, t]);
+  }, [commands, session.kind, canResume, t]);
 
   const completion = useMemo(
     () =>
@@ -2127,6 +2154,12 @@ export function ChatPane({
                 <div className="sv-blank">
                   <span className="sv-blank-icon">{kindIconEl(session.kind, 40)}</span>
                   <div className="sv-blank-line">{t("chat.empty")}</div>
+                  {canResume && (
+                    <button type="button" className="vlx-btn sv-blank-action" onClick={() => setResumePicker({ query: "" })}>
+                      <Icons.clock size={14} />
+                      {t("chat.resume.emptyAction")}
+                    </button>
+                  )}
                 </div>
               )}
               {/* The older part of a long conversation. Only the rows near the viewport are drawn; the
@@ -2483,7 +2516,8 @@ export function ChatPane({
                     e.preventDefault();
                     // Exact client commands execute on the first Enter. Otherwise completion would add
                     // its cosmetic trailing space and make `/clear` or `/rewind` need two submissions.
-                    if (attachments.length === 0 && /^\/(?:clear|new|rewind|compact|review|undo|redo|share|unshare)\s*$/.test(draft)) {
+                    if (attachments.length === 0 && (/^\/(?:clear|new|rewind|compact|review|undo|redo|share|unshare)\s*$/.test(draft)
+                      || (canResume && /^\/resume\s*$/.test(draft)))) {
                       send(behaviorOf(e));
                     } else if (wantsCatalogue && catalogueLoading && draft !== dismissed) {
                       return;
@@ -2537,6 +2571,9 @@ export function ChatPane({
       </div>
       {engineConfirm}
       {permissionRestart.dialog}
+      {resumePicker && canResume && (
+        <ResumePicker sessionId={session.id} initialQuery={resumePicker.query} onClose={() => setResumePicker(null)} />
+      )}
     </div>
     </SessionLinkDirectory.Provider>
   );

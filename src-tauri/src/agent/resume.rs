@@ -806,7 +806,8 @@ fn cursor_chat_exists(chats: &Path, id: &str) -> bool {
     entries.flatten().any(|e| e.path().join(id).is_dir())
 }
 
-/// Finds the first Claude transcript `*/<id>.jsonl` below a projects root.
+/// Finds the first Claude transcript `*/<id>.jsonl` below a projects root. Only decides whether
+/// `--resume` still has something to continue; readers go through `open_claude_recording`.
 fn find_claude_transcript_in(projects: &Path, id: &str) -> Option<PathBuf> {
     let target = format!("{id}.jsonl");
     for e in std::fs::read_dir(projects).ok()?.flatten() {
@@ -828,9 +829,24 @@ fn find_codex_rollout_in(sessions: &Path, id: &str) -> Option<PathBuf> {
 }
 
 /// Locates `~/.claude/projects/*/<id>.jsonl` for archive transcript rendering; returns None if deleted or remote.
+///
+/// The recording is the one `open_claude_recording` checks; readers that can should use that handle
+/// instead of reopening the path.
 pub fn find_claude_transcript(id: &str) -> Option<PathBuf> {
-    let projects = claude_home()?.join("projects");
-    find_claude_transcript_in(&projects, id)
+    open_claude_recording(id).ok().map(|(path, _)| path)
+}
+
+/// The checked recording of Claude conversation `id` and its open handle; see
+/// `chat::conversations::open_recording` for which file that is.
+pub(crate) fn open_claude_recording(id: &str) -> Result<(PathBuf, std::fs::File), String> {
+    let projects = claude_home().ok_or("Claude transcript file not found")?.join("projects");
+    crate::agent::chat::conversations::open_recording(&projects, id)
+}
+
+/// The checked recording of Claude conversation `id`, read whole, with its path.
+pub(crate) fn read_claude_recording(id: &str) -> Result<(PathBuf, String), String> {
+    let (path, mut file) = open_claude_recording(id)?;
+    Ok((path, crate::agent::chat::conversations::read_whole(&mut file)?))
 }
 
 /// Read a Claude transcript reduced to the branch the agent itself still follows.
@@ -840,10 +856,7 @@ pub fn find_claude_transcript(id: &str) -> Option<PathBuf> {
 /// counted. `--resume` walks `parentUuid` from the leaf instead; reading the same way keeps the session
 /// view, export, search, and rewind targets in step with what the agent remembers.
 pub(crate) fn read_claude_transcript(id: &str) -> Result<String, String> {
-    let path = find_claude_transcript(id).ok_or("Claude transcript file not found")?;
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read transcript: {e}"))?;
-    Ok(claude_active_branch(&content))
+    Ok(claude_active_branch(&read_claude_recording(id)?.1))
 }
 
 /// The state directory Pi or OMP owns: sessions live under `sessions/`, and the model catalogue the CLI

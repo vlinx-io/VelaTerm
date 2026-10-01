@@ -1,7 +1,7 @@
 //! Read native histories without changing their files or starting an agent.
 
 use std::collections::HashSet;
-use std::io::BufRead;
+use std::io::{BufRead, Read};
 use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -36,24 +36,91 @@ pub struct History {
     warnings: Vec<String>,
 }
 
-fn same_dir(a: &Path, b: &Path) -> bool {
+/// The most of a recording read while looking for its ID and working directory. Claude writes a turn,
+/// images included, as one line and puts `cwd` at its end, so the first line that names the directory can
+/// be megabytes long; one request to the model is far smaller than this. Past it a file counts as having
+/// no directory, so a file without one is never read to its end nor buffered whole.
+pub(crate) const SCAN_BUDGET: u64 = 64 * 1024 * 1024;
+
+pub(crate) fn same_dir(a: &Path, b: &Path) -> bool {
     match (a.canonicalize(), b.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
         _ => a == b,
     }
 }
 
-fn valid_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 200
+/// A native conversation ID: letters, digits, `-` and `_`, at most 200 bytes. A leading `-` is refused
+/// because the ID becomes the value of `--resume` on an agent's command line, where it would read as a
+/// flag of its own.
+pub(crate) fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 200 && !id.starts_with('-')
         && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
 }
 
-fn title(text: &str) -> String {
+/// Open `path` for reading only when it is a regular file itself, not a link to one.
+///
+/// Listings check the type of a directory entry and open it afterwards; a file swapped for a link in
+/// between must not be followed. The final component is opened as itself, never as a link's target (on
+/// Windows a link then reports as a link and is refused); on Unix also without blocking on a pipe, and
+/// when `identity` (device and inode of the entry as it was listed) is given, the opened file must be
+/// that same file, which also catches a swapped parent folder.
+pub(crate) fn open_regular(path: &Path, identity: Option<(u64, u64)>) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    // Windows opens a link or junction itself instead of its target, so the type check below refuses it.
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = options.open(path)?;
+    let meta = file.metadata()?;
+    let refused = || std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a regular file");
+    if !meta.is_file() {
+        return Err(refused());
+    }
+    #[cfg(unix)]
+    if let Some(expected) = identity {
+        use std::os::unix::fs::MetadataExt;
+        if (meta.dev(), meta.ino()) != expected {
+            return Err(refused());
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = identity;
+    Ok(file)
+}
+
+pub(crate) fn title(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(160).collect()
 }
 
+/// Device and inode of a directory entry as listed (from its own metadata, links not followed), so the
+/// file opened later can be checked to be the same one.
+pub(crate) fn entry_identity(meta: &std::fs::Metadata) -> Option<(u64, u64)> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some((meta.dev(), meta.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        None
+    }
+}
+
+/// A file found by `files`, with the identity it had when it was listed.
+type Listed = (PathBuf, Option<(u64, u64)>);
+
 /// No symlink traversal: history roots may contain links back to ancestors.
-fn files(root: &Path, extension: &str, recursive: bool) -> Result<Vec<PathBuf>, String> {
+fn files(root: &Path, extension: &str, recursive: bool) -> Result<Vec<Listed>, String> {
     let mut stack = vec![root.to_path_buf()];
     let mut out = Vec::new();
     while let Some(dir) = stack.pop() {
@@ -67,15 +134,16 @@ fn files(root: &Path, extension: &str, recursive: bool) -> Result<Vec<PathBuf>, 
             let ty = entry.file_type().map_err(|e| e.to_string())?;
             if ty.is_dir() && recursive { stack.push(entry.path()); }
             if ty.is_file() && entry.path().extension().and_then(|x| x.to_str()) == Some(extension) {
-                out.push(entry.path());
+                let identity = entry.metadata().ok().as_ref().and_then(entry_identity);
+                out.push((entry.path(), identity));
             }
         }
     }
     Ok(out)
 }
 
-fn jsonl(path: &Path, kind: SessionKind, directory: &Path) -> Result<Option<HistoricalSession>, String> {
-    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+fn jsonl(path: &Path, identity: Option<(u64, u64)>, kind: SessionKind, directory: &Path) -> Result<Option<HistoricalSession>, String> {
+    let file = open_regular(path, identity).map_err(|e| e.to_string())?;
     let updated_at = file.metadata().ok().and_then(|m| m.modified().ok())
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_millis() as i64).unwrap_or(0);
@@ -85,11 +153,16 @@ fn jsonl(path: &Path, kind: SessionKind, directory: &Path) -> Result<Option<Hist
     let mut cwd = String::new();
     let mut name = String::new();
     let mut bytes_read = 0;
-    for line in std::io::BufReader::new(file).lines() {
+    // Never more than `SCAN_BUDGET` of a file is read, and so never buffered as one line either.
+    let mut reader = std::io::BufReader::new(file.take(SCAN_BUDGET));
+    let mut line = Vec::new();
+    loop {
         if bytes_read >= 4 * 1024 * 1024 && !id.is_empty() && !cwd.is_empty() { break; }
-        let line = line.map_err(|e| e.to_string())?;
-        bytes_read += line.len();
-        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue; };
+        line.clear();
+        let read = reader.read_until(b'\n', &mut line).map_err(|e| e.to_string())?;
+        if read == 0 { break; }
+        bytes_read += read;
+        let Ok(v) = serde_json::from_slice::<Value>(&line) else { continue; };
         if kind == SessionKind::Codex {
             if v["type"] == "session_meta" {
                 // Subagent threads are helpers of another conversation, like Claude sidechains.
@@ -154,8 +227,8 @@ fn scan_jsonl(root: &Path, kind: SessionKind, directory: &Path, out: &mut Vec<Hi
         paths
     } else { files(root, "jsonl", true)? };
     let mut failures = 0;
-    for path in paths {
-        match jsonl(&path, kind, directory) {
+    for (path, identity) in paths {
+        match jsonl(&path, identity, kind, directory) {
             Ok(Some(s)) => out.push(s),
             Ok(None) => {},
             Err(_) => failures += 1,
@@ -186,8 +259,8 @@ fn scan_opencode(root: &Path, directory: &Path, out: &mut Vec<HistoricalSession>
         }
     }
     // Older OpenCode releases keep one JSON object per session.
-    for path in files(&root.join("storage/session"), "json", true)? {
-        let v: Value = serde_json::from_reader(std::fs::File::open(path).map_err(|e| e.to_string())?)
+    for (path, identity) in files(&root.join("storage/session"), "json", true)? {
+        let v: Value = serde_json::from_reader(open_regular(&path, identity).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
         let id = v["id"].as_str().unwrap_or_default();
         let cwd = v["directory"].as_str().unwrap_or_default();
@@ -350,6 +423,25 @@ mod tests {
     }
 
     #[test]
+    fn the_import_scanner_never_reads_beyond_the_scan_budget() {
+        let temp = Temp::new();
+        let path = temp.0.join("huge.jsonl");
+        let mut file = std::fs::File::create(&path).unwrap();
+        let chunk = vec![b'x'; 1024 * 1024];
+        for _ in 0..=(SCAN_BUDGET / chunk.len() as u64) {
+            std::io::Write::write_all(&mut file, &chunk).unwrap();
+        }
+        let late = serde_json::json!({"type":"user","sessionId":"huge","cwd":temp.0,"message":{"content":"Too late"}});
+        std::io::Write::write_all(&mut file, format!("\n{late}\n").as_bytes()).unwrap();
+        drop(file);
+        assert!(jsonl(&path, None, SessionKind::Claude, &temp.0).unwrap().is_none());
+        // Within the budget a long first line still yields the session.
+        let early = temp.0.join("early.jsonl");
+        std::fs::write(&early, format!("{}\n{}\n", "y".repeat(2 * 1024 * 1024), late)).unwrap();
+        assert_eq!(jsonl(&early, None, SessionKind::Claude, &temp.0).unwrap().unwrap().agent_session_id, "huge");
+    }
+
+    #[test]
     fn native_jsonl_matches_directory_and_excludes_claude_subagents() {
         let temp = Temp::new();
         let cwd = temp.0.to_string_lossy().to_string();
@@ -359,7 +451,7 @@ mod tests {
             serde_json::json!({"type":"response_item","payload":{"role":"user","content":"Injected context"}}),
             serde_json::json!({"type":"event_msg","payload":{"type":"user_message","message":"Repair\n the editor"}}),
         ]);
-        let session = jsonl(&codex, SessionKind::Codex, &temp.0).unwrap().unwrap();
+        let session = jsonl(&codex, None, SessionKind::Codex, &temp.0).unwrap().unwrap();
         assert_eq!(session.title, "Repair the editor");
         let current = temp.0.join("codex/current.jsonl");
         write(&current, &[
@@ -367,15 +459,15 @@ mod tests {
             serde_json::json!({"type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions"},{"type":"input_text","text":"<environment_context>context</environment_context>"}]}}),
             serde_json::json!({"type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"Fix current history"}]}}),
         ]);
-        assert_eq!(jsonl(&current, SessionKind::Codex, &temp.0).unwrap().unwrap().title, "Fix current history");
-        assert!(jsonl(&codex, SessionKind::Codex, &temp.0.join("another")).unwrap().is_none());
+        assert_eq!(jsonl(&current, None, SessionKind::Codex, &temp.0).unwrap().unwrap().title, "Fix current history");
+        assert!(jsonl(&codex, None, SessionKind::Codex, &temp.0.join("another")).unwrap().is_none());
         let subagent = temp.0.join("codex/subagent.jsonl");
         write(&subagent, &[
             serde_json::json!({"type":"session_meta","payload":{"id":"codex-3","cwd":cwd,"thread_source":"subagent",
                 "source":{"subagent":{"thread_spawn":{"parent_thread_id":"codex-2","depth":1}}}}}),
             serde_json::json!({"type":"event_msg","payload":{"type":"user_message","message":"Fix current history"}}),
         ]);
-        assert!(jsonl(&subagent, SessionKind::Codex, &temp.0).unwrap().is_none());
+        assert!(jsonl(&subagent, None, SessionKind::Codex, &temp.0).unwrap().is_none());
         let claude = temp.0.join("claude/project/c1.jsonl");
         write(&claude, &[
             serde_json::json!({"type":"queue-operation","sessionId":"claude-1"}),
@@ -389,8 +481,11 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].title, "Fix navigation");
         write(&claude, &[serde_json::json!({"type":"user","isSidechain":true,"sessionId":"child","cwd":cwd})]);
-        assert!(jsonl(&claude, SessionKind::Claude, &temp.0).unwrap().is_none());
+        assert!(jsonl(&claude, None, SessionKind::Claude, &temp.0).unwrap().is_none());
         assert!(!valid_id("id; command"));
+        assert!(!valid_id("--dangerously-skip-permissions"), "a leading dash would read as a flag");
+        assert!(!valid_id("-r"));
+        assert!(valid_id("a-b_C1"));
     }
 
     #[test]
@@ -481,6 +576,24 @@ mod tests {
         assert!(import_discovered(&ctx, &project.id, picks(), history()).unwrap().is_empty());
         let invalid=vec![Selection {kind:SessionKind::Kiro,agent_session_id:"kiro-other".into()}];
         assert!(import_discovered(&ctx, &project.id, invalid, history()).is_err());
+    }
+
+    /// Windows opens a link as itself, so `open_regular` refuses a linked recording instead of reading
+    /// its target. Creating a file link needs the symlink privilege (CI runners have it); without it the
+    /// test says so and ends.
+    #[cfg(windows)]
+    #[test]
+    fn open_regular_refuses_a_linked_file_on_windows() {
+        let temp = Temp::new();
+        let target = temp.0.join("target.jsonl");
+        std::fs::write(&target, "SECRET").unwrap();
+        assert!(open_regular(&target, None).is_ok());
+        let link = temp.0.join("link.jsonl");
+        if let Err(e) = std::os::windows::fs::symlink_file(&target, &link) {
+            eprintln!("skipped: cannot create a file symlink here ({e})");
+            return;
+        }
+        assert!(open_regular(&link, None).is_err());
     }
 
     #[cfg(unix)]

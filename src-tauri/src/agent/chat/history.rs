@@ -17,6 +17,7 @@
 //! agent is resuming opens with everything that was already said instead of a blank page.
 
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -456,15 +457,30 @@ fn replay_id(index: usize) -> String {
 ///
 /// The agent remembers the conversation across a restart, but the timeline is in memory and starts empty,
 /// so without this the view would be blank in front of an agent that knows exactly what was said.
-pub fn replay(kind: SessionKind, agent_session_id: &str) -> Result<Vec<ChatRow>, String> {
-    let mut rows = replay_recorded(kind, agent_session_id)?;
+/// `directory` is where the agent runs; for Claude it names the one recording the agent continues.
+pub fn replay(kind: SessionKind, agent_session_id: &str, directory: Option<&Path>) -> Result<Vec<ChatRow>, String> {
+    let mut rows = replay_recorded(kind, agent_session_id, directory)?;
     // The recording holds the message shell mode sent the agent as a user message; the view shows it as
     // the command row it was. One pass here covers every provider.
     super::shell::map_replayed_rows(&mut rows);
     Ok(rows)
 }
 
-fn replay_recorded(kind: SessionKind, agent_session_id: &str) -> Result<Vec<ChatRow>, String> {
+/// The Claude recording to replay, where it lies, and its checked handle to read it and its children from.
+///
+/// With an absolute working directory it is the recording in that directory's key folder, checked the way
+/// the resume picker checks it before binding, so no same-named file or link in another folder can take
+/// its place. Without one, the recording every other reader of the id uses (`open_recording`).
+fn claude_recording(root: Option<&Path>, agent_session_id: &str, directory: Option<&Path>) -> Result<(PathBuf, std::fs::File), String> {
+    const MISSING: &str = "Claude transcript file not found";
+    let root = root.ok_or(MISSING)?;
+    match directory.filter(|directory| directory.is_absolute()) {
+        Some(directory) => super::conversations::open_claude(root, directory, agent_session_id),
+        None => super::conversations::open_recording(root, agent_session_id),
+    }
+}
+
+fn replay_recorded(kind: SessionKind, agent_session_id: &str, directory: Option<&Path>) -> Result<Vec<ChatRow>, String> {
     if kind == SessionKind::Opencode {
         // OpenCode's store already holds addressable parts, and its subagents are whole sessions of their
         // own; the row ids come from the store so a later live event can update the same rows.
@@ -475,18 +491,9 @@ fn replay_recorded(kind: SessionKind, agent_session_id: &str) -> Result<Vec<Chat
         return Ok(rows);
     }
     if kind == SessionKind::Claude {
-        let path = resume::find_claude_transcript(agent_session_id)
-            .ok_or("Claude transcript file not found")?;
-        let content = resume::read_claude_transcript(agent_session_id)?;
-        let directory = path.with_extension("").join("subagents");
-        return Ok(claude_replay(&content, &mut |id| {
-            // Only provider identifiers are accepted; recording content cannot select arbitrary paths.
-            if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
-                return Err("Invalid Claude subagent identifier".to_string());
-            }
-            std::fs::read_to_string(directory.join(format!("agent-{id}.jsonl")))
-                .map_err(|_| "The subagent recording is unavailable".to_string())
-        }, &mut HashSet::new(), 0));
+        let root = super::conversations::projects_root();
+        let (path, mut file) = claude_recording(root.as_deref(), agent_session_id, directory)?;
+        return claude_checked_replay(&path, &mut file, super::conversations::CHILDREN_LIMIT);
     }
     if kind != SessionKind::Codex {
         return Ok(to_rows(read(kind, agent_session_id)?));
@@ -499,6 +506,16 @@ fn replay_recorded(kind: SessionKind, agent_session_id: &str) -> Result<Vec<Chat
     let mut read_thread = |id: &str| resume::read_codex_rollout_chain(id).map(|(_, value)| value);
     let subagents = codex_subagent_replays(&content, &mut read_thread);
     Ok(to_rows_with_subagents(events, &subagents))
+}
+
+/// The replay of a checked Claude recording. Its children are read through the recording's own folder,
+/// all of them together within `children_limit`.
+fn claude_checked_replay(path: &Path, file: &mut std::fs::File, children_limit: u64) -> Result<Vec<ChatRow>, String> {
+    let content = resume::claude_active_branch(&super::conversations::read_whole(file)?);
+    let mut remaining = children_limit;
+    Ok(claude_replay(&content, &mut |id| {
+        super::conversations::read_child(path, file, id, &mut remaining)
+    }, &mut HashSet::new(), 0))
 }
 
 /// Rebuild only children linked by native tool results. Unrelated sidechain files stay out of the view.
@@ -1119,6 +1136,69 @@ fn to_row(mut ev: ChatEvent, subagent: Option<CodexSubagentReplay>) -> ChatRow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_claude_replay_in_a_directory_reads_only_that_directory_s_recording() {
+        let temp = std::env::temp_dir().join(format!("vlx-replay-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp).unwrap();
+        let temp = temp.canonicalize().unwrap();
+        let root = temp.join("projects");
+        let project = temp.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let line = |cwd: &Path, text: &str| {
+            serde_json::json!({"type":"user","uuid":"u1","cwd":cwd,"message":{"role":"user","content":text}}).to_string()
+        };
+        let folder = root.join(super::super::conversations::project_key(&project.to_string_lossy()));
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("conv-1.jsonl"), line(&project, "legit") + "\n").unwrap();
+        // A folder that comes first below the root holds the same name with another directory's words.
+        std::fs::create_dir_all(root.join("-A")).unwrap();
+        std::fs::write(root.join("-A").join("conv-1.jsonl"), line(&temp.join("other"), "FOREIGN") + "\n").unwrap();
+        let (path, mut file) = claude_recording(Some(&root), "conv-1", Some(&project)).unwrap();
+        let content = super::super::conversations::read_whole(&mut file).unwrap();
+        assert_eq!(path, folder.join("conv-1.jsonl"));
+        assert!(content.contains("legit") && !content.contains("FOREIGN"));
+        // Gone from its own folder, it is gone: no other folder and no missing root stands in.
+        std::fs::remove_file(folder.join("conv-1.jsonl")).unwrap();
+        assert!(claude_recording(Some(&root), "conv-1", Some(&project)).is_err());
+        assert!(claude_recording(None, "conv-1", Some(&project)).is_err());
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    /// A small recording that links the same subagent many times does not make the replay read it without
+    /// bound: once the children's bound is spent, later cards say so instead of reading more.
+    #[test]
+    fn a_claude_replay_reads_all_its_children_within_one_bound() {
+        let temp = std::env::temp_dir().join(format!("vlx-replay-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp).unwrap();
+        let temp = temp.canonicalize().unwrap();
+        let root = temp.join("projects");
+        let project = temp.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let folder = root.join(super::super::conversations::project_key(&project.to_string_lossy()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let first = serde_json::json!({"type":"user","uuid":"u0","cwd":project,"message":{"role":"user","content":"start"}}).to_string();
+        let tasks = (0..5).map(|n| claude_task_record(&format!("task-{n}"), "c1")).collect::<Vec<_>>().join("\n");
+        std::fs::write(folder.join("conv-1.jsonl"), format!("{first}\n{tasks}\n")).unwrap();
+        let child = folder.join("conv-1").join("subagents").join("agent-c1.jsonl");
+        std::fs::create_dir_all(child.parent().unwrap()).unwrap();
+        let text = serde_json::json!({"type":"assistant","uuid":"a1","message":{"role":"assistant","content":[{"type":"text","text":"child says hi"}]}}).to_string();
+        std::fs::write(&child, text + "\n").unwrap();
+        let size = std::fs::metadata(&child).unwrap().len();
+
+        let (path, mut file) = claude_recording(Some(&root), "conv-1", Some(&project)).unwrap();
+        let rows = claude_checked_replay(&path, &mut file, size * 2 + size / 2).unwrap();
+        let cards: Vec<&Vec<ChatRow>> = rows.iter().filter_map(|row| match row {
+            ChatRow::Tool { children, subagent: Some(_), .. } => Some(children),
+            _ => None,
+        }).collect();
+        assert_eq!(cards.len(), 5);
+        let exhausted = |children: &Vec<ChatRow>| matches!(children.as_slice(),
+            [ChatRow::Notice { message, .. }] if message == "Subagent history exceeds the replay limit");
+        assert_eq!(cards.iter().filter(|children| !children.is_empty() && !exhausted(children)).count(), 2);
+        assert_eq!(cards.iter().filter(|children| exhausted(children)).count(), 3);
+        let _ = std::fs::remove_dir_all(&temp);
+    }
 
     fn claude(lines: &[&str]) -> Vec<ChatEvent> {
         fold(claude_events(&lines.join("\n")))

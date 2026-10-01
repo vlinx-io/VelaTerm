@@ -10,10 +10,12 @@
 //!   engine and the read-only session view of a terminal-driven session;
 //! - `protocol` is the wire format: what the agent emits, and the control requests both sides exchange;
 //! - `config_schema` asks the agent which settings it accepts, so the composer can complete them;
+//! - `conversations` lists the earlier conversations of a working directory, for the resume picker;
 //! - `engine` owns the running processes, one per session, and turns the wire into timeline rows.
 
 pub mod auto_continue;
 pub mod config_schema;
+pub mod conversations;
 pub mod codex_protocol;
 pub mod engine;
 pub mod history;

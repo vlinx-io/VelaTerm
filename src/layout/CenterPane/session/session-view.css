@@ -147,6 +147,13 @@
   color: var(--text-dim);
   font-size: calc(var(--ui-fs) + 1px);
 }
+.sv-blank-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  font-family: inherit;
+}
 
 .sv-empty-detail {
   margin-top: 6px;

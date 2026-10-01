@@ -29,7 +29,7 @@ If the agent is working, VelaTerm asks first: "Switching views restarts the agen
 
 The message box says "Message the agent, or use /commands, /skills and @files". Enter sends; Shift+Enter adds a line. With the cursor at the start or end of the text, ↑ and ↓ bring back your earlier messages from this conversation.
 
-A new conversation shows "Type below to start the conversation." The agent process starts when you send the first message.
+A new conversation shows "Type below to start the conversation." The agent process starts when you send the first message. A new Claude conversation also offers "Resume an earlier conversation"; see §7.
 
 ### While the agent is working
 
@@ -105,11 +105,32 @@ VelaTerm handles these commands itself:
 | Command | Agents | What happens |
 |---------|--------|--------------|
 | `/clear` (also `/new`) | All five | Archives this session and replaces it, in the same pane, with a new empty session that has the same settings |
+| `/resume` | Claude | Opens the list of earlier conversations of this directory, to continue one here or fork from it (see below) |
 | `/rewind` | Claude, Codex, OpenCode | Opens the rewind menu on your latest message (see §8) |
 | `/compact` | Codex, OpenCode, Pi, OMP | Summarizes the conversation to free up context |
 | `/review` | Codex | Asks Codex to review code; accepts `branch <name>`, `commit <sha>` or instructions |
 | `/undo`, `/redo` | OpenCode | Reverts the last message and its file changes, or restores what the last undo reverted |
 | `/share`, `/unshare` | OpenCode | Creates or removes a link that shares the conversation |
+
+### Resuming an earlier Claude conversation
+
+In a Claude session, `/resume` opens the "Resume a conversation" dialog. Type it and press Enter, or pick it from the `/` list. Text after the command, such as `/resume login bug`, becomes the search. A new, empty Claude conversation also shows a "Resume an earlier conversation" button. This works the same in the desktop app, in the browser, in a remote window and in the mobile app; you do not need the terminal view.
+
+The dialog lists the Claude conversations recorded in this session's working directory, newest first. Each row shows the title, the first prompt, the time of the last activity, the size of the recording and, when recorded, the git branch. Only conversations started in exactly this directory appear; conversations from subdirectories, other worktrees or other projects do not. The search runs in VelaTerm, not only over the rows already shown, and matches title, first prompt, branch and conversation ID. While a typed search is still pending, the dialog shows "Loading…" instead of the old rows, and Enter does nothing until the new result is in, so an action never hits a row the search has already replaced. "Refresh" reloads the list. Each page looks at a limited share of the directory's recordings, newest first. When a page stops before the end, the dialog shows "Showing the N most recent conversations." with a "Show older conversations" button that continues with the older recordings and appends what it finds. A search that has not found anything by then says "Older conversations have not been searched yet."; "Show older conversations" continues the search. So every conversation of the directory can be reached by paging or by search.
+
+When the conversations cannot be read, the dialog says "The conversations of this directory could not be read."; when resuming or forking fails for another reason than the ones below, it says "The conversation could not be opened here. Try again, or resume it in the terminal view." The dialog stays open in both cases.
+
+Each row offers these actions:
+
+- **Resume**: this session continues the chosen conversation. The session keeps its place in the tree, the conversation view shows the chosen conversation's history, and your next message continues it. No helper message is needed.
+- **Fork**: this session starts a new conversation from the chosen conversation's history. The original recording stays unchanged. With your first message, the session gets its own conversation ID.
+- **Open session**: replaces "Resume" when another session in VelaTerm already continues the conversation, marked "In <session name>" (and "Archived" when that session is archived). It opens that session, restoring it first if it is archived. A conversation is never continued by two sessions at once; use "Fork" to branch from it here instead.
+
+The conversation this session already holds is marked "Current". ↑ and ↓ choose a row, Enter takes its first action, Esc closes the dialog.
+
+Resuming and forking need an idle agent: no running turn, queued messages, shell command, background task or open permission request. Otherwise VelaTerm shows "Wait until the agent is idle: …" and the session keeps its conversation. After resuming a different conversation, the one this session held before stays on disk and remains in this list, but no session in the tree points at it anymore. VelaTerm's search then covers the conversation the session holds now: on the next search, the text of the previous conversation is dropped from this session's results and the resumed one is indexed instead.
+
+`/resume` is handled by VelaTerm only in Claude sessions; in other agents' sessions it is sent to the agent as a normal message. The terminal view keeps Claude's own `/resume`. Visitors of a shared session cannot open the dialog, and read-only embeddings of the conversation view, such as the conversation tab of a Security run, do not offer it; VelaTerm also refuses listing and resuming for these sessions when a client asks directly.
 
 ## 8. Rewinding and editing
 

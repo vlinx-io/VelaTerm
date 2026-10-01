@@ -69,6 +69,7 @@ The mental model in one line: **each agent session node in the tree is one ongoi
 - On the first run, VelaTerm remembers the agent's own conversation ID.
 - After that, whether you closed the tab or quit the app, opening the node again continues the same conversation. Before resuming, VelaTerm checks that the conversation still exists; if it was deleted, the session starts fresh instead of failing.
 - For a fresh conversation, create a new session node. In the conversation view, `/clear` replaces the session with a new empty one in the same place.
+- To continue an earlier Claude conversation of the same directory in the current session, use `/resume` in the conversation view; see [Conversation View](conversation-view_20260925_1012.md) §7.
 
 **Resume Session…** at the end of the New Session menu adds a conversation you already have, for example one you ran in a plain terminal. Pick the "Agent type", paste the agent's conversation ID, and choose "Resume & Open". Every agent type in §1 can be resumed this way.
 
@@ -76,7 +77,7 @@ The mental model in one line: **each agent session node in the tree is one ongoi
 
 ## 5. Fork: branch off a conversation
 
-For Claude, Codex, Pi and OMP sessions that already have a conversation, right-click → "Fork Session". This creates a sibling node that starts from the source conversation's current history and leaves the source unchanged, similar to a git branch. Use it to try two approaches from the same context.
+For Claude, Codex, Pi and OMP sessions that already have a conversation, right-click → "Fork Session". This creates a sibling node that starts from the source conversation's current history and leaves the source unchanged, similar to a git branch. Use it to try two approaches from the same context. A Claude fork in the conversation view starts from the source's history and gets its own conversation ID with its first message. The conversation view's `/resume` dialog also offers "Fork" for earlier conversations of the directory.
 
 ## 6. Permissions
 

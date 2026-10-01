@@ -34,6 +34,25 @@ fn active() -> &'static Mutex<HashSet<String>> {
 pub fn session_active(id: &str) -> bool {
     active().lock().unwrap().contains(id)
 }
+/// Whether a session holds the conversation of an audit the upstream scanner drives. Its view is
+/// read-only (the frontend checks the same `upstream` field), during the audit and after it.
+pub fn read_only_session(conn: &Connection, session_id: &str) -> Result<bool> {
+    let mut statement = conn
+        .prepare("SELECT data FROM security_runs WHERE session_id=?1")
+        .map_err(|e| e.to_string())?;
+    let runs = statement
+        .query_map([session_id], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    for data in runs {
+        let data = data.map_err(|e| e.to_string())?;
+        // A run whose record cannot be read is treated as read-only rather than as a free session.
+        let upstream = serde_json::from_str::<Value>(&data).map(|run| !run["upstream"].is_null()).unwrap_or(true);
+        if upstream {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
 pub fn cancel_session(app: &AppCtx, session_id: &str) -> Result<()> {
     if !session_active(session_id) {
         return Ok(());

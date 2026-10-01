@@ -668,6 +668,57 @@ export function chatClear(sessionId: string): Promise<Session> {
   return invoke("chat_clear", { sessionId });
 }
 
+/** Another VelaTerm session that already continues a conversation. */
+export interface ConversationOwner {
+  sessionId: string;
+  name: string;
+  archived: boolean;
+}
+
+/** An earlier Claude conversation of the session's directory, described without its content. */
+export interface ResumableConversation {
+  id: string;
+  title: string;
+  firstPrompt?: string;
+  /** Last activity, in milliseconds since the epoch. */
+  updatedAt: number;
+  sizeBytes: number;
+  gitBranch?: string;
+  owner?: ConversationOwner;
+  /** The conversation this session holds right now. */
+  current: boolean;
+}
+
+export interface ResumeListing {
+  directory: string;
+  conversations: ResumableConversation[];
+  /** Recordings after this page have not been looked at yet; the next page starts at `nextOffset`. */
+  truncated: boolean;
+  /** Where the next page of the same search continues. */
+  nextOffset: number;
+}
+
+/** `resume` continues the conversation in this session; `fork` branches from it and leaves it as it was. */
+export type ResumeMode = "resume" | "fork";
+
+/**
+ * One page of the earlier conversations this session could continue, newest first: those matching
+ * `query` (title, first prompt, branch or id), looking at the directory's recordings from `offset` on
+ * (a page's `nextOffset`). The server searches and pages, and each page is bounded in what it reads, so
+ * every conversation of the directory can be reached however many there are.
+ */
+export function chatResumeList(sessionId: string, query = "", offset = 0): Promise<ResumeListing> {
+  return invoke("chat_resume_list", { sessionId, query, offset });
+}
+
+/**
+ * Put an earlier conversation behind this session. The session keeps its id; the replayed history then
+ * reaches every open view through the session's reset event.
+ */
+export function chatResume(sessionId: string, agentSessionId: string, mode: ResumeMode): Promise<Session> {
+  return invoke("chat_resume", { sessionId, agentSessionId, mode });
+}
+
 /**
  * Send a user turn, with any images attached to it.
  *
