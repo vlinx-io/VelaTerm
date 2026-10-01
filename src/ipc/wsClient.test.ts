@@ -242,3 +242,95 @@ describe("wsClient superseded-socket isolation", () => {
     expect(reconnect.pending.size).toBe(0);
   });
 });
+
+type PtyInternals = ReconnectInternals & {
+  ptySinks: Map<string, (bytes: Uint8Array) => void>;
+  ptyArgs: Map<string, unknown>;
+  subIds: Map<string, number>;
+  reattachCbs: Map<string, Set<unknown>>;
+  reattachStartCbs: Map<string, Set<unknown>>;
+  idleTimer: ReturnType<typeof setInterval> | undefined;
+  goOnline: (ws: FakeWebSocket) => void;
+};
+const ptyInternals = wsClient as unknown as PtyInternals;
+
+describe("wsClient pty-resync", () => {
+  const realWebSocket = globalThis.WebSocket;
+  let socket: FakeWebSocket;
+
+  /** An open plaintext connection with one registered terminal, as usePtySession leaves it. */
+  function openWithTerminal(sid: string) {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    socket = new FakeWebSocket("ws://test/ws");
+    socket.readyState = FakeWebSocket.OPEN;
+    ptyInternals.ws = socket;
+    ptyInternals.ptySinks.set(sid, () => {});
+    ptyInternals.ptyArgs.set(sid, { sessionId: sid, kind: "shell", cols: 80, rows: 24 });
+  }
+
+  /** The pty-spawn frames the client has sent so far. */
+  function sentSpawns(): Array<Record<string, unknown>> {
+    return socket.sent
+      .map((raw) => JSON.parse(String(raw)) as Record<string, unknown>)
+      .filter((msg) => msg.t === "pty-spawn");
+  }
+
+  afterEach(() => {
+    clearInterval(ptyInternals.idleTimer);
+    ptyInternals.idleTimer = undefined;
+    globalThis.WebSocket = realWebSocket;
+    created = [];
+    ptyInternals.ws = null;
+    ptyInternals.ptySinks.clear();
+    ptyInternals.ptyArgs.clear();
+    ptyInternals.subIds.clear();
+    ptyInternals.reattachCbs.clear();
+    ptyInternals.reattachStartCbs.clear();
+    ptyInternals.pending.clear();
+  });
+
+  it("resets the terminal and reattaches it attach-only when the server resyncs it", async () => {
+    openWithTerminal("s1");
+    const events: string[] = [];
+    wsClient.onReattachStart("s1", () => events.push("start"));
+    wsClient.onReattach("s1", (res) => events.push(`reattached:${res.pid}`));
+
+    internals.onMessage({ data: JSON.stringify({ t: "pty-resync", sid: "s1" }) });
+    expect(events).toEqual(["start"]);
+    await vi.waitFor(() => expect(sentSpawns()).toHaveLength(1));
+    const spawn = sentSpawns()[0];
+    expect(spawn.sid).toBe("s1");
+    expect(spawn.attachOnly).toBe(true);
+
+    internals.onMessage({
+      data: JSON.stringify({
+        t: "reply",
+        id: spawn.id,
+        ok: true,
+        result: { pid: 9, launch: null, subId: 4, attached: true, cols: 80, rows: 24, owner: null },
+      }),
+    });
+    await vi.waitFor(() => expect(events).toEqual(["start", "reattached:9"]));
+    expect(ptyInternals.subIds.get("s1")).toBe(4);
+  });
+
+  it("ignores a resync for a terminal this client no longer has", async () => {
+    openWithTerminal("s1");
+    const starts: string[] = [];
+    wsClient.onReattachStart("s1", () => starts.push("s1"));
+    internals.onMessage({ data: JSON.stringify({ t: "pty-resync", sid: "gone" }) });
+    await Promise.resolve();
+    expect(starts).toEqual([]);
+    expect(sentSpawns()).toEqual([]);
+  });
+
+  it("still reattaches every registered terminal when the connection comes online", async () => {
+    openWithTerminal("s1");
+    const starts: string[] = [];
+    wsClient.onReattachStart("s1", () => starts.push("s1"));
+    ptyInternals.goOnline(socket);
+    expect(starts).toEqual(["s1"]);
+    await vi.waitFor(() => expect(sentSpawns()).toHaveLength(1));
+    expect(sentSpawns()[0]).toMatchObject({ t: "pty-spawn", sid: "s1", attachOnly: true });
+  });
+});

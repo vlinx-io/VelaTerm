@@ -21,6 +21,7 @@ mod remote_audit_fixture;
 // The desktop's always-on loopback link for SSH mirror connections (see local_link.rs).
 pub(crate) mod local_link;
 pub(crate) mod mirror;
+pub(crate) mod outbound;
 pub(crate) mod presence;
 mod rate_limit;
 pub(crate) mod share_policy;

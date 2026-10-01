@@ -16,6 +16,8 @@
 //! **Why a flush cadence.** Text arrives token by token. Emitting an event per token would put thousands of
 //! messages a minute through the same channel that serves every other client, so rows are marked dirty and
 //! swept a few times a second. That is fast enough to read as live typing and slow enough to stay cheap.
+//! The `extras` object that task, inventory and usage frames change rides the same sweep: those frames only
+//! mark it for publication, so a busy workflow sends it at most once per sweep instead of once per frame.
 //!
 //! **Why rows are addressed by id.** The agent describes a message twice: first as fragments while it is
 //! being written, then once more, complete, when it is done. Both carry the same message id and block index,
@@ -861,6 +863,9 @@ pub struct ClaudeExtras {
     /// Codex account rate-limit buckets merged from `account/rateLimits/updated`, keyed by limit id.
     #[serde(skip)]
     pub codex_rate_limits: Value,
+    /// Changed by a high-frequency protocol frame and not yet published; the next flush sends it.
+    #[serde(skip)]
+    publish_pending: bool,
 }
 
 impl ClaudeExtras {
@@ -3541,6 +3546,7 @@ fn spawn_flusher(app: AppCtx, session_id: String, proc: Arc<ChatProcess>) {
                     emit(&app, &session_id, json!({"type":"replaceRows","positions":positions,"rows":rows[start..].iter().map(snapshot_row).collect::<Vec<_>>(),"hasMore":start > 0,"revision":revision,"epoch":proc.started_at}));
                 }
             }
+            flush_pending_extras(&app, &session_id, &proc);
             if !proc.alive.load(Ordering::Relaxed) {
                 // One last sweep has just run, so nothing written before exit is lost.
                 return;
@@ -3638,7 +3644,7 @@ fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, line: &s
                         }
                     }
                     drop(extras);
-                    emit_extras(app, session_id, proc);
+                    mark_extras(proc);
                 }
             }
             handle_assistant(proc, &message, parent.as_deref())
@@ -3691,7 +3697,7 @@ fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, line: &s
                     });
                 }
             }
-            emit_extras(app, session_id, proc);
+            mark_extras(proc);
             if drained {
                 settle_background_state(app, session_id, proc);
             }
@@ -3712,7 +3718,7 @@ fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, line: &s
             fold_task_frame(&mut proc.extras.lock().unwrap(), &subtype, &message);
             track_claude_task(proc, &subtype, &message);
             handle_claude_task(proc, &subtype, &message);
-            emit_extras(app, session_id, proc);
+            mark_extras(proc);
             // A final status can retire the last live task before the inventory says so.
             let drained = {
                 let turn = proc.turn.lock().unwrap();
@@ -5851,10 +5857,33 @@ fn mcp_set_servers_error(response: &Value) -> Option<String> {
     (!reasons.is_empty()).then(|| format!("Claude did not attach the MCP server ({})", reasons.join("; ")))
 }
 
-/// Publish the whole `extras` object. See `ClaudeExtras`.
+/// Publish the whole `extras` object now. See `ClaudeExtras`. This also satisfies a pending mark.
 fn emit_extras(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
-    let extras = proc.extras.lock().unwrap().published();
+    let extras = {
+        let mut extras = proc.extras.lock().unwrap();
+        extras.publish_pending = false;
+        extras.published()
+    };
     emit(app, session_id, json!({"type":"extras","extras":extras}));
+}
+
+/// Mark `extras` for the next flush instead of publishing it now. For frames that arrive many times a
+/// second (task progress, inventories, per-message usage): the flush sends the latest state once.
+fn mark_extras(proc: &Arc<ChatProcess>) {
+    proc.extras.lock().unwrap().publish_pending = true;
+}
+
+/// The flusher's share of `extras`: publish once if marked since the last sweep. Returns whether it did.
+fn flush_pending_extras(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) -> bool {
+    let extras = {
+        let mut extras = proc.extras.lock().unwrap();
+        if !std::mem::take(&mut extras.publish_pending) {
+            return false;
+        }
+        extras.published()
+    };
+    emit(app, session_id, json!({"type":"extras","extras":extras}));
+    true
 }
 
 /// A frame that proves the API answered ends any retry banner still showing.
@@ -9545,14 +9574,55 @@ mod tests {
         assert_eq!(listed[0].status, "failed", "the inventory drop must not overwrite a terminal status");
         assert_eq!(listed[0].ended_at, Some(1789036359792));
 
-        let extras: Vec<Value> = events.lock().unwrap().iter().filter(|event| event["type"] == "extras").cloned().collect();
-        assert!(extras.len() >= 3, "every inventory and task frame republishes extras, got {}", extras.len());
+        let extras_events = || events.lock().unwrap().iter().filter(|event| event["type"] == "extras").cloned().collect::<Vec<Value>>();
+        assert!(extras_events().is_empty(), "inventory and task frames only mark extras for the next flush");
+        assert!(flush_pending_extras(&app, "s", &proc));
+        let extras = extras_events();
+        assert_eq!(extras.len(), 1, "one flush publishes the frames' combined result once");
         let last = &extras.last().unwrap()["extras"]["backgroundTasks"];
         assert_eq!(last.as_array().map(Vec::len), Some(1), "the final state rides in the event, not only the snapshot");
         assert_eq!(last[0]["task_id"], "agent-z");
         assert_eq!(last[0]["status"], "failed");
         assert_eq!(last[0]["ended_at"], 1789036359792u64);
         assert!(last[0].get("listed").is_none(), "the internal `listed` flag never reaches the wire");
+        manager.stop(&app, "s").unwrap();
+    }
+
+    /// Task, inventory and per-message usage frames arrive many times a second while a workflow runs. Each
+    /// one used to publish the whole extras object; now they mark it, and the flusher publishes the latest
+    /// state at most once per sweep. An immediate publication satisfies a pending mark.
+    #[test]
+    fn high_frequency_frames_publish_extras_at_most_once_per_flush() {
+        let app = ctx("extras-throttle");
+        let manager = manager_with_session("s");
+        let proc = manager.get("s").unwrap();
+        let events = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let captured = events.clone();
+        app.listen(&event_name("s"), move |payload| {
+            captured.lock().unwrap().push(serde_json::from_str(payload).unwrap());
+        });
+        let extras_events = || events.lock().unwrap().iter().filter(|event| event["type"] == "extras").cloned().collect::<Vec<Value>>();
+
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"shell-a","task_type":"local_bash","description":"npm test"}]}"#);
+        for n in 0..20 {
+            let frame = json!({"type":"system","subtype":"task_progress","task_id":"shell-a","description":format!("step {n}")});
+            handle_line(&app, "s", &proc, &frame.to_string());
+        }
+        handle_line(&app, "s", &proc, r#"{"type":"assistant","message":{"id":"m1","model":"claude-test","role":"assistant","content":[],"usage":{"input_tokens":1200,"cache_read_input_tokens":300}}}"#);
+        assert!(extras_events().is_empty(), "no frame publishes on its own");
+
+        assert!(flush_pending_extras(&app, "s", &proc));
+        assert!(!flush_pending_extras(&app, "s", &proc), "a sweep with nothing new publishes nothing");
+        let published = extras_events();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0]["extras"]["contextTokens"], 1500, "the flush carries the latest state");
+        assert_eq!(published[0]["extras"]["backgroundTasks"][0]["task_id"], "shell-a");
+
+        // A rate-limit frame still publishes at once, and that publication clears a pending mark.
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"task_progress","task_id":"shell-a","description":"late"}"#);
+        handle_line(&app, "s", &proc, r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","utilization":0.9}}"#);
+        assert_eq!(extras_events().len(), 2, "other extras changes stay immediate");
+        assert!(!flush_pending_extras(&app, "s", &proc), "the immediate publication already carried the mark");
         manager.stop(&app, "s").unwrap();
     }
 

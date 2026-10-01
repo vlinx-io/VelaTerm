@@ -6,8 +6,17 @@
 //!   / {t:"pong"} (heartbeat response)
 //! - Server: {t:"hello",source:"ws-N"} is the **first frame** after connection and identifies the source so
 //!   the frontend can compare itself with Resized/SpawnResult.owner; followed by {t:"reply",id,ok,result|error},
-//!   {t:"event",name,payload}, {t:"ping"} every 30 seconds, and binary PTY frames. A connection with no inbound
-//!   traffic for 2.5 heartbeat intervals is treated as half-open and closed.
+//!   {t:"event",name,payload}, {t:"ping"} every 30 seconds, {t:"pty-resync",sid}, and binary PTY frames.
+//!
+//! Outbound frames go through a per-connection [`Outbound`] queue with one writer (see `outbound.rs`): hello,
+//! invoke replies and pings take a control lane that is always sent first; events, PTY frames and pty-spawn
+//! replies share a bounded bulk lane. When one session's unsent terminal output grows past its cap, the
+//! server drops it and sends {t:"pty-resync",sid}; the client resets that terminal and reattaches. A backlog
+//! beyond the lane caps closes the connection with code 1013.
+//!
+//! Liveness: a connection with no inbound traffic for 2.5 heartbeat intervals is treated as half-open and
+//! closed, unless its own outbound backlog is still draining (the pong may be stuck behind it on the peer's
+//! side); a backlog that made no send progress for as long counts as dead as well.
 //!
 //! Event forwarding uses `AppCtx::listen(event_name, ..)`, backed by Tauri events on desktop and the in-process
 //! bus in headless mode. Global events are registered at connection time; per-session
@@ -25,10 +34,10 @@ use axum::response::IntoResponse;
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use tokio::sync::mpsc;
 
 use super::dispatch::{dispatch, CallOrigin};
 use super::e2ee::{self, Cipher};
+use super::outbound::{self, Class, Outbound, PtyPush};
 use super::{Ctx, ServeMode};
 use crate::db::repo;
 use crate::host::{AppCtx, ListenerId};
@@ -114,6 +123,13 @@ const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3
 /// this 2.5-interval timeout reclaims half-open connections caused by NAT or sleep.
 const LIVENESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(75);
 
+/// Whether a connection counts as dead: silent inbound for [`LIVENESS_TIMEOUT`], and either nothing waiting
+/// to be sent or no send progress for as long. A draining backlog keeps it alive, because the peer's pong
+/// can only be as prompt as our ping, which may sit behind a slow link's backlog on the way out.
+fn peer_presumed_dead(inbound_silence: Duration, backlogged: bool, since_progress: Duration) -> bool {
+    inbound_silence >= LIVENESS_TIMEOUT && (!backlogged || since_progress >= LIVENESS_TIMEOUT)
+}
+
 async fn handle_socket(
     socket: WebSocket,
     ctx: Ctx,
@@ -192,17 +208,18 @@ async fn handle_socket(
         _ => return, // End on close, a binary first frame, or an error.
     }
 
-    let (out_tx, mut out_rx) = mpsc::unbounded_channel::<Message>();
+    let outbound = Outbound::new(conn_source.clone());
     // Source ID for this connection. Each browser page has an independent WS, distinct from desktop.
     diagnostic.step("read");
 
 
     // The hello message is the **first application frame** and gives the frontend its source ID for comparing
-    // against Resized/SpawnResult.owner in fit and mirror decisions. The writer encrypts it in E2EE mode and
-    // consumes out_tx serially, guaranteeing delivery before replies, events, or PTY replay.
-    let _ = out_tx.send(Message::Text(
-        json!({"t": "hello", "source": conn_source}).to_string(),
-    ));
+    // against Resized/SpawnResult.owner in fit and mirror decisions. It is the first control-lane frame, and
+    // the writer drains that lane first, guaranteeing delivery before replies, events, or PTY replay.
+    outbound.push_control(
+        Message::Text(json!({"t": "hello", "source": conn_source}).to_string()),
+        Class::Hello,
+    );
 
     // Announce the arrival. On a host this is the only sign that someone else is attached: the desktop talks
     // over IPC and never appears in this list, so a non-empty list means somebody remote is on the other end.
@@ -219,31 +236,9 @@ async fn handle_socket(
         )),
     );
 
-    // Writer task: serialize every outbound reply, event, and PTY binary frame to the socket. In E2EE mode,
-    // text becomes base64 ciphertext and binary becomes raw ciphertext; control frames such as Close/Ping/Pong
-    // pass through unchanged. Encryption failure terminates the writer and closes the connection.
-    let cipher_w = cipher.clone();
-    let writer = tokio::spawn(async move {
-        while let Some(msg) = out_rx.recv().await {
-            let msg = match &cipher_w {
-                Some(c) => match msg {
-                    Message::Text(t) => match c.encrypt_text(&t) {
-                        Some(ct) => Message::Text(ct),
-                        None => break,
-                    },
-                    Message::Binary(b) => match c.encrypt_bytes(&b) {
-                        Some(cb) => Message::Binary(cb),
-                        None => break,
-                    },
-                    other => other,
-                },
-                None => msg,
-            };
-            if ws_tx.send(msg).await.is_err() {
-                break;
-            }
-        }
-    });
+    // Writer task: serialize every outbound reply, event, and PTY binary frame to the socket, control lane
+    // first. Encryption (E2EE) happens there; encryption or send failure, or an overflowed backlog, ends it.
+    let mut writer = tokio::spawn(outbound::run_writer(outbound.clone(), ws_tx, cipher.clone()));
 
     let mut event_ids: Vec<ListenerId> = Vec::new();
     // PTY subscriptions owned by this connection: sid -> subscription ID, used for detach on disconnect.
@@ -289,7 +284,7 @@ async fn handle_socket(
         &full_events
     };
     for name in global_events {
-        event_ids.push(listen_forward(&ctx.app, name, out_tx.clone()));
+        event_ids.push(listen_forward(&ctx.app, name, outbound.clone()));
     }
 
     // Process the plaintext application frame retained during first-frame inspection.
@@ -298,7 +293,7 @@ async fn handle_socket(
             &ctx,
             &first,
             &conn_source,
-            &out_tx,
+            &outbound,
             &mut pty_subs,
             &mut listened,
             &mut chat_listened,
@@ -308,8 +303,9 @@ async fn handle_socket(
     }
 
     // Read loop and heartbeat timer. Any inbound message, including pong, refreshes liveness. Send a ping each
-    // interval and close a connection silent beyond LIVENESS_TIMEOUT as half-open. Normal cleanup then removes
-    // forwarding listeners and detaches every subscription.
+    // interval and close a connection silent beyond LIVENESS_TIMEOUT as half-open (see `peer_presumed_dead`).
+    // The writer ending (send failure or overflow) ends the loop too. Normal cleanup then removes forwarding
+    // listeners and detaches every subscription.
     let mut heartbeat = tokio::time::interval(HEARTBEAT_INTERVAL);
     let mut last_inbound = std::time::Instant::now();
     loop {
@@ -334,7 +330,7 @@ async fn handle_socket(
                             &ctx,
                             &plain,
                             &conn_source,
-                            &out_tx,
+                            &outbound,
                             &mut pty_subs,
                             &mut listened,
                             &mut chat_listened,
@@ -346,8 +342,10 @@ async fn handle_socket(
                     _ => {}
                 }
             }
+            _ = &mut writer => break,
             _ = heartbeat.tick() => {
-                if last_inbound.elapsed() >= LIVENESS_TIMEOUT {
+                let (backlogged, since_progress) = outbound.progress();
+                if peer_presumed_dead(last_inbound.elapsed(), backlogged, since_progress) {
                     break;
                 }
                 // Disconnect a device revoked during this connection within one heartbeat; other devices remain unaffected.
@@ -361,7 +359,8 @@ async fn handle_socket(
                         break;
                     }
                 }
-                if out_tx.send(Message::Text(json!({"t":"ping"}).to_string())).is_err() {
+                outbound.log_stats();
+                if !outbound.push_ping() {
                     break;
                 }
             }
@@ -384,6 +383,8 @@ async fn handle_socket(
     for (sid, sub) in pty_subs {
         mgr.detach(&ctx.app, &sid, sub, &conn_source);
     }
+    outbound.close();
+    outbound.log_stats();
     writer.abort();
     diagnostic.success();
 }
@@ -487,7 +488,7 @@ fn handle_text(
     ctx: &Ctx,
     text: &str,
     conn_source: &str,
-    out_tx: &mpsc::UnboundedSender<Message>,
+    outbound: &Outbound,
     pty_subs: &mut HashMap<String, u64>,
     listened: &mut HashSet<String>,
     // Sessions whose chat channel this connection forwards. Separate from `listened`: a session can have
@@ -530,7 +531,7 @@ fn handle_text(
                         event_ids.push(listen_forward(
                             &ctx.app,
                             &crate::agent::chat::engine::event_name(sid),
-                            out_tx.clone(),
+                            outbound.clone(),
                         ));
                         // Work state reaches the sidebar through the channel PTY sessions use, so a session
                         // that never spawns a PTY still needs it registered.
@@ -538,7 +539,7 @@ fn handle_text(
                             event_ids.push(listen_forward(
                                 &ctx.app,
                                 &format!("pty://status/{sid}"),
-                                out_tx.clone(),
+                                outbound.clone(),
                             ));
                         }
                     }
@@ -551,13 +552,13 @@ fn handle_text(
                         Ok(result) => json!({"t":"reply","id":id,"ok":true,"result":result}),
                         Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}),
                     };
-                let _ = out_tx.send(Message::Text(reply.to_string()));
+                outbound.push_control(Message::Text(reply.to_string()), Class::Reply);
             } else {
                 // Other commands commonly block on SQLite's global lock, subprocesses, or file reads. Move them
                 // to spawn_blocking so one slow request cannot head-of-line block later messages or occupy a Tokio
                 // worker and affect other connections. Replies return asynchronously and match by ID, not order.
                 let ctx = ctx.clone();
-                let out_tx = out_tx.clone();
+                let outbound = outbound.clone();
                 let conn_source = conn_source.to_string();
                 let share = share.clone();
                 let queued = std::time::Instant::now();
@@ -576,7 +577,7 @@ fn handle_text(
                     if cmd == "chat_snapshot" {
                         crate::diagnostics::record("INFO","chat_sync",serde_json::json!({"requestId":trace_request,"prepareMs":prepare_ms as u64,"encodeMs":encoding.elapsed().as_millis() as u64,"bytes":encoded.len(),"success":reply["ok"]}));
                     }
-                    let _ = out_tx.send(Message::Text(encoded));
+                    outbound.push_control(Message::Text(encoded), Class::Reply);
                 });
             }
         }
@@ -584,9 +585,12 @@ fn handle_text(
             let id = msg.get("id").cloned().unwrap_or(Value::Null);
             if share.is_some() {
                 // Share visitors never get a terminal, so no PTY may be started for them.
-                let _ = out_tx.send(Message::Text(
-                    json!({"t":"reply","id":id,"ok":false,"error":"Terminals are unavailable through a public share"}).to_string(),
-                ));
+                outbound.push_bulk(
+                    Message::Text(
+                        json!({"t":"reply","id":id,"ok":false,"error":"Terminals are unavailable through a public share"}).to_string(),
+                    ),
+                    Class::PtyReply,
+                );
                 return;
             }
             let sid = msg
@@ -608,24 +612,24 @@ fn handle_text(
                 event_ids.push(listen_forward(
                     &ctx.app,
                     &format!("pty://status/{sid}"),
-                    out_tx.clone(),
+                    outbound.clone(),
                 ));
                 event_ids.push(listen_forward(
                     &ctx.app,
                     &format!("pty://exit/{sid}"),
-                    out_tx.clone(),
+                    outbound.clone(),
                 ));
                 // Notify this view when another client explicitly kills the session by closing or restarting it.
                 event_ids.push(listen_forward(
                     &ctx.app,
                     &format!("pty://killed/{sid}"),
-                    out_tx.clone(),
+                    outbound.clone(),
                 ));
             }
             // Serialize SpawnResult directly in camelCase to avoid maintaining parallel handwritten JSON. This
             // automatically includes cols/rows/owner, the initial-size channel used by mirror mode.
             let reply =
-                match web_pty_spawn(ctx, &sid, &args, conn_source, attach_only, out_tx.clone()) {
+                match web_pty_spawn(ctx, &sid, &args, conn_source, attach_only, outbound.clone()) {
                     Ok(res) => {
                         pty_subs.insert(sid.clone(), res.sub_id);
                         let result = serde_json::to_value(&res).unwrap_or(Value::Null);
@@ -633,7 +637,8 @@ fn handle_text(
                     }
                     Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}),
                 };
-            let _ = out_tx.send(Message::Text(reply.to_string()));
+            // Bulk lane, not control: the reply must follow the attach's replay bytes (the client's replay gate).
+            outbound.push_bulk(Message::Text(reply.to_string()), Class::PtyReply);
         }
         "pty-detach" => {
             let sid = msg.get("sid").and_then(Value::as_str).unwrap_or("");
@@ -663,13 +668,12 @@ fn dispatch_scoped(
     }
 }
 
-/// Registers forwarding for one event name, sending `{t:"event",name,payload}` through the outbound channel.
-fn listen_forward(app: &AppCtx, name: &str, out_tx: mpsc::UnboundedSender<Message>) -> ListenerId {
+/// Registers forwarding for one event name, queueing `{t:"event",name,payload}` on the bulk lane.
+fn listen_forward(app: &AppCtx, name: &str, outbound: Outbound) -> ListenerId {
     let name_owned = name.to_string();
     app.listen(name, move |payload| {
         let payload: Value = serde_json::from_str(payload).unwrap_or(Value::Null);
-        let msg = json!({ "t": "event", "name": name_owned, "payload": payload });
-        let _ = out_tx.send(Message::Text(msg.to_string()));
+        outbound.push_event(&name_owned, payload);
     })
 }
 
@@ -683,7 +687,7 @@ fn web_pty_spawn(
     args: &Value,
     conn_source: &str,
     attach_only: bool,
-    out_tx: mpsc::UnboundedSender<Message>,
+    outbound: Outbound,
 ) -> Result<SpawnResult, String> {
     let _context=crate::diagnostics::Context::enter(args.get("diagnosticRequestId").and_then(Value::as_str));
     let _operation=crate::diagnostics::Operation::enter(args.get("diagnosticOperationId").and_then(Value::as_str));
@@ -766,16 +770,7 @@ fn web_pty_spawn(
     }
     let hook = app.hooks().endpoint();
 
-    // WS output sink wraps bytes as [len][sid][payload]. Once connection closure drops out_rx, send fails and
-    // returns false so the reader thread removes this destination.
-    let sid_bytes = sid.as_bytes().to_vec();
-    let sink: OutputSink = Box::new(move |bytes: &[u8]| {
-        let mut frame = Vec::with_capacity(1 + sid_bytes.len() + bytes.len());
-        frame.push(sid_bytes.len() as u8);
-        frame.extend_from_slice(&sid_bytes);
-        frame.extend_from_slice(bytes);
-        out_tx.send(Message::Binary(frame)).is_ok()
-    });
+    let sink = pty_sink(outbound, sid);
 
     diagnostic.success();
     drop(diagnostic);
@@ -800,6 +795,31 @@ fn web_pty_spawn(
         attach_only,
         sink,
     )
+}
+
+/// WS output sink that wraps bytes as [len][sid][payload] binary frames on the bulk lane. It returns false,
+/// and keeps returning false, once the connection closes or the session's backlog was replaced by a resync,
+/// so the PTY fan-out removes it; the client reattaches with a fresh sink after the resync marker.
+fn pty_sink(outbound: Outbound, sid: &str) -> OutputSink {
+    let sid_owned = sid.to_string();
+    let sid_bytes = sid.as_bytes().to_vec();
+    let stopped = std::sync::atomic::AtomicBool::new(false);
+    Box::new(move |bytes: &[u8]| {
+        if stopped.load(Ordering::Relaxed) {
+            return false;
+        }
+        let mut frame = Vec::with_capacity(1 + sid_bytes.len() + bytes.len());
+        frame.push(sid_bytes.len() as u8);
+        frame.extend_from_slice(&sid_bytes);
+        frame.extend_from_slice(bytes);
+        match outbound.push_pty(&sid_owned, frame) {
+            PtyPush::Queued => true,
+            PtyPush::Resync | PtyPush::Closed => {
+                stopped.store(true, Ordering::Relaxed);
+                false
+            }
+        }
+    })
 }
 
 #[cfg(test)]
@@ -834,7 +854,7 @@ mod tests {
     /// Send one invoke frame through handle_text and await the reply. Non-PTY commands answer from
     /// spawn_blocking, so the reply arrives asynchronously on the outbound channel.
     async fn invoke_reply(ctx: &Ctx, cmd: &str) -> Value {
-        let (out_tx, mut out_rx) = mpsc::unbounded_channel();
+        let outbound = Outbound::new("ws-test");
         let mut pty_subs = HashMap::new();
         let mut listened = HashSet::new();
         let mut chat_listened = HashSet::new();
@@ -844,16 +864,18 @@ mod tests {
             ctx,
             &frame,
             "ws-test",
-            &out_tx,
+            &outbound,
             &mut pty_subs,
             &mut listened,
             &mut chat_listened,
             &mut event_ids,
             None,
         );
-        match out_rx.recv().await.expect("expected a reply frame") {
-            Message::Text(t) => serde_json::from_str(&t).expect("reply must be JSON"),
-            other => panic!("expected a text reply, got: {other:?}"),
+        match outbound.next().await.expect("expected a reply frame") {
+            outbound::Next::Frame(Message::Text(t), _, Class::Reply) => {
+                serde_json::from_str(&t).expect("reply must be JSON")
+            }
+            other => panic!("expected a text reply on the control lane, got: {other:?}"),
         }
     }
 
@@ -881,5 +903,57 @@ mod tests {
             json!("Web server not started"),
             "the Electron loopback lane must keep the full management plane"
         );
+    }
+
+    /// T6: silence alone kills a connection only when our own backlog is not still draining.
+    #[test]
+    fn liveness_spares_a_connection_whose_backlog_is_draining() {
+        let s = Duration::from_secs;
+        assert!(!peer_presumed_dead(s(80), true, s(2)), "a draining backlog keeps the connection");
+        assert!(peer_presumed_dead(s(80), true, s(80)), "a backlog without progress is a dead peer");
+        assert!(peer_presumed_dead(s(80), false, s(0)), "silence without backlog is a dead peer, as before");
+        assert!(!peer_presumed_dead(s(10), true, s(80)), "recent inbound traffic always keeps it");
+        assert!(!peer_presumed_dead(s(10), false, s(0)));
+    }
+
+    /// T5 against the real PTY fan-out: once one session's unsent output passes the threshold, the WS sink
+    /// refuses the chunk and the output stream drops it (without a detach), a resync marker is queued, and a
+    /// fresh attach replaying a full ring does not trip it again.
+    #[tokio::test]
+    async fn a_flooding_terminal_is_resynced_and_a_fresh_attach_replays_without_looping() {
+        use crate::pty::session::OutputStream;
+        let outbound = Outbound::new("ws-test");
+        let mut stream = OutputStream::new(crate::pty::manager::SCROLLBACK_CAP);
+        stream.attach(1, pty_sink(outbound.clone(), "sa"));
+        let chunk = vec![b'x'; 64 * 1024];
+        let mut ingested = 0;
+        while stream.subscriber_count() == 1 {
+            stream.ingest(&chunk);
+            ingested += chunk.len();
+            assert!(ingested <= 2 * outbound::PTY_RESYNC_BYTES, "the sink must refuse eventually");
+        }
+        // Frames carry a small sid header, so the backlog passes the threshold at about this many payload bytes.
+        assert!(ingested >= outbound::PTY_RESYNC_BYTES - chunk.len());
+        assert_eq!(outbound.take_stats()["resyncCount"], 1);
+
+        // The client's reattach: a new sink replays the prelude and the full ring.
+        stream.attach(2, pty_sink(outbound.clone(), "sa"));
+        stream.ingest(b"after");
+        assert_eq!(stream.subscriber_count(), 1, "a replay of one ring must not trigger another resync");
+        assert_eq!(outbound.take_stats()["resyncCount"], 0);
+
+        outbound.close();
+        let mut kinds = Vec::new();
+        while let Some(outbound::Next::Frame(msg, _, class)) = outbound.next().await {
+            kinds.push(class);
+            if class == Class::PtyResync {
+                assert_eq!(msg, Message::Text(json!({"t":"pty-resync","sid":"sa"}).to_string()));
+            }
+        }
+        let marker = kinds.iter().position(|c| *c == Class::PtyResync).expect("a resync marker");
+        assert_eq!(kinds.iter().filter(|c| **c == Class::PtyResync).count(), 1);
+        assert_eq!(kinds[..marker].iter().filter(|c| **c == Class::PtyOutput).count(), 0, "stale output was dropped");
+        assert!(kinds[marker + 1..].iter().all(|c| *c == Class::PtyOutput), "only the replay follows the marker");
+        assert!(kinds.len() > marker + 1);
     }
 }

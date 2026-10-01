@@ -13,6 +13,8 @@
 //! Server -> client:
 //!   { t:"reply", id, ok, result | error } Command response
 //!   { t:"event", name, payload }          Forwarded Tauri events (pty://status|exit, spawn://, notify://)
+//!   { t:"pty-resync", sid }               The server dropped this terminal's backlog on a slow link;
+//!                                         reset it and reattach (replay), as after a reconnect
 //!   Binary frame                            PTY output routed to subscribers by sid
 //!
 //! Reconnection: after a disconnect, reconnect automatically with exponential backoff from
@@ -525,31 +527,38 @@ class WsClient {
     // Recover by reattaching every registered PTY. attachOnly never revives a session closed by
     // another client during the outage as an empty shell; the server replays the mode prelude and
     // current screen.
-    for (const sid of this.ptySinks.keys()) {
-      const args = this.ptyArgs.get(sid);
-      if (!args) continue;
-      const startCbs = this.reattachStartCbs.get(sid);
-      if (startCbs) for (const cb of startCbs) cb();
-      void this.sendPtySpawn(sid, args, true)
-        .then((res) => {
-          const cbs = this.reattachCbs.get(sid);
-          if (cbs) for (const cb of cbs) cb(res);
-        })
-        .catch((err) => {
-          // An attach-only failure means another client closed or deleted the session while this
-          // one was offline. Finish as a terminated session: remove local registrations and emit
-          // an exit event so usePtySession closes the view.
-          const msg = String(err instanceof Error ? err.message : err);
-          if (msg.includes("is not running") || msg.includes("has been deleted")) {
-            this.ptySinks.delete(sid);
-            this.ptyArgs.delete(sid);
-            this.subIds.delete(sid);
-            this.dispatchLocalEvent(`pty://exit/${sid}`, null);
-          }
-        });
-    }
+    for (const sid of this.ptySinks.keys()) this.reattachPty(sid);
     this.pendingConnect?.resolve();
     this.pendingConnect = null;
+  }
+
+  /**
+   * Reattach one registered PTY: close its replay gate and reset the terminal (reattachStart), then
+   * pty-spawn with attachOnly so the server replays the mode prelude and current screen. Used after a
+   * reconnect and when the server announces `pty-resync`. Unknown sids are ignored.
+   */
+  private reattachPty(sid: string) {
+    const args = this.ptyArgs.get(sid);
+    if (!args || !this.ptySinks.has(sid)) return;
+    const startCbs = this.reattachStartCbs.get(sid);
+    if (startCbs) for (const cb of startCbs) cb();
+    void this.sendPtySpawn(sid, args, true)
+      .then((res) => {
+        const cbs = this.reattachCbs.get(sid);
+        if (cbs) for (const cb of cbs) cb(res);
+      })
+      .catch((err) => {
+        // An attach-only failure means another client closed or deleted the session while this
+        // one was offline. Finish as a terminated session: remove local registrations and emit
+        // an exit event so usePtySession closes the view.
+        const msg = String(err instanceof Error ? err.message : err);
+        if (msg.includes("is not running") || msg.includes("has been deleted")) {
+          this.ptySinks.delete(sid);
+          this.ptyArgs.delete(sid);
+          this.subIds.delete(sid);
+          this.dispatchLocalEvent(`pty://exit/${sid}`, null);
+        }
+      });
   }
 
   /** Retire the socket a new connection replaces. Its `onclose` is ignored from this point on, so
@@ -734,6 +743,10 @@ class WsClient {
     } else if (msg.t === "event") {
       const subs = this.events.get(msg.name as string);
       if (subs) for (const cb of subs) cb(msg.payload);
+    } else if (msg.t === "pty-resync") {
+      // The server dropped this terminal's unsent output because the link could not keep up, and
+      // stopped streaming it. Everything before the marker has arrived; replace it with a replay.
+      this.reattachPty(String(msg.sid ?? ""));
     } else if (msg.t === "error") {
       // The server reports connection-level failures such as rejected WS authentication before
       // closing the socket. Record them in the central error buffer for console/banner visibility;

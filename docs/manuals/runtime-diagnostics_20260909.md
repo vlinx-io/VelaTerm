@@ -2,7 +2,7 @@
 
 Created: 2026-09-09
 
-Updated: 2026-09-25 10:21
+Updated: 2026-09-27 00:21
 
 Runtime logs help you find out where an operation failed or what it was waiting for. They do not record terminal input or output, conversation text, file contents, credentials or full URLs.
 
@@ -64,6 +64,17 @@ Each step has a start and a completion line with `durationMs` for the step and `
 `event=ssh_connect` records the connection steps in order: `connect`, `probe`, `supply`, `prepare` (which includes copying the server to the remote machine), `start` and `forward`. When "Mirror the remote desktop app" attaches to a desktop app that is already running, only `connect`, `probe` and `forward` appear.
 
 Other requests are recorded as `rpc` lines with their start, success or failure (`rpc_failure`). Keystrokes and terminal resizes are not logged individually. Logging never changes how requests are retried or canceled.
+
+## When a remote window responds slowly
+
+A browser, mobile or Electron window receives replies, events and terminal output over one WebSocket connection. On a slow link the backend can produce more than the link carries. Replies to requests and the connection's heartbeat are sent ahead of queued events and terminal output, so a slow link delays the event stream rather than the answers. The one exception is the reply that attaches a terminal: it follows that terminal's replayed output. The backend on the remote machine records how full each connection's outgoing queue is:
+
+- `event=ws_outbound` (`INFO`) is written with every connection heartbeat and once more when the connection ends. `queuedBytes` and `queuedFrames` are what is still waiting at that moment; `peakQueuedBytes`, `sentBytes`, `sentFrames`, `coalescedCount` and `resyncCount` count since the previous line of the same connection (`clientId`). `classes` splits the sent frames and bytes by traffic class (`reply`, `ping`, `hello`, `ptyOutput`, `ptyReply`, `ptyResync`, `chatRows`, `chatExtras`, `chatQueue`, `chatOther`, `ptyEvent`, `sessionState`, `tree`, `otherEvent`) and lists only classes that sent something. Sizes are measured before end-to-end encryption, which adds about a third to text frames on the wire; terminal output is sent as binary frames without that overhead.
+- `coalescedCount` counts status updates that were replaced by a newer copy before they were sent: a conversation's status details, the session tree and the preset list. Only the newest copy is delivered, after everything queued before it. Conversation messages, the conversation's message queue and all other events are never merged or reordered.
+- `event=pty_resync` (`INFO`, with `sessionId` and `bytes`) means a terminal's unsent output grew too large for the link. VelaTerm drops that terminal's unsent output for this window only, then the window clears the terminal and reattaches, showing the terminal's recent output again. The session itself keeps running and no output is lost for other windows, but the reattach makes the terminal redraw once, so every window that shows it repaints.
+- `event=ws_slow_consumer` (`WARN`, with `bytes`) means the connection's queue exceeded its limit. The backend drops the queue and closes the connection with code 1013; the window reconnects and loads its state again.
+
+A connection whose queue is still being sent is not closed as unresponsive while it keeps making progress, even if the window has not sent anything for a while. A connection that neither sends anything nor makes progress is closed as before.
 
 ## What is recorded
 
