@@ -1,7 +1,9 @@
 //! Coverage for the advertised-IP selector (choosing an IP persists it and regenerates the pairing
 //! link with exactly that address, a vanished persisted IP falls back to automatic, and the URL
 //! ordering helper matches hosts exactly) and for restart persistence (the port field prefills the
-//! last persisted port instead of the hardcoded 8799, and a failed auto-start surfaces its error).
+//! last persisted port instead of the hardcoded 8799, and a failed auto-start surfaces its error), and
+//! for the listen-address selector (choice, reachability text, pairing address in loopback mode, URL
+//! list restricted to the chosen address, restart without the password, localized errors).
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,6 +17,7 @@ const {
   webPairingCreateMock,
   webServerStatusMock,
   webServerStartMock,
+  webServerSetListenMock,
   appSettings,
   mirrorSetEnabledMock,
   mirrorState,
@@ -40,12 +43,15 @@ const {
     webPairingCreateMock: vi.fn(),
     webServerStatusMock: vi.fn(),
     webServerStartMock: vi.fn(),
+    webServerSetListenMock: vi.fn(),
   };
 });
 
 vi.mock("../../i18n", () => ({
   // Echo keys so assertions are locale-independent.
   useT: () => (key: string) => key,
+  // backendError maps error codes through the plain `t`; echo the key there too.
+  t: (key: string) => key,
   getLocale: () => "en",
 }));
 vi.mock("../../ipc/transport", () => ({ invoke: invokeMock }));
@@ -71,6 +77,7 @@ vi.mock("../../ipc/webServer", () => ({
   networkInterfacesList: networkInterfacesListMock,
   webServerStatus: webServerStatusMock,
   webServerStart: webServerStartMock,
+  webServerSetListen: webServerSetListenMock,
   webServerStop: vi.fn(),
   webPairingCreate: webPairingCreateMock,
   webDevicesList: vi.fn().mockResolvedValue([]),
@@ -110,6 +117,9 @@ function stoppedStatus(extra: Partial<WebServerStatus>): WebServerStatus {
     savedPort: null,
     autoStart: false,
     scheme: null,
+    bind: null,
+    savedBind: null,
+    savedPairingHost: null,
     ...extra,
   };
 }
@@ -620,6 +630,166 @@ describe("RemoteAccessPanel restart persistence", () => {
       expect(
         screen.getByText(/remote\.autostartFailed Port 9123 is already in use/),
       ).toBeTruthy();
+    });
+  });
+});
+
+// --- Listen-address selector -----------------------------------------------------------------
+
+function listenCombo(): HTMLElement {
+  return screen.getByRole("combobox", { name: "remote.listenLabel" });
+}
+
+function listenOptionLabels(): string[] {
+  fireEvent.click(listenCombo());
+  const labels = screen.getAllByRole("option").map((o) => o.textContent ?? "");
+  fireEvent.click(listenCombo());
+  return labels;
+}
+
+function chooseListen(label: string) {
+  fireEvent.click(listenCombo());
+  const target = screen
+    .getAllByRole("option")
+    .find((o) => (o.textContent ?? "").startsWith(label));
+  if (!target) throw new Error(`no listen option ${label}`);
+  fireEvent.click(target);
+}
+
+const IFACES = [
+  { name: "en0", ip: "192.168.1.5", vpn: false },
+  { name: "utun3", ip: "100.100.83.2", vpn: true },
+];
+
+describe("listen-address selector", () => {
+  it("offers all networks, every interface, and loopback next to the port, defaulting to all", async () => {
+    webServerStatusMock.mockResolvedValue(stoppedStatus({}));
+    networkInterfacesListMock.mockResolvedValue(IFACES);
+    render(<RemoteAccessPanel onClose={() => {}} />);
+
+    await waitFor(() => expect(listenOptionLabels().length).toBe(4));
+    expect(listenOptionLabels()).toEqual([
+      "remote.listenAll",
+      "192.168.1.5 · en0",
+      "100.100.83.2 · utun3 (remote.ipVpn)",
+      "remote.listenLoopback",
+    ]);
+    expect(listenCombo().textContent).toContain("remote.listenAll");
+    expect(screen.getByText("remote.reachAll")).toBeTruthy();
+    // The advertised-IP selector stays available on every interface, as before.
+    expect(screen.getByRole("combobox", { name: "remote.ipLabel" })).toBeTruthy();
+  });
+
+  it("stores loopback, asks for the pairing address, and commits it on Enter", async () => {
+    webServerStatusMock.mockResolvedValue(stoppedStatus({}));
+    networkInterfacesListMock.mockResolvedValue(IFACES);
+    webServerSetListenMock.mockImplementation((bind: string, host: string | null) =>
+      Promise.resolve(
+        stoppedStatus({ savedBind: bind, savedPairingHost: host ?? "" }),
+      ),
+    );
+    render(<RemoteAccessPanel onClose={() => {}} />);
+    await waitFor(() => expect(listenOptionLabels().length).toBe(4));
+
+    chooseListen("remote.listenLoopback");
+    await waitFor(() => expect(webServerSetListenMock).toHaveBeenCalledWith("loopback", null));
+    const field = await waitFor(
+      () => screen.getByLabelText("remote.pairingHostLabel") as HTMLInputElement,
+    );
+    expect(screen.getByText("remote.reachTunnel")).toBeTruthy();
+    expect(screen.getByText("remote.pairingHostNeeded")).toBeTruthy();
+    // No advertised-IP choice in loopback mode: the interfaces are not what clients use.
+    expect(screen.queryByRole("combobox", { name: "remote.ipLabel" })).toBeNull();
+
+    fireEvent.change(field, { target: { value: "vela.example.ts.net" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() =>
+      expect(webServerSetListenMock).toHaveBeenCalledWith("loopback", "vela.example.ts.net"),
+    );
+    await waitFor(() => expect(screen.queryByText("remote.pairingHostNeeded")).toBeNull());
+  });
+
+  it("shows only the chosen address while running on it: no IP selector, no more-urls, QR on that host", async () => {
+    const url = "https://100.100.83.2:8799";
+    webServerStatusMock.mockResolvedValue({
+      ...runningStatus(),
+      url,
+      urls: [url],
+      bind: "100.100.83.2",
+      savedBind: "100.100.83.2",
+    });
+    networkInterfacesListMock.mockResolvedValue(IFACES);
+    // The backend link host never matters for display: the URL list drives it.
+    webPairingCreateMock.mockResolvedValue({ url: `${LAN_URL}/#pair=tok`, deviceToken: "t" });
+    render(<RemoteAccessPanel onClose={() => {}} />);
+
+    await waitFor(() => {
+      const qr = document.querySelector("[data-qr-value]");
+      expect(qr?.getAttribute("data-qr-value")).toBe(`${url}/#pair=tok`);
+    });
+    expect(screen.getByText("remote.reachOnly")).toBeTruthy();
+    expect(listenCombo().textContent).toContain("100.100.83.2");
+    expect(screen.queryByRole("combobox", { name: "remote.ipLabel" })).toBeNull();
+    expect(screen.queryByText(/remote\.moreUrls/)).toBeNull();
+    expect(screen.getAllByTitle("remote.copyUrl")).toHaveLength(1);
+  });
+
+  it("keeps a stored address that is currently absent selected instead of claiming all networks", async () => {
+    webServerStatusMock.mockResolvedValue(stoppedStatus({ savedBind: "10.9.9.9" }));
+    networkInterfacesListMock.mockResolvedValue(IFACES);
+    render(<RemoteAccessPanel onClose={() => {}} />);
+
+    await waitFor(() => expect(listenOptionLabels().length).toBe(5));
+    expect(listenOptionLabels()).toContain("remote.listenUnavailable");
+    expect(listenCombo().textContent).toContain("remote.listenUnavailable");
+    expect(listenCombo().textContent).not.toContain("remote.listenAll");
+    expect(screen.getByText("remote.reachOnly")).toBeTruthy();
+  });
+
+  it("restarts a running service through set-listen, adopts its status, and re-pairs without a password", async () => {
+    mockDefaults();
+    webServerSetListenMock.mockResolvedValue({
+      ...runningStatus(),
+      url: CGNAT_URL,
+      urls: [CGNAT_URL],
+      bind: "100.100.83.2",
+      savedBind: "100.100.83.2",
+    });
+    render(<RemoteAccessPanel onClose={() => {}} />);
+    await waitFor(() => expect(webPairingCreateMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(listenOptionLabels().length).toBe(4));
+
+    chooseListen("100.100.83.2");
+    await waitFor(() =>
+      expect(webServerSetListenMock).toHaveBeenCalledWith("100.100.83.2", null),
+    );
+    await waitFor(() => expect(webPairingCreateMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      const copyButtons = screen.getAllByTitle("remote.copyUrl");
+      expect(copyButtons).toHaveLength(1);
+      expect(copyButtons[0].textContent).toContain(`${CGNAT_URL}/#pair=tok`);
+    });
+    expect(webServerStartMock).not.toHaveBeenCalled();
+  });
+
+  it("shows a listen error localized through the backend error codes", async () => {
+    webServerStatusMock.mockResolvedValue(stoppedStatus({}));
+    networkInterfacesListMock.mockResolvedValue(IFACES);
+    webServerSetListenMock.mockRejectedValue(new Error("remote_bind_unavailable:192.168.1.5"));
+    render(<RemoteAccessPanel onClose={() => {}} />);
+    await waitFor(() => expect(listenOptionLabels().length).toBe(4));
+
+    chooseListen("192.168.1.5");
+    await waitFor(() => expect(screen.getByText("remote.bindUnavailable")).toBeTruthy());
+    // The previous choice stays shown, because it is still what applies.
+    expect(listenCombo().textContent).toContain("remote.listenAll");
+  });
+
+  it("localizes a coded auto-start error", async () => {
+    mockStopped({ autostartError: "remote_bind_unavailable:100.100.83.2" });
+    render(<RemoteAccessPanel onClose={() => {}} />);
+    await waitFor(() => {
+      expect(screen.getByText(/remote\.autostartFailed remote\.bindUnavailable/)).toBeTruthy();
     });
   });
 });
