@@ -12,7 +12,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    include: ["src/**/*.test.{ts,tsx}"],
+    // scripts/*.test.mjs covers the dev launcher scripts; those files opt into the node environment themselves.
+    include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.mjs"],
     // Work around Node 22+'s experimental global localStorage masking jsdom's implementation; see that file.
     setupFiles: ["./vitest.setup.ts"],
   },

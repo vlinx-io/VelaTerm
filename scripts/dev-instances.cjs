@@ -7,8 +7,8 @@
 //   node dev-instances.cjs stop all      Stop every instance.
 //
 // Development launchers write `.dev-data/instances/<label>.json` through dev-lib.sh. Each manifest
-// contains `{ label, mode, pid, vitePort?, backendPort?, dataDir?, url?, startedAt }`, where pid is
-// the launcher and process-tree root. Stopping recursively terminates descendants, clears recorded
+// contains `{ label, mode, pid, vitePort?, backendPort?, dataDir?, url?, bind?, startedAt }`, where pid
+// is the launcher and process-tree root (bind is dev:web's VLX_DEV_BIND mode: lan or loopback). Stopping recursively terminates descendants, clears recorded
 // ports as a fallback, and removes the manifest without affecting other instances.
 //
 // See the development modes and ports design document for background.
