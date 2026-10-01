@@ -38,10 +38,7 @@ pub fn hydrate() {
     // worker with a timeout so such prompts cannot block application startup.
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let mut probe = std::process::Command::new(&shell);
-        // Probe with the system environment; otherwise AppImage bundle directories would ride along.
-        crate::appimage::scrub_command(&mut probe);
-        let out = probe.arg("-i").arg("-l").arg("-c").arg(&script).output();
+        let out = probe_command(&shell).arg("-i").arg("-l").arg("-c").arg(&script).output();
         let _ = tx.send(out);
     });
 
@@ -70,6 +67,19 @@ pub fn hydrate() {
         }
         std::env::set_var(&key, &value);
     }
+}
+
+/// The login-shell probe without its arguments. It runs the user's startup files, and whatever they
+/// launch may outlive the probe, so it gets the system environment (AppImage bundle directories would
+/// otherwise ride along) and never the `--serve` access password. `run_serve` already removes the
+/// password before calling hydrate; this is the second line of defence for any other caller order.
+fn probe_command(shell: &str) -> std::process::Command {
+    let mut probe = std::process::Command::new(shell);
+    crate::appimage::scrub_command(&mut probe);
+    for key in crate::SERVE_PASSWORD_ENV_KEYS {
+        probe.env_remove(key);
+    }
+    probe
 }
 
 /// Variables that describe the probing shell session itself rather than the user's configuration, and
@@ -158,6 +168,30 @@ mod tests {
         assert!(skip(OsStr::new("TERM_PROGRAM")));
         assert!(!skip(OsStr::new("PATH")));
         assert!(!skip(OsStr::new("DEEPSEEK_API_KEY")));
+    }
+
+    #[test]
+    fn probe_never_inherits_the_serve_password() {
+        let _guard = crate::SERVE_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let saved: Vec<_> = crate::SERVE_PASSWORD_ENV_KEYS
+            .iter()
+            .map(|key| (*key, std::env::var_os(key)))
+            .collect();
+        for key in crate::SERVE_PASSWORD_ENV_KEYS {
+            std::env::set_var(key, "probe-secret");
+        }
+        let out = probe_command("sh")
+            .arg("-c")
+            .arg("printf %s \"${VELA_SERVE_PASSWORD-unset}|${VLX_SERVE_PASSWORD-unset}\"")
+            .output()
+            .expect("sh must run");
+        for (key, value) in saved {
+            match value {
+                Some(v) => std::env::set_var(key, v),
+                None => std::env::remove_var(key),
+            }
+        }
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "unset|unset");
     }
 
     #[test]
