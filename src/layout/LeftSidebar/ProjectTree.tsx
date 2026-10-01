@@ -1199,9 +1199,13 @@ export function ProjectTree(h: TreeHandlers) {
     // The browser snapshots the drag image by the end of dragstart; remove the offscreen clone next frame.
     setTimeout(() => clone.remove(), 0);
   };
+  // The project being dragged, so a project row can refuse an order across kinds while hovering (a drag
+  // payload is unreadable during dragover).
+  const draggedProject = useRef<string | null>(null);
   const onDragStart = (payload: DragPayload) => (e: React.DragEvent) => {
     e.stopPropagation();
     let out = payload;
+    draggedProject.current = out.kind === "project" ? out.id : null;
     // Dragging a selected session carries every selected session in the same project. Mixed-project selection falls
     // back to one item, matching context-menu batch restrictions.
     if (payload.kind === "session" && selectedIds.has(payload.id) && selection.length >= 2) {
@@ -1261,6 +1265,8 @@ export function ProjectTree(h: TreeHandlers) {
     return y < h * 0.5 ? "top" : "bottom";
   };
   const allowDrop = (e: React.DragEvent, id: string, hasCenter: boolean) => {
+    // A dragged project is handled by the project row itself: a collection takes it in, another project
+    // orders it before or after.
     if (hasProjectDrag(e.dataTransfer.types)) return;
     e.preventDefault();
     e.stopPropagation();
@@ -1270,14 +1276,21 @@ export function ProjectTree(h: TreeHandlers) {
       prev?.id === id && prev.zone === zone ? prev : { id, zone },
     );
   };
-  // Project drops only change collection membership, so they always highlight the whole row, never an edge.
-  const allowProjectDrop = (e: React.DragEvent, id: string) => {
+  // A project row reads two gestures from a dragged project: its halves order the project before or after
+  // the row, its center moves the project into the row's collection (a loose row takes it out of one).
+  const allowProjectRowDrag = (e: React.DragEvent, id: string) => {
     if (!hasProjectDrag(e.dataTransfer.types)) return;
+    const zone = calcZone(e, true);
+    // Ordering happens only among projects of the same kind; a collection takes any project in.
+    const dragged = draggedProject.current;
+    if (zone !== "center" && dragged && (dragged === id || !sameProjectKind(dragged, id))) return;
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
-    setDragOver((prev) => (prev?.id === id && prev.zone === "center" ? prev : { id, zone: "center" }));
+    setDragOver((prev) => (prev?.id === id && prev.zone === zone ? prev : { id, zone }));
   };
+  const sameProjectKind = (a: string, b: string) =>
+    isVirtualProject(projects.find((p) => p.id === a)) === isVirtualProject(projects.find((p) => p.id === b));
   const sortBetween = (
     siblings: { id: string; sortOrder: number }[],
     targetId: string,
@@ -1345,6 +1358,18 @@ export function ProjectTree(h: TreeHandlers) {
     if (!p) return;
 
     if (p.kind === "project") {
+      // The halves order the project among its own kind; the center moves it into the row's collection,
+      // which a loose row answers by taking it out. Both are no-ops on itself and across kinds.
+      if (zone !== "center") {
+        if (p.id === projectId || !sameProjectKind(p.id, projectId)) return;
+        const virtual = isVirtualProject(target);
+        const siblings = projects
+          .filter((q) => isVirtualProject(q) === virtual)
+          .sort((a, b) => a.sortOrder - b.sortOrder);
+        const order = sortBetween(siblings, projectId, zone === "top" ? "before" : "after");
+        void moveNode("project", p.id, null, null, null, order);
+        return;
+      }
       const move = resolveProjectDrop(p, target, projects);
       // Failed moves recover the backend tree and retain a visible error.
       if (move) void setProjectCollection(move.projectId, move.collectionId).catch(() => {});
@@ -1597,7 +1622,7 @@ export function ProjectTree(h: TreeHandlers) {
             draggable={!renaming && !isShareSurface && !fixed}
             onDragStart={onDragStart({ kind: "project", id: p.id, projectId: p.id })}
             onDragOver={(e) =>
-              hasProjectDrag(e.dataTransfer.types) ? allowProjectDrop(e, p.id) : allowDrop(e, p.id, true)
+              hasProjectDrag(e.dataTransfer.types) ? allowProjectRowDrag(e, p.id) : allowDrop(e, p.id, true)
             }
             onDragLeave={() => setDragOver((d) => (d?.id === p.id ? null : d))}
             onDrop={dropOnProject(p)}

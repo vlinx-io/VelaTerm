@@ -55,7 +55,7 @@ A project menu then offers "New Group", "Mark", "Experimental" (Code Graph and C
 
 Other tree operations:
 
-- **Move**: drag nodes, or use "Move to…". A session can be moved under another session to become its child.
+- **Move**: drag nodes, or use "Move to…". A session can be moved under another session to become its child. Dragging a project onto a collection moves it in, and onto a loose project takes it out of one; the upper or lower half of a project row places it before or after that project instead (the order is saved and survives restarts). Collections always stay above projects, so collections are reordered among collections and projects among projects.
 - **Rename**: "Rename" edits the name in place. A session you do not name takes its name from your first message.
 - **Marks**: "Mark" adds an emoji marker to a project, group or session: 🔥 Urgent, ⭐ Important, 🐛 Bug, ✅ Done, 🚧 In progress, 📌 Pinned, 💡 Idea, ⚠️ Caution. Choosing the current marker again removes it.
 - **Multi-select**: ⌘/Ctrl-click toggles sessions, Shift-click selects a range. The context menu then offers "Open Selected Sessions", "Tile Selected Sessions" (two to four sessions), "Move Selected to…", "Archive Selected Sessions" and "Delete N Selected Items". Dragging a selection moves all of it.
