@@ -296,7 +296,19 @@ fn start(app: &AppCtx, request: Request) -> Result<Run> {
             .effort
             .as_deref()
             .is_some_and(|s| !s.trim().is_empty());
-    let catalog = if explicit {
+    let catalog = if explicit && kind == SessionKind::Claude {
+        // Acceptance is wider than the offer for Claude: the CLI's list is a shortlist, and a scan saved
+        // with an identifier it no longer names must still start (see claude_models::accepted_for_bin).
+        // The binary is the one `models` offers from, so both read the same catalogue cache.
+        let bin = crate::agent::executable::resolve(app, kind, None)
+            .unwrap_or_else(|| crate::agent::executable::command_name(kind).to_string());
+        serde_json::to_value(crate::agent::claude_models::accepted_for_bin(
+            app,
+            &bin,
+            request.model.as_deref(),
+        ))
+        .map_err(|e| e.to_string())?
+    } else if explicit {
         models(app, &request.agent)?
     } else {
         json!([])

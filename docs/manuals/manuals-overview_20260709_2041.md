@@ -2,7 +2,7 @@
 
 Created: 2026-07-09 20:41
 
-Updated: 2026-09-25 10:22
+Updated: 2026-09-29
 
 > `docs/manuals/` contains the VelaTerm user manuals. This page is the table of contents and reading guide. New users should read the first four manuals in order and consult the others as needed.
 
@@ -27,8 +27,9 @@ Updated: 2026-09-25 10:22
 | 15 | [Settings & Shortcuts](settings-and-shortcuts_20260709_2041.md) | Every item in the eight settings categories, default key bindings and rebinding, the new agent session picker | Reference |
 | 16 | [Remote Development & Management](remote-development-guide_20260709_2041.md) | Remote Access for other devices, connecting to other machines over SSH (including Windows hosts and mirroring the remote desktop app), a URL or your account, sharing through a VelaTerm account (experimental), file transfer, using VelaTerm on a phone, disconnecting and what survives, security | Remote and mobile use |
 | 17 | [Model Catalog Sync](model-catalog-sync_20260909.md) | Where the model lists come from, how the Claude catalog is updated, checking the catalog | Reference |
-| 18 | [Runtime Logs and Privacy](runtime-diagnostics_20260909.md) | Runtime log files and settings, investigating frozen windows, slow shell switching and SSH connections, what the logs record and what they leave out | Troubleshooting |
-| 19 | [Split Diagnostics](split-diagnostics_20260905_2027.md) | How split commands reach windows, the split events in the runtime log, regression checks | Troubleshooting |
+| 18 | [Claude Model Catalog](claude-model-catalog_20260922.md) | How the Claude model menus merge the website catalog with the models the installed Claude CLI reports: the merge rules, identifier folding, `availableModels`, cache, version check and Refresh | Reference |
+| 19 | [Runtime Logs and Privacy](runtime-diagnostics_20260909.md) | Runtime log files and settings, investigating frozen windows, slow shell switching and SSH connections, what the logs record and what they leave out | Troubleshooting |
+| 20 | [Split Diagnostics](split-diagnostics_20260905_2027.md) | How split commands reach windows, the split events in the runtime log, regression checks | Troubleshooting |
 
 ## Four ideas worth knowing first
 

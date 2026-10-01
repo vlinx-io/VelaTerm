@@ -2,7 +2,7 @@
 
 Created: 2026-09-09
 
-Updated: 2026-09-25 10:21
+Updated: 2026-09-29
 
 VelaTerm keeps the complete list of Claude models on velaterm.com, so new Claude models can appear in VelaTerm without an app update. This page explains where the model lists come from, how the Claude catalog stays up to date, and how to check its state.
 
@@ -10,7 +10,7 @@ VelaTerm keeps the complete list of Claude models on velaterm.com, so new Claude
 
 The same model list for each agent is used when you create a session or a child session, when you start a code audit, and when you organize a session into the knowledge base.
 
-- **Claude:** the catalog from velaterm.com, combined with the models the local Claude CLI reports and any models configured in Claude's `settings.json`. The models the CLI reports never replace the complete catalog. A model listed in the catalog is not necessarily available to your account.
+- **Claude:** the catalog from velaterm.com (the bundled catalog when none has been downloaded), combined with the models the installed Claude CLI reports and any models configured in Claude's `settings.json`. The models the CLI reports never replace the complete catalog: a model the CLI lists updates the matching catalog entry or is appended when the catalog does not list it yet. When Claude Code's `availableModels` setting is present, the menus offer only what it allows. A model listed in the catalog is not necessarily available to your account. How the CLI's models are read and merged is described in [Claude model catalogue: the website catalogue merged with the installed CLI](claude-model-catalog_20260922.md).
 - **Codex:** the list that the local Codex app server reports for your account. The website catalog is not used for Codex.
 - **OpenCode, Grok, Crush, Antigravity, Cursor, Pi, OMP and Kiro:** the list printed by the agent's own CLI.
 - **Kimi:** a fixed set of models.
@@ -26,10 +26,10 @@ The desktop app and browser clients connected to the same backend share one cata
 
 In a Claude session in the conversation view, hold Option (Alt on Windows and Linux) and click the model button below the message box. The model menu then also shows the catalog status:
 
-- the source: "Website model catalog", "Cached model catalog" or "Bundled model catalog", followed by the catalog version;
+- the source: "Installed Claude CLI", followed by the CLI version, once the installed Claude CLI has answered VelaTerm's model check; otherwise "Website model catalog", "Cached model catalog" or "Bundled model catalog", followed by the catalog version;
 - "Last checked: …";
 - "Update failed. The previous catalog is still available." when the last check failed;
-- a "Refresh" button that checks the website immediately.
+- a "Refresh" button that asks the installed Claude CLI again immediately and checks the website when that fails.
 
 ## Diagnostics
 

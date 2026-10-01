@@ -217,6 +217,15 @@ pub fn dispatch_shared(
     {
         return Err("Image uploads are unavailable through a public share".into());
     }
+    // A visitor reads the catalogue from the cache only: a public share must never start a process on
+    // the host. The backend decides this, not the visitor's client.
+    if cmd == "chat_models" {
+        return crate::command_core::chat_models_with(
+            app,
+            sid,
+            crate::agent::cli_model_catalog::Probe::CacheOnly,
+        );
+    }
     let safe_args = if cmd == "chat_start" {
         json!({"sessionId":sid})
     } else if cmd == "chat_permission" {
@@ -612,6 +621,16 @@ mod shared_surface_tests {
                     .is_err(),
                 "{cmd} must be denied on the shared surface"
             );
+        }
+        // A visitor's catalogue read never starts a process on the host: the session's binary is a fake
+        // that logs every invocation, and the list comes from the fallbacks (or the cache) instead.
+        #[cfg(unix)]
+        {
+            let bin = crate::agent::cli_model_catalog::testing::fake_bin(&dir, json!({"version": "2.1.280"}));
+            app.db().conn.lock().unwrap().execute("UPDATE sessions SET agent_path = ?1 WHERE id = ?2", [bin.as_str(), session.id.as_str()]).unwrap();
+            let models = dispatch_shared(&app, &scope, "chat_models", &json!({"sessionId": session.id}), "ws-test", origin).unwrap();
+            assert!(!models.as_array().unwrap().is_empty());
+            assert!(crate::agent::cli_model_catalog::testing::calls(&dir).is_empty(), "a share visitor must not spawn the CLI");
         }
         // Host-side UI writes are neutralized rather than run.
         assert_eq!(

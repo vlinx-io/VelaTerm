@@ -1,0 +1,172 @@
+{
+ "cli_version": "2.1.280",
+ "captured": "2026-09-22",
+ "note": "Recorded from `claude -p --input-format stream-json --output-format stream-json --verbose` fed the initialize and list_models control requests; account and pid removed, commands and agents shortened to two neutral entries. The models arrays are unchanged.",
+ "responses": [
+  {
+   "type": "control_response",
+   "response": {
+    "subtype": "success",
+    "request_id": "probe-init",
+    "response": {
+     "commands": [
+      {
+       "name": "compact",
+       "description": "Clear conversation history but keep a summary in context",
+       "argumentHint": ""
+      },
+      {
+       "name": "review",
+       "description": "Review a pull request",
+       "argumentHint": ""
+      }
+     ],
+     "agents": [
+      {
+       "name": "general-purpose",
+       "description": "General-purpose agent for researching complex questions"
+      },
+      {
+       "name": "Explore",
+       "description": "Fast agent specialized for exploring codebases"
+      }
+     ],
+     "output_style": "default",
+     "available_output_styles": [
+      "default",
+      "Proactive",
+      "Concise",
+      "Explanatory",
+      "Learning"
+     ],
+     "user_output_styles_dir": "/home/user/.claude/output-styles",
+     "models": [
+      {
+       "value": "default",
+       "resolvedModel": "claude-opus-5-5[1m]",
+       "displayName": "Default (recommended)",
+       "description": "Opus 5.5 with 1M context · Best for everyday, complex tasks",
+       "supportsEffort": true,
+       "supportedEffortLevels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "supportsAdaptiveThinking": true,
+       "supportsFastMode": true,
+       "supportsAutoMode": true
+      },
+      {
+       "value": "opus[1m]",
+       "resolvedModel": "claude-opus-5-5[1m]",
+       "displayName": "Opus (1M context)",
+       "description": "Opus 5.5 with 1M context · Best for everyday, complex tasks",
+       "supportsEffort": true,
+       "supportedEffortLevels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "supportsAdaptiveThinking": true,
+       "supportsFastMode": true,
+       "supportsAutoMode": true
+      },
+      {
+       "value": "claude-fable-5-1",
+       "resolvedModel": "claude-fable-5-1",
+       "displayName": "Fable",
+       "description": "Fable 5.1 · Most capable for your hardest and longest-running tasks",
+       "supportsEffort": true,
+       "supportedEffortLevels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "supportsAdaptiveThinking": true,
+       "supportsAutoMode": true
+      }
+     ],
+     "current_permission_mode": "dontAsk",
+     "hooks_applied": true,
+     "analytics_disabled": false,
+     "remote_control_auto_enable": false,
+     "remote_control_auto_connect_default": false,
+     "remote_control_available": true,
+     "remote_control_auto_on_by_default": false,
+     "ide_rc_auto_enable_gate": true,
+     "fast_mode_state": "off",
+     "fast_mode_disabled_reason": "sdk_opt_in_required"
+    },
+    "pending_permission_requests": [],
+    "pending_user_dialog_requests": []
+   }
+  },
+  {
+   "type": "control_response",
+   "response": {
+    "subtype": "success",
+    "request_id": "probe-list",
+    "response": {
+     "models": [
+      {
+       "value": "default",
+       "resolvedModel": "claude-opus-5-5[1m]",
+       "displayName": "Default (recommended)",
+       "description": "Opus 5.5 with 1M context · Best for everyday, complex tasks",
+       "supportsEffort": true,
+       "supportedEffortLevels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "supportsAdaptiveThinking": true,
+       "supportsFastMode": true,
+       "supportsAutoMode": true
+      },
+      {
+       "value": "opus[1m]",
+       "resolvedModel": "claude-opus-5-5[1m]",
+       "displayName": "Opus (1M context)",
+       "description": "Opus 5.5 with 1M context · Best for everyday, complex tasks",
+       "supportsEffort": true,
+       "supportedEffortLevels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "supportsAdaptiveThinking": true,
+       "supportsFastMode": true,
+       "supportsAutoMode": true
+      },
+      {
+       "value": "claude-fable-5-1",
+       "resolvedModel": "claude-fable-5-1",
+       "displayName": "Fable",
+       "description": "Fable 5.1 · Most capable for your hardest and longest-running tasks",
+       "supportsEffort": true,
+       "supportedEffortLevels": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+       ],
+       "supportsAdaptiveThinking": true,
+       "supportsAutoMode": true
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

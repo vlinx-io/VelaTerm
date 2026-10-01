@@ -52,7 +52,7 @@ pub fn list_models(app: &crate::host::AppCtx, agent: &str) -> Result<Vec<String>
     if agent == "claude" {
         let bin = super::executable::resolve(app, crate::models::SessionKind::Claude, None)
             .unwrap_or_else(|| "claude".into());
-        return Ok(super::claude_models::list_for_bin(&bin).into_iter().map(|m| m.id).collect());
+        return Ok(super::claude_models::list_for_bin(app, &bin).into_iter().map(|m| m.id).collect());
     }
     if agent == "codex" {
         let bin = super::executable::resolve(app, crate::models::SessionKind::Codex, None)

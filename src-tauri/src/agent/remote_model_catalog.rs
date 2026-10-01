@@ -32,6 +32,9 @@ pub struct Status {
     pub checked_at: Option<u64>,
     pub error: Option<String>,
     pub refreshing: bool,
+    /// Set when the list comes from the installed CLI (`source: "cli"`): its `--version` string.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cli_version: Option<String>,
 }
 #[derive(Default)]
 struct State { catalog: Option<Catalog>, status: Status, attempted_at: u64 }
@@ -72,7 +75,7 @@ pub fn models(installed: Option<(u32,u32,u32)>) -> Option<Vec<ClaudeModel>> {
     }).map(|m| ClaudeModel {
         id: m.id.clone(), label: m.label.clone(), description: m.description.clone(),
         context_window: m.context_window, effort_levels: m.effort_levels.clone(), curated: true,
-        large_context: m.id.ends_with("[1m]"), supports_fast_mode: m.supports_fast_mode,
+        large_context: m.id.ends_with("[1m]"), supports_fast_mode: m.supports_fast_mode, is_default: false,
     }).collect())
 }
 pub fn status() -> Status {
@@ -153,6 +156,17 @@ pub fn start(ctx: AppCtx) {
         if due { refresh(&ctx); }
         std::thread::sleep(Duration::from_secs(15));
     });
+}
+
+/// Replace the in-memory website catalogue; `None` clears it. Callers serialize through
+/// `cli_model_catalog::TEST_LOCK`.
+#[cfg(test)]
+pub(crate) fn set_for_tests(json: Option<&[u8]>) {
+    let catalog = json.map(|bytes| parse(bytes).expect("valid test catalogue"));
+    let mut guard = STATE.lock().unwrap();
+    let state = guard.get_or_insert_with(State::default);
+    state.status.source = if catalog.is_some() { "cache" } else { "bundled" }.into();
+    state.catalog = catalog;
 }
 
 #[cfg(test)]

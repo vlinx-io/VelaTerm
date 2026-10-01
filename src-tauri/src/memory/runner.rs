@@ -177,7 +177,25 @@ fn validate_selection(app: &AppCtx, agent: &str, model: &str, effort: &str) -> R
     if model.is_empty() && effort.is_empty() {
         return Ok(());
     }
-    let options = models(app, agent)?;
+    // Acceptance is wider than the offer for Claude: a job saved with an identifier the CLI's shortlist no
+    // longer names must still retry (see claude_models::accepted_for_bin).
+    let options = if agent == "claude" {
+        // The binary `models` offers from (launch_models without a parent session), so offer and
+        // acceptance read the same catalogue cache.
+        let kind = crate::models::SessionKind::Claude;
+        let bin = crate::agent::executable::resolve(app, kind, None)
+            .unwrap_or_else(|| crate::agent::executable::command_name(kind).to_string());
+        crate::agent::claude_models::accepted_for_bin(app, &bin, Some(model))
+            .into_iter()
+            .map(|m| ModelOption {
+                id: m.id,
+                label: m.label,
+                effort_levels: m.effort_levels,
+            })
+            .collect()
+    } else {
+        models(app, agent)?
+    };
     validate_model(&options, model, effort)
 }
 
