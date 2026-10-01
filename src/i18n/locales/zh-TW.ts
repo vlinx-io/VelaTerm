@@ -625,7 +625,7 @@ const zhTW: typeof en = {
   "settings.chatFontSize": "對話字級",
   "settings.chatLineHeight": "對話行高",
   "settings.composerChips": "輸入工具列",
-  "settings.composerChipsHint": "已開啟的項目會依此處順序顯示在訊息旁。功能暫時無法使用時，例如智慧代理未執行、沒有背景工作或尚未完成登入，項目仍會顯示，但為空白或無法操作。目前智慧代理不支援的功能不顯示。空間不足時，無法容納的項目會移至「更多」選單。在此關閉的項目僅顯示於該選單中，仍可在此設定。",
+  "settings.composerChipsHint": "已開啟的項目會依此處順序顯示在訊息旁。功能暫時無法使用時，例如智慧代理未執行、沒有背景工作或尚未完成登入，項目仍會顯示，但為空白或無法操作。目前智慧代理不支援的功能不顯示。空間不足時，無法容納的項目會移至「更多」選單。在此關閉的項目在重新開啟前不會顯示於任何位置。",
   "settings.composerChipUp": (chip: string) => `將${chip}上移`,
   "settings.composerChipDown": (chip: string) => `將${chip}下移`,
   "settings.composerChip.model": "模型",

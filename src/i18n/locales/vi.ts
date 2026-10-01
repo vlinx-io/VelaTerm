@@ -631,7 +631,7 @@ const vi: typeof en = {
   "settings.chatFontSize": "Cỡ chữ hội thoại",
   "settings.chatLineHeight": "Chiều cao dòng hội thoại",
   "settings.composerChips": "Thanh công cụ soạn tin",
-  "settings.composerChipsHint": "Các mục được bật xuất hiện cạnh tin nhắn theo thứ tự hiển thị ở đây. Khi một tính năng tạm thời không dùng được (tác nhân chưa chạy, không có tác vụ nền hoặc chưa đăng nhập xong), mục đó vẫn hiển thị nhưng trống hoặc bị vô hiệu hóa. Các tính năng mà tác nhân hiện tại không hỗ trợ sẽ không xuất hiện. Những mục không đủ chỗ sẽ chuyển vào menu Thêm. Các mục được tắt ở đây chỉ xuất hiện trong menu đó và vẫn có thể được cấu hình tại đây.",
+  "settings.composerChipsHint": "Các mục được bật xuất hiện cạnh tin nhắn theo thứ tự hiển thị ở đây. Khi một tính năng tạm thời không dùng được (tác nhân chưa chạy, không có tác vụ nền hoặc chưa đăng nhập xong), mục đó vẫn hiển thị nhưng trống hoặc bị vô hiệu hóa. Các tính năng mà tác nhân hiện tại không hỗ trợ sẽ không xuất hiện. Những mục không đủ chỗ sẽ chuyển vào menu Thêm. Các mục được tắt ở đây sẽ không hiển thị ở bất kỳ đâu cho đến khi bạn bật lại.",
   "settings.composerChipUp": (chip: string) => `Đưa ${chip} lên trên`,
   "settings.composerChipDown": (chip: string) => `Đưa ${chip} xuống dưới`,
   "settings.composerChip.model": "Mô hình",

@@ -635,7 +635,7 @@ const es: typeof en = {
   "settings.chatFontSize": "Tamaño de fuente de la conversación",
   "settings.chatLineHeight": "Interlineado de la conversación",
   "settings.composerChips": "Barra de herramientas del editor",
-  "settings.composerChipsHint": "Los elementos activados aparecen junto al mensaje en el orden indicado. Si una función no está disponible temporalmente (el agente no se está ejecutando, no hay tareas en segundo plano o el inicio de sesión está pendiente), su elemento sigue visible, pero vacío o desactivado. Se omiten las funciones que el agente actual no admite. Los elementos que no caben pasan al menú Más. Los elementos desactivados aquí solo aparecen en ese menú y se pueden seguir configurando aquí.",
+  "settings.composerChipsHint": "Los elementos activados aparecen junto al mensaje en el orden indicado. Si una función no está disponible temporalmente (el agente no se está ejecutando, no hay tareas en segundo plano o el inicio de sesión está pendiente), su elemento sigue visible, pero vacío o desactivado. Se omiten las funciones que el agente actual no admite. Los elementos que no caben pasan al menú Más. Los elementos desactivados aquí no se muestran en ningún lugar hasta que los vuelva a activar.",
   "settings.composerChipUp": (chip: string) => `Subir ${chip}`,
   "settings.composerChipDown": (chip: string) => `Bajar ${chip}`,
   "settings.composerChip.model": "Modelo",

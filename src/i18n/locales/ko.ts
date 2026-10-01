@@ -633,7 +633,7 @@ const ko: typeof en = {
   "settings.chatFontSize": "대화 글꼴 크기",
   "settings.chatLineHeight": "대화 줄 높이",
   "settings.composerChips": "메시지 입력 도구 모음",
-  "settings.composerChipsHint": "켜진 항목은 여기에 표시된 순서대로 메시지 옆에 나타납니다. 에이전트가 실행 중이 아니거나, 백그라운드 작업이 없거나, 로그인이 완료되지 않아 기능을 일시적으로 사용할 수 없을 때도 해당 항목은 비어 있거나 비활성화된 상태로 표시됩니다. 현재 에이전트가 지원하지 않는 기능은 표시하지 않습니다. 공간이 부족한 항목은 더 보기 메뉴로 이동합니다. 여기서 끈 항목은 해당 메뉴에만 표시되며, 설정은 계속 여기서 변경할 수 있습니다.",
+  "settings.composerChipsHint": "켜진 항목은 여기에 표시된 순서대로 메시지 옆에 나타납니다. 에이전트가 실행 중이 아니거나, 백그라운드 작업이 없거나, 로그인이 완료되지 않아 기능을 일시적으로 사용할 수 없을 때도 해당 항목은 비어 있거나 비활성화된 상태로 표시됩니다. 현재 에이전트가 지원하지 않는 기능은 표시하지 않습니다. 공간이 부족한 항목은 더 보기 메뉴로 이동합니다. 여기서 끈 항목은 다시 켤 때까지 어디에도 표시되지 않습니다.",
   "settings.composerChipUp": (chip: string) => `${chip} 위로 이동`,
   "settings.composerChipDown": (chip: string) => `${chip} 아래로 이동`,
   "settings.composerChip.model": "모델",

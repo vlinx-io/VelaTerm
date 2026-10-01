@@ -1597,39 +1597,35 @@ it("shows Claude-specific login failures and folds a confirmed cancellation", as
   expect(screen.getByRole("button", { name: "Claude account" })).toBeTruthy();
 });
 
-it("keeps hidden chips in More and follows the inline preference at runtime", async () => {
-  // Inline preferences control placement; hidden available chips remain reachable through More.
+it("renders only the chips that are on and follows the inline preference at runtime", async () => {
+  // Chips that are off are not rendered anywhere, not even behind More.
   useTermStore.setState({ composerInlineChips: [...DEFAULT_COMPOSER_INLINE_CHIPS] });
   const { container } = await mountPane("codex");
   expect(screen.getByRole("combobox", { name: "Model" })).toBeTruthy();
   expect(screen.getByRole("combobox", { name: "Thinking effort" })).toBeTruthy();
   expect(screen.getByRole("combobox", { name: "Permission mode" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Codex account" })).toBeNull();
-  expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
-  expect(container.querySelector(".sv-controls-secondary")?.getAttribute("aria-hidden")).toBe("true");
+  expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+  expect(container.querySelector(".sv-controls-secondary")).toBeNull();
   const inline = [...container.querySelectorAll(".sv-controls-primary .sv-chip-slot")].map((el) => (el as HTMLElement).dataset.chip);
   expect(inline).toEqual(["model", "effort", "permission"]);
-  fireEvent.click(screen.getByRole("button", { name: "More" }));
-  expect(screen.getByRole("button", { name: "Codex account" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "More" }));
   // Changing the preference reorders and reveals chips without a remount.
   act(() => useTermStore.setState({ composerInlineChips: ["account", "permission"] }));
   expect(screen.getByRole("button", { name: "Codex account" })).toBeTruthy();
   expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
   expect([...container.querySelectorAll(".sv-controls-primary .sv-chip-slot")].map((el) => (el as HTMLElement).dataset.chip)).toEqual(["account", "permission"]);
-  expect(screen.getByRole("button", { name: "More" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "More" })).toBeNull();
 });
 
-it("keeps every offered chip reachable when all inline chips are off", async () => {
+it("renders no chip and no More when every chip is off", async () => {
   useTermStore.setState({ composerInlineChips: [] });
   snapshotOverrides = { running: false };
   const { container } = await mountPane("codex", null);
-  expect(container.querySelectorAll(".sv-controls-primary .sv-chip-slot")).toHaveLength(0);
-  expect(container.querySelector(".sv-controls-secondary")?.hasAttribute("inert")).toBe(true);
-  fireEvent.click(screen.getByRole("button", { name: "More" }));
-  expect(await screen.findByRole("combobox", { name: "Model" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Codex account" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "MCP" }).hasAttribute("disabled")).toBe(true);
+  expect(container.querySelectorAll(".sv-chip-slot")).toHaveLength(0);
+  expect(container.querySelector(".sv-controls-secondary")).toBeNull();
+  expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+  expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Codex account" })).toBeNull();
   expect(vi.mocked(invoke).mock.calls.some(call => call[0] === "chat_mcp_status")).toBe(false);
 });
 

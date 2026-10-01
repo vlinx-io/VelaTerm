@@ -635,7 +635,7 @@ const fr: typeof en = {
   "settings.chatFontSize": "Taille de police de la conversation",
   "settings.chatLineHeight": "Interligne de la conversation",
   "settings.composerChips": "Barre d’outils de saisie",
-  "settings.composerChipsHint": "Les éléments activés s’affichent à côté du message dans l’ordre indiqué. Si une fonction est temporairement indisponible (agent arrêté, aucune tâche en arrière-plan ou connexion au compte en attente), son élément reste visible, mais vide ou désactivé. Les fonctions non prises en charge par l’agent actuel sont omises. Les éléments qui ne tiennent pas dans la barre passent dans le menu Plus. Les éléments désactivés ici apparaissent uniquement dans ce menu et restent configurables ici.",
+  "settings.composerChipsHint": "Les éléments activés s’affichent à côté du message dans l’ordre indiqué. Si une fonction est temporairement indisponible (agent arrêté, aucune tâche en arrière-plan ou connexion au compte en attente), son élément reste visible, mais vide ou désactivé. Les fonctions non prises en charge par l’agent actuel sont omises. Les éléments qui ne tiennent pas dans la barre passent dans le menu Plus. Les éléments désactivés ici ne s’affichent nulle part tant que vous ne les réactivez pas.",
   "settings.composerChipUp": (chip: string) => `Monter ${chip}`,
   "settings.composerChipDown": (chip: string) => `Descendre ${chip}`,
   "settings.composerChip.model": "Modèle",

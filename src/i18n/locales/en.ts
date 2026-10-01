@@ -634,7 +634,7 @@ const en = {
   "settings.chatFontSize": "Conversation font size",
   "settings.chatLineHeight": "Conversation line height",
   "settings.composerChips": "Composer toolbar",
-  "settings.composerChipsHint": "Enabled items appear beside the message in the order shown here. If a feature is temporarily unavailable (the agent is not running, there are no background tasks, or sign-in is pending), its item remains visible but empty or disabled. Features the current agent does not support are omitted. Items that do not fit move to the More menu. Items switched off here appear only in that menu and remain configurable here.",
+  "settings.composerChipsHint": "Enabled items appear beside the message in the order shown here. If a feature is temporarily unavailable (the agent is not running, there are no background tasks, or sign-in is pending), its item remains visible but empty or disabled. Features the current agent does not support are omitted. Items that do not fit move to the More menu. Items switched off here are not shown anywhere until you switch them on again.",
   "settings.composerChipUp": (chip: string) => `Move ${chip} up`,
   "settings.composerChipDown": (chip: string) => `Move ${chip} down`,
   "settings.composerChip.model": "Model",

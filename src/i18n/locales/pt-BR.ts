@@ -635,7 +635,7 @@ const ptBR: typeof en = {
   "settings.chatFontSize": "Tamanho da fonte da conversa",
   "settings.chatLineHeight": "Altura da linha da conversa",
   "settings.composerChips": "Barra de ferramentas de mensagens",
-  "settings.composerChipsHint": "Os itens ativados aparecem ao lado da mensagem na ordem indicada. Se um recurso estiver temporariamente indisponível (o agente não está em execução, não há tarefas em segundo plano ou o login está pendente), seu item continua visível, mas vazio ou desabilitado. Os recursos não compatíveis com o agente atual são omitidos. Os itens que não couberem vão para o menu Mais. Os itens desativados aqui aparecem apenas nesse menu e continuam podendo ser configurados aqui.",
+  "settings.composerChipsHint": "Os itens ativados aparecem ao lado da mensagem na ordem indicada. Se um recurso estiver temporariamente indisponível (o agente não está em execução, não há tarefas em segundo plano ou o login está pendente), seu item continua visível, mas vazio ou desabilitado. Os recursos não compatíveis com o agente atual são omitidos. Os itens que não couberem vão para o menu Mais. Os itens desativados aqui não aparecem em lugar nenhum até que você os ative novamente.",
   "settings.composerChipUp": (chip: string) => `Mover ${chip} para cima`,
   "settings.composerChipDown": (chip: string) => `Mover ${chip} para baixo`,
   "settings.composerChip.model": "Modelo",

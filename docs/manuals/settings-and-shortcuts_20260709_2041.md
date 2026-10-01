@@ -54,7 +54,7 @@ These settings apply to the conversation view of agent sessions; see [Conversati
 
 Controls that the current agent or model does not support are not shown. A supported control stays visible when its feature is temporarily unavailable, for example MCP servers and Background tasks while the agent process is stopped.
 
-Controls that are switched off, and controls that do not fit beside the message box, are in the **More** menu, so you can use every supported control without first switching it on here. More is not shown when all supported controls are on and fit. A control that is switched off and on again moves to the end of the row. On mobile, controls that are off appear in a second row.
+A chip that is off is not shown anywhere, neither beside the input nor in **More**; turn it on in Settings to use it again. Turning a chip off and on again places it at the end of the inline order. On desktop, **More** appears only when the chips that are on do not all fit beside the input, and it contains exactly those overflowed chips. Temporarily disabled controls remain disabled in More. On mobile, the chips that are on wrap beside the input and there is no More.
 
 ## 5. Behavior
 

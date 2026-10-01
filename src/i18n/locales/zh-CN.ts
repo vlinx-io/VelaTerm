@@ -624,7 +624,7 @@ const zhCN: typeof en = {
   "settings.chatFontSize": "会话字号",
   "settings.chatLineHeight": "会话行高",
   "settings.composerChips": "输入工具栏",
-  "settings.composerChipsHint": "已开启的项目按此处顺序显示在消息旁。功能暂不可用时，例如智能体未运行、没有后台任务或尚未完成登录，项目仍会显示，但为空或不可操作。当前智能体不支持的功能不显示。空间不足时，放不下的项目会移入“更多”菜单。此处关闭的项目仅显示在该菜单中，仍可在此配置。",
+  "settings.composerChipsHint": "已开启的项目按此处顺序显示在消息旁。功能暂不可用时，例如智能体未运行、没有后台任务或尚未完成登录，项目仍会显示，但为空或不可操作。当前智能体不支持的功能不显示。空间不足时，放不下的项目会移入“更多”菜单。此处关闭的项目在重新开启前不会显示在任何位置。",
   "settings.composerChipUp": (chip: string) => `将${chip}上移`,
   "settings.composerChipDown": (chip: string) => `将${chip}下移`,
   "settings.composerChip.model": "模型",

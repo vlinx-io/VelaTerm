@@ -633,7 +633,7 @@ const ja: typeof en = {
   "settings.chatFontSize": "会話の文字サイズ",
   "settings.chatLineHeight": "会話の行の高さ",
   "settings.composerChips": "メッセージ入力ツールバー",
-  "settings.composerChipsHint": "有効にした項目は、この順序でメッセージの横に表示されます。エージェントが起動していない、バックグラウンドタスクがない、ログインが未完了など、機能が一時的に利用できない場合も、項目は空または無効の状態で表示されます。現在のエージェントが対応していない機能は表示されません。収まらない項目は「その他」メニューに移動します。ここでオフにした項目は、そのメニューにのみ表示され、設定は引き続きここで変更できます。",
+  "settings.composerChipsHint": "有効にした項目は、この順序でメッセージの横に表示されます。エージェントが起動していない、バックグラウンドタスクがない、ログインが未完了など、機能が一時的に利用できない場合も、項目は空または無効の状態で表示されます。現在のエージェントが対応していない機能は表示されません。収まらない項目は「その他」メニューに移動します。ここでオフにした項目は、再びオンにするまでどこにも表示されません。",
   "settings.composerChipUp": (chip: string) => `${chip}を上へ移動`,
   "settings.composerChipDown": (chip: string) => `${chip}を下へ移動`,
   "settings.composerChip.model": "モデル",

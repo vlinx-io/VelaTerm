@@ -8,9 +8,9 @@ import { arrangeComposerChips, partitionComposerChips, type ComposerChip } from 
 const CHIP_GAP = 6;
 
 /**
- * The chips the user turned on stay beside the message in their chosen order. On the desktop the row is
- * measured before paint; chips that do not fit fold into a More row together with the chips that are
- * off, and the More toggle exists only while something is folded. Mobile keeps both rows visible.
+ * The chips the user turned on stay beside the message in their chosen order; chips that are off are not
+ * rendered anywhere. On the desktop the row is measured before paint, chips that do not fit fold into a
+ * More row, and the More toggle exists only while something is folded. Mobile wraps all of them inline.
  */
 export function ComposerToolbar({ chips, inline, actions, status, mobile }: {
   chips: ComposerChip[];
@@ -33,10 +33,10 @@ export function ComposerToolbar({ chips, inline, actions, status, mobile }: {
   const observed = useRef(new Set<Element>());
   const [, remeasure] = useReducer((n: number) => n + 1, 0);
 
-  const { enabled, hidden } = arrangeComposerChips(chips, inline);
+  const { enabled } = arrangeComposerChips(chips, inline);
   const inlineChips = mobile || !layout.overflow ? enabled : enabled.slice(0, layout.inlineCount);
-  const folded = mobile ? hidden : [...enabled.slice(inlineChips.length), ...hidden];
-  const showToggle = !mobile && chips.length > 0 && (hidden.length > 0 || layout.overflow);
+  const folded = mobile ? [] : enabled.slice(inlineChips.length);
+  const showToggle = !mobile && folded.length > 0;
   const open = mobile || (showToggle && expanded);
 
   useLayoutEffect(() => {
@@ -89,7 +89,6 @@ export function ComposerToolbar({ chips, inline, actions, status, mobile }: {
       primary.current.getBoundingClientRect().width,
       moreWidth.current,
       CHIP_GAP,
-      hidden.length > 0,
     );
     if (next.inlineCount !== layout.inlineCount || next.overflow !== layout.overflow) setLayout(next);
     if (!next.overflow && expanded) setExpanded(false);
@@ -124,7 +123,7 @@ export function ComposerToolbar({ chips, inline, actions, status, mobile }: {
       <div className={mobile ? "sv-controls-primary sv-controls-primary-wrap" : "sv-controls-primary"} ref={primary}
         style={!mobile && showToggle ? { minWidth: `min(100%, ${moreWidth.current}px)` } : undefined}>
         {inlineChips.map(slot)}
-        {!mobile && chips.length > 0 && <button type="button" className="sv-chip sv-more-toggle" ref={toggle}
+        {!mobile && enabled.length > 0 && <button type="button" className="sv-chip sv-more-toggle" ref={toggle}
           aria-hidden={!showToggle || undefined} inert={!showToggle} tabIndex={showToggle ? undefined : -1}
           style={showToggle ? { maxWidth: "100%", overflow: "hidden" } : {
             position: "absolute", visibility: "hidden", pointerEvents: "none", width: "max-content",

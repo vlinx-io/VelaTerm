@@ -40,7 +40,6 @@ export function partitionComposerChips(
   available: number,
   moreWidth: number,
   gap: number,
-  hasHidden = false,
 ): { inlineCount: number; overflow: boolean } {
   // Unmeasured items take neither width nor a gap, so a row nobody has measured yet always fits.
   const rowWidth = (count: number, extra: number) => {
@@ -53,7 +52,7 @@ export function partitionComposerChips(
     }
     return total + Math.max(0, items - 1) * gap;
   };
-  if (!hasHidden && rowWidth(widths.length, 0) <= available) return { inlineCount: widths.length, overflow: false };
+  if (rowWidth(widths.length, 0) <= available) return { inlineCount: widths.length, overflow: false };
   let inlineCount = 0;
   while (inlineCount < widths.length && rowWidth(inlineCount + 1, moreWidth) <= available) inlineCount += 1;
   return { inlineCount, overflow: true };
