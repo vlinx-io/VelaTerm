@@ -1503,7 +1503,9 @@ impl ChatManager {
             claude_models: Mutex::new(Vec::new()),
             // A resumed transcript is already addressable before the provider emits its first user turn.
             // The native session event still replaces this value when the provider confirms its identity.
-            agent_session_id: Mutex::new(resume.map(str::to_string)),
+            // A fork has no identity until then: the source it reads from is not the conversation it
+            // writes, and nothing may address the source on its behalf.
+            agent_session_id: Mutex::new(resume.filter(|_| !(fork && kind == SessionKind::Claude)).map(str::to_string)),
             settings_change: Mutex::new(()),
             model: Mutex::new(model.map(str::to_string)),
             effort: Mutex::new(effort.map(str::to_string)),
@@ -1552,7 +1554,7 @@ impl ChatManager {
         // Restore history before notifying clients of the new process. The reset carries this
         // timeline so a pending submission never becomes the only visible message during replay.
         if let Some(id) = resume {
-            match super::history::replay(kind, id) {
+            match super::history::replay(kind, id, cwd.map(std::path::Path::new)) {
                 Ok(rows) => {
                     let mut timeline = proc.timeline.lock().unwrap();
                     timeline.replace_all(rows);
@@ -2779,6 +2781,46 @@ impl ChatManager {
         Ok(())
     }
 
+    /// Refuse to put another conversation behind this session while anything of the current one is still
+    /// in flight: a turn, queued messages, a shell command, background tasks or an unanswered permission.
+    /// A process that is not running, or was never started, has nothing in flight.
+    pub fn ensure_switch_idle(&self, session_id: &str) -> Result<(), String> {
+        const BUSY: &str = "chat_resume_busy";
+        if self.shell_runs.lock().unwrap().contains_key(session_id) {
+            return Err(BUSY.into());
+        }
+        let Some(proc) = self.sessions.lock().unwrap().get(session_id).cloned() else {
+            return Ok(());
+        };
+        if !proc.alive.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+        {
+            let turn = proc.turn.lock().unwrap();
+            if turn.running
+                || !turn.waiting.is_empty()
+                || proc.shell_running.load(Ordering::Relaxed)
+                || !turn.active_tasks.is_empty()
+                || !turn.background_tasks.is_empty()
+            {
+                return Err(BUSY.into());
+            }
+        }
+        if !proc.permissions.lock().unwrap().is_empty() {
+            return Err(BUSY.into());
+        }
+        Ok(())
+    }
+
+    /// Whether Claude's fast mode was last on for this session's process, running or already released.
+    pub fn fast_mode(&self, session_id: &str) -> bool {
+        self.sessions
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .is_some_and(|proc| proc.extras.lock().unwrap().fast_mode)
+    }
+
     /// A view is showing this conversation again, so a release it asked for earlier no longer applies.
     ///
     /// Nothing else happens here: the process, if any, keeps running, and one that already went is started
@@ -3696,6 +3738,14 @@ fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, line: &s
                 settle_background_state(app, session_id, proc);
             }
             release_if_idle(app, session_id, proc);
+        }
+        // The same mapping as the handshake's list, so a menu refreshed mid-session reads exactly like one
+        // read at start.
+        Incoming::Commands(list) => {
+            if let Ok(commands) = skills::claude_commands(&json!({ "commands": list })) {
+                *proc.commands.lock().unwrap() = commands.clone();
+                emit(app, session_id, json!({"type":"commands","commands":commands}));
+            }
         }
         Incoming::LocalCommand { id, text } => {
             proc.timeline.lock().unwrap().upsert(ChatRow::Command { id, text });
@@ -8098,6 +8148,19 @@ mod tests {
         assert_eq!(events.load(Ordering::Relaxed), 1);
     }
 
+    /// A slash command sent first leaves the placeholder name alone; the first real prompt names it.
+    #[test]
+    fn chat_title_skips_a_slash_command_sent_first() {
+        let (app, manager, events) = title_fixture("title-slash", SessionKind::Claude, "Claude 1");
+        manager.send(&app, "s", "/effort high", Vec::new(), "queue").unwrap();
+        finish_turn(&manager, &app, "s", "success");
+        assert_eq!(stored_title(&app), "Claude 1");
+        assert_eq!(events.load(Ordering::Relaxed), 0);
+        manager.send(&app, "s", "Fix the build", Vec::new(), "queue").unwrap();
+        assert_eq!(stored_title(&app), "Fix the build");
+        assert_eq!(events.load(Ordering::Relaxed), 1);
+    }
+
     /// Nothing running means nothing to wait for: the message goes straight out.
     #[test]
     fn a_message_sent_to_an_idle_agent_goes_out_at_once() {
@@ -9253,6 +9316,24 @@ mod tests {
         assert!(manager.snapshot("s").rows.iter().any(|row| matches!(row, ChatRow::Tool { output: Some(output), .. } if output == "done")));
     }
 
+    /// A mid-session change to the command list replaces the one the handshake reported.
+    #[test]
+    fn commands_changed_replaces_the_command_list() {
+        let app = ctx("commands-changed");
+        let proc = inert_process(SessionKind::Claude);
+        *proc.commands.lock().unwrap() = vec![json!({"name":"old","invocation":"/"})];
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"commands_changed","commands":[{"name":"clear","aliases":["reset","new"],"builtin":true},{"name":"mine"}]}"#);
+        let commands = proc.commands.lock().unwrap().clone();
+        assert_eq!(commands.len(), 2);
+        assert_eq!(commands[0]["name"], "clear");
+        assert_eq!(commands[0]["aliases"], json!(["reset", "new"]));
+        assert_eq!(commands[0]["builtin"], true);
+        assert!(commands.iter().all(|command| command["invocation"] == "/"));
+        // A frame without a list keeps what is there.
+        handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"commands_changed"}"#);
+        assert_eq!(proc.commands.lock().unwrap().len(), 2);
+    }
+
     /// A foreground task is over once its turn ends, whether or not its final frame arrived; one moved to
     /// the background in the meantime still counts.
     #[test]
@@ -9290,6 +9371,46 @@ mod tests {
         let proc = inert_process(SessionKind::Claude);
         handle_line(&app, "s", &proc, r#"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b1","task_type":"local_bash","description":"Build jdk21u"}]}"#);
         assert_eq!(ensure_rewind_idle(&proc).unwrap_err(), "Wait for background tasks to finish before rewinding: Build jdk21u");
+    }
+
+    /// Another conversation may take this session's place only when nothing of the current one is in
+    /// flight. A session whose agent never started, or already went, has nothing in flight.
+    #[test]
+    fn switching_conversations_waits_for_everything_in_flight() {
+        let manager = ChatManager::new();
+        assert_eq!(manager.ensure_switch_idle("s"), Ok(()));
+        assert!(!manager.fast_mode("s"));
+        let proc = inert_process(SessionKind::Claude);
+        manager.sessions.lock().unwrap().insert("s".into(), proc.clone());
+        assert_eq!(manager.ensure_switch_idle("s"), Ok(()));
+        let busy = |manager: &ChatManager| manager.ensure_switch_idle("s").unwrap_err();
+
+        proc.turn.lock().unwrap().running = true;
+        assert_eq!(busy(&manager), "chat_resume_busy");
+        proc.turn.lock().unwrap().running = false;
+        proc.turn.lock().unwrap().waiting.push(QueuedMessage { id: "q1".into(), text: "next".into(), images: vec![] });
+        assert_eq!(busy(&manager), "chat_resume_busy");
+        proc.turn.lock().unwrap().waiting.clear();
+        proc.shell_running.store(true, Ordering::Relaxed);
+        assert_eq!(busy(&manager), "chat_resume_busy");
+        proc.shell_running.store(false, Ordering::Relaxed);
+        proc.turn.lock().unwrap().active_tasks.insert("agent".into());
+        assert_eq!(busy(&manager), "chat_resume_busy");
+        proc.turn.lock().unwrap().active_tasks.clear();
+        proc.turn.lock().unwrap().background_tasks.insert("shell".into());
+        assert_eq!(busy(&manager), "chat_resume_busy");
+        proc.turn.lock().unwrap().background_tasks.clear();
+        proc.permissions.lock().unwrap().insert("p1".into(), json!({}));
+        assert_eq!(busy(&manager), "chat_resume_busy");
+        proc.permissions.lock().unwrap().clear();
+        assert_eq!(manager.ensure_switch_idle("s"), Ok(()));
+
+        // A released process keeps its last state in the table but runs nothing.
+        proc.turn.lock().unwrap().running = true;
+        proc.alive.store(false, Ordering::Relaxed);
+        assert_eq!(manager.ensure_switch_idle("s"), Ok(()));
+        proc.extras.lock().unwrap().fast_mode = true;
+        assert!(manager.fast_mode("s"), "the restart keeps what the stopped process had on");
     }
 
     /// A turn Claude opens by itself, answering a finished background task, reports working to the

@@ -45,6 +45,8 @@ const commands = new Set([
   "chat_queue_steer",
   "chat_queue_update",
   "chat_restart_permission_mode",
+  "chat_resume",
+  "chat_resume_list",
   "chat_review",
   "chat_rewind",
   "chat_rewind_preview",

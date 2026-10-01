@@ -29,7 +29,7 @@ If the agent is working, VelaTerm asks first: "Switching views restarts the agen
 
 The message box says "Message the agent, or use /commands, /skills and @files". Enter sends; Shift+Enter adds a line. With the cursor at the start or end of the text, ↑ and ↓ bring back your earlier messages from this conversation.
 
-A new conversation shows "Type below to start the conversation." The agent process starts when you send the first message.
+A new conversation shows "Type below to start the conversation." The agent process starts when you send the first message. A new Claude conversation also offers "Resume an earlier conversation"; see §7.
 
 ### While the agent is working
 
@@ -100,16 +100,75 @@ Paste or drop images into the message box. A message can carry up to 4 images of
 
 Type `/` to list commands and `@` to insert a file path. Tab or Enter inserts the highlighted suggestion; Esc closes the list. For Claude and Codex, the list includes the agent's own commands and skills.
 
+The list only offers commands of this session's agent: a Codex, Pi, OMP or OpenCode session never lists Claude's commands, and a Claude-only name such as `/status` typed there is sent to that agent as a normal message. Typing an alias finds its command: in Claude, `/cost` lists `/usage` and `/settings` lists `/config`. The list shows and inserts the command's own name.
+
+Each row carries a small tag that says what sending the command does. Hover over the tag for a longer explanation.
+
+| Tag | What happens |
+|-----|--------------|
+| The agent's name, for example "Claude Code" | The command is sent to the agent as typed, and the agent answers it |
+| VelaTerm | VelaTerm handles the command itself |
+| Picker | A VelaTerm picker opens |
+| Terminal | The session moves to the terminal view with the command typed in (see below) |
+
+VelaTerm's own commands come first, then the agent's commands, then the terminal commands. For a command VelaTerm handles or moves to the terminal view, Enter on the complete name runs it at once; for the agent's own commands, Enter first completes the name.
+
 VelaTerm handles these commands itself:
 
 | Command | Agents | What happens |
 |---------|--------|--------------|
-| `/clear` (also `/new`) | All five | Archives this session and replaces it, in the same pane, with a new empty session that has the same settings |
-| `/rewind` | Claude, Codex, OpenCode | Opens the rewind menu on your latest message (see §8) |
+| `/clear` (also `/new`; in Claude also `/reset`) | All five | Archives this session and replaces it, in the same pane, with a new empty session that has the same settings |
+| `/resume` (in Claude also `/continue`) | Claude | Opens the list of earlier conversations of this directory, to continue one here or fork from it (see below) |
+| `/rewind` (in Claude also `/checkpoint` and `/undo`) | Claude, Codex, OpenCode | Opens the rewind menu on your latest message (see §8) |
+| `/fork`, `/branch` | Claude | Same as "Fork Session" in the session's context menu: a new sibling session starts from this conversation's history. Needs a conversation; before the first message, VelaTerm says the command is not available here |
+| `/export` | Claude | Same as "Export Session…" in the session's context menu: writes the conversation to a Markdown file |
 | `/compact` | Codex, OpenCode, Pi, OMP | Summarizes the conversation to free up context |
 | `/review` | Codex | Asks Codex to review code; accepts `branch <name>`, `commit <sha>` or instructions |
 | `/undo`, `/redo` | OpenCode | Reverts the last message and its file changes, or restores what the last undo reverted |
 | `/share`, `/unshare` | OpenCode | Creates or removes a link that shares the conversation |
+
+`/clear`, `/new` and `/rewind` keep their earlier rule wherever they exist, and in Claude their aliases `/reset`, `/checkpoint` and `/undo` follow it too: with text after the name, with images attached, or when sent with Steer, the text is sent to the agent as a normal message. In Claude, `/fork`, `/branch` and `/export` take no text after the name. With text after them, the message box says "… takes no arguments in the conversation view.", nothing is sent, and your text stays. If a fork fails, your text comes back.
+
+### Claude commands from the terminal interface
+
+In a Claude session, the list also offers the commands that Claude Code has only in its terminal interface, such as `/status`, `/memory`, `/hooks`, `/permissions`, `/plugin`, `/help`, `/diff`, `/login` and `/add-dir`. They are tagged "Terminal". Their aliases work too: `/allowed-tools`, for example, stands for `/permissions`. Commands that the terminal interface shows only with a matching provider, account or feature, such as `/setup-bedrock`, `/setup-vertex` or `/install-slack-app`, are listed as well; where such a command is off, Claude says so in the terminal view after the switch.
+
+Sending one of them switches the session to the terminal view and types the command, with any text after it, into Claude's prompt. VelaTerm does not press Enter: check the command, then press Enter yourself to run it. Line breaks and other control characters are never typed; each becomes a space. If another window of the same session starts the terminal view first, VelaTerm does not type the command there, so it can never land on that window's shell command line; type it yourself. The switch works like the switch button in the pane header: if the agent is working, VelaTerm asks first, and the agent restarts in the terminal view. The message box keeps your text until the server has switched, and a line above it says that the switch is running: if you cancel the question or the switch fails, your text stays where it is, including anything you typed meanwhile. Sending the command again while a switch is running does nothing. When the request fails, VelaTerm reads the session again before undoing anything: if the switch did happen, for example because only the connection dropped after the server switched, the command waits in the terminal view and no error appears. If the session cannot be read either, VelaTerm shows the error, leaves your text in the message box and also keeps the command for the terminal view until it sees which view the session is in. VelaTerm does not switch back on its own; use the robot button ("Conversation view") to return. Changes that Claude saves to disk, such as memory files, plugins, permission rules, settings or the sign-in, apply after you return. Changes that last only for that terminal session, such as a directory added with `/add-dir` or plan mode, do not carry back.
+
+Not yet verified in a live run: the typed text relies on the terminal keeping input typed while Claude starts. If the shell drops that input, the terminal view opens with an empty Claude prompt; nothing runs, because no Enter is sent.
+
+Commands that Claude Code answers in the conversation view itself, such as `/config`, `/usage`, `/compact`, `/context` or `/model`, are sent to Claude as typed and tagged "Claude Code". When Claude reports a command itself, that one is used: a user's, project's or plugin's own `/status`, for example, is sent to Claude instead of opening the terminal view. The descriptions of the rows tagged "Claude Code" or "Terminal" are Claude Code's own English text.
+
+Some commands have no meaning in the conversation view and are not listed. Typed and sent, they are not forwarded; the message box says why, and your text stays:
+
+- Commands that only change Claude's terminal interface, such as `/theme`, `/vim`, `/statusline`, `/keybindings` or `/terminal-setup`: "… only changes the agent's terminal interface and has no effect in the conversation view."
+- Commands for things VelaTerm manages, such as `/exit` (also `/quit`), `/desktop`, `/mobile`, `/cd` or `/stop`: "… is not available in the conversation view: VelaTerm manages this session itself."
+
+A name that no list knows is sent to the agent as typed.
+
+While Claude runs, it can report a changed command list, for example after plugins or skills were reloaded. The `/` list follows that change.
+
+**Automatic names.** A session you did not name takes its name from your first message. A slash command, such as `/init` or `/effort high`, does not count: the session keeps its automatic name until the first message that is not a command.
+
+### Resuming an earlier Claude conversation
+
+In a Claude session, `/resume` (or its alias `/continue`) opens the "Resume a conversation" dialog. Type it and press Enter, or pick it from the `/` list. Text after the command, such as `/resume login bug`, becomes the search. Sent with Steer or with images attached, `/resume` goes to Claude as a normal message. A new, empty Claude conversation also shows a "Resume an earlier conversation" button. This works the same in the desktop app, in the browser, in a remote window and in the mobile app; you do not need the terminal view.
+
+The dialog lists the Claude conversations recorded in this session's working directory, newest first. Each row shows the title, the first prompt, the time of the last activity, the size of the recording and, when recorded, the git branch. Only conversations started in exactly this directory appear; conversations from subdirectories, other worktrees or other projects do not. The search runs in VelaTerm, not only over the rows already shown, and matches title, first prompt, branch and conversation ID. While a typed search is still pending, the dialog shows "Loading…" instead of the old rows, and Enter does nothing until the new result is in, so an action never hits a row the search has already replaced. "Refresh" reloads the list. Each page looks at a limited share of the directory's recordings, newest first. When a page stops before the end, the dialog shows "Showing the N most recent conversations." with a "Show older conversations" button that continues with the older recordings and appends what it finds. A search that has not found anything by then says "Older conversations have not been searched yet."; "Show older conversations" continues the search. So every conversation of the directory can be reached by paging or by search.
+
+When the conversations cannot be read, the dialog says "The conversations of this directory could not be read."; when resuming or forking fails for another reason than the ones below, it says "The conversation could not be opened here. Try again, or resume it in the terminal view." The dialog stays open in both cases.
+
+Each row offers these actions:
+
+- **Resume**: this session continues the chosen conversation. The session keeps its place in the tree, the conversation view shows the chosen conversation's history, and your next message continues it. No helper message is needed.
+- **Fork**: this session starts a new conversation from the chosen conversation's history. The original recording stays unchanged. With your first message, the session gets its own conversation ID.
+- **Open session**: replaces "Resume" when another session in VelaTerm already continues the conversation, marked "In <session name>" (and "Archived" when that session is archived). It opens that session, restoring it first if it is archived. A conversation is never continued by two sessions at once; use "Fork" to branch from it here instead.
+
+The conversation this session already holds is marked "Current". ↑ and ↓ choose a row, Enter takes its first action, Esc closes the dialog.
+
+Resuming and forking need an idle agent: no running turn, queued messages, shell command, background task or open permission request. Otherwise VelaTerm shows "Wait until the agent is idle: …" and the session keeps its conversation. After resuming a different conversation, the one this session held before stays on disk and remains in this list, but no session in the tree points at it anymore. VelaTerm's search then covers the conversation the session holds now: on the next search, the text of the previous conversation is dropped from this session's results and the resumed one is indexed instead.
+
+`/resume` is handled by VelaTerm only in Claude sessions; in other agents' sessions it is sent to the agent as a normal message. The terminal view keeps Claude's own `/resume`. Visitors of a shared session cannot open the dialog (there, `/resume` is sent as a normal message), and read-only embeddings of the conversation view, such as the conversation tab of a Security run, do not offer it; VelaTerm also refuses listing and resuming for these sessions when a client asks directly.
 
 ## 8. Rewinding and editing
 

@@ -8,6 +8,14 @@
 
 import type { ChatCommand, ChatConfigKey } from "../../../ipc/chat";
 
+/** A command as the menu sees it: the catalogue's entry with its texts already resolved. */
+export interface CommandCandidate extends ChatCommand {
+  /** Routed when typed, never offered. */
+  hidden?: boolean;
+  tag?: string;
+  tagTitle?: string;
+}
+
 /** One thing the composer is offering to finish. */
 export interface Suggestion {
   id: string;
@@ -15,6 +23,9 @@ export interface Suggestion {
   /** Dimmed trailing text: a command's argument hint, or a setting's allowed values. */
   hint?: string;
   desc?: string;
+  /** A small label naming what happens when the command is sent, with a longer explanation. */
+  tag?: string;
+  tagTitle?: string;
   /** What the draft becomes when this is chosen. */
   insert: string;
   /** Where the caret goes afterwards; the end of the draft when absent. */
@@ -102,7 +113,7 @@ export function buildSuggestions({
   draft: string;
   /** Caret position, which is what tells a mention being written from one already finished. */
   caret?: number;
-  commands: ChatCommand[];
+  commands: CommandCandidate[];
   configKeys: ChatConfigKey[];
   /** Children of the directory the current mention points into; empty until that listing arrives. */
   files?: FileCandidate[];
@@ -174,7 +185,7 @@ export function buildSuggestions({
     const query = dollar[1].toLowerCase();
     return take(
       commands
-        .filter((c) => c.invocation && (start === 0 || c.invocation === "$")
+        .filter((c) => !c.hidden && c.invocation && (start === 0 || c.invocation === "$")
           && c.name.toLowerCase().startsWith(query))
         .map((c) => {
           const end = caret + (draft.slice(caret).match(/^[^\s$]*/)?.[0].length ?? 0);
@@ -186,6 +197,8 @@ export function buildSuggestions({
             label: `$${c.name}`,
             hint: c.argumentHint,
             desc: c.description,
+            tag: c.tag,
+            tagTitle: c.tagTitle,
             insert: draft.slice(0, start) + text + suffix,
             caret: start + text.length + (hasSpace ? 1 : 0),
           };
@@ -197,12 +210,14 @@ export function buildSuggestions({
   const command = /^\/([^\s]*)$/.exec(draft);
   if (command) {
     const query = command[1].toLowerCase();
-    // Local commands come first. A same-named skill remains accessible through `$`.
+    // Local commands come first. A same-named skill remains accessible through `$`. An alias finds its
+    // command (`/cost` offers `/usage`), which is what gets listed and inserted.
     const seen = new Set<string>();
     return take(
       commands
         .filter((c) => {
-          if (!c.name.toLowerCase().startsWith(query) || seen.has(c.name)) return false;
+          if (c.hidden || seen.has(c.name)) return false;
+          if (![c.name, ...(c.aliases ?? [])].some((n) => n.toLowerCase().startsWith(query))) return false;
           seen.add(c.name);
           return true;
         })
@@ -211,6 +226,8 @@ export function buildSuggestions({
           label: `/${c.name}`,
           hint: c.argumentHint,
           desc: c.description,
+          tag: c.tag,
+          tagTitle: c.tagTitle,
           insert: `${c.invocation ?? "/"}${c.name} `,
         })),
       commands.length,

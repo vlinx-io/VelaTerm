@@ -87,9 +87,8 @@ pub fn export_markdown(
 ) -> Result<String, String> {
     let (path, events) = match kind {
         SessionKind::Claude => {
-            let path = resume::find_claude_transcript(agent_session_id)
-                .ok_or("Claude transcript file not found")?;
-            (path, claude_events(&resume::read_claude_transcript(agent_session_id)?))
+            let (path, content) = resume::read_claude_recording(agent_session_id)?;
+            (path, claude_events(&resume::claude_active_branch(&content)))
         }
         SessionKind::Codex => {
             let (path, content) = resume::read_codex_rollout_chain(agent_session_id)?;

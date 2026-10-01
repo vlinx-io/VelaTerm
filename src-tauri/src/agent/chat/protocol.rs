@@ -83,6 +83,7 @@ pub fn reported_permission_mode(v: &Value) -> Option<&str> {
 ///   design document.
 /// - `fork` marks the first launch of a forked session. `--fork-session` makes Claude copy the source
 ///   conversation into a new one instead of appending to it, so the source and the fork stay separate.
+///   Without a conversation to resume the flag means nothing, so it is never passed alone.
 pub fn launch_args(
     resume: Option<&str>,
     fork: bool,
@@ -105,7 +106,9 @@ pub fn launch_args(
         "--thinking-display".into(),
         "summarized".into(),
     ];
-    if let Some(id) = resume {
+    // An ID that fails the native-ID check (a leading `-` would read as a flag of its own) is never put
+    // on the command line; the conversation then starts fresh instead of passing a foreign token.
+    if let Some(id) = resume.filter(|id| crate::agent::history::valid_id(id)) {
         args.push("--resume".into());
         args.push(id.into());
         if fork {
@@ -170,6 +173,9 @@ pub enum Incoming {
     RateLimit(Value),
     /// Every live background task after a change. Replace semantics.
     BackgroundTasks(Vec<Value>),
+    /// The full slash-command list after a mid-session change (a plugin or skill appeared or went away).
+    /// Replace semantics, in the same shape `initialize` answers with.
+    Commands(Vec<Value>),
     /// A turn finished, successfully or not. `model_usage` is the per-model cost and context window.
     Result {
         subtype: String,
@@ -298,6 +304,13 @@ pub fn parse_line(line: &str) -> Incoming {
                     return Incoming::BackgroundTasks(
                         v.get("tasks").and_then(Value::as_array).cloned().unwrap_or_default(),
                     );
+                }
+                // A frame without a list says nothing; reading it as an empty list would clear the menu.
+                Some("commands_changed") => {
+                    return match v.get("commands").and_then(Value::as_array) {
+                        Some(commands) => Incoming::Commands(commands.clone()),
+                        None => Incoming::Other,
+                    };
                 }
                 _ => return Incoming::Other,
             }
@@ -778,6 +791,16 @@ mod tests {
     }
 
     #[test]
+    fn an_id_that_would_read_as_a_flag_is_never_passed() {
+        for hostile in ["--dangerously-skip-permissions", "-r", "a b", "../x"] {
+            let args = launch_args(Some(hostile), true, None, None, "default");
+            assert!(!args.iter().any(|arg| arg == "--resume" || arg == "--fork-session"), "{args:?}");
+            assert!(!args.iter().any(|arg| arg == hostile), "{args:?}");
+            assert!(!args.iter().any(|arg| arg == "--dangerously-skip-permissions"), "{args:?}");
+        }
+    }
+
+    #[test]
     fn init_line_yields_the_agent_session_id() {
         let line = r#"{"type":"system","subtype":"init","session_id":"abc","model":"claude-sonnet-5"}"#;
         match parse_line(line) {
@@ -835,6 +858,17 @@ mod tests {
             Incoming::BackgroundTasks(tasks) => assert_eq!(tasks.len(), 1),
             _ => panic!("expected BackgroundTasks"),
         }
+        match parse_line(r#"{"type":"system","subtype":"commands_changed","commands":[{"name":"x","aliases":["y"],"builtin":true}]}"#) {
+            Incoming::Commands(commands) => {
+                assert_eq!(commands.len(), 1);
+                assert_eq!(commands[0]["aliases"][0], "y");
+            }
+            _ => panic!("expected Commands"),
+        }
+        assert!(matches!(
+            parse_line(r#"{"type":"system","subtype":"commands_changed"}"#),
+            Incoming::Other
+        ));
         assert!(matches!(
             parse_line(r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","utilization":0.9}}"#),
             Incoming::RateLimit(_)

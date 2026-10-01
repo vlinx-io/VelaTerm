@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { buildSuggestions, findFileMention, mentionDir } from "./completion";
+import { buildSuggestions, findFileMention, mentionDir, type CommandCandidate } from "./completion";
 import type { ChatCommand } from "../../../ipc/chat";
 
 const commands = [
@@ -125,6 +125,36 @@ describe("buildSuggestions", () => {
 
   it("accepts the alias the agent reports for the same command", () => {
     expect(build("/settings auto")?.map((s) => s.label)).toEqual(["autoCompact", "autoScroll"]);
+  });
+});
+
+describe("slash menu over a command catalogue", () => {
+  const catalogue: CommandCandidate[] = [
+    { name: "clear", aliases: ["reset", "new"], tag: "VelaTerm", tagTitle: "Handled by VelaTerm" },
+    { name: "usage", aliases: ["cost", "stats"], invocation: "/", tag: "Claude Code" },
+    { name: "status", tag: "Terminal" },
+    { name: "theme", hidden: true },
+    { name: "rewind", hidden: true },
+  ];
+  const suggest = (draft: string) => buildSuggestions({ draft, commands: catalogue, configKeys: [] });
+
+  it("finds a command by its alias and lists and inserts its own name", () => {
+    expect(suggest("/cos")?.map((s) => s.label)).toEqual(["/usage"]);
+    expect(suggest("/cos")?.[0].insert).toBe("/usage ");
+    expect(suggest("/res")?.map((s) => s.label)).toEqual(["/clear"]);
+  });
+
+  it("never offers a hidden entry, by slash or dollar", () => {
+    expect(suggest("/the")).toBeNull();
+    expect(suggest("/rew")).toBeNull();
+    expect(suggest("$the")).toBeNull();
+  });
+
+  it("carries each entry's tag", () => {
+    expect(suggest("/")?.map((s) => [s.label, s.tag])).toEqual([
+      ["/clear", "VelaTerm"], ["/usage", "Claude Code"], ["/status", "Terminal"],
+    ]);
+    expect(suggest("/cl")?.[0].tagTitle).toBe("Handled by VelaTerm");
   });
 });
 

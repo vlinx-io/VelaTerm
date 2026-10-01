@@ -62,7 +62,8 @@ pub fn launch_args(
     bypass_approvals: bool,
 ) -> Vec<String> {
     let mut args: Vec<String> = vec!["--mode".into(), "rpc".into()];
-    if let Some(id) = resume.filter(|id| !id.trim().is_empty()) {
+    // A leading `-` would make the value read as a flag of its own.
+    if let Some(id) = resume.filter(|id| !id.trim().is_empty() && !id.trim_start().starts_with('-')) {
         match variant {
             _ if fork => args.push("--fork".into()),
             PiVariant::Pi => args.push("--session".into()),
@@ -483,6 +484,8 @@ mod tests {
             launch_args(PiVariant::Omp, Some("abc"), false, None, true),
             vec!["--mode", "rpc", "--resume", "abc", "--approval-mode=yolo"]
         );
+        // A value with a leading dash would read as a flag of its own.
+        assert_eq!(launch_args(PiVariant::Omp, Some("--yolo"), false, None, false), vec!["--mode", "rpc"]);
     }
 
     #[test]

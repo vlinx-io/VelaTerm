@@ -77,7 +77,9 @@ import {
 } from "../../../ipc/chat";
 import { attachImages, restoreAttachment, MAX_IMAGE_BYTES, MAX_IMAGES, type Attachment } from "./attachments";
 import { attachChatInputGuard } from "./inputGuard";
-import { buildSuggestions, findFileMention, mentionDir, type Suggestion } from "./completion";
+import { buildSuggestions, findFileMention, mentionDir, type CommandCandidate, type Suggestion } from "./completion";
+import { buildCatalogue, isImmediate, isListed, resolveSlash } from "./commandCatalogue";
+import { canExportContext, exportSessionToFile } from "../../../exportSession";
 import { env } from "../../../platform/env";
 import { imageFromNativeClipboard, imagesFromClipboard, imagesFromDrop } from "../../../terminal/imageInput";
 import { IS_MAC, IS_PLAIN_BROWSER } from "../../../hooks/shortcutRegistry";
@@ -97,7 +99,7 @@ import { isMode, type Mode } from "./permissions";
 import { useTermStore } from "../../../store/termStore";
 import { effectivePermissionMode } from "../../../store/settings";
 import { effectiveStatus, supportsPermissionToggle, type Session } from "../../../types";
-import { kindIconEl } from "../../sessionViewers/sessionMeta";
+import { AGENT_KIND_LABEL, kindIconEl } from "../../sessionViewers/sessionMeta";
 import { assistantLabel } from "../../sessionViewers/TranscriptViewer";
 import {
   CompactionRow,
@@ -131,6 +133,7 @@ import { QueuedMessageText } from "./QueuedMessageText";
 import { MessageSender, messageSenderName } from "./MessageSender";
 import { parseShellSubmission, shellErrorKey, shellSubmissionFor, acknowledgeShellSubmission } from "./shellMode";
 import { SessionLinkDirectory } from "./links";
+import { ResumePicker } from "./ResumePicker";
 
 interface MessageReplacement {
   text: string;
@@ -377,6 +380,14 @@ export function ChatPane({
   };
   const [turnStartedAt, setTurnStartedAt] = useState<number | undefined>();
   const [error, setError] = useState<string | null>(null);
+  /** The earlier-conversation picker, open with the search it was asked for. */
+  const [resumePicker, setResumePicker] = useState<{ query: string } | null>(null);
+  // Only Claude records conversations this picker can read, and a share visitor may neither list the
+  // host's recordings nor rebind the host's session. A read-only embedding offers no action that
+  // would change the conversation behind it.
+  const canResume = session.kind === "claude" && !isShareSurface && !readOnly;
+  /** Every slash command this session knows, with what sending each one does. */
+  const commandCatalogue = useMemo(() => buildCatalogue(session.kind, commands), [session.kind, commands]);
   /** Which failed send's missing-agent notice the user closed, so it does not reappear until the next one. */
   const [agentNoticeDismissed, setAgentNoticeDismissed] = useState<string | null>(null);
   const keepRestartPermission = useRef(false);
@@ -390,6 +401,9 @@ export function ChatPane({
     }
   }, setError);
   const [draft, setDraft] = useState("");
+  // The draft as last rendered, for callbacks that run after the render that created them.
+  const draftNow = useRef(draft);
+  draftNow.current = draft;
   // Only the browsing position and unsent draft are local. Recall reads the backend's conversation and queue.
   const inputHistory = useRef<{
     id: string | null;
@@ -1291,80 +1305,161 @@ export function ChatPane({
       })();
       return;
     }
-    // Paseo treats these as client commands: they change the surrounding session UI and must never be
-    // forwarded to Claude or Codex as user prose. Arguments or attachments deliberately opt out.
-    const localCommand =
-      behavior !== "steer" && attachments.length === 0 && /^\/(clear|new|rewind)$/.exec(text)?.[1];
-    // These agents answer compact (and, for Codex, review) through requests of their own rather than as
-    // user prose. They need the process started, and for Codex its native thread open, first.
-    const chatCommand =
-      behavior !== "steer" && attachments.length === 0
-        ? /^\/(compact|review)(?:\s+([\s\S]*))?$/.exec(text)
-        : null;
-    const commandSupported =
-      chatCommand?.[1] === "compact"
-        ? session.kind === "codex" || session.kind === "pi" || session.kind === "omp"
-        : session.kind === "codex";
-    if (chatCommand && commandSupported) {
-      const [, name, args] = chatCommand;
-      setError(null);
-      updateDraft("");
-      setCaret(0);
-      setDismissed(null);
-      toEnd();
-      void (async () => {
-        try {
-          await ensureStarted();
-          if (name === "compact") await chatCompact(session.id);
-          else await chatReview(session.id, args ?? "");
-        } catch (err) {
-          setError(String(err));
-        }
-      })();
-      return;
-    }
-    if (localCommand === "rewind") {
-      const latestUser = [...rows].reverse().find((row) => row.kind === "user");
-      if (!canRewind || !latestUser) {
-        setError(t("chat.command.rewindUnavailable"));
+    // One chokepoint for every slash command: the catalogue says what the name means for this agent, and
+    // that, not a list of names per agent, decides what happens. Client commands change the surrounding
+    // session UI and are never forwarded to the agent as prose (Paseo's rule).
+    const slash = resolveSlash(commandCatalogue, text);
+    const entry = slash?.entry.treatment === "passthrough" ? undefined : slash?.entry;
+    // The older per-agent commands keep their rule: with images, while steering, or with arguments an
+    // action does not take, the text is sent as a message instead.
+    // `/resume` has always been sent as a message where no picker can open.
+    const optedOut = (!!entry?.optOut
+      && (attachments.length > 0 || behavior === "steer" || (entry.args !== "accept" && slash!.args !== "")))
+      || (entry?.treatment === "picker" && !canResume);
+    if (slash && entry && !optedOut) {
+      const cmd = `/${slash.name}`;
+      // A refusal leaves the draft where it is, with a line saying why.
+      const refuse = (note: string) => {
+        setError(null);
+        setAttachNote(note);
+      };
+      const taken = () => {
+        setError(null);
+        setAttachNote(null);
+        updateDraft("");
+        setCaret(0);
+        setDismissed(null);
+      };
+      // Puts a taken draft back after the action failed, unless something new was typed meanwhile
+      // (a composer not yet rendered empty still shows the taken text).
+      const previousDraft = draft;
+      const giveBack = () => {
+        if (draftNow.current !== "" && draftNow.current !== previousDraft) return;
+        updateDraft(previousDraft);
+        setCaret(previousDraft.length);
+        placeCaret.current = previousDraft.length;
+      };
+      if (entry.treatment === "unavailable") {
+        refuse(entry.reason === "terminal" ? t("chat.command.unavailable.terminal", cmd) : t("chat.command.unavailable.session", cmd));
         return;
       }
-      setError(null);
-      updateDraft("");
-      setCaret(0);
-      setDismissed(null);
-      rewindRequestToken.current += 1;
-      // Keep the requested message in view when opening its menu triggers another layout.
-      // Mounted messages need the same pause in tail following as virtualized messages.
-      pinnedRef.current = false;
-      setRewindRequest({ rowId: latestUser.id, token: rewindRequestToken.current });
-      const displayIndex = display.findIndex(
-        (entry) => entry.kind === "row" && entry.row.id === latestUser.id,
-      );
-      if (displayIndex >= 0 && displayIndex < virtualRows.length) {
-        virtualizer.scrollToIndex(displayIndex, { align: "center" });
+      if (attachments.length > 0) {
+        refuse(t("chat.command.noImages", cmd));
+        return;
       }
-      return;
-    }
-    if (localCommand === "clear" || localCommand === "new") {
-      if (clientCommandRunning) return;
-      const previousDraft = draft;
-      setClientCommandRunning(true);
-      setError(null);
-      updateDraft("");
-      setCaret(0);
-      setDismissed(null);
-      void useTermStore
-        .getState()
-        .clearChatSession(session.id, model, effort || undefined)
-        .catch((err) => {
-          setError(String(err));
-          updateDraft(previousDraft);
-          setCaret(previousDraft.length);
-          placeCaret.current = previousDraft.length;
-        })
-        .finally(() => setClientCommandRunning(false));
-      return;
+      if (entry.args === "reject" && slash.args) {
+        refuse(t("chat.command.noArguments", cmd));
+        return;
+      }
+      if (entry.treatment === "terminal") {
+        if (isShareSurface || readOnly) {
+          refuse(t("chat.command.notHere", cmd));
+          return;
+        }
+        // Typed into the agent's own prompt in the terminal view, never submitted there. The draft stays in
+        // the composer until the server has switched, so a slow, lost or failed answer never costs it, and it
+        // leaves then only if it is still the command that was handed over; a line says a switch is running.
+        const switching = t("chat.command.switching", cmd);
+        const dropNote = () => setAttachNote((note) => (note === switching ? null : note));
+        switchTo("tui", {
+          prefill: text,
+          onStart: () => { setError(null); setAttachNote(switching); },
+          onDone: () => { if (draftNow.current === previousDraft) taken(); else dropNote(); },
+          onFail: dropNote,
+        });
+        return;
+      }
+      if (entry.treatment === "picker") {
+        // Switching conversations needs an idle agent; say so here rather than after picking one.
+        if (busy || queue.length > 0 || pendingSubmissions.length > 0) {
+          setError(t("chat.resume.error.busy"));
+          return;
+        }
+        taken();
+        // Any text after the name becomes the picker's search.
+        setResumePicker({ query: slash.args });
+        return;
+      }
+      switch (entry.action) {
+        case "compact":
+        case "review": {
+          // These agents answer compact (and, for Codex, review) through requests of their own rather than
+          // as user prose. They need the process started, and for Codex its native thread open, first.
+          const action = entry.action;
+          taken();
+          toEnd();
+          void (async () => {
+            try {
+              await ensureStarted();
+              if (action === "compact") await chatCompact(session.id);
+              else await chatReview(session.id, slash.args);
+            } catch (err) {
+              setError(String(err));
+            }
+          })();
+          return;
+        }
+        case "fork": {
+          if (!session.agentSessionId || isShareSurface || readOnly) {
+            refuse(t("chat.command.notHere", cmd));
+            return;
+          }
+          taken();
+          void useTermStore.getState().forkSession(session.id).catch((err) => {
+            setError(String(err));
+            giveBack();
+          });
+          return;
+        }
+        case "export": {
+          if (!canExportContext(session) || isShareSurface || readOnly) {
+            refuse(t("chat.command.notHere", cmd));
+            return;
+          }
+          taken();
+          void exportSessionToFile(session);
+          return;
+        }
+        case "rewind": {
+          const latestUser = [...rows].reverse().find((row) => row.kind === "user");
+          if (!canRewind || !latestUser) {
+            setError(t("chat.command.rewindUnavailable"));
+            return;
+          }
+          taken();
+          rewindRequestToken.current += 1;
+          // Keep the requested message in view when opening its menu triggers another layout.
+          // Mounted messages need the same pause in tail following as virtualized messages.
+          pinnedRef.current = false;
+          setRewindRequest({ rowId: latestUser.id, token: rewindRequestToken.current });
+          const displayIndex = display.findIndex(
+            (item) => item.kind === "row" && item.row.id === latestUser.id,
+          );
+          if (displayIndex >= 0 && displayIndex < virtualRows.length) {
+            virtualizer.scrollToIndex(displayIndex, { align: "center" });
+          }
+          return;
+        }
+        case "clear": {
+          if (clientCommandRunning) return;
+          setClientCommandRunning(true);
+          taken();
+          void useTermStore
+            .getState()
+            .clearChatSession(session.id, model, effort || undefined)
+            .catch((err) => {
+              setError(String(err));
+              updateDraft(previousDraft);
+              setCaret(previousDraft.length);
+              placeCaret.current = previousDraft.length;
+            })
+            .finally(() => setClientCommandRunning(false));
+          return;
+        }
+        // `backend`: sent as a message; VelaTerm's backend answers it without a turn.
+        default:
+          break;
+      }
     }
     if (submissionReceipts !== true) {
       if (submissionReceipts === false) setError(t("chat.submission.updateRequired"));
@@ -1642,38 +1737,27 @@ export function ChatPane({
     return () => { disposed = true; };
   }, [wantsCatalogue, hidden, session.id, session.kind, engineRunning]);
 
-  const completionCommands = useMemo<ChatCommand[]>(() => {
-    const local: ChatCommand[] = [
-      { name: "clear", description: t("chat.command.clearDescription") },
-    ];
-    // What Codex's own interface offers as commands and this pane asks for through requests of its own.
-    if (session.kind === "codex") {
-      local.push(
-        { name: "compact", description: t("chat.command.compactDescription") },
-        {
-          name: "review",
-          description: t("chat.command.reviewDescription"),
-          argumentHint: t("chat.command.reviewHint"),
-        },
-      );
-    }
-    // Pi and OMP expose compaction as a protocol command of their own.
-    if (session.kind === "pi" || session.kind === "omp") {
-      local.push({ name: "compact", description: t("chat.command.compactDescription") });
-    }
-    // What OpenCode's own interface answers without a turn, handled by the backend when sent.
-    if (session.kind === "opencode") {
-      local.push(
-        { name: "compact", description: t("chat.command.compactDescription") },
-        { name: "undo", description: t("chat.command.undoDescription") },
-        { name: "redo", description: t("chat.command.redoDescription") },
-        { name: "share", description: t("chat.command.shareDescription") },
-        { name: "unshare", description: t("chat.command.unshareDescription") },
-      );
-    }
-    const localNames = new Set(local.map((command) => command.name).concat("new"));
-    return [...local, ...commands.filter((command) => command.invocation || !localNames.has(command.name))];
-  }, [commands, session.kind, t]);
+
+  const completionCommands = useMemo<CommandCandidate[]>(() => {
+    const agent = AGENT_KIND_LABEL[session.kind];
+    return commandCatalogue.map((entry) => {
+      const [tag, tagTitle] =
+        entry.treatment === "native" ? [t("chat.command.tag.velaterm"), t("chat.command.tagTitle.velaterm")]
+        : entry.treatment === "picker" ? [t("chat.command.tag.picker"), t("chat.command.tagTitle.picker")]
+        : entry.treatment === "terminal" ? [t("chat.command.tag.terminal"), t("chat.command.tagTitle.terminal")]
+        : [agent ?? t("chat.command.tag.agent"), t("chat.command.tagTitle.agent", agent ?? t("chat.command.tag.agent"))];
+      return {
+        name: entry.name,
+        aliases: entry.aliases,
+        invocation: entry.invocation,
+        description: entry.descriptionKey ? t(entry.descriptionKey) : entry.description,
+        argumentHint: entry.argumentHintKey ? t(entry.argumentHintKey) : entry.argumentHint,
+        hidden: !isListed(entry) || (entry.treatment === "picker" && !canResume),
+        tag,
+        tagTitle,
+      };
+    });
+  }, [commandCatalogue, session.kind, canResume, t]);
 
   const completion = useMemo(
     () =>
@@ -2127,6 +2211,12 @@ export function ChatPane({
                 <div className="sv-blank">
                   <span className="sv-blank-icon">{kindIconEl(session.kind, 40)}</span>
                   <div className="sv-blank-line">{t("chat.empty")}</div>
+                  {canResume && (
+                    <button type="button" className="vlx-btn sv-blank-action" onClick={() => setResumePicker({ query: "" })}>
+                      <Icons.clock size={14} />
+                      {t("chat.resume.emptyAction")}
+                    </button>
+                  )}
                 </div>
               )}
               {/* The older part of a long conversation. Only the rows near the viewport are drawn; the
@@ -2321,6 +2411,7 @@ export function ChatPane({
                     <span className="sv-complete-name">{c.label}</span>
                     {c.hint ? <span className="sv-complete-hint">{c.hint}</span> : null}
                     {c.desc ? <span className="sv-complete-desc">{c.desc}</span> : null}
+                    {c.tag ? <span className="sv-complete-tag" title={c.tagTitle}>{c.tag}</span> : null}
                   </button>
                 ))}
               </div>
@@ -2482,8 +2573,10 @@ export function ChatPane({
                   if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault();
                     // Exact client commands execute on the first Enter. Otherwise completion would add
-                    // its cosmetic trailing space and make `/clear` or `/rewind` need two submissions.
-                    if (attachments.length === 0 && /^\/(?:clear|new|rewind|compact|review|undo|redo|share|unshare)\s*$/.test(draft)) {
+                    // its cosmetic trailing space and make `/clear` or `/status` need two submissions.
+                    // Agent commands that always ran this way keep doing so.
+                    if (attachments.length === 0 && (/^\/(?:clear|new|rewind|compact|review|undo|redo|share|unshare)\s*$/.test(draft)
+                      || isImmediate(commandCatalogue, draft))) {
                       send(behaviorOf(e));
                     } else if (wantsCatalogue && catalogueLoading && draft !== dismissed) {
                       return;
@@ -2537,6 +2630,9 @@ export function ChatPane({
       </div>
       {engineConfirm}
       {permissionRestart.dialog}
+      {resumePicker && canResume && (
+        <ResumePicker sessionId={session.id} initialQuery={resumePicker.query} onClose={() => setResumePicker(null)} />
+      )}
     </div>
     </SessionLinkDirectory.Provider>
   );

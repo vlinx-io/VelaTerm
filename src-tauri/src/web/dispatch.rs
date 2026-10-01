@@ -123,6 +123,15 @@ fn guard_remote_path(app: &AppCtx, origin: CallOrigin, path: &str) -> Result<(),
     }
 }
 
+/// Apply the data-directory rule to Claude's recordings before a remote client lists or resumes them.
+/// Nothing exists to read when the folder does not, so only an existing one is resolved and checked.
+fn guard_claude_projects(app: &AppCtx, origin: CallOrigin, root: Option<&std::path::Path>) -> Result<(), String> {
+    match root {
+        Some(root) if root.exists() => guard_remote_path(app, origin, &root.to_string_lossy()),
+        _ => Ok(()),
+    }
+}
+
 /// Resolve a path for the ACL check, symlink- and traversal-safe, without requiring the target to
 /// exist: an existing target is fully canonicalized; a not-yet-existing target canonicalizes its
 /// existing parent directory (which resolves any `..` and symlinks in the directory part) and
@@ -708,6 +717,25 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         // Chat engine: an agent driven as a protocol peer. Every arm takes a session id and never a path,
         // so a remote client can drive a conversation without reaching the filesystem through these calls.
         "chat_clear" => to_value(core::chat_clear(app, &req_str(args, "sessionId")?)?),
+        // The resume picker reads Claude's recordings of the session's directory. The folder is chosen by
+        // the server, never by the caller, but it is still checked like a path a remote client named.
+        "chat_resume_list" => {
+            guard_claude_projects(app, origin, crate::agent::chat::conversations::projects_root().as_deref())?;
+            let query = opt_str(args, "query").unwrap_or_default();
+            // The query only filters the server's own listing; it is capped like any search text.
+            let query: String = query.chars().take(200).collect();
+            let offset = usize::try_from(opt_u64(args, "offset").unwrap_or(0)).unwrap_or(usize::MAX);
+            to_value(core::chat_resume_list(app, &req_str(args, "sessionId")?, &query, offset)?)
+        }
+        "chat_resume" => {
+            guard_claude_projects(app, origin, crate::agent::chat::conversations::projects_root().as_deref())?;
+            to_value(core::chat_resume(
+                app,
+                &req_str(args, "sessionId")?,
+                &req_str(args, "agentSessionId")?,
+                &req_str(args, "mode")?,
+            )?)
+        }
         "chat_start" => {
             let (model, effort) = (opt_str(args, "model"), opt_str(args, "effort"));
             to_value(core::chat_start(
@@ -1403,6 +1431,33 @@ mod tests {
         let db = crate::db::Db::open(&data_dir.join("test.db"))
             .expect("failed to open the test database");
         AppCtx::Headless(Arc::new(HeadlessHost::new(data_dir, db)))
+    }
+
+    /// Claude's recordings are reachable for a paired device only outside the app data directory; the
+    /// desktop and loopback clients are never restricted.
+    #[test]
+    fn claude_projects_inside_the_data_dir_are_denied_to_remote_clients() {
+        let app = test_ctx();
+        let data_dir = app.data_dir().unwrap();
+        let inside = data_dir.join("claude").join("projects");
+        std::fs::create_dir_all(&inside).unwrap();
+        assert!(super::guard_claude_projects(&app, CallOrigin::Remote, Some(&inside)).is_err());
+        assert!(super::guard_claude_projects(&app, CallOrigin::Local, Some(&inside)).is_ok());
+        let outside = std::env::temp_dir().join(format!("vlx-claude-projects-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&outside).unwrap();
+        assert!(super::guard_claude_projects(&app, CallOrigin::Remote, Some(&outside)).is_ok());
+        // A link placed outside that leads inside is judged by where it leads.
+        #[cfg(unix)]
+        {
+            let link = outside.join("link");
+            std::os::unix::fs::symlink(&inside, &link).unwrap();
+            assert!(super::guard_claude_projects(&app, CallOrigin::Remote, Some(&link)).is_err());
+        }
+        // Nothing to read when the folder is missing, so nothing to deny.
+        assert!(super::guard_claude_projects(&app, CallOrigin::Remote, Some(&outside.join("missing"))).is_ok());
+        assert!(super::guard_claude_projects(&app, CallOrigin::Remote, None).is_ok());
+        let _ = std::fs::remove_dir_all(&outside);
+        let _ = std::fs::remove_dir_all(&data_dir);
     }
 
     #[test]

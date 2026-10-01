@@ -75,6 +75,7 @@ import { installWebkitImeFix, isWebkitEngine } from "../terminal/imeWebkitFix";
 import { installImeCaret } from "../terminal/imeCaret";
 import { detectAgentScreen, readScreenTail } from "../terminal/screenDetect";
 import { remapGrokDayCanvasToWhite } from "../terminal/grokBgRemap";
+import { takePrefill } from "../terminal/prefill";
 import { fontStack, resolveTheme, XTERM_THEME } from "../theme";
 import type { AgentKind, Session } from "../types";
 
@@ -793,6 +794,8 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       const initialPrompt = useTermStore
         .getState()
         .takePendingPrompt(session.id);
+      // A command handed over from the conversation view, typed after the launch line and never submitted.
+      const prefill = takePrefill(session.id);
 
       try {
         const result = await ptySpawn(
@@ -852,6 +855,11 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
           }
           await ptyWrite(session.id, `${autoCmd}\r`);
         }
+        // Typed right behind the launch line, the text waits in the terminal's input until the agent reads
+        // it into its prompt. It carries no Enter: the person decides whether it runs. Only a client that wrote
+        // the launch line itself types it: after an attach, another client's launch line may still be on its
+        // way, and the text must never end up in front of it on the shell's command line.
+        if (prefill && autoCmd) await ptyWrite(session.id, prefill);
       } catch (err) {
         clearStarting();
         setRuntime(session.id, { status: "error" });

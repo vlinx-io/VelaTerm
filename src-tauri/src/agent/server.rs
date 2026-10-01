@@ -397,6 +397,11 @@ fn serve_loop(server: tiny_http::Server, app: AppCtx, token: String) {
 /// Hooks and Codex rollout capture share this atomic check. User names are preserved, and if both
 /// paths arrive concurrently only the first holder of the database lock can rename.
 pub(crate) fn try_auto_rename(app: &AppCtx, sid: &str, prompt: &str) -> bool {
+    // `/init` or `/effort high` says what the agent should do, not what the session is about; the name
+    // waits for the first prompt that does.
+    if is_slash_command(prompt) {
+        return false;
+    }
     let title = condense_title(prompt);
     if title.is_empty() {
         return false;
@@ -793,6 +798,17 @@ pub(crate) fn is_auto_name(name: &str) -> bool {
         }
         None => false,
     }
+}
+
+/// Whether a prompt is a slash command: its first nonempty line starts with `/name` and the name holds no
+/// further `/`, so a prompt that opens with a path such as `/Users/x/a.rs` is still read as prose.
+fn is_slash_command(prompt: &str) -> bool {
+    let first_line = prompt.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let Some(rest) = first_line.strip_prefix('/') else {
+        return false;
+    };
+    let name = rest.split(char::is_whitespace).next().unwrap_or("");
+    !name.is_empty() && !name.contains('/')
 }
 
 /// Condense the first user message into a title: take the first nonempty line, remove leading
@@ -2268,6 +2284,16 @@ mod tests {
                 !is_auto_name(name),
                 "{name} should not count as an auto-numbered name"
             );
+        }
+    }
+
+    #[test]
+    fn slash_commands_are_told_from_prompts_that_start_with_a_path() {
+        for prompt in ["/effort high", "/init", "  /compact", "\n/clear\nmore"] {
+            assert!(is_slash_command(prompt), "{prompt:?}");
+        }
+        for prompt in ["/Users/x/a.rs fix", "fix /init", "Hallo", "/", "/ note", ""] {
+            assert!(!is_slash_command(prompt), "{prompt:?}");
         }
     }
 

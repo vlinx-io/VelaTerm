@@ -279,6 +279,13 @@ export interface SessionRuntime {
    */
   agentAutoInstall?: boolean;
   /**
+   * A command the conversation view hands to the terminal view because only the agent's own interface can
+   * run it. The terminal types it into the agent's prompt right after the launch line, without Enter, and
+   * clears it; it is taken before the spawn, so a failed spawn drops it instead of typing it later.
+   * Relevant only to agent sessions.
+   */
+  agentPrefill?: string;
+  /**
    * Complete launch command assembled by the backend and actually written to the PTY for this spawn, including
    * agent flags, resume/permission/custom arguments, and the shell guard. Record after a successful agent-session
    * spawn; plain terminals (launch=None) do not. Displayed only in Session Info opened while holding Option and

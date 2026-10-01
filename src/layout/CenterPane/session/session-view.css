@@ -147,6 +147,13 @@
   color: var(--text-dim);
   font-size: calc(var(--ui-fs) + 1px);
 }
+.sv-blank-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  font-family: inherit;
+}
 
 .sv-empty-detail {
   margin-top: 6px;
@@ -2156,6 +2163,16 @@ select.sv-pill {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-dim);
+}
+/* What sending the command does: the agent answers it, VelaTerm does it, a picker, or the terminal view. */
+.sv-complete-tag {
+  flex: none;
+  margin-left: auto;
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  color: var(--text-faint);
+  font-size: 0.85em;
 }
 
 /* Stop button: the send button becomes one while a turn is running. */

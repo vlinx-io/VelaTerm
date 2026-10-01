@@ -926,6 +926,193 @@ pub fn chat_clear(ctx: &AppCtx, session_id: &str) -> Result<Session, String> {
     Ok(fresh)
 }
 
+/// The directory a chat session's agent runs in.
+///
+/// A session created under a project usually has no directory of its own; it runs in the project's.
+/// The terminal path applies this fallback in the frontend, so the engine must apply it here or the
+/// agent inherits the backend's own working directory and reads the wrong files.
+fn chat_directory(session: &Session, project_root: Option<String>) -> Option<String> {
+    session
+        .cwd
+        .as_deref()
+        .filter(|c| !c.trim().is_empty())
+        .map(str::to_string)
+        .or(project_root)
+}
+
+/// A session the resume picker may act on, with the directory whose conversations it may list.
+///
+/// Only a live Claude session in the conversation view qualifies, and only with an absolute directory:
+/// the directory names the recordings, so a relative one would name whatever the backend runs in.
+fn resume_target(ctx: &AppCtx, session_id: &str) -> Result<(Session, std::path::PathBuf), String> {
+    const UNSUPPORTED: &str = "chat_resume_unsupported";
+    let (session, root) = {
+        let conn = ctx.db().conn.lock().unwrap();
+        let session = repo::get_session(&conn, session_id)?.ok_or("Session not found")?;
+        let root = repo::get_project_root(&conn, &session.project_id)?;
+        (session, root)
+    };
+    if session.kind != SessionKind::Claude || session.engine != "chat" || session.archived_at.is_some() {
+        return Err(UNSUPPORTED.into());
+    }
+    // The conversation of an audit the upstream scanner drives is shown read-only; it is not rebound.
+    if crate::security::read_only_session(&ctx.db().conn.lock().unwrap(), session_id)? {
+        return Err(UNSUPPORTED.into());
+    }
+    let directory = chat_directory(&session, root)
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .ok_or(UNSUPPORTED)?;
+    Ok((session, directory))
+}
+
+/// Mark which listed conversations this session holds and which ones another session already owns.
+fn annotate_conversations(
+    ctx: &AppCtx,
+    session: &Session,
+    listing: &mut crate::agent::chat::conversations::Listing,
+) -> Result<(), String> {
+    use crate::agent::chat::conversations::ConversationOwner;
+    let (owners, fork_pending) = {
+        let conn = ctx.db().conn.lock().unwrap();
+        (
+            repo::conversation_owners(&conn, session.kind, &session.id)?,
+            repo::get_fork_pending(&conn, &session.id)?,
+        )
+    };
+    let bound = session.agent_session_id.as_deref().filter(|_| !fork_pending);
+    for conversation in &mut listing.conversations {
+        conversation.current = bound == Some(conversation.id.as_str());
+        // A live owner is the one to open; an archived one is shown only when nothing live holds it.
+        conversation.owner = owners
+            .iter()
+            .filter(|owner| owner.agent_session_id.as_deref() == Some(conversation.id.as_str()))
+            .min_by_key(|owner| owner.archived_at.is_some())
+            .map(|owner| ConversationOwner {
+                session_id: owner.id.clone(),
+                name: owner.name.clone(),
+                archived: owner.archived_at.is_some(),
+            });
+    }
+    Ok(())
+}
+
+/// One page of the earlier Claude conversations of a session's directory that match `query`, for the
+/// resume picker, looking at the directory's recordings from position `offset` on (a page's `next_offset`).
+pub fn chat_resume_list(
+    ctx: &AppCtx,
+    session_id: &str,
+    query: &str,
+    offset: usize,
+) -> Result<crate::agent::chat::conversations::Listing, String> {
+    chat_resume_list_in(ctx, crate::agent::chat::conversations::projects_root().as_deref(), session_id, query, offset)
+}
+
+fn chat_resume_list_in(
+    ctx: &AppCtx,
+    root: Option<&std::path::Path>,
+    session_id: &str,
+    query: &str,
+    offset: usize,
+) -> Result<crate::agent::chat::conversations::Listing, String> {
+    use crate::agent::chat::conversations::{self, Listing};
+    let (session, directory) = resume_target(ctx, session_id)?;
+    let mut listing = match root {
+        Some(root) => conversations::list_claude(root, &directory, query, offset, conversations::LIST_LIMIT)?,
+        None => Listing {
+            directory: directory.to_string_lossy().into_owned(),
+            conversations: Vec::new(),
+            truncated: false,
+            next_offset: 0,
+        },
+    };
+    annotate_conversations(ctx, &session, &mut listing)?;
+    Ok(listing)
+}
+
+/// Continue an earlier Claude conversation in this session, or branch from it (`mode` = `fork`).
+///
+/// The session keeps its id, so its tabs, panes and links stay valid; only the conversation behind it
+/// changes, exactly as a `/resume` in its terminal would. The chosen id is honoured only when the
+/// server's own check of the session's directory finds it there. The running process is stopped before
+/// the binding changes, so none of its late frames can record the old id again, and a new one starts
+/// right away: its replayed history reaches every client through the usual reset event.
+pub fn chat_resume(ctx: &AppCtx, session_id: &str, agent_session_id: &str, mode: &str) -> Result<Session, String> {
+    let root = crate::agent::chat::conversations::projects_root();
+    let fast_mode = chat_resume_bind(ctx, root.as_deref(), session_id, agent_session_id, mode)?;
+    // A failed start keeps the new binding: the view shows the recorded history and the error, and the
+    // next message tries again.
+    chat_start(ctx, session_id, None, None, fast_mode)?;
+    let conn = ctx.db().conn.lock().unwrap();
+    repo::get_session(&conn, session_id)?.ok_or_else(|| "Session not found".to_string())
+}
+
+/// Everything of `chat_resume` up to the new binding; returns whether fast mode should come back on.
+fn chat_resume_bind(
+    ctx: &AppCtx,
+    root: Option<&std::path::Path>,
+    session_id: &str,
+    agent_session_id: &str,
+    mode: &str,
+) -> Result<bool, String> {
+    const NOT_FOUND: &str = "chat_resume_not_found";
+    const IN_USE: &str = "chat_resume_in_use";
+    let fork = match mode {
+        "resume" => false,
+        "fork" => true,
+        _ => return Err("chat_resume_invalid_mode".into()),
+    };
+    let (session, directory) = resume_target(ctx, session_id)?;
+    if !crate::agent::history::valid_id(agent_session_id) {
+        return Err(NOT_FOUND.into());
+    }
+    let root = root.ok_or(NOT_FOUND)?;
+    // The same check the listing makes, for this one recording and without the listing's cap.
+    let chosen = crate::agent::chat::conversations::find_claude(root, &directory, agent_session_id)?
+        .ok_or(NOT_FOUND)?;
+    let fork_pending = {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::get_fork_pending(&conn, session_id)?
+    };
+    if !fork && !fork_pending && session.agent_session_id.as_deref() == Some(agent_session_id) {
+        // Already this session's conversation: nothing to switch.
+        return Ok(ctx.chat().fast_mode(session_id));
+    }
+    if !fork {
+        let conn = ctx.db().conn.lock().unwrap();
+        let owned = repo::conversation_owners(&conn, session.kind, session_id)?
+            .iter()
+            .any(|owner| owner.agent_session_id.as_deref() == Some(agent_session_id));
+        if owned {
+            return Err(IN_USE.into());
+        }
+    }
+    // Checked last, right before the stop, so the window in which new work could slip in stays short.
+    ctx.chat().ensure_switch_idle(session_id)?;
+    // A background audit or a plan/execute run is driving this conversation; switching would pull it
+    // out from under that workflow.
+    if crate::security::session_active(session_id) || crate::agent::plan_execute::active(ctx, session_id) {
+        return Err("chat_resume_busy".into());
+    }
+    let fast_mode = ctx.chat().fast_mode(session_id);
+    ctx.chat().stop(ctx, session_id)?;
+    crate::agent::chat::auto_continue::cancel(ctx, session_id);
+    let rebound = {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::rebind_conversation(&conn, session_id, agent_session_id, session.kind, fork)?
+    };
+    if !rebound {
+        // Claimed by another session since the check above; the old binding stays.
+        return Err(IN_USE.into());
+    }
+    ctx.emit(TREE_CHANGED, ());
+    // A placeholder name such as "Claude 3" takes the conversation's title; a chosen name stays.
+    if chosen.title != chosen.id {
+        crate::agent::server::try_auto_rename(ctx, session_id, &chosen.title);
+    }
+    Ok(fast_mode)
+}
+
 /// Start the chat engine for a session, or do nothing if it is already running.
 ///
 /// The conversation continues where it left off: the session's captured agent id becomes `--resume`, and
@@ -959,15 +1146,7 @@ pub fn chat_start(
             session.kind.as_str()
         ));
     }
-    // A session created under a project usually has no directory of its own; it runs in the project's.
-    // The terminal path applies this fallback in the frontend, so the engine must apply it here or the
-    // agent inherits the backend's own working directory and reads the wrong files.
-    let cwd = session
-        .cwd
-        .as_deref()
-        .filter(|c| !c.trim().is_empty())
-        .map(str::to_string)
-        .or(project_root);
+    let cwd = chat_directory(&session, project_root);
     let bin = crate::agent::executable::for_session(ctx, &session);
     let mut selection = session_settings::resolve(ctx, &session)?;
     if model.is_some() {
@@ -1621,12 +1800,19 @@ pub fn chat_snapshot_window(
     // said before anything else happens — and keeps showing it when the agent cannot be started at all,
     // instead of an empty pane under an error.
     if snapshot.pid.is_none() {
-        let session = {
+        let (session, project_root) = {
             let conn = ctx.db().conn.lock().unwrap();
-            repo::get_session(&conn, session_id)?
+            let session = repo::get_session(&conn, session_id)?;
+            let root = match &session {
+                Some(session) => repo::get_project_root(&conn, &session.project_id)?,
+                None => None,
+            };
+            (session, root)
         };
+        // The directory the agent runs in names the one recording it continues, so the view shows that one.
+        let directory = session.as_ref().and_then(|s| chat_directory(s, project_root));
         if let Some((kind, id)) = session.and_then(|s| s.agent_session_id.map(|id| (s.kind, id))) {
-            match crate::agent::chat::history::replay(kind, &id) {
+            match crate::agent::chat::history::replay(kind, &id, directory.as_deref().map(std::path::Path::new)) {
                 Ok(rows) => snapshot.rows = rows,
                 // A recording that is gone, or a thread Codex never wrote, is the same empty pane as before.
                 Err(e) => crate::diagnostic_warn!("chat: no history replayed for {id}: {e}"),
@@ -2444,4 +2630,172 @@ pub fn web_devices_list(ctx: &AppCtx) -> Vec<crate::web::DeviceEntry> {
 /// Errors when the revocation cannot be persisted, because it would be undone by the next restart.
 pub fn web_device_revoke(ctx: &AppCtx, device_id: &str) -> Result<bool, String> {
     ctx.remote_web().revoke_device(device_id)
+}
+
+#[cfg(test)]
+mod resume_tests {
+    use super::{chat_resume_bind, chat_resume_list_in};
+    use crate::agent::chat::conversations::project_key;
+    use crate::db::repo;
+    use crate::host::AppCtx;
+    use crate::models::{Session, SessionKind};
+    use serde_json::json;
+    use std::path::{Path, PathBuf};
+
+    struct Fixture {
+        dir: PathBuf,
+        ctx: AppCtx,
+        root: PathBuf,
+        project: PathBuf,
+        project_id: String,
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn record(root: &Path, cwd: &Path, id: &str, prompt: &str) {
+        let folder = root.join(project_key(&cwd.to_string_lossy()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let line = json!({"type":"user","sessionId":id,"cwd":cwd,"message":{"role":"user","content":prompt}});
+        std::fs::write(folder.join(format!("{id}.jsonl")), format!("{line}\n")).unwrap();
+    }
+
+    /// A headless app with one project, Claude recordings in a fixture root (never the user's own), and
+    /// the recording of another directory next to them.
+    fn fixture() -> Fixture {
+        let dir = std::env::temp_dir().join(format!("vlx-resume-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        let project = dir.join("project");
+        let other = dir.join("other");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        let data = dir.join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let db = crate::db::Db::open(&data.join("t.db")).unwrap();
+        let ctx = AppCtx::Headless(std::sync::Arc::new(crate::host::HeadlessHost::new(data, db)));
+        let root = dir.join("claude").join("projects");
+        record(&root, &project, "conv-a", "Fix the build");
+        record(&root, &project, "conv-b", "Owned elsewhere");
+        record(&root, &other, "conv-foreign", "Another project");
+        let project_id = {
+            let conn = ctx.db().conn.lock().unwrap();
+            repo::import_project(&conn, project.to_str().unwrap()).unwrap().id
+        };
+        Fixture { dir, ctx, root, project, project_id }
+    }
+
+    fn session(fixture: &Fixture, name: &str, kind: SessionKind, engine: &str) -> Session {
+        let conn = fixture.ctx.db().conn.lock().unwrap();
+        let session = repo::create_session(&conn, &fixture.project_id, None, name, kind, None, None, None, None, None).unwrap();
+        repo::set_session_engine(&conn, &session.id, engine).unwrap();
+        session
+    }
+
+    fn stored(fixture: &Fixture, id: &str) -> (Option<String>, bool, String) {
+        let conn = fixture.ctx.db().conn.lock().unwrap();
+        let session = repo::get_session(&conn, id).unwrap().unwrap();
+        (session.agent_session_id, repo::get_fork_pending(&conn, id).unwrap(), session.name)
+    }
+
+    #[test]
+    fn resume_binds_only_listed_unowned_conversations_of_the_directory() {
+        let f = fixture();
+        let current = session(&f, "Claude 1", SessionKind::Claude, "chat");
+        let owner = session(&f, "Owner", SessionKind::Claude, "tui");
+        {
+            let conn = f.ctx.db().conn.lock().unwrap();
+            repo::set_agent_session_id(&conn, &owner.id, "conv-b", SessionKind::Claude).unwrap();
+        }
+        let root = Some(f.root.as_path());
+
+        let listing = chat_resume_list_in(&f.ctx, root, &current.id, "", 0).unwrap();
+        let mut ids: Vec<_> = listing.conversations.iter().map(|c| c.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, ["conv-a", "conv-b"], "only the session's directory is listed");
+        let owned = listing.find("conv-b").unwrap();
+        assert_eq!(owned.owner.as_ref().map(|o| o.session_id.as_str()), Some(owner.id.as_str()));
+        assert!(listing.find("conv-a").unwrap().owner.is_none());
+
+        // Everything the client could smuggle in is refused, and the binding stays as it was.
+        for (id, mode, code) in [
+            ("conv-a", "adopt", "chat_resume_invalid_mode"),
+            ("../conv-a", "resume", "chat_resume_not_found"),
+            ("conv-a/../../x", "fork", "chat_resume_not_found"),
+            ("conv-foreign", "resume", "chat_resume_not_found"),
+            ("conv-missing", "fork", "chat_resume_not_found"),
+            ("conv-b", "resume", "chat_resume_in_use"),
+        ] {
+            assert_eq!(chat_resume_bind(&f.ctx, root, &current.id, id, mode).unwrap_err(), code, "{id}");
+            assert_eq!(stored(&f, &current.id), (None, false, "Claude 1".to_string()));
+        }
+        assert_eq!(chat_resume_bind(&f.ctx, None, &current.id, "conv-a", "resume").unwrap_err(), "chat_resume_not_found");
+
+        // Resume in place: same session, the chosen conversation, and a placeholder name takes its title.
+        chat_resume_bind(&f.ctx, root, &current.id, "conv-a", "resume").unwrap();
+        assert_eq!(stored(&f, &current.id), (Some("conv-a".into()), false, "Fix the build".into()));
+        let listing = chat_resume_list_in(&f.ctx, root, &current.id, "", 0).unwrap();
+        assert!(listing.find("conv-a").unwrap().current);
+        assert!(!listing.find("conv-b").unwrap().current);
+        // Choosing the conversation it already holds changes nothing.
+        chat_resume_bind(&f.ctx, root, &current.id, "conv-a", "resume").unwrap();
+        assert_eq!(stored(&f, &current.id).0.as_deref(), Some("conv-a"));
+
+        // A fork may branch from a conversation another session owns; the source's owner is untouched.
+        let source = f.root.join(project_key(&f.project.to_string_lossy())).join("conv-b.jsonl");
+        let before = (std::fs::read(&source).unwrap(), std::fs::metadata(&source).unwrap().modified().unwrap());
+        chat_resume_bind(&f.ctx, root, &current.id, "conv-b", "fork").unwrap();
+        assert_eq!(stored(&f, &current.id), (Some("conv-b".into()), true, "Fix the build".into()));
+        assert_eq!(stored(&f, &owner.id).0.as_deref(), Some("conv-b"));
+        // A pending fork holds no conversation of its own yet.
+        assert!(chat_resume_list_in(&f.ctx, root, &current.id, "", 0).unwrap().conversations.iter().all(|c| !c.current));
+        // The fork's recordings stay untouched: the source file keeps its exact bytes and its mtime.
+        let after = (std::fs::read(&source).unwrap(), std::fs::metadata(&source).unwrap().modified().unwrap());
+        assert_eq!(before, after, "binding a fork must not touch the source recording");
+    }
+
+    #[test]
+    fn only_live_claude_chat_sessions_can_resume() {
+        let f = fixture();
+        let root = Some(f.root.as_path());
+        let terminal = session(&f, "Claude 2", SessionKind::Claude, "tui");
+        let codex = session(&f, "Codex 1", SessionKind::Codex, "chat");
+        let archived = session(&f, "Claude 3", SessionKind::Claude, "chat");
+        {
+            let conn = f.ctx.db().conn.lock().unwrap();
+            repo::set_archived(&conn, &archived.id, true).unwrap();
+        }
+        for id in [&terminal.id, &codex.id, &archived.id] {
+            assert_eq!(chat_resume_list_in(&f.ctx, root, id, "", 0).unwrap_err(), "chat_resume_unsupported");
+            assert_eq!(chat_resume_bind(&f.ctx, root, id, "conv-a", "resume").unwrap_err(), "chat_resume_unsupported");
+            assert_eq!(stored(&f, id).0, None);
+        }
+        // The conversation of an audit the upstream scanner drove stays read-only after the audit, as in
+        // its view; one of an audit without the scanner can be rebound like any other session.
+        let audit = session(&f, "Claude 5", SessionKind::Claude, "chat");
+        let conversational = session(&f, "Claude 6", SessionKind::Claude, "chat");
+        {
+            let conn = f.ctx.db().conn.lock().unwrap();
+            for (run, id, data) in [("r1", &audit.id, r#"{"upstream":{"scan":{}}}"#), ("r2", &conversational.id, r#"{"upstream":null}"#)] {
+                conn.execute(
+                    "INSERT INTO security_runs VALUES (?1,?2,?3,'completed',0,?4)",
+                    rusqlite::params![run, f.project_id, id, data],
+                ).unwrap();
+            }
+        }
+        assert_eq!(chat_resume_list_in(&f.ctx, root, &audit.id, "", 0).unwrap_err(), "chat_resume_unsupported");
+        assert_eq!(chat_resume_bind(&f.ctx, root, &audit.id, "conv-a", "resume").unwrap_err(), "chat_resume_unsupported");
+        assert_eq!(stored(&f, &audit.id).0, None);
+        assert!(chat_resume_list_in(&f.ctx, root, &conversational.id, "", 0).is_ok());
+        // A relative directory names nothing definite, so it lists nothing.
+        let relative = session(&f, "Claude 4", SessionKind::Claude, "chat");
+        {
+            let conn = f.ctx.db().conn.lock().unwrap();
+            conn.execute("UPDATE sessions SET cwd = 'project' WHERE id = ?1", [&relative.id]).unwrap();
+        }
+        assert_eq!(chat_resume_list_in(&f.ctx, root, &relative.id, "", 0).unwrap_err(), "chat_resume_unsupported");
+    }
 }

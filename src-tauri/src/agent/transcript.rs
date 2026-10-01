@@ -81,9 +81,9 @@ pub fn context_info(kind: SessionKind, agent_session_id: &str) -> Result<AgentCo
     if !matches!(kind, SessionKind::Claude) {
         return Err("This session kind does not record model context information".to_string());
     }
-    let path = resume::find_claude_transcript(agent_session_id)
-        .ok_or("Claude transcript file not found")?;
-    let tail = read_tail(&path, CONTEXT_TAIL_BYTES)?;
+    // Read through the handle that was checked, never by reopening its path.
+    let (_, mut file) = resume::open_claude_recording(agent_session_id)?;
+    let tail = read_tail_of(&mut file, CONTEXT_TAIL_BYTES)?;
     let (model, context_tokens) = last_claude_usage(&tail);
     // Respect explicit `[1m]` first, then look up the real model ID, then fall back to 200k.
     let settings = claude_settings();
@@ -413,8 +413,13 @@ fn tool_file_path(input: &Value) -> Option<String> {
 
 /// Reads at most `cap` bytes from a file tail, discarding the leading partial line when starting mid-file.
 fn read_tail(path: &Path, cap: u64) -> Result<String, String> {
-    use std::io::{Read, Seek, SeekFrom};
     let mut f = std::fs::File::open(path).map_err(|e| format!("Failed to open transcript: {e}"))?;
+    read_tail_of(&mut f, cap)
+}
+
+/// `read_tail` for a file that is already open.
+fn read_tail_of(f: &mut std::fs::File, cap: u64) -> Result<String, String> {
+    use std::io::{Read, Seek, SeekFrom};
     let len = f
         .metadata()
         .map_err(|e| format!("Failed to read transcript metadata: {e}"))?
@@ -804,7 +809,13 @@ pub fn source_path(kind: SessionKind, agent_session_id: &str) -> Option<std::pat
 /// performs. Callers that cache the resolved path (the search index) use this on refresh.
 pub fn read_at(kind: SessionKind, path: &Path) -> Result<Vec<TranscriptMessage>, String> {
     match kind {
-        SessionKind::Claude => parse_file(path, parse_claude_line),
+        SessionKind::Claude => {
+            // The path was checked when it was found; the file is still never read through a link.
+            let mut file = crate::agent::history::open_regular(path, None)
+                .map_err(|e| format!("Failed to read transcript: {e}"))?;
+            let content = crate::agent::chat::conversations::read_whole(&mut file)?;
+            Ok(merge(content.lines().filter_map(parse_claude_line)))
+        }
         SessionKind::Codex => parse_file(path, parse_codex_line),
         SessionKind::Grok => parse_grok_file(path),
         SessionKind::Pi | SessionKind::Omp => parse_pi_file(path),

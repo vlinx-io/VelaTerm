@@ -876,7 +876,7 @@ it("waits for the skill catalogue and retries a failed lookup without sending th
   retry = true;
   fireEvent.change(input, { target: { value: "" } });
   fireEvent.change(input, { target: { value: "$vsp", selectionStart: 4 } });
-  await screen.findByRole("button", { name: "$vspawn" });
+  await screen.findByRole("button", { name: /^\$vspawn/ });
   expect(screen.queryByText(/Skill lookup failed/)).toBeNull();
 });
 

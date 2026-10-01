@@ -79,7 +79,14 @@ impl ChatManager {
             let root = repo::get_project_root(&conn, &session.project_id)?;
             (session, root)
         };
-        let resume = previous.agent_session_id.lock().unwrap().clone().or(session.agent_session_id.clone());
+        let confirmed = previous.agent_session_id.lock().unwrap().clone();
+        let resume = confirmed.or(session.agent_session_id.clone());
+        // A fork that has not recorded an id of its own is still only a branch point: the launch below forks
+        // again (start_inner applies this same rule) and holds no id until its first turn.
+        let fork = resume.is_some() && {
+            let conn = app.db().conn.lock().unwrap();
+            repo::get_fork_pending(&conn, session_id)?
+        };
         if resume.is_none() && !previous.timeline.lock().unwrap().rows.is_empty() {
             return Err("CHAT_PERMISSION_RESTART_NO_HISTORY".into());
         }
@@ -130,7 +137,7 @@ impl ChatManager {
             next.timeline.lock().unwrap().replace_all(rows.clone());
             *next.user_targets.lock().unwrap() = previous.user_targets.lock().unwrap().clone();
             // Claude does not publish its native id until a turn starts; preserve it while idle.
-            *next.agent_session_id.lock().unwrap() = resume;
+            *next.agent_session_id.lock().unwrap() = if fork { None } else { resume };
             emit(app, session_id, reset_event(&next));
             next.request_and_wait("set_permission_mode", |id| {
                 protocol::control_request(id, protocol::set_permission_mode("bypassPermissions"))
@@ -270,6 +277,24 @@ for line in sys.stdin:
         assert!(matches!(next.timeline.lock().unwrap().get("partial"), Some(ChatRow::Assistant { streaming: false, text, .. }) if text == "Partial answer"));
         assert!(!next.turn.lock().unwrap().running);
         assert_eq!(repo::get_session(&app.db().conn.lock().unwrap(), "s").unwrap().unwrap().permission_mode.as_deref(), Some("skip"));
+        app.chat().stop_for_handoff(&app, "s").unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A fork that has not recorded an id of its own restarts as a fork: the relaunch branches from the source
+    /// again and the process still holds no id, so the source conversation is never continued in place.
+    #[test]
+    fn a_pending_fork_restarts_as_a_fork_without_an_id() {
+        let (app, dir) = fixture("restart-fork");
+        app.db().conn.lock().unwrap().execute("UPDATE sessions SET fork_pending=1 WHERE id='s'", []).unwrap();
+        let previous = app.chat().get("s").unwrap();
+        *previous.agent_session_id.lock().unwrap() = None;
+        app.chat().restart_claude_bypass(&app, "s", previous.pid).unwrap();
+        let next = app.chat().get("s").unwrap();
+        assert_ne!(next.pid, previous.pid);
+        assert_eq!(*next.mode.lock().unwrap(), "bypassPermissions");
+        assert_eq!(next.agent_session_id.lock().unwrap().as_deref(), None, "a pending fork holds no id of its own");
+        assert!(repo::get_fork_pending(&app.db().conn.lock().unwrap(), "s").unwrap(), "the fork is still pending");
         app.chat().stop_for_handoff(&app, "s").unwrap();
         std::fs::remove_dir_all(dir).unwrap();
     }

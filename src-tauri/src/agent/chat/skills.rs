@@ -176,6 +176,23 @@ mod tests {
         ],"errors":[]}]})).unwrap()
     }
 
+    /// The list a real CLI answered its handshake with keeps what the composer's catalogue matches on.
+    #[test]
+    fn claude_catalogue_keeps_aliases_and_builtin_marks_from_a_real_handshake() {
+        let fixture: Value = serde_json::from_str(include_str!("fixtures/claude-initialize-commands.json")).unwrap();
+        let raw = fixture["commands"].as_array().unwrap();
+        let commands = claude_commands(&fixture).unwrap();
+        assert_eq!(commands.len(), raw.len());
+        for (command, original) in commands.iter().zip(raw) {
+            assert_eq!(command["invocation"], "/");
+            assert_eq!(command["name"], original["name"]);
+            assert_eq!(command["aliases"], original["aliases"]);
+            assert_eq!(command["builtin"], original["builtin"]);
+        }
+        let clear = commands.iter().find(|c| c["name"] == "clear").unwrap();
+        assert_eq!(clear["aliases"], json!(["reset", "new"]));
+    }
+
     #[test]
     fn catalogue_uses_provider_paths_and_excludes_disabled_skills() {
         let commands = catalogue();

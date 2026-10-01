@@ -387,6 +387,41 @@ fn resolve_transcript_path(session: &Session, prev: Option<&StateRow>) -> Option
     transcript::source_path(session.kind, agent_id)
 }
 
+/// Whether a transcript checkpoint was derived from the conversation the session holds now. Every lookup
+/// of `transcript::source_path` yields a path that names the agent session id: Claude's `<id>.jsonl`, a
+/// Codex, Pi or OMP file whose name contains it, Grok's `<id>/updates.jsonl`. A checkpoint without a
+/// recorded path, or of a kind without such a path, cannot be told apart and counts as current.
+fn checkpoint_belongs_to(session: &Session, prev: &StateRow) -> bool {
+    let (Some(agent_id), Some(recorded)) = (nonempty_agent_id(session), prev.source_path.as_deref()) else {
+        return true;
+    };
+    let path = Path::new(recorded);
+    let name = |path: Option<&Path>| path.and_then(|p| p.file_name()).and_then(|n| n.to_str()).map(str::to_owned);
+    match session.kind {
+        SessionKind::Claude => path.file_stem().and_then(|n| n.to_str()) == Some(agent_id),
+        SessionKind::Codex | SessionKind::Pi | SessionKind::Omp => name(Some(path)).is_some_and(|n| n.contains(agent_id)),
+        SessionKind::Grok => name(path.parent()).as_deref() == Some(agent_id),
+        _ => true,
+    }
+}
+
+/// Remove one track of a session: its rows and its checkpoint.
+fn drop_track(db: &Db, session_id: &str, source: &str) -> Result<(), String> {
+    let mut conn = db.conn.lock().unwrap();
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("Failed to begin drop tx: {e}"))?;
+    delete_rows(&tx, session_id, Some(source))?;
+    tx.execute(
+        "DELETE FROM search_index_state WHERE session_id = ?1 AND source = ?2",
+        params![session_id, source],
+    )
+    .map_err(|e| format!("Failed to drop search state: {e}"))?;
+    tx.commit()
+        .map_err(|e| format!("Failed to commit drop tx: {e}"))?;
+    Ok(())
+}
+
 /// Rows fetched per backfill round; small enough that the lock is released between rounds.
 const BACKFILL_BATCH: usize = 500;
 
@@ -542,7 +577,14 @@ pub fn refresh_stale(db: &Db, recordings_dir: &Path) -> Result<(), String> {
     // Per session: check freshness, extract unlocked, then append/rebuild under the lock.
     for s in &sessions {
         // Select the same track as build_full, but reuse the recorded path instead of looking it up again.
-        let st = states.get(&(s.id.clone(), SRC_TRANSCRIPT.to_string()));
+        let mut st = states.get(&(s.id.clone(), SRC_TRANSCRIPT.to_string()));
+        // A transcript track derived from another conversation than the one the session now holds (after a
+        // resume or fork in place, from the picker or from the terminal) no longer describes the session:
+        // drop it before anything reuses its path or its checkpoint.
+        if st.is_some_and(|prev| !checkpoint_belongs_to(s, prev)) {
+            drop_track(db, &s.id, SRC_TRANSCRIPT)?;
+            st = None;
+        }
         if s.kind == SessionKind::Kiro {
             let native = nonempty_agent_id(s).ok_or_else(|| "Kiro session ID is unavailable".to_string())
                 .and_then(crate::agent::kiro_store::read);
@@ -964,6 +1006,65 @@ mod tests {
         assert_eq!(count_rows(&db, sid), 2);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A checkpoint belongs to the session only while its recorded path names the conversation the session
+    /// holds; after a resume or fork in place it is another conversation's, and its track is dropped whole.
+    #[test]
+    fn a_checkpoint_of_another_conversation_is_dropped() {
+        let state = |path: &str| StateRow { indexed_len: 1, indexed_mtime: None, source_path: Some(path.to_string()) };
+        let claude = make_session("s", SessionKind::Claude, Some("new-id"));
+        assert!(checkpoint_belongs_to(&claude, &state("/p/-w/new-id.jsonl")));
+        assert!(!checkpoint_belongs_to(&claude, &state("/p/-w/old-id.jsonl")));
+        assert!(!checkpoint_belongs_to(&claude, &state("/p/-w/new-id-2.jsonl")));
+        let codex = make_session("s", SessionKind::Codex, Some("new-id"));
+        assert!(checkpoint_belongs_to(&codex, &state("/c/2026/rollout-2026-01-01T00-00-00-new-id.jsonl")));
+        assert!(!checkpoint_belongs_to(&codex, &state("/c/2026/rollout-2026-01-01T00-00-00-old-id.jsonl")));
+        let grok = make_session("s", SessionKind::Grok, Some("new-id"));
+        assert!(checkpoint_belongs_to(&grok, &state("/g/sessions/x/new-id/updates.jsonl")));
+        assert!(!checkpoint_belongs_to(&grok, &state("/g/sessions/x/old-id/updates.jsonl")));
+        // Nothing recorded, or no conversation id: nothing to compare, the checkpoint stays.
+        assert!(checkpoint_belongs_to(&claude, &StateRow { indexed_len: 1, indexed_mtime: None, source_path: None }));
+        assert!(checkpoint_belongs_to(&make_session("s", SessionKind::Claude, None), &state("/p/-w/old-id.jsonl")));
+
+        let db = temp_db();
+        let sid = "sess-rebound";
+        {
+            let conn = db.conn.lock().unwrap();
+            for (source, text) in [(SRC_TRANSCRIPT, "old conversation words"), (SRC_RECORDING, "terminal output")] {
+                conn.execute(
+                    "INSERT INTO session_fts(text, session_id, source, message_index, ordinal) VALUES (?1, ?2, ?3, 0, 0)",
+                    params![text, sid, source],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO session_words(rowid, words, session_id) VALUES (last_insert_rowid(), ?1, ?2)",
+                    params![text, sid],
+                )
+                .unwrap();
+                conn.execute(
+                    "INSERT INTO search_index_state(session_id, source, indexed_len, indexed_at, source_path) \
+                     VALUES (?1, ?2, 1, 0, '/p/-w/old-id.jsonl')",
+                    params![sid, source],
+                )
+                .unwrap();
+            }
+        }
+        drop_track(&db, sid, SRC_TRANSCRIPT).unwrap();
+        let conn = db.conn.lock().unwrap();
+        let count = |sql: &str, source: &str| -> i64 {
+            conn.query_row(sql, params![sid, source], |r| r.get(0)).unwrap()
+        };
+        let rows = "SELECT COUNT(*) FROM session_fts WHERE session_id = ?1 AND source = ?2";
+        let states = "SELECT COUNT(*) FROM search_index_state WHERE session_id = ?1 AND source = ?2";
+        // Only the recording row's word companion is left.
+        let words = "SELECT COUNT(*) FROM session_words WHERE session_id = ?1 AND rowid IN \
+                     (SELECT rowid FROM session_fts WHERE source = ?2)";
+        let all_words: i64 = conn
+            .query_row("SELECT COUNT(*) FROM session_words WHERE session_id = ?1", params![sid], |r| r.get(0))
+            .unwrap();
+        assert_eq!((count(rows, SRC_TRANSCRIPT), count(states, SRC_TRANSCRIPT)), (0, 0));
+        assert_eq!((count(rows, SRC_RECORDING), count(states, SRC_RECORDING), count(words, SRC_RECORDING), all_words), (1, 1, 1, 1));
     }
 
     /// A trigram row without a word companion (the state of every row when the word table is first created)
