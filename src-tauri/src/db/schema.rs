@@ -60,6 +60,9 @@ CREATE TABLE IF NOT EXISTS sessions (
   worktree_path TEXT,
   worktree_base_ref TEXT,
   archived_at INTEGER,
+  -- Last recorded user or agent activity in milliseconds since the epoch, NULL when never active. The
+  -- sidebar's optional activity order sorts by it descending; unlike created_at it is in milliseconds.
+  last_active_at INTEGER,
   fork_pending INTEGER NOT NULL DEFAULT 0,
   browser_url TEXT,
   engine      TEXT NOT NULL DEFAULT 'tui',

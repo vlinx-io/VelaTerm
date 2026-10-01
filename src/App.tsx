@@ -32,6 +32,7 @@ import {
   refreshSettingsFromBackend,
   startSettingsWatch,
 } from "./store/settingsWatch";
+import { startActivityWatch } from "./store/activityWatch";
 import { isTauri } from "./ipc/transport";
 import { startSpawnRecovery } from "./ipc/spawnRecovery";
 import { isShareSurface } from "./ipc/shareBase";
@@ -189,6 +190,8 @@ function App() {
     // Preferences are backend-authoritative but were reconciled only at startup, so a change made in
     // another shell stayed invisible here until the next launch. Follow the broadcast instead.
     const stopSettingsWatch = startSettingsWatch();
+    // Sidebar activity order: one store observer records focus and agent-state activity for every session.
+    const stopActivityWatch = startActivityWatch();
     // Account usage: read the machine-wide snapshot once, then follow the backend's broadcast. Sessions
     // render from this one copy instead of each querying its provider.
     const stopUsageSync = startUsageSync();
@@ -212,6 +215,7 @@ function App() {
       stopUpdateSchedule();
       stopMirrorSync();
       stopSettingsWatch();
+      stopActivityWatch();
       stopUsageSync();
     };
     // Run once on mount.

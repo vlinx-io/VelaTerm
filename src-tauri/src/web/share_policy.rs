@@ -517,6 +517,10 @@ mod tests {
         ] {
             assert!(!allowed_command(cmd), "Public share must deny {cmd}");
         }
+        // A visitor's focus is not the host's activity: the activity stamp stays a host-side write on both
+        // share surfaces (the frontend also skips the call there, see noteSessionActivity).
+        assert!(!allowed_command("touch_session_activity"));
+        assert!(!app_command("touch_session_activity"));
         // Shell mode is the capability pty_spawn grants; a public share visitor has neither, on either
         // surface.
         for cmd in ["chat_run_shell", "chat_cancel_shell"] {

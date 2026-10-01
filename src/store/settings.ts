@@ -205,6 +205,9 @@ export interface PersistedSettings {
   /** The revision of the default inline set that the saved list has been brought up to. A list saved
    * before a revision gains that revision's chips once; removing them again in the settings sticks. */
   composerInlineChipsRevision: number;
+  /** Sidebar order: on keeps the most recently active projects and sessions at the top, off renders the
+   * manual order. Off by default; the manual order is never changed by the mode. */
+  sortByActivity: boolean;
 }
 
 /** Every composer chip the toolbar can show, in the order the toolbar used before the list became
@@ -271,6 +274,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   infoCollapsed: {},
   composerInlineChips: DEFAULT_COMPOSER_INLINE_CHIPS,
   composerInlineChipsRevision: COMPOSER_INLINE_CHIPS_REVISION,
+  sortByActivity: false,
 };
 
 /** Keeps only known chip ids, once each and in the saved order. A missing or malformed value falls back
@@ -354,6 +358,8 @@ export function loadSettings(): PersistedSettings {
       merged.composerInlineChips = [...merged.composerInlineChips, "tasks"];
     }
     merged.composerInlineChipsRevision = COMPOSER_INLINE_CHIPS_REVISION;
+    // Only an explicit boolean true switches the activity order on; anything else keeps the manual order.
+    merged.sortByActivity = parsed.sortByActivity === true;
     // Migrate boolean gpuRender to termRenderer only when the new key is absent, preserving WebGL for
     // existing users. Future saves write only the new structure and naturally discard the old field.
     if (parsed.termRenderer === undefined && typeof parsed.gpuRender === "boolean") {

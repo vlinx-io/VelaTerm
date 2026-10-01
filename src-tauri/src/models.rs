@@ -221,6 +221,10 @@ pub struct Session {
     pub worktree_base_ref: Option<String>,
     /// Archive timestamp in seconds. Archived sessions are reversibly hidden and available read-only.
     pub archived_at: Option<i64>,
+    /// Last recorded activity in milliseconds since the epoch (agent state change, focus, or user input),
+    /// None when never active. Written through `touch_session_activity` at most once per second and read
+    /// back with the tree snapshot so the sidebar's optional activity order is right after a restart.
+    pub last_active_at: Option<i64>,
     /// Last URL for browser nodes, empty for other types. The frontend debounces navigation updates through
     /// `set_browser_url` and reloads this value next time.
     pub browser_url: Option<String>,

@@ -877,6 +877,8 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
     const dataSub = term.onData((data) => {
       // onData is the authoritative input moment, covering context-menu paste and other no-keydown paths.
       noteUserInput();
+      // User input is sidebar activity; the store counts a typing burst once per second, not per key.
+      useTermStore.getState().noteSessionActivity(session.id);
       // Swallow xterm's late duplicate of punctuation already sent by the WebKit fallback.
       if (imeFix?.shouldSwallow(data)) return;
       completion?.input(data);

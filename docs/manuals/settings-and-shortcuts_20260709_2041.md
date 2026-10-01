@@ -63,6 +63,7 @@ Controls that are switched off, and controls that do not fit beside the message 
 | Tabs | "Single" (default) reuses the current tab when you open an agent session and keeps the previous tab running in the background. "Multi" opens each session in its own tab |
 | Dynamic status filter additions | When a sidebar status filter is active, sessions that start to match are added to it (on by default) |
 | Background limit | Shown in Single mode: the maximum number of background tabs (8, 16, 32 or 64; default 32). Past the limit, the oldest inactive background tab ends |
+| Sort by activity | Keep the most recently active projects and sessions at the top of the sidebar tree (off by default, same switch as in the sidebar filter menu); off restores the manual order. See [Interface & Session Management](interface-and-sessions_20260709_2041.md) |
 | Confirm before spawn | Show a confirmation card before a child session starts (on by default); see [Session Spawning & Git Collaboration](session-spawning-and-git_20260709_2041.md) §4 |
 | Usage auto-refresh | Keep the account usage in the Info panel up to date (on by default) |
 | Usage refresh | Refresh interval: 30 s, 1 min, 2 min or 5 min (default 5 min) |

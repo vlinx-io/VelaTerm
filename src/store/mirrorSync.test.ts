@@ -16,6 +16,7 @@ vi.mock("../ipc/commands", () => ({
   markMirrorDetach: vi.fn(),
 }));
 vi.mock("../ipc/tree", () => ({
+  touchSessionActivity: vi.fn().mockResolvedValue(true),
   listTree: vi
     .fn()
     .mockResolvedValue({ projects: [], groups: [], sessions: [] }),
@@ -95,7 +96,7 @@ const emitClients = (count: number, clients: unknown[] = []) =>
   h.cbs.clients!(count, clients);
 
 import { markMirrorDetach } from "../ipc/commands";
-import { listTree } from "../ipc/tree";
+import { listTree, touchSessionActivity } from "../ipc/tree";
 import { buildMirrorLayout } from "./mirrorLayout";
 import { startMirrorSync } from "./mirrorSync";
 import { useTermStore } from "./termStore";
@@ -353,6 +354,9 @@ describe("following a peer", () => {
     expect(useTermStore.getState().openTabs).toEqual(["B"]);
     expect(useTermStore.getState().activeSessionId).toBe("B");
     expect(mirrorPush).not.toHaveBeenCalled();
+    // Following the peer's focus is not this user's activity: the sidebar's activity record stays untouched.
+    expect(vi.mocked(touchSessionActivity)).not.toHaveBeenCalled();
+    expect(useTermStore.getState().sessionActivity).toEqual({});
     stop();
   });
 
