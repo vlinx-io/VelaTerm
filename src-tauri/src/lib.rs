@@ -1763,7 +1763,7 @@ const SERVE_USAGE: &str = "usage: vlx-term --serve [--port 8799] [--password <pa
 /// so no PTY session, chat engine, model probe or other helper spawned later inherits the password.
 ///
 /// `serve_startup_env` calls it as the very first step of `--serve`, before `login_env::hydrate` and
-/// before any thread or child exists, and once more after hydrate (see there).
+/// before any child exists, and once more after hydrate (see there).
 /// Rust's `Command` also takes the same environment lock as `remove_var`, so a spawn can never observe a
 /// half-updated environment.
 fn take_serve_password_env() -> Option<String> {
@@ -1783,22 +1783,21 @@ pub(crate) const SERVE_PASSWORD_ENV_KEYS: [&str; 2] = [SERVE_PASSWORD_ENV, SERVE
 /// then run `hydrate` (the login-shell environment recovery, which spawns the first child of the
 /// process), then scrub again.
 ///
-/// Why this order: the first take runs while the process is still single-threaded (main.rs calls
-/// `run_serve` before it starts any thread or child for `--serve`), so the login-shell probe and
-/// everything its startup files launch already start without the password. A startup file may export
+/// Why this order: the first take runs before anything spawns a child, so the login-shell probe and
+/// everything its startup files launch already start without the password. The only other thread that
+/// can exist at that point is main.rs's parent watch (`exit_with_parent`, set up for the Electron sidecar),
+/// which only sleeps and checks the parent process and reads no variables. A startup file may export
 /// the variable itself and hydrate then copies it back into this process; as before this change, such a
 /// value wins over the inherited one, and the second take removes it again. That second take is still
-/// safe: the only other thread that can exist then is hydrate's probe worker after a timeout, which is
-/// blocked waiting on a child whose environment was captured at spawn and reads no variables.
+/// safe: besides the parent watch, the only other thread that can exist then is hydrate's probe worker
+/// after a timeout, which is blocked waiting on a child whose environment was captured at spawn and reads
+/// no variables.
 fn serve_startup_env(hydrate: impl FnOnce()) -> Option<String> {
     let inherited = take_serve_password_env();
     hydrate();
     take_serve_password_env().or(inherited)
 }
 
-/// Read the access password from `--password-file`: the first line with trailing CR/LF removed. On Unix
-/// the file must not be readable or writable by group or others. Errors name the path but never the
-/// content.
 /// How an argument appears in an error message. Flags are shown as typed; a bare value is hidden, because
 /// a misaligned command line (for example a value left over after `--password <pw>`) could otherwise
 /// print the password to stderr and from there into a service log.
@@ -1810,6 +1809,9 @@ fn shown_arg(arg: &str) -> String {
     }
 }
 
+/// Read the access password from `--password-file`: the first line with trailing CR/LF removed. On Unix
+/// the file must not be readable or writable by group or others. Errors name the path but never the
+/// content.
 fn read_password_file(path: &str) -> Result<String, String> {
     use std::io::Read;
     // A FIFO or device would block or stream on open; only a regular file is a password file.

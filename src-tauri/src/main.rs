@@ -103,8 +103,9 @@ fn main() {
     raise_fd_limit();
     // Headless server mode starts browser remote access (HTTPS, login, WebSocket, and PTY) from the CLI
     // without creating a window or requiring a display server. It must run before anything below spawns
-    // a thread or child: run_serve first removes the access password from the environment and only then
-    // recovers the login-shell environment itself, so the login-shell probe never inherits the password.
+    // a child: run_serve first removes the access password from the environment and only then recovers
+    // the login-shell environment itself, so the login-shell probe never inherits the password. The
+    // parent watch started just before it reads no variables.
     if args.get(1).map(String::as_str) == Some("--serve") {
         #[cfg(unix)]
         exit_with_parent();
