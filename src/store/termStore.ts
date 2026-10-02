@@ -4,7 +4,7 @@ import { diagnosticEvent, } from "../ipc/transport";
 //! The center area uses tabs containing recursively splittable pane trees.
 
 import { create } from "zustand";
-import { DEFAULT_CONVERSATION_FONT_SIZE, normalizeTextSize, normalizeTextLineHeight } from "../theme";
+import { DEFAULT_CONVERSATION_FONT_SIZE, normalizeTextSize, normalizeTextLineHeight, normalizeUiZoom } from "../theme";
 import { t } from "../i18n";
 import { setBrowserUrl } from "../ipc/browser";
 import { chatClear, setSessionEngine, type ChatBackgroundTask } from "../ipc/chat";
@@ -1068,6 +1068,8 @@ interface TermStore {
   uiFontFamily: string | null;
   /** Interface font size in pixels, or `null` to follow density. */
   uiFontSize: number | null;
+  /** Whole-UI zoom factor; see `VisualSettings.uiZoom`. */
+  uiZoom: number;
   /** Terminal monospace font, applied live to all terminals. */
   termFontFamily: string | null;
   /** Terminal font size in pixels, applied live to all terminals. */
@@ -1535,6 +1537,8 @@ interface TermStore {
   setUiFontFamily: (v: string | null) => void;
   /** Interface font size in pixels; `null` follows density. */
   setUiFontSize: (v: number | null) => void;
+  /** Whole-UI zoom factor; clamped to `[UI_ZOOM_MIN, UI_ZOOM_MAX]` by the setter. */
+  setUiZoom: (v: number) => void;
   /** Terminal font family; empty or `null` uses the default stack. */
   setTermFontFamily: (v: string | null) => void;
   /** Terminal font size in pixels, clamped to 10–24. */
@@ -1695,6 +1699,7 @@ function persistAndApplyVisual(getState: () => TermStore) {
     defaultShell: s.defaultShell,
     uiFontFamily: s.uiFontFamily,
     uiFontSize: s.uiFontSize,
+    uiZoom: s.uiZoom,
     termFontFamily: s.termFontFamily,
     termFontSize: s.termFontSize,
     termLineHeight: s.termLineHeight,
@@ -4685,6 +4690,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
     set({
       uiFontSize: v == null ? null : Math.min(20, normalizeTextSize(v)),
     });
+    persistAndApplyVisual(get);
+  },
+  setUiZoom: (v) => {
+    set({ uiZoom: normalizeUiZoom(v) });
     persistAndApplyVisual(get);
   },
   setTermFontFamily: (v) => {

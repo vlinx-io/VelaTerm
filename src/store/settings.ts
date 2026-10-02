@@ -3,7 +3,7 @@
 //! SettingsModal and the store share types while reducing the size of the main store.
 
 import { pushSetting } from "../ipc/settingsSync";
-import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, normalizeTextSize, normalizeTextLineHeight } from "../theme";
+import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, DEFAULT_UI_ZOOM, normalizeTextSize, normalizeTextLineHeight, normalizeUiZoom } from "../theme";
 import type {
   AccentChoice,
   Density,
@@ -137,6 +137,9 @@ export interface PersistedSettings {
   uiFontFamily: string | null;
   /** UI font size in pixels; null follows density without an inline `--ui-fs`. */
   uiFontSize: number | null;
+  /** Whole-UI zoom factor. 1 is the browser default; values below shrink and values above enlarge.
+   * Applied as CSS `zoom` on the document root by `applyVisual`, and clamped by the setter. */
+  uiZoom: number;
   /** Primary terminal monospace font; null uses the default stack. */
   termFontFamily: string | null;
   /** Terminal font size in pixels, defaulting to 13. */
@@ -245,6 +248,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   defaultShell: "",
   uiFontFamily: null,
   uiFontSize: null,
+  uiZoom: DEFAULT_UI_ZOOM,
   termFontFamily: null,
   termFontSize: DEFAULT_TERMINAL_FONT_SIZE,
   termLineHeight: DEFAULT_TERMINAL_LINE_HEIGHT,
@@ -330,6 +334,9 @@ export function loadSettings(): PersistedSettings {
     merged.chatFontSize = normalizeTextSize(merged.chatFontSize, DEFAULT_CONVERSATION_FONT_SIZE);
     merged.chatLineHeight = normalizeTextLineHeight(merged.chatLineHeight);
     merged.termLineHeight = normalizeTextLineHeight(merged.termLineHeight);
+    // Clamp uiZoom before it reaches applyVisual so a bad payload (out of range, non-finite) cannot
+    // hide the UI at a tiny scale that leaves no visible control to fix it.
+    merged.uiZoom = normalizeUiZoom(merged.uiZoom);
     if (
       !parsed.chatModelByKind ||
       typeof parsed.chatModelByKind !== "object" ||
@@ -401,6 +408,7 @@ export const visualOf = (s: PersistedSettings): VisualSettings => ({
   navLayout: s.navLayout,
   uiFontFamily: s.uiFontFamily,
   uiFontSize: s.uiFontSize,
+  uiZoom: normalizeUiZoom(s.uiZoom),
   chatFontFamily: s.chatFontFamily,
   chatFontSize: s.chatFontSize,
   chatLineHeight: s.chatLineHeight,

@@ -624,6 +624,7 @@ const ja: typeof en = {
   "settings.fonts": "Fonts", // TODO translate
   "settings.uiFont": "Interface font", // TODO translate
   "settings.uiFontSize": "Interface size", // TODO translate
+  "settings.uiZoom": "UIズーム", // Interface zoom
   "settings.termFont": "Terminal font", // TODO translate
   "settings.termFontSize": "Terminal size", // TODO translate
   "settings.termLineHeight": "ターミナルの行の高さ",

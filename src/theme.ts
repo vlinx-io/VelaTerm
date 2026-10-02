@@ -41,6 +41,11 @@ export interface VisualSettings {
   uiFontFamily: string | null;
   /** UI font size in pixels. null follows density without an inline --ui-fs; a value overrides the density size inline. */
   uiFontSize: number | null;
+  /** Whole-UI zoom factor. 1 is native, <1 shrinks, >1 enlarges, clamped to `[UI_ZOOM_MIN, UI_ZOOM_MAX]` at
+   * the setter. Applied via CSS `zoom` on the document root so the ~450 hardcoded pixel font sizes across
+   * the app scale in one shot without a rem refactor; unlike `transform: scale`, `zoom` preserves layout
+   * math and hit-testing. */
+  uiZoom: number;
   chatFontFamily: string | null;
   chatFontSize: number;
   chatLineHeight: number;
@@ -50,6 +55,22 @@ export interface VisualSettings {
 export const DEFAULT_TERMINAL_FONT_SIZE = 13;
 export const DEFAULT_CONVERSATION_FONT_SIZE = 13.5;
 export const DEFAULT_TERMINAL_LINE_HEIGHT = 1.2;
+
+/** UI zoom defaults + bounds. The preset list is a UI convention; storage stays a plain number so a
+ * user (or a remote-settings push) can pick any value in range. */
+export const DEFAULT_UI_ZOOM = 1;
+export const UI_ZOOM_MIN = 0.5;
+export const UI_ZOOM_MAX = 2;
+export const UI_ZOOM_PRESETS: readonly number[] = [0.8, 0.9, 1, 1.1, 1.25, 1.5];
+
+/** Clamp an unknown value to a supported UI zoom in `[UI_ZOOM_MIN, UI_ZOOM_MAX]`, falling back to
+ * `DEFAULT_UI_ZOOM` for non-finite input. Rounded to two decimals so serialised values stay stable. */
+export function normalizeUiZoom(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_UI_ZOOM;
+  const clamped = Math.max(UI_ZOOM_MIN, Math.min(UI_ZOOM_MAX, n));
+  return Math.round(clamped * 100) / 100;
+}
 
 export function normalizeTextSize(value: number, defaultValue = DEFAULT_TERMINAL_FONT_SIZE): number {
   return Number.isFinite(value) ? Math.max(10, Math.min(24, Math.round(value * 2) / 2)) : defaultValue;
@@ -265,6 +286,13 @@ export function applyVisual(s: VisualSettings) {
   else root.style.removeProperty("--font-mono");
   if (s.uiFontSize != null) root.style.setProperty("--ui-fs", `${s.uiFontSize}px`);
   else root.style.removeProperty("--ui-fs");
+  // CSS `zoom` on the root element scales fonts, dimensions and spacing proportionally in one shot,
+  // covering the ~450 hardcoded pixel font sizes across the app. Skip the inline style when the value
+  // is the default so the page inherits the browser default (Safari treats an explicit 1 as an
+  // override in a few edge cases such as printing).
+  const zoom = normalizeUiZoom(s.uiZoom);
+  if (zoom === DEFAULT_UI_ZOOM) root.style.removeProperty("zoom");
+  else root.style.setProperty("zoom", String(zoom));
   applyConversationTypography(s);
 }
 

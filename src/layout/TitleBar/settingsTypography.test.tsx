@@ -110,3 +110,32 @@ it("normalizes malformed or out-of-range saved typography", () => {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({ chatFontSize: 999, chatLineHeight: null, chatFontFamily: 123, termLineHeight: 0 }));
   expect(loadSettings()).toMatchObject({ chatFontSize: 24, chatLineHeight: 1.2, chatFontFamily: null, termLineHeight: 1 });
 });
+
+it("clamps uiZoom to the supported range and applies CSS zoom on the document root", () => {
+  useTermStore.getState().setUiZoom(1.25);
+  expect(useTermStore.getState().uiZoom).toBe(1.25);
+  applyVisual(visualOf({ ...loadSettings(), uiZoom: useTermStore.getState().uiZoom }));
+  expect(document.documentElement.style.zoom).toBe("1.25");
+
+  useTermStore.getState().setUiZoom(1);
+  expect(useTermStore.getState().uiZoom).toBe(1);
+  applyVisual(visualOf({ ...loadSettings(), uiZoom: useTermStore.getState().uiZoom }));
+  // A zoom of 1 is the browser default; the inline style is cleared so print and edge cases inherit.
+  expect(document.documentElement.style.zoom).toBe("");
+
+  useTermStore.getState().setUiZoom(10);
+  expect(useTermStore.getState().uiZoom).toBe(2);
+  useTermStore.getState().setUiZoom(0.1);
+  expect(useTermStore.getState().uiZoom).toBe(0.5);
+  useTermStore.getState().setUiZoom(Number.NaN);
+  expect(useTermStore.getState().uiZoom).toBe(1);
+});
+
+it("loads a persisted uiZoom and clamps a bad payload back to the default", () => {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ uiZoom: 1.5 }));
+  expect(loadSettings().uiZoom).toBe(1.5);
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ uiZoom: "corrupted" }));
+  expect(loadSettings().uiZoom).toBe(1);
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ uiZoom: 99 }));
+  expect(loadSettings().uiZoom).toBe(2);
+});

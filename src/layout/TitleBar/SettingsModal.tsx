@@ -28,7 +28,7 @@ import { env, platform } from "../../platform";
 import type { VelaCommandStatus } from "../../platform/types";
 import { COMPOSER_CHIP_IDS, type ComposerChipId } from "../../store/settings";
 import { useTermStore, type TermRenderer } from "../../store/termStore";
-import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT } from "../../theme";
+import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, UI_ZOOM_PRESETS } from "../../theme";
 import type {
   AccentChoice,
   Density,
@@ -338,6 +338,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const toggleSound = useTermStore((s) => s.toggleSound);
   const uiFontFamily = useTermStore((s) => s.uiFontFamily);
   const uiFontSize = useTermStore((s) => s.uiFontSize);
+  const uiZoom = useTermStore((s) => s.uiZoom);
+  const setUiZoom = useTermStore((s) => s.setUiZoom);
   const termFontFamily = useTermStore((s) => s.termFontFamily);
   const termFontSize = useTermStore((s) => s.termFontSize);
   const termLineHeight = useTermStore((s) => s.termLineHeight);
@@ -549,6 +551,15 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     max={20}
                     defaultValue={13}
                     autoLabel={t("settings.fontAuto")}
+                  />
+                </Field>
+                <Field label={t("settings.uiZoom")}>
+                  <Select
+                    value={String(uiZoom)}
+                    ariaLabel={t("settings.uiZoom")}
+                    options={UI_ZOOM_PRESETS.map((v) => ({ value: String(v), label: `${Math.round(v * 100)}%` }))}
+                    onChange={(v) => setUiZoom(Number(v))}
+                    width={140}
                   />
                 </Field>
               </>
