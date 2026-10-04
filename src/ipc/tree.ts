@@ -5,6 +5,7 @@ import type {
   Group,
   NodeKind,
   Project,
+  ProjectFolder,
   Session,
   SessionEngine,
   SessionKind,
@@ -241,6 +242,26 @@ export function setCollapsed(
   collapsed: boolean,
 ): Promise<void> {
   return invoke("set_collapsed", { kind, id, collapsed });
+}
+
+export function createProjectFolder(name: string): Promise<ProjectFolder> {
+  return invoke<ProjectFolder>("create_project_folder", { name });
+}
+
+export function renameProjectFolder(id: string, name: string): Promise<void> {
+  return invoke("rename_project_folder", { id, name });
+}
+
+export function deleteProjectFolder(id: string): Promise<void> {
+  return invoke("delete_project_folder", { id });
+}
+
+export function setProjectFolderCollapsed(id: string, collapsed: boolean): Promise<void> {
+  return invoke("set_project_folder_collapsed", { id, collapsed });
+}
+
+export function setProjectFolder(projectId: string, folderId: string | null): Promise<void> {
+  return invoke("set_project_folder", { projectId, folderId });
 }
 
 /** Archive or restore a session. Archiving hides it without data loss and keeps read-only playback. */

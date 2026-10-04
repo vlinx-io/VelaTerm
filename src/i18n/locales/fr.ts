@@ -855,17 +855,30 @@ const fr: typeof en = {
   "tree.openInSplit": "Ouvrir dans un volet", // Open in Split
   "tree.createProject": "Créer un projet",
   "tree.dropFoldersHint": "Déposez des dossiers ici pour les ajouter en tant que projets",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "Nouvelle collection",
   "tree.deleteCollection": "Supprimer la collection",
   "collection.title": "Nouvelle collection",
   "collection.name": "Nom de la collection",
   "collection.namePlaceholder": "research",
   "collection.submit": "Créer la collection",
-  "collection.tag": "Aucun dossier",
+  "collection.tag": "Aucun répertoire",
   "collection.deleteTitle": "Supprimer la collection",
   "collection.deleteBody": (name) =>
     `Supprimer la collection « ${name} » ? Tous ses groupes et sessions seront également supprimés. Cette action est irréversible.`,
+  "folder.projectCount": (count) => (count <= 1 ? `${count} projet` : `${count} projets`), // {count} projects
+  "folder.new": "Nouveau dossier", // New Folder
+  "folder.createTitle": "Nouveau dossier", // New Folder
+  "folder.renameTitle": "Renommer le dossier", // Rename Folder
+  "folder.name": "Nom du dossier", // Folder name
+  "folder.namePlaceholder": "paiements", // payments
+  "folder.create": "Créer le dossier", // Create Folder
+  "folder.delete": "Supprimer le dossier", // Delete Folder
+  "folder.deleteTitle": "Supprimer le dossier", // Delete Folder
+  "folder.deleteBody": (name) =>
+    `Supprimer le dossier « ${name} » ? Les projets qu'il contient sont conservés et sortis du dossier.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
+  "folder.moveTo": "Déplacer vers un dossier", // Move to Folder
+  "folder.none": "Aucun dossier", // No Folder
   "tree.cloneProject": "Cloner depuis Git", // Clone from Git
   "createProject.title": "Créer un projet",
   "createProject.name": "Nom du projet",

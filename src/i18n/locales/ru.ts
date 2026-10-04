@@ -864,17 +864,30 @@ const ru: typeof en = {
   "tree.openInSplit": "Открыть в панели", // Open in Split
   "tree.createProject": "Создать проект",
   "tree.dropFoldersHint": "Перетащите папки сюда, чтобы добавить их как проекты",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "Новая коллекция",
   "tree.deleteCollection": "Удалить коллекцию",
   "collection.title": "Новая коллекция",
   "collection.name": "Название коллекции",
   "collection.namePlaceholder": "research",
   "collection.submit": "Создать коллекцию",
-  "collection.tag": "Без папки",
+  "collection.tag": "Без каталога",
   "collection.deleteTitle": "Удалить коллекцию",
   "collection.deleteBody": (name) =>
     `Удалить коллекцию «${name}»? Все её группы и сессии тоже будут удалены. Это действие нельзя отменить.`,
+  "folder.projectCount": (count) => `${count} ${plural(count, "проект", "проекта", "проектов")}`, // {count} projects
+  "folder.new": "Новая папка", // New Folder
+  "folder.createTitle": "Новая папка", // New Folder
+  "folder.renameTitle": "Переименовать папку", // Rename Folder
+  "folder.name": "Имя папки", // Folder name
+  "folder.namePlaceholder": "payments", // payments
+  "folder.create": "Создать папку", // Create Folder
+  "folder.delete": "Удалить папку", // Delete Folder
+  "folder.deleteTitle": "Удалить папку", // Delete Folder
+  "folder.deleteBody": (name) =>
+    `Удалить папку «${name}»? Проекты в ней сохранятся и будут перемещены из папки.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
+  "folder.moveTo": "Переместить в папку", // Move to Folder
+  "folder.none": "Без папки", // No Folder
   "tree.cloneProject": "Клонировать из Git", // Clone from Git
   "createProject.title": "Создать проект",
   "createProject.name": "Название проекта",

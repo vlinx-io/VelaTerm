@@ -23,7 +23,7 @@ vi.mock("../notify", () => ({
 }));
 
 import { useTermStore } from "./termStore";
-import type { Group, Project } from "../types";
+import type { Group, Project, ProjectFolder } from "../types";
 
 const project = (id: string, collapsed: boolean): Project => ({
   id,
@@ -44,11 +44,20 @@ const group = (id: string, collapsed: boolean): Group => ({
   createdAt: 0,
 });
 
+const folder = (id: string, collapsed: boolean): ProjectFolder => ({
+  id,
+  name: id,
+  sortOrder: 0,
+  collapsed,
+  createdAt: 0,
+});
+
 beforeEach(() => {
   localStorage.removeItem("vlx-sidebar-tree-views");
   useTermStore.setState({
     projects: [project("p1", false)],
     groups: [group("g1", true)],
+    projectFolders: [folder("f1", true)],
     sessions: [],
     ephemeralSessions: {},
     sidebarTreeViews: [{
@@ -77,7 +86,15 @@ describe("per-view collapse state", () => {
     const id = useTermStore.getState().splitSidebarTreeView("vertical", "main");
     const view = useTermStore.getState().sidebarTreeViews.find((v) => v.id === id);
 
-    expect(view?.collapsedOverrides).toEqual({ p1: false, g1: true });
+    expect(view?.collapsedOverrides).toEqual({ p1: false, g1: true, f1: true });
+  });
+
+  it("snapshots folder collapse so later shared folder changes do not reach the split pane", () => {
+    const id = useTermStore.getState().splitSidebarTreeView("vertical", "main");
+    useTermStore.setState({ projectFolders: [folder("f1", false)] });
+
+    const view = useTermStore.getState().sidebarTreeViews.find((v) => v.id === id);
+    expect(view?.collapsedOverrides?.f1).toBe(true);
   });
 
   it("keeps a collapse change inside its own view", () => {
@@ -102,7 +119,7 @@ describe("per-view collapse state", () => {
       const { useTermStore: restartedStore } = await import("./termStore");
       const restored = restartedStore.getState().sidebarTreeViews.find((v) => v.id === id);
 
-      expect(restored?.collapsedOverrides).toEqual({ p1: true, g1: true });
+      expect(restored?.collapsedOverrides).toEqual({ p1: true, g1: true, f1: true });
     } finally {
       vi.useRealTimers();
       localStorage.removeItem("vlx-sidebar-tree-views");

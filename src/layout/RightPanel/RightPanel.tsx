@@ -35,7 +35,7 @@ function ScopeInfo({ project, group }: { project: Project; group?: Group }) {
     <Section id="scope" title={group ? "Group" : "Project"} className="scope-section">
       {group && <KV k="group" v={group.name} />}
       <KV k="project" v={project.name} />
-      {/* Collections have no folder, so the path row is omitted rather than shown empty. */}
+      {/* Collections have no root directory, so the path row is omitted rather than shown empty. */}
       {projectRoot(project) && <KV k="path" v={project.rootPath} accent />}
     </Section>
   );

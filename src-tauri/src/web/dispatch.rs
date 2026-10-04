@@ -546,6 +546,33 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             )?;
             Ok(Value::Null)
         }
+        "create_project_folder" => {
+            to_value(core::create_project_folder(app, &req_str(args, "name")?)?)
+        }
+        "rename_project_folder" => {
+            core::rename_project_folder(app, &req_str(args, "id")?, &req_str(args, "name")?)?;
+            Ok(Value::Null)
+        }
+        "delete_project_folder" => {
+            core::delete_project_folder(app, &req_str(args, "id")?)?;
+            Ok(Value::Null)
+        }
+        "set_project_folder_collapsed" => {
+            core::set_project_folder_collapsed(
+                app,
+                &req_str(args, "id")?,
+                req_bool(args, "collapsed")?,
+            )?;
+            Ok(Value::Null)
+        }
+        "set_project_folder" => {
+            core::set_project_folder(
+                app,
+                &req_str(args, "projectId")?,
+                opt_str(args, "folderId").as_deref(),
+            )?;
+            Ok(Value::Null)
+        }
         "set_session_archived" => {
             core::set_session_archived(app, &req_str(args, "id")?, req_bool(args, "archived")?)?;
             Ok(Value::Null)
@@ -1439,6 +1466,43 @@ mod tests {
         let data_dir = app.data_dir().unwrap();
         assert_eq!(dispatch(&app, "public_remote_options", &json!({}), "ws-1", CallOrigin::Remote).unwrap_err(),
             "remote_cmd_forbidden:public_remote_options");
+        drop(app);
+        std::fs::remove_dir_all(data_dir).unwrap();
+    }
+
+    #[test]
+    fn project_folder_commands_round_trip_through_dispatch() {
+        let app = test_ctx();
+        let data_dir = app.data_dir().unwrap();
+        let project = {
+            let conn = app.db().conn.lock().unwrap();
+            crate::db::repo::create_virtual_project(&conn, "payments-web").unwrap()
+        };
+        let local = |cmd: &str, args: Value| dispatch(&app, cmd, &args, DESKTOP_SOURCE, CallOrigin::Local);
+
+        let folder = local("create_project_folder", json!({ "name": "Payments" })).unwrap();
+        assert_eq!(folder["name"], "Payments");
+        let folder_id = folder["id"].as_str().unwrap().to_string();
+
+        local("set_project_folder", json!({ "projectId": project.id, "folderId": folder_id })).unwrap();
+        local("set_project_folder_collapsed", json!({ "id": folder_id, "collapsed": true })).unwrap();
+        local("rename_project_folder", json!({ "id": folder_id, "name": "Billing" })).unwrap();
+        let tree = local("list_tree", json!({})).unwrap();
+        assert_eq!(tree["folders"][0]["name"], "Billing");
+        assert_eq!(tree["folders"][0]["collapsed"], true);
+        assert_eq!(tree["projects"][0]["folderId"], folder_id);
+
+        let err = local("set_project_folder", json!({ "projectId": project.id, "folderId": "missing" }))
+            .unwrap_err();
+        assert!(err.contains("Folder not found"), "{err}");
+
+        local("set_project_folder", json!({ "projectId": project.id, "folderId": null })).unwrap();
+        assert!(local("list_tree", json!({})).unwrap()["projects"][0]["folderId"].is_null());
+
+        local("delete_project_folder", json!({ "id": folder_id })).unwrap();
+        let tree = local("list_tree", json!({})).unwrap();
+        assert_eq!(tree["folders"], json!([]));
+        assert_eq!(tree["projects"].as_array().unwrap().len(), 1);
         drop(app);
         std::fs::remove_dir_all(data_dir).unwrap();
     }

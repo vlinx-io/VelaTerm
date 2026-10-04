@@ -848,17 +848,30 @@ const ko: typeof en = {
   "tree.openInSplit": "분할 창에서 열기", // Open in Split
   "tree.createProject": "프로젝트 만들기",
   "tree.dropFoldersHint": "폴더를 여기에 놓으면 프로젝트로 추가됩니다",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "새 컬렉션",
   "tree.deleteCollection": "컬렉션 삭제",
   "collection.title": "새 컬렉션",
   "collection.name": "컬렉션 이름",
   "collection.namePlaceholder": "research",
   "collection.submit": "컬렉션 만들기",
-  "collection.tag": "폴더 없음",
+  "collection.tag": "디렉터리 없음",
   "collection.deleteTitle": "컬렉션 삭제",
   "collection.deleteBody": (name) =>
     `컬렉션 "${name}"을(를) 삭제할까요? 안의 그룹과 세션도 모두 삭제되며 되돌릴 수 없습니다.`,
+  "folder.projectCount": (count) => `프로젝트 ${count}개`, // {count} projects
+  "folder.new": "새 폴더", // New Folder
+  "folder.createTitle": "새 폴더", // New Folder
+  "folder.renameTitle": "폴더 이름 바꾸기", // Rename Folder
+  "folder.name": "폴더 이름", // Folder name
+  "folder.namePlaceholder": "payments", // payments
+  "folder.create": "폴더 만들기", // Create Folder
+  "folder.delete": "폴더 삭제", // Delete Folder
+  "folder.deleteTitle": "폴더 삭제", // Delete Folder
+  "folder.deleteBody": (name) =>
+    `폴더 "${name}"을(를) 삭제할까요? 안의 프로젝트는 유지되며 폴더 밖으로 이동합니다.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
+  "folder.moveTo": "폴더로 이동", // Move to Folder
+  "folder.none": "폴더 없음", // No Folder
   "tree.cloneProject": "Git에서 클론", // Clone from Git
   "createProject.title": "프로젝트 만들기",
   "createProject.name": "프로젝트 이름",

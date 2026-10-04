@@ -9,7 +9,8 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use uuid::Uuid;
 
 use crate::models::{
-    AgentPreset, Group, NodeKind, Project, Session, SessionKind, Tree, AGENT_PRESET_ICON_MAX_BYTES,
+    AgentPreset, Group, NodeKind, Project, ProjectFolder, Session, SessionKind, Tree,
+    AGENT_PRESET_ICON_MAX_BYTES,
 };
 
 /// Converts Windows verbatim paths returned by `std::fs::canonicalize` into the ordinary form used
@@ -70,6 +71,7 @@ fn map_project(row: &Row) -> rusqlite::Result<Project> {
         created_at: row.get(6)?,
         // Append the emoji marker at index 7 without shifting existing fields.
         mark: row.get(7)?,
+        folder_id: row.get(8)?,
     })
 }
 
@@ -153,7 +155,7 @@ pub fn import_project(conn: &Connection, root_path: &str) -> Result<Project, Str
     // root before comparison so the CLI switches to the project instead of importing a duplicate.
     let mut stmt = conn
         .prepare(
-            "SELECT id, name, root_path, color, sort_order, collapsed, created_at, mark FROM projects",
+            "SELECT id, name, root_path, color, sort_order, collapsed, created_at, mark, folder_id FROM projects",
         )
         .map_err(|e| format!("Failed to inspect existing projects: {e}"))?;
     let existing = stmt
@@ -181,6 +183,7 @@ pub fn import_project(conn: &Connection, root_path: &str) -> Result<Project, Str
         sort_order: now_millis(),
         collapsed: false,
         mark: None,
+        folder_id: None,
         created_at: now_secs(),
     };
 
@@ -218,6 +221,7 @@ pub fn create_virtual_project(conn: &Connection, name: &str) -> Result<Project, 
         sort_order: now_millis(),
         collapsed: false,
         mark: None,
+        folder_id: None,
         created_at: now_secs(),
     };
 
@@ -2268,12 +2272,135 @@ pub fn set_collapsed(
     Ok(())
 }
 
+fn map_project_folder(row: &Row) -> rusqlite::Result<ProjectFolder> {
+    Ok(ProjectFolder {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        sort_order: row.get(2)?,
+        collapsed: row.get::<_, i64>(3)? != 0,
+        created_at: row.get(4)?,
+    })
+}
+
+fn check_folder_name(name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Folder name must not be empty".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Create a sidebar folder appended after the existing ones. Duplicate names are allowed, as for collections.
+pub fn create_project_folder(conn: &Connection, name: &str) -> Result<ProjectFolder, String> {
+    let name = check_folder_name(name)?;
+    let sort_order: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM project_folders",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("Failed to read folder order: {e}"))?;
+    let folder = ProjectFolder {
+        id: new_id(),
+        name,
+        sort_order,
+        collapsed: false,
+        created_at: now_secs(),
+    };
+    conn.execute(
+        "INSERT INTO project_folders (id, name, sort_order, collapsed, created_at)
+         VALUES (?1, ?2, ?3, 0, ?4)",
+        params![folder.id, folder.name, folder.sort_order, folder.created_at],
+    )
+    .map_err(|e| format!("Failed to write folder: {e}"))?;
+    Ok(folder)
+}
+
+pub fn rename_project_folder(conn: &Connection, id: &str, name: &str) -> Result<(), String> {
+    let name = check_folder_name(name)?;
+    let changed = conn
+        .execute(
+            "UPDATE project_folders SET name = ?1 WHERE id = ?2",
+            params![name, id],
+        )
+        .map_err(|e| format!("Failed to rename folder: {e}"))?;
+    if changed == 0 {
+        return Err(format!("Folder not found: {id}"));
+    }
+    Ok(())
+}
+
+/// Delete a folder and release its projects. The explicit clear keeps projects safe even where the
+/// `ON DELETE SET NULL` foreign key is not enforced, and a missing folder is not an error because another
+/// view may have deleted it first.
+pub fn delete_project_folder(conn: &Connection, id: &str) -> Result<(), String> {
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| format!("Failed to start transaction: {e}"))?;
+    tx.execute(
+        "UPDATE projects SET folder_id = NULL WHERE folder_id = ?1",
+        params![id],
+    )
+    .map_err(|e| format!("Failed to release folder projects: {e}"))?;
+    tx.execute("DELETE FROM project_folders WHERE id = ?1", params![id])
+        .map_err(|e| format!("Failed to delete folder: {e}"))?;
+    tx.commit()
+        .map_err(|e| format!("Failed to commit folder deletion: {e}"))?;
+    Ok(())
+}
+
+pub fn set_project_folder_collapsed(
+    conn: &Connection,
+    id: &str,
+    collapsed: bool,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE project_folders SET collapsed = ?1 WHERE id = ?2",
+        params![collapsed as i64, id],
+    )
+    .map_err(|e| format!("Failed to update folder collapsed state: {e}"))?;
+    Ok(())
+}
+
+/// Put a project into a folder, or back at the top level with None. The folder is checked here rather than
+/// left to the foreign key, which is only enforced on connections that enable it.
+pub fn set_project_folder(
+    conn: &Connection,
+    project_id: &str,
+    folder_id: Option<&str>,
+) -> Result<(), String> {
+    if let Some(fid) = folder_id {
+        let exists = conn
+            .query_row(
+                "SELECT 1 FROM project_folders WHERE id = ?1",
+                params![fid],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(|e| format!("Failed to read folder: {e}"))?
+            .is_some();
+        if !exists {
+            return Err(format!("Folder not found: {fid}"));
+        }
+    }
+    let changed = conn
+        .execute(
+            "UPDATE projects SET folder_id = ?1 WHERE id = ?2",
+            params![folder_id, project_id],
+        )
+        .map_err(|e| format!("Failed to move project to folder: {e}"))?;
+    if changed == 0 {
+        return Err(format!("Project not found: {project_id}"));
+    }
+    Ok(())
+}
+
 /// Return a complete three-table tree snapshot ordered by sort_order.
 pub fn list_tree(conn: &Connection) -> Result<Tree, String> {
     // Exclude hidden deleted_at tombstones retained only because they contain archived sessions.
     let projects = query_all(
         conn,
-        "SELECT id, name, root_path, color, sort_order, collapsed, created_at, mark
+        "SELECT id, name, root_path, color, sort_order, collapsed, created_at, mark, folder_id
          FROM projects WHERE deleted_at IS NULL ORDER BY sort_order",
         map_project,
     )?;
@@ -2293,10 +2420,18 @@ pub fn list_tree(conn: &Connection) -> Result<Tree, String> {
         map_session,
     )?;
 
+    let folders = query_all(
+        conn,
+        "SELECT id, name, sort_order, collapsed, created_at
+         FROM project_folders ORDER BY sort_order, created_at",
+        map_project_folder,
+    )?;
+
     Ok(Tree {
         projects,
         groups,
         sessions,
+        folders,
     })
 }
 
@@ -4001,5 +4136,82 @@ mod tests {
         assert_eq!(codex_chat_settings(&conn, &fork.id).unwrap(), (Some("default".into()), None));
         assert_eq!(codex_chat_settings(&conn, &created.id).unwrap(), expected);
 
+    }
+
+    /// Folders only group projects, so names are trimmed, new folders append, and duplicate names are allowed
+    /// just like collections.
+    #[test]
+    fn project_folders_create_rename_and_list_in_order() {
+        let conn = mem_conn();
+        let first = create_project_folder(&conn, "  Payments  ").unwrap();
+        let second = create_project_folder(&conn, "Payments").unwrap();
+        assert_eq!(first.name, "Payments");
+        assert_ne!(first.id, second.id);
+        assert!(second.sort_order > first.sort_order);
+        assert!(!first.collapsed);
+
+        rename_project_folder(&conn, &second.id, " Billing ").unwrap();
+        assert!(rename_project_folder(&conn, &second.id, "   ").is_err());
+        assert!(rename_project_folder(&conn, "missing", "Name").is_err());
+        assert!(create_project_folder(&conn, "\t").is_err());
+
+        let tree = list_tree(&conn).unwrap();
+        let names: Vec<&str> = tree.folders.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["Payments", "Billing"]);
+    }
+
+    #[test]
+    fn set_project_folder_assigns_clears_and_rejects_unknown_ids() {
+        let conn = mem_conn();
+        let project = create_virtual_project(&conn, "payments-web").unwrap();
+        assert_eq!(project.folder_id, None);
+        let folder = create_project_folder(&conn, "Payments").unwrap();
+
+        set_project_folder(&conn, &project.id, Some(folder.id.as_str())).unwrap();
+        let tree = list_tree(&conn).unwrap();
+        assert_eq!(tree.projects[0].folder_id.as_deref(), Some(folder.id.as_str()));
+
+        let err = set_project_folder(&conn, &project.id, Some("missing")).unwrap_err();
+        assert!(err.contains("Folder not found"), "{err}");
+        // The rejected call must leave the existing assignment alone.
+        assert_eq!(
+            list_tree(&conn).unwrap().projects[0].folder_id.as_deref(),
+            Some(folder.id.as_str())
+        );
+        assert!(set_project_folder(&conn, "missing", Some(folder.id.as_str())).is_err());
+
+        set_project_folder(&conn, &project.id, None).unwrap();
+        assert_eq!(list_tree(&conn).unwrap().projects[0].folder_id, None);
+    }
+
+    /// Deleting a folder must never delete projects. The clear is explicit, so it holds even on a connection
+    /// with foreign-key enforcement off.
+    #[test]
+    fn deleting_a_project_folder_keeps_its_projects_loose() {
+        let conn = mem_conn();
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        let web = create_virtual_project(&conn, "payments-web").unwrap();
+        let api = create_virtual_project(&conn, "payments-api").unwrap();
+        let folder = create_project_folder(&conn, "Payments").unwrap();
+        set_project_folder(&conn, &web.id, Some(folder.id.as_str())).unwrap();
+        set_project_folder(&conn, &api.id, Some(folder.id.as_str())).unwrap();
+
+        delete_project_folder(&conn, &folder.id).unwrap();
+        let tree = list_tree(&conn).unwrap();
+        assert!(tree.folders.is_empty());
+        assert_eq!(tree.projects.len(), 2);
+        assert!(tree.projects.iter().all(|p| p.folder_id.is_none()));
+        // A second view may still show the folder; deleting it again must not fail.
+        delete_project_folder(&conn, &folder.id).unwrap();
+    }
+
+    #[test]
+    fn project_folder_collapsed_state_persists() {
+        let conn = mem_conn();
+        let folder = create_project_folder(&conn, "Payments").unwrap();
+        set_project_folder_collapsed(&conn, &folder.id, true).unwrap();
+        assert!(list_tree(&conn).unwrap().folders[0].collapsed);
+        set_project_folder_collapsed(&conn, &folder.id, false).unwrap();
+        assert!(!list_tree(&conn).unwrap().folders[0].collapsed);
     }
 }

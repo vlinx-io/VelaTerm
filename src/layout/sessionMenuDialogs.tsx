@@ -50,15 +50,20 @@ export function ConfirmDelete({
   collection,
   batchCount,
   worktreePaths = [],
+  title: titleText,
+  body: bodyText,
   onConfirm,
   onCancel,
 }: {
   name: string;
-  kind: NodeKind;
+  /** Optional only for callers that supply both title and body, such as project folders, which are not nodes. */
+  kind?: NodeKind;
   /** Wording only: a collection is a project row with no folder and reads as a collection to the user. */
   collection?: boolean;
   batchCount?: number;
   worktreePaths?: string[];
+  title?: string;
+  body?: string;
   onConfirm: (removeWorktree: boolean) => void;
   onCancel: () => void;
 }) {
@@ -66,7 +71,7 @@ export function ConfirmDelete({
   const isBatch = batchCount != null;
   const hasWt = worktreePaths.length > 0;
   const [removeWt, setRemoveWt] = useState(false);
-  const title = isBatch
+  const title = titleText ?? (isBatch
     ? t("tree.batchDeleteTitle")
     : kind === "project"
       ? collection
@@ -74,8 +79,8 @@ export function ConfirmDelete({
         : t("tree.deleteProjectTitle")
       : kind === "group"
         ? t("tree.deleteGroupTitle")
-        : t("tree.deleteSessionTitle");
-  const body = isBatch
+        : t("tree.deleteSessionTitle"));
+  const body = bodyText ?? (isBatch
     ? t("tree.batchDeleteBody", batchCount)
     : kind === "project"
       ? collection
@@ -83,7 +88,7 @@ export function ConfirmDelete({
         : t("tree.deleteProjectBody", name)
       : kind === "group"
         ? t("tree.deleteGroupBody", name)
-        : t("tree.deleteSessionBody", name);
+        : t("tree.deleteSessionBody", name));
   return (
     <Backdrop onClose={onCancel}>
       <div

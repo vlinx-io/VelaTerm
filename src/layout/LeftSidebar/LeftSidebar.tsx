@@ -23,6 +23,7 @@ import {
   projectRoot,
   type AgentState,
   type NodeKind,
+  type ProjectFolder,
 } from "../../types";
 import { MARK_LABEL_KEYS, NODE_MARKS, normalizeMark } from "../../marks";
 import { useSessionMenu } from "../sessionMenu";
@@ -42,6 +43,9 @@ import {
   type SidebarTreeTab,
   type SidebarViewRect,
 } from "./sidebarTreeLayout";
+import { ProjectFolderDialogs, type FolderDialog } from "./ProjectFolderDialogs";
+import { moveToFolderItem } from "./projectFolderMenu";
+import { setProjectFolder } from "../../store/projectFolders";
 
 /** Status filters: working (pulsing green), attention (pulsing yellow), replied (magenta), and replied with
  * background work still running (cyan). */
@@ -197,6 +201,7 @@ function SidebarTreePane({
   onSplitDown,
   onClose,
   onNewCollection,
+  onNewFolder,
   treeHandlers,
 }: {
   view: SidebarTreeView;
@@ -207,6 +212,7 @@ function SidebarTreePane({
   onSplitDown: () => void;
   onClose: () => void;
   onNewCollection: () => void;
+  onNewFolder: () => void;
   treeHandlers: Omit<TreeHandlers, "view" | "isPrimary">;
 }) {
   const t = useT();
@@ -263,6 +269,17 @@ function SidebarTreePane({
       </div>
       <div className="sidebar-tree-footer">
         {/* Creation action, kept apart from the two view controls on the right. */}
+        <button
+          className="icon-btn sm sidebar-tree-new-folder"
+          title={t("folder.new")}
+          aria-label={t("folder.new")}
+          onClick={(event) => {
+            event.stopPropagation();
+            onNewFolder();
+          }}
+        >
+          <Icons.folderPlus size={14} />
+        </button>
         <button
           className="icon-btn sm sidebar-tree-new-collection"
           title={t("tree.newCollection")}
@@ -500,6 +517,13 @@ export function LeftSidebar() {
   const [renameVal, setRenameVal] = useState("");
   // Name prompt for a collection; the sidebar owns it because the footer button has no node to hang a dialog on.
   const [collectionOpen, setCollectionOpen] = useState(false);
+  const [folderMenu, setFolderMenu] = useState<{
+    folder: ProjectFolder;
+    viewId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [folderDialog, setFolderDialog] = useState<FolderDialog | null>(null);
   const startRename = (node: TreeNodeRef) => {
     const viewId = menu?.viewId ?? effectiveActiveViewId;
     setRenaming({ id: node.id, kind: node.kind, viewId });
@@ -626,10 +650,13 @@ export function LeftSidebar() {
     const rename: MenuItem = { label: t("common.rename"), onClick: () => startRename(node) };
 
     if (node.kind === "project") {
+      const st = useTermStore.getState();
+      const project = st.projects.find((p) => p.id === node.projectId);
       // A collection is stored as a project row but has no folder, so this menu names it a collection.
-      const virtual = isVirtualProject(
-        useTermStore.getState().projects.find((p) => p.id === node.projectId),
-      );
+      const virtual = isVirtualProject(project);
+      const moveToFolder = moveToFolderItem(t, project, st.projectFolders, (folderId) => {
+        void setProjectFolder(node.projectId, folderId).catch(() => {});
+      });
       // Match group layout: Session section (including persistent browser/Resume), then project actions.
       return [
         ...newSessionItems(node.projectId, null, null, { withBrowser: true, withTerminal: true }),
@@ -639,6 +666,7 @@ export function LeftSidebar() {
           onClick: () => openDialog({ type: "newGroup", projectId: node.projectId, parentGroupId: null }),
         },
         buildMarkItem("project", node.id),
+        ...(moveToFolder ? [moveToFolder] : []),
         {
           label: t("common.experimental"),
           submenu: [
@@ -845,12 +873,22 @@ export function LeftSidebar() {
                 onSplitDown={() => splitTreeView?.("vertical", view.id)}
                 onClose={() => deleteTreeView?.(view.id)}
                 onNewCollection={() => setCollectionOpen(true)}
+                onNewFolder={() => setFolderDialog({ type: "create" })}
                 treeHandlers={{
                   onContext: (node, x, y) => {
                     setActiveTreeView?.(view.id);
                     setMenu({ node, viewId: view.id, x, y });
                   },
-                  contextId: menu?.viewId === view.id ? menu.node.id : null,
+                  onFolderContext: (folder, x, y) => {
+                    setActiveTreeView?.(view.id);
+                    setFolderMenu({ folder, viewId: view.id, x, y });
+                  },
+                  contextId:
+                    menu?.viewId === view.id
+                      ? menu.node.id
+                      : folderMenu?.viewId === view.id
+                        ? folderMenu.folder.id
+                        : null,
                   renamingId: renaming?.viewId === view.id ? renaming.id : null,
                   renameVal,
                   setRenameVal,
@@ -889,6 +927,24 @@ export function LeftSidebar() {
           onClose={() => setNewSessionMenu(null)}
         />
       )}
+      {folderMenu && (
+        <ContextMenu
+          x={folderMenu.x}
+          y={folderMenu.y}
+          items={[
+            {
+              label: t("common.rename"),
+              onClick: () => setFolderDialog({ type: "rename", folder: folderMenu.folder }),
+            },
+            {
+              label: t("folder.delete"),
+              danger: true,
+              onClick: () => setFolderDialog({ type: "delete", folder: folderMenu.folder }),
+            },
+          ]}
+          onClose={() => setFolderMenu(null)}
+        />
+      )}
 
       {collectionOpen && (
         <FormModal
@@ -910,6 +966,7 @@ export function LeftSidebar() {
           }}
         />
       )}
+      <ProjectFolderDialogs dialog={folderDialog} onClose={() => setFolderDialog(null)} />
 
       {dialogs}
 

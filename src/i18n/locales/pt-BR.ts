@@ -853,17 +853,30 @@ const ptBR: typeof en = {
   "tree.openInSplit": "Abrir em painel dividido", // Open in Split
   "tree.createProject": "Criar projeto",
   "tree.dropFoldersHint": "Solte pastas aqui para adicioná-las como projetos",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "Nova coleção",
   "tree.deleteCollection": "Excluir coleção",
   "collection.title": "Nova coleção",
   "collection.name": "Nome da coleção",
   "collection.namePlaceholder": "research",
   "collection.submit": "Criar coleção",
-  "collection.tag": "Sem pasta",
+  "collection.tag": "Sem diretório",
   "collection.deleteTitle": "Excluir coleção",
   "collection.deleteBody": (name) =>
     `Excluir a coleção "${name}"? Todos os seus grupos e sessões também serão excluídos. Isso não pode ser desfeito.`,
+  "folder.projectCount": (count) => (count === 1 ? "1 projeto" : `${count} projetos`), // {count} projects
+  "folder.new": "Nova pasta", // New Folder
+  "folder.createTitle": "Nova pasta", // New Folder
+  "folder.renameTitle": "Renomear pasta", // Rename Folder
+  "folder.name": "Nome da pasta", // Folder name
+  "folder.namePlaceholder": "pagamentos", // payments
+  "folder.create": "Criar pasta", // Create Folder
+  "folder.delete": "Excluir pasta", // Delete Folder
+  "folder.deleteTitle": "Excluir pasta", // Delete Folder
+  "folder.deleteBody": (name) =>
+    `Excluir a pasta "${name}"? Os projetos dentro dela são mantidos e saem da pasta.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
+  "folder.moveTo": "Mover para pasta", // Move to Folder
+  "folder.none": "Sem pasta", // No Folder
   "tree.cloneProject": "Clonar do Git", // Clone from Git
   "createProject.title": "Criar projeto",
   "createProject.name": "Nome do projeto",

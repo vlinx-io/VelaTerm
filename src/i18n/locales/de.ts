@@ -852,17 +852,30 @@ const de: typeof en = {
   "tree.openInSplit": "Im geteilten Bereich öffnen", // Open in Split
   "tree.createProject": "Projekt erstellen",
   "tree.dropFoldersHint": "Ordner hier ablegen, um sie als Projekte hinzuzufügen",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "Neue Sammlung",
   "tree.deleteCollection": "Sammlung löschen",
   "collection.title": "Neue Sammlung",
   "collection.name": "Name der Sammlung",
   "collection.namePlaceholder": "research",
   "collection.submit": "Sammlung erstellen",
-  "collection.tag": "Kein Ordner",
+  "collection.tag": "Kein Verzeichnis",
   "collection.deleteTitle": "Sammlung löschen",
   "collection.deleteBody": (name) =>
     `Sammlung „${name}“ löschen? Alle enthaltenen Gruppen und Sitzungen werden ebenfalls gelöscht. Das lässt sich nicht rückgängig machen.`,
+  "folder.projectCount": (count) => (count === 1 ? "1 Projekt" : `${count} Projekte`), // {count} projects
+  "folder.new": "Neuer Ordner", // New Folder
+  "folder.createTitle": "Neuer Ordner", // New Folder
+  "folder.renameTitle": "Ordner umbenennen", // Rename Folder
+  "folder.name": "Ordnername", // Folder name
+  "folder.namePlaceholder": "zahlungen", // payments
+  "folder.create": "Ordner erstellen", // Create Folder
+  "folder.delete": "Ordner löschen", // Delete Folder
+  "folder.deleteTitle": "Ordner löschen", // Delete Folder
+  "folder.deleteBody": (name) =>
+    `Ordner „${name}“ löschen? Die enthaltenen Projekte bleiben erhalten und werden aus dem Ordner verschoben.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
+  "folder.moveTo": "In Ordner verschieben", // Move to Folder
+  "folder.none": "Kein Ordner", // No Folder
   "tree.cloneProject": "Von Git klonen", // Clone from Git
   "createProject.title": "Projekt erstellen",
   "createProject.name": "Projektname",

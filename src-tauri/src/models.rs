@@ -130,6 +130,17 @@ pub struct AgentPreset {
 /// this is generous for a PNG of that size while keeping the row small enough to sync cheaply.
 pub const AGENT_PRESET_ICON_MAX_BYTES: usize = 64 * 1024;
 
+/// User-created sidebar folder grouping projects. One level only; deleting it leaves its projects loose.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectFolder {
+    pub id: String,
+    pub name: String,
+    pub sort_order: i64,
+    pub collapsed: bool,
+    pub created_at: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
@@ -141,6 +152,10 @@ pub struct Project {
     pub collapsed: bool,
     /// Optional emoji marker shown before the name in the sidebar; see [`Session::mark`].
     pub mark: Option<String>,
+    /// Sidebar folder holding this project; None keeps it at the top level. `default` accepts payloads from
+    /// builds that predate folders.
+    #[serde(default)]
+    pub folder_id: Option<String>,
     pub created_at: i64,
 }
 
@@ -239,6 +254,7 @@ pub struct Tree {
     pub projects: Vec<Project>,
     pub groups: Vec<Group>,
     pub sessions: Vec<Session>,
+    pub folders: Vec<ProjectFolder>,
 }
 
 /// Node kind used by rename, delete, and move to select the target table.

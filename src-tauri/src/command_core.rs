@@ -17,7 +17,7 @@ use crate::agent::chat::protocol::ChatImage;
 use crate::agent::session_settings::{self, Selection};
 use crate::db::repo;
 use crate::host::{AppCtx, PRESETS_CHANGED, SETTINGS_CHANGED, TREE_CHANGED};
-use crate::models::{AgentPreset, Group, NodeKind, Project, Session, SessionKind, Tree};
+use crate::models::{AgentPreset, Group, NodeKind, Project, ProjectFolder, Session, SessionKind, Tree};
 
 // Private helpers.
 
@@ -540,6 +540,55 @@ pub fn set_collapsed(
     {
         let conn = ctx.db().conn.lock().unwrap();
         repo::set_collapsed(&conn, kind, id, collapsed)?;
+    }
+    ctx.emit(TREE_CHANGED, ());
+    Ok(())
+}
+
+pub fn create_project_folder(ctx: &AppCtx, name: &str) -> Result<ProjectFolder, String> {
+    let folder = {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::create_project_folder(&conn, name)?
+    };
+    ctx.emit(TREE_CHANGED, ());
+    Ok(folder)
+}
+
+pub fn rename_project_folder(ctx: &AppCtx, id: &str, name: &str) -> Result<(), String> {
+    {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::rename_project_folder(&conn, id, name)?;
+    }
+    ctx.emit(TREE_CHANGED, ());
+    Ok(())
+}
+
+pub fn delete_project_folder(ctx: &AppCtx, id: &str) -> Result<(), String> {
+    {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::delete_project_folder(&conn, id)?;
+    }
+    ctx.emit(TREE_CHANGED, ());
+    Ok(())
+}
+
+pub fn set_project_folder_collapsed(ctx: &AppCtx, id: &str, collapsed: bool) -> Result<(), String> {
+    {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::set_project_folder_collapsed(&conn, id, collapsed)?;
+    }
+    ctx.emit(TREE_CHANGED, ());
+    Ok(())
+}
+
+pub fn set_project_folder(
+    ctx: &AppCtx,
+    project_id: &str,
+    folder_id: Option<&str>,
+) -> Result<(), String> {
+    {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::set_project_folder(&conn, project_id, folder_id)?;
     }
     ctx.emit(TREE_CHANGED, ());
     Ok(())

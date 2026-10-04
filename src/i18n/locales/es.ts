@@ -855,17 +855,30 @@ const es: typeof en = {
   "tree.openInSplit": "Abrir en panel dividido", // Open in Split
   "tree.createProject": "Crear proyecto",
   "tree.dropFoldersHint": "Suelta carpetas aquí para añadirlas como proyectos",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "Nueva colección",
   "tree.deleteCollection": "Eliminar colección",
   "collection.title": "Nueva colección",
   "collection.name": "Nombre de la colección",
   "collection.namePlaceholder": "research",
   "collection.submit": "Crear colección",
-  "collection.tag": "Sin carpeta",
+  "collection.tag": "Sin directorio",
   "collection.deleteTitle": "Eliminar colección",
   "collection.deleteBody": (name) =>
     `¿Eliminar la colección "${name}"? También se eliminarán sus grupos y sesiones. Esto no se puede deshacer.`,
+  "folder.projectCount": (count) => (count === 1 ? "1 proyecto" : `${count} proyectos`), // {count} projects
+  "folder.new": "Nueva carpeta", // New Folder
+  "folder.createTitle": "Nueva carpeta", // New Folder
+  "folder.renameTitle": "Renombrar carpeta", // Rename Folder
+  "folder.name": "Nombre de la carpeta", // Folder name
+  "folder.namePlaceholder": "pagos", // payments
+  "folder.create": "Crear carpeta", // Create Folder
+  "folder.delete": "Eliminar carpeta", // Delete Folder
+  "folder.deleteTitle": "Eliminar carpeta", // Delete Folder
+  "folder.deleteBody": (name) =>
+    `¿Eliminar la carpeta "${name}"? Los proyectos que contiene se conservan y salen de la carpeta.`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
+  "folder.moveTo": "Mover a carpeta", // Move to Folder
+  "folder.none": "Sin carpeta", // No Folder
   "tree.cloneProject": "Clonar desde Git", // Clone from Git
   "createProject.title": "Crear proyecto",
   "createProject.name": "Nombre del proyecto",

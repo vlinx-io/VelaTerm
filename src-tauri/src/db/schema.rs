@@ -12,6 +12,14 @@
 /// name in the sidebar and usable as a sidebar filter. The value is the emoji itself rather than an enumerated code,
 /// so unknown values from a newer build round-trip unchanged; NULL or an empty string means unmarked.
 pub const SCHEMA: &str = r#"
+CREATE TABLE IF NOT EXISTS project_folders (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  sort_order  INTEGER NOT NULL DEFAULT 0,
+  collapsed   INTEGER NOT NULL DEFAULT 0,
+  created_at  INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS projects (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
@@ -21,6 +29,7 @@ CREATE TABLE IF NOT EXISTS projects (
   collapsed   INTEGER NOT NULL DEFAULT 0,
   deleted_at  INTEGER,
   mark        TEXT,
+  folder_id   TEXT REFERENCES project_folders(id) ON DELETE SET NULL,
   created_at  INTEGER NOT NULL
 );
 

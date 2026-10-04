@@ -328,6 +328,7 @@ fn filtered_tree(app: &AppCtx, scope: &ShareScope) -> Result<Value, String> {
         let mut value = serde_json::to_value(project).map_err(|_| "Cannot encode shared tree")?;
         // The sidebar renderer trims rootPath; the real host path must not reach the visitor.
         value["rootPath"] = json!("");
+        value["folderId"] = Value::Null;
         projects.push(value);
     }
     let mut groups = Vec::new();
@@ -355,7 +356,7 @@ fn filtered_tree(app: &AppCtx, scope: &ShareScope) -> Result<Value, String> {
         }
         sessions.push(value);
     }
-    Ok(json!({"projects": projects, "groups": groups, "sessions": sessions}))
+    Ok(json!({"projects": projects, "groups": groups, "sessions": sessions, "folders": []}))
 }
 
 /// Filters the host state snapshot down to sessions inside the scope.
@@ -622,6 +623,58 @@ mod shared_surface_tests {
             dispatch_shared(&app, &scope, "get_session_cwd", &json!({"sessionId": session.id}), "ws-test", origin).unwrap(),
             Value::Null
         );
+        drop(app);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Folder names are host-side organization and a folder id would point at nothing the visitor has, so the
+    /// shared tree carries neither, and visitors cannot manage folders.
+    #[test]
+    fn shared_tree_omits_project_folders() {
+        use crate::host::HeadlessHost;
+        let dir = std::env::temp_dir().join(format!("share-folders-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(&dir.join("test.db")).unwrap();
+        let project = {
+            let conn = db.conn.lock().unwrap();
+            let project = repo::create_virtual_project(&conn, "Shared").unwrap();
+            let folder = repo::create_project_folder(&conn, "Client work").unwrap();
+            repo::set_project_folder(&conn, &project.id, Some(folder.id.as_str())).unwrap();
+            let session = repo::create_session(
+                &conn,
+                &project.id,
+                None,
+                "Conversation",
+                SessionKind::Claude,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            repo::set_session_engine(&conn, &session.id, "chat").unwrap();
+            project
+        };
+        let app = AppCtx::Headless(std::sync::Arc::new(HeadlessHost::new(dir.clone(), db)));
+        let scope = ShareScope {
+            scope: "project".into(),
+            target_id: Some(project.id),
+            push_authority: None,
+        };
+        let origin = crate::web::dispatch::CallOrigin::Remote;
+        let tree = dispatch_shared(&app, &scope, "list_tree", &json!({}), "ws-test", origin).unwrap();
+        assert_eq!(tree["folders"], json!([]));
+        assert!(tree["projects"][0]["folderId"].is_null());
+        assert!(dispatch_shared(
+            &app,
+            &scope,
+            "create_project_folder",
+            &json!({ "name": "x" }),
+            "ws-test",
+            origin
+        )
+        .is_err());
         drop(app);
         std::fs::remove_dir_all(dir).unwrap();
     }

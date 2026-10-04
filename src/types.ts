@@ -63,6 +63,15 @@ export type DisplayStatus = SessionStatus | AgentState | "unavailable";
 /** Node kind used by rename, delete, and move operations. */
 export type NodeKind = "project" | "group" | "session";
 
+/** User-created sidebar folder grouping projects. One level only; deleting it leaves its projects loose. */
+export interface ProjectFolder {
+  id: string;
+  name: string;
+  sortOrder: number;
+  collapsed: boolean;
+  createdAt: number;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -73,6 +82,8 @@ export interface Project {
   collapsed: boolean;
   /** Optional emoji marker shown before the name in the sidebar; see `Session.mark`. */
   mark?: string | null;
+  /** Sidebar folder holding this project. Absent, null, or an id no longer in `Tree.folders` means top level. */
+  folderId?: string | null;
   createdAt: number;
 }
 
@@ -188,11 +199,12 @@ export interface Session {
   createdAt: number;
 }
 
-/** Complete tree snapshot. */
+/** Complete tree snapshot. `folders` is absent from hosts that predate folders. */
 export interface Tree {
   projects: Project[];
   groups: Group[];
   sessions: Session[];
+  folders?: ProjectFolder[];
 }
 
 /** In-memory session runtime state. */

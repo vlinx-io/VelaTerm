@@ -836,17 +836,29 @@ const zhTW: typeof en = {
   "tree.openInSplit": "在分割窗格開啟", // Open in Split
   "tree.createProject": "建立專案",
   "tree.dropFoldersHint": "將資料夾拖放到此處，即可新增為專案",
-  // New Collection / Collection name / research / Create Collection / No folder / Delete Collection
+  // New Collection / Collection name / research / Create Collection / No directory / Delete Collection
   "tree.newCollection": "新增集合",
   "tree.deleteCollection": "刪除集合",
   "collection.title": "新增集合",
   "collection.name": "集合名稱",
   "collection.namePlaceholder": "research",
   "collection.submit": "建立集合",
-  "collection.tag": "無資料夾",
+  "collection.tag": "無目錄",
   "collection.deleteTitle": "刪除集合",
   "collection.deleteBody": (name) =>
     `刪除集合「${name}」？其中的分組與會話也會一併刪除，且無法復原。`,
+  "folder.projectCount": (count) => `${count} 個專案`, // {count} projects
+  "folder.new": "新增資料夾", // New Folder
+  "folder.createTitle": "新增資料夾", // New Folder
+  "folder.renameTitle": "重新命名資料夾", // Rename Folder
+  "folder.name": "資料夾名稱", // Folder name
+  "folder.namePlaceholder": "payments", // payments
+  "folder.create": "建立資料夾", // Create Folder
+  "folder.delete": "刪除資料夾", // Delete Folder
+  "folder.deleteTitle": "刪除資料夾", // Delete Folder
+  "folder.deleteBody": (name) => `刪除資料夾「${name}」？其中的專案會保留，並移出該資料夾。`, // Delete folder "{name}"? The projects inside are kept and moved out of the folder.
+  "folder.moveTo": "移至資料夾", // Move to Folder
+  "folder.none": "無資料夾", // No Folder
   "tree.cloneProject": "從 Git 複製", // Clone from Git
   "createProject.title": "建立專案",
   "createProject.name": "專案名稱",

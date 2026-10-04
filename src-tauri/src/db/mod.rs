@@ -266,6 +266,24 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         conn.execute("ALTER TABLE sessions ADD COLUMN agent_path TEXT", [])
             .map_err(|e| format!("Failed to migrate sessions.agent_path: {e}"))?;
     }
+    // Migration tests start from bare legacy tables that never ran SCHEMA, so the folder table is created here too.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS project_folders (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            collapsed INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
+        );",
+    )
+    .map_err(|e| format!("Failed to migrate project folders: {e}"))?;
+    if table_exists(conn, "projects") && !column_exists(conn, "projects", "folder_id") {
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN folder_id TEXT REFERENCES project_folders(id) ON DELETE SET NULL",
+            [],
+        )
+        .map_err(|e| format!("Failed to migrate projects.folder_id: {e}"))?;
+    }
     // Create the parent index only after migration adds parent_session_id. Putting it in SCHEMA would fail
     // on old databases before ALTER runs; IF NOT EXISTS remains safe and idempotent for new databases.
     conn.execute(
@@ -344,6 +362,36 @@ mod tests {
         migrate(&conn).unwrap();
         migrate(&conn).unwrap();
         assert!(column_exists(&conn, "sessions", "parent_session_id"));
+    }
+
+    /// A database created before folders keeps every project, now loose, and gains the folder table.
+    #[test]
+    fn migrate_adds_project_folders_to_existing_projects() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE projects (
+               id TEXT PRIMARY KEY, name TEXT NOT NULL, root_path TEXT NOT NULL, color TEXT,
+               sort_order INTEGER NOT NULL DEFAULT 0, collapsed INTEGER NOT NULL DEFAULT 0,
+               created_at INTEGER NOT NULL
+             );
+             INSERT INTO projects (id, name, root_path, created_at) VALUES ('p1', 'legacy', '/tmp', 0);
+             CREATE TABLE sessions (
+               id TEXT PRIMARY KEY, project_id TEXT NOT NULL, group_id TEXT,
+               name TEXT NOT NULL, sort_order INTEGER NOT NULL DEFAULT 0,
+               created_at INTEGER NOT NULL
+             );",
+        )
+        .unwrap();
+
+        migrate(&conn).unwrap();
+
+        assert!(column_exists(&conn, "projects", "folder_id"));
+        assert!(table_exists(&conn, "project_folders"));
+        let folder: Option<String> = conn
+            .query_row("SELECT folder_id FROM projects WHERE id = 'p1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(folder, None);
+        migrate(&conn).unwrap();
     }
 
     /// The database file is owner-only after open: app_settings holds the remote-access password

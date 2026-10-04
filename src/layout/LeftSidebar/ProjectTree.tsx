@@ -21,6 +21,7 @@ import {
   type Group,
   type NodeKind,
   type Project,
+  type ProjectFolder,
   type Session,
 } from "../../types";
 import { MARK_LABEL_KEYS, type NodeMark, normalizeMark } from "../../marks";
@@ -29,6 +30,9 @@ import { SESSION_DRAG_MIME, SESSION_MULTI_DRAG_MIME } from "../CenterPane/paneDr
 import { DEFAULT_BINDINGS, formatCombo } from "../../hooks/shortcutRegistry";
 import { useGitBranch } from "../../hooks/useGitBranch";
 import { stripControlChars, useCtrlCharGuard } from "../../hooks/textInputGuards";
+import { setProjectFolder, toggleProjectFolderCollapsed } from "../../store/projectFolders";
+import { arrangeProjectsInFolders } from "./projectFolderLayout";
+import { hasProjectDrag, PROJECT_DRAG_MIME, resolveProjectDrop } from "./projectFolderDrop";
 
 /** Reference to a node targeted by a context menu or operation. */
 export interface TreeNodeRef {
@@ -40,7 +44,7 @@ export interface TreeNodeRef {
 }
 
 interface DragPayload {
-  kind: "group" | "session";
+  kind: "group" | "session" | "project";
   id: string;
   projectId: string;
   /** For multi-session dragging, carries all selected IDs in the same project when at least two are selected.
@@ -55,6 +59,8 @@ export interface TreeHandlers {
   /** Only the primary projection consumes global reveal requests. */
   isPrimary: boolean;
   onContext: (node: TreeNodeRef, x: number, y: number) => void;
+  /** Right-click on a folder row; folders are not tree nodes, so they get their own menu callback. */
+  onFolderContext: (folder: ProjectFolder, x: number, y: number) => void;
   /** Current context-menu target, highlighted temporarily without changing persistent selection. */
   contextId: string | null;
   renamingId: string | null;
@@ -70,7 +76,8 @@ export interface TreeHandlers {
  *  visible rows and reuses nodes while scrolling. This is separate from `flat`, which contains only persistent nodes
  *  for Shift-range selection. */
 type TreeRow =
-  | { kind: "project"; id: string; project: Project; expanded: boolean }
+  | { kind: "folder"; id: string; folder: ProjectFolder; projectCount: number; expanded: boolean }
+  | { kind: "project"; id: string; project: Project; expanded: boolean; indent: number }
   | { kind: "group"; id: string; group: Group; depth: number; expanded: boolean }
   | {
       kind: "session";
@@ -299,6 +306,7 @@ export function ProjectTree(h: TreeHandlers) {
   const openProjectCombo =
     useTermStore((s) => s.shortcutOverrides.openProject) || DEFAULT_BINDINGS.openProject;
   const groups = useTermStore((s) => s.groups);
+  const projectFolders = useTermStore((s) => s.projectFolders);
   const sessions = useTermStore((s) => s.sessions);
   const ephemeralSessions = useTermStore((s) => s.ephemeralSessions);
   const toggleCollapsed = useTermStore((s) => s.toggleCollapsed);
@@ -361,6 +369,16 @@ export function ProjectTree(h: TreeHandlers) {
   const statusFiltering = statusFilter !== null;
   const markFiltering = markFilter !== null;
   const filtering = filter.length > 0 || statusFiltering || markFiltering;
+
+  // Folders follow the same shared-vs-per-pane collapse split as projects; a filter keeps them open.
+  const toggleFolder = (folder: ProjectFolder) => {
+    if (filtering) return;
+    if (!collapsedOverrides) {
+      void toggleProjectFolderCollapsed(folder.id);
+      return;
+    }
+    setViewCollapsed(view.id, folder.id, !nodeCollapsed(folder.id, folder.collapsed));
+  };
 
   // Marker filtering compares live values rather than a snapshot: a marker changes only when the user picks one,
   // so no row can disappear while it is being clicked.
@@ -450,6 +468,17 @@ export function ProjectTree(h: TreeHandlers) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtering, filter, statusFiltering, statusFilterIds, markFilter, groups, sessions, projects]);
 
+  const projectEntries = useMemo(() => {
+    const visible =
+      filtering && visProjects ? projects.filter((p) => visProjects.has(p.id)) : projects;
+    return arrangeProjectsInFolders(
+      visible,
+      projectFolders,
+      (folder) => filtering || !nodeCollapsed(folder.id, folder.collapsed),
+      filtering,
+    );
+  }, [projects, projectFolders, filtering, visProjects, collapsedOverrides]);
+
   // A name match propagates visibility downward so a matching node's complete subtree remains expandable even when
   // descendants lack the term. Marker propagation is added only for projects/groups below: a marked session keeps
   // its ancestor chain visible, but must not pull unrelated descendants into the marker result.
@@ -506,11 +535,9 @@ export function ProjectTree(h: TreeHandlers) {
       }
       for (const s of childSessions) sessionWalk(s, ancestorMatched);
     };
-    const visP =
-      filtering && visProjects
-        ? projects.filter((p) => visProjects.has(p.id))
-        : projects;
-    for (const p of visP) {
+    for (const entry of projectEntries) {
+      if (entry.kind !== "project") continue;
+      const p = entry.project;
       out.push({ id: p.id, kind: "project" });
       const expanded = filtering ? true : !nodeCollapsed(p.id, p.collapsed);
       if (expanded) walk(p.id, null, containerHit(p.name, p.mark));
@@ -519,7 +546,7 @@ export function ProjectTree(h: TreeHandlers) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     projects, groups, sessions, filter, statusFiltering, statusFilterIds, markFilter,
-    visGroups, visProjects, collapsedOverrides,
+    visGroups, visProjects, collapsedOverrides, projectEntries,
   ]);
 
   // Flatten the visible tree, including pinned temporary draft types, into virtualized render rows matching the old
@@ -572,19 +599,27 @@ export function ProjectTree(h: TreeHandlers) {
       for (const s of childSessions) sessionWalk(s, depth, ancestorMatched);
     };
 
-    // Project followed by its group/session subtree, matching visibleProjects.map.
-    const visP =
-      filtering && visProjects ? projects.filter((p) => visProjects.has(p.id)) : projects;
-    for (const p of visP) {
+    for (const entry of projectEntries) {
+      if (entry.kind === "folder") {
+        out.push({
+          kind: "folder",
+          id: entry.folder.id,
+          folder: entry.folder,
+          projectCount: entry.projectCount,
+          expanded: entry.expanded,
+        });
+        continue;
+      }
+      const p = entry.project;
       const expanded = filtering ? true : !nodeCollapsed(p.id, p.collapsed);
-      out.push({ kind: "project", id: p.id, project: p, expanded });
-      if (expanded) walkChildren(p.id, null, 1, containerHit(p.name, p.mark));
+      out.push({ kind: "project", id: p.id, project: p, expanded, indent: entry.indent });
+      if (expanded) walkChildren(p.id, null, 1 + entry.indent, containerHit(p.name, p.mark));
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     projects, groups, sessions, filter, statusFiltering, statusFilterIds, markFilter,
-    visGroups, visProjects, filtering, collapsedOverrides,
+    visGroups, visProjects, filtering, collapsedOverrides, projectEntries,
   ]);
 
   // Exact row heights are compact 24, regular 28, or comfy 32, reduced by 3 in compact navigation. Supplying this
@@ -612,10 +647,15 @@ export function ProjectTree(h: TreeHandlers) {
   useEffect(() => {
     if (!isPrimary || !revealProjectId) return;
     const index = rows.findIndex((row) => row.kind === "project" && row.id === revealProjectId);
-    if (index < 0) return;
+    if (index < 0) {
+      const folderId = projects.find((p) => p.id === revealProjectId)?.folderId;
+      const folder = folderId ? projectFolders.find((f) => f.id === folderId) : undefined;
+      if (folder?.collapsed && !filtering) void toggleProjectFolderCollapsed(folder.id);
+      return;
+    }
     virtualizer.scrollToIndex(index, { align: "auto" });
     setRevealProject(null);
-  }, [isPrimary, revealProjectId, rows, setRevealProject, virtualizer]);
+  }, [isPrimary, revealProjectId, rows, setRevealProject, virtualizer, projects, projectFolders, filtering]);
 
   // Autoscroll near list edges so virtualized offscreen drop targets enter the viewport. Listen during capture because
   // row onDragOver stops propagation.
@@ -743,6 +783,11 @@ export function ProjectTree(h: TreeHandlers) {
       void toggleCollapsed("project", proj.id);
       changed = true;
     }
+    const folder = proj?.folderId ? projectFolders.find((f) => f.id === proj.folderId) : undefined;
+    if (folder?.collapsed) {
+      void toggleProjectFolderCollapsed(folder.id);
+      changed = true;
+    }
     // If all ancestors are expanded and the row is still absent, clear pending state defensively.
     if (!changed) revealPendingRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -856,6 +901,7 @@ export function ProjectTree(h: TreeHandlers) {
       if (ids.length >= 2) out = { ...payload, ids };
     }
     e.dataTransfer.setData("text/plain", JSON.stringify(out));
+    if (out.kind === "project") e.dataTransfer.setData(PROJECT_DRAG_MIME, out.id);
     // Sessions can also be dropped onto the center pane to split or fill a pane there. Browser nodes open in their
     // own tabs and cannot join a pane tree, so they are left out and a browser-only drag offers no pane preview.
     if (out.kind === "session") {
@@ -903,6 +949,7 @@ export function ProjectTree(h: TreeHandlers) {
     return y < h * 0.5 ? "top" : "bottom";
   };
   const allowDrop = (e: React.DragEvent, id: string, hasCenter: boolean) => {
+    if (hasProjectDrag(e.dataTransfer.types)) return;
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
@@ -910,6 +957,14 @@ export function ProjectTree(h: TreeHandlers) {
     setDragOver((prev) =>
       prev?.id === id && prev.zone === zone ? prev : { id, zone },
     );
+  };
+  // Project drops only change folder membership, so they always highlight the whole row, never an edge.
+  const allowProjectDrop = (e: React.DragEvent, id: string) => {
+    if (!hasProjectDrag(e.dataTransfer.types)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    setDragOver((prev) => (prev?.id === id && prev.zone === "center" ? prev : { id, zone: "center" }));
   };
   const sortBetween = (
     siblings: { id: string; sortOrder: number }[],
@@ -931,7 +986,7 @@ export function ProjectTree(h: TreeHandlers) {
     const zone = dragOver?.id === target.id ? dragOver.zone : "center";
     setDragOver(null);
     const p = readPayload(e);
-    if (!p) return;
+    if (!p || p.kind === "project") return;
 
     // Batch drop moves all sessions into this group at center or its parent at an edge through one moveMany call.
     if (p.ids && p.ids.length >= 2) {
@@ -969,13 +1024,21 @@ export function ProjectTree(h: TreeHandlers) {
       );
     }
   };
-  const dropOnProject = (projectId: string) => (e: React.DragEvent) => {
+  const dropOnProject = (target: Project) => (e: React.DragEvent) => {
+    const projectId = target.id;
     e.preventDefault();
     e.stopPropagation();
     const zone = dragOver?.id === projectId ? dragOver.zone : "center";
     setDragOver(null);
     const p = readPayload(e);
     if (!p) return;
+
+    if (p.kind === "project") {
+      const move = resolveProjectDrop(p, { kind: "project", project: target }, projects, projectFolders);
+      // A rejection means the folder vanished elsewhere; setProjectFolder has already reloaded the tree.
+      if (move) void setProjectFolder(move.projectId, move.folderId).catch(() => {});
+      return;
+    }
 
     // Batch drop moves all sessions to the ungrouped project root.
     if (p.ids && p.ids.length >= 2) {
@@ -999,6 +1062,15 @@ export function ProjectTree(h: TreeHandlers) {
       if (p.projectId !== projectId) return;
       void moveNode("group", p.id, projectId, null, null, Date.now());
     }
+  };
+  const dropOnFolder = (folder: ProjectFolder) => (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(null);
+    const p = readPayload(e);
+    if (!p) return;
+    const move = resolveProjectDrop(p, { kind: "folder", folderId: folder.id }, projects, projectFolders);
+    if (move) void setProjectFolder(move.projectId, move.folderId).catch(() => {});
   };
   const dropOnSession = (target: Session) => (e: React.DragEvent) => {
     e.preventDefault();
@@ -1161,6 +1233,36 @@ export function ProjectTree(h: TreeHandlers) {
   // Render one flattened row by kind, centralizing JSX formerly spread across three recursive render paths.
   const renderRow = (row: TreeRow): React.ReactNode => {
     switch (row.kind) {
+      case "folder": {
+        const f = row.folder;
+        return (
+          <div
+            className={"row project-folder" + (contextId === f.id ? " context" : "")}
+            style={{ paddingLeft: 6, ...dragStyle(f.id) }}
+            onDragOver={(e) => allowProjectDrop(e, f.id)}
+            onDragLeave={() => setDragOver((d) => (d?.id === f.id ? null : d))}
+            onDrop={dropOnFolder(f)}
+            onMouseDown={preventModifierSelect}
+            onClick={() => toggleFolder(f)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (!isShareSurface) h.onFolderContext(f, e.clientX, e.clientY);
+            }}
+          >
+            <span className="tw">
+              <Chevron open={row.expanded} />
+            </span>
+            <span className="ic" style={{ color: "var(--text-dim)" }}>
+              {row.expanded ? <Icons.folderOpen size={15} /> : <Icons.folder size={15} />}
+            </span>
+            <span className="nm">{f.name}</span>
+            <span className="folder-count" title={t("folder.projectCount", row.projectCount)}>
+              {row.projectCount}
+            </span>
+          </div>
+        );
+      }
       case "project": {
         const p = row.project;
         const renaming = renamingId === p.id;
@@ -1178,10 +1280,14 @@ export function ProjectTree(h: TreeHandlers) {
               (selectedIds.has(p.id) ? " sel" : "") +
               (contextId === p.id ? " context" : "")
             }
-            style={{ paddingLeft: 6, ...dragStyle(p.id) }}
-            onDragOver={(e) => allowDrop(e, p.id, true)}
+            style={{ paddingLeft: 6 + row.indent * 13, ...dragStyle(p.id) }}
+            draggable={!filtering && !renaming && !isShareSurface}
+            onDragStart={onDragStart({ kind: "project", id: p.id, projectId: p.id })}
+            onDragOver={(e) =>
+              hasProjectDrag(e.dataTransfer.types) ? allowProjectDrop(e, p.id) : allowDrop(e, p.id, true)
+            }
             onDragLeave={() => setDragOver((d) => (d?.id === p.id ? null : d))}
-            onDrop={dropOnProject(p.id)}
+            onDrop={dropOnProject(p)}
             onMouseDown={preventModifierSelect}
             onClick={(e) => handleClick({ id: p.id, kind: "project" }, e, false)}
             onContextMenu={ctx(ref)}
