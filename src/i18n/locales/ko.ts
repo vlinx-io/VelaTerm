@@ -624,6 +624,7 @@ const ko: typeof en = {
   "settings.fonts": "Fonts", // TODO translate
   "settings.uiFont": "Interface font", // TODO translate
   "settings.uiFontSize": "Interface size", // TODO translate
+  "settings.uiZoom": "인터페이스 확대/축소", // Interface zoom
   "settings.termFont": "Terminal font", // TODO translate
   "settings.termFontSize": "Terminal size", // TODO translate
   "settings.termLineHeight": "터미널 줄 높이",
