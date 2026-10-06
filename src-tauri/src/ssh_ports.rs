@@ -245,21 +245,20 @@ pub fn handle(req: PortsRequest) -> Option<PortsOutcome> {
             refresh_detection(session, t.as_ref());
             None
         }
-        Ok(PortsAction::Forward(rport)) => match forward(session, t.as_ref(), rport) {
+        Ok(PortsAction::Forward(rport)) => match forward(session, t.as_ref(), rport, &|| {
+            crate::ssh_remote::transport(session).is_some()
+        }) {
             Ok(true) => None,
             Ok(false) => return None,
             Err(e) => Some(e),
         },
-        Ok(PortsAction::Unforward(rport)) => {
-            let removed = with_registry(session, |r| r.remove(rport));
-            removed.and_then(|f| t.close_forward(f.lport).err())
-        }
-        Ok(PortsAction::Open(rport)) => match with_registry(session, |r| r.lport_of(rport)) {
-            Some(lport) => {
+        Ok(PortsAction::Unforward(rport)) => unforward(session, t.as_ref(), rport).err(),
+        Ok(PortsAction::Open(rport)) => match open_port(session, rport) {
+            Ok(lport) => {
                 open_lport = Some(lport);
                 None
             }
-            None => Some(format!("port {rport} is not forwarded")),
+            Err(e) => Some(e),
         },
     };
     crate::ssh_remote::transport(session)?;
@@ -283,8 +282,19 @@ fn refresh_detection(session: &str, t: &dyn SshTransport) {
     });
 }
 
-/// `Ok(false)` means the session disconnected while the tunnel was opening; the tunnel is closed again.
-fn forward(session: &str, t: &dyn SshTransport, rport: u16) -> Result<bool, String> {
+fn unforward(session: &str, t: &dyn SshTransport, rport: u16) -> Result<(), String> {
+    match with_registry(session, |r| r.remove(rport)) {
+        Some(f) => t.close_forward(f.lport),
+        None => Ok(()),
+    }
+}
+
+fn open_port(session: &str, rport: u16) -> Result<u16, String> {
+    with_registry(session, |r| r.lport_of(rport)).ok_or_else(|| format!("port {rport} is not forwarded"))
+}
+
+/// `Ok(false)` means `alive` reported the session gone while the tunnel was opening; the tunnel is closed again.
+fn forward(session: &str, t: &dyn SshTransport, rport: u16, alive: &dyn Fn() -> bool) -> Result<bool, String> {
     let source = with_registry(session, |r| {
         if r.lport_of(rport).is_some() {
             return Ok(None);
@@ -293,18 +303,18 @@ fn forward(session: &str, t: &dyn SshTransport, rport: u16) -> Result<bool, Stri
     })?;
     let Some(source) = source else { return Ok(true) };
     let lport = t.open_user_forward(rport, Some(rport))?;
-    if crate::ssh_remote::transport(session).is_none() {
+    if !alive() {
         let _ = t.close_forward(lport);
         return Ok(false);
     }
     match with_registry(session, |r| r.insert_within_cap(Forward { rport, lport, source })) {
         InsertOutcome::Inserted => Ok(true),
         InsertOutcome::Duplicate => {
-            t.close_forward(lport)?;
+            let _ = t.close_forward(lport);
             Ok(true)
         }
         InsertOutcome::Full => {
-            t.close_forward(lport)?;
+            let _ = t.close_forward(lport);
             Err(format!("at most {MAX_FORWARDS} ports can be forwarded per connection"))
         }
     }
@@ -457,13 +467,257 @@ mod tests {
 
     #[test]
     fn requests_for_unknown_sessions_are_ignored() {
-        let out = handle(PortsRequest {
-            session: "no-such-session".into(),
-            action: "forward".into(),
-            rport: Some(3000),
-        });
+        let session = "ports-unknown-session";
+        let out = handle(PortsRequest { session: session.into(), action: "forward".into(), rport: Some(3000) });
         assert!(out.is_none());
-        assert!(forget_session("no-such-session").is_empty());
+        assert!(!registries().contains_key(session));
+    }
+
+    type Hook = Box<dyn Fn() + Send + Sync>;
+
+    #[derive(Default)]
+    struct FakeTransport {
+        exec_out: Mutex<Option<Result<String, String>>>,
+        exec_calls: Mutex<u32>,
+        on_exec: Mutex<Option<Hook>>,
+        open_result: Mutex<Option<Result<u16, String>>>,
+        open_calls: Mutex<Vec<(u16, Option<u16>)>>,
+        on_open: Mutex<Option<Hook>>,
+        close_result: Mutex<Option<Result<(), String>>>,
+        closed: Mutex<Vec<u16>>,
+    }
+
+    impl SshTransport for FakeTransport {
+        fn exec(&self, _cmd: &str) -> Result<String, String> {
+            *self.exec_calls.lock().unwrap() += 1;
+            if let Some(h) = self.on_exec.lock().unwrap().as_ref() {
+                h();
+            }
+            self.exec_out.lock().unwrap().clone().unwrap_or(Err("no exec result".into()))
+        }
+        fn exec_input(&self, _cmd: &str, _input: &str) -> Result<String, String> {
+            unreachable!()
+        }
+        fn upload(&self, _l: &std::path::Path, _r: &str, _p: crate::ssh_remote::Progress) -> Result<(), String> {
+            unreachable!()
+        }
+        fn open_forward(&self, _rport: u16) -> Result<u16, String> {
+            unreachable!()
+        }
+        fn open_user_forward(&self, rport: u16, preferred_lport: Option<u16>) -> Result<u16, String> {
+            self.open_calls.lock().unwrap().push((rport, preferred_lport));
+            if let Some(h) = self.on_open.lock().unwrap().as_ref() {
+                h();
+            }
+            self.open_result.lock().unwrap().clone().unwrap_or(Ok(rport))
+        }
+        fn close_forward(&self, lport: u16) -> Result<(), String> {
+            self.closed.lock().unwrap().push(lport);
+            self.close_result.lock().unwrap().clone().unwrap_or(Ok(()))
+        }
+        fn close(&self) {}
+        fn session(&self) -> &str {
+            "fake"
+        }
+    }
+
+    fn snap(session: &str) -> PortsSnapshot {
+        with_registry(session, |r| r.snapshot(session, None))
+    }
+
+    fn fill_registry(session: &str) {
+        with_registry(session, |r| {
+            for p in 0..MAX_FORWARDS as u16 {
+                r.insert(fwd(3000 + p, 3000 + p, ForwardSource::Manual));
+            }
+        });
+    }
+
+    const LIVE: &dyn Fn() -> bool = &|| true;
+
+    const PROC_OK: &str = "  sl  local_address rem_address   st\n   0: 0100007F:1F90 00000000:0000 0A 0\n";
+
+    #[test]
+    fn refresh_detection_resets_guard_after_ok_and_err() {
+        let s = "ports-detect-reset";
+        let t = FakeTransport::default();
+        *t.exec_out.lock().unwrap() = Some(Ok(PROC_OK.into()));
+        refresh_detection(s, &t);
+        let sn = snap(s);
+        assert!(sn.detection_available);
+        assert_eq!(sn.detected, vec![8080]);
+        assert!(!with_registry(s, |r| r.detecting));
+
+        *t.exec_out.lock().unwrap() = Some(Err("boom".into()));
+        refresh_detection(s, &t);
+        let sn = snap(s);
+        assert!(!sn.detection_available);
+        assert!(sn.detected.is_empty());
+        assert!(!with_registry(s, |r| r.detecting));
+
+        refresh_detection(s, &t);
+        assert_eq!(*t.exec_calls.lock().unwrap(), 3);
+        forget_session(s);
+    }
+
+    #[test]
+    fn refresh_detection_without_header_marks_unavailable() {
+        let s = "ports-detect-noheader";
+        let t = FakeTransport::default();
+        *t.exec_out.lock().unwrap() = Some(Ok("Get-NetTCPConnection: not found".into()));
+        refresh_detection(s, &t);
+        assert!(!snap(s).detection_available);
+        forget_session(s);
+    }
+
+    #[test]
+    fn refresh_detection_skips_exec_while_one_is_in_flight() {
+        let s = "ports-detect-guard";
+        let t = FakeTransport::default();
+        *t.exec_out.lock().unwrap() = Some(Ok(PROC_OK.into()));
+        let inner = std::sync::Arc::new(FakeTransport::default());
+        let inner_hook = inner.clone();
+        *t.on_exec.lock().unwrap() = Some(Box::new(move || refresh_detection(s, inner_hook.as_ref())));
+        refresh_detection(s, &t);
+        assert_eq!(*t.exec_calls.lock().unwrap(), 1);
+        assert_eq!(*inner.exec_calls.lock().unwrap(), 0);
+        assert!(snap(s).detection_available);
+        forget_session(s);
+    }
+
+    #[test]
+    fn forward_new_port_opens_once_and_inserts() {
+        let s = "ports-fwd-new";
+        let t = FakeTransport::default();
+        assert_eq!(forward(s, &t, 3000, LIVE), Ok(true));
+        assert_eq!(*t.open_calls.lock().unwrap(), vec![(3000, Some(3000))]);
+        assert_eq!(snap(s).forwards, vec![fwd(3000, 3000, ForwardSource::Manual)]);
+        forget_session(s);
+    }
+
+    #[test]
+    fn forward_marks_detected_source() {
+        let s = "ports-fwd-detected";
+        with_registry(s, |r| r.set_listening(Some(vec![8080])));
+        let t = FakeTransport::default();
+        assert_eq!(forward(s, &t, 8080, LIVE), Ok(true));
+        assert_eq!(snap(s).forwards[0].source, ForwardSource::Detected);
+        forget_session(s);
+    }
+
+    #[test]
+    fn forward_already_forwarded_is_idempotent() {
+        let s = "ports-fwd-idem";
+        let t = FakeTransport::default();
+        assert_eq!(forward(s, &t, 3000, LIVE), Ok(true));
+        assert_eq!(forward(s, &t, 3000, LIVE), Ok(true));
+        assert_eq!(t.open_calls.lock().unwrap().len(), 1);
+        assert!(t.closed.lock().unwrap().is_empty());
+        assert_eq!(snap(s).forwards.len(), 1);
+        forget_session(s);
+    }
+
+    #[test]
+    fn forward_duplicate_after_open_closes_new_tunnel_and_keeps_first() {
+        let s = "ports-fwd-dup-race";
+        let t = FakeTransport::default();
+        *t.open_result.lock().unwrap() = Some(Ok(4001));
+        *t.on_open.lock().unwrap() = Some(Box::new(move || {
+            with_registry(s, |r| r.insert(fwd(3000, 3000, ForwardSource::Manual)));
+        }));
+        *t.close_result.lock().unwrap() = Some(Err("close failed".into()));
+        assert_eq!(forward(s, &t, 3000, LIVE), Ok(true));
+        assert_eq!(*t.closed.lock().unwrap(), vec![4001]);
+        assert_eq!(snap(s).forwards, vec![fwd(3000, 3000, ForwardSource::Manual)]);
+        forget_session(s);
+    }
+
+    #[test]
+    fn forward_full_after_open_closes_tunnel_and_reports_cap() {
+        let s = "ports-fwd-full-race";
+        let t = FakeTransport::default();
+        *t.open_result.lock().unwrap() = Some(Ok(9001));
+        *t.on_open.lock().unwrap() = Some(Box::new(move || fill_registry(s)));
+        *t.close_result.lock().unwrap() = Some(Err("close failed".into()));
+        let err = forward(s, &t, 9000, LIVE).unwrap_err();
+        assert!(err.contains("at most 20"), "{err}");
+        assert_eq!(*t.closed.lock().unwrap(), vec![9001]);
+        let sn = snap(s);
+        assert_eq!(sn.forwards.len(), MAX_FORWARDS);
+        assert!(sn.forwards.iter().all(|f| f.rport != 9000));
+        forget_session(s);
+    }
+
+    #[test]
+    fn forward_at_cap_does_not_open() {
+        let s = "ports-fwd-cap-pre";
+        fill_registry(s);
+        let t = FakeTransport::default();
+        assert!(forward(s, &t, 9000, LIVE).is_err());
+        assert!(t.open_calls.lock().unwrap().is_empty());
+        forget_session(s);
+    }
+
+    #[test]
+    fn forward_open_error_leaves_registry_unchanged() {
+        let s = "ports-fwd-open-err";
+        let t = FakeTransport::default();
+        *t.open_result.lock().unwrap() = Some(Err("refused".into()));
+        assert_eq!(forward(s, &t, 3000, LIVE), Err("refused".into()));
+        assert!(snap(s).forwards.is_empty());
+        assert!(t.closed.lock().unwrap().is_empty());
+        forget_session(s);
+    }
+
+    #[test]
+    fn forward_closes_tunnel_when_session_disconnected_meanwhile() {
+        let s = "ports-fwd-gone";
+        let t = FakeTransport::default();
+        *t.open_result.lock().unwrap() = Some(Ok(3000));
+        assert_eq!(forward(s, &t, 3000, &|| false), Ok(false));
+        assert_eq!(*t.closed.lock().unwrap(), vec![3000]);
+        assert!(snap(s).forwards.is_empty());
+        forget_session(s);
+    }
+
+    #[test]
+    fn unforward_removes_and_closes_local_port() {
+        let s = "ports-unfwd";
+        let t = FakeTransport::default();
+        with_registry(s, |r| r.insert(fwd(3000, 4000, ForwardSource::Manual)));
+        assert_eq!(unforward(s, &t, 3000), Ok(()));
+        assert_eq!(*t.closed.lock().unwrap(), vec![4000]);
+        assert!(snap(s).forwards.is_empty());
+        forget_session(s);
+    }
+
+    #[test]
+    fn unforward_unknown_port_is_a_noop() {
+        let s = "ports-unfwd-none";
+        let t = FakeTransport::default();
+        assert_eq!(unforward(s, &t, 3000), Ok(()));
+        assert!(t.closed.lock().unwrap().is_empty());
+        forget_session(s);
+    }
+
+    #[test]
+    fn unforward_reports_close_error_but_still_removes() {
+        let s = "ports-unfwd-err";
+        let t = FakeTransport::default();
+        *t.close_result.lock().unwrap() = Some(Err("close failed".into()));
+        with_registry(s, |r| r.insert(fwd(3000, 3000, ForwardSource::Manual)));
+        assert_eq!(unforward(s, &t, 3000), Err("close failed".into()));
+        assert!(snap(s).forwards.is_empty());
+        forget_session(s);
+    }
+
+    #[test]
+    fn open_port_returns_lport_or_not_forwarded_error() {
+        let s = "ports-open";
+        with_registry(s, |r| r.insert(fwd(3000, 4000, ForwardSource::Manual)));
+        assert_eq!(open_port(s, 3000), Ok(4000));
+        assert_eq!(open_port(s, 3001), Err("port 3001 is not forwarded".into()));
+        forget_session(s);
     }
 
     fn manual(rport: u16) -> Forward {
