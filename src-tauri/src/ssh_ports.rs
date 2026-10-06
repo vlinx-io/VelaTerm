@@ -10,9 +10,9 @@ use crate::ssh_remote::SshTransport;
 /// Most user forwards one SSH session may hold.
 pub const MAX_FORWARDS: usize = 20;
 
-// Stable codes the frontend maps to localized text (`mapBackendError`); detail follows the first colon.
+// Stable codes the frontend maps to localized text (`mapBackendError`); detail follows the first colon and may be empty.
 const ERR_INVALID_PORT: &str = "ports_invalid_port";
-const ERR_MISSING_PORT: &str = "ports_missing_port";
+const ERR_MISSING_PORT: &str = "ports_missing_port:";
 const ERR_UNKNOWN_ACTION: &str = "ports_unknown_action";
 const ERR_LIMIT: &str = "ports_limit";
 const ERR_NOT_FORWARDED: &str = "ports_not_forwarded";
@@ -473,7 +473,7 @@ lr-x------ 1 u u 64 Oct  6 12:00 7 -> /home/u/socket:[1]";
         assert_eq!(parse_action(&req("forward", Some(3000))), Ok(PortsAction::Forward(3000)));
         assert_eq!(parse_action(&req("unforward", Some(1))), Ok(PortsAction::Unforward(1)));
         assert_eq!(parse_action(&req("open", Some(65535))), Ok(PortsAction::Open(65535)));
-        assert_eq!(parse_action(&req("forward", None)), Err("ports_missing_port".into()));
+        assert_eq!(parse_action(&req("forward", None)), Err("ports_missing_port:".into()));
         assert_eq!(parse_action(&req("forward", Some(0))), Err("ports_invalid_port:0".into()));
         assert_eq!(parse_action(&req("forward", Some(70000))), Err("ports_invalid_port:70000".into()));
         assert_eq!(parse_action(&req("forward", Some(-1))), Err("ports_invalid_port:-1".into()));

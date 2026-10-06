@@ -34,7 +34,7 @@ describe("mapBackendError", () => {
 
   it("maps the port forwarding codes to their i18n keys with the detail as parameter", () => {
     expect(mapBackendError("ports_invalid_port:70000")).toBe("ports.invalidPort|70000");
-    expect(mapBackendError("ports_missing_port")).toBe("ports.missingPort");
+    expect(mapBackendError("ports_missing_port:")).toBe("ports.missingPort");
     expect(mapBackendError("ports_unknown_action:foo")).toBe("ports.unknownAction|foo");
     expect(mapBackendError("ports_limit:20")).toBe("ports.limit|20");
     expect(mapBackendError("ports_not_forwarded:3000")).toBe("ports.notForwarded|3000");
