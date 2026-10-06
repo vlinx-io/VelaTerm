@@ -1018,6 +1018,17 @@ pub(crate) fn pick_local_port(host: &str) -> Result<u16, String> {
     free_local_port()
 }
 
+/// User forwards keep the remote port number locally when it is free, so `localhost:3000` stays
+/// `localhost:3000`; otherwise any free port.
+pub(crate) fn pick_preferred_port(preferred: Option<u16>) -> Result<u16, String> {
+    if let Some(p) = preferred {
+        if std::net::TcpListener::bind(("127.0.0.1", p)).is_ok() {
+            return Ok(p);
+        }
+    }
+    free_local_port()
+}
+
 /// Remote state persisted in run.json for reconnect reuse/reclamation.
 #[derive(Debug, Clone, serde::Deserialize)]
 struct RunState {
@@ -1306,6 +1317,72 @@ fn openssh_open_forward(host: &str, session: &str, rport: u16) -> Result<u16, St
     Ok(lport)
 }
 
+/// User forwards keyed by (session, local port): the remote port and the `ssh -N -L` child holding it.
+static USER_FORWARDS: OnceLock<Mutex<HashMap<(String, u16), (u16, Child)>>> = OnceLock::new();
+
+fn user_forwards() -> std::sync::MutexGuard<'static, HashMap<(String, u16), (u16, Child)>> {
+    USER_FORWARDS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+fn user_forward_spec(lport: u16, rport: u16) -> String {
+    format!("127.0.0.1:{lport}:127.0.0.1:{rport}")
+}
+
+fn openssh_open_user_forward(
+    host: &str,
+    session: &str,
+    rport: u16,
+    preferred_lport: Option<u16>,
+) -> Result<u16, String> {
+    let (target, port) = split_ssh_target(host);
+    let sock = control_path(session);
+    let lport = pick_preferred_port(preferred_lport)?;
+
+    let mut cmd = ssh_command("ssh");
+    cmd.args(ssh_common_args(&sock, port, true));
+    cmd.args(["-o", "BatchMode=yes"]);
+    cmd.args(["-o", "ExitOnForwardFailure=yes"]);
+    cmd.args(["-N", "-L", &user_forward_spec(lport, rport)]);
+    cmd.arg(target);
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::null());
+    cmd.stderr(Stdio::null());
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("failed to start port forward (ssh missing locally?): {e}"))?;
+    if let Err(e) = wait_forward_listening(&mut child, lport, Duration::from_secs(20)) {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(e);
+    }
+    user_forwards().insert((session.to_string(), lport), (rport, child));
+    Ok(lport)
+}
+
+fn openssh_close_user_forward(host: &str, session: &str, lport: u16) {
+    let Some((rport, mut child)) = user_forwards().remove(&(session.to_string(), lport)) else {
+        return;
+    };
+    let _ = child.kill();
+    let _ = child.wait();
+    // A ControlMaster owns the listener of a multiplexed forward, so killing the requesting client does not
+    // free the local port; cancel it on the master explicitly.
+    #[cfg(not(windows))]
+    {
+        let (target, port) = split_ssh_target(host);
+        let mut cmd = ssh_command("ssh");
+        cmd.args(ssh_common_args(&control_path(session), port, true));
+        cmd.args(["-O", "cancel", "-L", &user_forward_spec(lport, rport)]);
+        cmd.arg(target);
+        let _ = cmd.output();
+    }
+    #[cfg(windows)]
+    let _ = (host, rport);
+}
+
 /// Read run.json and check the recorded PID to find a live remote service. Remove stale state and return
 /// None otherwise.
 fn detect_running(t: &dyn SshTransport, sys: &RemoteSystem) -> Option<RunState> {
@@ -1394,6 +1471,18 @@ pub fn stop_serve(session: &str) {
     }
 }
 
+/// Kill every user-forward child of a session. Closing the master afterwards frees multiplexed listeners.
+fn stop_user_forwards(session: &str) {
+    let mut map = user_forwards();
+    let keys: Vec<(String, u16)> = map.keys().filter(|(s, _)| s == session).cloned().collect();
+    for key in keys {
+        if let Some((_, mut child)) = map.remove(&key) {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
 // ─────────────────────────── SSH transport abstraction for OpenSSH/russh ───────────────────────────
 
 /// Authentication intent built by the command layer and implemented by the transport.
@@ -1407,8 +1496,9 @@ pub enum SshAuth {
 /// Established SSH transport encapsulating backend state. Orchestration depends only on this trait, so
 /// switching a platform between OpenSSH and russh changes only connect_transport selection.
 ///
-/// Send is required because the global registry crosses blocking threads; dropping russh state disconnects it.
-pub trait SshTransport: Send {
+/// Send + Sync are required because the global registry hands out shared `Arc`s across blocking threads;
+/// dropping russh state disconnects it.
+pub trait SshTransport: Send + Sync {
     /// Run a remote command and return trimmed stdout.
     fn exec(&self, cmd: &str) -> Result<String, String>;
     /// Run a remote command with `input` on its stdin, then EOF, and return trimmed stdout.
@@ -1417,6 +1507,11 @@ pub trait SshTransport: Send {
     fn upload(&self, local: &Path, remote_rel: &str, progress: Progress) -> Result<(), String>;
     /// Start persistent local forwarding and return lport after health succeeds.
     fn open_forward(&self, rport: u16) -> Result<u16, String>;
+    /// Forward a user-chosen remote port to 127.0.0.1, on `preferred_lport` when free, and return the local
+    /// port. No HTTP health check: the remote port may speak any protocol.
+    fn open_user_forward(&self, rport: u16, preferred_lport: Option<u16>) -> Result<u16, String>;
+    /// Close one user forward by local port without touching the service tunnel or other forwards.
+    fn close_forward(&self, lport: u16) -> Result<(), String>;
     /// Disconnect forwarding and connection resources without stopping the remote service.
     fn close(&self);
     /// Session ID used for port derivation, ConnectResult, and registry keys.
@@ -1569,7 +1664,17 @@ impl SshTransport for OpensshTransport {
         openssh_open_forward(&self.host, &self.session, rport)
     }
 
+    fn open_user_forward(&self, rport: u16, preferred_lport: Option<u16>) -> Result<u16, String> {
+        openssh_open_user_forward(&self.host, &self.session, rport, preferred_lport)
+    }
+
+    fn close_forward(&self, lport: u16) -> Result<(), String> {
+        openssh_close_user_forward(&self.host, &self.session, lport);
+        Ok(())
+    }
+
     fn close(&self) {
+        stop_user_forwards(&self.session);
         stop_serve(&self.session);
         close_master(&self.host, &self.session);
     }
@@ -1606,10 +1711,19 @@ fn connect_transport(
 
 /// Active transport registry keyed by session. russh **must** remain registered to keep its connection/
 /// forwarding alive; OpenSSH is registered for a unified disconnect path.
-static TRANSPORTS: OnceLock<Mutex<HashMap<String, Box<dyn SshTransport>>>> = OnceLock::new();
+static TRANSPORTS: OnceLock<Mutex<HashMap<String, Arc<dyn SshTransport>>>> = OnceLock::new();
 
-fn transports() -> &'static Mutex<HashMap<String, Box<dyn SshTransport>>> {
+fn transports() -> &'static Mutex<HashMap<String, Arc<dyn SshTransport>>> {
     TRANSPORTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// A session's live transport. Shared so port requests run network I/O without holding the registry lock.
+pub(crate) fn transport(session: &str) -> Option<Arc<dyn SshTransport>> {
+    transports()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(session)
+        .cloned()
 }
 
 /// Unified disconnect prefers the active registry; missing state falls back to reconstructed OpenSSH.
@@ -1748,6 +1862,27 @@ fn tunnel_port_alive(port: u16) -> bool {
         Duration::from_secs(2),
     )
     .is_ok()
+}
+
+/// Wait until a user forward's local end accepts connections. Unlike the service tunnel there is no HTTP
+/// probe: the remote port may serve any protocol, or nothing yet. A child that exits non-zero lost its
+/// bind or connection; with a ControlMaster the master owns the listener, so a clean exit is not failure.
+fn wait_forward_listening(child: &mut Child, lport: u16, timeout: Duration) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if tunnel_port_alive(lport) {
+            return Ok(());
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            if !status.success() {
+                return Err(format!("ssh port forward to local port {lport} failed ({status})"));
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(format!("port forward timed out: local port {lport} is not listening"));
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
 }
 
 /// Interruptible sleep in 200 ms steps, returning false immediately when no longer wanted.
@@ -1944,7 +2079,7 @@ pub fn connect(
             transports()
                 .lock()
                 .unwrap()
-                .insert(session.clone(), transport);
+                .insert(session.clone(), Arc::from(transport));
             Ok(r)
         }
         Err(e) => {
@@ -2543,6 +2678,60 @@ mod tests {
 
         // Close the master and remove its socket.
         close_master(&host, &session);
+    }
+
+    #[test]
+    fn pick_preferred_port_uses_the_preferred_port_only_when_free() {
+        let held = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let taken = held.local_addr().unwrap().port();
+        assert_ne!(pick_preferred_port(Some(taken)).unwrap(), taken);
+        drop(held);
+        assert_eq!(pick_preferred_port(Some(taken)).unwrap(), taken);
+        assert!(pick_preferred_port(None).unwrap() > 0);
+    }
+
+    #[test]
+    fn wait_forward_listening_returns_once_the_port_listens() {
+        let port = free_local_port().unwrap();
+        let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+        // Bind late so the wait has to poll; a clean child exit in the meantime must not count as failure.
+        let binder = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            let listener = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+            let _ = stop_rx.recv();
+            drop(listener);
+        });
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .arg("--list")
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap();
+        let started = Instant::now();
+        assert!(wait_forward_listening(&mut child, port, Duration::from_secs(5)).is_ok());
+        assert!(started.elapsed() >= Duration::from_millis(250));
+        let _ = child.wait();
+        let _ = stop_tx.send(());
+        binder.join().unwrap();
+    }
+
+    #[test]
+    fn wait_forward_listening_fails_fast_when_the_ssh_child_exits() {
+        let port = free_local_port().unwrap();
+        // The test binary rejects unknown flags with a non-zero exit, standing in for a failed `ssh -L`.
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .arg("--no-such-flag")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let started = Instant::now();
+        assert!(wait_forward_listening(&mut child, port, Duration::from_secs(30)).is_err());
+        assert!(started.elapsed() < Duration::from_secs(15));
+    }
+
+    #[test]
+    fn user_forward_spec_binds_loopback_on_both_ends() {
+        assert_eq!(user_forward_spec(3000, 8080), "127.0.0.1:3000:127.0.0.1:8080");
     }
 }
 
