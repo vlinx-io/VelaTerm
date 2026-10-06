@@ -1018,11 +1018,20 @@ pub(crate) fn pick_local_port(host: &str) -> Result<u16, String> {
     free_local_port()
 }
 
+/// `localhost` resolves to `::1` first on many hosts, so a local app on `[::1]:p` would shadow a forward bound
+/// only on `127.0.0.1:p`. Hosts without IPv6 count as free.
+pub(crate) fn loopback_v6_free(p: u16) -> bool {
+    !matches!(
+        std::net::TcpListener::bind(("::1", p)),
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse
+    )
+}
+
 /// User forwards keep the remote port number locally when it is free, so `localhost:3000` stays
 /// `localhost:3000`; otherwise any free port.
 pub(crate) fn pick_preferred_port(preferred: Option<u16>) -> Result<u16, String> {
     if let Some(p) = preferred {
-        if std::net::TcpListener::bind(("127.0.0.1", p)).is_ok() {
+        if loopback_v6_free(p) && std::net::TcpListener::bind(("127.0.0.1", p)).is_ok() {
             return Ok(p);
         }
     }
@@ -2702,6 +2711,16 @@ mod tests {
         drop(held);
         assert_eq!(pick_preferred_port(Some(taken)).unwrap(), taken);
         assert!(pick_preferred_port(None).unwrap() > 0);
+    }
+
+    #[test]
+    fn pick_preferred_port_avoids_a_port_held_on_ipv6_loopback() {
+        let Ok(held) = std::net::TcpListener::bind(("::1", 0)) else { return };
+        let taken = held.local_addr().unwrap().port();
+        assert!(!loopback_v6_free(taken));
+        assert_ne!(pick_preferred_port(Some(taken)).unwrap(), taken);
+        drop(held);
+        assert!(loopback_v6_free(taken));
     }
 
     #[test]

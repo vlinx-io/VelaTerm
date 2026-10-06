@@ -317,7 +317,7 @@ impl SshTransport for RusshTransport {
         let listener = self
             .rt
             .block_on(async {
-                if let Some(p) = preferred_lport {
+                if let Some(p) = preferred_lport.filter(|&p| crate::ssh_remote::loopback_v6_free(p)) {
                     if let Ok(l) = TcpListener::bind(("127.0.0.1", p)).await {
                         return Ok(l);
                     }
