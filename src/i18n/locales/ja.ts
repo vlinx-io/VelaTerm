@@ -2227,6 +2227,11 @@ const ja: typeof en = {
   "ports.stop": "停止", // Stop
   "ports.localChanged": (port) => `ローカルポート ${port} は使用中のため、別のローカルポートを使用しています`, // Local port {port} was busy, so another local port is used
   "ports.unavailable": "利用できません — VelaTerm を更新してください", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `無効なポート: ${port}`, // Invalid port: {port}
+  "ports.missingPort": "ポートを入力してください", // Enter a port
+  "ports.unknownAction": (action) => `不明な操作: ${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `1 つの接続で転送できるポートは最大 ${max} 個です`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `ポート ${port} は転送されていません`, // Port {port} is not forwarded
   "statusbar.ports": (n) => `${n} 個のポートを転送中`, // {n} forwarded ports
 };
 

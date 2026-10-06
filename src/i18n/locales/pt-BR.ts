@@ -2238,6 +2238,11 @@ const ptBR: typeof en = {
   "ports.stop": "Parar", // Stop
   "ports.localChanged": (port) => `A porta local ${port} estava ocupada, então outra porta local é usada`, // Local port {port} was busy, so another local port is used
   "ports.unavailable": "Indisponível — atualize o VelaTerm", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `Porta inválida: ${port}`, // Invalid port: {port}
+  "ports.missingPort": "Informe uma porta", // Enter a port
+  "ports.unknownAction": (action) => `Ação desconhecida: ${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `No máximo ${max} portas podem ser encaminhadas por conexão`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `A porta ${port} não está encaminhada`, // Port {port} is not forwarded
   "statusbar.ports": (n) => (n === 1 ? "1 porta encaminhada" : `${n} portas encaminhadas`), // {n} forwarded ports
 };
 

@@ -2239,6 +2239,11 @@ const en = {
   "ports.localChanged": (port: number) =>
     `Local port ${port} was busy, so another local port is used`,
   "ports.unavailable": "Unavailable — update VelaTerm",
+  "ports.invalidPort": (port: string) => `Invalid port: ${port}`,
+  "ports.missingPort": "Enter a port",
+  "ports.unknownAction": (action: string) => `Unknown action: ${action}`,
+  "ports.limit": (max: string) => `At most ${max} ports can be forwarded per connection`,
+  "ports.notForwarded": (port: string) => `Port ${port} is not forwarded`,
   "statusbar.ports": (n: number) => (n === 1 ? "1 forwarded port" : `${n} forwarded ports`),
 };
 

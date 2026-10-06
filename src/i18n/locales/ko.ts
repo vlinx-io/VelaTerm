@@ -2210,6 +2210,11 @@ const ko: typeof en = {
   "ports.stop": "중지", // Stop
   "ports.localChanged": (port) => `로컬 포트 ${port}이(가) 사용 중이어서 다른 로컬 포트를 사용합니다`, // Local port {port} was busy, so another local port is used
   "ports.unavailable": "사용할 수 없음 — VelaTerm을 업데이트하세요", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `잘못된 포트: ${port}`, // Invalid port: {port}
+  "ports.missingPort": "포트를 입력하세요", // Enter a port
+  "ports.unknownAction": (action) => `알 수 없는 작업: ${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `연결당 최대 ${max}개의 포트를 전달할 수 있습니다`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `포트 ${port}은(는) 전달되지 않았습니다`, // Port {port} is not forwarded
   "statusbar.ports": (n) => `전달된 포트 ${n}개`, // {n} forwarded ports
 };
 

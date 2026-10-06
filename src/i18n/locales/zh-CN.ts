@@ -2177,6 +2177,11 @@ const zhCN: typeof en = {
   "ports.stop": "停止", // Stop
   "ports.localChanged": (port) => `本地端口 ${port} 已被占用，已改用其他本地端口`, // Local port {port} was busy, so another local port is used
   "ports.unavailable": "不可用 — 请更新 VelaTerm", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `无效的端口：${port}`, // Invalid port: {port}
+  "ports.missingPort": "请输入端口", // Enter a port
+  "ports.unknownAction": (action) => `未知操作：${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `每个连接最多可转发 ${max} 个端口`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `端口 ${port} 未被转发`, // Port {port} is not forwarded
   "statusbar.ports": (n) => `已转发 ${n} 个端口`, // {n} forwarded ports
 };
 

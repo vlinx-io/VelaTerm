@@ -2188,6 +2188,11 @@ const vi: typeof en = {
   "ports.stop": "Dừng", // Stop
   "ports.localChanged": (port) => `Cổng cục bộ ${port} đang bận nên đã dùng một cổng cục bộ khác`, // Local port {port} was busy, so another local port is used
   "ports.unavailable": "Không khả dụng — hãy cập nhật VelaTerm", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `Cổng không hợp lệ: ${port}`, // Invalid port: {port}
+  "ports.missingPort": "Hãy nhập một cổng", // Enter a port
+  "ports.unknownAction": (action) => `Thao tác không xác định: ${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `Mỗi kết nối chỉ có thể chuyển tiếp tối đa ${max} cổng`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `Cổng ${port} chưa được chuyển tiếp`, // Port {port} is not forwarded
   "statusbar.ports": (n) => `${n} cổng đã chuyển tiếp`, // {n} forwarded ports
 };
 

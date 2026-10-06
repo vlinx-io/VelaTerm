@@ -2178,6 +2178,11 @@ const zhTW: typeof en = {
   "ports.stop": "停止", // Stop
   "ports.localChanged": (port) => `本機連接埠 ${port} 已被占用，已改用其他本機連接埠`, // Local port {port} was busy, so another local port is used
   "ports.unavailable": "無法使用 — 請更新 VelaTerm", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `無效的連接埠：${port}`, // Invalid port: {port}
+  "ports.missingPort": "請輸入連接埠", // Enter a port
+  "ports.unknownAction": (action) => `未知的操作：${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `每個連線最多可轉送 ${max} 個連接埠`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `連接埠 ${port} 尚未轉送`, // Port {port} is not forwarded
   "statusbar.ports": (n) => `已轉送 ${n} 個連接埠`, // {n} forwarded ports
 };
 

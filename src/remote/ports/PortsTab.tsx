@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
+import { mapBackendError } from "../../ipc/backendError";
 import { Section } from "../../layout/RightPanel/parts";
 import { requestPorts, usePorts } from "./portsClient";
 import "./ports.css";
@@ -41,7 +42,7 @@ export function PortsTab() {
 
   return (
     <>
-      {error && <div role="alert" className="ports-error">{error}</div>}
+      {error && <div role="alert" className="ports-error">{mapBackendError(error)}</div>}
       <Section id="ports-active" title={t("ports.active")} tag={forwards.length || undefined}>
         {forwards.length === 0 ? (
           <div className="ports-hint">{t("ports.activeEmpty")}</div>

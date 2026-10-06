@@ -98,9 +98,9 @@ it("forwards a typed port and rejects invalid input", async () => {
 it("keeps manual forwarding when detection is unavailable and shows request errors", async () => {
   render(<PortsTab />);
   await act(async () => {});
-  push({ detected: [], detectionAvailable: false, error: "port 3000 is not forwarded" });
+  push({ detected: [], detectionAvailable: false, error: "ports_not_forwarded:3000" });
   expect(screen.getByText("Port detection is not available on this host")).toBeTruthy();
-  expect(screen.getByRole("alert").textContent).toBe("port 3000 is not forwarded");
+  expect(screen.getByRole("alert").textContent).toBe("Port 3000 is not forwarded");
   expect(screen.getByRole("textbox", { name: "Remote port" })).toBeTruthy();
 });
 

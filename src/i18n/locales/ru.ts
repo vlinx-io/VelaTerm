@@ -2250,6 +2250,11 @@ const ru: typeof en = {
   "ports.stop": "Остановить", // Stop
   "ports.localChanged": (port) => `Локальный порт ${port} был занят, поэтому используется другой локальный порт`, // Local port {port} was busy, so another local port is used
   "ports.unavailable": "Недоступно — обновите VelaTerm", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `Недопустимый порт: ${port}`, // Invalid port: {port}
+  "ports.missingPort": "Введите порт", // Enter a port
+  "ports.unknownAction": (action) => `Неизвестное действие: ${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `Для одного подключения можно перенаправить не более ${max} портов`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `Порт ${port} не перенаправлен`, // Port {port} is not forwarded
   "statusbar.ports": (n) => `Перенаправлено портов: ${n}`, // {n} forwarded ports
 };
 

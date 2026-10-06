@@ -2244,6 +2244,11 @@ const fr: typeof en = {
   "ports.stop": "Arrêter", // Stop
   "ports.localChanged": (port) => `Le port local ${port} était occupé, un autre port local est utilisé`, // Local port {port} was busy, so another local port is used
   "ports.unavailable": "Indisponible — mettez à jour VelaTerm", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `Port non valide : ${port}`, // Invalid port: {port}
+  "ports.missingPort": "Saisissez un port", // Enter a port
+  "ports.unknownAction": (action) => `Action inconnue : ${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `Au maximum ${max} ports peuvent être transférés par connexion`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `Le port ${port} n'est pas transféré`, // Port {port} is not forwarded
   "statusbar.ports": (n) => (n === 1 ? "1 port transféré" : `${n} ports transférés`), // {n} forwarded ports
 };
 

@@ -26,7 +26,8 @@ export function handshakeFailureReason(msg: { type?: string; code?: string }): H
  */
 export function mapBackendError(raw: string): string {
   const idx = raw.indexOf(":");
-  if (idx <= 0) return raw;
+  if (idx < 0) return raw === "ports_missing_port" ? t("ports.missingPort") : raw;
+  if (idx === 0) return raw;
   const detail = raw.slice(idx + 1);
   switch (raw.slice(0, idx)) {
     case "remote_cmd_forbidden":
@@ -35,6 +36,14 @@ export function mapBackendError(raw: string): string {
       return t("transport.remoteSettingForbidden", detail);
     case "remote_path_forbidden":
       return t("transport.remotePathForbidden", detail);
+    case "ports_invalid_port":
+      return t("ports.invalidPort", detail);
+    case "ports_unknown_action":
+      return t("ports.unknownAction", detail);
+    case "ports_limit":
+      return t("ports.limit", detail);
+    case "ports_not_forwarded":
+      return t("ports.notForwarded", detail);
     default:
       return raw;
   }

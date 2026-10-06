@@ -10,6 +10,17 @@ use crate::ssh_remote::SshTransport;
 /// Most user forwards one SSH session may hold.
 pub const MAX_FORWARDS: usize = 20;
 
+// Stable codes the frontend maps to localized text (`mapBackendError`); detail follows the first colon.
+const ERR_INVALID_PORT: &str = "ports_invalid_port";
+const ERR_MISSING_PORT: &str = "ports_missing_port";
+const ERR_UNKNOWN_ACTION: &str = "ports_unknown_action";
+const ERR_LIMIT: &str = "ports_limit";
+const ERR_NOT_FORWARDED: &str = "ports_not_forwarded";
+
+fn limit_error() -> String {
+    format!("{ERR_LIMIT}:{MAX_FORWARDS}")
+}
+
 /// `/proc/net/tcp{,6}` local addresses for 127.0.0.1, 0.0.0.0, ::1 and ::. The kernel prints each 32-bit
 /// word in host byte order, so 127.0.0.1 reads `0100007F` on the little-endian hosts vela-server ships for.
 const LOOPBACK_OR_ANY: [&str; 4] = [
@@ -95,15 +106,15 @@ pub enum PortsAction {
 pub fn parse_action(req: &PortsRequest) -> Result<PortsAction, String> {
     let port = || match req.rport {
         Some(p) if (1..=65535).contains(&p) => Ok(p as u16),
-        Some(p) => Err(format!("invalid port: {p}")),
-        None => Err("missing port".to_string()),
+        Some(p) => Err(format!("{ERR_INVALID_PORT}:{p}")),
+        None => Err(ERR_MISSING_PORT.to_string()),
     };
     match req.action.as_str() {
         "list" => Ok(PortsAction::List),
         "forward" => port().map(PortsAction::Forward),
         "unforward" => port().map(PortsAction::Unforward),
         "open" => port().map(PortsAction::Open),
-        other => Err(format!("unknown action: {other}")),
+        other => Err(format!("{ERR_UNKNOWN_ACTION}:{other}")),
     }
 }
 
@@ -158,7 +169,7 @@ impl ForwardRegistry {
 
     pub fn check_capacity(&self) -> Result<(), String> {
         if self.forwards.len() >= MAX_FORWARDS {
-            return Err(format!("at most {MAX_FORWARDS} ports can be forwarded per connection"));
+            return Err(limit_error());
         }
         Ok(())
     }
@@ -342,7 +353,7 @@ fn unforward(session: &str, t: &dyn SshTransport, rport: u16) -> Result<(), Stri
 }
 
 fn open_port(session: &str, rport: u16) -> Result<u16, String> {
-    with_registry(session, |r| r.lport_of(rport)).ok_or_else(|| format!("port {rport} is not forwarded"))
+    with_registry(session, |r| r.lport_of(rport)).ok_or_else(|| format!("{ERR_NOT_FORWARDED}:{rport}"))
 }
 
 /// `Ok(false)` means `alive` reported the session gone while the tunnel was opening; the tunnel is closed again.
@@ -367,7 +378,7 @@ fn forward(session: &str, t: &dyn SshTransport, rport: u16, alive: &dyn Fn() -> 
         }
         InsertOutcome::Full => {
             let _ = t.close_forward(lport);
-            Err(format!("at most {MAX_FORWARDS} ports can be forwarded per connection"))
+            Err(limit_error())
         }
     }
 }
@@ -462,11 +473,11 @@ lr-x------ 1 u u 64 Oct  6 12:00 7 -> /home/u/socket:[1]";
         assert_eq!(parse_action(&req("forward", Some(3000))), Ok(PortsAction::Forward(3000)));
         assert_eq!(parse_action(&req("unforward", Some(1))), Ok(PortsAction::Unforward(1)));
         assert_eq!(parse_action(&req("open", Some(65535))), Ok(PortsAction::Open(65535)));
-        assert!(parse_action(&req("forward", None)).is_err());
-        assert!(parse_action(&req("forward", Some(0))).is_err());
-        assert!(parse_action(&req("forward", Some(70000))).is_err());
-        assert!(parse_action(&req("forward", Some(-1))).is_err());
-        assert!(parse_action(&req("delete", Some(3000))).is_err());
+        assert_eq!(parse_action(&req("forward", None)), Err("ports_missing_port".into()));
+        assert_eq!(parse_action(&req("forward", Some(0))), Err("ports_invalid_port:0".into()));
+        assert_eq!(parse_action(&req("forward", Some(70000))), Err("ports_invalid_port:70000".into()));
+        assert_eq!(parse_action(&req("forward", Some(-1))), Err("ports_invalid_port:-1".into()));
+        assert_eq!(parse_action(&req("delete", Some(3000))), Err("ports_unknown_action:delete".into()));
     }
 
     #[test]
@@ -773,7 +784,7 @@ lr-x------ 1 u u 64 Oct  6 12:00 7 -> /home/u/socket:[1]";
         *t.on_open.lock().unwrap() = Some(Box::new(move || fill_registry(s)));
         *t.close_result.lock().unwrap() = Some(Err("close failed".into()));
         let err = forward(s, &t, 9000, LIVE).unwrap_err();
-        assert!(err.contains("at most 20"), "{err}");
+        assert_eq!(err, "ports_limit:20");
         assert_eq!(*t.closed.lock().unwrap(), vec![9001]);
         let sn = snap(s);
         assert_eq!(sn.forwards.len(), MAX_FORWARDS);
@@ -849,7 +860,7 @@ lr-x------ 1 u u 64 Oct  6 12:00 7 -> /home/u/socket:[1]";
         let s = "ports-open";
         with_registry(s, |r| r.insert(fwd(3000, 4000, ForwardSource::Manual)));
         assert_eq!(open_port(s, 3000), Ok(4000));
-        assert_eq!(open_port(s, 3001), Err("port 3001 is not forwarded".into()));
+        assert_eq!(open_port(s, 3001), Err("ports_not_forwarded:3001".into()));
         forget_session(s);
     }
 
