@@ -3,7 +3,7 @@
 //! is answered with a full `ssh://ports-state` snapshot instead of a reply.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 /// Most user forwards one SSH session may hold.
 pub const MAX_FORWARDS: usize = 20;
@@ -174,9 +174,16 @@ impl ForwardRegistry {
 
 static REGISTRIES: OnceLock<Mutex<HashMap<String, ForwardRegistry>>> = OnceLock::new();
 
+/// Registry data is plain, so a poisoned lock is safe to recover and keeps disconnect cleanup working.
+fn registries() -> MutexGuard<'static, HashMap<String, ForwardRegistry>> {
+    REGISTRIES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 fn with_registry<R>(session: &str, f: impl FnOnce(&mut ForwardRegistry) -> R) -> R {
-    let mut map = REGISTRIES.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap();
-    f(map.entry(session.to_string()).or_default())
+    f(registries().entry(session.to_string()).or_default())
 }
 
 /// Record the remote port the vela-server tunnel targets so detection never offers it.
@@ -186,10 +193,7 @@ pub fn set_service_port(session: &str, rport: u16) {
 
 /// Drop a session's registry and return the local ports of its forwards so the caller can close them.
 pub fn forget_session(session: &str) -> Vec<u16> {
-    REGISTRIES
-        .get_or_init(|| Mutex::new(HashMap::new()))
-        .lock()
-        .unwrap()
+    registries()
         .remove(session)
         .map(|r| r.forwards.values().map(|f| f.lport).collect())
         .unwrap_or_default()
