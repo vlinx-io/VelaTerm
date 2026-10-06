@@ -2197,6 +2197,20 @@ const ko: typeof en = {
   "chat.antigravity.textOnly": "Antigravity 대화 보기는 현재 텍스트 메시지만 지원합니다.",
   "chat.antigravity.permissionsHint": "승인이 필요한 도구는 Antigravity 설정에서 미리 허용하거나 터미널 보기에서 사용해야 합니다.",
   "chat.antigravity.settingsHint": "모델, 추론 강도 또는 권한은 턴 사이에 변경하세요.",
+  "ports.title": "포트", // Ports
+  "ports.active": "전달됨", // Forwarded
+  "ports.activeEmpty": "전달된 포트가 없습니다", // No forwarded ports
+  "ports.detected": "감지됨", // Detected
+  "ports.detectedEmpty": "수신 대기 중인 포트가 없습니다", // No listening ports found
+  "ports.detectionUnavailable": "이 호스트에서는 포트 감지를 사용할 수 없습니다", // Port detection is not available on this host
+  "ports.manual": "포트 전달", // Forward a port
+  "ports.portPlaceholder": "원격 포트", // Remote port
+  "ports.forward": "전달", // Forward
+  "ports.open": "브라우저에서 열기", // Open in browser
+  "ports.stop": "중지", // Stop
+  "ports.localChanged": (port) => `로컬 포트 ${port}이(가) 사용 중이어서 다른 로컬 포트를 사용합니다`, // Local port {port} was busy, so another local port is used
+  "ports.unavailable": "사용할 수 없음 — VelaTerm을 업데이트하세요", // Unavailable — update VelaTerm
+  "statusbar.ports": (n) => `전달된 포트 ${n}개`, // {n} forwarded ports
 };
 
 export default ko;

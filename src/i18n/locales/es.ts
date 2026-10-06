@@ -2228,6 +2228,20 @@ const es: typeof en = {
   "chat.antigravity.textOnly": "La vista de conversación de Antigravity actualmente solo admite mensajes de texto.",
   "chat.antigravity.permissionsHint": "Las herramientas que requieren aprobación deben autorizarse previamente en la configuración de Antigravity o utilizarse en la vista de terminal.",
   "chat.antigravity.settingsHint": "Cambie el modelo, el nivel de razonamiento o los permisos entre turnos.",
+  "ports.title": "Puertos", // Ports
+  "ports.active": "Reenviados", // Forwarded
+  "ports.activeEmpty": "No hay puertos reenviados", // No forwarded ports
+  "ports.detected": "Detectados", // Detected
+  "ports.detectedEmpty": "No se encontraron puertos en escucha", // No listening ports found
+  "ports.detectionUnavailable": "La detección de puertos no está disponible en este host", // Port detection is not available on this host
+  "ports.manual": "Reenviar un puerto", // Forward a port
+  "ports.portPlaceholder": "Puerto remoto", // Remote port
+  "ports.forward": "Reenviar", // Forward
+  "ports.open": "Abrir en el navegador", // Open in browser
+  "ports.stop": "Detener", // Stop
+  "ports.localChanged": (port) => `El puerto local ${port} estaba ocupado, así que se usa otro puerto local`, // Local port {port} was busy, so another local port is used
+  "ports.unavailable": "No disponible — actualiza VelaTerm", // Unavailable — update VelaTerm
+  "statusbar.ports": (n) => (n === 1 ? "1 puerto reenviado" : `${n} puertos reenviados`), // {n} forwarded ports
 };
 
 export default es;

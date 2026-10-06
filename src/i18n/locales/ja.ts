@@ -2214,6 +2214,20 @@ const ja: typeof en = {
   "chat.antigravity.textOnly": "Antigravity の会話ビューは現在、テキストメッセージのみに対応しています。",
   "chat.antigravity.permissionsHint": "承認が必要なツールは、Antigravity の設定で事前に許可するか、ターミナルビューで使用してください。",
   "chat.antigravity.settingsHint": "モデル、推論の強度、権限はターンの合間に変更してください。",
+  "ports.title": "ポート", // Ports
+  "ports.active": "転送中", // Forwarded
+  "ports.activeEmpty": "転送中のポートはありません", // No forwarded ports
+  "ports.detected": "検出済み", // Detected
+  "ports.detectedEmpty": "待ち受け中のポートが見つかりません", // No listening ports found
+  "ports.detectionUnavailable": "このホストではポート検出を利用できません", // Port detection is not available on this host
+  "ports.manual": "ポートを転送", // Forward a port
+  "ports.portPlaceholder": "リモートポート", // Remote port
+  "ports.forward": "転送", // Forward
+  "ports.open": "ブラウザで開く", // Open in browser
+  "ports.stop": "停止", // Stop
+  "ports.localChanged": (port) => `ローカルポート ${port} は使用中のため、別のローカルポートを使用しています`, // Local port {port} was busy, so another local port is used
+  "ports.unavailable": "利用できません — VelaTerm を更新してください", // Unavailable — update VelaTerm
+  "statusbar.ports": (n) => `${n} 個のポートを転送中`, // {n} forwarded ports
 };
 
 export default ja;

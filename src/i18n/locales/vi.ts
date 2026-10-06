@@ -2175,6 +2175,20 @@ const vi: typeof en = {
   "chat.antigravity.textOnly": "Chế độ hội thoại của Antigravity hiện chỉ hỗ trợ tin nhắn văn bản.",
   "chat.antigravity.permissionsHint": "Các công cụ cần phê duyệt phải được cho phép trước trong cài đặt Antigravity hoặc sử dụng ở chế độ thiết bị đầu cuối.",
   "chat.antigravity.settingsHint": "Thay đổi mô hình, mức độ suy luận hoặc quyền giữa các lượt.",
+  "ports.title": "Cổng", // Ports
+  "ports.active": "Đã chuyển tiếp", // Forwarded
+  "ports.activeEmpty": "Không có cổng nào được chuyển tiếp", // No forwarded ports
+  "ports.detected": "Đã phát hiện", // Detected
+  "ports.detectedEmpty": "Không tìm thấy cổng đang lắng nghe", // No listening ports found
+  "ports.detectionUnavailable": "Không thể phát hiện cổng trên máy chủ này", // Port detection is not available on this host
+  "ports.manual": "Chuyển tiếp một cổng", // Forward a port
+  "ports.portPlaceholder": "Cổng từ xa", // Remote port
+  "ports.forward": "Chuyển tiếp", // Forward
+  "ports.open": "Mở trong trình duyệt", // Open in browser
+  "ports.stop": "Dừng", // Stop
+  "ports.localChanged": (port) => `Cổng cục bộ ${port} đang bận nên đã dùng một cổng cục bộ khác`, // Local port {port} was busy, so another local port is used
+  "ports.unavailable": "Không khả dụng — hãy cập nhật VelaTerm", // Unavailable — update VelaTerm
+  "statusbar.ports": (n) => `${n} cổng đã chuyển tiếp`, // {n} forwarded ports
 };
 
 export default vi;

@@ -2225,6 +2225,21 @@ const en = {
   "chat.antigravity.textOnly": "Antigravity conversation view currently supports text messages only.",
   "chat.antigravity.permissionsHint": "Tools that require approval must be allowed in Antigravity settings or used in terminal view.",
   "chat.antigravity.settingsHint": "Change the model, reasoning effort, or permissions between turns.",
+  "ports.title": "Ports",
+  "ports.active": "Forwarded",
+  "ports.activeEmpty": "No forwarded ports",
+  "ports.detected": "Detected",
+  "ports.detectedEmpty": "No listening ports found",
+  "ports.detectionUnavailable": "Port detection is not available on this host",
+  "ports.manual": "Forward a port",
+  "ports.portPlaceholder": "Remote port",
+  "ports.forward": "Forward",
+  "ports.open": "Open in browser",
+  "ports.stop": "Stop",
+  "ports.localChanged": (port: number) =>
+    `Local port ${port} was busy, so another local port is used`,
+  "ports.unavailable": "Unavailable — update VelaTerm",
+  "statusbar.ports": (n: number) => (n === 1 ? "1 forwarded port" : `${n} forwarded ports`),
 };
 
 export default en;

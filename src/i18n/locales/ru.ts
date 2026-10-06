@@ -2237,6 +2237,20 @@ const ru: typeof en = {
   "chat.antigravity.textOnly": "В режиме диалога Antigravity пока поддерживаются только текстовые сообщения.",
   "chat.antigravity.permissionsHint": "Инструменты, требующие одобрения, необходимо заранее разрешить в настройках Antigravity или использовать в режиме терминала.",
   "chat.antigravity.settingsHint": "Изменяйте модель, уровень рассуждений или разрешения между ходами.",
+  "ports.title": "Порты", // Ports
+  "ports.active": "Перенаправленные", // Forwarded
+  "ports.activeEmpty": "Нет перенаправленных портов", // No forwarded ports
+  "ports.detected": "Обнаруженные", // Detected
+  "ports.detectedEmpty": "Прослушиваемые порты не найдены", // No listening ports found
+  "ports.detectionUnavailable": "Обнаружение портов недоступно на этом хосте", // Port detection is not available on this host
+  "ports.manual": "Перенаправить порт", // Forward a port
+  "ports.portPlaceholder": "Удалённый порт", // Remote port
+  "ports.forward": "Перенаправить", // Forward
+  "ports.open": "Открыть в браузере", // Open in browser
+  "ports.stop": "Остановить", // Stop
+  "ports.localChanged": (port) => `Локальный порт ${port} был занят, поэтому используется другой локальный порт`, // Local port {port} was busy, so another local port is used
+  "ports.unavailable": "Недоступно — обновите VelaTerm", // Unavailable — update VelaTerm
+  "statusbar.ports": (n) => `Перенаправлено портов: ${n}`, // {n} forwarded ports
 };
 
 export default ru;

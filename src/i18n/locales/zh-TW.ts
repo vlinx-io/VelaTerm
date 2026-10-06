@@ -2165,6 +2165,20 @@ const zhTW: typeof en = {
   "chat.antigravity.textOnly": "Antigravity 會話檢視目前僅支援文字訊息。",
   "chat.antigravity.permissionsHint": "需要核准的工具必須先在 Antigravity 設定中獲准使用，或在終端機檢視中使用。",
   "chat.antigravity.settingsHint": "請在回合之間變更模型、思考程度或權限。",
+  "ports.title": "連接埠", // Ports
+  "ports.active": "已轉送", // Forwarded
+  "ports.activeEmpty": "沒有已轉送的連接埠", // No forwarded ports
+  "ports.detected": "已偵測", // Detected
+  "ports.detectedEmpty": "找不到正在監聽的連接埠", // No listening ports found
+  "ports.detectionUnavailable": "此主機不支援連接埠偵測", // Port detection is not available on this host
+  "ports.manual": "轉送連接埠", // Forward a port
+  "ports.portPlaceholder": "遠端連接埠", // Remote port
+  "ports.forward": "轉送", // Forward
+  "ports.open": "在瀏覽器中開啟", // Open in browser
+  "ports.stop": "停止", // Stop
+  "ports.localChanged": (port) => `本機連接埠 ${port} 已被占用，已改用其他本機連接埠`, // Local port {port} was busy, so another local port is used
+  "ports.unavailable": "無法使用 — 請更新 VelaTerm", // Unavailable — update VelaTerm
+  "statusbar.ports": (n) => `已轉送 ${n} 個連接埠`, // {n} forwarded ports
 };
 
 export default zhTW;
