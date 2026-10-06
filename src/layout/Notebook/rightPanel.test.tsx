@@ -21,6 +21,7 @@ it("keeps Info as the default and exposes four labeled icons",()=>{
   localStorage.removeItem(SETTINGS_KEY);expect(loadSettings().inspectorTab).toBe("info");render(<RightPanel/>);
   for(const name of ["Files","Info","Git","Knowledge Base"]){const link=screen.getByRole("link",{name});expect(link.textContent).toBe("");expect(link.getAttribute("title")).toBe(name);}
   expect(screen.getByRole("link",{name:"Info"}).getAttribute("aria-current")).toBe("page");
+  expect(screen.queryByRole("link",{name:"Ports"})).toBeNull();
 });
 
 it("opens knowledge through its right tab URL and keeps the directory in that panel",async()=>{
