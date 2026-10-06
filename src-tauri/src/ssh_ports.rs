@@ -272,14 +272,18 @@ fn refresh_detection(session: &str, t: &dyn SshTransport) {
     if busy {
         return;
     }
+    struct ClearDetecting<'a>(&'a str);
+    impl Drop for ClearDetecting<'_> {
+        fn drop(&mut self) {
+            with_registry(self.0, |r| r.detecting = false);
+        }
+    }
+    let _clear = ClearDetecting(session);
     let listening = match t.exec(PROC_NET_CMD) {
         Ok(out) if out.contains("local_address") => Some(parse_listening_ports(&out)),
         _ => None,
     };
-    with_registry(session, |r| {
-        r.detecting = false;
-        r.set_listening(listening);
-    });
+    with_registry(session, |r| r.set_listening(listening));
 }
 
 fn unforward(session: &str, t: &dyn SshTransport, rport: u16) -> Result<(), String> {
@@ -557,6 +561,23 @@ mod tests {
 
         refresh_detection(s, &t);
         assert_eq!(*t.exec_calls.lock().unwrap(), 3);
+        forget_session(s);
+    }
+
+    #[test]
+    fn refresh_detection_clears_guard_when_exec_panics() {
+        let s = "ports-detect-panic";
+        let t = FakeTransport::default();
+        *t.exec_out.lock().unwrap() = Some(Ok(PROC_OK.into()));
+        *t.on_exec.lock().unwrap() = Some(Box::new(|| panic!("exec exploded")));
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| refresh_detection(s, &t)));
+        assert!(panicked.is_err());
+        assert!(!with_registry(s, |r| r.detecting));
+
+        t.on_exec.clear_poison();
+        *t.on_exec.lock().unwrap() = None;
+        refresh_detection(s, &t);
+        assert_eq!(*t.exec_calls.lock().unwrap(), 2);
         forget_session(s);
     }
 
