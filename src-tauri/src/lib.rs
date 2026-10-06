@@ -65,6 +65,9 @@ mod ssh_remote;
 // GUI-only pure-Rust russh transport, currently used on Windows.
 #[cfg(feature = "gui")]
 mod ssh_russh;
+// GUI-only user port forwarding for SSH remote windows: detection, registry and request handling.
+#[cfg(feature = "gui")]
+mod ssh_ports;
 mod web;
 mod wsl_remote;
 // GUI-only macOS native notifications with session-aware click navigation.
