@@ -2,7 +2,7 @@
 //! the `vlx://ports-request` handler. The remote window cannot invoke local commands, so every request
 //! is answered with a full `ssh://ports-state` snapshot instead of a reply.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use crate::ssh_remote::SshTransport;
@@ -19,10 +19,22 @@ const LOOPBACK_OR_ANY: [&str; 4] = [
     "00000000000000000000000000000000",
 ];
 
-/// Ports in LISTEN state (`0A`) on loopback or any address, sorted and deduplicated across IPv4/IPv6.
-pub fn parse_listening_ports(raw: &str) -> Vec<u16> {
-    let mut ports: Vec<u16> = raw
-        .lines()
+/// Ports in LISTEN state (`0A`) on loopback or any address, sorted and deduplicated across IPv4/IPv6,
+/// skipping sockets whose inode is in `exclude_inodes`.
+pub fn parse_listening_ports(raw: &str, exclude_inodes: &HashSet<u64>) -> Vec<u16> {
+    let mut ports: Vec<u16> = parse_listening_sockets(raw)
+        .into_iter()
+        .filter(|(_, inode)| !exclude_inodes.contains(inode))
+        .map(|(port, _)| port)
+        .collect();
+    ports.sort_unstable();
+    ports.dedup();
+    ports
+}
+
+/// `(port, socket inode)` for every LISTEN row on loopback or any address.
+fn parse_listening_sockets(raw: &str) -> Vec<(u16, u64)> {
+    raw.lines()
         .filter_map(|line| {
             let mut cols = line.split_whitespace();
             cols.next()?;
@@ -35,12 +47,23 @@ pub fn parse_listening_ports(raw: &str) -> Vec<u16> {
             if !LOOPBACK_OR_ANY.contains(&addr) {
                 return None;
             }
-            u16::from_str_radix(port, 16).ok()
+            // After the state: tx:rx, tr:tm, retrnsmt, uid, timeout, inode.
+            let inode = cols.nth(5)?.parse().ok()?;
+            Some((u16::from_str_radix(port, 16).ok()?, inode))
         })
-        .collect();
-    ports.sort_unstable();
-    ports.dedup();
-    ports
+        .collect()
+}
+
+/// Inodes of the sockets in an `ls -l /proc/<pid>/fd` listing (`... 7 -> socket:[12345]`); pipes, files and
+/// anon inodes are ignored.
+pub fn parse_socket_inodes(listing: &str) -> HashSet<u64> {
+    listing
+        .lines()
+        .filter_map(|line| {
+            let (_, target) = line.split_once(" -> socket:[")?;
+            target.trim_end().strip_suffix(']')?.parse().ok()
+        })
+        .collect()
 }
 
 /// Ports worth offering: unprivileged, not the vela-server tunnel target, not already forwarded.
@@ -114,6 +137,7 @@ pub struct PortsSnapshot {
 #[derive(Default)]
 pub struct ForwardRegistry {
     service_rport: Option<u16>,
+    service_pid: Option<u32>,
     forwards: BTreeMap<u16, Forward>,
     listening: Vec<u16>,
     detection_available: bool,
@@ -209,9 +233,13 @@ fn with_registry<R>(session: &str, f: impl FnOnce(&mut ForwardRegistry) -> R) ->
     f(registries().entry(session.to_string()).or_default())
 }
 
-/// Record the remote port the vela-server tunnel targets so detection never offers it.
-pub fn set_service_port(session: &str, rport: u16) {
-    with_registry(session, |r| r.service_rport = Some(rport));
+/// Record the remote port the vela-server tunnel targets, and its PID when known, so detection never
+/// offers vela-server's own listeners.
+pub fn set_service_port(session: &str, rport: u16, pid: Option<u32>) {
+    with_registry(session, |r| {
+        r.service_rport = Some(rport);
+        r.service_pid = pid;
+    });
 }
 
 /// Drop a session's registry and return the local ports of its forwards so the caller can close them.
@@ -225,6 +253,26 @@ pub fn forget_session(session: &str) -> Vec<u16> {
 /// `2>/dev/null; true` keeps hosts without IPv6 (no tcp6 file) from failing the whole command; output
 /// without the `local_address` header (macOS, PowerShell) means detection is unavailable.
 const PROC_NET_CMD: &str = "cat /proc/net/tcp /proc/net/tcp6 2>/dev/null; true";
+
+const FD_MARKER: &str = "---vela-fds---";
+
+/// With a known service PID the same exec also lists that process's fds, so its own listeners (e.g. the
+/// hook server on a random port) can be told apart from the user's.
+fn proc_net_cmd(service_pid: Option<u32>) -> String {
+    match service_pid {
+        Some(pid) => format!(
+            "cat /proc/net/tcp /proc/net/tcp6 2>/dev/null; echo {FD_MARKER}; ls -l /proc/{pid}/fd 2>/dev/null; true"
+        ),
+        None => PROC_NET_CMD.to_string(),
+    }
+}
+
+/// Exact PID, not its descendants: remote terminals and the user's dev servers are children of vela-server
+/// and must stay visible. An empty or unreadable fd listing excludes nothing.
+fn parse_detection(out: &str) -> Vec<u16> {
+    let (tcp, fds) = out.split_once(FD_MARKER).unwrap_or((out, ""));
+    parse_listening_ports(tcp, &parse_socket_inodes(fds))
+}
 
 pub struct PortsOutcome {
     pub snapshot: PortsSnapshot,
@@ -268,7 +316,7 @@ pub fn handle(req: PortsRequest) -> Option<PortsOutcome> {
 
 /// The frontend polls every few seconds; a slow host must not stack concurrent detections.
 fn refresh_detection(session: &str, t: &dyn SshTransport) {
-    let busy = with_registry(session, |r| std::mem::replace(&mut r.detecting, true));
+    let (busy, pid) = with_registry(session, |r| (std::mem::replace(&mut r.detecting, true), r.service_pid));
     if busy {
         return;
     }
@@ -279,8 +327,8 @@ fn refresh_detection(session: &str, t: &dyn SshTransport) {
         }
     }
     let _clear = ClearDetecting(session);
-    let listening = match t.exec(PROC_NET_CMD) {
-        Ok(out) if out.contains("local_address") => Some(parse_listening_ports(&out)),
+    let listening = match t.exec(&proc_net_cmd(pid)) {
+        Ok(out) if out.contains("local_address") => Some(parse_detection(&out)),
         _ => None,
     };
     with_registry(session, |r| r.set_listening(listening));
@@ -344,13 +392,57 @@ mod tests {
         let raw = format!("{TCP4}\n{TCP6}");
         // 3000 (127.0.0.1 and ::1), 8080 (0.0.0.0), 5058 (::), 22 (0.0.0.0). 8081 is bound to 10.0.2.15
         // and the 3000 row in state 01 is an established connection.
-        assert_eq!(parse_listening_ports(&raw), vec![22, 3000, 5058, 8080]);
+        assert_eq!(parse_listening_ports(&raw, &HashSet::new()), vec![22, 3000, 5058, 8080]);
     }
 
     #[test]
     fn parse_ignores_output_that_is_not_proc_net_tcp() {
-        assert!(parse_listening_ports("").is_empty());
-        assert!(parse_listening_ports("cat : Cannot find path '/proc/net/tcp'").is_empty());
+        assert!(parse_listening_ports("", &HashSet::new()).is_empty());
+        assert!(parse_listening_ports("cat : Cannot find path '/proc/net/tcp'", &HashSet::new()).is_empty());
+    }
+
+    #[test]
+    fn parses_port_and_inode_from_tcp_and_tcp6_rows() {
+        let raw = format!("{TCP4}\n{TCP6}");
+        let mut sockets = parse_listening_sockets(&raw);
+        sockets.sort_unstable();
+        assert_eq!(sockets, vec![(22, 5), (3000, 1), (3000, 6), (5058, 7), (8080, 2)]);
+    }
+
+    #[test]
+    fn parses_socket_inodes_and_ignores_other_fd_kinds() {
+        let listing = "total 0
+lr-x------ 1 u u 64 Oct  6 12:00 0 -> /dev/null
+lrwx------ 1 u u 64 Oct  6 12:00 3 -> socket:[34933]
+lrwx------ 1 u u 64 Oct  6 12:00 4 -> socket:[34934]
+l-wx------ 1 u u 64 Oct  6 12:00 5 -> pipe:[999]
+lrwx------ 1 u u 64 Oct  6 12:00 6 -> anon_inode:[eventpoll]
+lr-x------ 1 u u 64 Oct  6 12:00 7 -> /home/u/socket:[1]";
+        assert_eq!(parse_socket_inodes(listing), HashSet::from([34933, 34934]));
+        assert!(parse_socket_inodes("").is_empty());
+        assert!(parse_socket_inodes("ls: cannot access '/proc/9/fd': No such file or directory").is_empty());
+    }
+
+    #[test]
+    fn detection_drops_service_pid_sockets_and_keeps_other_owners() {
+        // Inode 2 is the service's hook server (8080 here), inode 1 a user's dev server on 3000.
+        let out = format!("{TCP4}\n{TCP6}\n{FD_MARKER}\nlrwx------ 1 u u 64 Oct  6 12:00 3 -> socket:[2]\n");
+        assert_eq!(parse_detection(&out), vec![22, 3000, 5058]);
+    }
+
+    #[test]
+    fn detection_without_fd_section_or_listing_filters_nothing() {
+        let raw = format!("{TCP4}\n{TCP6}");
+        assert_eq!(parse_detection(&raw), vec![22, 3000, 5058, 8080]);
+        assert_eq!(parse_detection(&format!("{raw}\n{FD_MARKER}\n")), vec![22, 3000, 5058, 8080]);
+    }
+
+    #[test]
+    fn detection_command_includes_the_pid_only_when_known() {
+        assert_eq!(proc_net_cmd(None), PROC_NET_CMD);
+        let cmd = proc_net_cmd(Some(4242));
+        assert!(cmd.contains("ls -l /proc/4242/fd") && cmd.contains(FD_MARKER));
+        assert!(!PROC_NET_CMD.contains("/fd"));
     }
 
     #[test]
@@ -455,7 +547,7 @@ mod tests {
 
     #[test]
     fn forget_session_returns_its_local_ports_and_keeps_other_sessions() {
-        set_service_port("forget-a", 41000);
+        set_service_port("forget-a", 41000, Some(77));
         with_registry("forget-a", |r| {
             r.insert(fwd(3000, 3000, ForwardSource::Manual));
             r.insert(fwd(8080, 18080, ForwardSource::Detected));
@@ -483,6 +575,7 @@ mod tests {
     struct FakeTransport {
         exec_out: Mutex<Option<Result<String, String>>>,
         exec_calls: Mutex<u32>,
+        exec_cmds: Mutex<Vec<String>>,
         on_exec: Mutex<Option<Hook>>,
         open_result: Mutex<Option<Result<u16, String>>>,
         open_calls: Mutex<Vec<(u16, Option<u16>)>>,
@@ -492,7 +585,8 @@ mod tests {
     }
 
     impl SshTransport for FakeTransport {
-        fn exec(&self, _cmd: &str) -> Result<String, String> {
+        fn exec(&self, cmd: &str) -> Result<String, String> {
+            self.exec_cmds.lock().unwrap().push(cmd.to_string());
             *self.exec_calls.lock().unwrap() += 1;
             if let Some(h) = self.on_exec.lock().unwrap().as_ref() {
                 h();
@@ -539,7 +633,7 @@ mod tests {
 
     const LIVE: &dyn Fn() -> bool = &|| true;
 
-    const PROC_OK: &str = "  sl  local_address rem_address   st\n   0: 0100007F:1F90 00000000:0000 0A 0\n";
+    const PROC_OK: &str = "  sl  local_address rem_address   st\n   0: 0100007F:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1000        0 2 1 0\n";
 
     #[test]
     fn refresh_detection_resets_guard_after_ok_and_err() {
@@ -561,6 +655,24 @@ mod tests {
 
         refresh_detection(s, &t);
         assert_eq!(*t.exec_calls.lock().unwrap(), 3);
+        forget_session(s);
+    }
+
+    #[test]
+    fn refresh_detection_uses_the_recorded_service_pid() {
+        let s = "ports-detect-pid";
+        let fds = "lrwx------ 1 u u 64 Oct  6 12:00 3 -> socket:[2]\n";
+        let t = FakeTransport::default();
+        *t.exec_out.lock().unwrap() = Some(Ok(PROC_OK.into()));
+        refresh_detection(s, &t);
+        assert_eq!(t.exec_cmds.lock().unwrap()[0], PROC_NET_CMD);
+        assert_eq!(snap(s).detected, vec![8080]);
+
+        set_service_port(s, 41000, Some(321));
+        *t.exec_out.lock().unwrap() = Some(Ok(format!("{PROC_OK}{FD_MARKER}\n{fds}")));
+        refresh_detection(s, &t);
+        assert!(t.exec_cmds.lock().unwrap()[1].contains("/proc/321/fd"));
+        assert!(snap(s).detected.is_empty());
         forget_session(s);
     }
 
