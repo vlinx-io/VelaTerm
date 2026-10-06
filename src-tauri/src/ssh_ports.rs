@@ -2,6 +2,9 @@
 //! the `vlx://ports-request` handler. The remote window cannot invoke local commands, so every request
 //! is answered with a full `ssh://ports-state` snapshot instead of a reply.
 
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Mutex, OnceLock};
+
 /// Most user forwards one SSH session may hold.
 pub const MAX_FORWARDS: usize = 20;
 
@@ -79,6 +82,119 @@ pub fn parse_action(req: &PortsRequest) -> Result<PortsAction, String> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ForwardSource {
+    Manual,
+    Detected,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Forward {
+    pub rport: u16,
+    pub lport: u16,
+    pub source: ForwardSource,
+}
+
+/// Full `ssh://ports-state` payload; the last snapshot a window receives wins.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortsSnapshot {
+    pub session: String,
+    pub detected: Vec<u16>,
+    pub forwards: Vec<Forward>,
+    pub detection_available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// One SSH session's user forwards plus the last detection result.
+#[derive(Default)]
+pub struct ForwardRegistry {
+    service_rport: Option<u16>,
+    forwards: BTreeMap<u16, Forward>,
+    listening: Vec<u16>,
+    detection_available: bool,
+}
+
+impl ForwardRegistry {
+    pub fn lport_of(&self, rport: u16) -> Option<u16> {
+        self.forwards.get(&rport).map(|f| f.lport)
+    }
+
+    pub fn check_capacity(&self) -> Result<(), String> {
+        if self.forwards.len() >= MAX_FORWARDS {
+            return Err(format!("at most {MAX_FORWARDS} ports can be forwarded per connection"));
+        }
+        Ok(())
+    }
+
+    pub fn source_for(&self, rport: u16) -> ForwardSource {
+        if self.detected().contains(&rport) {
+            ForwardSource::Detected
+        } else {
+            ForwardSource::Manual
+        }
+    }
+
+    /// Returns false, keeping the existing entry, when the remote port is already forwarded.
+    pub fn insert(&mut self, forward: Forward) -> bool {
+        if self.forwards.contains_key(&forward.rport) {
+            return false;
+        }
+        self.forwards.insert(forward.rport, forward);
+        true
+    }
+
+    pub fn remove(&mut self, rport: u16) -> Option<Forward> {
+        self.forwards.remove(&rport)
+    }
+
+    /// `None` means detection failed or the host has no `/proc/net/tcp`.
+    pub fn set_listening(&mut self, listening: Option<Vec<u16>>) {
+        self.detection_available = listening.is_some();
+        self.listening = listening.unwrap_or_default();
+    }
+
+    fn detected(&self) -> Vec<u16> {
+        let forwarded: Vec<u16> = self.forwards.keys().copied().collect();
+        filter_detected(&self.listening, self.service_rport, &forwarded)
+    }
+
+    pub fn snapshot(&self, session: &str, error: Option<String>) -> PortsSnapshot {
+        PortsSnapshot {
+            session: session.to_string(),
+            detected: self.detected(),
+            forwards: self.forwards.values().cloned().collect(),
+            detection_available: self.detection_available,
+            error,
+        }
+    }
+}
+
+static REGISTRIES: OnceLock<Mutex<HashMap<String, ForwardRegistry>>> = OnceLock::new();
+
+fn with_registry<R>(session: &str, f: impl FnOnce(&mut ForwardRegistry) -> R) -> R {
+    let mut map = REGISTRIES.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap();
+    f(map.entry(session.to_string()).or_default())
+}
+
+/// Record the remote port the vela-server tunnel targets so detection never offers it.
+pub fn set_service_port(session: &str, rport: u16) {
+    with_registry(session, |r| r.service_rport = Some(rport));
+}
+
+/// Drop a session's registry and return the local ports of its forwards so the caller can close them.
+pub fn forget_session(session: &str) -> Vec<u16> {
+    REGISTRIES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap()
+        .remove(session)
+        .map(|r| r.forwards.values().map(|f| f.lport).collect())
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,5 +255,88 @@ mod tests {
         assert_eq!((r.session.as_str(), r.action.as_str(), r.rport), ("abc", "forward", Some(3000)));
         let r: PortsRequest = serde_json::from_str(r#"{"session":"abc","action":"list"}"#).unwrap();
         assert_eq!(r.rport, None);
+    }
+
+    fn fwd(rport: u16, lport: u16, source: ForwardSource) -> Forward {
+        Forward { rport, lport, source }
+    }
+
+    #[test]
+    fn registry_adds_removes_and_refuses_duplicates() {
+        let mut reg = ForwardRegistry::default();
+        assert!(reg.insert(fwd(3000, 3000, ForwardSource::Detected)));
+        assert!(!reg.insert(fwd(3000, 3001, ForwardSource::Manual)));
+        assert_eq!(reg.lport_of(3000), Some(3000));
+        assert_eq!(reg.remove(3000), Some(fwd(3000, 3000, ForwardSource::Detected)));
+        assert_eq!(reg.remove(3000), None);
+        assert_eq!(reg.lport_of(3000), None);
+    }
+
+    #[test]
+    fn registry_caps_forwards_per_session() {
+        let mut reg = ForwardRegistry::default();
+        for p in 0..MAX_FORWARDS as u16 {
+            assert!(reg.check_capacity().is_ok());
+            reg.insert(fwd(5000 + p, 5000 + p, ForwardSource::Manual));
+        }
+        assert!(reg.check_capacity().unwrap_err().contains("20"));
+    }
+
+    #[test]
+    fn snapshot_filters_detected_and_reports_forwards() {
+        let mut reg = ForwardRegistry::default();
+        reg.service_rport = Some(41234);
+        reg.set_listening(Some(vec![22, 3000, 8080, 41234]));
+        assert_eq!(reg.source_for(3000), ForwardSource::Detected);
+        assert_eq!(reg.source_for(9999), ForwardSource::Manual);
+        reg.insert(fwd(8080, 18080, ForwardSource::Detected));
+        let snap = reg.snapshot("s1", Some("boom".into()));
+        assert_eq!(snap.detected, vec![3000]);
+        assert_eq!(snap.forwards, vec![fwd(8080, 18080, ForwardSource::Detected)]);
+        assert!(snap.detection_available);
+        assert_eq!(snap.error.as_deref(), Some("boom"));
+    }
+
+    #[test]
+    fn failed_detection_marks_unavailable_and_clears_ports() {
+        let mut reg = ForwardRegistry::default();
+        reg.set_listening(Some(vec![3000]));
+        reg.set_listening(None);
+        let snap = reg.snapshot("s1", None);
+        assert!(!snap.detection_available);
+        assert!(snap.detected.is_empty());
+    }
+
+    #[test]
+    fn snapshot_serializes_to_the_wire_shape() {
+        let mut reg = ForwardRegistry::default();
+        reg.set_listening(Some(vec![3000]));
+        reg.insert(fwd(5432, 15432, ForwardSource::Manual));
+        let json = serde_json::to_value(reg.snapshot("s1", None)).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "session": "s1",
+                "detected": [3000],
+                "forwards": [{ "rport": 5432, "lport": 15432, "source": "manual" }],
+                "detectionAvailable": true
+            })
+        );
+    }
+
+    #[test]
+    fn forget_session_returns_its_local_ports_and_keeps_other_sessions() {
+        set_service_port("forget-a", 41000);
+        with_registry("forget-a", |r| {
+            r.insert(fwd(3000, 3000, ForwardSource::Manual));
+            r.insert(fwd(8080, 18080, ForwardSource::Detected));
+        });
+        with_registry("forget-b", |r| r.insert(fwd(5000, 5000, ForwardSource::Manual)));
+        let mut freed = forget_session("forget-a");
+        freed.sort_unstable();
+        assert_eq!(freed, vec![3000, 18080]);
+        assert!(forget_session("forget-a").is_empty());
+        assert_eq!(with_registry("forget-b", |r| r.lport_of(5000)), Some(5000));
+        forget_session("forget-b");
     }
 }
