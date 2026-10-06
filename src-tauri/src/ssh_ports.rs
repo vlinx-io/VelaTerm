@@ -5,6 +5,8 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
+use crate::ssh_remote::SshTransport;
+
 /// Most user forwards one SSH session may hold.
 pub const MAX_FORWARDS: usize = 20;
 
@@ -115,6 +117,14 @@ pub struct ForwardRegistry {
     forwards: BTreeMap<u16, Forward>,
     listening: Vec<u16>,
     detection_available: bool,
+    detecting: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum InsertOutcome {
+    Inserted,
+    Duplicate,
+    Full,
 }
 
 impl ForwardRegistry {
@@ -144,6 +154,19 @@ impl ForwardRegistry {
         }
         self.forwards.insert(forward.rport, forward);
         true
+    }
+
+    /// Atomic check-and-insert for a forward opened after the pre-open capacity check, which a concurrent
+    /// request may have outdated.
+    pub fn insert_within_cap(&mut self, forward: Forward) -> InsertOutcome {
+        if self.forwards.contains_key(&forward.rport) {
+            return InsertOutcome::Duplicate;
+        }
+        if self.check_capacity().is_err() {
+            return InsertOutcome::Full;
+        }
+        self.insert(forward);
+        InsertOutcome::Inserted
     }
 
     pub fn remove(&mut self, rport: u16) -> Option<Forward> {
@@ -197,6 +220,94 @@ pub fn forget_session(session: &str) -> Vec<u16> {
         .remove(session)
         .map(|r| r.forwards.values().map(|f| f.lport).collect())
         .unwrap_or_default()
+}
+
+/// `2>/dev/null; true` keeps hosts without IPv6 (no tcp6 file) from failing the whole command; output
+/// without the `local_address` header (macOS, PowerShell) means detection is unavailable.
+const PROC_NET_CMD: &str = "cat /proc/net/tcp /proc/net/tcp6 2>/dev/null; true";
+
+pub struct PortsOutcome {
+    pub snapshot: PortsSnapshot,
+    /// Local port of a forward to open in the browser, set only for an `open` of an existing forward.
+    pub open_lport: Option<u16>,
+}
+
+/// Run one request and return the snapshot to emit. Unknown sessions return None: the window is closing
+/// or the request did not come from a live SSH window. Blocks on SSH I/O; never holds the registry lock
+/// across it.
+pub fn handle(req: PortsRequest) -> Option<PortsOutcome> {
+    let t = crate::ssh_remote::transport(&req.session)?;
+    let session = req.session.as_str();
+    let mut open_lport = None;
+    let error = match parse_action(&req) {
+        Err(e) => Some(e),
+        Ok(PortsAction::List) => {
+            refresh_detection(session, t.as_ref());
+            None
+        }
+        Ok(PortsAction::Forward(rport)) => match forward(session, t.as_ref(), rport) {
+            Ok(true) => None,
+            Ok(false) => return None,
+            Err(e) => Some(e),
+        },
+        Ok(PortsAction::Unforward(rport)) => {
+            let removed = with_registry(session, |r| r.remove(rport));
+            removed.and_then(|f| t.close_forward(f.lport).err())
+        }
+        Ok(PortsAction::Open(rport)) => match with_registry(session, |r| r.lport_of(rport)) {
+            Some(lport) => {
+                open_lport = Some(lport);
+                None
+            }
+            None => Some(format!("port {rport} is not forwarded")),
+        },
+    };
+    crate::ssh_remote::transport(session)?;
+    let snapshot = with_registry(session, |r| r.snapshot(session, error));
+    Some(PortsOutcome { snapshot, open_lport })
+}
+
+/// The frontend polls every few seconds; a slow host must not stack concurrent detections.
+fn refresh_detection(session: &str, t: &dyn SshTransport) {
+    let busy = with_registry(session, |r| std::mem::replace(&mut r.detecting, true));
+    if busy {
+        return;
+    }
+    let listening = match t.exec(PROC_NET_CMD) {
+        Ok(out) if out.contains("local_address") => Some(parse_listening_ports(&out)),
+        _ => None,
+    };
+    with_registry(session, |r| {
+        r.detecting = false;
+        r.set_listening(listening);
+    });
+}
+
+/// `Ok(false)` means the session disconnected while the tunnel was opening; the tunnel is closed again.
+fn forward(session: &str, t: &dyn SshTransport, rport: u16) -> Result<bool, String> {
+    let source = with_registry(session, |r| {
+        if r.lport_of(rport).is_some() {
+            return Ok(None);
+        }
+        r.check_capacity().map(|_| Some(r.source_for(rport)))
+    })?;
+    let Some(source) = source else { return Ok(true) };
+    let lport = t.open_user_forward(rport, Some(rport))?;
+    if crate::ssh_remote::transport(session).is_none() {
+        let _ = t.close_forward(lport);
+        return Ok(false);
+    }
+    match with_registry(session, |r| r.insert_within_cap(Forward { rport, lport, source })) {
+        InsertOutcome::Inserted => Ok(true),
+        InsertOutcome::Duplicate => {
+            t.close_forward(lport)?;
+            Ok(true)
+        }
+        InsertOutcome::Full => {
+            t.close_forward(lport)?;
+            Err(format!("at most {MAX_FORWARDS} ports can be forwarded per connection"))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -342,5 +453,39 @@ mod tests {
         assert!(forget_session("forget-a").is_empty());
         assert_eq!(with_registry("forget-b", |r| r.lport_of(5000)), Some(5000));
         forget_session("forget-b");
+    }
+
+    #[test]
+    fn requests_for_unknown_sessions_are_ignored() {
+        let out = handle(PortsRequest {
+            session: "no-such-session".into(),
+            action: "forward".into(),
+            rport: Some(3000),
+        });
+        assert!(out.is_none());
+        assert!(forget_session("no-such-session").is_empty());
+    }
+
+    fn manual(rport: u16) -> Forward {
+        fwd(rport, rport, ForwardSource::Manual)
+    }
+
+    #[test]
+    fn insert_within_cap_keeps_first_duplicate() {
+        let mut r = ForwardRegistry::default();
+        assert_eq!(r.insert_within_cap(manual(3000)), InsertOutcome::Inserted);
+        assert_eq!(r.insert_within_cap(Forward { lport: 4000, ..manual(3000) }), InsertOutcome::Duplicate);
+        assert_eq!(r.lport_of(3000), Some(3000));
+    }
+
+    #[test]
+    fn insert_within_cap_rejects_past_the_limit() {
+        let mut r = ForwardRegistry::default();
+        for p in 0..MAX_FORWARDS as u16 {
+            assert_eq!(r.insert_within_cap(manual(3000 + p)), InsertOutcome::Inserted);
+        }
+        assert_eq!(r.insert_within_cap(manual(9000)), InsertOutcome::Full);
+        assert_eq!(r.insert_within_cap(manual(3000)), InsertOutcome::Duplicate);
+        assert!(r.lport_of(9000).is_none());
     }
 }
