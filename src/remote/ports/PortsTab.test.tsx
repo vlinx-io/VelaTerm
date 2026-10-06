@@ -47,6 +47,7 @@ it("lists on mount and forwards a detected port", async () => {
   await act(async () => {});
   expect(requests()).toEqual([{ session: "s1", action: "list" }]);
   push();
+  expect(screen.getByRole("button", { name: "Forward 3000" }).getAttribute("title")).toBe("Forward");
   fireEvent.click(screen.getByRole("button", { name: "Forward 3000" }));
   await act(async () => {});
   expect(requests().at(-1)).toEqual({ session: "s1", action: "forward", rport: 3000 });
@@ -63,6 +64,10 @@ it("shows active forwards, highlights a changed local port, and opens or stops t
   const moved = screen.getByText("localhost:51234");
   expect(moved.className).toContain("accent");
   expect(moved.getAttribute("title")).toBe("Local port 8080 was busy, so another local port is used");
+  for (const rport of [3000, 8080]) {
+    expect(screen.getByRole("button", { name: `Open in browser ${rport}` }).getAttribute("title")).toBe("Open in browser");
+    expect(screen.getByRole("button", { name: `Stop ${rport}` }).getAttribute("title")).toBe("Stop");
+  }
   fireEvent.click(screen.getByRole("button", { name: "Open in browser 8080" }));
   fireEvent.click(screen.getByRole("button", { name: "Stop 3000" }));
   await act(async () => {});
@@ -78,6 +83,7 @@ it("forwards a typed port and rejects invalid input", async () => {
   push({ detected: [] });
   const input = screen.getByRole("textbox", { name: "Remote port" });
   const submit = screen.getByRole("button", { name: "Forward" });
+  expect(submit.getAttribute("title")).toBe("Forward");
   for (const bad of ["", "0", "70000", "80a", "-1"]) {
     fireEvent.change(input, { target: { value: bad } });
     expect((submit as HTMLButtonElement).disabled).toBe(true);

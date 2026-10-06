@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
 import { Section } from "../../layout/RightPanel/parts";
 import { requestPorts, usePorts } from "./portsClient";
@@ -57,18 +58,22 @@ export function PortsTab() {
                   localhost:{f.lport}
                 </span>
                 <button
-                  className="ports-btn"
+                  type="button"
+                  className="icon-btn sm"
                   aria-label={`${t("ports.open")} ${f.rport}`}
+                  title={t("ports.open")}
                   onClick={() => void requestPorts("open", f.rport)}
                 >
-                  {t("ports.open")}
+                  <Icons.globe size={14} />
                 </button>
                 <button
-                  className="ports-btn"
+                  type="button"
+                  className="icon-btn sm"
                   aria-label={`${t("ports.stop")} ${f.rport}`}
+                  title={t("ports.stop")}
                   onClick={() => void requestPorts("unforward", f.rport)}
                 >
-                  {t("ports.stop")}
+                  <Icons.stop size={14} />
                 </button>
               </div>
             );
@@ -86,11 +91,13 @@ export function PortsTab() {
               <span className="port">{port}</span>
               <span className="sp" />
               <button
-                className="ports-btn"
+                type="button"
+                className="icon-btn sm"
                 aria-label={`${t("ports.forward")} ${port}`}
+                title={t("ports.forward")}
                 onClick={() => void requestPorts("forward", port)}
               >
-                {t("ports.forward")}
+                <Icons.plus size={14} />
               </button>
             </div>
           ))
@@ -106,8 +113,14 @@ export function PortsTab() {
             value={manual}
             onChange={(event) => setManual(event.target.value)}
           />
-          <button className="ports-btn" type="submit" disabled={manualPort === null}>
-            {t("ports.forward")}
+          <button
+            className="icon-btn sm"
+            type="submit"
+            aria-label={t("ports.forward")}
+            title={t("ports.forward")}
+            disabled={manualPort === null}
+          >
+            <Icons.plus size={14} />
           </button>
         </form>
       </Section>

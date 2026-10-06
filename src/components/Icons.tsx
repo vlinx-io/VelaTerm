@@ -58,6 +58,7 @@ const Icons: Record<string, IconComponent> = {
   bellOff: I([r("path", { key: 1, d: "M12.5 11H3.5c1-1 1.3-2 1.3-3.5v-1A3.2 3.2 0 018 3.3a3.2 3.2 0 013.2 3.2v1c0 1.5.3 2.5 1.3 3.5z" }), r("path", { key: 2, d: "M6.8 13a1.3 1.3 0 002.4 0" }), r("path", { key: 3, d: "M3 2.5l10 11" })]),
   minus: I(r("path", { key: 1, d: "M3.5 8h9" })),
   plus: I(r("path", { key: 1, d: "M8 3.5v9M3.5 8h9" })),
+  stop: I(r("rect", { key: 1, x: 4.5, y: 4.5, width: 7, height: 7, rx: 1 })),
   x: I(r("path", { key: 1, d: "M4 4l8 8M12 4l-8 8" })),
   splitV: I([r("rect", { key: 1, x: 2.5, y: 2.5, width: 11, height: 11, rx: 1.5 }), r("path", { key: 2, d: "M8 2.5v11" })]),
   splitH: I([r("rect", { key: 1, x: 2.5, y: 2.5, width: 11, height: 11, rx: 1.5 }), r("path", { key: 2, d: "M2.5 8h11" })]),

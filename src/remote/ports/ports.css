@@ -1,10 +1,10 @@
-.ports-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; }
-.ports-row .port { min-width: 48px; font-variant-numeric: tabular-nums; }
-.ports-row .local { flex: 1; color: var(--text-dim); }
+.ports-row { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 12px; white-space: nowrap; }
+.ports-row .port { flex: none; min-width: 48px; font-variant-numeric: tabular-nums; }
+.ports-row .local { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text-dim); }
 .ports-row .local.accent { color: var(--accent); }
 .ports-row .sp { flex: 1; }
-.ports-btn { border: 1px solid var(--border); border-radius: 5px; padding: 1px 8px; font-size: 11px; background: transparent; color: var(--text); cursor: pointer; }
-.ports-btn:disabled { opacity: 0.5; cursor: default; }
+.ports-row .icon-btn { flex: none; }
+.ports-row .icon-btn:disabled { opacity: 0.5; pointer-events: none; }
 .ports-hint { color: var(--text-faint); font-size: 12px; }
 .ports-error { color: var(--red); font-size: 12px; padding: 8px 14px; }
-.ports-input { width: 96px; padding: 2px 6px; font-size: 12px; background: var(--bg-0); color: var(--text); border: 1px solid var(--border); border-radius: 5px; }
+.ports-input { flex: 1; min-width: 0; padding: 2px 6px; font-size: 12px; background: var(--bg-0); color: var(--text); border: 1px solid var(--border); border-radius: 5px; }
