@@ -1041,6 +1041,28 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 }
             });
 
+            // Remote windows cannot invoke local commands, so port forwarding requests arrive as events and
+            // every request is answered with a full snapshot. Handling runs on a plain thread because it
+            // performs blocking SSH I/O and may drop the last transport, which must not happen in async code.
+            let ports_app = app.handle().clone();
+            app.listen_any("vlx://ports-request", move |event| {
+                let Ok(req) = serde_json::from_str::<ssh_ports::PortsRequest>(event.payload()) else {
+                    return;
+                };
+                let app = ports_app.clone();
+                std::thread::spawn(move || {
+                    let Some(out) = ssh_ports::handle(req) else { return };
+                    if let Some(lport) = out.open_lport {
+                        use tauri_plugin_opener::OpenerExt;
+                        let _ = app
+                            .opener()
+                            .open_url(format!("http://localhost:{lport}"), None::<&str>);
+                    }
+                    use tauri::Emitter;
+                    let _ = app.emit("ssh://ports-state", &out.snapshot);
+                });
+            });
+
             let wsl_app = app.handle().clone();
             app.listen_any("vlx://wsl-reconnect", move |event| {
                 let Ok(v) = serde_json::from_str::<serde_json::Value>(event.payload()) else { return; };

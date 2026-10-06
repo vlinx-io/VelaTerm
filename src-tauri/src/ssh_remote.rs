@@ -1736,11 +1736,16 @@ pub fn disconnect(host: &str, session: &str, kill_remote: bool) {
     let kill_remote = kill_remote && session_target(session) == ServiceTarget::Headless;
     // Remove the object under lock, then perform network I/O without blocking the registry.
     let removed = transports().lock().unwrap().remove(session);
+    let user_lports = crate::ssh_ports::forget_session(session);
     if let Some(t) = removed {
+        for lport in user_lports {
+            let _ = t.close_forward(lport);
+        }
         if kill_remote {
             let sys = session_sys(session);
             let _ = shell_exec(t.as_ref(), &sys, &kill_service_cmd(&sys));
         }
+        stop_user_forwards(session);
         t.close();
         clear_session_sys(session);
         clear_session_target(session);
@@ -1750,6 +1755,7 @@ pub fn disconnect(host: &str, session: &str, kill_remote: bool) {
     if kill_remote {
         kill_remote_service(host, session);
     }
+    stop_user_forwards(session);
     stop_serve(session);
     close_master(host, session);
     clear_session_sys(session);
@@ -1843,6 +1849,10 @@ fn rebuild_tunnel(
     };
     // 3. Reap the dead tunnel child and rebuild on the original port.
     stop_serve(session);
+    // close_master tore down master-owned user listeners; drop their entries so the panel shows them gone.
+    stop_user_forwards(session);
+    crate::ssh_ports::forget_session(session);
+    crate::ssh_ports::set_service_port(session, rport);
     let lport = openssh_open_forward(host, session, rport).map_err(RebuildErr::Retryable)?;
     if lport != want_port {
         // If another process owns the stable port, destroy the useless new forwarding child.
@@ -2084,6 +2094,7 @@ pub fn connect(
         }
         Err(e) => {
             transport.close();
+            crate::ssh_ports::forget_session(&session);
             Err(e)
         }
     }
@@ -2122,6 +2133,7 @@ fn connect_inner(
         if let Some(link) = read_local_link(t, &sys) {
             set_session_target(session, ServiceTarget::DesktopLink);
             progress("forward", None);
+            crate::ssh_ports::set_service_port(session, link.port);
             let local_port = t.open_forward(link.port)?;
             return Ok(ConnectResult {
                 session: session.to_string(),
@@ -2145,6 +2157,7 @@ fn connect_inner(
         if rs.version == version && rs.shared_db == shared_db && rs.mirror == mirror {
             // Reuse its port/password and add only forwarding, preserving remote sessions.
             progress("forward", None);
+            crate::ssh_ports::set_service_port(session, rs.port);
             let local_port = t.open_forward(rs.port)?;
             return Ok(ConnectResult {
                 session: session.to_string(),
@@ -2186,6 +2199,7 @@ fn connect_inner(
     let rport = remote_serve_port(session);
     start_detached_serve(t, &sys, version, &password, rport, shared_db, mirror)?;
     progress("forward", None);
+    crate::ssh_ports::set_service_port(session, rport);
     let local_port = t.open_forward(rport)?;
     Ok(ConnectResult {
         session: session.to_string(),
