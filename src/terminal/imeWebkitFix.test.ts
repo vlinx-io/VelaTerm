@@ -333,4 +333,45 @@ describe("imeWebkitFix with xterm's native input handlers", () => {
     expect(symbols.map((symbol) => fix.shouldSwallow(symbol))).toEqual(symbols.map(() => true));
     cleanup();
   });
+
+  it("does not send both halves of one slash keystroke, which is how a typed / appeared as //", () => {
+    // The `/` key is the one symbol that passes both gates: `keyup` reports its half-width source, which is a
+    // pass-through symbol, and the IME's conversion arrives later through `input` as a full-width `／`, which is
+    // full-width punctuation. Each channel committed separately, so one keystroke wrote two characters.
+    const { textarea, sent, fix, cleanup } = setup();
+    fireKey(textarea, "keydown", { code: "Slash", key: "Process", keyCode: 229 });
+    fireKey(textarea, "keyup", { code: "Slash", key: "/" });
+    expect(sent).toEqual(["/"]);
+    // The late input carries the full-width form; it is the same keystroke and must be consumed.
+    expect(fix.shouldSwallow("／")).toBe(true);
+    cleanup();
+  });
+
+  it("still deduplicates a duplicate that arrives with a later keystroke", () => {
+    // The duplicate lands with the next keystroke, not on a clock. The former five-second TTL expired while
+    // the user sat idle, so the next keystroke's arrival released the duplicate and the character was sent
+    // twice; entries are now removed only by being matched.
+    const { textarea, sent, fix, cleanup } = setup();
+    fireKey(textarea, "keydown", { code: "Slash", key: "Process", keyCode: 229 });
+    fireKey(textarea, "keyup", { code: "Slash", key: "/" });
+    fireKey(textarea, "keydown", { code: "KeyS", key: "Process", keyCode: 229 });
+    expect(sent).toEqual(["/"]);
+    expect(fix.shouldSwallow("/")).toBe(true);
+    cleanup();
+  });
+
+  it("keeps two deliberately typed slashes and never swallows later ordinary input", () => {
+    const { textarea, sent, fix, cleanup } = setup();
+    for (let i = 0; i < 2; i++) {
+      fireKey(textarea, "keydown", { code: "Slash", key: "Process", keyCode: 229 });
+      fireKey(textarea, "keyup", { code: "Slash", key: "/" });
+    }
+    expect(sent).toEqual(["/", "/"]); // Both keystrokes belong in the PTY.
+    // A registration is consumed and the table then empties, so unrelated later input is untouched.
+    expect(fix.shouldSwallow("/")).toBe(true);
+    expect(fix.shouldSwallow("/")).toBe(true);
+    expect(fix.shouldSwallow("/")).toBe(false);
+    expect(fix.shouldSwallow("a")).toBe(false);
+    cleanup();
+  });
 });
