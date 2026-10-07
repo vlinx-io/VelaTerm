@@ -435,6 +435,9 @@ const vi: typeof en = {
   "settings.agentDefaultViewHint":
     "Chế độ xem mà các phiên mới của tác nhân này sẽ mở. Các phiên đã có giữ nguyên chế độ xem lúc tạo.",
   "settings.appearance": "Giao diện",
+  "settings.theme": "Chủ đề",
+  "settings.themeSystem": "Hệ thống",
+  "settings.themeSwitcher": "Nút chuyển chủ đề trên thanh tiêu đề",
   "settings.accent": "Màu nhấn",
   "settings.accentAuto": "Theo chủ đề",
   "settings.density": "Mật độ",

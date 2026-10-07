@@ -445,6 +445,9 @@ const ru: typeof en = {
   "settings.agentDefaultViewHint":
     "Вид, в котором открываются новые сессии этого агента. Уже созданные сессии сохраняют вид, с которым были созданы.", // Agent default view hint
   "settings.appearance": "Внешний вид", // Appearance
+  "settings.theme": "Тема", // Theme
+  "settings.themeSystem": "Как в системе", // System
+  "settings.themeSwitcher": "Переключатель темы в заголовке окна", // Theme switcher in title bar
   "settings.accent": "Акцент", // Accent
   "settings.accentAuto": "Как тема", // Follow theme
   "settings.density": "Плотность", // Density

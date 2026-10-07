@@ -23,6 +23,7 @@ import {
   type ShellOption,
 } from "../../ipc/commands";
 import { pushSetting } from "../../ipc/settingsSync";
+import { runAfterInitialSettings } from "../../store/settingsWatch";
 import { installVelaSkills } from "../../ipc/velaSkills";
 import { env, platform } from "../../platform";
 import type { VelaCommandStatus } from "../../platform/types";
@@ -307,11 +308,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const paneStyle = useTermStore((s) => s.paneStyle);
   const dividerStyle = useTermStore((s) => s.dividerStyle);
   const navLayout = useTermStore((s) => s.navLayout);
+  const theme = useTermStore((s) => s.theme);
+  const themeSwitcherInTitleBar = useTermStore((s) => s.themeSwitcherInTitleBar);
   const setAccent = useTermStore((s) => s.setAccent);
   const setDensity = useTermStore((s) => s.setDensity);
   const setPaneStyle = useTermStore((s) => s.setPaneStyle);
   const setDividerStyle = useTermStore((s) => s.setDividerStyle);
   const setNavLayout = useTermStore((s) => s.setNavLayout);
+  const setTheme = useTermStore((s) => s.setTheme);
+  const setDarkTheme = useTermStore((s) => s.setDarkTheme);
+  const setThemeSwitcherInTitleBar = useTermStore((s) => s.setThemeSwitcherInTitleBar);
   const singleTabMode = useTermStore((s) => s.singleTabMode);
   const setSingleTabMode = useTermStore((s) => s.setSingleTabMode);
   const spawnConfirm = useTermStore((s) => s.spawnConfirm);
@@ -549,6 +555,27 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     max={20}
                     defaultValue={13}
                     autoLabel={t("settings.fontAuto")}
+                  />
+                </Field>
+                <Field label={t("settings.theme")}>
+                  <Seg<"system" | "dark" | "light">
+                    value={theme}
+                    options={[
+                      ["system", t("settings.themeSystem")],
+                      ["dark", t("titlebar.themeClassicDark")],
+                      ["light", t("titlebar.themeLight")],
+                    ]}
+                    onChange={(mode) => runAfterInitialSettings(() => {
+                      if (mode === "dark") setDarkTheme("classic");
+                      else setTheme(mode);
+                    })}
+                  />
+                </Field>
+                <Field label={t("settings.themeSwitcher")}>
+                  <Seg<"on" | "off">
+                    value={themeSwitcherInTitleBar ? "on" : "off"}
+                    options={[["on", t("common.on")], ["off", t("common.off")]]}
+                    onChange={(value) => setThemeSwitcherInTitleBar(value === "on")}
                   />
                 </Field>
               </>

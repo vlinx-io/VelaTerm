@@ -201,6 +201,8 @@ export interface PersistedSettings {
   /** Info panel sections the user collapsed, as a sparse map of section id to `true`. A missing id means
    * the section is open, so the map stays empty until someone collapses something. */
   infoCollapsed: Record<string, boolean>;
+  /** Whether the theme buttons appear in the title bar. Off keeps theme changes in Appearance settings. */
+  themeSwitcherInTitleBar: boolean;
   /** Composer chips shown inline under the message input, in display order. Chips missing from the list
    * are off: they stay reachable in the settings and move into the More row whenever it appears. */
   composerInlineChips: ComposerChipId[];
@@ -272,6 +274,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   referSummary: { enabled: false, agent: "claude", model: "", effort: "" },
   showSystemResources: true,
   infoCollapsed: {},
+  themeSwitcherInTitleBar: false,
   composerInlineChips: DEFAULT_COMPOSER_INLINE_CHIPS,
   composerInlineChipsRevision: COMPOSER_INLINE_CHIPS_REVISION,
 };

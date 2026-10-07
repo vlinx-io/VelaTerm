@@ -247,6 +247,11 @@ svg { display: block; }
 .sidebar-tree-body { position: relative; flex: 1; min-height: 0; }
 .sidebar-tree-footer { height: 30px; flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 4px; padding: 3px 6px; border-top: 1px solid var(--border); background: var(--bg-1); }
 .sidebar-tree-footer .icon-btn { flex: none; }
+.col-foot { height: 30px; flex: none; display: flex; align-items: center; justify-content: flex-start; padding: 3px 6px; border-top: 1px solid var(--border); background: var(--bg-1); }
+.sidebar-tree-footer .sidebar-tree-hide { margin-right: auto; }
+/* Collapsed side panel: a narrow column that keeps the Show control in the corner the Hide control used. */
+.col-rail { width: 32px; }
+.col-rail .col-fill { flex: 1; }
 .sidebar-tree-divider { z-index: 6; }
 .sidebar-tree-divider.horizontal { width: 1px; cursor: col-resize; }
 .sidebar-tree-divider.vertical { height: 1px; cursor: row-resize; }
@@ -651,6 +656,7 @@ svg { display: block; }
 .statusbar .accent { color: var(--accent); }
 /* While remote access runs, light the status-bar port segment to match the `.remote-on` globe. */
 .statusbar .seg.web-on { color: var(--accent); }
+.statusbar .seg.account-on { color: var(--accent); }
 .statusbar .seg.web-on svg { filter: drop-shadow(0 0 4px color-mix(in oklch, var(--accent) 60%, transparent)); }
 
 /* Quit confirmation dialog. The "save workspace" row is an option, not an alert: it stays quiet until

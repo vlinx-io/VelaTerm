@@ -431,6 +431,9 @@ const zhCN: typeof en = {
   "settings.agentDefaultViewHint":
     "该智能体新建会话时打开的视图。已有会话保持创建时的视图。",
   "settings.appearance": "外观",
+  "settings.theme": "主题",
+  "settings.themeSystem": "跟随系统",
+  "settings.themeSwitcher": "在标题栏显示主题切换",
   "settings.accent": "强调色",
   "settings.accentAuto": "跟随明暗",
   "settings.density": "密度",

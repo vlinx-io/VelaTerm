@@ -432,6 +432,9 @@ const zhTW: typeof en = {
   "settings.agentDefaultViewHint":
     "該智慧體新增會話時開啟的檢視。既有會話維持建立時的檢視。", // Agent default view hint
   "settings.appearance": "外觀", // Appearance
+  "settings.theme": "主題", // Theme
+  "settings.themeSystem": "跟隨系統", // System
+  "settings.themeSwitcher": "在標題列顯示主題切換", // Theme switcher in title bar
   "settings.accent": "強調色", // Accent
   "settings.accentAuto": "跟隨明暗", // Follow theme
   "settings.density": "密度", // Density
