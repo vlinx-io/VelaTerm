@@ -74,6 +74,7 @@ import {
   writeTerminalOutput,
 } from "../terminal/outputScheduler";
 import { installWebkitImeFix, isWebkitEngine } from "../terminal/imeWebkitFix";
+import { installImeAnchor } from "../terminal/imeAnchor";
 import { installImeCaret } from "../terminal/imeCaret";
 import { detectAgentScreen, readScreenTail } from "../terminal/screenDetect";
 import { remapGrokDayCanvasToWhite } from "../terminal/grokBgRemap";
@@ -445,6 +446,9 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
     // Draw a caret inside the pre-edit overlay while composing; xterm's overlay has none and it covers the
     // terminal cursor (issue #59). See imeCaret.ts.
     const imeCaret = installImeCaret(container);
+    // Keep the helper textarea caret at the end outside composition so xterm slices the commit correctly
+    // after ←/→ moved it. See imeAnchor.ts.
+    const imeAnchor = term.textarea ? installImeAnchor(container, term.textarea) : null;
 
     let disposed = false;
     let unlistenExit: UnlistenFn | undefined;
@@ -986,6 +990,7 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       container.removeEventListener("vlx-terminal-user-scroll", syncViewportIntent);
       searchIntentSub.dispose();
       imeCaret.dispose();
+      imeAnchor?.dispose();
       imeFix?.dispose();
       writeParsedSub.dispose();
       dataSub.dispose();
