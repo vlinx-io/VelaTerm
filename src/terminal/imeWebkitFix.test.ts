@@ -319,4 +319,18 @@ describe("imeWebkitFix with xterm's native input handlers", () => {
     vi.advanceTimersByTime(1);
     expect(sent).toEqual(["/", "\x1b[D", "测试"]);
   });
+  it("consumes every duplicate after a burst longer than the old deduplication cap, so no character is sent twice", () => {
+    // A burst of pass-through symbols within the reorder window used to exceed the 16-entry cap; the oldest
+    // registrations were dropped and their late duplicates reached the PTY, so a typed `/` arrived as `//`.
+    const symbols = ["`", "~", "!", "@", "#", "$", "%", "^", "&", "*", "(", ")", "-", "_", "=", "+", "[", "{", "]", "}", ";", ":", "'", '"'];
+    const { textarea, sent, fix, cleanup } = setup();
+    for (const symbol of symbols) {
+      fireKey(textarea, "keydown", { code: "KeyX", key: "Process", keyCode: 229 });
+      fireKey(textarea, "keyup", { code: "KeyX", key: symbol });
+    }
+    expect(sent).toEqual(symbols); // Each symbol committed exactly once, in order.
+    // xterm delivers each duplicate afterwards, oldest first; every one must be swallowed.
+    expect(symbols.map((symbol) => fix.shouldSwallow(symbol))).toEqual(symbols.map(() => true));
+    cleanup();
+  });
 });

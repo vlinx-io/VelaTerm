@@ -113,10 +113,15 @@ function isPassthroughSymbol(s: string): boolean {
 }
 
 /** Deduplication lifetime. xterm's late duplicate `onData` usually arrives with the next input; unmatched entries
- *  expire. A generous window is safe because normal keystroke data does not equal these IME punctuation commits. */
+ *  expire. A generous window is safe because normal keystroke data does not equal these IME punctuation commits.
+ *
+ *  This TTL is the table's only bound, deliberately. A capacity cap cannot work here: every registered commit is
+ *  owed exactly one late duplicate, so dropping the oldest entry to make room does not drop a stale registration,
+ *  it drops a live one and the duplicate it was holding back reaches the PTY. Typing a burst of pass-through
+ *  symbols (24 within the 50 ms reorder window was measured) evicted the first eight registrations and produced
+ *  doubled characters — a typed `/` arriving as `//`. Entries are inserted in time order and only the expired
+ *  head is removed, so the array stays proportional to the keystroke rate over five seconds, not to session age. */
 const DEDUP_TTL_MS = 5000;
-/** Deduplication capacity limit preventing unbounded growth under extreme repeated input. */
-const DEDUP_MAX = 16;
 /** Window for recognizing a reordered late keydown. An IME keydown (229) arriving this soon after an immediate
  *  input commit belongs to the same keystroke and must not arm keyup. Reordered events are only milliseconds apart,
  *  so 50 ms is generous while remaining much shorter than consecutive human keystrokes. */
@@ -139,7 +144,8 @@ export function installWebkitImeFix(
   send: (data: string) => void,
 ): WebkitImeFix {
   const textarea = term.textarea;
-  // Register a workaround commit whose late xterm duplicate should be consumed.
+  // Register a workaround commit whose late xterm duplicate should be consumed. Every entry is owed a duplicate,
+  // so entries are only ever removed by expiry or by being matched; see DEDUP_TTL_MS for why there is no cap.
   const pending: { data: string; at: number }[] = [];
 
   const purge = (now: number) => {
@@ -152,7 +158,6 @@ export function installWebkitImeFix(
     purge(now);
     send(data);
     pending.push({ data, at: now });
-    if (pending.length > DEDUP_MAX) pending.shift();
   };
 
   // State for keyup handling of half-width pass-through symbols. imeKeydown records the latest IME-processed
