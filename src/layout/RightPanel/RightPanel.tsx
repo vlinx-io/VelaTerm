@@ -113,7 +113,12 @@ export function RightPanel() {
             aria-current={inspectorTab===id?"page":undefined}
             key={id}
             className={"insp-tab" + (inspectorTab === id ? " on" : "")}
-            onClick={event=>{if(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();memoryNavigate(tabUrl(id));}}
+            // Apply the tab directly, then record it in the URL. The URL is not the source of truth here:
+            // a peer's mirrored layout (or a stale `inspector=` value) can leave it naming a tab this panel
+            // is not showing, and then navigating to that same URL would render no change at all — the
+            // click appears dead. `memoryNavigate` is skipped when the URL already matches, so a click
+            // that only needs the panel to catch up does not add a history entry.
+            onClick={event=>{if(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();setInspectorTab(id);const url=tabUrl(id);if(url!==window.location.href)memoryNavigate(url);}}
           >
             <Icon size={13} />
           </a>

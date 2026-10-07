@@ -23,6 +23,19 @@ it("keeps Info as the default and exposes four labeled icons",()=>{
   expect(screen.getByRole("link",{name:"Info"}).getAttribute("aria-current")).toBe("page");
 });
 
+it("selects a tab whose URL is already current, as a mirrored layout leaves it",()=>{
+  // A peer's published layout writes inspectorTab without touching the URL, so the address can already
+  // name the tab the panel is not showing. The click must still switch the panel.
+  window.history.replaceState(null,"","/?inspector=files");
+  render(<RightPanel/>);
+  // A peer's frame lands here: the store changes while the address bar still names the old tab.
+  useTermStore.setState({inspectorTab:"git"});
+  fireEvent.click(screen.getByRole("link",{name:"Files"}));
+  expect(useTermStore.getState().inspectorTab).toBe("files");
+  expect(document.querySelector(".col-right .insp-body")?.textContent).toBe("File explorer");
+  expect(window.location.href).toBe(`${location.origin}/?inspector=files`);
+});
+
 it("opens knowledge through its right tab URL and keeps the directory in that panel",async()=>{
   render(<RightPanel/>);fireEvent.click(screen.getByRole("link",{name:"Knowledge Base"}));
   await screen.findByRole("link",{name:"Personal"});expect(new URLSearchParams(location.search).get("inspector")).toBe("knowledge");
