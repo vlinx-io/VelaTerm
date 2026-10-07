@@ -435,6 +435,9 @@ const ja: typeof en = {
   "settings.agentDefaultViewHint":
     "このエージェントの新しいセッションを開くときのビューです。既存のセッションは作成時のビューのままです。", // Agent default view hint
   "settings.appearance": "外観", // Appearance
+  "settings.theme": "テーマ", // Theme
+  "settings.themeSystem": "システム", // System
+  "settings.themeSwitcher": "タイトルバーにテーマ切り替えを表示", // Theme switcher in title bar
   "settings.accent": "アクセント", // Accent
   "settings.accentAuto": "テーマに従う", // Follow theme
   "settings.density": "密度", // Density
