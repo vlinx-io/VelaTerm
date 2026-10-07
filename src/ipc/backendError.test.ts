@@ -32,6 +32,21 @@ describe("mapBackendError", () => {
     );
   });
 
+  it("maps the port forwarding codes to their i18n keys with the detail as parameter", () => {
+    expect(mapBackendError("ports_invalid_port:70000")).toBe("ports.invalidPort|70000");
+    expect(mapBackendError("ports_missing_port:")).toBe("ports.missingPort");
+    expect(mapBackendError("ports_unknown_action:foo")).toBe("ports.unknownAction|foo");
+    expect(mapBackendError("ports_limit:20")).toBe("ports.limit|20");
+    expect(mapBackendError("ports_not_forwarded:3000")).toBe("ports.notForwarded|3000");
+  });
+
+  it("passes OS bind errors and other code-less prose through unchanged", () => {
+    expect(mapBackendError("bind 127.0.0.1:3000: address already in use")).toBe(
+      "bind 127.0.0.1:3000: address already in use",
+    );
+    expect(mapBackendError("ssh exited with status 255")).toBe("ssh exited with status 255");
+  });
+
   it("passes unknown backend errors through unchanged", () => {
     expect(mapBackendError("Session has been deleted")).toBe("Session has been deleted");
     expect(mapBackendError("Failed to open file: no such file")).toBe(

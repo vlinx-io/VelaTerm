@@ -2233,6 +2233,25 @@ const ptBR: typeof en = {
   "chat.antigravity.textOnly": "A visualização de conversa do Antigravity atualmente aceita apenas mensagens de texto.",
   "chat.antigravity.permissionsHint": "Ferramentas que exigem aprovação devem ser autorizadas nas configurações do Antigravity ou usadas na visualização de terminal.",
   "chat.antigravity.settingsHint": "Altere o modelo, o nível de raciocínio ou as permissões entre os turnos.",
+  "ports.title": "Portas", // Ports
+  "ports.active": "Encaminhadas", // Forwarded
+  "ports.activeEmpty": "Nenhuma porta encaminhada", // No forwarded ports
+  "ports.detected": "Detectadas", // Detected
+  "ports.detectedEmpty": "Nenhuma porta em escuta encontrada", // No listening ports found
+  "ports.detectionUnavailable": "A detecção de portas não está disponível neste host", // Port detection is not available on this host
+  "ports.manual": "Encaminhar uma porta", // Forward a port
+  "ports.portPlaceholder": "Porta remota", // Remote port
+  "ports.forward": "Encaminhar", // Forward
+  "ports.open": "Abrir no navegador", // Open in browser
+  "ports.stop": "Parar", // Stop
+  "ports.localChanged": (port) => `A porta local ${port} estava ocupada, então outra porta local é usada`, // Local port {port} was busy, so another local port is used
+  "ports.unavailable": "Indisponível — atualize o VelaTerm", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `Porta inválida: ${port}`, // Invalid port: {port}
+  "ports.missingPort": "Informe uma porta", // Enter a port
+  "ports.unknownAction": (action) => `Ação desconhecida: ${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `No máximo ${max} portas podem ser encaminhadas por conexão`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `A porta ${port} não está encaminhada`, // Port {port} is not forwarded
+  "statusbar.ports": (n) => (n === 1 ? "1 porta encaminhada" : `${n} portas encaminhadas`), // {n} forwarded ports
 };
 
 export default ptBR;

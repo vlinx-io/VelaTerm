@@ -35,6 +35,16 @@ export function mapBackendError(raw: string): string {
       return t("transport.remoteSettingForbidden", detail);
     case "remote_path_forbidden":
       return t("transport.remotePathForbidden", detail);
+    case "ports_missing_port":
+      return t("ports.missingPort");
+    case "ports_invalid_port":
+      return t("ports.invalidPort", detail);
+    case "ports_unknown_action":
+      return t("ports.unknownAction", detail);
+    case "ports_limit":
+      return t("ports.limit", detail);
+    case "ports_not_forwarded":
+      return t("ports.notForwarded", detail);
     default:
       return raw;
   }

@@ -2172,6 +2172,25 @@ const zhCN: typeof en = {
   "chat.antigravity.textOnly": "Antigravity 会话视图目前仅支持文本消息。",
   "chat.antigravity.permissionsHint": "需要批准的工具必须先在 Antigravity 设置中获准使用，或在终端视图中使用。",
   "chat.antigravity.settingsHint": "请在回合之间修改模型、推理强度或权限。",
+  "ports.title": "端口", // Ports
+  "ports.active": "已转发", // Forwarded
+  "ports.activeEmpty": "没有已转发的端口", // No forwarded ports
+  "ports.detected": "已检测", // Detected
+  "ports.detectedEmpty": "未发现监听中的端口", // No listening ports found
+  "ports.detectionUnavailable": "此主机不支持端口检测", // Port detection is not available on this host
+  "ports.manual": "转发端口", // Forward a port
+  "ports.portPlaceholder": "远程端口", // Remote port
+  "ports.forward": "转发", // Forward
+  "ports.open": "在浏览器中打开", // Open in browser
+  "ports.stop": "停止", // Stop
+  "ports.localChanged": (port) => `本地端口 ${port} 已被占用，已改用其他本地端口`, // Local port {port} was busy, so another local port is used
+  "ports.unavailable": "不可用 — 请更新 VelaTerm", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `无效的端口：${port}`, // Invalid port: {port}
+  "ports.missingPort": "请输入端口", // Enter a port
+  "ports.unknownAction": (action) => `未知操作：${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `每个连接最多可转发 ${max} 个端口`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `端口 ${port} 未被转发`, // Port {port} is not forwarded
+  "statusbar.ports": (n) => `已转发 ${n} 个端口`, // {n} forwarded ports
 };
 
 export default zhCN;

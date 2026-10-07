@@ -30,7 +30,7 @@ export type DividerStyle = "subtle" | "visible";
 /** Sidebar layout: tree is standard; compact hides group icons and uses shorter rows. */
 export type NavLayout = "tree" | "compact";
 /** Active tab in the right-side Inspector. */
-export type InspectorTab = "files" | "info" | "git" | "knowledge";
+export type InspectorTab = "files" | "info" | "git" | "knowledge" | "ports";
 
 /** Vlinx visual settings: design tokens beyond the color scheme. */
 export interface VisualSettings {

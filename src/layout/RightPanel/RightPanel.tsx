@@ -16,13 +16,20 @@ import { KV, Section } from "./parts";
 import { KnowledgeNavigation } from "../Notebook/KnowledgeNavigation";
 import { MemoryIcon } from "../Memory/shared";
 import { memoryNavigate, useMemoryLocation } from "../Memory/navigation";
+import { portsSupported } from "../../remote/ports/portsClient";
+import { PortsTab } from "../../remote/ports/PortsTab";
+import type { InspectorTab } from "../../theme";
 
 const INSPECTOR_TABS = [
   { id: "files" as const, label: "Files", Icon: Icons.file },
   { id: "info" as const, label: "Info", Icon: Icons.info },
   { id: "git" as const, label: "Git", Icon: Icons.git },
   { id: "knowledge" as const, label: "", Icon: MemoryIcon },
+  ...(portsSupported ? [{ id: "ports" as const, label: "", Icon: Icons.connect }] : []),
 ];
+
+const isInspectorTab = (tab: string): tab is InspectorTab =>
+  INSPECTOR_TABS.some((entry) => entry.id === tab);
 
 
 /* ===================== Info: real basics and placeholder resources ===================== */
@@ -51,7 +58,7 @@ export function RightPanel() {
   const setInspectorTab = useTermStore((s) => s.setInspectorTab);
   const search=useMemoryLocation();
   const initialInspectorTab = useRef(inspectorTab);
-  useEffect(()=>{const tab=new URLSearchParams(search).get("inspector") ?? initialInspectorTab.current;if((tab==="files"||tab==="info"||tab==="git"||tab==="knowledge")&&useTermStore.getState().inspectorTab!==tab)setInspectorTab(tab);},[search,setInspectorTab]);
+  useEffect(()=>{const tab=new URLSearchParams(search).get("inspector") ?? initialInspectorTab.current;if(isInspectorTab(tab)&&useTermStore.getState().inspectorTab!==tab)setInspectorTab(tab);},[search,setInspectorTab]);
   const tabUrl=(tab:string)=>{const url=new URL(window.location.href);url.searchParams.set("inspector",tab);if(tab==="knowledge"&&!url.searchParams.has("memory"))url.searchParams.set("memory","notebooks");return url.href;};
   const sessions = useTermStore((s) => s.sessions);
   const ephemeralSessions = useTermStore((s) => s.ephemeralSessions);
@@ -101,6 +108,8 @@ export function RightPanel() {
     ({ session, project, group } = resolve(lastTargetRef.current));
   }
   const cwd = session?.cwd || project?.rootPath || null;
+  // A stored or mirrored "ports" selection has no panel outside SSH remote windows.
+  const activeTab: InspectorTab = isInspectorTab(inspectorTab) ? inspectorTab : "info";
 
   return (
     <aside className="col col-right" style={{ width, borderLeft: "none" }}>
@@ -108,11 +117,11 @@ export function RightPanel() {
         {INSPECTOR_TABS.map(({ id, label, Icon }) => (
           <a
             href={tabUrl(id)}
-            title={id==="knowledge"?t("memory.title"):label}
-            aria-label={id==="knowledge"?t("memory.title"):label}
-            aria-current={inspectorTab===id?"page":undefined}
+            title={id==="knowledge"?t("memory.title"):id==="ports"?t("ports.title"):label}
+            aria-label={id==="knowledge"?t("memory.title"):id==="ports"?t("ports.title"):label}
+            aria-current={activeTab===id?"page":undefined}
             key={id}
-            className={"insp-tab" + (inspectorTab === id ? " on" : "")}
+            className={"insp-tab" + (activeTab === id ? " on" : "")}
             onClick={event=>{if(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();memoryNavigate(tabUrl(id));}}
           >
             <Icon size={13} />
@@ -120,9 +129,9 @@ export function RightPanel() {
         ))}
       </nav>
       <div className="insp-body" style={{ display: "flex", flexDirection: "column" }}>
-        {inspectorTab === "knowledge" && <KnowledgeNavigation/>}
-        {inspectorTab === "files" && <FilesTab rootPath={cwd} rootName={project?.name ?? null} />}
-        {inspectorTab === "info" &&
+        {activeTab === "knowledge" && <KnowledgeNavigation/>}
+        {activeTab === "files" && <FilesTab rootPath={cwd} rootName={project?.name ?? null} />}
+        {activeTab === "info" &&
           (session ? (
             <InfoTab key={session.id} session={session} cwd={cwd} />
           ) : project ? (
@@ -132,7 +141,8 @@ export function RightPanel() {
               {t("panel.noSession")}
             </div>
           ))}
-        {inspectorTab === "git" && <GitTab path={cwd} />}
+        {activeTab === "git" && <GitTab path={cwd} />}
+        {activeTab === "ports" && <PortsTab />}
       </div>
     </aside>
   );

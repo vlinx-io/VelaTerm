@@ -9,6 +9,7 @@
 //! accept tasks. Synchronous trait methods use `rt.block_on` for request/response. Command handlers run
 //! under spawn_blocking, so this does not nest a runtime inside an async runtime.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -56,6 +57,8 @@ pub struct RusshTransport {
     orig_host: String,
     session_id: String,
     forwards: Mutex<Vec<JoinHandle<()>>>,
+    /// User forwards by local port; aborting a task drops its listener and frees the port.
+    user_forwards: Mutex<HashMap<u16, JoinHandle<()>>>,
 }
 
 impl RusshTransport {
@@ -127,6 +130,32 @@ impl RusshTransport {
             orig_host: host.to_string(),
             session_id: session.to_string(),
             forwards: Mutex::new(Vec::new()),
+            user_forwards: Mutex::new(HashMap::new()),
+        })
+    }
+
+    /// Local accept loop: one direct-tcpip channel per connection, copying both directions.
+    fn spawn_forward(&self, listener: TcpListener, rport: u16) -> JoinHandle<()> {
+        let handle = Arc::clone(&self.handle);
+        self.rt.spawn(async move {
+            loop {
+                let (mut socket, _) = match listener.accept().await {
+                    Ok(x) => x,
+                    Err(_) => break,
+                };
+                let handle = Arc::clone(&handle);
+                tokio::spawn(async move {
+                    let channel = match handle
+                        .channel_open_direct_tcpip("127.0.0.1", rport as u32, "127.0.0.1", 0)
+                        .await
+                    {
+                        Ok(c) => c,
+                        Err(_) => return,
+                    };
+                    let mut stream = channel.into_stream();
+                    let _ = tokio::io::copy_bidirectional(&mut socket, &mut stream).await;
+                });
+            }
         })
     }
 }
@@ -269,33 +298,11 @@ impl SshTransport for RusshTransport {
 
     fn open_forward(&self, rport: u16) -> Result<u16, String> {
         let lport = pick_local_port(&self.orig_host)?;
-
-        // A local TCP accept loop opens one direct-tcpip channel and copies both directions per connection.
         let listener = self
             .rt
             .block_on(async { TcpListener::bind(("127.0.0.1", lport)).await })
             .map_err(|e| format!("failed to bind local forward port {lport}: {e}"))?;
-        let handle = Arc::clone(&self.handle);
-        let task = self.rt.spawn(async move {
-            loop {
-                let (mut socket, _) = match listener.accept().await {
-                    Ok(x) => x,
-                    Err(_) => break,
-                };
-                let handle = Arc::clone(&handle);
-                tokio::spawn(async move {
-                    let channel = match handle
-                        .channel_open_direct_tcpip("127.0.0.1", rport as u32, "127.0.0.1", 0)
-                        .await
-                    {
-                        Ok(c) => c,
-                        Err(_) => return,
-                    };
-                    let mut stream = channel.into_stream();
-                    let _ = tokio::io::copy_bidirectional(&mut socket, &mut stream).await;
-                });
-            }
-        });
+        let task = self.spawn_forward(listener, rport);
         self.forwards.lock().unwrap().push(task);
 
         // Send a real HTTP health probe to avoid a TCP-only false positive, sharing the OpenSSH helper.
@@ -306,12 +313,56 @@ impl SshTransport for RusshTransport {
         Ok(lport)
     }
 
+    fn open_user_forward(&self, rport: u16, preferred_lport: Option<u16>) -> Result<u16, String> {
+        let listener = self
+            .rt
+            .block_on(async {
+                if let Some(p) = preferred_lport.filter(|&p| crate::ssh_remote::loopback_v6_free(p)) {
+                    if let Ok(l) = TcpListener::bind(("127.0.0.1", p)).await {
+                        return Ok(l);
+                    }
+                }
+                TcpListener::bind(("127.0.0.1", 0)).await
+            })
+            .map_err(|e| format!("failed to bind a local port for remote port {rport}: {e}"))?;
+        let lport = listener
+            .local_addr()
+            .map_err(|e| format!("failed to read local forward port: {e}"))?
+            .port();
+        let task = self.spawn_forward(listener, rport);
+        self.user_forwards
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(lport, task);
+        Ok(lport)
+    }
+
+    fn close_forward(&self, lport: u16) -> Result<(), String> {
+        if let Some(task) = self
+            .user_forwards
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&lport)
+        {
+            task.abort();
+        }
+        Ok(())
+    }
+
     fn close(&self) {
-        // Abort the local forwarding accept task.
+        // Abort the local forwarding accept tasks.
         if let Ok(mut v) = self.forwards.lock() {
             for t in v.drain(..) {
                 t.abort();
             }
+        }
+        for (_, t) in self
+            .user_forwards
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain()
+        {
+            t.abort();
         }
         // Disconnect SSH; dropping the Box also shuts down the runtime completely.
         let _ = self

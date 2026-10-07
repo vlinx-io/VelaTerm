@@ -2228,6 +2228,25 @@ const de: typeof en = {
   "chat.antigravity.textOnly": "Die Konversationsansicht von Antigravity unterstützt derzeit nur Textnachrichten.",
   "chat.antigravity.permissionsHint": "Werkzeuge, die eine Genehmigung erfordern, müssen in den Antigravity-Einstellungen freigegeben oder in der Terminalansicht verwendet werden.",
   "chat.antigravity.settingsHint": "Ändern Sie Modell, Denkaufwand oder Berechtigungen zwischen den Gesprächsrunden.",
+  "ports.title": "Ports", // Ports
+  "ports.active": "Weitergeleitet", // Forwarded
+  "ports.activeEmpty": "Keine weitergeleiteten Ports", // No forwarded ports
+  "ports.detected": "Erkannt", // Detected
+  "ports.detectedEmpty": "Keine lauschenden Ports gefunden", // No listening ports found
+  "ports.detectionUnavailable": "Porterkennung ist auf diesem Host nicht verfügbar", // Port detection is not available on this host
+  "ports.manual": "Port weiterleiten", // Forward a port
+  "ports.portPlaceholder": "Remote-Port", // Remote port
+  "ports.forward": "Weiterleiten", // Forward
+  "ports.open": "Im Browser öffnen", // Open in browser
+  "ports.stop": "Stoppen", // Stop
+  "ports.localChanged": (port) => `Lokaler Port ${port} war belegt, daher wird ein anderer lokaler Port verwendet`, // Local port {port} was busy, so another local port is used
+  "ports.unavailable": "Nicht verfügbar — VelaTerm aktualisieren", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `Ungültiger Port: ${port}`, // Invalid port: {port}
+  "ports.missingPort": "Port eingeben", // Enter a port
+  "ports.unknownAction": (action) => `Unbekannte Aktion: ${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `Pro Verbindung können höchstens ${max} Ports weitergeleitet werden`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `Port ${port} wird nicht weitergeleitet`, // Port {port} is not forwarded
+  "statusbar.ports": (n) => (n === 1 ? "1 weitergeleiteter Port" : `${n} weitergeleitete Ports`), // {n} forwarded ports
 };
 
 export default de;

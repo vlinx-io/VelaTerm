@@ -65,6 +65,9 @@ mod ssh_remote;
 // GUI-only pure-Rust russh transport, currently used on Windows.
 #[cfg(feature = "gui")]
 mod ssh_russh;
+// GUI-only user port forwarding for SSH remote windows: detection, registry and request handling.
+#[cfg(feature = "gui")]
+mod ssh_ports;
 mod web;
 mod wsl_remote;
 // GUI-only macOS native notifications with session-aware click navigation.
@@ -1043,6 +1046,28 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 if let Some(session) = v.get("session").and_then(|s| s.as_str()) {
                     ssh_remote::kick_tunnel(session);
                 }
+            });
+
+            // Remote windows cannot invoke local commands, so port forwarding requests arrive as events and
+            // every request is answered with a full snapshot. Handling runs on a plain thread because it
+            // performs blocking SSH I/O and may drop the last transport, which must not happen in async code.
+            let ports_app = app.handle().clone();
+            app.listen_any("vlx://ports-request", move |event| {
+                let Ok(req) = serde_json::from_str::<ssh_ports::PortsRequest>(event.payload()) else {
+                    return;
+                };
+                let app = ports_app.clone();
+                std::thread::spawn(move || {
+                    let Some(out) = ssh_ports::handle(req) else { return };
+                    if let Some(lport) = out.open_lport {
+                        use tauri_plugin_opener::OpenerExt;
+                        let _ = app
+                            .opener()
+                            .open_url(format!("http://localhost:{lport}"), None::<&str>);
+                    }
+                    use tauri::Emitter;
+                    let _ = app.emit("ssh://ports-state", &out.snapshot);
+                });
             });
 
             let wsl_app = app.handle().clone();

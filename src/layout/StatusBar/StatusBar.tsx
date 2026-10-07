@@ -24,6 +24,7 @@ import { checkVelaSkills, openVelaSkillsModal, useVelaSkillsState } from "../../
 import { isShareSurface } from "../../ipc/shareBase";
 import { webServerStatus, type WebServerStatus } from "../../ipc/webServer";
 import { env } from "../../platform";
+import { portsSupported, usePorts } from "../../remote/ports/portsClient";
 import { useTermStore } from "../../store/termStore";
 import { effectivePermissionMode } from "../../store/settings";
 import {
@@ -130,6 +131,28 @@ function StatusSegs() {
   );
 }
 
+/** Forwarded-port count for SSH remote windows; clicking it reveals the Ports inspector tab. */
+export function PortsSeg() {
+  const t = useT();
+  const { snapshot } = usePorts();
+  const count = snapshot?.forwards.length ?? 0;
+  if (!portsSupported || count === 0) return null;
+  return (
+    <span
+      className="seg btn"
+      title={t("ports.title")}
+      onClick={() => {
+        const s = useTermStore.getState();
+        if (s.rightCollapsed) s.toggleRight();
+        s.setInspectorTab("ports");
+      }}
+    >
+      <Icons.connect size={11} />
+      {t("statusbar.ports", count)}
+    </span>
+  );
+}
+
 export function StatusBar() {
   const t = useT();
   const sessions = useTermStore((s) => s.sessions);
@@ -204,6 +227,7 @@ export function StatusBar() {
           <span className="accent">{t("statusbar.bgEvicted", liveEvictNotice.label)}</span>
         </span>
       )}
+      <PortsSeg />
       {web?.running && (
         <span className="seg web-on" title={t("statusbar.webTooltip", web.url ?? "")}>
           <Icons.globe size={11} />:{web.port}
