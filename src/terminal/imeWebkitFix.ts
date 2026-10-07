@@ -108,11 +108,38 @@ function isPassthroughSymbol(s: string): boolean {
   return true;
 }
 
-/** Deduplication lifetime. xterm's late duplicate `onData` usually arrives with the next input; unmatched entries
- *  expire. A generous window is safe because normal keystroke data does not equal these IME punctuation commits. */
-const DEDUP_TTL_MS = 5000;
-/** Deduplication capacity limit preventing unbounded growth under extreme repeated input. */
-const DEDUP_MAX = 16;
+/**
+ * The half-width ASCII character a full-width form stands for, or "" when the text is not full-width ASCII.
+ *
+ * One physical key can reach the PTY through two channels: `keyup` reports the key's half-width source
+ * (`/`) and the IME's conversion arrives later through `input` (`／`). Comparing the channels needs a form
+ * they share, so full-width ASCII (U+FF01-U+FF5E, which excludes the full-width space U+3000) maps back to
+ * its source; every other character, including CJK punctuation, has no half-width counterpart.
+ */
+function halfwidthAscii(s: string): string {
+  if (!s) return "";
+  let out = "";
+  for (const ch of s) {
+    const c = ch.codePointAt(0)!;
+    if (c < 0xff01 || c > 0xff5e) return "";
+    out += String.fromCodePoint(c - 0xfee0);
+  }
+  return out;
+}
+
+/** Backlog bound for the deduplication table, as a memory safety valve rather than a policy.
+ *
+ *  Every workaround commit is owed exactly one later duplicate, so an entry must not be discarded while that
+ *  duplicate is still on its way. Two earlier bounds were wrong for that reason: a five-second expiry dropped
+ *  entries whenever the next keystroke came later than the window (the duplicate arrives with that keystroke,
+ *  so pausing mid-word before retyping lost it), and a 16-entry cap evicted live registrations during a burst
+ *  of punctuation. Both sent the character to the PTY twice, so a typed `/` arrived as `//`.
+ *
+ *  Time cannot be the bound, because the duplicate is delivered relative to the next keystroke and not to a
+ *  clock. Entries are therefore removed only by being matched, and this cap exists solely so a terminal where
+ *  duplicates never arrive cannot grow the table without limit; it is far above any realistic typing burst and
+ *  is reached only if the workaround stops matching at all. */
+const DEDUP_MAX = 256;
 /** Window for recognizing a reordered late keydown. An IME keydown (229) arriving this soon after an immediate
  *  input commit belongs to the same keystroke and must not arm keyup. Reordered events are only milliseconds apart,
  *  so 50 ms is generous while remaining much shorter than consecutive human keystrokes. */
@@ -134,19 +161,16 @@ export function installWebkitImeFix(
   send: (data: string) => void,
 ): WebkitImeFix {
   const textarea = term.textarea;
-  // Register a workaround commit whose late xterm duplicate should be consumed.
-  const pending: { data: string; at: number }[] = [];
-
-  const purge = (now: number) => {
-    while (pending.length && now - pending[0].at > DEDUP_TTL_MS) pending.shift();
-  };
+  // Workaround commits awaiting their late duplicate, oldest first. An entry is removed by being matched
+  // (`shouldSwallow`); see DEDUP_MAX for why nothing else removes it. Entries store the half-width character the
+  // commit stands for, so a duplicate is recognized whichever form of the same keystroke arrives.
+  const pending: string[] = [];
 
   // Commit immediately to the PTY and register the text so xterm's later duplicate is consumed.
   const commitNow = (data: string) => {
-    const now = Date.now();
-    purge(now);
     send(data);
-    pending.push({ data, at: now });
+    pending.push(halfwidthAscii(data) || data);
+    // Safety valve only; a table at this size means duplicates stopped arriving entirely. See DEDUP_MAX.
     if (pending.length > DEDUP_MAX) pending.shift();
   };
 
@@ -216,9 +240,10 @@ export function installWebkitImeFix(
   return {
     shouldSwallow: (data: string) => {
       if (!pending.length) return false;
-      const now = Date.now();
-      purge(now);
-      const idx = pending.findIndex((p) => p.data === data);
+      // Compare the half-width form so the duplicate is recognized whichever channel committed first: a `keyup`
+      // writing `/` and an input carrying the IME's `／` are the same keystroke, and only one belongs in the PTY.
+      const key = halfwidthAscii(data) || data;
+      const idx = pending.indexOf(key);
       if (idx === -1) return false;
       pending.splice(idx, 1);
       return true;

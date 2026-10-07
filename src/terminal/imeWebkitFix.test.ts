@@ -138,4 +138,61 @@ describe("imeWebkitFix", () => {
     expect(sent).toEqual([]);
     cleanup();
   });
+
+  it("consumes every duplicate after a burst longer than the old deduplication cap, so no character is sent twice", () => {
+    // A burst of pass-through symbols within the reorder window used to exceed the 16-entry cap; the oldest
+    // registrations were dropped and their late duplicates reached the PTY, so a typed `/` arrived as `//`.
+    const symbols = ["`", "~", "!", "@", "#", "$", "%", "^", "&", "*", "(", ")", "-", "_", "=", "+", "[", "{", "]", "}", ";", ":", "'", '"'];
+    const { textarea, sent, fix, cleanup } = setup();
+    for (const symbol of symbols) {
+      fireKey(textarea, "keydown", { code: "KeyX", key: "Process", keyCode: 229 });
+      fireKey(textarea, "keyup", { code: "KeyX", key: symbol });
+    }
+    expect(sent).toEqual(symbols); // Each symbol committed exactly once, in order.
+    // xterm delivers each duplicate afterwards, oldest first; every one must be swallowed.
+    expect(symbols.map((symbol) => fix.shouldSwallow(symbol))).toEqual(symbols.map(() => true));
+    cleanup();
+  });
+
+  it("does not send both halves of one slash keystroke, which is how a typed / appeared as //", () => {
+    // The `/` key is the one symbol that passes both gates: `keyup` reports its half-width source, which is a
+    // pass-through symbol, and the IME's conversion arrives later through `input` as a full-width `／`, which is
+    // full-width punctuation. Each channel committed separately, so one keystroke wrote two characters.
+    const { textarea, sent, fix, cleanup } = setup();
+    fireKey(textarea, "keydown", { code: "Slash", key: "Process", keyCode: 229 });
+    fireKey(textarea, "keyup", { code: "Slash", key: "/" });
+    expect(sent).toEqual(["/"]);
+    // The late input carries the full-width form; it is the same keystroke and must be consumed.
+    expect(fix.shouldSwallow("／")).toBe(true);
+    cleanup();
+  });
+
+  it("still deduplicates a duplicate that arrives after a long pause", () => {
+    // The duplicate lands with the next keystroke, which may be much later than any fixed time window. The
+    // former five-second TTL expired while the user sat idle, so the next keystroke's arrival released the
+    // duplicate and the character was sent twice.
+    const { textarea, sent, fix, cleanup } = setup();
+    fireKey(textarea, "keydown", { code: "Slash", key: "Process", keyCode: 229 });
+    fireKey(textarea, "keyup", { code: "Slash", key: "/" });
+    now += 30_000;
+    fireKey(textarea, "keydown", { code: "KeyS", key: "Process", keyCode: 229 });
+    expect(sent).toEqual(["/"]);
+    expect(fix.shouldSwallow("/")).toBe(true);
+    cleanup();
+  });
+
+  it("keeps two deliberately typed slashes and never swallows later ordinary input", () => {
+    const { textarea, sent, fix, cleanup } = setup();
+    for (let i = 0; i < 2; i++) {
+      fireKey(textarea, "keydown", { code: "Slash", key: "Process", keyCode: 229 });
+      fireKey(textarea, "keyup", { code: "Slash", key: "/" });
+    }
+    expect(sent).toEqual(["/", "/"]); // Both keystrokes belong in the PTY.
+    // A registration is consumed and the table then empties, so unrelated later input is untouched.
+    expect(fix.shouldSwallow("/")).toBe(true);
+    expect(fix.shouldSwallow("/")).toBe(true);
+    expect(fix.shouldSwallow("/")).toBe(false);
+    expect(fix.shouldSwallow("a")).toBe(false);
+    cleanup();
+  });
 });
