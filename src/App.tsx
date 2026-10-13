@@ -16,6 +16,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotifications } from "./hooks/useNotifications";
 import { CenterPane } from "./layout/CenterPane/CenterPane";
 import { LeftSidebar } from "./layout/LeftSidebar/LeftSidebar";
+import { PanelRail } from "./layout/PanelRail";
 import { RightPanel } from "./layout/RightPanel/RightPanel";
 import { StatusBar } from "./layout/StatusBar/StatusBar";
 import { TitleBar } from "./layout/TitleBar/TitleBar";
@@ -240,7 +241,9 @@ function App() {
     <div className="app">
       <TitleBar />
       <div className="body">
-        {!leftCollapsed && (
+        {leftCollapsed ? (
+          <PanelRail side="left" />
+        ) : (
           <>
             <LeftSidebar />
             <Splitter onDrag={resizeLeft} />
@@ -249,12 +252,15 @@ function App() {
 
         <CenterPane />
 
-        {!rightCollapsed && !isShareSurface && (
-          <>
-            <Splitter onDrag={resizeRight} />
-            <RightPanel />
-          </>
-        )}
+        {!isShareSurface &&
+          (rightCollapsed ? (
+            <PanelRail side="right" />
+          ) : (
+            <>
+              <Splitter onDrag={resizeRight} />
+              <RightPanel />
+            </>
+          ))}
       </div>
       <StatusBar />
       <Suspense fallback={null}>

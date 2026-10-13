@@ -218,6 +218,7 @@ function SidebarTreePane({
   const t = useT();
   const setTreeFilter = useTermStore((s) => s.setSidebarTreeViewFilter);
   const refreshStatusMatches = useTermStore((s) => s.refreshSidebarTreeViewStatusMatches);
+  const toggleLeft = useTermStore((s) => s.toggleLeft);
   const treeWrapRef = useRef<HTMLDivElement>(null);
 
   return (
@@ -273,6 +274,21 @@ function SidebarTreePane({
         <TreeScrollbar wrapRef={treeWrapRef} />
       </div>
       <div className="sidebar-tree-footer">
+        {/* The Hide control stays in the primary pane's footer so split views show it once. PanelRail
+            renders the matching Show control in the same corner while the sidebar is collapsed. */}
+        {isPrimary && (
+          <button
+            className="icon-btn sm sidebar-tree-hide"
+            title={t("titlebar.hideLeft")}
+            aria-label={t("titlebar.hideLeft")}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleLeft();
+            }}
+          >
+            <Icons.panelLeftFill size={14} />
+          </button>
+        )}
         <button
           className="icon-btn sm sidebar-tree-refresh"
           title={t("tree.refreshStatusFilter")}

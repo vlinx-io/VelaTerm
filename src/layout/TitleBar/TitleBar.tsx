@@ -1,18 +1,17 @@
-//! Vela-style application header with branding, theme toggle, appearance settings, and panel controls.
+//! Vela-style application header with branding, appearance settings, and window-level actions.
 //! The window retains native decorations; this row sits below the system title bar.
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import Icons from "../../components/Icons";
-import { getLocale, useT } from "../../i18n";
-import { SharingLink, sharingNavigate, useSharingLocation } from "../../sharing/navigation";
-import { sharingText } from "../../sharing/copy";
+import { useT } from "../../i18n";
+import { sharingNavigate, useSharingLocation } from "../../sharing/navigation";
 import { getBackendVersion } from "../../ipc/commands";
 import { apiUrl, isShareSurface } from "../../ipc/shareBase";
 import { invoke, isTauri } from "../../ipc/transport";
 import { recordRequestError } from "../../ipc/reqLog";
 import { screenshotShortcutGet, screenshotStart } from "../../ipc/screenshot";
 import { webServerStatus, type WebServerStatus } from "../../ipc/webServer";
-import { env, platform } from "../../platform";
+import { env } from "../../platform";
 import { useTermStore } from "../../store/termStore";
 import { runAfterInitialSettings } from "../../store/settingsWatch";
 import { resolveTheme } from "../../theme";
@@ -21,8 +20,6 @@ import { AppMenuBar } from "./AppMenuBar";
 import { ConnectRemotePanel } from "./ConnectRemotePanel";
 import { RemoteAccessPanel } from "./RemoteAccessPanel";
 import { SettingsModal } from "./SettingsModal";
-
-const FEEDBACK_URL = "https://velaterm.com/feedback";
 
 /**
  * Format MM-DD HH:mm:ss for the development badge's latest hot-update time.
@@ -48,7 +45,7 @@ function useHotReloadTime(): string {
     const handler = () => setStamp(fmtClock(new Date()));
     import.meta.hot.on("vite:afterUpdate", handler);
     return () => {
-      import.meta.hot?.off("vite:afterUpdate", handler);
+      import.meta.hot?.off?.("vite:afterUpdate", handler);
     };
   }, []);
   return stamp;
@@ -60,10 +57,7 @@ export function TitleBar() {
   const theme = useTermStore((s) => s.theme);
   const setTheme = useTermStore((s) => s.setTheme);
   const setDarkTheme = useTermStore((s) => s.setDarkTheme);
-  const leftCollapsed = useTermStore((s) => s.leftCollapsed);
-  const toggleLeft = useTermStore((s) => s.toggleLeft);
-  const rightCollapsed = useTermStore((s) => s.rightCollapsed);
-  const toggleRight = useTermStore((s) => s.toggleRight);
+  const themeSwitcherInTitleBar = useTermStore((s) => s.themeSwitcherInTitleBar);
   // Mirror mode is switched on the host only. Without a marker, a followed client sees its tabs and
   // splits rearrange with no visible cause; the badge names where those changes come from.
   const mirrorEnabled = useTermStore((s) => s.mirrorEnabled);
@@ -192,27 +186,6 @@ export function TitleBar() {
     setRemoteRunning(s?.running ?? false);
     setRemotePort(s?.port ?? null);
   };
-
-  useEffect(() => {
-    // Browser clients never show the account entry, and the relay status is not part of their session.
-    if (env.isBrowser) return;
-    let alive = true;
-    const refresh = () => {
-      invoke<{ linked: boolean }>("public_account_status")
-        .then((status) => {
-          if (alive) setAccountLinked(status.linked);
-        })
-        .catch(() => {
-          // Keep the last known state while the account service is unreachable; the icon is decoration.
-        });
-    };
-    refresh();
-    window.addEventListener("public-account-changed", refresh);
-    return () => {
-      alive = false;
-      window.removeEventListener("public-account-changed", refresh);
-    };
-  }, []);
 
   const remoteInfo = (window as any).__VLX_REMOTE__ as
     { address: string } | undefined;
@@ -431,7 +404,7 @@ export function TitleBar() {
 
       <span className="tb-spacer" />
 
-      <div className="tb-seg">
+      {themeSwitcherInTitleBar && <div className="tb-seg">
         <button
           className={theme === "system" ? "on" : ""}
           aria-pressed={theme === "system"}
@@ -462,7 +435,7 @@ export function TitleBar() {
         >
           <Icons.sun size={14} />
         </button>
-      </div>
+      </div>}
 
       {/* Remote access appears in Tauri/Electron desktop, whose sidecars can start a LAN instance.
           Browser clients are already remote. The button lights while the service runs. */}
@@ -554,59 +527,6 @@ export function TitleBar() {
           <Icons.gear size={15} />
         </button>
       )}
-
-      {!env.isBrowser && (
-        <SharingLink
-          className={`tb-btn${accountLinked ? " account-on" : ""}`}
-          values={{ publicAccount: "1" }}
-          title={`${sharingText("Account", getLocale())} · ${t("common.experimental")}`}
-          aria-label={`${sharingText("Account", getLocale())} · ${t("common.experimental")}`}
-        >
-          <Icons.account size={15} />
-        </SharingLink>
-      )}
-
-      {/* Feedback opens the feedback page in the system browser on every platform and surface. */}
-      <button
-        className="tb-btn"
-        title={t("titlebar.feedback")}
-        onClick={() => {
-          void platform.opener.openExternal(FEEDBACK_URL).catch(() => {});
-        }}
-      >
-        <Icons.feedback size={15} />
-      </button>
-
-      {/* VS Code-style panel toggles sit at the far right and fill their corresponding side when open. */}
-      <div className="tb-pair">
-        <button
-          className="tb-btn"
-          title={
-            leftCollapsed ? t("titlebar.showLeft") : t("titlebar.hideLeft")
-          }
-          onClick={toggleLeft}
-        >
-          {leftCollapsed ? (
-            <Icons.panelLeft size={15} />
-          ) : (
-            <Icons.panelLeftFill size={15} />
-          )}
-        </button>
-
-        <button
-          className="tb-btn"
-          title={
-            rightCollapsed ? t("titlebar.showRight") : t("titlebar.hideRight")
-          }
-          onClick={toggleRight}
-        >
-          {rightCollapsed ? (
-            <Icons.panel size={15} />
-          ) : (
-            <Icons.panelFill size={15} />
-          )}
-        </button>
-      </div>
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       {shareOpen && <ShareModal onClose={() => setShareOpen(false)} />}

@@ -1125,6 +1125,8 @@ interface TermStore {
   referSummary: ReferSummaryConfig;
   /** Whether the Info panel's Resources section shows the whole-machine group. */
   showSystemResources: boolean;
+  /** Whether the theme buttons appear in the title bar. */
+  themeSwitcherInTitleBar: boolean;
   /**
    * Info panel sections the user collapsed, keyed by section id. Missing keys are open, matching the
    * sparse persisted map, so a section the user never touched keeps its default expanded state.
@@ -1524,6 +1526,8 @@ interface TermStore {
   setReferSummary: (patch: Partial<ReferSummaryConfig>) => void;
   /** Shows or hides the whole-machine rows in the Info panel's Resources section. */
   setShowSystemResources: (v: boolean) => void;
+  /** Sets whether the title bar shows the theme buttons. */
+  setThemeSwitcherInTitleBar: (v: boolean) => void;
   /** Collapses or expands one Info panel section by id, persisting the choice across sessions and shells. */
   toggleInfoSection: (id: string) => void;
   /** Replaces the ordered list of composer chips shown inline; chips left out are off. */
@@ -1741,6 +1745,7 @@ function persistAndApplyVisual(getState: () => TermStore) {
     referSummary: s.referSummary,
     showSystemResources: s.showSystemResources,
     infoCollapsed: s.infoCollapsed,
+    themeSwitcherInTitleBar: s.themeSwitcherInTitleBar,
     composerInlineChips: s.composerInlineChips,
     composerInlineChipsRevision: s.composerInlineChipsRevision,
   };
@@ -4695,6 +4700,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
   setShowSystemResources: (v) => {
     set({ showSystemResources: v });
+    persistAndApplyVisual(get);
+  },
+  setThemeSwitcherInTitleBar: (v) => {
+    set({ themeSwitcherInTitleBar: v });
     persistAndApplyVisual(get);
   },
   toggleInfoSection: (id) => {

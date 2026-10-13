@@ -1,6 +1,5 @@
 //! Bottom status bar (Vlinx style, 24px). Left: session count, current session type, branch and
-//! worktree marker, per-session permissions, and notification toggle. Keeping notifications at the
-//! end of the left side avoids accidental clicks near the right edge. Right: global aggregates that
+//! worktree marker, per-session permissions, notifications, Feedback, and Account. Right: global aggregates that
 //! do not duplicate the per-session Info panel—working/waiting/replied counts linked to the sidebar
 //! filter, background keep-alive tab count with a popover, and remote-access status.
 
@@ -13,7 +12,9 @@ import Icons from "../../components/Icons";
 import { SELECT_PANEL } from "../../components/Select";
 import { SessionStatusBadge } from "../../components/SessionStatusBadge";
 import { useGitBranchInfo } from "../../hooks/useGitBranch";
-import { t, useT } from "../../i18n";
+import { getLocale, t, useT } from "../../i18n";
+import { SharingLink } from "../../sharing/navigation";
+import { sharingText } from "../../sharing/copy";
 import { invoke, isTauri } from "../../ipc/transport";
 import {
   getEffectiveNotifyPermission,
@@ -23,7 +24,7 @@ import { openUpdateModal, useUpdateState } from "../../ipc/updater";
 import { checkVelaSkills, openVelaSkillsModal, useVelaSkillsState } from "../../ipc/velaSkills";
 import { isShareSurface } from "../../ipc/shareBase";
 import { webServerStatus, type WebServerStatus } from "../../ipc/webServer";
-import { env } from "../../platform";
+import { env, platform } from "../../platform";
 import { useTermStore } from "../../store/termStore";
 import { effectivePermissionMode } from "../../store/settings";
 import {
@@ -32,6 +33,8 @@ import {
   supportsPermissionToggle,
 } from "../../types";
 import { collectSessionIds } from "../CenterPane/paneTree";
+
+const FEEDBACK_URL = "https://velaterm.com/feedback";
 
 /** Localized display name for a session type; brand names remain untranslated. */
 function kindLabel(kind: SessionKind): string {
@@ -196,6 +199,8 @@ export function StatusBar() {
       </span>
       <PermissionSeg />
       <NotifySeg />
+      <FeedbackSeg />
+      <AccountSeg />
       <span className="sp" />
       <StatusSegs />
       {liveTabs.length > 0 && <BackgroundTabsSeg />}
@@ -212,6 +217,61 @@ export function StatusBar() {
       <VelaSkillsSeg />
       <UpdateSeg />
     </div>
+  );
+}
+
+/** Opens the feedback page in the system browser. */
+function FeedbackSeg() {
+  const t = useT();
+  return (
+    <button
+      type="button"
+      className="seg btn"
+      title={t("titlebar.feedback")}
+      aria-label={t("titlebar.feedback")}
+      onClick={() => {
+        void platform.opener.openExternal(FEEDBACK_URL).catch(() => {});
+      }}
+    >
+      <Icons.feedback size={11} />
+    </button>
+  );
+}
+
+/** Account link state follows changes reported by the local account relay. */
+function AccountSeg() {
+  const t = useT();
+  const [linked, setLinked] = useState(false);
+  useEffect(() => {
+    if (env.isBrowser) return;
+    let alive = true;
+    const refresh = () => {
+      invoke<{ linked: boolean }>("public_account_status")
+        .then((status) => {
+          if (alive) setLinked(status.linked);
+        })
+        .catch(() => {
+          // Keep the last known state while the account service is unreachable.
+        });
+    };
+    refresh();
+    window.addEventListener("public-account-changed", refresh);
+    return () => {
+      alive = false;
+      window.removeEventListener("public-account-changed", refresh);
+    };
+  }, []);
+  if (env.isBrowser) return null;
+  const label = `${sharingText("Account", getLocale())} · ${t("common.experimental")}`;
+  return (
+    <SharingLink
+      className={"seg btn" + (linked ? " account-on" : "")}
+      values={{ publicAccount: "1" }}
+      title={label}
+      aria-label={label}
+    >
+      <Icons.account size={11} />
+    </SharingLink>
   );
 }
 

@@ -47,6 +47,7 @@ function ScopeInfo({ project, group }: { project: Project; group?: Group }) {
 export function RightPanel() {
   const t = useT();
   const width = useTermStore((s) => s.rightWidth);
+  const toggleRight = useTermStore((s) => s.toggleRight);
   const inspectorTab = useTermStore((s) => s.inspectorTab);
   const setInspectorTab = useTermStore((s) => s.setInspectorTab);
   const search=useMemoryLocation();
@@ -133,6 +134,11 @@ export function RightPanel() {
             </div>
           ))}
         {inspectorTab === "git" && <GitTab path={cwd} />}
+      </div>
+      <div className="col-foot">
+        <button className="icon-btn sm" title={t("titlebar.hideRight")} aria-label={t("titlebar.hideRight")} onClick={toggleRight}>
+          <Icons.panelFill size={14} />
+        </button>
       </div>
     </aside>
   );
