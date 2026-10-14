@@ -1630,6 +1630,7 @@ const en = {
   "files.nameLabel": "Name",
   "files.newTooltip": "New file or folder",
   "files.openInTerminal": "Open in Terminal",
+  "files.collapseAll": "Collapse All",
   "files.revealInFinder": "Show in File Manager",
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",

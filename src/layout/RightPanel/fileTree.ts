@@ -45,6 +45,29 @@ export function updateFileNode(root: FileNodeT, path: string, update: (node: Fil
   return children.some((child, index) => child !== root.children![index]) ? { ...root, children } : root;
 }
 
+/**
+ * Close every loaded directory below `root`, leaving the root itself open.
+ *
+ * Collapsing the root too would hide the whole tree and read as a broken panel, so the root is the
+ * one node exempted. Loaded children are kept, so reopening a directory needs no refetch.
+ */
+export function collapseAllBelow(root: FileNodeT): FileNodeT {
+  if (!root.children) return root;
+  const close = (node: FileNodeT): FileNodeT => {
+    const children = node.children?.map(close);
+    const changed = children?.some((child, index) => child !== node.children![index]);
+    return node.open || changed ? { ...node, open: false, ...(children ? { children } : {}) } : node;
+  };
+  const children = root.children.map(close);
+  return children.some((child, index) => child !== root.children![index]) ? { ...root, children } : root;
+}
+
+/** Whether any loaded directory below `root` is currently open, i.e. whether collapsing would do
+ *  anything. Used to disable the control rather than offer a button that visibly does nothing. */
+export function hasOpenDescendant(root: FileNodeT): boolean {
+  return (root.children || []).some((c) => !!c.open || hasOpenDescendant(c));
+}
+
 /** Only expanded, already loaded directories need background queries. */
 export function visibleDirectories(root: FileNodeT): string[] {
   if (!root.isDir || !root.open) return [];
