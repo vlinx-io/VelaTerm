@@ -1,5 +1,7 @@
 //! Global keyboard shortcuts.
 //! - Cmd/Ctrl+1–9 focuses the numbered open tab and is fixed to tab positions.
+//! - Cmd/Ctrl+Tab cycles open tabs (Shift reverses) and is fixed because shortcutRegistry combos
+//!   encode only single letters, so Tab is not expressible as a remappable ShortcutAction.
 //! - Cmd/Ctrl++/-/0 changes or resets terminal font size and is fixed to those semantics.
 //! - Settings may remap temporary-terminal creation, desktop browser tabs, pane/tab closure, both
 //!   split directions, terminal/global search, terminal copy and select all, and document save. Defaults live in shortcutRegistry
@@ -38,6 +40,16 @@ import {
   type ShortcutAction,
 } from "./shortcutRegistry";
 
+/**
+ * Whether `e` is Cmd/Ctrl(+Shift)+Tab with at least two open tabs to cycle. Below two tabs cycling is a
+ * no-op, so the combo stays unconsumed: the global handler leaves it alone and usePtySession lets xterm
+ * deliver it to the shell as before. Either modifier is accepted on every platform, the way a browser's
+ * Ctrl+Tab is, so this deliberately does not use the platform-exclusive hasMod.
+ */
+export function isTabCycleKey(e: KeyboardEvent): boolean {
+  return (e.metaKey || e.ctrlKey) && e.key === "Tab" && useTermStore.getState().openTabs.length > 1;
+}
+
 export function useKeyboardShortcuts() {
   useEffect(() => {
     // Zero-based Cmd+1–9 tab index, with layout/IME-independent e.code fallback; otherwise -1.
@@ -73,7 +85,21 @@ export function useKeyboardShortcuts() {
         return;
       }
 
-      // ── Fixed shortcut 2: Cmd++/-/0 changes or resets terminal font size ──
+      // ── Fixed shortcut 2: Cmd+Tab cycles open tabs, Shift reverses, both directions wrap ──
+      // Plain next/previous over the visible `openTabs` order, not most-recently-used; `liveTabs` is a
+      // background pool and never part of the cycle. usePtySession blocks the combo from xterm so the
+      // shell does not also receive HT/CBT; both sides gate on isTabCycleKey.
+      if (isTabCycleKey(e)) {
+        const { openTabs, activeTabId, setActiveTab } = useTermStore.getState();
+        e.preventDefault();
+        // Clamp an unknown active tab to 0 so either direction still lands in range.
+        const from = Math.max(0, openTabs.indexOf(activeTabId ?? ""));
+        const step = e.shiftKey ? -1 : 1;
+        setActiveTab(openTabs[(from + step + openTabs.length) % openTabs.length]);
+        return;
+      }
+
+      // ── Fixed shortcut 3: Cmd++/-/0 changes or resets terminal font size ──
       // Apply only to active session tabs; document/browser tabs retain their own handling.
       if (hasMod(e)) {
         const isPlus = e.key === "+" || e.key === "=" || e.code === "Equal";
