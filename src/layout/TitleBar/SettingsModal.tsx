@@ -830,7 +830,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
                 <div>
                   <SectionTitle>{t("settings.catBehavior")}</SectionTitle>
-                  <Field label={t("settings.tabs")}>
+                  <Field label={t("settings.tabs")} hint={t("settings.tabsHint")}>
                     <Seg<"single" | "multi">
                       value={singleTabMode ? "single" : "multi"}
                       options={[
@@ -840,7 +840,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       onChange={(v) => setSingleTabMode(v === "single")}
                     />
                   </Field>
-                  <Field label={t("settings.dynamicStatusFilter")}>
+                  <Field label={t("settings.dynamicStatusFilter")} hint={t("settings.dynamicStatusFilterHint")}>
                     <Seg<"on" | "off">
                       value={dynamicStatusFilter ? "on" : "off"}
                       options={[
@@ -851,20 +851,15 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     />
                   </Field>
                   {singleTabMode && (
-                    <Field label={t("settings.maxLiveTabs")}>
-                      <Select
+                    <Field label={t("settings.maxLiveTabs")} hint={t("settings.maxLiveTabsHint")}>
+                      <Seg<string>
                         value={String(maxLiveTabs)}
-                        options={MAX_LIVE_TABS_CHOICES.map((n) => ({ value: String(n), label: String(n) }))}
+                        options={MAX_LIVE_TABS_CHOICES.map((n) => [String(n), String(n)] as [string, string])}
                         onChange={(v) => setMaxLiveTabs(Number(v))}
-                        size="sm"
-                        width={160}
-                        menuWidth={172}
-                        align="right"
-                        ariaLabel={t("settings.maxLiveTabs")}
                       />
                     </Field>
                   )}
-                  <Field label={t("settings.spawnConfirm")}>
+                  <Field label={t("settings.spawnConfirm")} hint={t("settings.spawnConfirmHint")}>
                     <Seg<"on" | "off">
                       value={spawnConfirm ? "on" : "off"}
                       options={[
