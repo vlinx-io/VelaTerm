@@ -88,6 +88,7 @@ import {
   type InspectorTab,
   type NavLayout,
   type PaneStyle,
+  type SettingsTab,
   type ResolvedTheme,
   type Theme,
 } from "../theme";
@@ -1141,6 +1142,7 @@ interface TermStore {
   dividerStyle: DividerStyle;
   navLayout: NavLayout;
   inspectorTab: InspectorTab;
+  settingsTab: SettingsTab;
   /** Single-tab mode: reuse the session slot and keep replaced tabs alive in the background. */
   singleTabMode: boolean;
   /** Terminal renderer: stable DOM or accelerated WebGL with GPU context limits. */
@@ -1621,6 +1623,7 @@ interface TermStore {
   setDividerStyle: (v: DividerStyle) => void;
   setNavLayout: (v: NavLayout) => void;
   setInspectorTab: (v: InspectorTab) => void;
+  setSettingsTab: (v: SettingsTab) => void;
   /** Toggles persisted single-tab mode. */
   setSingleTabMode: (v: boolean) => void;
   /** Toggles confirmation before spawning child sessions. */
@@ -1846,6 +1849,7 @@ function persistAndApplyVisual(getState: () => TermStore) {
     dividerStyle: s.dividerStyle,
     navLayout: s.navLayout,
     inspectorTab: s.inspectorTab,
+    settingsTab: s.settingsTab,
     singleTabMode: s.singleTabMode,
     termRenderer: s.termRenderer,
     redrawOnReveal: s.redrawOnReveal,
@@ -4987,6 +4991,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
   setInspectorTab: (v) => {
     set({ inspectorTab: v });
+    persistAndApplyVisual(get);
+  },
+  setSettingsTab: (v) => {
+    set({ settingsTab: v });
     persistAndApplyVisual(get);
   },
   setSingleTabMode: (v) => {
