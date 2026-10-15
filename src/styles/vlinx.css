@@ -281,13 +281,15 @@ svg { display: block; }
 .filter-menu-item .lbl { flex: 1; min-width: 0; }
 .filter-menu-item .cnt { flex: 0 0 auto; min-width: 18px; height: 16px; padding: 0 5px; border-radius: 8px; background: var(--bg-hover); color: var(--text-dim); font-size: 10.5px; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
 /* Section heading separating the status and marker groups inside one filter dropdown. */
-.filter-menu-title { padding: 6px 8px 3px; color: var(--text-faint); font-size: 10.5px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; }
+.filter-menu-title, .tree-section { color: var(--text-faint); font-size: 10.5px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; }
+.filter-menu-title { padding: 6px 8px 3px; }
 .filter-menu-title:first-child { padding-top: 3px; }
 /* Marker emoji occupies the same column as the status dot so both sections line up. */
 .filter-menu-item .mark-emoji { width: 7px; flex: 0 0 auto; display: inline-flex; justify-content: center; font-size: 12px; line-height: 1; }
 
 /* ============================ TREE ================================== */
 .tree { height: 100%; overflow-y: scroll; padding: 4px 6px 16px; }
+.tree-section { display: flex; align-items: flex-end; height: var(--row-h); padding: 0 8px 3px; user-select: none; -webkit-user-select: none; }
 .row { display: flex; align-items: center; gap: 6px; height: var(--row-h); padding-right: 6px; border-radius: var(--r-sm); cursor: pointer; position: relative; color: var(--text-mid); white-space: nowrap; user-select: none; -webkit-user-select: none; }
 .row:hover { background: var(--bg-hover); }
 .row.sel { background: var(--accent-soft); color: var(--text); }

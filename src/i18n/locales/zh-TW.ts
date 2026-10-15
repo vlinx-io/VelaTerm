@@ -1151,6 +1151,7 @@ const zhTW: typeof en = {
   "tree.openProject": "開啟專案", // Open Project
   "tree.noAttention": "沒有符合狀態篩選的會話", // No sessions match the status filter
   "tree.noMatch": "無符合結果", // No matches
+  "tree.otherProjects": "其他專案", // Other projects
 
   // Dialog fields
   "tree.groupName": "群組名稱", // Group name

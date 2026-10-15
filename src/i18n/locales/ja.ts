@@ -1170,6 +1170,7 @@ const ja: typeof en = {
   "tree.openProject": "プロジェクトを開く", // Open Project
   "tree.noAttention": "ステータス絞り込みに一致するセッションはありません", // No sessions match the status filter
   "tree.noMatch": "一致なし", // No matches
+  "tree.otherProjects": "その他のプロジェクト", // Other projects
 
   // Dialog fields
   "tree.groupName": "グループ名", // Group name

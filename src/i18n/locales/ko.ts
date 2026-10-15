@@ -1163,6 +1163,7 @@ const ko: typeof en = {
   "tree.openProject": "프로젝트 열기", // Open Project
   "tree.noAttention": "상태 필터와 일치하는 세션이 없습니다", // No sessions match the status filter
   "tree.noMatch": "일치 항목 없음", // No matches
+  "tree.otherProjects": "기타 프로젝트", // Other projects
 
   // Dialog fields
   "tree.groupName": "그룹 이름", // Group name

@@ -34,6 +34,7 @@ import { arrangeProjectsInCollections } from "./projectCollectionLayout";
 import { collectionDialogUrl } from "./collectionNavigation";
 import { newGroupDialogUrl } from "./groupNavigation";
 import { hasProjectDrag, PROJECT_DRAG_MIME, resolveProjectDrop } from "./projectCollectionDrop";
+import { hiddenSearchMatches } from "./hiddenSearchMatches";
 
 /** Reference to a node targeted by a context menu or operation. */
 export interface TreeNodeRef {
@@ -80,6 +81,7 @@ export interface TreeHandlers {
  *  visible rows and reuses nodes while scrolling. This is separate from `flat`, which contains only persistent nodes
  *  for Shift-range selection. */
 type TreeRow =
+  | { kind: "section"; id: string }
   | { kind: "project"; id: string; project: Project; expanded: boolean; indent: number }
   | { kind: "group"; id: string; group: Group; depth: number; expanded: boolean }
   | {
@@ -491,6 +493,13 @@ export function ProjectTree(h: TreeHandlers) {
     return arrangeProjectsInCollections(visible, p => filtering || !nodeCollapsed(p.id, p.collapsed));
   }, [projects, filtering, visProjects, collapsedOverrides]);
 
+  // A status filter hides projects without qualifying sessions; searching still lists them, flat and
+  // collapsed, below the filtered results so they stay reachable.
+  const otherProjects = useMemo(
+    () => hiddenSearchMatches(projects, filter, visProjects, statusFiltering),
+    [projects, filter, visProjects, statusFiltering],
+  );
+
   // A name match propagates visibility downward so a matching node's complete subtree remains expandable even when
   // descendants lack the term. Marker propagation is added only for projects/groups below: a marked session keeps
   // its ancestor chain visible, but must not pull unrelated descendants into the marker result.
@@ -564,11 +573,12 @@ export function ProjectTree(h: TreeHandlers) {
       const expanded = filtering ? true : !nodeCollapsed(p.id, p.collapsed);
       if (expanded) walk(p.id, null, projectContainerHit(p));
     }
+    for (const p of otherProjects) out.push({ id: p.id, kind: "project" });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     projects, groups, sessions, filter, statusFiltering, statusFilterIds, markFilter,
-    visGroups, visProjects, collapsedOverrides, projectEntries,
+    visGroups, visProjects, collapsedOverrides, projectEntries, otherProjects,
   ]);
 
   // Flatten the visible tree, including pinned temporary draft types, into virtualized render rows matching the old
@@ -627,11 +637,17 @@ export function ProjectTree(h: TreeHandlers) {
       out.push({ kind: "project", id: p.id, project: p, expanded, indent: entry.indent });
       if (expanded) walkChildren(p.id, null, 1 + entry.indent, projectContainerHit(p));
     }
+    if (otherProjects.length > 0) {
+      out.push({ kind: "section", id: "section:other-projects" });
+      for (const p of otherProjects) {
+        out.push({ kind: "project", id: p.id, project: p, expanded: false, indent: 0 });
+      }
+    }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     projects, groups, sessions, filter, statusFiltering, statusFilterIds, markFilter,
-    visGroups, visProjects, filtering, collapsedOverrides, projectEntries,
+    visGroups, visProjects, filtering, collapsedOverrides, projectEntries, otherProjects,
   ]);
 
   // Exact row heights are compact 24, regular 28, or comfy 32, reduced by 3 in compact navigation. Supplying this
@@ -1249,6 +1265,8 @@ export function ProjectTree(h: TreeHandlers) {
   // Render one flattened row by kind, centralizing JSX formerly spread across three recursive render paths.
   const renderRow = (row: TreeRow): React.ReactNode => {
     switch (row.kind) {
+      case "section":
+        return <div className="tree-section">{t("tree.otherProjects")}</div>;
       case "project": {
         const p = row.project;
         const renaming = renamingId === p.id;

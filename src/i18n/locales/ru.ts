@@ -1181,6 +1181,7 @@ const ru: typeof en = {
   "tree.openProject": "Открыть проект", // Open Project
   "tree.noAttention": "Нет сессий, соответствующих фильтру статуса", // No sessions match the status filter
   "tree.noMatch": "Совпадений нет", // No matches
+  "tree.otherProjects": "Другие проекты", // Other projects
 
   // Dialog fields
   "tree.groupName": "Название группы", // Group name

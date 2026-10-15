@@ -1150,6 +1150,7 @@ const zhCN: typeof en = {
   "tree.openProject": "打开项目",
   "tree.noAttention": "没有符合状态筛选的会话",
   "tree.noMatch": "无匹配结果",
+  "tree.otherProjects": "其他项目",
 
   // Dialog fields
   "tree.groupName": "分组名称",

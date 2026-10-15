@@ -1170,6 +1170,7 @@ const ptBR: typeof en = {
   "tree.openProject": "Abrir projeto", // Open Project
   "tree.noAttention": "Nenhuma sessão corresponde ao filtro de status", // No sessions match the status filter
   "tree.noMatch": "Sem resultados", // No matches
+  "tree.otherProjects": "Outros projetos", // Other projects
 
   // Dialog fields
   "tree.groupName": "Nome do grupo", // Group name

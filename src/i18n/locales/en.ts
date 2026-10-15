@@ -1168,6 +1168,7 @@ const en = {
   "tree.openProject": "Open Project",
   "tree.noAttention": "No sessions match the status filter",
   "tree.noMatch": "No matches",
+  "tree.otherProjects": "Other projects",
 
   // Dialog fields
   "tree.groupName": "Group name",

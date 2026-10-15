@@ -272,3 +272,73 @@ describe("dragging projects", () => {
     expect(fireEvent.dragOver(rowOf("Payments"), overData(["text/plain", PROJECT_DRAG_MIME]))).toBe(false);
   });
 });
+
+describe("other projects section", () => {
+  const filtered = (treeFilter: string, statusFilter: boolean) => {
+    const base = handlers();
+    return {
+      ...base,
+      view: {
+        ...base.view,
+        treeFilter,
+        statusFilter: statusFilter ? (["working"] as ["working"]) : null,
+        statusFilterIds: statusFilter ? { s1: true as const } : null,
+      },
+    };
+  };
+
+  beforeEach(() => {
+    mocks.state.sessions = [
+      {
+        id: "s1",
+        projectId: "p-api",
+        groupId: null,
+        parentSessionId: null,
+        name: "pay-shell",
+        kind: "terminal",
+        collapsed: false,
+        sortOrder: 0,
+        createdAt: 0,
+      },
+    ];
+  });
+
+  it("lists filter-hidden projects matching the search below the results", () => {
+    const { container } = render(<ProjectTree {...filtered("pay", true)} />);
+    expect(screen.getByText("tree.otherProjects")).toBeTruthy();
+    expect(names(container)).toEqual(["Payments", "payments-api", "pay-shell", "payments-web"]);
+    expect(rowOf("payments-web").style.paddingLeft).toBe("6px");
+  });
+
+  it("stays hidden without a status filter", () => {
+    render(<ProjectTree {...filtered("pay", false)} />);
+    expect(screen.queryByText("tree.otherProjects")).toBeNull();
+  });
+
+  it("shows name matches in the main tree with only a mark filter", () => {
+    const base = handlers();
+    const { container } = render(
+      <ProjectTree {...base} view={{ ...base.view, treeFilter: "notes", markFilter: "⭐" }} />,
+    );
+    expect(screen.queryByText("tree.otherProjects")).toBeNull();
+    expect(names(container)).toEqual(["notes"]);
+  });
+
+  it("replaces the empty state when only hidden projects match", () => {
+    const { container } = render(<ProjectTree {...filtered("notes", true)} />);
+    expect(screen.queryByText("tree.noMatch")).toBeNull();
+    expect(screen.getByText("tree.otherProjects")).toBeTruthy();
+    expect(names(container)).toEqual(["notes"]);
+  });
+
+  it("opens a new session from a hidden project's add button", () => {
+    const props = filtered("notes", true);
+    render(<ProjectTree {...props} />);
+    fireEvent.click(within(rowOf("notes")).getByTitle("tree.newSession"));
+    expect(props.onAddSession).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "project", id: "p-notes", projectId: "p-notes" }),
+      expect.any(Number),
+      expect.any(Number),
+    );
+  });
+});

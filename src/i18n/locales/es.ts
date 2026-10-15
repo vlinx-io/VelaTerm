@@ -1173,6 +1173,7 @@ const es: typeof en = {
   "tree.openProject": "Abrir proyecto", // Open Project
   "tree.noAttention": "Ninguna sesión coincide con el filtro de estado", // No sessions match the status filter
   "tree.noMatch": "Sin coincidencias", // No matches
+  "tree.otherProjects": "Otros proyectos", // Other projects
 
   // Dialog fields
   "tree.groupName": "Nombre del grupo", // Group name
