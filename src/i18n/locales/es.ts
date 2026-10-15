@@ -533,6 +533,8 @@ const es: typeof en = {
   "settings.maxLiveTabs": "Background limit", // Background limit
   "settings.defaultShell": "Shell predeterminada", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.scopeTabsToProject": "Mostrar solo las pestañas del proyecto activo", // Show only the active project's tabs
+  "settings.scopeTabsToProjectHint": "Al seleccionar un proyecto en la barra lateral, solo verás sus pestañas y los terminales globales. Las pestañas ocultas siguen en ejecución.", // Selecting a project in the sidebar shows only its tabs plus global terminals. Hidden tabs keep running.
   "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.autoContinue": "Continuar tras el restablecimiento", // Continue after limit resets
@@ -1362,6 +1364,8 @@ const es: typeof en = {
   "center.splitHint": "Abre una sesión para dividirla con estos atajos:",
   "tab.unsavedDot": "Cambios sin guardar", // Unsaved changes
   "tab.newTerminal": "Nuevo terminal", // New terminal
+  "tab.newGlobalTerminal": "Nuevo terminal global", // New global terminal
+  "tab.globalTerminal": "Terminal global", // Global terminal
   "tab.newDocument": "Nuevo documento", // New document
   "tab.bgTitle": (n) =>
     `Pestañas en segundo plano: ${n} (procesos aún en ejecución)`, // Background keep-alive tabs: {n}…

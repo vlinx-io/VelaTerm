@@ -10,6 +10,7 @@ const { storeState, splitNewMock, newScratchTabMock, focusTerminalMock } =
     storeState: {
       shortcutOverrides: {} as Record<string, string>,
       activeSessionId: "s1",
+      scopeTabsToProject: false,
       splitNew: vi.fn(),
       newScratchTab: vi.fn(),
       setSettingsOpen: vi.fn(),
@@ -57,6 +58,26 @@ afterEach(() => {
 });
 
 describe("AppMenuBar", () => {
+  it("offers a global terminal only while tabs are scoped to a project", () => {
+    storeState.scopeTabsToProject = true;
+    try {
+      render(<AppMenuBar />);
+      tapAlt();
+      fireEvent.click(screen.getByText("menubar.terminal"));
+      fireEvent.click(screen.getByText("tab.newGlobalTerminal"));
+      expect(newScratchTabMock).toHaveBeenCalledWith({ global: true });
+    } finally {
+      storeState.scopeTabsToProject = false;
+    }
+  });
+
+  it("hides the global terminal entry while scoping is off", () => {
+    render(<AppMenuBar />);
+    tapAlt();
+    fireEvent.click(screen.getByText("menubar.terminal"));
+    expect(screen.queryByText("tab.newGlobalTerminal")).toBeNull();
+  });
+
   it("stays hidden until a bare Alt press, and hides again on the next one", () => {
     render(<AppMenuBar />);
     expect(screen.queryByText("menubar.help")).toBeNull();

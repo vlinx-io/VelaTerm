@@ -186,6 +186,8 @@ export interface Session {
    *  sidebar filter. The stored value is the emoji itself, so markers unknown to this build still round-trip.
    *  Empty or absent means unmarked. */
   mark?: string | null;
+  /** Ephemeral terminal that belongs to no project and shows in every project's tab bar. Never persisted. */
+  global?: boolean;
   sortOrder: number;
   createdAt: number;
 }

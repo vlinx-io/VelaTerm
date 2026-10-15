@@ -3,6 +3,7 @@
 //! Inactive tabs use `display:none`, keeping xterm and the PTY alive; dividers overlay the active tab.
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useMemoryTab } from "../Memory/useMemoryTab";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
@@ -10,6 +11,7 @@ import { effectiveCombo, formatCombo } from "../../hooks/shortcutRegistry";
 import { isShareSurface } from "../../ipc/shareBase";
 import { remoteText } from "../../sharing/remoteApi";
 import { useTermStore } from "../../store/termStore";
+import { visibleTabIds } from "../../store/visibleTabs";
 import { projectRoot } from "../../types";
 import {
   collectSessionIds,
@@ -147,6 +149,7 @@ export function CenterPane() {
   const sessions = useTermStore((s) => s.sessions);
   const ephemeralSessions = useTermStore((s) => s.ephemeralSessions);
   const openTabs = useTermStore((s) => s.openTabs);
+  const visibleTabs = useTermStore(useShallow(visibleTabIds));
   const liveTabs = useTermStore((s) => s.liveTabs);
   const docTabs = useTermStore((s) => s.docTabs);
   const browserTabs = useTermStore((s) => s.browserTabs);
@@ -314,7 +317,7 @@ export function CenterPane() {
         </Suspense>
         {searchOpen && activeSessionId && (sessionsById.get(activeSessionId) ?? ephemeralSessions[activeSessionId])?.engine !== "chat" && <SearchBar />}
 
-        {openTabs.length === 0 && (
+        {visibleTabs.length === 0 && (
           <div className="empty">
             <div className="inner">
               <div className="glyph">

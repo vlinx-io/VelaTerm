@@ -529,6 +529,8 @@ const zhTW: typeof en = {
   "settings.maxLiveTabs": "背景保活上限", // Background limit
   "settings.defaultShell": "預設 Shell", // Default shell
   "settings.spawnConfirm": "派生前確認", // Confirm before spawn
+  "settings.scopeTabsToProject": "僅顯示目前專案的分頁", // Show only the active project's tabs
+  "settings.scopeTabsToProjectHint": "在側邊欄選取專案後，只會顯示該專案的分頁與全域終端機。隱藏的分頁會繼續執行。", // Selecting a project in the sidebar shows only its tabs plus global terminals. Hidden tabs keep running.
   "settings.usageAuto": "額度自動刷新", // Usage auto-refresh
   "settings.usageRefresh": "額度刷新", // Usage refresh
   "settings.autoContinue": "額度重設後自動繼續", // Continue after limit resets
@@ -1329,6 +1331,8 @@ const zhTW: typeof en = {
   "center.splitHint": "開啟會話後，可使用以下快捷鍵分割畫面：",
   "tab.unsavedDot": "有未儲存的修改", // Unsaved changes
   "tab.newTerminal": "新增終端機", // New terminal
+  "tab.newGlobalTerminal": "新增全域終端機", // New global terminal
+  "tab.globalTerminal": "全域終端機", // Global terminal
   "tab.newDocument": "新增文件", // New document
   "tab.bgTitle": (n) => `背景保活分頁：${n} 個（處理程序仍在執行）`, // Background keep-alive tabs: {n}…
   "tab.bgLabel": (n) => `背景 ${n}`, // Background {n}

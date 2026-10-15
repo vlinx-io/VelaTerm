@@ -531,6 +531,8 @@ const en = {
   "settings.maxLiveTabs": "Background limit",
   "settings.defaultShell": "Default shell",
   "settings.spawnConfirm": "Confirm before spawn",
+  "settings.scopeTabsToProject": "Show only the active project's tabs",
+  "settings.scopeTabsToProjectHint": "Selecting a project in the sidebar shows only its tabs plus global terminals. Hidden tabs keep running.",
   "settings.usageAuto": "Usage auto-refresh",
   "settings.usageRefresh": "Usage refresh",
   "settings.autoContinue": "Continue after limit resets",
@@ -1357,6 +1359,8 @@ const en = {
   "center.splitHint": "Open a session to use these split shortcuts:",
   "tab.unsavedDot": "Unsaved changes",
   "tab.newTerminal": "New terminal",
+  "tab.newGlobalTerminal": "New global terminal",
+  "tab.globalTerminal": "Global terminal",
   "tab.newDocument": "New document",
   "tab.bgTitle": (n: number) =>
     `Background keep-alive tabs: ${n} (processes still running)`,

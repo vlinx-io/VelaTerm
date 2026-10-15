@@ -40,6 +40,7 @@ interface MenuDef {
 export function AppMenuBar() {
   const t = useT();
   const shortcutOverrides = useTermStore((s) => s.shortcutOverrides);
+  const scopeTabsToProject = useTermStore((s) => s.scopeTabsToProject);
   const [visible, setVisible] = useState(false);
   // Highlighted top-level menu; meaningful only while the bar is visible.
   const [cursor, setCursor] = useState(0);
@@ -84,6 +85,9 @@ export function AppMenuBar() {
             accel: accel("newTab"),
             run: () => useTermStore.getState().newScratchTab(),
           },
+          ...(scopeTabsToProject
+            ? [{ label: t("tab.newGlobalTerminal"), run: () => useTermStore.getState().newScratchTab({ global: true }) }]
+            : []),
           "separator",
           {
             label: t("term.splitRight"),
@@ -116,7 +120,7 @@ export function AppMenuBar() {
         ],
       },
     ],
-    [t, accel],
+    [t, accel, scopeTabsToProject],
   );
 
   useEffect(() => {

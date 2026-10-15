@@ -191,3 +191,52 @@ it("switches tabs with mod+digit but leaves mod+Alt+digit to editors", () => {
   expect(digit({ ctrlKey: true, altKey: true }).defaultPrevented).toBe(false);
   expect(setActiveTab).not.toHaveBeenCalled();
 });
+
+it("numbers only the visible tabs when tabs are scoped to a project", () => {
+  const setActiveTab = vi.fn();
+  Object.assign(state, {
+    scopeTabsToProject: true,
+    activeProjectId: "A",
+    openTabs: ["a1", "b1", "a2"],
+    paneTrees: {},
+    ephemeralSessions: {},
+    projects: [{ id: "A" }, { id: "B" }],
+    sessions: [
+      { id: "a1", projectId: "A" },
+      { id: "b1", projectId: "B" },
+      { id: "a2", projectId: "A" },
+    ],
+    setActiveTab,
+  });
+  try {
+    const event = new KeyboardEvent("keydown", { key: "2", code: "Digit2", bubbles: true, cancelable: true, ctrlKey: true });
+    document.body.dispatchEvent(event);
+    expect(setActiveTab).toHaveBeenCalledWith("a2");
+  } finally {
+    Object.assign(state, { scopeTabsToProject: false, activeProjectId: null, projects: [], sessions: [] });
+  }
+});
+
+it("numbers all open tabs when scoping is off", () => {
+  const setActiveTab = vi.fn();
+  Object.assign(state, {
+    scopeTabsToProject: false,
+    activeProjectId: "A",
+    openTabs: ["a1", "b1", "a2"],
+    paneTrees: {},
+    ephemeralSessions: {},
+    projects: [{ id: "A" }, { id: "B" }],
+    sessions: [
+      { id: "a1", projectId: "A" },
+      { id: "b1", projectId: "B" },
+      { id: "a2", projectId: "A" },
+    ],
+    setActiveTab,
+  });
+  try {
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "2", code: "Digit2", bubbles: true, cancelable: true, ctrlKey: true }));
+    expect(setActiveTab).toHaveBeenCalledWith("b1");
+  } finally {
+    Object.assign(state, { activeProjectId: null, projects: [], sessions: [] });
+  }
+});

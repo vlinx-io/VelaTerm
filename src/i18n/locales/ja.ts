@@ -532,6 +532,8 @@ const ja: typeof en = {
   "settings.maxLiveTabs": "Background limit", // Background limit
   "settings.defaultShell": "既定のシェル", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.scopeTabsToProject": "アクティブなプロジェクトのタブのみ表示", // Show only the active project's tabs
+  "settings.scopeTabsToProjectHint": "サイドバーでプロジェクトを選択すると、そのプロジェクトのタブとグローバルターミナルのみが表示されます。非表示のタブは実行を続けます。", // Selecting a project in the sidebar shows only its tabs plus global terminals. Hidden tabs keep running.
   "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.autoContinue": "上限リセット後に自動再開", // Continue after limit resets
@@ -1354,6 +1356,8 @@ const ja: typeof en = {
   "center.splitHint": "セッションを開くと、次のショートカットで画面を分割できます：",
   "tab.unsavedDot": "未保存の変更あり", // Unsaved changes
   "tab.newTerminal": "新規ターミナル", // New terminal
+  "tab.newGlobalTerminal": "新規グローバルターミナル", // New global terminal
+  "tab.globalTerminal": "グローバルターミナル", // Global terminal
   "tab.newDocument": "新規ドキュメント", // New document
   "tab.bgTitle": (n) => `バックグラウンド常駐タブ: ${n} 件（プロセスは実行中）`, // Background keep-alive tabs: {n}…
   "tab.bgLabel": (n) => `バックグラウンド ${n}`, // Background {n}

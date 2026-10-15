@@ -1,5 +1,5 @@
 //! Global keyboard shortcuts.
-//! - Cmd/Ctrl+1–9 focuses the numbered open tab and is fixed to tab positions.
+//! - Cmd/Ctrl+1–9 focuses the numbered visible tab and is fixed to tab positions.
 //! - Cmd/Ctrl++/-/0 changes or resets terminal font size and is fixed to those semantics.
 //! - Settings may remap temporary-terminal creation, desktop browser tabs, pane/tab closure, both
 //!   split directions, terminal/global search, terminal selection, and document save. Defaults live in shortcutRegistry
@@ -23,6 +23,7 @@ import { isTauri } from "../ipc/transport";
 import { isShareSurface } from "../ipc/shareBase";
 import { env } from "../platform";
 import { useTermStore } from "../store/termStore";
+import { visibleTabIds } from "../store/visibleTabs";
 import { activeAgentLocation, agentPickerUrl, navigateAgentPicker, newAgentPickerRoute, readAgentPickerRoute } from "../layout/NewAgentSession/navigation";
 import { getTerminal, selectAll as selectAllTerminalContent } from "../terminal/registry";
 import {
@@ -46,10 +47,11 @@ export function useKeyboardShortcuts() {
       const tabIdx = digitIndex(e);
       // Cmd/Ctrl+Alt+digit is left to editors, where the document editor maps it to heading levels.
       if (hasMod(e) && !e.altKey && tabIdx >= 0) {
-        const { openTabs, setActiveTab } = useTermStore.getState();
-        if (tabIdx < openTabs.length) {
+        const state = useTermStore.getState();
+        const tabs = visibleTabIds(state);
+        if (tabIdx < tabs.length) {
           e.preventDefault();
-          setActiveTab(openTabs[tabIdx]);
+          state.setActiveTab(tabs[tabIdx]);
         }
         return;
       }

@@ -124,6 +124,8 @@ export interface PersistedSettings {
   inspectorTab: InspectorTab;
   /** Single-tab mode reuses the current tab and keeps the previous tree alive in the background. */
   singleTabMode: boolean;
+  /** Tab bar shows only the active project's tabs plus global terminals. Off keeps every tab visible. */
+  scopeTabsToProject: boolean;
   /** Terminal renderer. DOM is stable; WebGL can hit context limits with many terminals. */
   termRenderer: TermRenderer;
   /** Advanced full redraw on tab return, off by default. Enable only to mitigate GPU artifacts or
@@ -261,6 +263,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   navLayout: "tree",
   inspectorTab: "info",
   singleTabMode: true,
+  scopeTabsToProject: false,
   termRenderer: "dom",
   redrawOnReveal: false,
   outputScheduler: true,
@@ -392,6 +395,7 @@ export function loadSettings(): PersistedSettings {
     merged.referSummary = sanitizeReferSummary(parsed.referSummary);
     merged.composerInlineChips = sanitizeComposerInlineChips(parsed.composerInlineChips);
     merged.inputLatencyLog = merged.inputLatencyLog === true;
+    merged.scopeTabsToProject = merged.scopeTabsToProject === true;
     merged.inputLatencyThresholdMs = normalizeInputLatencyThreshold(merged.inputLatencyThresholdMs);
     // A list saved before revision 1 gains Tasks at the end. The bumped revision is written with the next
     // save, so switching Tasks off again afterwards is kept.

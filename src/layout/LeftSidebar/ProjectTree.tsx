@@ -337,6 +337,7 @@ export function ProjectTree(h: TreeHandlers) {
   const toggleSelect = useTermStore((s) => s.toggleSelect);
   const setSelection = useTermStore((s) => s.setSelection);
   const setInspectTarget = useTermStore((s) => s.setInspectTarget);
+  const setActiveProject = useTermStore((s) => s.setActiveProject);
 
   type DragZone = "top" | "center" | "bottom";
   interface DragTarget { id: string; zone: DragZone }
@@ -840,6 +841,15 @@ export function ProjectTree(h: TreeHandlers) {
       return;
     }
     selectSingle(node);
+    const projectId =
+      node.kind === "project"
+        ? projects.find((p) => p.id === node.id)?.rootPath
+          ? node.id
+          : undefined
+        : node.kind === "group"
+          ? groupsById.get(node.id)?.projectId
+          : sessionsById.get(node.id)?.projectId;
+    if (projectId) setActiveProject(projectId);
     if (isSession) {
       // Selecting a session clears project/group inspection so the right pane follows the active session again.
       setInspectTarget(null);

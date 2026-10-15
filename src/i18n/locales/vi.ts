@@ -532,6 +532,8 @@ const vi: typeof en = {
   "settings.maxLiveTabs": "Giới hạn nền",
   "settings.defaultShell": "Shell mặc định",
   "settings.spawnConfirm": "Xác nhận trước khi tạo phiên",
+  "settings.scopeTabsToProject": "Chỉ hiển thị các thẻ của dự án đang hoạt động",
+  "settings.scopeTabsToProjectHint": "Khi chọn một dự án trong thanh bên, chỉ các thẻ của dự án đó và terminal toàn cục được hiển thị. Các thẻ bị ẩn vẫn tiếp tục chạy.",
   "settings.usageAuto": "Tự động làm mới mức sử dụng",
   "settings.usageRefresh": "Làm mới mức sử dụng",
   "settings.autoContinue": "Tiếp tục sau khi đặt lại giới hạn",
@@ -1332,6 +1334,8 @@ const vi: typeof en = {
   "center.splitHint": "Mở một phiên để chia màn hình bằng các phím tắt sau:",
   "tab.unsavedDot": "Thay đổi chưa lưu",
   "tab.newTerminal": "Terminal mới",
+  "tab.newGlobalTerminal": "Terminal toàn cục mới",
+  "tab.globalTerminal": "Terminal toàn cục",
   "tab.newDocument": "Tài liệu mới",
   "tab.bgTitle": (n: number) =>
     `Thẻ được duy trì ở nền: ${n} (tiến trình vẫn đang chạy)`,

@@ -532,6 +532,8 @@ const de: typeof en = {
   "settings.maxLiveTabs": "Background limit", // Background limit
   "settings.defaultShell": "Standard-Shell", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.scopeTabsToProject": "Nur Tabs des aktiven Projekts anzeigen", // Show only the active project's tabs
+  "settings.scopeTabsToProjectHint": "Wenn du in der Seitenleiste ein Projekt auswählst, werden nur dessen Tabs und globale Terminals angezeigt. Ausgeblendete Tabs laufen weiter.", // Selecting a project in the sidebar shows only its tabs plus global terminals. Hidden tabs keep running.
   "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.autoContinue": "Nach Zurücksetzung fortsetzen", // Continue after limit resets
@@ -1359,6 +1361,8 @@ const de: typeof en = {
   "center.splitHint": "Öffnen Sie eine Sitzung, um sie mit diesen Tastenkürzeln aufzuteilen:",
   "tab.unsavedDot": "Ungespeicherte Änderungen", // Unsaved changes
   "tab.newTerminal": "Neues Terminal", // New terminal
+  "tab.newGlobalTerminal": "Neues globales Terminal", // New global terminal
+  "tab.globalTerminal": "Globales Terminal", // Global terminal
   "tab.newDocument": "Neues Dokument", // New document
   "tab.bgTitle": (n) => `Hintergrund-Tabs: ${n} (Prozesse laufen weiter)`, // Background keep-alive tabs: {n}…
   "tab.bgLabel": (n) => `Hintergrund ${n}`, // Background {n}

@@ -542,6 +542,8 @@ const ru: typeof en = {
   "settings.maxLiveTabs": "Background limit", // Background limit
   "settings.defaultShell": "Shell по умолчанию", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.scopeTabsToProject": "Показывать только вкладки активного проекта", // Show only the active project's tabs
+  "settings.scopeTabsToProjectHint": "При выборе проекта на боковой панели отображаются только его вкладки и глобальные терминалы. Скрытые вкладки продолжают работать.", // Selecting a project in the sidebar shows only its tabs plus global terminals. Hidden tabs keep running.
   "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.autoContinue": "Продолжать после сброса лимита", // Continue after limit resets
@@ -1371,6 +1373,8 @@ const ru: typeof en = {
   "center.splitHint": "Откройте сессию, чтобы разделить окно с помощью этих сочетаний клавиш:",
   "tab.unsavedDot": "Несохранённые изменения", // Unsaved changes
   "tab.newTerminal": "Новый терминал", // New terminal
+  "tab.newGlobalTerminal": "Новый глобальный терминал", // New global terminal
+  "tab.globalTerminal": "Глобальный терминал", // Global terminal
   "tab.newDocument": "Новый документ", // New document
   "tab.bgTitle": (n) => `Фоновые вкладки: ${n} (процессы продолжают работать)`, // Background keep-alive tabs: {n}…
   "tab.bgLabel": (n) => `Фон ${n}`, // Background {n}

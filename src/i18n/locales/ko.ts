@@ -532,6 +532,8 @@ const ko: typeof en = {
   "settings.maxLiveTabs": "Background limit", // Background limit
   "settings.defaultShell": "기본 셸", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.scopeTabsToProject": "활성 프로젝트의 탭만 표시", // Show only the active project's tabs
+  "settings.scopeTabsToProjectHint": "사이드바에서 프로젝트를 선택하면 해당 프로젝트의 탭과 전역 터미널만 표시됩니다. 숨겨진 탭은 계속 실행됩니다.", // Selecting a project in the sidebar shows only its tabs plus global terminals. Hidden tabs keep running.
   "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.autoContinue": "한도 초기화 후 자동으로 계속", // Continue after limit resets
@@ -1346,6 +1348,8 @@ const ko: typeof en = {
   "center.splitHint": "세션을 연 후 다음 단축키로 화면을 분할할 수 있습니다:",
   "tab.unsavedDot": "저장되지 않은 변경", // Unsaved changes
   "tab.newTerminal": "새 터미널", // New terminal
+  "tab.newGlobalTerminal": "새 전역 터미널", // New global terminal
+  "tab.globalTerminal": "전역 터미널", // Global terminal
   "tab.newDocument": "새 문서", // New document
   "tab.bgTitle": (n) => `백그라운드 유지 탭: ${n}개 (프로세스 실행 중)`, // Background keep-alive tabs: {n}…
   "tab.bgLabel": (n) => `백그라운드 ${n}`, // Background {n}

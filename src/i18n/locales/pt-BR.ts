@@ -533,6 +533,8 @@ const ptBR: typeof en = {
   "settings.maxLiveTabs": "Background limit", // Background limit
   "settings.defaultShell": "Shell padrão", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.scopeTabsToProject": "Mostrar apenas as abas do projeto ativo", // Show only the active project's tabs
+  "settings.scopeTabsToProjectHint": "Ao selecionar um projeto na barra lateral, apenas as abas dele e os terminais globais são exibidos. As abas ocultas continuam em execução.", // Selecting a project in the sidebar shows only its tabs plus global terminals. Hidden tabs keep running.
   "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.autoContinue": "Continuar após a redefinição", // Continue after limit resets
@@ -1360,6 +1362,8 @@ const ptBR: typeof en = {
   "center.splitHint": "Abra uma sessão para dividi-la com estes atalhos:",
   "tab.unsavedDot": "Alterações não salvas", // Unsaved changes
   "tab.newTerminal": "Novo terminal", // New terminal
+  "tab.newGlobalTerminal": "Novo terminal global", // New global terminal
+  "tab.globalTerminal": "Terminal global", // Global terminal
   "tab.newDocument": "Novo documento", // New document
   "tab.bgTitle": (n) =>
     `Abas em segundo plano: ${n} (processos ainda em execução)`, // Background keep-alive tabs: {n}…

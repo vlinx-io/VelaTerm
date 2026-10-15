@@ -533,6 +533,8 @@ const fr: typeof en = {
   "settings.maxLiveTabs": "Background limit", // Background limit
   "settings.defaultShell": "Shell par défaut", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.scopeTabsToProject": "Afficher uniquement les onglets du projet actif", // Show only the active project's tabs
+  "settings.scopeTabsToProjectHint": "Sélectionner un projet dans la barre latérale n'affiche que ses onglets et les terminaux globaux. Les onglets masqués continuent de s'exécuter.", // Selecting a project in the sidebar shows only its tabs plus global terminals. Hidden tabs keep running.
   "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.autoContinue": "Reprendre après réinitialisation", // Continue after limit resets
@@ -1363,6 +1365,8 @@ const fr: typeof en = {
   "center.splitHint": "Ouvrez une session pour la diviser avec ces raccourcis :",
   "tab.unsavedDot": "Modifications non enregistrées", // Unsaved changes
   "tab.newTerminal": "Nouveau terminal", // New terminal
+  "tab.newGlobalTerminal": "Nouveau terminal global", // New global terminal
+  "tab.globalTerminal": "Terminal global", // Global terminal
   "tab.newDocument": "Nouveau document", // New document
   "tab.bgTitle": (n) =>
     `Onglets maintenus en arrière-plan : ${n} (processus toujours actifs)`, // Background keep-alive tabs: {n}…
