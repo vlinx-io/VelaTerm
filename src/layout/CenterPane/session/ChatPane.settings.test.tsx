@@ -93,6 +93,20 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+it.each([null, undefined])("renders the Zcode catalogue when a native model has no description (%s)", async (description) => {
+  const previous = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) => command === "chat_models"
+    ? Promise.resolve([{ id: "old-model", label: "GLM-5.3", description, effortLevels: ["high"] }]) as Promise<never>
+    : previous(command, args));
+  const { container } = await mountPane("zcode");
+  expect(screen.getByRole("option", { name: "GLM-5.3" })).toBeTruthy();
+  const input = container.querySelector<HTMLTextAreaElement>(".sv-box textarea")!;
+  fireEvent.change(input, { target: { value: "ZCODE_UI_OK" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(vi.mocked(invoke).mock.calls.some(([command, args]) =>
+    command === "chat_send" && args?.text === "ZCODE_UI_OK")).toBe(true));
+});
+
 it("keeps the running model visible on discovery failure and restores choices after retry", async () => {
   const previous = vi.mocked(invoke).getMockImplementation()!;
   let failModels = true;
@@ -163,7 +177,7 @@ it("replays newer events over a late snapshot without losing history or restorin
   expect(screen.getByText("New queue")).toBeTruthy();
 });
 
-async function mountPane(kind: "claude" | "codex" | "opencode" | "antigravity" = "claude", expectedModel: string | null = "old-model", mobile = false) {
+async function mountPane(kind: "claude" | "codex" | "opencode" | "antigravity" | "zcode" = "claude", expectedModel: string | null = "old-model", mobile = false) {
   const view = render(<ChatPane session={{ id: "s", projectId: "p", name: "Claude", kind, engine: "chat", collapsed: false, sortOrder: 0, createdAt: 0 }}
     area={{}} hidden={false} focused multi={false} mobile={mobile} onActivate={() => {}} onSplit={() => {}} onClose={() => {}} />);
   if (expectedModel !== null) await waitFor(() => expect((screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement).value).toBe(expectedModel));
@@ -867,6 +881,33 @@ it.each(["chat_start", "chat_send"])("keeps the failed message without overwriti
   expect(screen.getByText("Error: Submission failed")).toBeTruthy();
 });
 
+it("keeps a rejected Zcode image guide in the composer for normal queueing", async () => {
+  const { container } = await mountPane("zcode");
+  act(() => useTermStore.setState({ runtimes: { s: { status: "running", agent: "zcode", agentState: "working" } } }));
+  const input = container.querySelector<HTMLTextAreaElement>(".sv-box textarea")!;
+  fireEvent.change(input, { target: { value: "Keep this image" } });
+  fireEvent.drop(container.querySelector(".sv-composer")!, { dataTransfer: { files: [new File(["png"], "example.png", { type: "image/png" })] } });
+  await screen.findByAltText("example.png");
+  fireEvent.click(screen.getByRole("button", { name: "Steer" }));
+  expect(input.value).toBe("Keep this image");
+  expect(container.querySelector(".sv-attach img")).toBeTruthy();
+  expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "chat_send")).toHaveLength(0);
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_send", expect.objectContaining({ behavior: "queue", text: "Keep this image", images: [{mimeType:"image/png",data:"cG5n"}] })));
+});
+
+it("shows native guide admission and keeps a fallback notice across the next turn", async () => {
+  await mountPane("zcode");
+  act(() => eventCallback({type:"steerPending"}));
+  expect(screen.getByText("Guide request submitted; waiting for a native execution boundary.")).toBeTruthy();
+  act(() => eventCallback({type:"steerFallback",reason:"guide.noToolBoundary"}));
+  act(() => eventCallback({type:"turnStarted",startedAt:123}));
+  expect(screen.getByText("Zcode could not apply the guide in the current turn and queued it for a later turn. Do not resend it.")).toBeTruthy();
+  expect(screen.queryByText("Guide request submitted; waiting for a native execution boundary.")).toBeNull();
+  act(() => eventCallback({type:"steerPending",turnEnded:true}));
+  expect(screen.getByText("The original turn ended while the guide was being admitted. Zcode has received the input; wait for its actual reply and do not resend.")).toBeTruthy();
+});
+
 it("restores steering attachments on failure and clears them on retry", async () => {
   const { container } = await mountPane("codex");
   act(() => useTermStore.setState({ runtimes: { s: { status: "running", agent: "codex", agentState: "working" } } }));
@@ -959,6 +1000,7 @@ it("searches the focused session and closes without interrupting a running turn"
 it.each([
   ["codex", "/vsp", "$vspawn "], ["codex", "$vsp", "$vspawn "],
   ["claude", "/vsp", "/vspawn "], ["claude", "$vsp", "/vspawn "],
+  ["zcode", "/vsp", "/vspawn "], ["zcode", "$vsp", "/vspawn "],
 ] as const)("loads skills before the first message: %s %s", async (kind, draft, native) => {
   snapshotOverrides = { running: false, commands: [] };
   const fallback = vi.mocked(invoke).getMockImplementation()!;
@@ -976,6 +1018,19 @@ it.each([
   fireEvent.change(input, { target: { value: native + "inspect the project" } });
   fireEvent.keyDown(input, { key: "Enter" });
   await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_send", expect.objectContaining({ text: native + "inspect the project" })));
+});
+
+it("exposes native Zcode MCP management in the composer", async () => {
+  const fallback = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) => command === "chat_mcp_status"
+    ? Promise.resolve({ mcpServers: [{ name: "plugin:fixture:tools", status: "connected", canToggle: false, toolCount: 2 }] }) as Promise<never>
+    : fallback(command, args));
+  await mountPane("zcode");
+  fireEvent.click(screen.getByRole("button", { name: "MCP" }));
+  await screen.findByText("plugin:fixture:tools");
+  expect(invoke).toHaveBeenCalledWith("chat_mcp_status", { sessionId: "s" });
+  expect(screen.getByText(/2 tools/)).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Disable" }).hasAttribute("disabled")).toBe(true);
 });
 
 

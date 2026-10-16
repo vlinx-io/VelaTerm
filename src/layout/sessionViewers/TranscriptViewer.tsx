@@ -41,6 +41,7 @@ export function assistantLabel(kind: Session["kind"]): string {
   if (kind === "kiro") return "Kiro";
   if (kind === "grok") return "Grok Build";
   if (kind === "zoo") return "Zoo Code";
+  if (kind === "zcode") return "Zcode";
   return "Claude";
 }
 

@@ -7,6 +7,9 @@ import type { SessionKind } from "../types";
 export function permissionLabelKey(mode: string): I18nKey {
   if (mode === "read-only") return "chat.mode.readOnly";
   if (mode === "full-access") return "chat.mode.fullAccess";
+  if (mode === "build") return "chat.mode.default";
+  if (mode === "edit") return "chat.mode.acceptEdits";
+  if (mode === "yolo") return "chat.mode.bypassPermissions";
   return `chat.mode.${mode}` as I18nKey;
 }
 

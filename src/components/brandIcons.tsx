@@ -247,6 +247,13 @@ function ZooMark({ size = 14 }: { size?: number }) {
   );
 }
 
+/** 独立 Zcode 会话的 ZC 标记，用于区别 Claude 预设与 Zoo。 */
+export function zcodeMarkEl(size = 14) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="M3 5h8L3 19h8M21 5h-4v14h4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>;
+}
+
 export function zooMarkEl(size = 14) {
   return <ZooMark size={size} />;
 }

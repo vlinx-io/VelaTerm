@@ -13,6 +13,19 @@ function plural(n: number, one: string, few: string, many: string): string {
 }
 
 const ru: typeof en = {
+  "chat.zcode.planLoadFailed": "Не удалось загрузить Start Plan. Проверьте версию CLI или войдите снова.",
+  "chat.zcode.planUnsupported": "Этот CLI не сообщает о поддержке Start Plan.",
+  "chat.zcode.planEffective": "Активация:",
+  "chat.zcode.planEnds": "Истекает:",
+  "chat.zcode.planRemaining": "Осталось:",
+  "chat.zcode.planUsed": "Использовано:",
+  "chat.zcode.plan.available": "Доступно",
+  "chat.zcode.plan.pending": "Ожидание активации",
+  "chat.zcode.plan.unavailable": "Нет доступной квоты или моделей",
+  "chat.zcode.plan.not-authenticated": "Войдите в эту учётную запись",
+  "chat.zcode.plan.verification-required": "Требуется официальная проверка",
+  "chat.zcode.plan.error": "Не удалось проверить права",
+
   "panel.averageOutput": "средняя скорость вывода",
   "panel.averageOutputHint": "Оценка количества выходных токенов в секунду за измеренное время ответа, включая сообщённые токены рассуждений. Время выполнения инструментов и ожидания пользователя не учитывается. Значение не отображается, если данные об использовании токенов нельзя надёжно сопоставить с измеренным временем. Это не скорость декодирования самой модели.",
   "translation.swap": "Поменять языки местами",
@@ -2243,6 +2256,20 @@ const ru: typeof en = {
   "chat.resetCredits.retry": "Повторить сброс",
   "chat.resetCredits.use": "Использовать один сброс",
   "chat.resetCredits.refresh": "Обновить",
+  "chat.zcode.guideTurnEnded": "Исходный ход завершился во время приёма указания. Zcode получил ввод; дождитесь ответа и не отправляйте повторно.",
+  "chat.zcode.guidePending": "Запрос указания отправлен; ожидается точка применения в нативном выполнении.",
+  "chat.zcode.guideQueued": "Zcode не смог применить указание в текущем ходе и поставил его в очередь на следующий ход. Не отправляйте повторно.",
+  "chat.zcode.imageGuideUnavailable": "Указания Zcode во время выполнения не поддерживают изображения. Черновик и изображения сохранены; отправьте их обычным способом для добавления в очередь.",
+  "chat.usage.label": "Использование",
+  "chat.usage.session": "Итого за сеанс",
+  "chat.usage.turn": "Текущий ход",
+  "chat.usage.input": "Ввод",
+  "chat.usage.output": "Вывод",
+  "chat.usage.cached": "Чтение кэша",
+  "chat.usage.cacheWrite": "Запись кэша",
+  "chat.usage.reasoning": "Рассуждение",
+  "chat.usage.unknown": "Неизвестно",
+  "chat.usage.notReported": "Нет данных",
   "chat.usage.context": (used: string, max: string, pct: number) =>
     `Контекст: ${used} из ${max} токенов (${pct} %)`,
   "chat.usage.cost": (usd: string) => `Стоимость сеанса: $${usd}`,
@@ -2257,6 +2284,7 @@ const ru: typeof en = {
   "chat.autoContinue.failed": "Не удалось автоматически продолжить задачу. Отправьте сообщение, чтобы продолжить.", // The task could not continue automatically. Send a message to continue.
   "chat.mcp.codexScope": "Это изменит пользовательскую конфигурацию Codex и затронет другие беседы, использующие её. Продолжить?",
   "chat.mcp.tooltip": "Серверы MCP",
+  "chat.mcp.zcodeProbe": "Проверяет настроенные серверы в отдельном процессе CLI. Переподключение проверяет все серверы; включайте и отключайте их в настройках Zcode.",
   "chat.mcp.loading": "Чтение списка серверов…",
   "chat.mcp.backendUnsupported": "Сервер VelaTerm, к которому установлено подключение, не поддерживает управление MCP. Обновите и перезапустите этот сервер, затем повторите попытку.",
   "chat.mcp.none": "Серверы MCP не настроены",

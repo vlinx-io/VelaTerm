@@ -18,7 +18,7 @@ function roles(value: Config): Role[] {
 
 function launchable(value: Config, options: LaunchOption[]): Config | null {
   return roles(value).every(role =>
-    options.some(option => option.id === value[role]?.agent && option.supportsPlanExecute)) ? value : null;
+    options.some(option => option.id === value[role]?.agent && option.supportsPlanExecute && (!option.planExecuteRoles || option.planExecuteRoles.includes(role)))) ? value : null;
 }
 
 /**
@@ -36,7 +36,7 @@ function withRemembered(
     const given: Config["plan"] = explicit?.[role] ?? {};
     const saved = prefs?.[role] ?? {};
     // Old preferences must not restore an agent that can no longer run this workflow.
-    if (saved.agent && !options.some(option => option.id === saved.agent && option.supportsPlanExecute)) return base;
+    if (saved.agent && !options.some(option => option.id === saved.agent && option.supportsPlanExecute && (!option.planExecuteRoles || option.planExecuteRoles.includes(role)))) return base;
     if (given.agent == null && saved.agent) {
       if (base.agent !== saved.agent) {
         base.model = "";
@@ -113,7 +113,7 @@ export function PlanExecuteFields({ parentSessionId, config, options, onChange, 
         <h3>{label}</h3>
         <LaunchField label={t("spawn.agentLabel")}>
           <Combo key={String(disabled || confirmed)} disabled={disabled || confirmed} value={value.agent ?? ""} width="100%" menuPortal ariaLabel={t("spawn.agentLabel")}
-            options={available.map(option => ({ value: option.id, label: option.label }))}
+            options={available.filter(option => !option.planExecuteRoles || option.planExecuteRoles.includes(role)).map(option => ({ value: option.id, label: option.label }))}
             onChange={agent => {
               update({ agent: agent as typeof value.agent, model: "", effort: "" });
               remember({ agent: agent as SessionKind, model: null, effort: null });

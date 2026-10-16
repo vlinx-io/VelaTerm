@@ -14,6 +14,8 @@
 /** One choice offered for a question. */
 export interface QuestionOption {
   label: string;
+  /** 原生协议可将显示标签与提交值分开；没有值时沿用标签。 */
+  value?: string;
   description?: string;
 }
 
@@ -64,6 +66,7 @@ export function parseQuestionFormQuestions(input: unknown): QuestionFormQuestion
       if (typeof o.label !== "string") return null;
       options.push({
         label: o.label,
+        ...(typeof o.value === "string" ? { value: o.value } : {}),
         description: typeof o.description === "string" ? o.description : undefined,
       });
     }
@@ -143,7 +146,7 @@ export function buildQuestionFormAnswers(
 
     if (selected && selected.size > 0) {
       answers[q.question] = Array.from(selected)
-        .map((idx) => q.options[idx]?.label)
+        .map((idx) => q.options[idx]?.value ?? q.options[idx]?.label)
         .filter((label): label is string => typeof label === "string")
         .join(", ");
     }

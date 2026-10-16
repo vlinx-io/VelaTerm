@@ -18,6 +18,49 @@ beforeEach(() => {
 });
 
 describe("durable spawn decisions", () => {
+  it("does not open a confirmation card before a no-confirm receipt arrives", async () => {
+    const request = { ...req, noConfirm: true };
+    let acknowledge!: (value: SpawnReceipt) => void;
+    ipc.spawnRequest.mockReturnValue(new Promise<SpawnReceipt>(resolve => { acknowledge = resolve; }));
+    const handling = useTermStore.getState().handleSpawnRequest(request);
+    expect(useTermStore.getState().pendingSpawns).toEqual([]);
+    acknowledge(receipt({ request, decision: "confirmed", state: "complete" }));
+    await handling;
+    expect(useTermStore.getState().pendingSpawns).toEqual([]);
+  });
+  it.each([false, true])("keeps automatic startup out of confirmation while retaining failures for retry (noConfirm=%s)", async noConfirm => {
+    const request = { ...req, noConfirm };
+    await useTermStore.getState().applySpawnReceipt(receipt({ request, decision: "confirmed", state: "pending" }));
+    expect(useTermStore.getState().pendingSpawns).toEqual([]);
+    await useTermStore.getState().applySpawnReceipt(receipt({ request, decision: "confirmed", state: "failed", error: "agent unavailable" }));
+    expect(useTermStore.getState().pendingSpawns).toEqual([request]);
+  });
+  it("does not erase a no-confirm startup failure when an older pending receipt arrives", async () => {
+    const request = { ...req, noConfirm: true };
+    const failed = receipt({ request, decision: "confirmed", state: "failed", error: "agent unavailable" });
+    await useTermStore.getState().applySpawnReceipt(failed);
+    await useTermStore.getState().applySpawnReceipt(receipt({ request, decision: "confirmed", state: "pending" }));
+    expect(useTermStore.getState().pendingSpawns).toEqual([request]);
+    expect(useTermStore.getState().spawnReceipts["request-1"]).toEqual(failed);
+    ipc.resolveSpawn.mockResolvedValue({ ...failed, state: "complete", error: null, session: { id: "child" } });
+    await useTermStore.getState().confirmSpawn(request);
+    expect(useTermStore.getState().pendingSpawns).toEqual([]);
+    expect(openSession).toHaveBeenCalledWith("child", expect.any(Object));
+  });
+  it("does not automatically retry a failure after an older recovery list arrives", async () => {
+    const request = { ...req, noConfirm: true };
+    let acknowledge!: (value: SpawnReceipt[]) => void;
+    ipc.spawnRequests.mockReturnValue(new Promise<SpawnReceipt[]>(resolve => { acknowledge = resolve; }));
+    const sync = useTermStore.getState().syncSpawnRequests();
+    const failed = receipt({ request, decision: "confirmed", state: "failed", error: "agent unavailable" });
+    await useTermStore.getState().applySpawnReceipt(failed);
+    ipc.retrySpawn.mockResolvedValue({ ...failed, state: "complete", error: null });
+    acknowledge([receipt({ request, decision: "confirmed", state: "pending" })]);
+    await sync;
+    expect(ipc.retrySpawn).not.toHaveBeenCalled();
+    expect(useTermStore.getState().spawnReceipts["request-1"]).toEqual(failed);
+    expect(useTermStore.getState().pendingSpawns).toEqual([request]);
+  });
   it("keeps edited task and images when confirmation has no acknowledgement", async () => {
     const draft = { ...req, prompt: "edited", images: [{ mimeType: "image/png", data: "AQID" }] };
     useTermStore.setState({ pendingSpawns: [req] });

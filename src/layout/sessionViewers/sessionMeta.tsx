@@ -15,6 +15,7 @@ import {
   ompMarkEl,
   piMarkEl,
   zooMarkEl,
+  zcodeMarkEl,
 } from "../../components/brandIcons";
 import Icons from "../../components/Icons";
 import { useGitBranchInfo } from "../../hooks/useGitBranch";
@@ -31,6 +32,7 @@ import { sessionIconEl } from "../agentPresetIcon";
  * through a theme-aware token so it remains legible on both light and dark backgrounds.
  */
 const KIND_COLOR: Partial<Record<SessionKind, string>> = {
+  zcode: "#38BDF8",
   claude: "#D97757", // Orange (Anthropic's official color)
   codex: CODEX_BRAND_COLOR, // Theme-aware color shared with Usage (see brandIcons)
   opencode: "#3B82F6", // Blue
@@ -53,6 +55,7 @@ const KIND_COLOR: Partial<Record<SessionKind, string>> = {
 
 /** Fallback local-agent display names used before install recipes arrive, preventing an empty title flash. */
 export const AGENT_KIND_LABEL: Partial<Record<SessionKind, string>> = {
+  zcode: "Zcode",
   claude: "Claude Code",
   codex: "Codex",
   opencode: "OpenCode",
@@ -92,6 +95,8 @@ function rawKindIcon(kind: SessionKind, size: number) {
     // Claude uses the generic outlined robot icon.
     case "claude":
       return <Icons.bot size={size} />;
+    case "zcode":
+      return zcodeMarkEl(size);
     // These agents use their official logos, falling back to the robot when brandIconEl lacks one.
     case "opencode":
       return brandIconEl("opencode", size) ?? <Icons.bot size={size} />;

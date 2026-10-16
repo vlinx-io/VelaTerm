@@ -146,6 +146,7 @@ pub fn supported(kind: SessionKind) -> bool {
         kind,
         SessionKind::Claude
             | SessionKind::Codex
+            | SessionKind::Zcode
             | SessionKind::Opencode
             | SessionKind::Pi
             | SessionKind::Omp

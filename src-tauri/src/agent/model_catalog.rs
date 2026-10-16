@@ -62,6 +62,10 @@ pub fn list_models(app: &crate::host::AppCtx, agent: &str) -> Result<Vec<String>
     if agent == "kimi" {
         return Ok(["k3", "k3-256k", "kimi-for-coding", "kimi-for-coding-highspeed"].into_iter().map(str::to_string).collect());
     }
+    if agent == "zcode" {
+        let bin = super::executable::resolve(app, crate::models::SessionKind::Zcode, None).unwrap_or_else(|| "zcode".into());
+        return super::zcode_cli::models(&bin);
+    }
     if list_args(agent).is_none() { return Ok(Vec::new()); }
     let kind = crate::models::SessionKind::from_db(agent);
     let bin = super::executable::resolve(app, kind, None)
@@ -71,6 +75,7 @@ pub fn list_models(app: &crate::host::AppCtx, agent: &str) -> Result<Vec<String>
 
 /// Use the session's selected executable for both model discovery and conversation launches.
 pub fn list_models_at(agent: &str, bin: &str) -> Result<Vec<String>, String> {
+    if agent == "zcode" { return super::zcode_cli::models(bin); }
     let Some(args) = list_args(agent) else { return Ok(Vec::new()); };
     let mut cmd = crate::host::command(bin);
     crate::login_env::refresh_command(&mut cmd);

@@ -81,6 +81,19 @@ pub fn list(app: &AppCtx, kind: SessionKind, context: &Context) -> Result<Catalo
         SessionKind::Codex => {
             serde_json::to_value(super::codex_models::list_in_dir(&bin, &extra, cwd)?)
         }
+        SessionKind::Zcode => {
+            // 启动前也读取原生逐模型档位，并沿用父会话的环境和所选可执行文件。
+            let models = if let Some(parent) = &parent {
+                super::zcode_cli::session_models(app, &parent.id, &bin, cwd)?
+            } else {
+                let cwd = cwd.map(str::to_owned).unwrap_or_else(|| std::env::current_dir().unwrap_or_default().to_string_lossy().into_owned());
+                let snapshot = super::zcode_cli::query(&bin, Some(&cwd), "session/create", serde_json::json!({
+                    "workspace":{"workspacePath":cwd,"workspaceKey":cwd},"persistence":"deferred","titleGenerationEnabled":false
+                }))?;
+                super::zcode_cli::model_entries(&snapshot)
+            };
+            serde_json::to_value(models)
+        }
         SessionKind::Opencode => {
             // A stable scope reuses the backend's reserved port. Serialize discovery so simultaneous
             // clients do not treat another lookup's listener as a port conflict.

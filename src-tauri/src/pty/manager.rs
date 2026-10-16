@@ -1250,7 +1250,7 @@ impl PtyManager {
 
         match kind {
             // Browser nodes should never spawn PTYs; defensively attach no monitor or agent marker.
-            SessionKind::Browser => {}
+            SessionKind::Browser | SessionKind::Zcode => {}
             // Terminal retains activity-based busy/idle only. Process-tree agent detection was too expensive.
             SessionKind::Terminal => {
                 spawn_status_monitor(

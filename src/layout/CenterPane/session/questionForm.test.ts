@@ -94,6 +94,15 @@ describe("areQuestionsAnswered", () => {
 });
 
 describe("buildQuestionFormAnswers", () => {
+  it("保留原生选项的显示标签，并提交机器可识别的值", () => {
+    const questions = parseQuestionFormQuestions({
+      questions: [{ question: "Review this implementation plan.", header: "Plan", options: [{ label: "Approve", value: "approve" }] }],
+    })!;
+    expect(questions[0].options[0].label).toBe("Approve");
+    expect(buildQuestionFormAnswers(questions, { 0: pick(0) }, {})).toEqual({ "Review this implementation plan.": "approve" });
+    expect(buildQuestionFormAnswers(questions, {}, { 0: "Please revise" })).toEqual({ "Review this implementation plan.": "Please revise" });
+  });
+
   it("keys answers by the question text the tool asked with", () => {
     const answers = buildQuestionFormAnswers(parsed(), { 0: pick(0), 1: pick(0, 1) }, {});
     expect(answers).toEqual({

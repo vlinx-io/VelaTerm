@@ -261,7 +261,8 @@ fn launch_defaults(app: &AppCtx, conn: &Connection, parent: Option<&Session>, ki
     let args = same.and_then(|p| p.agent_args.clone()).or_else(|| prefs["agentDefaults"][kind.as_str()]["args"].as_str().map(str::to_owned));
     let permission = permission_catalog::effective(conn, kind, same.and_then(|p| p.permission_mode.as_deref()))?;
     permission_catalog::validate(kind, permission.as_deref())?;
-    let engine = if !kind.supports_chat() { "tui" }
+    let engine = if kind == SessionKind::Zcode { "chat" }
+        else if !kind.supports_chat() { "tui" }
         else if let Some(parent) = parent.filter(|p| p.kind.supports_chat()) { &parent.engine }
         else { prefs["agentDefaults"][kind.as_str()]["engine"].as_str()
             .unwrap_or(if matches!(kind, SessionKind::Claude | SessionKind::Codex) { "chat" } else { "tui" }) };
@@ -658,6 +659,20 @@ mod tests {
     fn confirm(f: &Fixture, req: SpawnRequest) -> Receipt {
         let receipt = register(&f.app, req.clone()).unwrap();
         decide(&f.app, "test", &receipt.request_id, true, Some(req)).unwrap()
+    }
+
+    #[test]
+    fn zcode_launch_preparation_keeps_explicit_model_and_max_effort() {
+        let f = fixture();
+        let mut req = request(&f, false);
+        req.kind = Some("zcode".into());
+        req.model = Some("deepseek/deepseek-flash".into());
+        req.effort = Some("max".into());
+        req.no_confirm = true;
+        let launch = prepare_launch(&f.app, &req).unwrap();
+        assert_eq!(launch.kind, SessionKind::Zcode);
+        assert_eq!(launch.selection.model.as_deref(), Some("deepseek/deepseek-flash"));
+        assert_eq!(launch.selection.effort.as_deref(), Some("max"));
     }
     fn owned(f: &Fixture, id: &str) -> OwnedWorktree {
         let raw: String = f.app.db().conn.lock().unwrap().query_row("SELECT receipt FROM spawn_worktrees WHERE id=?1", [id], |r| r.get(0)).unwrap();

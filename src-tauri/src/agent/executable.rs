@@ -5,6 +5,7 @@ use std::path::Path;
 
 pub fn command_name(kind: SessionKind) -> &'static str {
     match kind {
+        SessionKind::Zcode => "zcode",
         SessionKind::Cursor => "cursor-agent",
         SessionKind::Antigravity => "agy",
         SessionKind::Kiro => "kiro-cli",
@@ -125,6 +126,14 @@ fn configured_binary(path: String) -> LaunchBinary {
 /// only), and last a dead command wrapper. Checking the wrapper last keeps a working copy found
 /// anywhere else in the lead.
 fn discover(kind: SessionKind) -> LaunchBinary {
+    if kind == SessionKind::Zcode {
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(parent) = exe.parent() {
+                let bin = parent.join("zcode").join(if cfg!(windows) { "zcode.exe" } else { "zcode" });
+                if bin.is_file() { return LaunchBinary::Path(bin.to_string_lossy().into_owned()); }
+            }
+        }
+    }
     let name = command_name(kind);
     if let Some(path) = super::install::locate_installed_bin(kind.as_str()) {
         return LaunchBinary::Path(path);

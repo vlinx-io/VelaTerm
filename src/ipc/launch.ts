@@ -5,6 +5,7 @@ import type { AgentKind } from "../types";
 
 export interface LaunchOption {
   supportsPlanExecute: boolean;
+  planExecuteRoles?: ("plan" | "exec" | "review")[];
   supportsReferSummary: boolean;
   id: AgentKind | "terminal";
   label: string;

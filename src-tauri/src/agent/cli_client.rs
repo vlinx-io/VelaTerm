@@ -150,7 +150,7 @@ pub fn run_view(args: &[String]) -> ! {
 }
 
 const SPAWN_USAGE: &str =
-    "usage: vspawn [--worktree] [--cwd <path>] [--yes] [--agent <agent>|--claude|--codex|--copilot|--kiro|--pi] [--model <name>] [--effort <level>] <task description...>\n\
+    "usage: vspawn [--worktree] [--cwd <path>] [--yes] [--agent <agent>|--claude|--codex|--zcode|--copilot|--kiro|--pi] [--model <name>] [--effort <level>] <task description...>\n\
     --plan-execute    create planning, execution and optional independent review chat sessions\n\
     --split-tasks     let the planner propose multiple tasks for user confirmation (requires --plan-execute)\n\
     --worktree-mode <none|shared|each>   directory mode for all workflow roles; overrides --worktree (requires --plan-execute)\n\
@@ -158,8 +158,8 @@ const SPAWN_USAGE: &str =
     --plan-agent / --exec-agent / --review-agent <agent>   agent for each role\n\
     --plan-model / --exec-model / --review-model <model>   model for each role\n\
     --plan-effort / --exec-effort / --review-effort <level> reasoning effort for each role\n\
-    --agent <agent>   child agent: claude, codex, opencode, copilot, cursor, antigravity, cline, pi, omp, crush, kimi, kiro, grok or zoo\n\
-    --claude / --codex / --copilot / --kiro / --pi   shortcuts for --agent with that agent\n\
+    --agent <agent>   child agent: claude, codex, zcode, opencode, copilot, cursor, antigravity, cline, pi, omp, crush, kimi, kiro, grok or zoo\n\
+    --claude / --codex / --zcode / --copilot / --kiro / --pi   shortcuts for --agent with that agent\n\
     --cwd <path>      child working directory and repository used to create a worktree\n\
     --request-id <uuid> reuse the same request identity after a lost acknowledgement\n\
     --yes             skip initial launch confirmation; split-task proposals still require review\n\
@@ -306,6 +306,7 @@ fn parse_spawn_args(rest: &[String]) -> SpawnParse {
             "--yes" | "-y" | "--no-confirm" => no_confirm = true,
             "--claude" => kind = Some("claude".to_string()),
             "--codex" => kind = Some("codex".to_string()),
+            "--zcode" => kind = Some("zcode".to_string()),
             "--copilot" => kind = Some("copilot".to_string()),
             "--kiro" => kind = Some("kiro".to_string()),
             "--pi" => kind = Some("pi".to_string()),
@@ -1633,6 +1634,13 @@ fn refer_http_timeout(args: &ReferArgs) -> std::time::Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spawn_zcode_selects_the_independent_agent() {
+        let SpawnParse::Ok(parsed) = parse_spawn_args(&args(&["--zcode", "执行独立任务"])) else { panic!("Zcode CLI selection must be accepted") };
+        assert_eq!(parsed.kind.as_deref(), Some("zcode"));
+        assert_eq!(parsed.prompt, "执行独立任务");
+    }
 
     fn args(rest: &[&str]) -> Vec<String> {
         rest.iter().map(|s| s.to_string()).collect()

@@ -51,6 +51,7 @@ pub mod status_watch;
 pub mod transcript;
 pub mod usage;
 pub mod usage_store;
+pub mod zcode_cli;
 pub mod version;
 
 pub mod permission_state;

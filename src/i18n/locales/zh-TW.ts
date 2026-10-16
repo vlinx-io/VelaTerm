@@ -3,6 +3,19 @@
 import type en from "./en";
 
 const zhTW: typeof en = {
+  "chat.zcode.planLoadFailed": "Start Plan 載入失敗，請檢查 CLI 版本或重新登入。",
+  "chat.zcode.planUnsupported": "此 CLI 未回報 Start Plan 支援。",
+  "chat.zcode.planEffective": "生效：",
+  "chat.zcode.planEnds": "到期：",
+  "chat.zcode.planRemaining": "剩餘：",
+  "chat.zcode.planUsed": "已用：",
+  "chat.zcode.plan.available": "可用",
+  "chat.zcode.plan.pending": "待生效",
+  "chat.zcode.plan.unavailable": "暫無可用額度或模型",
+  "chat.zcode.plan.not-authenticated": "請登入此帳戶",
+  "chat.zcode.plan.verification-required": "需要官方驗證",
+  "chat.zcode.plan.error": "權益查詢失敗",
+
   "panel.averageOutput": "平均輸出速度",
   "panel.averageOutputHint": "依測得的回應時間估算每秒輸出的 token 數，包含智慧體回報的推理 token，不計工具執行和等待使用者的時間。用量與計時無法可靠對應時，不顯示數值。此指標並非模型的純解碼速度。",
   "translation.swap": "交換語言",
@@ -2172,6 +2185,20 @@ const zhTW: typeof en = {
   "chat.resetCredits.retry": "重試重設",
   "chat.resetCredits.use": "使用一張",
   "chat.resetCredits.refresh": "重新整理",
+  "chat.zcode.guideTurnEnded": "引導准入期間原回合已結束。Zcode 已接收輸入，請等待實際回覆，不要重複傳送。",
+  "chat.zcode.guidePending": "已提交引導請求，等待原生執行邊界。",
+  "chat.zcode.guideQueued": "Zcode 未能在本輪採用追加指令，已轉為後續排隊執行，請勿重複傳送。",
+  "chat.zcode.imageGuideUnavailable": "Zcode 即時追加不支援圖片。正文與圖片已保留，請一般傳送以加入佇列。",
+  "chat.usage.label": "用量",
+  "chat.usage.session": "工作階段累計",
+  "chat.usage.turn": "目前回合",
+  "chat.usage.input": "輸入",
+  "chat.usage.output": "輸出",
+  "chat.usage.cached": "快取讀取",
+  "chat.usage.cacheWrite": "快取寫入",
+  "chat.usage.reasoning": "思考",
+  "chat.usage.unknown": "未知",
+  "chat.usage.notReported": "尚未回報",
   "chat.usage.context": (used: string, max: string, pct: number) =>
     `上下文：已用 ${used}，上限 ${max} token（${pct}%）`,
   "chat.usage.cost": (usd: string) => `本次會話費用：$${usd}`,
@@ -2185,6 +2212,7 @@ const zhTW: typeof en = {
   "chat.autoContinue.failed": "任務未能自動繼續，傳送訊息即可繼續。", // The task could not continue automatically. Send a message to continue.
   "chat.mcp.codexScope": "此操作將修改 Codex 使用者設定，影響使用該設定的其他工作階段。是否繼續？",
   "chat.mcp.tooltip": "MCP 伺服器",
+  "chat.mcp.zcodeProbe": "透過獨立 CLI 探測已設定的服務。重新連線會重新探測全部服務；啟停請在 Zcode 設定中操作。",
   "chat.mcp.loading": "正在讀取伺服器清單…",
   "chat.mcp.backendUnsupported": "目前連線的 VelaTerm 後端不支援 MCP 管理。請更新並重新啟動該後端，然後重試。",
   "chat.mcp.none": "尚未設定 MCP 伺服器",

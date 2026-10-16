@@ -12,9 +12,9 @@
 //! misdescribe what it does; they are left out, as is an `addRules` whose behavior is not `allow`.
 
 /** Wire-level permission names; the backend supplies each agent's supported options. */
-export type Mode = "plan" | "default" | "acceptEdits" | "auto" | "bypassPermissions" | "read-only" | "full-access";
+export type Mode = "plan" | "default" | "acceptEdits" | "auto" | "bypassPermissions" | "read-only" | "full-access" | "build" | "edit" | "yolo";
 export function isMode(value: string): value is Mode {
-  return ["plan", "default", "acceptEdits", "auto", "bypassPermissions", "read-only", "full-access"].includes(value);
+  return ["plan", "default", "acceptEdits", "auto", "bypassPermissions", "read-only", "full-access", "build", "edit", "yolo"].includes(value);
 }
 
 /** A standing rule the agent offered, exactly as it arrived; it travels back unchanged. */

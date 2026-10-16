@@ -14,6 +14,7 @@ pub fn modes(kind: SessionKind) -> &'static [&'static str] {
     match kind {
         SessionKind::Claude => CLAUDE_MODES,
         SessionKind::Codex => &["read-only", "auto", "full-access"],
+        SessionKind::Zcode => &["plan", "build", "edit", "yolo"],
         SessionKind::Opencode | SessionKind::Antigravity => &["default", "bypassPermissions"],
         // OMP can ask for approval; its bypass maps to `--approval-mode=yolo`. Pi has no approval step at
         // all, so it exposes no modes and the composer shows no permission control for it.
@@ -41,6 +42,7 @@ fn kind(agent: &str) -> Result<SessionKind, String> {
     match agent {
         "claude" => Ok(SessionKind::Claude),
         "codex" => Ok(SessionKind::Codex),
+        "zcode" => Ok(SessionKind::Zcode),
         "opencode" => Ok(SessionKind::Opencode),
         "omp" => Ok(SessionKind::Omp),
         "antigravity" => Ok(SessionKind::Antigravity),
@@ -50,6 +52,7 @@ fn kind(agent: &str) -> Result<SessionKind, String> {
 
 pub fn normalize(kind: SessionKind, stored: Option<&str>) -> Result<&str, String> {
     let mode = match (kind, stored.map(str::trim).unwrap_or("")) {
+        (SessionKind::Zcode, "" | "default") => "build",
         (SessionKind::Codex, "" | "default") => "auto",
         (SessionKind::Codex, "skip") => "full-access",
         (_, "") => "default",

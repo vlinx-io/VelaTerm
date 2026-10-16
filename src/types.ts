@@ -5,7 +5,7 @@ export type SessionId = string;
 export type SessionStatus = "idle" | "running" | "exited" | "error";
 
 /** AI agent kind detected within a session. */
-export type AgentKind = "claude" | "codex" | "opencode" | "copilot" | "cursor" | "antigravity" | "cline" | "pi" | "omp" | "crush" | "kimi" | "kiro" | "grok" | "zoo";
+export type AgentKind = "claude" | "codex" | "zcode" | "opencode" | "copilot" | "cursor" | "antigravity" | "cline" | "pi" | "omp" | "crush" | "kimi" | "kiro" | "grok" | "zoo";
 
 /**
  * Session kind, which determines launch behavior.
@@ -18,11 +18,11 @@ export type AgentKind = "claude" | "codex" | "opencode" | "copilot" | "cursor" |
  *   PreToolUse hook injected through Crush's shadow configuration. Crush exposes only PreToolUse and therefore
  *   reports working only; idle state comes from screen detection.
  */
-export type SessionKind = "terminal" | "claude" | "codex" | "opencode" | "copilot" | "cursor" | "antigravity" | "cline" | "pi" | "omp" | "crush" | "kimi" | "kiro" | "grok" | "zoo" | "browser";
+export type SessionKind = "terminal" | "claude" | "codex" | "zcode" | "opencode" | "copilot" | "cursor" | "antigravity" | "cline" | "pi" | "omp" | "crush" | "kimi" | "kiro" | "grok" | "zoo" | "browser";
 
 /** Agents with permission controls. Claude/Codex/OpenCode obtain their choices from the backend;
  * other supported agents expose a bypass switch. OpenCode injects configuration rather than a flag. */
-export const PERMISSION_TOGGLE_KINDS: SessionKind[] = ["claude", "codex", "opencode", "copilot", "cursor", "antigravity", "cline", "omp", "crush", "kimi", "kiro", "grok", "zoo"];
+export const PERMISSION_TOGGLE_KINDS: SessionKind[] = ["claude", "codex", "zcode", "opencode", "copilot", "cursor", "antigravity", "cline", "omp", "crush", "kimi", "kiro", "grok", "zoo"];
 export function supportsPermissionToggle(kind: SessionKind): boolean {
   return PERMISSION_TOGGLE_KINDS.includes(kind);
 }
@@ -40,7 +40,7 @@ export function supportsPermissionToggle(kind: SessionKind): boolean {
 export type SessionEngine = "tui" | "chat";
 
 /** Agent kinds the chat engine can drive. The backend refuses the rest, so nothing may offer them. */
-export const CHAT_ENGINE_KINDS: SessionKind[] = ["claude", "codex", "opencode", "pi", "omp", "antigravity"];
+export const CHAT_ENGINE_KINDS: SessionKind[] = ["claude", "codex", "zcode", "opencode", "pi", "omp", "antigravity"];
 export function supportsChatEngine(kind: SessionKind): boolean {
   return CHAT_ENGINE_KINDS.includes(kind);
 }

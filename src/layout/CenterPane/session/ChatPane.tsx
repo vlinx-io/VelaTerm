@@ -12,6 +12,7 @@
 import { useAgentPermissions, savePermissionDefault } from "../../../hooks/useAgentPermissions";
 import { useSessionPermissionState } from "../../../hooks/useSessionPermissionState";
 import { currentPermissionLabel, PermissionStateDetails } from "../../../components/PermissionStateDetails";
+import { permissionLabelKey } from "../../../components/AgentPermissionSelect";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { measureElement, observeElementOffset, useVirtualizer } from "@tanstack/react-virtual";
 
@@ -30,6 +31,7 @@ import { StatusDot } from "../../../components/StatusDot";
 import { translationError } from "../../../translation/SettingsSection";
 import { cancelSubmissionTranslation, sendOriginalSubmission } from "./outbox";
 import { ModelCatalogStatus } from "./ModelCatalogStatus";
+import { ZcodeStartPlanStatus } from "./ZcodeStartPlanStatus";
 import { useChatModels } from "./useChatModels";
 import { StatusIndicator } from "../../../components/StatusIndicator";
 import { useT, type I18nKey } from "../../../i18n";
@@ -183,15 +185,9 @@ function effortKey(kind: Session["kind"], model: string): string {
   return `${kind}:${model}`;
 }
 
-function modeLabelKey(mode: Mode): I18nKey {
-  if (mode === "read-only") return "chat.mode.readOnly";
-  if (mode === "full-access") return "chat.mode.fullAccess";
-  return `chat.mode.${mode}` as I18nKey;
-}
-
 /** OMP and Antigravity defer to their own approval settings in `default` mode. */
 function modeLabelKeyFor(kind: Session["kind"], mode: Mode): I18nKey {
-  return (kind === "omp" || kind === "antigravity") && mode === "default" ? "chat.mode.agentDefault" : modeLabelKey(mode);
+  return (kind === "omp" || kind === "antigravity") && mode === "default" ? "chat.mode.agentDefault" : permissionLabelKey(mode);
 }
 
 /** A Codex mode (`default`, `plan`) or an OpenCode agent name; the backend validates it against the catalogue. */
@@ -584,6 +580,14 @@ export function ChatPane({
           break;
         case "steerAccepted":
           setActionFeedback(t("chat.steerAccepted"));
+          break;
+        case "steerPending":
+          if (event.turnEnded) setNotice({text:t("chat.zcode.guideTurnEnded"),priority:"high"});
+          else setActionFeedback(t("chat.zcode.guidePending"));
+          break;
+        case "steerFallback":
+          setActionFeedback("");
+          setNotice({text:t("chat.zcode.guideQueued"),priority:"high"});
           break;
         case "turnInterrupted":
           stopping.current = false;
@@ -1481,6 +1485,10 @@ export function ChatPane({
       if (submissionReceipts === false) setError(t("chat.submission.updateRequired"));
       return;
     }
+    if (session.kind === "zcode" && behavior === "steer" && attachments.length > 0) {
+      setAttachNote(t("chat.zcode.imageGuideUnavailable"));
+      return;
+    }
     const images = attachments.map(({ mimeType, data }) => ({ mimeType, data }));
     const translate = !!translation.settings?.config.enabled && !!translation.value?.enabled && !!translation.value.preferences.outgoing && !!text && !text.startsWith("/");
     const existing = submissionsFor(session.id).find(item => item.text === text && item.behavior === behavior && JSON.stringify(item.images) === JSON.stringify(images) && !["sent", "queued"].includes(item.status));
@@ -1746,7 +1754,7 @@ export function ChatPane({
 
   const wantsCatalogue = /^[/\$][^\s]*$/.test(draft) || /(?:^|\s)\$[^\s$]*$/.test(draft.slice(0, caret));
   useEffect(() => {
-    if (!wantsCatalogue || hidden || !["codex", "claude"].includes(session.kind)) return;
+    if (!wantsCatalogue || hidden || !["codex", "claude", "zcode"].includes(session.kind)) return;
     let disposed = false;
     setCatalogueLoading(true);
     void chatCommands(session.id).then((catalogue) => {
@@ -1997,6 +2005,7 @@ export function ChatPane({
       defaultValue={defaultModel || undefined}
       defaultLabel={t("chat.savedModelDefault")}
       footer={<>
+        {session.kind === "zcode" && !isShareSurface && <ZcodeStartPlanStatus sessionId={session.id} onRefreshed={retryModels} />}
         {(modelsLoading || modelsFailed || catalogue.length === 0) && <div className="sv-model-catalog-status">
           <div role="status">{t(modelsLoading ? "common.loading" : modelsFailed ? "chat.modelsLoadFailed" : "chat.modelsEmpty")}</div>
           {!modelsLoading && <button type="button" className="sv-model-catalog-refresh" onClick={retryModels}>{t("common.retry")}</button>}
@@ -2094,8 +2103,8 @@ export function ChatPane({
   // A chip the user turned on is offered whenever it exists for this agent kind. Between turns the agent
   // process is away, so MCP and Tasks are disabled rather than dropped: a chip that comes and goes with
   // the process cannot be found by someone who just switched it on.
-  if (session.kind === "claude" || session.kind === "codex") composerChips.push({ id: "mcp", node: (
-    <McpChip sessionId={session.id} codex={session.kind === "codex"} disabled={!engineRunning} />
+  if (session.kind === "claude" || session.kind === "codex" || session.kind === "zcode") composerChips.push({ id: "mcp", node: (
+    <McpChip sessionId={session.id} codex={session.kind === "codex"} zcode={session.kind === "zcode"} disabled={!engineRunning} />
   ) });
   if (session.kind === "claude") composerChips.push({ id: "chrome", node: (
     <ControlChip
@@ -2124,8 +2133,8 @@ export function ChatPane({
     />
   ) });
   // The account menu disables itself while a sign-in is unresolved; the inline panel handles that flow.
-  if (session.kind === "codex" || session.kind === "claude") composerChips.push({ id: "account", node: (
-    <AgentAccountMenu provider={session.kind === "claude" ? "Claude" : "Codex"} sessionId={session.id} state={extras.auth} busy={turnStartedAt !== undefined} />
+  if (session.kind === "codex" || session.kind === "claude" || session.kind === "zcode") composerChips.push({ id: "account", node: (
+    <AgentAccountMenu provider={session.kind === "zcode" ? "Zcode" : session.kind === "claude" ? "Claude" : "Codex"} sessionId={session.id} state={extras.auth} busy={turnStartedAt !== undefined} />
   ) });
   if (session.kind === "codex") composerChips.push({ id: "codexCredits", node: <CodexResetCredits /> });
 
@@ -2345,7 +2354,7 @@ export function ChatPane({
                   because the row's own left indent replaces the auto margins that center it. */}
               {error && !isAgentNotInstalledError(error) && <div className="sv-item"><ErrorRow message={error} /></div>}
               {catalogueError && <div className="sv-item"><ErrorRow message={catalogueError} /></div>}
-              {(session.kind === "codex" || session.kind === "claude") && !readOnly && <AgentAuth provider={session.kind === "claude" ? "Claude" : "Codex"} sessionId={session.id} state={extras.auth} busy={turnStartedAt !== undefined} />}
+              {(session.kind === "codex" || session.kind === "claude" || session.kind === "zcode") && !readOnly && <AgentAuth provider={session.kind === "zcode" ? "Zcode" : session.kind === "claude" ? "Claude" : "Codex"} sessionId={session.id} state={extras.auth} busy={turnStartedAt !== undefined} />}
             </div>
             <UserMessageRail key={session.id} items={railItems} order={messageOrder} scrollRef={scrollRef} enabled={syncState === "ready" && !hidden && !(searchOpen && focused)}
               pendingId={railJump.pendingId} error={railJump.error} onCancel={railJump.cancel} onSelect={id => {
@@ -2658,7 +2667,7 @@ export function ChatPane({
               )}
               <ComposerToolbar mobile={mobile} chips={composerChips} inline={["translation", ...composerInlineChips]}
                 actions={<>
-                  {(session.kind === "claude" || session.kind === "codex") && <UsageMeter extras={extras} />}
+                  {(session.kind === "claude" || session.kind === "codex" || session.kind === "zcode") && <UsageMeter extras={extras} detailed={session.kind === "zcode"} />}
                   {busy && session.kind !== "antigravity" && (
                     <button
                       className="sv-steer"

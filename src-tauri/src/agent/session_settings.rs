@@ -410,7 +410,7 @@ pub fn from_args(kind: SessionKind, text: Option<&str>) -> Selection {
                 state.model = clean(value);
                 true
             }
-            "--effort" if matches!(kind, SessionKind::Claude | SessionKind::Antigravity) => {
+            "--effort" if matches!(kind, SessionKind::Claude | SessionKind::Antigravity | SessionKind::Zcode) => {
                 state.effort = clean(value).filter(|v| v != "auto");
                 true
             }
@@ -456,7 +456,7 @@ pub fn without_selection_args(kind: SessionKind, text: Option<&str>) -> String {
             .map(|s| super::inject::split_extra_args(Some(s)));
         let value = inline.or_else(|| next.as_ref().and_then(|v| v.first()).map(String::as_str));
         let remove = matches!(flag, "--model" | "-m")
-            || (matches!(kind, SessionKind::Claude | SessionKind::Antigravity) && flag == "--effort")
+            || (matches!(kind, SessionKind::Claude | SessionKind::Antigravity | SessionKind::Zcode) && flag == "--effort")
             || (kind == SessionKind::Opencode && flag == "--variant")
             || (matches!(kind, SessionKind::Pi | SessionKind::Omp) && flag == "--thinking")
             || (kind == SessionKind::Codex
@@ -569,6 +569,14 @@ mod tests {
             ),
             pair("openai/gpt-5.5", "high")
         );
+    }
+
+    #[test]
+    fn zcode_launch_effort_is_transferred_to_rpc_without_forwarding_cli_flags() {
+        let args = "--model deepseek/deepseek-flash --effort=max --custom value";
+        assert_eq!(from_args(SessionKind::Zcode, Some(args)), pair("deepseek/deepseek-flash", "max"));
+        assert_eq!(without_selection_args(SessionKind::Zcode, Some(args)), "--custom value");
+        assert_eq!(without_selection_args(SessionKind::Zcode, Some("--effort max --model=deepseek/deepseek-flash")), "");
     }
 
     #[test]

@@ -2,6 +2,19 @@
 //! Add new text here first, then translate it in every other dictionary; type constraints prevent omissions.
 
 const en = {
+  "chat.zcode.planLoadFailed": "Could not load Start Plan. Check the CLI version and sign in again.",
+  "chat.zcode.planUnsupported": "This CLI does not report Start Plan support.",
+  "chat.zcode.planEffective": "Effective:",
+  "chat.zcode.planEnds": "Expires:",
+  "chat.zcode.planRemaining": "Remaining:",
+  "chat.zcode.planUsed": "Used:",
+  "chat.zcode.plan.available": "Available",
+  "chat.zcode.plan.pending": "Pending activation",
+  "chat.zcode.plan.unavailable": "No usable quota or models",
+  "chat.zcode.plan.not-authenticated": "Sign in to this account",
+  "chat.zcode.plan.verification-required": "Official verification required",
+  "chat.zcode.plan.error": "Could not query entitlements",
+
   "panel.averageOutput": "average output",
   "panel.averageOutputHint": "Estimated output tokens per second over measured response time, including reported reasoning. Excludes tool execution and user waits. Unavailable when usage and timing cannot be matched reliably. This is not pure model decoding speed.",
   "translation.swap": "Swap languages",
@@ -2229,6 +2242,20 @@ const en = {
   "chat.resetCredits.retry": "Retry reset",
   "chat.resetCredits.use": "Use one credit",
   "chat.resetCredits.refresh": "Refresh",
+  "chat.zcode.guideTurnEnded": "The original turn ended while the guide was being admitted. Zcode has received the input; wait for its actual reply and do not resend.",
+  "chat.zcode.guidePending": "Guide request submitted; waiting for a native execution boundary.",
+  "chat.zcode.guideQueued": "Zcode could not apply the guide in the current turn and queued it for a later turn. Do not resend it.",
+  "chat.zcode.imageGuideUnavailable": "Zcode cannot steer with images. Your draft and images are kept; send normally to queue them.",
+  "chat.usage.label": "Usage",
+  "chat.usage.session": "Session total",
+  "chat.usage.turn": "Current turn",
+  "chat.usage.input": "Input",
+  "chat.usage.output": "Output",
+  "chat.usage.cached": "Cache read",
+  "chat.usage.cacheWrite": "Cache write",
+  "chat.usage.reasoning": "Reasoning",
+  "chat.usage.unknown": "Unknown",
+  "chat.usage.notReported": "Not reported",
   "chat.usage.context": (used: string, max: string, pct: number) =>
     `Context: ${used} of ${max} tokens (${pct}%)`,
   "chat.usage.cost": (usd: string) => `Session cost: $${usd}`,
@@ -2243,6 +2270,7 @@ const en = {
   // ── MCP servers and background tasks ──
   "chat.mcp.codexScope": "This changes your Codex user configuration and affects other conversations using it. Continue?",
   "chat.mcp.tooltip": "MCP servers",
+  "chat.mcp.zcodeProbe": "Tests configured servers in a separate CLI process. Reconnect tests all servers; enable or disable them in Zcode settings.",
   "chat.mcp.loading": "Reading the server list…",
   "chat.mcp.backendUnsupported": "The connected VelaTerm backend does not support MCP controls. Update and restart that backend, then retry.",
   "chat.mcp.none": "No MCP servers configured",

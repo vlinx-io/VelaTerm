@@ -3,6 +3,19 @@
 import type en from "./en";
 
 const de: typeof en = {
+  "chat.zcode.planLoadFailed": "Start Plan konnte nicht geladen werden. CLI-Version prüfen oder erneut anmelden.",
+  "chat.zcode.planUnsupported": "Diese CLI meldet keine Unterstützung für Start Plan.",
+  "chat.zcode.planEffective": "Aktiv ab:",
+  "chat.zcode.planEnds": "Ablauf:",
+  "chat.zcode.planRemaining": "Verbleibend:",
+  "chat.zcode.planUsed": "Verbraucht:",
+  "chat.zcode.plan.available": "Verfügbar",
+  "chat.zcode.plan.pending": "Aktivierung ausstehend",
+  "chat.zcode.plan.unavailable": "Kein nutzbares Kontingent oder Modell",
+  "chat.zcode.plan.not-authenticated": "Bei diesem Konto anmelden",
+  "chat.zcode.plan.verification-required": "Offizielle Verifizierung erforderlich",
+  "chat.zcode.plan.error": "Berechtigungen konnten nicht abgefragt werden",
+
   "panel.averageOutput": "mittlere Ausgaberate",
   "panel.averageOutputHint": "Geschätzte Anzahl der pro Sekunde ausgegebenen Tokens, berechnet aus der gemessenen Antwortzeit und einschließlich gemeldeter Reasoning-Tokens. Werkzeugausführung und Wartezeiten auf Benutzereingaben werden nicht berücksichtigt. Wenn sich Verbrauch und Zeitmessung nicht zuverlässig zuordnen lassen, wird kein Wert angezeigt. Dies ist nicht die reine Dekodiergeschwindigkeit des Modells.",
   "translation.swap": "Sprachen tauschen",
@@ -2226,6 +2239,20 @@ const de: typeof en = {
   "chat.resetCredits.retry": "Zurücksetzung wiederholen",
   "chat.resetCredits.use": "Ein Guthaben verwenden",
   "chat.resetCredits.refresh": "Aktualisieren",
+  "chat.zcode.guideTurnEnded": "Die ursprüngliche Runde endete während der Annahme. Zcode hat die Eingabe erhalten; warten Sie auf die Antwort und senden Sie nicht erneut.",
+  "chat.zcode.guidePending": "Anleitungsanfrage gesendet; wartet auf einen nativen Ausführungspunkt.",
+  "chat.zcode.guideQueued": "Zcode konnte die Anweisung in dieser Runde nicht anwenden und hat sie für eine spätere Runde eingereiht. Nicht erneut senden.",
+  "chat.zcode.imageGuideUnavailable": "Zcode unterstützt keine Bilder bei der laufenden Anleitung. Entwurf und Bilder bleiben erhalten; normal senden, um sie einzureihen.",
+  "chat.usage.label": "Nutzung",
+  "chat.usage.session": "Sitzung gesamt",
+  "chat.usage.turn": "Aktueller Durchlauf",
+  "chat.usage.input": "Eingabe",
+  "chat.usage.output": "Ausgabe",
+  "chat.usage.cached": "Cache gelesen",
+  "chat.usage.cacheWrite": "Cache geschrieben",
+  "chat.usage.reasoning": "Denkprozess",
+  "chat.usage.unknown": "Unbekannt",
+  "chat.usage.notReported": "Noch nicht gemeldet",
   "chat.usage.context": (used: string, max: string, pct: number) =>
     `Kontext: ${used} von ${max} Tokens (${pct} %)`,
   "chat.usage.cost": (usd: string) => `Sitzungskosten: $${usd}`,
@@ -2240,6 +2267,7 @@ const de: typeof en = {
   "chat.autoContinue.failed": "Die Aufgabe konnte nicht automatisch fortgesetzt werden. Senden Sie eine Nachricht, um fortzufahren.", // The task could not continue automatically. Send a message to continue.
   "chat.mcp.codexScope": "Dadurch wird Ihre Codex-Benutzerkonfiguration geändert. Dies betrifft auch andere Unterhaltungen, die diese Konfiguration verwenden. Fortfahren?",
   "chat.mcp.tooltip": "MCP-Server",
+  "chat.mcp.zcodeProbe": "Prüft konfigurierte Server in einem separaten CLI-Prozess. Neu verbinden prüft alle Server; aktivieren oder deaktivieren Sie sie in den Zcode-Einstellungen.",
   "chat.mcp.loading": "Serverliste wird gelesen …",
   "chat.mcp.backendUnsupported": "Das verbundene VelaTerm-Backend unterstützt die MCP-Verwaltung nicht. Aktualisieren Sie dieses Backend, starten Sie es neu und versuchen Sie es erneut.",
   "chat.mcp.none": "Keine MCP-Server konfiguriert",

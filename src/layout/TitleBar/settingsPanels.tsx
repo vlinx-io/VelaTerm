@@ -278,6 +278,7 @@ const AGENT_DEFAULT_KINDS: {
   // `inject::permission_flag`). `yolo` is display-only here; the backend injects the actual flag.
   { kind: "cline", label: "Cline", yolo: "--auto-approve true", permVia: "flag" },
   { kind: "pi", label: "Pi", yolo: "", permVia: "none" },
+  { kind: "zcode", label: "Zcode", yolo: "", permVia: "none" },
   // OMP forked from Pi but kept approval prompts; `--yolo` (its alias for `--auto-approve`) skips them.
   { kind: "omp", label: "OMP", yolo: "--yolo", permVia: "flag" },
   // Crush injects `--yolo` only in skip mode; default mode retains native staged approval.
@@ -529,7 +530,7 @@ export function AgentsPanel() {
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: "var(--space-4, 16px)" }}>
           <div style={{ flex: "1 1 160px", minWidth: 0, color: "var(--text-dim)", fontSize: 12, lineHeight: 1.5 }}>{t("permission.defaultHint")}</div>
           <div style={{ flex: "none", maxWidth: "100%" }}>
-            {["claude", "codex", "opencode"].includes(selKind) ? (
+            {["claude", "codex", "zcode", "opencode"].includes(selKind) ? (
               <AgentPermissionSelect key={selKind} kind={selKind} value={cfg.permissionMode}
                 onChange={mode => savePermissionDefault(selKind, mode)} />
             ) : supportsYolo ? (
@@ -574,7 +575,7 @@ export function AgentsPanel() {
       )}
 
       {/* Only agents the chat engine can drive have two views; everything else always runs its own terminal. */}
-      {supportsChatEngine(selKind) && (
+      {supportsChatEngine(selKind) && selKind !== "zcode" && (
         <>
           <Field label={t("settings.agentDefaultView")}>
             <Seg<"chat" | "tui">

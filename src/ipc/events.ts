@@ -94,6 +94,7 @@ export type StatusSignal =
         | "kiro"
         | "grok"
         | "zoo"
+        | "zcode"
         | null;
       stateSource?: "hooks" | "legacy" | "chat";
     }

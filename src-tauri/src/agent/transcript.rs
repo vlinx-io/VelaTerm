@@ -938,6 +938,7 @@ pub fn read(kind: SessionKind, agent_session_id: &str) -> Result<Vec<TranscriptM
             Err("Transcript view is not supported for Zoo Code sessions yet".to_string())
         }
         SessionKind::Terminal => Err("Terminal sessions have no agent transcript".to_string()),
+        SessionKind::Zcode => Err("读取 Zcode CLI 原生历史需要会话对应的可执行程序及工作目录".to_string()),
         SessionKind::Browser => Err("Browser pages have no agent transcript".to_string()),
     }
 }

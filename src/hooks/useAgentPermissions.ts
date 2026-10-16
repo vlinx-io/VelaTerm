@@ -17,7 +17,7 @@ export function useAgentPermissions(kind: SessionKind, stored?: string | null) {
     const refresh = () => {
       const request = ++generation;
       setState({ key });
-      if (!["claude", "codex", "opencode", "omp", "antigravity"].includes(kind)) return;
+      if (!["claude", "codex", "zcode", "opencode", "omp", "antigravity"].includes(kind)) return;
       void invoke<PermissionCatalog>("agent_permission_catalog", { agent: kind, stored: stored ?? null })
         .then(catalog => { if (active && request === generation) setState({ key, catalog }); })
         .catch(error => { if (active && request === generation) setState({ key, error: String(error) }); });

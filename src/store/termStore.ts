@@ -2348,10 +2348,16 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
 
   applySpawnReceipt: async (receipt, open = false) => {
-    const needsReview = receipt.decision === "pending" || receipt.state === "pending" || receipt.state === "failed" || receipt.state === "uncertain" || receipt.state === "dispatching";
     set((s) => {
+      const previous = s.spawnReceipts[receipt.requestId];
+      // 后端不会退回初始 pending；忽略晚到的旧查询，保留失败原因及重试入口。
+      if (previous && ((previous.decision !== "pending" && receipt.decision === "pending")
+        || (previous.state !== "pending" && receipt.state === "pending"))) return s;
       const index = s.pendingSpawns.findIndex((r) => r.requestId === receipt.requestId);
       const next = s.pendingSpawns.filter((r) => r.requestId !== receipt.requestId);
+      // 自动启动不进入确认队列；失败仍保留重试入口，已打开的人工确认卡保持稳定。
+      const needsReview = receipt.decision === "pending" || receipt.state === "failed" || receipt.state === "uncertain" || receipt.state === "dispatching"
+        || (receipt.state === "pending" && index >= 0 && !receipt.request.noConfirm);
       if (needsReview) next.splice(index < 0 ? next.length : index, 0, receipt.request);
       return { pendingSpawns: next, spawnReceipts: { ...s.spawnReceipts, [receipt.requestId]: receipt } };
     });
@@ -2365,9 +2371,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
     const receipts = await spawnRequests();
     for (const receipt of receipts) {
       await get().applySpawnReceipt(receipt, receipt.decision === "confirmed" && receipt.state === "ready");
+      const current = get().spawnReceipts[receipt.requestId];
       // An interrupted creation is safe to resume: the backend reuses its fixed result identity.
       // Failed or uncertain delivery stays visible for an explicit retry, without an event retry loop.
-      if (receipt.decision === "confirmed" && (receipt.state === "pending" || receipt.state === "waiting") && !spawnRecovery.has(receipt.requestId)) {
+      if (current?.decision === "confirmed" && (current.state === "pending" || current.state === "waiting") && !spawnRecovery.has(receipt.requestId)) {
         const recovery = retrySpawn(receipt.requestId).then((result) => get().applySpawnReceipt(result, true))
           .finally(() => spawnRecovery.delete(receipt.requestId));
         spawnRecovery.set(receipt.requestId, recovery);
@@ -2378,11 +2385,13 @@ export const useTermStore = create<TermStore>((set, get) => ({
 
   handleSpawnRequest: async (req) => {
     if (!req.requestId) { await get().syncSpawnRequests(); return; }
-    // The event is a hint. Settings, the decision and the result come from the durable backend row.
-    // Keep the hint visible if the read fails; reconnect can recover it without executing locally.
-    set((s) => ({ pendingSpawns: s.pendingSpawns.some((r) => r.requestId === req.requestId)
-      ? s.pendingSpawns : [...s.pendingSpawns, req] }));
-    const receipt = await spawnRequest(req.requestId);
+    // 先读后端持久结果，避免 --yes 请求在回执到达前短暂弹出确认窗口。
+    // 读取失败仍显示请求，重连后可恢复，不在客户端执行任务。
+    const receipt = await spawnRequest(req.requestId).catch(cause => {
+      set((s) => ({ pendingSpawns: s.pendingSpawns.some((r) => r.requestId === req.requestId)
+        ? s.pendingSpawns : [...s.pendingSpawns, req] }));
+      throw cause;
+    });
     await get().applySpawnReceipt(receipt, receipt.decision === "confirmed");
     if (receipt.decision === "confirmed" && receipt.state === "pending") await get().syncSpawnRequests();
     if (receipt.decision === "pending" && get().notifyEnabled) {

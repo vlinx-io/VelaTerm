@@ -2,6 +2,21 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+mod zcode_registration_tests {
+    #[test]
+    fn zcode_is_a_distinct_schedulable_chat_agent() {
+        let kind = super::SessionKind::from_db("zcode");
+        assert_eq!(kind.as_str(), "zcode");
+        assert!(kind.supports_chat());
+        let option = crate::agent::launch_options::catalog().into_iter()
+            .find(|item| item.id.as_str() == "zcode").expect("Zcode must appear independently");
+        assert_eq!(option.label, "Zcode");
+        assert!(option.supports_plan_execute);
+        assert!(option.accepts_task);
+    }
+}
+
 /// Session type, which determines launch behavior.
 /// - `Terminal`: a plain login shell and the backward-compatible default.
 /// - Agent types are launched by VelaTerm with official hooks, notify handlers, plugins, or extensions
@@ -22,6 +37,8 @@ pub enum SessionKind {
     Terminal,
     Claude,
     Codex,
+    /// 独立 Zcode 桌面接收会话，使用专用协议驱动，不复用 Claude 身份。
+    Zcode,
     Opencode,
     Copilot,
     Cursor,
@@ -52,7 +69,7 @@ pub enum SessionKind {
 impl SessionKind {
     /// Verified protocol drivers accepted by the conversation engine.
     pub fn supports_chat(self) -> bool {
-        matches!(self, Self::Claude | Self::Codex | Self::Opencode | Self::Pi | Self::Omp | Self::Antigravity)
+        matches!(self, Self::Claude | Self::Codex | Self::Zcode | Self::Opencode | Self::Pi | Self::Omp | Self::Antigravity)
     }
 
     /// Lowercase string used for persistence.
@@ -61,6 +78,7 @@ impl SessionKind {
             SessionKind::Terminal => "terminal",
             SessionKind::Claude => "claude",
             SessionKind::Codex => "codex",
+            SessionKind::Zcode => "zcode",
             SessionKind::Opencode => "opencode",
             SessionKind::Copilot => "copilot",
             SessionKind::Cursor => "cursor",
@@ -82,6 +100,7 @@ impl SessionKind {
         match s {
             "claude" => SessionKind::Claude,
             "codex" => SessionKind::Codex,
+            "zcode" => SessionKind::Zcode,
             "opencode" => SessionKind::Opencode,
             "copilot" => SessionKind::Copilot,
             "cursor" => SessionKind::Cursor,

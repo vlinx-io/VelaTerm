@@ -77,6 +77,7 @@ const DEFAULT_QUICK_AGENTS: SessionKind[] = ["claude", "codex", "opencode"];
 const QUICK_AGENT_KINDS: SessionKind[] = [
   "claude",
   "codex",
+  "zcode",
   "opencode",
   "copilot",
   "cursor",
@@ -750,6 +751,11 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
           label: t("tree.newAgentSession", "Zoo Code"),
           icon: kindIconEl("zoo"),
           onClick: () => void handleNewSession(projectId, groupId, "zoo", parentSessionId),
+        },
+        {
+          label: t("tree.newAgentSession", "Zcode"),
+          icon: kindIconEl("zcode"),
+          onClick: () => void handleNewSession(projectId, groupId, "zcode", parentSessionId),
         },
         // Saved presets, listed after the built-in agents they behave like. Each launches directly with
         // its own executable and defaults, which is the point of saving one.

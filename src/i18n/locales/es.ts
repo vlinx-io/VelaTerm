@@ -3,6 +3,19 @@
 import type en from "./en";
 
 const es: typeof en = {
+  "chat.zcode.planLoadFailed": "No se pudo cargar Start Plan. Comprueba la versión del CLI o inicia sesión de nuevo.",
+  "chat.zcode.planUnsupported": "Este CLI no indica compatibilidad con Start Plan.",
+  "chat.zcode.planEffective": "Activación:",
+  "chat.zcode.planEnds": "Caducidad:",
+  "chat.zcode.planRemaining": "Restante:",
+  "chat.zcode.planUsed": "Usado:",
+  "chat.zcode.plan.available": "Disponible",
+  "chat.zcode.plan.pending": "Pendiente de activación",
+  "chat.zcode.plan.unavailable": "Sin cuota o modelos disponibles",
+  "chat.zcode.plan.not-authenticated": "Inicia sesión en esta cuenta",
+  "chat.zcode.plan.verification-required": "Se requiere verificación oficial",
+  "chat.zcode.plan.error": "No se pudieron consultar los derechos",
+
   "panel.averageOutput": "salida media",
   "panel.averageOutputHint": "Estimación de los tokens generados por segundo durante el tiempo de respuesta medido, incluidos los tokens de razonamiento declarados. Excluye la ejecución de herramientas y la espera del usuario. No se muestra ningún valor si el uso y el tiempo no se pueden relacionar de forma fiable. No representa la velocidad de decodificación pura del modelo.",
   "translation.swap": "Intercambiar idiomas",
@@ -2234,6 +2247,20 @@ const es: typeof en = {
   "chat.resetCredits.retry": "Reintentar restablecimiento",
   "chat.resetCredits.use": "Usar un crédito",
   "chat.resetCredits.refresh": "Actualizar",
+  "chat.zcode.guideTurnEnded": "El turno original terminó mientras se admitía la guía. Zcode recibió la entrada; espera su respuesta y no la reenvíes.",
+  "chat.zcode.guidePending": "Solicitud de guía enviada; esperando un punto de ejecución nativo.",
+  "chat.zcode.guideQueued": "Zcode no pudo aplicar la guía en este turno y la puso en cola para otro turno. No la reenvíes.",
+  "chat.zcode.imageGuideUnavailable": "Zcode no admite imágenes en la guía en curso. El borrador y las imágenes se conservan; envíalos normalmente para ponerlos en cola.",
+  "chat.usage.label": "Uso",
+  "chat.usage.session": "Total de la sesión",
+  "chat.usage.turn": "Turno actual",
+  "chat.usage.input": "Entrada",
+  "chat.usage.output": "Salida",
+  "chat.usage.cached": "Lectura de caché",
+  "chat.usage.cacheWrite": "Escritura de caché",
+  "chat.usage.reasoning": "Razonamiento",
+  "chat.usage.unknown": "Desconocido",
+  "chat.usage.notReported": "Sin datos",
   "chat.usage.context": (used: string, max: string, pct: number) =>
     `Contexto: ${used} de ${max} tokens (${pct} %)`,
   "chat.usage.cost": (usd: string) => `Coste de la sesión: $${usd}`,
@@ -2248,6 +2275,7 @@ const es: typeof en = {
   "chat.autoContinue.failed": "La tarea no pudo continuar automáticamente. Envía un mensaje para continuar.", // The task could not continue automatically. Send a message to continue.
   "chat.mcp.codexScope": "Esta acción modifica tu configuración de usuario de Codex y afecta a otras conversaciones que la utilicen. ¿Continuar?",
   "chat.mcp.tooltip": "Servidores MCP",
+  "chat.mcp.zcodeProbe": "Comprueba los servidores configurados en un proceso CLI independiente. Reconectar comprueba todos; actívalos o desactívalos en los ajustes de Zcode.",
   "chat.mcp.loading": "Leyendo la lista de servidores…",
   "chat.mcp.backendUnsupported": "El servidor VelaTerm conectado no admite la gestión de MCP. Actualícelo y reinícielo; después, vuelva a intentarlo.",
   "chat.mcp.none": "No hay servidores MCP configurados",

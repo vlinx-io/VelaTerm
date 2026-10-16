@@ -826,7 +826,7 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
                 personality.as_deref(),
             )?)
         }
-        "chat_auth_start" => to_value(core::chat_auth_start(app, &req_str(args, "sessionId")?)?),
+        "chat_auth_start" => to_value(core::chat_auth_start_provider(app, &req_str(args, "sessionId")?, args.get("provider").and_then(Value::as_str))?),
         "chat_auth_logout" => to_value(core::chat_auth_logout(app, &req_str(args, "sessionId")?)?),
         "chat_auth_submit" => to_value(core::chat_auth_submit(app, &req_str(args, "sessionId")?, &req_str(args, "code")?)?),
         "chat_auth_cancel" => to_value(core::chat_auth_cancel(app, &req_str(args, "sessionId")?)?),
@@ -971,6 +971,7 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         "model_catalog_status" => to_value(crate::agent::remote_model_catalog::status()),
         "model_catalog_refresh" => to_value(crate::agent::remote_model_catalog::refresh(app)),
         "chat_models" => core::chat_models(app, &req_str(args, "sessionId")?),
+        "chat_zcode_start_plan" => core::chat_zcode_start_plan(app, &req_str(args, "sessionId")?),
         "chat_commands" => to_value(core::chat_commands(app, &req_str(args, "sessionId")?)?),
         "chat_snapshot" => {
             let window = args.get("window").filter(|value| !value.is_null()).map(|value| serde_json::from_value::<crate::agent::chat::engine::ChatWindow>(value.clone())).transpose().map_err(|e| e.to_string())?;
@@ -1611,13 +1612,19 @@ mod tests {
     fn chat_mcp_commands_reach_the_agent_manager() {
         let app = test_ctx();
         let data_dir = app.data_dir().unwrap();
+        let session = {
+            let conn = app.db().conn.lock().unwrap();
+            let project = crate::db::repo::create_virtual_project(&conn, "MCP dispatch").unwrap();
+            crate::db::repo::create_session(&conn, &project.id, None, "MCP probe", crate::models::SessionKind::Claude,
+                None, None, None, None, None).unwrap()
+        };
         for cmd in ["chat_mcp_status", "chat_mcp_toggle", "chat_mcp_reconnect"] {
             // Missing parameters must fail validation rather than fall through as an unknown command.
             let error = dispatch(&app, cmd, &json!({}), DESKTOP_SOURCE, CallOrigin::Local).unwrap_err();
             assert_eq!(error, "Missing string parameter sessionId", "{cmd}");
             let error = dispatch(
                 &app, cmd,
-                &json!({ "sessionId": "mcp-probe", "server": "local-tools", "enabled": false }),
+                &json!({ "sessionId": session.id, "server": "local-tools", "enabled": false }),
                 DESKTOP_SOURCE, CallOrigin::Local,
             ).unwrap_err();
             assert_eq!(error, "This session has no running agent", "{cmd}");

@@ -39,6 +39,7 @@ mod generation;
 mod opencode;
 mod permission_restart;
 mod pi;
+mod zcode;
 
 use super::codex_protocol;
 use super::pi_protocol;
@@ -828,6 +829,9 @@ pub struct ClaudeExtras {
     /// Numeric, provider-reported cumulative token counters for background workflow accounting.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub native_usage: Option<Value>,
+    /// 原生当前回合的已结算用量，与会话累计分开。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_usage: Option<Value>,
     #[serde(skip)]
     generation: generation::GenerationTiming,
     /// Context the last API call carried: input plus cache reads and cache writes.
@@ -972,6 +976,7 @@ struct ChatProcess {
     /// The Pi/OMP side of this conversation: its variant, model catalogue, and pending extension dialogs.
     pi: Mutex<pi::PiState>,
     antigravity: Mutex<super::antigravity_protocol::StreamState>,
+    zcode: Mutex<zcode::State>,
     /// Codex service tier (`fast`, or another id from its model catalogue) for subsequent turns. None
     /// keeps whatever the thread was opened with.
     service_tier: Mutex<Option<String>>,
@@ -1164,6 +1169,7 @@ fn initial_mode(kind: SessionKind, stored: Option<&str>) -> String {
             _ => "auto",
         },
         SessionKind::Opencode => opencode::initial_mode(stored),
+        SessionKind::Zcode => crate::agent::permission_catalog::normalize(SessionKind::Zcode, stored).unwrap_or("build"),
         SessionKind::Omp => crate::agent::permission_catalog::normalize(SessionKind::Omp, stored)
             .unwrap_or("default"),
         SessionKind::Pi => "default",
@@ -1478,6 +1484,11 @@ impl ChatManager {
         // OpenCode is reached over HTTP: the port it listens on and the password that guards it.
         let mut opencode_launch: Option<(u16, String)> = None;
         match kind {
+            SessionKind::Zcode => {
+                if fork { return Err("Zcode 会话分叉需要原生 fork 操作，当前请新建独立会话".into()); }
+                cmd.args(["app-server", "--stdio", "--standalone"]);
+                cmd.args(extra_args);
+            }
             SessionKind::Claude => {
                 cmd.args(protocol::launch_args(resume, fork, model, effort, &mode));
                 cmd.args(extra_args);
@@ -1523,6 +1534,9 @@ impl ChatManager {
             cmd.current_dir(cwd);
         }
         agent_environment(app, session_id, &mut cmd);
+        if kind == SessionKind::Zcode {
+            crate::agent::zcode_cli::prepare_environment(&mut cmd, crate::host::home_dir());
+        }
         if kind == SessionKind::Claude {
             // Claude disables file checkpoints outside its TUI unless this SDK-compatible switch is set.
             // Its explicit disable switch still wins, so user policy remains authoritative.
@@ -1596,6 +1610,7 @@ impl ChatManager {
             opencode: Mutex::new(opencode::OpencodeState::default()),
             pi: Mutex::new(pi::PiState::default()),
             antigravity: Mutex::new(crate::agent::chat::antigravity_protocol::StreamState::default()),
+            zcode: Mutex::new(zcode::State::default()),
             service_tier: Mutex::new(service_tier),
             personality: Mutex::new(personality),
             codex_turn_error: Mutex::new(None),
@@ -1709,6 +1724,7 @@ impl ChatManager {
 
         let init_id = proc.request_id("initialize");
         match kind {
+            SessionKind::Zcode => zcode::bootstrap(app.clone(), session_id.into(), proc.clone(), resume.map(str::to_string)),
             SessionKind::Antigravity => start_waiting_message(app, session_id, &proc),
             SessionKind::Claude => {
                 // Ask for the command catalogue straight away; the composer's completions come from the answer.
@@ -2081,6 +2097,9 @@ impl ChatManager {
         if proc.kind == SessionKind::Omp {
             return pi::respond_extension_ui(app, session_id, &proc, request_id, allow);
         }
+        if proc.kind == SessionKind::Zcode {
+            return zcode::respond(app, session_id, &proc, request_id, allow, updated_input, message);
+        }
         if proc.permissions.lock().unwrap().remove(request_id).is_none() {
             return Err("That permission request is no longer waiting for an answer".into());
         }
@@ -2165,6 +2184,9 @@ impl ChatManager {
             proc.request_and_wait("set_permission_mode", |id| {
                 protocol::control_request(id, protocol::set_permission_mode(mode))
             }).map_err(|error| permission_restart::mode_error(&proc, mode, error))?;
+        }
+        if proc.kind == SessionKind::Zcode {
+            zcode::command(&proc, "set_permission_mode", "session/setMode", json!({"mode":mode}))?;
         }
         *proc.mode.lock().unwrap() = mode.to_string();
         proc.permission_confirmed.store(true, Ordering::Relaxed);
@@ -2278,6 +2300,9 @@ impl ChatManager {
             model
         };
         let _change = proc.settings_change.lock().unwrap();
+        if proc.kind == SessionKind::Zcode {
+            zcode::set_model(&proc, model)?;
+        }
         if proc.kind == SessionKind::Claude {
             proc.request_and_wait("set_model", |id| {
                 protocol::control_request(id, protocol::set_model(model))
@@ -2301,6 +2326,10 @@ impl ChatManager {
         let proc = self.get(session_id)?;
         // Automatic effort removes the override; an empty string is not a provider effort level.
         let effort = effort.map(str::trim).filter(|value| !value.is_empty());
+        if proc.kind == SessionKind::Zcode {
+            zcode::set_effort(&proc,effort)?;
+            return Ok(());
+        }
         let previous = std::mem::replace(
             &mut *proc.effort.lock().unwrap(),
             effort.map(str::to_string),
@@ -2349,8 +2378,8 @@ impl ChatManager {
 
     fn account_process(&self, session_id: &str) -> Result<Arc<ChatProcess>, String> {
         let proc = self.get(session_id)?;
-        if !matches!(proc.kind, SessionKind::Claude | SessionKind::Codex) {
-            return Err("Account operations require a Claude or Codex conversation.".into());
+        if !matches!(proc.kind, SessionKind::Claude | SessionKind::Codex | SessionKind::Zcode) {
+            return Err("当前 Harness 不支持原生账户登录".into());
         }
         if proc.kind == SessionKind::Codex {
             for _ in 0..500 {
@@ -2362,6 +2391,10 @@ impl ChatManager {
     }
 
     pub fn auth_start(&self, app: &AppCtx, session_id: &str) -> Result<(), String> {
+        self.auth_start_provider(app,session_id,None)
+    }
+
+    pub fn auth_start_provider(&self, app: &AppCtx, session_id: &str, provider: Option<&str>) -> Result<(), String> {
         let _change = self.auth_change.lock().unwrap();
         let proc = self.account_process(session_id)?;
         let _action = proc.action.lock().unwrap();
@@ -2369,6 +2402,7 @@ impl ChatManager {
             return Err("An account operation for this provider is already in progress in another conversation.".into());
         }
         if proc.kind == SessionKind::Claude { auth::claude::start(app, session_id, &proc) }
+        else if proc.kind == SessionKind::Zcode { auth::zcode::run(app,session_id,&proc,true,provider.unwrap_or("zai")) }
         else { auth::start(app, session_id, &proc) }
     }
 
@@ -2380,6 +2414,7 @@ impl ChatManager {
             return Err("An account operation for this provider is already in progress in another conversation.".into());
         }
         if proc.kind == SessionKind::Claude { auth::claude::logout(app, session_id, &proc) }
+        else if proc.kind == SessionKind::Zcode { auth::zcode::run(app,session_id,&proc,false,"zai") }
         else { auth::logout(app, session_id, &proc) }
     }
 
@@ -2387,6 +2422,7 @@ impl ChatManager {
         let proc = self.account_process(session_id)?;
         let _action = proc.action.lock().unwrap();
         if proc.kind == SessionKind::Claude { auth::claude::cancel(app, session_id, &proc) }
+        else if proc.kind == SessionKind::Zcode { auth::zcode::cancel(app,session_id,&proc) }
         else { auth::cancel(app, session_id, &proc) }
     }
 
@@ -2463,6 +2499,7 @@ impl ChatManager {
     pub fn mcp_toggle(&self, session_id: &str, server: &str, enabled: bool) -> Result<Value, String> {
         let proc = self.get(session_id)?;
         if proc.kind == SessionKind::Codex { return codex::mcp_toggle(&proc, server, enabled); }
+        if proc.kind == SessionKind::Zcode { return Err("请在 Zcode 设置中启停 MCP；原生 CLI 当前只提供状态查询和重新连接".into()); }
         let proc = self.claude(session_id)?;
         proc.request_and_wait("mcp_toggle", |id| {
             protocol::control_request(id, protocol::mcp_toggle(server, enabled))
@@ -2504,6 +2541,12 @@ impl ChatManager {
         Some(commands)
     }
 
+    pub fn live_zcode_commands(&self, session_id: &str) -> Option<Result<Vec<Value>,String>> {
+        let proc=self.get(session_id).ok()?;
+        if proc.kind!=SessionKind::Zcode || !proc.alive.load(Ordering::Relaxed) { return None; }
+        Some(zcode::refresh_commands(&proc))
+    }
+
     /// The catalogue the running Claude process reported, or None before it has answered.
     pub fn live_claude_models(&self, session_id: &str) -> Option<Vec<crate::agent::claude_models::ClaudeModel>> {
         let proc = self.sessions.lock().unwrap().get(session_id).cloned()?;
@@ -2525,6 +2568,22 @@ impl ChatManager {
         Some(proc.request_and_wait("model_list", |id| {
             json!({"id":id,"method":"model/list","params":{}})
         }).map(|result| crate::agent::codex_models::parse_models(&result)))
+    }
+
+    pub fn live_zcode_models(&self, session_id: &str) -> Option<Result<Vec<Value>, String>> {
+        let proc = self.sessions.lock().unwrap().get(session_id).cloned()?;
+        if proc.kind != SessionKind::Zcode || !proc.alive.load(Ordering::Relaxed) { return None; }
+        // 不将尚未就绪误报为空目录，也不另起不同状态的 CLI 掩盖活跃进程的初始化失败。
+        if !proc.ready.load(Ordering::Relaxed) { return Some(Err("Zcode 正在初始化，请稍后重试模型列表".into())); }
+        let models = proc.zcode.lock().unwrap().models.clone();
+        Some(Ok(models))
+    }
+
+    pub fn live_zcode_start_plan(&self, session_id: &str) -> Option<Result<Value, String>> {
+        let proc = self.sessions.lock().unwrap().get(session_id).cloned()?;
+        if proc.kind != SessionKind::Zcode || !proc.alive.load(Ordering::Relaxed) { return None; }
+        if !proc.ready.load(Ordering::Relaxed) { return Some(Err("Zcode 正在初始化，请稍后刷新 Start Plan".into())); }
+        Some(zcode::start_plan(&proc))
     }
 
     /// Add a measured stream rate when this process observed matching output and usage events.
@@ -2559,7 +2618,7 @@ impl ChatManager {
     pub fn context_info(&self, session_id: &str) -> Option<crate::agent::transcript::AgentContextInfo> {
         let proc = self.sessions.lock().unwrap().get(session_id).cloned()?;
         // Codex reports the same two numbers through `thread/tokenUsage/updated`, into the same fields.
-        if !matches!(proc.kind, SessionKind::Claude | SessionKind::Codex) {
+        if !matches!(proc.kind, SessionKind::Claude | SessionKind::Codex | SessionKind::Zcode) {
             return None;
         }
         let extras = proc.extras.lock().unwrap().clone();
@@ -3309,6 +3368,10 @@ fn prune_finished_tasks(extras: &mut ClaudeExtras) -> bool {
 /// reports the exit as released, which is what keeps a client that still shows the pane from drawing an
 /// error for it.
 fn release_process(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
+    if proc.kind == SessionKind::Zcode {
+        auth::zcode::stop(proc);
+        zcode::clear_interactions(app, session_id, proc);
+    }
     proc.release_when_idle.store(false, Ordering::Relaxed);
     proc.released.store(true, Ordering::Relaxed);
     proc.alive.store(false, Ordering::Relaxed);
@@ -3659,6 +3722,7 @@ fn spawn_stdout_reader(
         if superseded || app.chat().permission_restarts.lock().unwrap().contains(&session_id) {
             return;
         }
+        if proc.kind == SessionKind::Zcode { zcode::clear_interactions(&app, &session_id, &proc); }
         crate::session_state::set_alive(&app, &session_id, false);
         end_background_tasks(&mut proc.extras.lock().unwrap());
         emit_extras(&app, &session_id, &proc);
@@ -3778,6 +3842,11 @@ fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, line: &s
     }
     if proc.kind == SessionKind::Codex {
         handle_codex_line(app, session_id, proc, line);
+        return;
+    }
+
+    if proc.kind == SessionKind::Zcode {
+        zcode::handle_line(app, session_id, proc, line);
         return;
     }
     auth::claude::observe(app, session_id, proc, line);
@@ -5472,6 +5541,12 @@ fn interrupt_locked(proc: &Arc<ChatProcess>, turn: &mut TurnQueue) -> Result<(),
 }
 
 fn send_interrupt_locked(proc: &Arc<ChatProcess>, turn: &mut TurnQueue) -> Result<(), String> {
+    if proc.kind == SessionKind::Zcode {
+        turn.interrupted = turn.running;
+        let native = zcode::native_id(proc)?;
+        let id = proc.request_id("interrupt");
+        return proc.write(&json!({"id":id,"method":"session/stop","params":{"sessionId":native}}));
+    }
     turn.interrupted = turn.running;
     if proc.kind == SessionKind::Antigravity {
         if !turn.running { return Ok(()); }
@@ -5599,6 +5674,7 @@ fn dispatch_steer(
     claim_native_writer(app,proc)?;
     if let Some(id) = message_id { super::submissions::begin_dispatch(&app.db().conn.lock().unwrap(), session_id, id)?; }
     match proc.kind {
+        SessionKind::Zcode => zcode::steer(app, session_id, proc, &row_id, text, images)?,
         SessionKind::Codex => {
             let thread_id = proc.agent_session_id.lock().unwrap().clone()
                 .ok_or("Codex has not opened its thread yet")?;
@@ -5624,7 +5700,7 @@ fn dispatch_steer(
         let receipt = if proc.permissions.lock().unwrap().is_empty() { "steered" } else { "blocked" };
         super::submissions::finish_dispatch(&app.db().conn.lock().unwrap(), session_id, id, receipt)?;
     }
-    emit(app, session_id, json!({"type":"steerAccepted"}));
+    if proc.kind != SessionKind::Zcode { emit(app, session_id, json!({"type":"steerAccepted"})); }
     Ok(())
 }
 
@@ -5678,7 +5754,9 @@ fn dispatch(
         emit(app, session_id, json!({"type":"turnStarted","startedAt":turn_started_at}));
     }
     emit_state(app, session_id, AgentState::Working);
-    if proc.kind == SessionKind::Antigravity {
+    if proc.kind == SessionKind::Zcode {
+        zcode::dispatch(proc, &row_id, text, images)?;
+    } else if proc.kind == SessionKind::Antigravity {
         super::antigravity_protocol::validate(text, images.len(), "queue")?;
         proc.antigravity.lock().unwrap().begin_turn();
         proc.write(&super::antigravity_protocol::user_message(text))?;
@@ -6405,6 +6483,7 @@ mod tests {
             opencode: Mutex::new(opencode::OpencodeState::default()),
             pi: Mutex::new(pi::PiState::default()),
             antigravity: Mutex::new(crate::agent::chat::antigravity_protocol::StreamState::default()),
+            zcode: Mutex::new(zcode::State::default()),
             service_tier: Mutex::new(None),
             personality: Mutex::new(None),
             codex_turn_error: Mutex::new(None),
@@ -7515,6 +7594,45 @@ mod tests {
     }
 
     #[test]
+    fn zcode_skill_catalogue_retains_native_session_authority() {
+        let app=ctx("zcode-extensions");
+        let (mut proc,stdout)=cat_process();
+        Arc::get_mut(&mut proc).unwrap().kind=SessionKind::Zcode;
+        *proc.agent_session_id.lock().unwrap()=Some("sess-native".into());
+        proc.zcode.lock().unwrap().slash_commands=vec![json!({"name":"compact","invocation":"/"})];
+        let manager=ChatManager::new();
+        manager.sessions.lock().unwrap().insert("s".into(),proc.clone());
+        let responder=proc.clone();
+        let worker=std::thread::spawn(move || {
+            let mut methods=Vec::new();
+            for line in BufReader::new(stdout).lines() {
+                let request:Value=serde_json::from_str(&line.unwrap()).unwrap();
+                let method=request["method"].as_str().unwrap();
+                methods.push(method.to_owned());
+                let result=match method {
+                    "skills/referenceCatalog"=>{
+                        assert_eq!(request["params"]["sessionId"],"sess-native");
+                        json!({"authority":"session","skills":[{"name":"plugin-skill","description":"Plugin skill","enabled":true}]})
+                    },
+                    other=>panic!("错误的原生方法：{other}"),
+                };
+                zcode::handle_line(&app,"s",&responder,&json!({"id":request["id"],"result":result}).to_string());
+            }
+            methods
+        });
+        for _ in 0..2 {
+            let commands=manager.live_zcode_commands("s").unwrap().unwrap();
+            assert_eq!(commands.len(),2,"刷新不能重复堆叠技能或丢失原生命令");
+            assert_eq!(commands[1]["name"],"plugin-skill");
+            assert_eq!(commands[1]["invocation"],"/");
+        }
+        assert!(manager.mcp_toggle("s","plugin:fixture:tools",false).unwrap_err().contains("Zcode"));
+        proc.child.lock().unwrap().kill().unwrap();
+        proc.child.lock().unwrap().wait().unwrap();
+        assert_eq!(worker.join().unwrap(),["skills/referenceCatalog","skills/referenceCatalog"]);
+    }
+
+    #[test]
     fn codex_mcp_management_uses_native_requests_and_paginates() {
         let app = ctx("codex-mcp-management");
         let (mut proc, stdout) = cat_process();
@@ -7598,6 +7716,7 @@ mod tests {
             opencode: Mutex::new(opencode::OpencodeState::default()),
             pi: Mutex::new(pi::PiState::default()),
             antigravity: Mutex::new(crate::agent::chat::antigravity_protocol::StreamState::default()),
+            zcode: Mutex::new(zcode::State::default()),
             service_tier: Mutex::new(None),
             personality: Mutex::new(None),
             codex_turn_error: Mutex::new(None),

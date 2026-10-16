@@ -3,6 +3,19 @@
 import type en from "./en";
 
 const ja: typeof en = {
+  "chat.zcode.planLoadFailed": "Start Plan を読み込めません。CLI の更新または再ログインをお試しください。",
+  "chat.zcode.planUnsupported": "この CLI は Start Plan に対応していません。",
+  "chat.zcode.planEffective": "有効：",
+  "chat.zcode.planEnds": "期限：",
+  "chat.zcode.planRemaining": "残り：",
+  "chat.zcode.planUsed": "使用済み：",
+  "chat.zcode.plan.available": "利用可能",
+  "chat.zcode.plan.pending": "有効化待ち",
+  "chat.zcode.plan.unavailable": "利用できる残量またはモデルがありません",
+  "chat.zcode.plan.not-authenticated": "このアカウントにログイン",
+  "chat.zcode.plan.verification-required": "公式の確認が必要",
+  "chat.zcode.plan.error": "権利を取得できません",
+
   "panel.averageOutput": "平均出力速度",
   "panel.averageOutputHint": "計測した応答時間から推定した、1秒あたりの出力トークン数です。報告された推論トークンを含み、ツールの実行時間とユーザーを待つ時間は除外します。使用量と計測時間を正しく対応付けられない場合は表示しません。モデル自体のデコード速度ではありません。",
   "translation.swap": "言語を入れ替え",
@@ -2221,6 +2234,20 @@ const ja: typeof en = {
   "chat.resetCredits.retry": "リセットを再試行",
   "chat.resetCredits.use": "1 枚使う",
   "chat.resetCredits.refresh": "更新",
+  "chat.zcode.guideTurnEnded": "ガイド受付中に元のターンが終了しました。Zcode は入力を受信済みです。実際の返信を待ち、再送しないでください。",
+  "chat.zcode.guidePending": "ガイド要求を送信しました。ネイティブ実行の適用地点を待っています。",
+  "chat.zcode.guideQueued": "Zcode は今回のターンにガイドを適用できず、後続ターンのキューに追加しました。再送しないでください。",
+  "chat.zcode.imageGuideUnavailable": "Zcode の実行中ガイドは画像に対応していません。下書きと画像は保持されています。通常送信でキューに追加してください。",
+  "chat.usage.label": "使用量",
+  "chat.usage.session": "セッション累計",
+  "chat.usage.turn": "現在のターン",
+  "chat.usage.input": "入力",
+  "chat.usage.output": "出力",
+  "chat.usage.cached": "キャッシュ読み取り",
+  "chat.usage.cacheWrite": "キャッシュ書き込み",
+  "chat.usage.reasoning": "推論",
+  "chat.usage.unknown": "不明",
+  "chat.usage.notReported": "未報告",
   "chat.usage.context": (used: string, max: string, pct: number) =>
     `コンテキスト: ${max} トークン中 ${used} を使用（${pct}%）`,
   "chat.usage.cost": (usd: string) => `セッションの費用: $${usd}`,
@@ -2234,6 +2261,7 @@ const ja: typeof en = {
   "chat.autoContinue.failed": "タスクを自動的に再開できませんでした。メッセージを送信すると再開できます。", // The task could not continue automatically. Send a message to continue.
   "chat.mcp.codexScope": "Codex のユーザー設定を変更します。この設定を使用する他のセッションにも影響します。続行しますか？",
   "chat.mcp.tooltip": "MCP サーバー",
+  "chat.mcp.zcodeProbe": "別の CLI プロセスで設定済みサーバーを検査します。再接続ではすべてのサーバーを検査します。有効・無効の切り替えは Zcode の設定で行ってください。",
   "chat.mcp.loading": "サーバー一覧を読み込んでいます…",
   "chat.mcp.backendUnsupported": "接続先の VelaTerm バックエンドは MCP の管理に対応していません。バックエンドを更新して再起動し、もう一度お試しください。",
   "chat.mcp.none": "MCP サーバーは設定されていません",

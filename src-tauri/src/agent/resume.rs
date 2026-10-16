@@ -714,7 +714,7 @@ pub fn confirmed_missing(kind: SessionKind, id: &str) -> bool {
         }
         SessionKind::Terminal => false,
         // Browser nodes have no agent conversation or resume semantics.
-        SessionKind::Browser => false,
+        SessionKind::Browser | SessionKind::Zcode => false,
     }
 }
 

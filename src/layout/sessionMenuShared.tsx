@@ -14,6 +14,7 @@ import { type SessionKind } from "../types";
 export const AGENT_ARGS_KINDS: SessionKind[] = [
   "claude",
   "codex",
+  "zcode",
   "opencode",
   "copilot",
   "cursor",
@@ -61,6 +62,7 @@ export function kindLabel(kind: SessionKind): string {
   if (kind === "browser") return t("kind.browser");
   if (kind === "claude") return "Claude";
   if (kind === "codex") return "Codex";
+  if (kind === "zcode") return "Zcode";
   if (kind === "opencode") return "OpenCode";
   if (kind === "copilot") return "Copilot";
   if (kind === "cursor") return "Cursor";

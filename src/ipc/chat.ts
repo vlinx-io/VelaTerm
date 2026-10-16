@@ -327,6 +327,7 @@ export function isTaskFinished(task: Pick<ChatBackgroundTask, "finished" | "ende
 
 /** An MCP server as the running agent reports it. */
 export interface ChatMcpServer {
+  toolCount?: number;
   canToggle?: boolean;
   name: string;
   status: string;
@@ -351,12 +352,26 @@ export interface ChatAuthState {
   userCode?: string;
 }
 
-export const chatAuthStart = (sessionId: string) => invoke<void>("chat_auth_start", { sessionId });
+export type ZcodeLoginProvider = "zai" | "bigmodel" | "zai-start-plan" | "bigmodel-start-plan";
+export const chatAuthStart = (sessionId: string, provider?: ZcodeLoginProvider) => invoke<void>("chat_auth_start", { sessionId, provider });
 export const chatAuthLogout = (sessionId: string) => invoke<void>("chat_auth_logout", { sessionId });
 export const chatAuthSubmit = (sessionId: string, code: string) => invoke<void>("chat_auth_submit", { sessionId, code });
 export const chatAuthCancel = (sessionId: string) => invoke<void>("chat_auth_cancel", { sessionId });
 
+export interface ChatTokenUsage {
+  scope?: "session";
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedInputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  reasoningOutputTokens?: number;
+  reasoningTokens?: number;
+}
+
 export interface ChatExtras {
+  nativeUsage?: ChatTokenUsage;
+  turnUsage?: ChatTokenUsage;
   auth?: ChatAuthState;
   contextTokens?: number;
   contextWindow?: number;
@@ -491,6 +506,8 @@ export interface ChatSnapshot {
   /** A usage limit stopped this conversation, and it continues on its own at the time given. */
   autoContinue?: ChatAutoContinue;
   auth?: ChatAuthState;
+  nativeUsage?: ChatTokenUsage;
+  turnUsage?: ChatTokenUsage;
   /** Flattened `ChatExtras`; read them with `extrasOf`. */
   contextTokens?: number;
   contextWindow?: number;
@@ -517,6 +534,8 @@ export type ChatAutoContinueReason = "unknownReset" | "repeated" | "failed";
 /** The extras a snapshot carries, as one object. */
 export function extrasOf(snapshot: ChatSnapshot): ChatExtras {
   return {
+    nativeUsage: snapshot.nativeUsage,
+    turnUsage: snapshot.turnUsage,
     auth: snapshot.auth,
     contextTokens: snapshot.contextTokens,
     contextWindow: snapshot.contextWindow,
@@ -567,6 +586,8 @@ export type ChatEvent =
   | { type: "turnCompleted" }
   | { type: "turnInterrupted" }
   | { type: "steerAccepted" }
+  | { type: "steerPending"; turnEnded?: boolean }
+  | { type: "steerFallback"; reason?: string }
   /**
    * The process behind the conversation ended. `released` says the application let it go on purpose —
    * the view was closed, the session archived, or the engine switched — so there is nothing to report.
@@ -806,9 +827,20 @@ export function chatSetEffort(sessionId: string, effort?: string): Promise<void>
 }
 
 /** Models offered by this session's installed agent and account. */
-export function chatModels(sessionId: string): Promise<ChatModel[]> {
-  return invoke("chat_models", { sessionId });
+export async function chatModels(sessionId: string): Promise<ChatModel[]> {
+  const models = await invoke<(Omit<ChatModel, "description"> & { description?: string | null })[]>("chat_models", { sessionId });
+  // 原生说明可省略，旧后端会序列化为 null；在 IPC 边界恢复界面约定，避免模型菜单拖垮整个窗口。
+  return models.map(model => ({ ...model, description: model.description ?? "" }));
 }
+
+export interface ZcodeStartPlan {
+  providerId: string; label: string;
+  status: "available" | "pending" | "unavailable" | "not-authenticated" | "verification-required" | "error";
+  effectiveAt?: number; message?: string; models: string[];
+  plans: { name: string; status: string; startsAt?: number; endsAt?: number; effectiveAt?: number }[];
+  balances: { name: string; unit: string; total?: number; used?: number; available?: number; endsAt?: number; models: string[] }[];
+}
+export const chatZcodeStartPlan = (sessionId: string) => invoke<{ plans: ZcodeStartPlan[] }>("chat_zcode_start_plan", { sessionId });
 
 /** Read the whole conversation; snapshot image bytes stay deferred until their individual views mount. */
 export async function chatSnapshot(sessionId: string, window?: { before?: string; from?: string; since?: number; epoch?: number }): Promise<ChatSnapshot> {

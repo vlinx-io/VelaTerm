@@ -8,7 +8,7 @@ vi.mock("../../../ipc/chat", async (original) => ({
 
 import { chatMcpStatus, chatMcpToggle, type ChatBackgroundTask } from "../../../ipc/chat";
 import { setLang } from "../../../i18n";
-import { McpChip, TasksChip } from "./extras";
+import { McpChip, TasksChip, UsageMeter } from "./extras";
 
 const servers = { mcpServers: [{ name: "local-tools", status: "connected", tools: [] }] };
 
@@ -168,4 +168,16 @@ it("offers no Stop for a finished task, only its status", () => {
   expect(screen.getAllByRole("button", { name: "Stop" }).length).toBe(1);
   fireEvent.click(screen.getByText("npm test"));
   expect(screen.getByText("local bash · Completed")).toBeTruthy();
+});
+
+
+it("shows native session and turn usage even when context capacity is unknown", () => {
+  render(<UsageMeter detailed extras={{nativeUsage:{scope:"session",inputTokens:120,outputTokens:12,cachedInputTokens:30},turnUsage:{inputTokens:80,outputTokens:8}}} />);
+  fireEvent.click(screen.getByRole("button", {name:"Usage"}));
+  expect(screen.getByText("Session total")).toBeTruthy();
+  expect(screen.getByText("Current turn")).toBeTruthy();
+  expect(screen.getByText("120")).toBeTruthy();
+  expect(screen.getByText("30")).toBeTruthy();
+  expect(screen.getByText("Unknown")).toBeTruthy();
+  expect(screen.queryByText(/\$|200.?000/)).toBeNull();
 });

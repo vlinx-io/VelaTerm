@@ -134,6 +134,10 @@ pub fn user_cli_status() -> UserCliStatus {
 /// shell profiles or overwrite a same-name file without the application marker.
 #[cfg(feature = "gui")]
 pub fn install_user_cli() -> std::io::Result<UserCliStatus> {
+    // 独立实验构建复用真实界面时，保留用户现有的全局命令与技能。
+    if std::env::var("VELA_ISOLATED_RUNTIME").as_deref() == Ok("1") {
+        return Ok(user_cli_status());
+    }
     if cfg!(debug_assertions) {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
@@ -580,6 +584,7 @@ pub fn uninstall_skills() -> std::io::Result<()> {
 /// Refresh installed skills at startup so contents follow application updates, like bin scripts. Leave
 /// uninstalled skills untouched because the setting controls installation. Log failures without aborting.
 pub fn refresh_installed_skills() {
+    if std::env::var("VELA_ISOLATED_RUNTIME").as_deref() == Ok("1") { return; }
     if let Err(e) = skill_dirs().and_then(refresh_skills_in_dirs) {
         crate::diagnostic_warn!("failed to refresh installed agent skills (skill content may lag behind the current version): {e}");
     }

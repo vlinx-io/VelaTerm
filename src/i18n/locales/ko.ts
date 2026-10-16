@@ -3,6 +3,19 @@
 import type en from "./en";
 
 const ko: typeof en = {
+  "chat.zcode.planLoadFailed": "Start Plan을 불러올 수 없습니다. CLI 버전을 확인하거나 다시 로그인하세요.",
+  "chat.zcode.planUnsupported": "이 CLI는 Start Plan 지원을 보고하지 않습니다.",
+  "chat.zcode.planEffective": "시작:",
+  "chat.zcode.planEnds": "만료:",
+  "chat.zcode.planRemaining": "남음:",
+  "chat.zcode.planUsed": "사용:",
+  "chat.zcode.plan.available": "사용 가능",
+  "chat.zcode.plan.pending": "활성화 대기",
+  "chat.zcode.plan.unavailable": "사용 가능한 잔량 또는 모델 없음",
+  "chat.zcode.plan.not-authenticated": "이 계정으로 로그인",
+  "chat.zcode.plan.verification-required": "공식 인증 필요",
+  "chat.zcode.plan.error": "이용 권한 조회 실패",
+
   "panel.averageOutput": "평균 출력 속도",
   "panel.averageOutputHint": "측정된 응답 시간을 기준으로 추정한 초당 출력 토큰 수입니다. 보고된 추론 토큰을 포함하며, 도구 실행 시간과 사용자 대기 시간은 제외합니다. 사용량과 측정 시간을 신뢰할 수 있게 대응시킬 수 없으면 표시하지 않습니다. 모델 자체의 디코딩 속도를 나타내는 값은 아닙니다.",
   "translation.swap": "언어 바꾸기",
@@ -2204,6 +2217,20 @@ const ko: typeof en = {
   "chat.resetCredits.retry": "초기화 다시 시도",
   "chat.resetCredits.use": "1개 사용",
   "chat.resetCredits.refresh": "새로고침",
+  "chat.zcode.guideTurnEnded": "가이드 접수 중 원래 턴이 끝났습니다. Zcode가 입력을 받았으니 실제 답변을 기다리고 다시 보내지 마세요.",
+  "chat.zcode.guidePending": "가이드 요청을 보냈습니다. 네이티브 실행 적용 지점을 기다립니다.",
+  "chat.zcode.guideQueued": "Zcode가 이번 턴에 가이드를 적용하지 못해 다음 턴 대기열에 넣었습니다. 다시 보내지 마세요.",
+  "chat.zcode.imageGuideUnavailable": "Zcode 실행 중 가이드는 이미지를 지원하지 않습니다. 초안과 이미지는 유지됩니다. 일반 전송으로 대기열에 넣으세요.",
+  "chat.usage.label": "사용량",
+  "chat.usage.session": "세션 합계",
+  "chat.usage.turn": "현재 턴",
+  "chat.usage.input": "입력",
+  "chat.usage.output": "출력",
+  "chat.usage.cached": "캐시 읽기",
+  "chat.usage.cacheWrite": "캐시 쓰기",
+  "chat.usage.reasoning": "추론",
+  "chat.usage.unknown": "알 수 없음",
+  "chat.usage.notReported": "아직 보고되지 않음",
   "chat.usage.context": (used: string, max: string, pct: number) =>
     `컨텍스트: ${max} 토큰 중 ${used} 사용(${pct}%)`,
   "chat.usage.cost": (usd: string) => `세션 비용: $${usd}`,
@@ -2217,6 +2244,7 @@ const ko: typeof en = {
   "chat.autoContinue.failed": "작업을 자동으로 계속하지 못했습니다. 메시지를 보내면 계속할 수 있습니다.", // The task could not continue automatically. Send a message to continue.
   "chat.mcp.codexScope": "Codex 사용자 설정이 변경되며, 이 설정을 사용하는 다른 대화에도 영향을 줍니다. 계속하시겠습니까?",
   "chat.mcp.tooltip": "MCP 서버",
+  "chat.mcp.zcodeProbe": "별도 CLI 프로세스에서 설정된 서버를 검사합니다. 다시 연결하면 모든 서버를 검사합니다. 활성화 또는 비활성화는 Zcode 설정에서 변경하세요.",
   "chat.mcp.loading": "서버 목록을 읽는 중…",
   "chat.mcp.backendUnsupported": "현재 연결된 VelaTerm 백엔드는 MCP 관리를 지원하지 않습니다. 해당 백엔드를 업데이트하고 다시 시작한 후 재시도하세요.",
   "chat.mcp.none": "구성된 MCP 서버가 없습니다",
