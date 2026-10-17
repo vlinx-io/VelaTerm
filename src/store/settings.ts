@@ -3,7 +3,7 @@
 //! SettingsModal and the store share types while reducing the size of the main store.
 
 import { pushSetting } from "../ipc/settingsSync";
-import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, normalizeTextSize, normalizeTextLineHeight } from "../theme";
+import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, SETTINGS_TABS, normalizeTextSize, normalizeTextLineHeight } from "../theme";
 import type {
   AccentChoice,
   DarkStyle,
@@ -12,6 +12,7 @@ import type {
   InspectorTab,
   NavLayout,
   PaneStyle,
+  SettingsTab,
   VisualSettings,
 } from "../theme";
 import type { SessionEngine, SessionKind } from "../types";
@@ -122,6 +123,8 @@ export interface PersistedSettings {
   dividerStyle: DividerStyle;
   navLayout: NavLayout;
   inspectorTab: InspectorTab;
+  /** Settings dialog section to reopen on, remembered from the last one viewed. */
+  settingsTab: SettingsTab;
   /** Single-tab mode reuses the current tab and keeps the previous tree alive in the background. */
   singleTabMode: boolean;
   /** Terminal renderer. DOM is stable; WebGL can hit context limits with many terminals. */
@@ -260,6 +263,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   dividerStyle: "subtle",
   navLayout: "tree",
   inspectorTab: "info",
+  settingsTab: "appearance",
   singleTabMode: true,
   termRenderer: "dom",
   redrawOnReveal: false,
@@ -373,6 +377,8 @@ export function loadSettings(): PersistedSettings {
     merged.chatFontSize = normalizeTextSize(merged.chatFontSize, DEFAULT_CONVERSATION_FONT_SIZE);
     merged.chatLineHeight = normalizeTextLineHeight(merged.chatLineHeight);
     merged.termLineHeight = normalizeTextLineHeight(merged.termLineHeight);
+    // A section that no longer exists would open Settings on an empty panel.
+    if (!SETTINGS_TABS.includes(merged.settingsTab)) merged.settingsTab = "appearance";
     if (
       !parsed.chatModelByKind ||
       typeof parsed.chatModelByKind !== "object" ||
