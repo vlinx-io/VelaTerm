@@ -1602,6 +1602,12 @@ impl PtyManager {
     ///
     /// Broadcasts `StatusSignal::Resized` only when size or ownership changes, allowing clients to switch fit/mirror mode.
     ///
+    /// A rejected request also broadcasts the current size and owner. A client only sends a resize while it believes
+    /// it may size the PTY, so a rejection means that client missed an ownership change (a broadcast that arrived
+    /// while its terminal was not listening, for one). Left alone it keeps fitting its own grid to a PTY of another
+    /// width, and every TUI redraw that relies on line wrapping lands on the wrong rows. The broadcast carries the
+    /// real owner, which sends that client into mirror mode; clients already in step receive what they already have.
+    ///
     /// A resize after session closure is also a successful no-op, matching the normal ResizeObserver teardown race.
     pub fn resize(
         &self,
@@ -1620,6 +1626,30 @@ impl PtyManager {
             };
             let mut owner = session.size_owner.lock().unwrap();
             if !resize_allowed(owner.as_deref(), source, takeover) {
+                let current_owner = owner.clone();
+                let (cur_cols, cur_rows) = *session.size.lock().unwrap();
+                drop(owner);
+                drop(map);
+                // The requested size is what the out-of-step client was drawing; the broadcast below carries the real one.
+                crate::diagnostics::record(
+                    "WARN",
+                    "pty_resize_rejected",
+                    serde_json::json!({
+                        "sessionId": id,
+                        "clientId": source,
+                        "ownerClientId": current_owner,
+                        "cols": cols,
+                        "rows": rows,
+                    }),
+                );
+                app.emit(
+                    &StatusSignal::event_name(id),
+                    StatusSignal::Resized {
+                        cols: cur_cols,
+                        rows: cur_rows,
+                        owner: current_owner,
+                    },
+                );
                 return Ok(());
             }
             timed_resize(
@@ -2946,6 +2976,89 @@ mod tests {
 
         app.unlisten(listener);
         mgr.kill("own-1", DESKTOP_SOURCE, KillReason::Close).unwrap();
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    /// A resize from a client that does not own the size leaves the PTY alone and re-broadcasts the real size and
+    /// owner, so a client that missed an ownership change switches to mirroring instead of fitting its own grid.
+    #[cfg(unix)]
+    #[test]
+    fn rejected_resize_resynchronizes_clients() {
+        use crate::agent::server::HookEndpoint;
+        use crate::host::{AppCtx, HeadlessHost};
+        use crate::models::SessionKind;
+        use std::sync::{Arc, Mutex};
+
+        let data_dir =
+            std::env::temp_dir().join(format!("vlx-resize-resync-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&data_dir).expect("failed to create the temporary directory");
+        let db = crate::db::Db::open(&data_dir.join("test.db")).expect("failed to open the test database");
+        let app = AppCtx::Headless(Arc::new(HeadlessHost::new(data_dir.clone(), db)));
+
+        let mgr = super::PtyManager::new();
+        let hook = HookEndpoint {
+            port: 0,
+            token: "test".to_string(),
+        };
+        let spawn = |source: &str, cols: u16, rows: u16| {
+            mgr.spawn(
+                app.clone(),
+                "resync-1".to_string(),
+                SessionKind::Terminal,
+                Some("/bin/sh".to_string()),
+                None,
+                None,
+                cols,
+                rows,
+                hook.clone(),
+                None,
+                false,
+                None,
+                None, // extra_args
+                None, // permission_mode
+                None, // theme
+                source,
+                false,
+                Box::new(|_| true),
+            )
+        };
+        // `ws-1` launches and owns 100x30; `ws-2` attaches and should mirror.
+        spawn("ws-1", 100, 30).expect("starting the owner failed");
+        spawn("ws-2", 80, 24).expect("attaching failed");
+
+        let events: Arc<Mutex<Vec<serde_json::Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let events_cb = Arc::clone(&events);
+        let listener = app.listen("pty://status/resync-1", move |payload| {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(payload) {
+                if v.get("kind").and_then(serde_json::Value::as_str) == Some("resized") {
+                    events_cb.lock().unwrap().push(v);
+                }
+            }
+        });
+        let size_and_owner = |mgr: &super::PtyManager| {
+            let map = mgr.sessions.lock().unwrap();
+            let s = map.get("resync-1").unwrap();
+            let size = *s.size.lock().unwrap();
+            let owner = s.size_owner.lock().unwrap().clone();
+            (size, owner)
+        };
+
+        // `ws-2` fits its own 80-column view as if it owned the size: refused, and told who does.
+        mgr.resize(&app, "resync-1", 80, 24, "ws-2", false).unwrap();
+        assert_eq!(size_and_owner(&mgr), ((100, 30), Some("ws-1".to_string())));
+        let got = events.lock().unwrap().clone();
+        assert_eq!(got.len(), 1, "a rejected resize should broadcast the real size exactly once");
+        assert_eq!(got[0]["cols"], 100);
+        assert_eq!(got[0]["rows"], 30);
+        assert_eq!(got[0]["owner"], "ws-1");
+
+        // The owner's own resize still applies and broadcasts as before.
+        mgr.resize(&app, "resync-1", 120, 40, "ws-1", false).unwrap();
+        assert_eq!(size_and_owner(&mgr), ((120, 40), Some("ws-1".to_string())));
+        assert_eq!(events.lock().unwrap().len(), 2);
+
+        app.unlisten(listener);
+        mgr.kill("resync-1", DESKTOP_SOURCE, KillReason::Close).unwrap();
         let _ = std::fs::remove_dir_all(&data_dir);
     }
 
