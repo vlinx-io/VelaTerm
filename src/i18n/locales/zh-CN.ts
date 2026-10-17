@@ -870,6 +870,7 @@ const zhCN: typeof en = {
   "settings.scGlobalSearch": "搜索所有会话",
   "settings.scSelectAllTerminal": "全选终端内容", // Select all in terminal
   "settings.scSaveDoc": "保存文档",
+  "settings.scFocusSidebar": "聚焦侧边栏",
   "settings.scRecording": "请按下组合键…",
   "settings.scHint": "点一下某个快捷键，再按下新的组合键（需含 Cmd/Ctrl）。",
   "settings.scScreenshotSection": "截图",

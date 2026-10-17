@@ -883,6 +883,7 @@ const ptBR: typeof en = {
   "settings.scGlobalSearch": "Buscar em todas as sessões", // Search all sessions
   "settings.scSelectAllTerminal": "Selecionar tudo no terminal", // Select all in terminal
   "settings.scSaveDoc": "Salvar documento", // Save document
+  "settings.scFocusSidebar": "Focar barra lateral", // Focus sidebar
   "settings.scRecording": "Pressione as teclas…", // Press keys…
   "settings.scHint":
     "Clique em um atalho e pressione uma nova combinação (Cmd/Ctrl obrigatório).", // hint

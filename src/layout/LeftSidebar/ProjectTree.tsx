@@ -27,6 +27,9 @@ import { MARK_LABEL_KEYS, type NodeMark, normalizeMark } from "../../marks";
 import { SessionKindIcon } from "../sessionViewers/sessionMeta";
 import { SESSION_DRAG_MIME, SESSION_MULTI_DRAG_MIME } from "../CenterPane/paneDrop";
 import { DEFAULT_BINDINGS, formatCombo } from "../../hooks/shortcutRegistry";
+import { treeKeyAction, type KeyNavRow } from "./treeKeyNav";
+import { focusTerminal } from "../../terminal/registry";
+import { focusComposer } from "../CenterPane/session/composerFocus";
 import { useGitBranch } from "../../hooks/useGitBranch";
 import { stripControlChars, useCtrlCharGuard } from "../../hooks/textInputGuards";
 import { setProjectCollection } from "../../store/projectCollections";
@@ -274,6 +277,18 @@ const SessionRow = memo(function SessionRow(p: SessionRowProps) {
     </div>
   );
 });
+
+/** Hand the keyboard to a session's own input: its composer for a chat-engine session, which has no
+ * xterm, and its terminal otherwise. Waits a frame so a session that was just opened is displayed, and its
+ * chat pane mounted, before focusing; an element under display:none cannot take focus. */
+function focusSessionInput(id: string) {
+  requestAnimationFrame(() => {
+    const { sessions, ephemeralSessions } = useTermStore.getState();
+    const session = ephemeralSessions[id] ?? sessions.find((s) => s.id === id);
+    if (session?.engine === "chat") focusComposer(id);
+    else focusTerminal(id);
+  });
+}
 
 export function ProjectTree(h: TreeHandlers) {
   const t = useT();
@@ -826,6 +841,27 @@ export function ProjectTree(h: TreeHandlers) {
     setSelection(flat.slice(lo, hi + 1), anchor);
   };
 
+  // Select and open a node. Shared by mouse clicks and by Enter on the keyboard cursor so the two
+  // cannot drift apart; only the modifier gestures above stay mouse-only.
+  const activateNode = (node: SelNode, isSession: boolean, newTab: boolean) => {
+    selectSingle(node);
+    if (isSession) {
+      // Selecting a session clears project/group inspection so the right pane follows the active session again.
+      setInspectTarget(null);
+      // Option/Alt-click opens a new tab; a normal click reuses the current tab.
+      openSession(node.id, newTab ? { newTab: true } : undefined);
+    } else {
+      // Selecting a project/group makes the right pane inspect its directory instead of the active session.
+      setInspectTarget(node);
+      if (!filtering) {
+        const shared = node.kind === "project"
+          ? projects.find((p) => p.id === node.id)?.collapsed
+          : groupsById.get(node.id)?.collapsed;
+        toggleNodeCollapsed(node.kind, node.id, shared);
+      }
+    }
+  };
+
   const handleClick = (
     node: SelNode,
     e: React.MouseEvent,
@@ -839,22 +875,7 @@ export function ProjectTree(h: TreeHandlers) {
       rangeSelect(node.id);
       return;
     }
-    selectSingle(node);
-    if (isSession) {
-      // Selecting a session clears project/group inspection so the right pane follows the active session again.
-      setInspectTarget(null);
-      // Option/Alt-click opens a new tab; a normal click reuses the current tab.
-      openSession(node.id, e.altKey ? { newTab: true } : undefined);
-    } else {
-      // Selecting a project/group makes the right pane inspect its directory instead of the active session.
-      setInspectTarget(node);
-      if (!filtering) {
-        const shared = node.kind === "project"
-          ? projects.find((p) => p.id === node.id)?.collapsed
-          : groupsById.get(node.id)?.collapsed;
-        toggleNodeCollapsed(node.kind, node.id, shared);
-      }
-    }
+    activateNode(node, isSession, e.altKey);
   };
 
   // Session rows carry only their ID, so look the shared collapse value up here. Draft sessions live outside the
@@ -862,6 +883,84 @@ export function ProjectTree(h: TreeHandlers) {
   const toggleSessionCollapsed = (id: string) => {
     const shared = sessionsById.get(id)?.collapsed ?? ephemeralSessions[id]?.collapsed;
     toggleNodeCollapsed("session", id, shared);
+  };
+
+  // ── Keyboard navigation ─────────────────────────────────────────────────────────────────────
+  // The cursor is stored as a row ID rather than an index so it follows its row when the tree
+  // reorders, and simply goes away when that row is filtered or collapsed out of sight.
+  // DOM focus stays on the scroll container and never moves onto a row: rows are virtualized, so a
+  // focused row unmounts as soon as it scrolls out and focus would fall back to the body. That is
+  // why this is aria-activedescendant rather than a roving tabindex.
+  const [cursorId, setCursorId] = useState<string | null>(null);
+  const cursorIndex = useMemo(
+    () => (cursorId ? rows.findIndex((r) => r.id === cursorId) : -1),
+    [rows, cursorId],
+  );
+
+  // A project row's depth is its collection indent, and walkChildren starts its groups and sessions one level
+  // below that, so a project nested in a collection is the collection's child. Only a session can be a leaf.
+  const navRows = useMemo<KeyNavRow[]>(
+    () =>
+      rows.map((r) => ({
+        depth: r.kind === "project" ? r.indent : r.depth,
+        expandable: r.kind === "session" ? r.hasKids : true,
+        expanded: r.expanded,
+      })),
+    [rows],
+  );
+
+  const rowDomId = (id: string) => `vlx-row-${view.id}-${id}`;
+
+  const moveCursor = (index: number) => {
+    setCursorId(rows[index].id);
+    virtualizer.scrollToIndex(index, { align: "auto" });
+  };
+
+  const onTreeKeyDown = (e: React.KeyboardEvent) => {
+    // An inline rename field owns the keyboard while it is open, and modified chords belong to the
+    // global shortcut listener.
+    if (renamingId || e.metaKey || e.ctrlKey || e.altKey) return;
+    // Escape is the way back out. Without it the tree is a keyboard trap: once focused there is no
+    // way to return to the session you were already in without reaching for the mouse.
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      const { activeSessionId } = useTermStore.getState();
+      if (activeSessionId) focusSessionInput(activeSessionId);
+      return;
+    }
+    const action = treeKeyAction(navRows, cursorIndex, e.key);
+    if (!action) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (action.kind === "move") {
+      moveCursor(action.index);
+      return;
+    }
+    const row = rows[action.index];
+    if (action.kind === "toggle") {
+      // Filtering force-expands every row, so there is nothing to collapse while a filter is on --
+      // the same guard the click path applies.
+      if (filtering) return;
+      if (row.kind === "session") toggleSessionCollapsed(row.id);
+      else if (row.kind === "group") toggleNodeCollapsed("group", row.id, row.group.collapsed);
+      else toggleNodeCollapsed("project", row.id, row.project.collapsed);
+      return;
+    }
+    activateNode({ id: row.id, kind: row.kind }, row.kind === "session", false);
+    // Enter means "go to this session", so focus must follow even when it is ALREADY active --
+    // TerminalView only grabs focus on the transition into active, and ChatPane never does, so
+    // re-selecting the session would otherwise leave the keyboard stranded in the tree.
+    if (row.kind === "session") focusSessionInput(row.id);
+  };
+
+  // Entering the tree with nothing current starts at the active session when it is on screen, so
+  // Tab-then-Down continues from where the user already is rather than from the top of the list.
+  const onTreeFocus = () => {
+    if (cursorIndex >= 0) return;
+    const active = activeSessionId ? rows.findIndex((r) => r.id === activeSessionId) : -1;
+    if (active >= 0) moveCursor(active);
+    else if (rows.length > 0) setCursorId(rows[0].id);
   };
 
   // Prevent native text selection for Cmd/Ctrl/Shift multi-selection gestures; Shift-click can extend selection
@@ -1471,7 +1570,20 @@ export function ProjectTree(h: TreeHandlers) {
   const showEmptyHint = filtering && rows.length === 0;
 
   return (
-    <div ref={setParent} className="tree">
+    <div
+      ref={setParent}
+      className="tree"
+      // Addresses this container for the focusSidebar shortcut, which has no React handle on it.
+      data-session-tree={isPrimary ? "primary" : "secondary"}
+      role="tree"
+      // Views are user-named and shown in the pane header, so the name is already the label a
+      // multi-view sidebar needs; no new string to translate.
+      aria-label={view.name || undefined}
+      tabIndex={0}
+      aria-activedescendant={cursorIndex >= 0 ? rowDomId(rows[cursorIndex].id) : undefined}
+      onKeyDown={onTreeKeyDown}
+      onFocus={onTreeFocus}
+    >
       {showEmptyHint ? (
         <div style={{ padding: "12px", fontSize: 12, color: "var(--text-faint)" }}>
           {statusFiltering && !filter ? t("tree.noAttention") : t("tree.noMatch")}
@@ -1486,6 +1598,18 @@ export function ProjectTree(h: TreeHandlers) {
               key={vi.key}
               data-index={vi.index}
               ref={virtualizer.measureElement}
+              // The positioning wrapper carries the tree semantics because it is the one element
+              // that exists per row for all three row kinds. The .row inside stays presentational.
+              id={rowDomId(rows[vi.index].id)}
+              role="treeitem"
+              aria-level={navRows[vi.index].depth + 1}
+              aria-expanded={navRows[vi.index].expandable ? navRows[vi.index].expanded : undefined}
+              aria-selected={selectedIds.has(rows[vi.index].id)}
+              data-cursor={rows[vi.index].id === cursorId ? "true" : undefined}
+              // A click puts the keyboard cursor on its row, so Enter after it acts on what was clicked
+              // rather than on wherever the arrows last left off. Capture phase, because the chevron
+              // stops its click from bubbling. Selection itself stays with the row's own handlers.
+              onClickCapture={() => setCursorId(rows[vi.index].id)}
               style={{
                 position: "absolute",
                 top: vi.start,

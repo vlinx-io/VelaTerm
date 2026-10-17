@@ -119,7 +119,7 @@ describe("shortcut defaults per shell", () => {
 
     // Defaults: every Ctrl+Alt letter an action claims is blocked from reaching xterm.
     expect([...appAltKeyCodes({})].sort()).toEqual(
-      ["KeyB", "KeyD", "KeyE", "KeyF", "KeyG", "KeyN", "KeyO", "KeyT", "KeyW"],
+      ["KeyB", "KeyD", "KeyE", "KeyF", "KeyG", "KeyN", "KeyO", "KeyS", "KeyT", "KeyW"],
     );
     // A rebound action moves the blocked key with it; the old letter goes back to the terminal.
     const overridden = appAltKeyCodes({ splitRight: "mod+alt+k" });

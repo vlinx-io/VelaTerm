@@ -871,6 +871,7 @@ const zhTW: typeof en = {
   "settings.scGlobalSearch": "搜尋所有會話", // Search all sessions
   "settings.scSelectAllTerminal": "全選終端機內容", // Select all in terminal
   "settings.scSaveDoc": "儲存文件", // Save document
+  "settings.scFocusSidebar": "聚焦側邊欄", // Focus sidebar
   "settings.scRecording": "請按下按鍵…", // Press keys…
   "settings.scHint": "點一下快捷鍵，再按下新的組合鍵（需含 Cmd/Ctrl）。", // hint
   "settings.scScreenshotSection": "截圖",

@@ -2,7 +2,7 @@
 //! - Cmd/Ctrl+1–9 focuses the numbered open tab and is fixed to tab positions.
 //! - Cmd/Ctrl++/-/0 changes or resets terminal font size and is fixed to those semantics.
 //! - Settings may remap temporary-terminal creation, desktop browser tabs, pane/tab closure, both
-//!   split directions, terminal/global search, terminal selection, and document save. Defaults live in shortcutRegistry
+//!   split directions, terminal/global search, terminal selection, document save, and sidebar focus. Defaults live in shortcutRegistry
 //!   and overrides in vlx-settings. Remapping changes only triggers, not contextual behavior.
 //!
 //! Platform defaults use Cmd on macOS and Ctrl+Alt on Windows/Linux (see DEFAULT_BINDINGS). Bare Ctrl
@@ -160,6 +160,22 @@ export function useKeyboardShortcuts() {
           e.preventDefault();
           void splitNew("horizontal", "shortcut");
         }
+        return;
+      }
+
+      // Move keyboard focus into the session tree, expanding the sidebar first when it is collapsed.
+      // The tree owns its own arrow-key navigation once focused (see ProjectTree).
+      if (matchCombo(e, sc("focusSidebar"))) {
+        e.preventDefault();
+        const { leftCollapsed, toggleLeft } = useTermStore.getState();
+        if (leftCollapsed) toggleLeft();
+        // Focus after the expand renders; the element does not exist yet on a collapsed sidebar.
+        requestAnimationFrame(() => {
+          const tree =
+            document.querySelector<HTMLElement>('[data-session-tree="primary"]') ??
+            document.querySelector<HTMLElement>("[data-session-tree]");
+          tree?.focus();
+        });
         return;
       }
 

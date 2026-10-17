@@ -288,6 +288,13 @@ svg { display: block; }
 
 /* ============================ TREE ================================== */
 .tree { height: 100%; overflow-y: scroll; padding: 4px 6px 16px; }
+/* Keyboard cursor. DOM focus sits on the scrolling .tree container (rows are virtualized and would
+   unmount under focus), so the current row is drawn here rather than through :focus on the row.
+   The container shows its own ring only while no row is current, so the two never stack. */
+.tree:focus-visible { outline: 1px solid var(--accent-line); outline-offset: -1px; }
+.tree:focus-visible:has([data-cursor]) { outline: none; }
+.tree:focus [data-cursor] .row { box-shadow: inset 0 0 0 1px var(--accent-line); }
+.tree:focus [data-cursor] .row.sel { box-shadow: inset 0 0 0 1px var(--accent); }
 .row { display: flex; align-items: center; gap: 6px; height: var(--row-h); padding-right: 6px; border-radius: var(--r-sm); cursor: pointer; position: relative; color: var(--text-mid); white-space: nowrap; user-select: none; -webkit-user-select: none; }
 .row:hover { background: var(--bg-hover); }
 .row.sel { background: var(--accent-soft); color: var(--text); }

@@ -891,6 +891,7 @@ const ru: typeof en = {
   "settings.scGlobalSearch": "Поиск по всем сеансам", // Search all sessions
   "settings.scSelectAllTerminal": "Выделить всё в терминале", // Select all in terminal
   "settings.scSaveDoc": "Сохранить документ", // Save document
+  "settings.scFocusSidebar": "Фокус на боковой панели", // Focus sidebar
   "settings.scRecording": "Нажмите клавиши…", // Press keys…
   "settings.scHint":
     "Нажмите на сочетание, затем нажмите новую комбинацию (нужен Cmd/Ctrl).", // hint

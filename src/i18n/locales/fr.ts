@@ -883,6 +883,7 @@ const fr: typeof en = {
   "settings.scGlobalSearch": "Rechercher dans toutes les sessions", // Search all sessions
   "settings.scSelectAllTerminal": "Tout sélectionner dans le terminal", // Select all in terminal
   "settings.scSaveDoc": "Enregistrer le document", // Save document
+  "settings.scFocusSidebar": "Activer la barre latérale", // Focus sidebar
   "settings.scRecording": "Appuyez sur les touches…", // Press keys…
   "settings.scHint":
     "Cliquez sur un raccourci, puis appuyez sur une nouvelle combinaison (Cmd/Ctrl requis).", // hint

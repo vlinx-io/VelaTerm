@@ -876,6 +876,7 @@ const vi: typeof en = {
   "settings.scGlobalSearch": "Tìm mọi phiên",
   "settings.scSelectAllTerminal": "Chọn tất cả trong terminal", // Select all in terminal
   "settings.scSaveDoc": "Lưu tài liệu",
+  "settings.scFocusSidebar": "Chuyển tiêu điểm vào thanh bên",
   "settings.scRecording": "Nhấn phím…",
   "settings.scHint":
     "Nhấp vào phím tắt, rồi nhấn tổ hợp mới (bắt buộc Cmd/Ctrl).",

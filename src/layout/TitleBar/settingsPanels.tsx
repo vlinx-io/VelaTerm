@@ -60,6 +60,7 @@ const SC_LABEL: Record<ShortcutAction, I18nKey> = {
   globalSearch: "settings.scGlobalSearch",
   selectAllTerminal: "settings.scSelectAllTerminal",
   saveDoc: "settings.scSaveDoc",
+  focusSidebar: "settings.scFocusSidebar",
 };
 
 /** Shortcut row with a label and current chord button. Clicking the button starts key capture.
