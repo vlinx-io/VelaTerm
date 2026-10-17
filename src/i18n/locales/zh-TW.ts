@@ -523,12 +523,16 @@ const zhTW: typeof en = {
   "settings.navTree": "標準", // Tree
   "settings.navCompact": "緊湊", // Compact
   "settings.tabs": "分頁", // Tabs
+  "settings.tabsHint": "「單分頁」會為你開啟的每個工作階段重複使用同一個分頁，其餘則在背景繼續執行。「多分頁」則為每個工作階段各開一個分頁。", // Single reuses one tab for every session you open, keeping the others running in the background. Multi gives each session its own tab.
   "settings.dynamicStatusFilter": "狀態篩選動態增加",
+  "settings.dynamicStatusFilterHint": "狀態篩選會保留套用當下符合的工作階段。開啟後，之後才開始符合的工作階段也會加入。工作階段的狀態改變時不會被移出清單。", // A status filter keeps the sessions that matched when you applied it. When on, sessions that begin matching later are added as well. Sessions are never removed as their status changes.
   "settings.tabSingle": "單分頁", // Single
   "settings.tabMulti": "多分頁", // Multi
   "settings.maxLiveTabs": "背景保活上限", // Background limit
+  "settings.maxLiveTabsHint": "單一分頁模式下可在背景保持執行的工作階段數量。超過上限時會關閉閒置最久的工作階段；正在執行、等待你處理或有未讀通知者則會保留。", // How many sessions keep running in the background in single-tab mode. Beyond the limit the oldest idle session is closed; ones that are working, waiting for you, or holding an unread notification are kept.
   "settings.defaultShell": "預設 Shell", // Default shell
   "settings.spawnConfirm": "派生前確認", // Confirm before spawn
+  "settings.spawnConfirmHint": "適用於代理透過 vspawn 衍生的工作階段，而非你自己開啟的分頁。開啟後，可在工作階段啟動前檢視並編輯提示。", // Applies to sessions an agent derives with vspawn, not to tabs you open yourself. When on, you can review and edit the prompt before the session starts.
   "settings.usageAuto": "額度自動刷新", // Usage auto-refresh
   "settings.usageRefresh": "額度刷新", // Usage refresh
   "settings.autoContinue": "額度重設後自動繼續", // Continue after limit resets

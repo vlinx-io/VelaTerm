@@ -526,12 +526,16 @@ const de: typeof en = {
   "settings.navTree": "Baum", // Tree
   "settings.navCompact": "Kompakt", // Compact
   "settings.tabs": "Tabs", // Tabs
+  "settings.tabsHint": "„Einzeln“ verwendet für jede geöffnete Sitzung denselben Tab weiter und lässt die übrigen im Hintergrund laufen. „Mehrere“ gibt jeder Sitzung einen eigenen Tab.", // Single reuses one tab for every session you open, keeping the others running in the background. Multi gives each session its own tab.
   "settings.dynamicStatusFilter": "Dynamische Ergänzung des Statusfilters",
+  "settings.dynamicStatusFilterHint": "Ein Statusfilter behält die Sitzungen, die beim Anwenden übereingestimmt haben. Ist die Option aktiv, werden später hinzukommende Treffer ergänzt. Sitzungen werden bei Statuswechseln nie entfernt.", // A status filter keeps the sessions that matched when you applied it. When on, sessions that begin matching later are added as well. Sessions are never removed as their status changes.
   "settings.tabSingle": "Einzeln", // Single
   "settings.tabMulti": "Mehrere", // Multi
   "settings.maxLiveTabs": "Background limit", // Background limit
+  "settings.maxLiveTabsHint": "Wie viele Sitzungen im Einzel-Tab-Modus im Hintergrund weiterlaufen. Oberhalb der Grenze wird die älteste untätige Sitzung geschlossen; arbeitende, auf eine Eingabe wartende oder ungelesen benachrichtigte bleiben erhalten.", // How many sessions keep running in the background in single-tab mode. Beyond the limit the oldest idle session is closed; ones that are working, waiting for you, or holding an unread notification are kept.
   "settings.defaultShell": "Standard-Shell", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.spawnConfirmHint": "Gilt für Sitzungen, die ein Agent per vspawn ableitet, nicht für selbst geöffnete Tabs. Aktiviert lässt sich der Prompt vor dem Start prüfen und bearbeiten.", // Applies to sessions an agent derives with vspawn, not to tabs you open yourself. When on, you can review and edit the prompt before the session starts.
   "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.autoContinue": "Nach Zurücksetzung fortsetzen", // Continue after limit resets
