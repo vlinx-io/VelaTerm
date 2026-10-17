@@ -1552,6 +1552,7 @@ const ru: typeof en = {
   "files.nameLabel": "Имя", // Name
   "files.newTooltip": "Новый файл или папка", // New file or folder
   "files.openInTerminal": "Open in Terminal",
+  "files.collapseAll": "Свернуть все", // Collapse All
   "files.revealInFinder": "Show in File Manager",
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",

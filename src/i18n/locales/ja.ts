@@ -1538,6 +1538,7 @@ const ja: typeof en = {
   "files.nameLabel": "名前", // Name
   "files.newTooltip": "新規ファイル / フォルダ", // New file or folder
   "files.openInTerminal": "Open in Terminal",
+  "files.collapseAll": "すべて折りたたむ", // Collapse All
   "files.revealInFinder": "Show in File Manager",
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",

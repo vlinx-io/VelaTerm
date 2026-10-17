@@ -1519,6 +1519,7 @@ const vi: typeof en = {
   "files.nameLabel": "Tên",
   "files.newTooltip": "Tệp hoặc thư mục mới",
   "files.openInTerminal": "Mở trong terminal",
+  "files.collapseAll": "Thu gọn tất cả",
   "files.revealInFinder": "Hiện trong trình quản lý tệp",
   "files.copyPath": "Sao chép đường dẫn",
   "files.copyRelPath": "Sao chép đường dẫn tương đối",

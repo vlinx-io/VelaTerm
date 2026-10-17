@@ -1539,6 +1539,7 @@ const de: typeof en = {
   "files.nameLabel": "Name", // Name
   "files.newTooltip": "Neue Datei oder Ordner", // New file or folder
   "files.openInTerminal": "Open in Terminal",
+  "files.collapseAll": "Alle einklappen", // Collapse All
   "files.revealInFinder": "Show in File Manager",
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",

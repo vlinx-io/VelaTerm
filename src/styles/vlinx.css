@@ -450,6 +450,10 @@ svg { display: block; }
 .files-toggle { display: grid; place-items: center; width: 22px; height: 22px; border-radius: var(--r-sm); color: var(--text-faint); }
 .files-toggle:hover { color: var(--text); background: var(--bg-hover); }
 .files-toggle.on { color: var(--accent); }
+/* A disabled header toggle stays visible so the control is discoverable, but reads as unavailable
+   and stops answering hover. Used by Collapse All when nothing is expanded. */
+.files-toggle:disabled { opacity: 0.35; cursor: default; }
+.files-toggle:disabled:hover { color: var(--text-faint); background: none; }
 .files-path { flex: 1; min-width: 0; font-size: 11px; font-weight: 600; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .files-filter { flex: none; display: flex; align-items: center; gap: 6px; padding: 5px 8px; border-bottom: 1px solid var(--border); color: var(--text-faint); }
 .files-filter input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: var(--text); font-size: 12px; }
