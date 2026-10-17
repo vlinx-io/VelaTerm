@@ -510,6 +510,9 @@ const ko: typeof en = {
   "settings.agentDefaultViewHint":
     "이 에이전트의 새 세션이 열리는 보기입니다. 기존 세션은 만들 때의 보기를 유지합니다.", // Agent default view hint
   "settings.appearance": "외관", // Appearance
+  "settings.darkTheme": "다크 테마", // Dark theme
+  "settings.lightTheme": "라이트 테마", // Light theme
+  "settings.themeClassic": "클래식", // Classic
   "settings.accent": "강조색", // Accent
   "settings.accentAuto": "테마 따름", // Follow theme
   "settings.density": "밀도", // Density

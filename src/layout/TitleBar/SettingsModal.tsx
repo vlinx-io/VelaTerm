@@ -9,6 +9,19 @@ import { Backdrop } from "../../components/Backdrop";
 import { CompletionModeField } from "./CompletionModeField";
 import { FontSelect, useFontCatalog } from "./FontSelect";
 import Select, { type SelectOption } from "../../components/Select";
+import { DARK_THEMES, LIGHT_THEMES } from "../../themes";
+
+/** Classic first, then a mode's named themes by their own names, which are not translated. */
+function themeOptions<T extends string>(themes: Record<string, { label: string }>, classic: string): SelectOption<T>[] {
+  return [
+    { value: "classic" as T, label: classic },
+    ...Object.entries(themes).map(([value, theme], index) => ({
+      value: value as T,
+      label: theme.label,
+      separatorBefore: index === 0,
+    })),
+  ];
+}
 import {
   getLangChoice,
   LOCALE_NAMES,
@@ -31,6 +44,8 @@ import { useTermStore, type TermRenderer } from "../../store/termStore";
 import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT } from "../../theme";
 import type {
   AccentChoice,
+  DarkStyle,
+  LightStyle,
   Density,
   DividerStyle,
   NavLayout,
@@ -308,6 +323,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const density = useTermStore((s) => s.density);
   const paneStyle = useTermStore((s) => s.paneStyle);
   const dividerStyle = useTermStore((s) => s.dividerStyle);
+  const darkStyle = useTermStore((s) => s.darkStyle);
+  const setDarkStyle = useTermStore((s) => s.setDarkStyle);
+  const lightStyle = useTermStore((s) => s.lightStyle);
+  const setLightStyle = useTermStore((s) => s.setLightStyle);
   const navLayout = useTermStore((s) => s.navLayout);
   const setAccent = useTermStore((s) => s.setAccent);
   const setDensity = useTermStore((s) => s.setDensity);
@@ -508,6 +527,28 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             {cat === "appearance" && (
               <>
                 <SectionTitle>{t("settings.appearance")}</SectionTitle>
+                <Field label={t("settings.darkTheme")}>
+                  <Select<DarkStyle>
+                    value={darkStyle}
+                    onChange={setDarkStyle}
+                    options={themeOptions(DARK_THEMES, t("settings.themeClassic"))}
+                    size="sm"
+                    width={180}
+                    menuWidth={196}
+                    align="right"
+                  />
+                </Field>
+                <Field label={t("settings.lightTheme")}>
+                  <Select<LightStyle>
+                    value={lightStyle}
+                    onChange={setLightStyle}
+                    options={themeOptions(LIGHT_THEMES, t("settings.themeClassic"))}
+                    size="sm"
+                    width={180}
+                    menuWidth={196}
+                    align="right"
+                  />
+                </Field>
                 <Field label={t("settings.accent")}>
                   <AccentPicker accent={accent} setAccent={setAccent} />
                 </Field>
