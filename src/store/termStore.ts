@@ -3558,6 +3558,12 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
 
   closeSession: (sessionId) => {
+    // A stopped process has nothing left to read, so retire its unread marker here rather than in each
+    // caller. Every way a session's process ends routes through this action -- natural exit and remote
+    // kill via usePtySession's listeners, End Process and Close Draft via sessionMenu -- and the tree
+    // node itself survives, so `focusReturned`'s sweep (which only drops IDs whose session is gone)
+    // never reaches it and the blue dot would otherwise sit on a dead session until it was opened.
+    get().clearNotification(sessionId);
     // Remove the exited process's pane, closing its tab when last, while leaving the app in an empty state.
     const { paneTrees, openTabs, liveTabs } = get();
     const loc = locate(paneTrees, openTabs, sessionId);
