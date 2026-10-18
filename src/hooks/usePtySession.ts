@@ -32,6 +32,7 @@ import type { UnlistenFn } from "../ipc/transport";
 import { terminalLinkHandler, webLinkActivate } from "../terminal/openLink";
 
 import { appAltKeyCodes, IS_PLAIN_BROWSER } from "./shortcutRegistry";
+import { isTabCycleKey } from "./useKeyboardShortcuts";
 
 import {
   ptyRedraw,
@@ -296,6 +297,14 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
         e.preventDefault();
         completion?.input("\x1b\r");
         void ptyWrite(session.id, "\x1b\r").catch(() => {});
+        return false;
+      }
+      // Cmd/Ctrl+Tab and Cmd/Ctrl+Shift+Tab cycle app tabs (see useKeyboardShortcuts). xterm would also
+      // encode them as HT / CBT (\x1b[Z) and write them to the PTY, so swallow them here on every
+      // platform — this sits above the macOS early return below. Only the modified combination is taken,
+      // and only while there are tabs to cycle: an unmodified Tab or Shift+Tab, or the combo with a single
+      // tab open, still reaches the shell.
+      if (isTabCycleKey(e)) {
         return false;
       }
       // On Windows/Linux, let plain Ctrl+V reach native browser paste. xterm otherwise converts it to
