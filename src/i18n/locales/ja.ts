@@ -535,12 +535,16 @@ const ja: typeof en = {
   "settings.navTree": "標準", // Tree
   "settings.navCompact": "コンパクト", // Compact
   "settings.tabs": "タブ", // Tabs
+  "settings.tabsHint": "「シングル」は開いたセッションごとに同じタブを再利用し、他はバックグラウンドで実行し続けます。「マルチ」は各セッションに専用のタブを与えます。", // Single reuses one tab for every session you open, keeping the others running in the background. Multi gives each session its own tab.
   "settings.dynamicStatusFilter": "状態フィルターへの動的追加",
+  "settings.dynamicStatusFilterHint": "状態フィルターは、適用した時点で一致していたセッションを保持します。オンにすると、後から一致し始めたセッションも追加されます。状態が変わってもセッションが除外されることはありません。", // A status filter keeps the sessions that matched when you applied it. When on, sessions that begin matching later are added as well. Sessions are never removed as their status changes.
   "settings.tabSingle": "シングル", // Single
   "settings.tabMulti": "マルチ", // Multi
   "settings.maxLiveTabs": "Background limit", // Background limit
+  "settings.maxLiveTabsHint": "単一タブモードでバックグラウンド実行を維持するセッション数です。上限を超えると最も古いアイドル状態のセッションが閉じられます。作業中・応答待ち・未読通知のあるセッションは保持されます。", // How many sessions keep running in the background in single-tab mode. Beyond the limit the oldest idle session is closed; ones that are working, waiting for you, or holding an unread notification are kept.
   "settings.defaultShell": "既定のシェル", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.spawnConfirmHint": "自分で開くタブではなく、エージェントが vspawn で派生させるセッションに適用されます。オンにすると、セッション開始前にプロンプトを確認・編集できます。", // Applies to sessions an agent derives with vspawn, not to tabs you open yourself. When on, you can review and edit the prompt before the session starts.
   "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.autoContinue": "上限リセット後に自動再開", // Continue after limit resets

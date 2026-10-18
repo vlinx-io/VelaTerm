@@ -536,12 +536,16 @@ const es: typeof en = {
   "settings.navTree": "Árbol", // Tree
   "settings.navCompact": "Compacta", // Compact
   "settings.tabs": "Pestañas", // Tabs
+  "settings.tabsHint": "«Única» reutiliza la misma pestaña para cada sesión que abres y mantiene las demás en segundo plano. «Múltiples» da a cada sesión su propia pestaña.", // Single reuses one tab for every session you open, keeping the others running in the background. Multi gives each session its own tab.
   "settings.dynamicStatusFilter": "Incorporación dinámica al filtro de estado",
+  "settings.dynamicStatusFilterHint": "Un filtro de estado conserva las sesiones que coincidían al aplicarlo. Al activarlo, también se añaden las que empiecen a coincidir después. Las sesiones nunca se quitan al cambiar de estado.", // A status filter keeps the sessions that matched when you applied it. When on, sessions that begin matching later are added as well. Sessions are never removed as their status changes.
   "settings.tabSingle": "Única", // Single
   "settings.tabMulti": "Múltiples", // Multi
   "settings.maxLiveTabs": "Background limit", // Background limit
+  "settings.maxLiveTabsHint": "Cuántas sesiones siguen ejecutándose en segundo plano en modo de pestaña única. Superado el límite se cierra la sesión inactiva más antigua; se conservan las que trabajan, esperan una respuesta tuya o tienen una notificación sin leer.", // How many sessions keep running in the background in single-tab mode. Beyond the limit the oldest idle session is closed; ones that are working, waiting for you, or holding an unread notification are kept.
   "settings.defaultShell": "Shell predeterminada", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.spawnConfirmHint": "Se aplica a las sesiones que un agente deriva con vspawn, no a las pestañas que abres tú. Activado, puedes revisar y editar el prompt antes de que la sesión arranque.", // Applies to sessions an agent derives with vspawn, not to tabs you open yourself. When on, you can review and edit the prompt before the session starts.
   "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.autoContinue": "Continuar tras el restablecimiento", // Continue after limit resets

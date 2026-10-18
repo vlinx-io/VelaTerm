@@ -536,12 +536,16 @@ const fr: typeof en = {
   "settings.navTree": "Arbre", // Tree
   "settings.navCompact": "Compacte", // Compact
   "settings.tabs": "Onglets", // Tabs
+  "settings.tabsHint": "« Unique » réutilise le même onglet pour chaque session ouverte et laisse les autres tourner en arrière-plan. « Multiples » donne à chaque session son propre onglet.", // Single reuses one tab for every session you open, keeping the others running in the background. Multi gives each session its own tab.
   "settings.dynamicStatusFilter": "Ajout dynamique au filtre d’état",
+  "settings.dynamicStatusFilterHint": "Un filtre d’état conserve les sessions qui correspondaient au moment où vous l’avez appliqué. Activé, il ajoute aussi celles qui se mettent à correspondre ensuite. Aucune session n’est retirée lorsque son état change.", // A status filter keeps the sessions that matched when you applied it. When on, sessions that begin matching later are added as well. Sessions are never removed as their status changes.
   "settings.tabSingle": "Unique", // Single
   "settings.tabMulti": "Multiples", // Multi
   "settings.maxLiveTabs": "Background limit", // Background limit
+  "settings.maxLiveTabsHint": "Nombre de sessions maintenues en arrière-plan en mode onglet unique. Au-delà de la limite, la session inactive la plus ancienne est fermée ; celles qui travaillent, attendent une action de votre part ou ont une notification non lue sont conservées.", // How many sessions keep running in the background in single-tab mode. Beyond the limit the oldest idle session is closed; ones that are working, waiting for you, or holding an unread notification are kept.
   "settings.defaultShell": "Shell par défaut", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.spawnConfirmHint": "S’applique aux sessions qu’un agent dérive via vspawn, pas aux onglets que vous ouvrez vous-même. Activé, vous pouvez relire et modifier l’invite avant le démarrage.", // Applies to sessions an agent derives with vspawn, not to tabs you open yourself. When on, you can review and edit the prompt before the session starts.
   "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.autoContinue": "Reprendre après réinitialisation", // Continue after limit resets

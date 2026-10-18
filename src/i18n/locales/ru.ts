@@ -545,12 +545,16 @@ const ru: typeof en = {
   "settings.navTree": "Дерево", // Tree
   "settings.navCompact": "Компактно", // Compact
   "settings.tabs": "Вкладки", // Tabs
+  "settings.tabsHint": "«Одна» переиспользует одну и ту же вкладку для каждой открываемой сессии, а остальные продолжают работать в фоне. «Несколько» даёт каждой сессии собственную вкладку.", // Single reuses one tab for every session you open, keeping the others running in the background. Multi gives each session its own tab.
   "settings.dynamicStatusFilter": "Динамическое добавление в фильтр статуса",
+  "settings.dynamicStatusFilterHint": "Фильтр статуса сохраняет сессии, которые подходили в момент его применения. Если включено, добавляются и те, что начали подходить позже. Сессии никогда не убираются из списка при смене статуса.", // A status filter keeps the sessions that matched when you applied it. When on, sessions that begin matching later are added as well. Sessions are never removed as their status changes.
   "settings.tabSingle": "Одна", // Single
   "settings.tabMulti": "Несколько", // Multi
   "settings.maxLiveTabs": "Background limit", // Background limit
+  "settings.maxLiveTabsHint": "Сколько сессий продолжают работать в фоне в режиме одной вкладки. Сверх лимита закрывается самая давняя неактивная сессия; работающие, ожидающие вашего ответа и с непрочитанным уведомлением сохраняются.", // How many sessions keep running in the background in single-tab mode. Beyond the limit the oldest idle session is closed; ones that are working, waiting for you, or holding an unread notification are kept.
   "settings.defaultShell": "Shell по умолчанию", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.spawnConfirmHint": "Относится к сессиям, которые агент порождает через vspawn, а не к вкладкам, открытым вами. Если включено, запрос можно просмотреть и отредактировать до запуска сессии.", // Applies to sessions an agent derives with vspawn, not to tabs you open yourself. When on, you can review and edit the prompt before the session starts.
   "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.autoContinue": "Продолжать после сброса лимита", // Continue after limit resets

@@ -536,12 +536,16 @@ const ptBR: typeof en = {
   "settings.navTree": "Árvore", // Tree
   "settings.navCompact": "Compacta", // Compact
   "settings.tabs": "Abas", // Tabs
+  "settings.tabsHint": "“Única” reutiliza a mesma aba para cada sessão que você abre e mantém as demais rodando em segundo plano. “Múltiplas” dá a cada sessão sua própria aba.", // Single reuses one tab for every session you open, keeping the others running in the background. Multi gives each session its own tab.
   "settings.dynamicStatusFilter": "Inclusão dinâmica no filtro de status",
+  "settings.dynamicStatusFilterHint": "Um filtro de status mantém as sessões que correspondiam quando você o aplicou. Ativado, também acrescenta as que passarem a corresponder depois. As sessões nunca são removidas quando o status muda.", // A status filter keeps the sessions that matched when you applied it. When on, sessions that begin matching later are added as well. Sessions are never removed as their status changes.
   "settings.tabSingle": "Única", // Single
   "settings.tabMulti": "Múltiplas", // Multi
   "settings.maxLiveTabs": "Background limit", // Background limit
+  "settings.maxLiveTabsHint": "Quantas sessões continuam rodando em segundo plano no modo de aba única. Acima do limite, a sessão ociosa mais antiga é fechada; as que estão trabalhando, aguardando sua resposta ou com notificação não lida são mantidas.", // How many sessions keep running in the background in single-tab mode. Beyond the limit the oldest idle session is closed; ones that are working, waiting for you, or holding an unread notification are kept.
   "settings.defaultShell": "Shell padrão", // Default shell
   "settings.spawnConfirm": "Confirm before spawn", // Confirm before spawn
+  "settings.spawnConfirmHint": "Vale para sessões que um agente deriva com vspawn, não para abas que você abre. Ativado, você pode revisar e editar o prompt antes de a sessão iniciar.", // Applies to sessions an agent derives with vspawn, not to tabs you open yourself. When on, you can review and edit the prompt before the session starts.
   "settings.usageAuto": "Usage auto-refresh", // Usage auto-refresh
   "settings.usageRefresh": "Usage refresh", // Usage refresh
   "settings.autoContinue": "Continuar após a redefinição", // Continue after limit resets
