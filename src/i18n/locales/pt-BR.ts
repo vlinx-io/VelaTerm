@@ -1556,6 +1556,7 @@ const ptBR: typeof en = {
   "files.nameLabel": "Nome", // Name
   "files.newTooltip": "Novo arquivo ou pasta", // New file or folder
   "files.openInTerminal": "Open in Terminal",
+  "files.collapseAll": "Recolher tudo", // Collapse All
   "files.revealInFinder": "Show in File Manager",
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",

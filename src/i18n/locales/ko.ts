@@ -1536,6 +1536,7 @@ const ko: typeof en = {
   "files.nameLabel": "이름", // Name
   "files.newTooltip": "새 파일 또는 폴더", // New file or folder
   "files.openInTerminal": "Open in Terminal",
+  "files.collapseAll": "모두 접기", // Collapse All
   "files.revealInFinder": "Show in File Manager",
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",

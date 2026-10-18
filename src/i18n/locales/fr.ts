@@ -1561,6 +1561,7 @@ const fr: typeof en = {
   "files.nameLabel": "Nom", // Name
   "files.newTooltip": "Nouveau fichier ou dossier", // New file or folder
   "files.openInTerminal": "Open in Terminal",
+  "files.collapseAll": "Tout réduire", // Collapse All
   "files.revealInFinder": "Show in File Manager",
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",
