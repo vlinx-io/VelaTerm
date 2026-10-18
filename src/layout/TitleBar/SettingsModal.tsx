@@ -28,13 +28,14 @@ import { env, platform } from "../../platform";
 import type { VelaCommandStatus } from "../../platform/types";
 import { COMPOSER_CHIP_IDS, INPUT_LATENCY_THRESHOLDS, type ComposerChipId } from "../../store/settings";
 import { useTermStore, type TermRenderer } from "../../store/termStore";
-import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT } from "../../theme";
+import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, SETTINGS_TABS } from "../../theme";
 import type {
   AccentChoice,
   Density,
   DividerStyle,
   NavLayout,
   PaneStyle,
+  SettingsTab,
 } from "../../theme";
 import { Field, Seg, SectionTitle } from "./settingsParts";
 import {
@@ -299,7 +300,7 @@ function AccentPicker({
 }
 
 
-type Cat = "appearance" | "terminal" | "conversation" | "translation" | "behavior" | "advanced" | "agents" | "shortcuts" | "general";
+type Cat = SettingsTab | "translation";
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const fonts = useFontCatalog();
@@ -363,7 +364,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const legacyTranslation = route.get("settings") === "conversation" && route.get("settingsSection") === "translation";
   const requestedCategory = legacyTranslation ? "translation" : route.get("settings");
   const showTranslation = route.get("settingsTranslation") === "1" || requestedCategory === "translation";
-  const [cat, setCat] = useState<Cat>((requestedCategory as Cat) || "appearance");
+  // The section lives in local state so switching panels does not go through settings persistence; the
+  // store only seeds it on open and records each change, so Settings reopens where it was left.
+  // Translation is not recorded: it is listed only when the route asks for it, so reopening on it would
+  // show a panel with no entry in the list.
+  const savedTab = useTermStore((s) => s.settingsTab);
+  const setSettingsTab = useTermStore((s) => s.setSettingsTab);
+  const [cat, setCatLocal] = useState<Cat>((requestedCategory as Cat) || savedTab);
+  const setCat = (v: Cat) => {
+    setCatLocal(v);
+    if ((SETTINGS_TABS as readonly string[]).includes(v)) setSettingsTab(v as SettingsTab);
+  };
   useEffect(() => { if (requestedCategory) setCat(requestedCategory as Cat); }, [requestedCategory]);
   useEffect(() => { if (legacyTranslation) navigateTranslation(translationUrl({ settings: "translation", settingsSection: null }), true); }, [legacyTranslation]);
   const [skillOn, setSkillOn] = useState<boolean | null>(null);
