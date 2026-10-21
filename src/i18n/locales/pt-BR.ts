@@ -522,6 +522,9 @@ const ptBR: typeof en = {
   "settings.agentDefaultViewHint":
     "Visão em que as novas sessões deste agente são abertas. As sessões existentes mantêm a visão com que foram criadas.", // Agent default view hint
   "settings.appearance": "Aparência", // Appearance
+  "settings.darkTheme": "Tema escuro", // Dark theme
+  "settings.lightTheme": "Tema claro", // Light theme
+  "settings.themeClassic": "Clássico", // Classic
   "settings.accent": "Destaque", // Accent
   "settings.accentAuto": "Seguir o tema", // Follow theme
   "settings.density": "Densidade", // Density

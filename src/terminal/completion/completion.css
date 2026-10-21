@@ -28,7 +28,7 @@
   --suggest-match: #2aaaff;
   --suggest-selected-match: #2aaaff;
 }
-[data-theme="light"] .terminal-completion {
+[data-theme="light"][data-light-style="classic"] .terminal-completion {
   --suggest-bg: #f3f3f3;
   --suggest-border: #c8c8c8;
   --suggest-text: #333333;
