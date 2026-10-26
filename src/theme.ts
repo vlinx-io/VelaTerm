@@ -8,6 +8,7 @@
 import type { ITheme } from "@xterm/xterm";
 import { invoke, isTauri } from "./ipc/transport";
 import { setXtermTheme } from "./terminal/registry";
+import { accentTokens, chromeTokens, namedTheme, type DarkStyle, type LightStyle, type ThemeDef } from "./themes";
 
 /** User-selected color-scheme mode; this is the persisted value. */
 export type ThemeMode = "system" | "dark" | "light";
@@ -15,8 +16,7 @@ export type ThemeMode = "system" | "dark" | "light";
 export type ResolvedTheme = "dark" | "light";
 /** Legacy store name, equivalent to ThemeMode. */
 export type Theme = ThemeMode;
-/** Retained settings field for compatibility with saved dark-style preferences. */
-export type DarkStyle = "classic";
+export type { DarkStyle, LightStyle } from "./themes";
 
 /** Accent color: 'auto' follows the scheme (dark→green, light→blue); other choices are fixed. */
 export type AccentName = "green" | "blue" | "amber" | "violet";
@@ -34,7 +34,10 @@ export type InspectorTab = "files" | "info" | "git" | "knowledge";
 
 /** Vlinx visual settings: design tokens beyond the color scheme. */
 export interface VisualSettings {
+  /** Theme used in dark mode: "classic" or a named dark theme. */
   darkStyle: DarkStyle;
+  /** Theme used in light mode: "classic" or a named light theme. */
+  lightStyle: LightStyle;
   accent: AccentChoice;
   density: Density;
   paneStyle: PaneStyle;
@@ -187,9 +190,43 @@ export const XTERM_THEME: Record<ResolvedTheme, ITheme> = {
   },
 };
 
+/** Themes last applied for each mode. Module state so every terminal mount and the chrome read the same ones. */
+let activeDarkStyle: DarkStyle = "classic";
+let activeLightStyle: LightStyle = "classic";
+
+/** The named theme painting a resolved mode, or null when that mode uses the classic look. */
+function activeTheme(resolved: ResolvedTheme): ThemeDef | null {
+  return namedTheme(resolved, resolved === "dark" ? activeDarkStyle : activeLightStyle);
+}
+
 /** Use the same palette for live terminals, newly mounted panes, and recording playback. */
 export function xtermTheme(mode: ThemeMode): ITheme {
-  return XTERM_THEME[resolveTheme(mode)];
+  const resolved = resolveTheme(mode);
+  return activeTheme(resolved)?.terminal ?? XTERM_THEME[resolved];
+}
+
+/** Inline custom properties written by the last applyThemeChrome, so switching back to classic removes them. */
+let appliedChromeProps: string[] = [];
+
+/**
+ * Paint the chrome for the resolved mode. A named theme writes its tokens and its accent preset inline on
+ * documentElement, which outranks the `[data-theme]` and `[data-accent]` blocks; classic removes them again.
+ * `data-dark-style` / `data-light-style` name the active themes for component styles that pin classic colors.
+ */
+function applyThemeChrome(resolved: ResolvedTheme) {
+  const root = document.documentElement;
+  root.dataset.darkStyle = activeDarkStyle;
+  root.dataset.lightStyle = activeLightStyle;
+  for (const prop of appliedChromeProps) root.style.removeProperty(prop);
+  appliedChromeProps = [];
+  const theme = activeTheme(resolved);
+  if (!theme) return;
+  const hue = (root.dataset.accent as AccentName | undefined) ?? effectiveAccent("auto", resolved);
+  const tokens = { ...chromeTokens(theme), ...accentTokens(theme, hue) };
+  for (const [prop, value] of Object.entries(tokens)) {
+    root.style.setProperty(prop, value);
+    appliedChromeProps.push(prop);
+  }
 }
 
 const STORAGE_KEY = "vlx-theme";
@@ -240,10 +277,12 @@ function syncNativeChrome(mode: ThemeMode) {
 }
 
 /** Apply a scheme: resolve it, write data-theme and color-scheme, persist the mode, and synchronize xterm colors. */
-export function applyTheme(mode: ThemeMode, darkStyle: DarkStyle = "classic") {
+export function applyTheme(mode: ThemeMode, darkStyle: DarkStyle = "classic", lightStyle: LightStyle = "classic") {
   const resolved = resolveTheme(mode);
+  activeDarkStyle = darkStyle;
+  activeLightStyle = lightStyle;
   document.documentElement.dataset.theme = resolved;
-  document.documentElement.dataset.darkStyle = darkStyle;
+  applyThemeChrome(resolved);
   // color-scheme drives how the user agent renders native in-page controls: checkboxes, radios, selects,
   // scrollbars, and form fields. index.html only seeds it from prefers-color-scheme, so without this line it
   // keeps following the OS for the window's lifetime and an explicit dark theme still draws light checkboxes
@@ -261,8 +300,12 @@ export function applyTheme(mode: ThemeMode, darkStyle: DarkStyle = "classic") {
 export function applyVisual(s: VisualSettings) {
   const root = document.documentElement;
   const resolved = (root.dataset.theme as ResolvedTheme) || resolveTheme("system");
-  root.dataset.darkStyle = s.darkStyle;
+  activeDarkStyle = s.darkStyle;
+  activeLightStyle = s.lightStyle;
   root.dataset.accent = effectiveAccent(s.accent, resolved);
+  // The accent picks which of the theme's hues the accent tokens take, so repaint after it is known.
+  applyThemeChrome(resolved);
+  setXtermTheme(xtermTheme(resolved));
   root.dataset.density = s.density;
   root.dataset.pane = s.paneStyle;
   root.dataset.divider = s.dividerStyle;

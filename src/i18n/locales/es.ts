@@ -522,6 +522,9 @@ const es: typeof en = {
   "settings.agentDefaultViewHint":
     "Vista en la que se abren las sesiones nuevas de este agente. Las sesiones existentes conservan la vista con la que se crearon.", // Agent default view hint
   "settings.appearance": "Apariencia", // Appearance
+  "settings.darkTheme": "Tema oscuro", // Dark theme
+  "settings.lightTheme": "Tema claro", // Light theme
+  "settings.themeClassic": "Clásico", // Classic
   "settings.accent": "Acento", // Accent
   "settings.accentAuto": "Seguir al tema", // Follow theme
   "settings.density": "Densidad", // Density
