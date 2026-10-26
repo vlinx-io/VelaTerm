@@ -3,7 +3,7 @@
 //! saved per-agent choices can still override it.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { COMPOSER_CHIP_IDS, DEFAULT_COMPOSER_INLINE_CHIPS, SETTINGS_KEY, defaultEngineFor, loadSettings, sanitizeComposerInlineChips } from "./settings";
+import { COMPOSER_CHIP_IDS, DEFAULT_COMPOSER_INLINE_CHIPS, SETTINGS_KEY, defaultEngineFor, loadSettings, sanitizeComposerInlineChips, saveSettings } from "./settings";
 import { useTermStore } from "./termStore";
 
 describe("dark palette preference", () => {
@@ -239,5 +239,30 @@ describe("composer inline chips", () => {
     useTermStore.setState({ composerInlineChips: [] });
     useTermStore.getState().hydrateSettingsFromCache();
     expect(useTermStore.getState().composerInlineChips).toEqual(["permission", "model", "mcp"]);
+  });
+});
+
+describe("settings dialog section", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("opens on appearance with nothing stored", () => {
+    expect(loadSettings().settingsTab).toBe("appearance");
+  });
+
+  it("falls back to appearance for settings saved before the field existed", () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ accent: "blue", inspectorTab: "git" }));
+    const s = loadSettings();
+    expect(s.settingsTab).toBe("appearance");
+    expect(s.accent).toBe("blue");
+  });
+
+  it("falls back to appearance for a section that no longer exists", () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ settingsTab: "weather" }));
+    expect(loadSettings().settingsTab).toBe("appearance");
+  });
+
+  it("round-trips the chosen section", () => {
+    saveSettings({ ...loadSettings(), settingsTab: "behavior" });
+    expect(loadSettings().settingsTab).toBe("behavior");
   });
 });
