@@ -419,7 +419,7 @@ pub fn safe_fields(data: &Value) -> Value {
                 s,
                 "configured_default" | "low" | "medium" | "high" | "xhigh" | "max"
             ),
-            "clientId" => {
+            "clientId" | "ownerClientId" => {
                 matches!(s, "main" | "desktop")
                     || s.strip_prefix("ws-").is_some_and(|v| {
                         !v.is_empty() && v.len() <= 12 && v.bytes().all(|b| b.is_ascii_digit())
