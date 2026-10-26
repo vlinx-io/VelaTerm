@@ -1,6 +1,8 @@
 //! Shared settings components: Seg segmented control, Field settings row, and SectionTitle group heading.
 //! Extracted from SettingsModal for reuse by the main settings page and category panels (settingsPanels / settingsBehaviorFields).
 
+import Icons from "../../components/Icons";
+
 export function Seg<T extends string>({
   value,
   options,
@@ -42,9 +44,13 @@ export function Seg<T extends string>({
 /** Settings row with a fixed-width left label, right-aligned control, and thin bottom divider; roomier than the original popover on wide layouts. */
 export function Field({
   label,
+  hint,
   children,
 }: {
   label: string;
+  /** Explanation of a setting whose effect is not obvious from its label, shown as a tooltip on an info
+   *  glyph beside the label so it takes no vertical space. */
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -59,9 +65,27 @@ export function Field({
       }}
     >
       <span
-        style={{ width: 150, flex: "none", color: "var(--text-dim)", fontSize: 12.5 }}
+        style={{
+          width: 150,
+          flex: "none",
+          color: "var(--text-dim)",
+          fontSize: 12.5,
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+        }}
       >
         {label}
+        {hint && (
+          <span
+            role="note"
+            aria-label={hint}
+            title={hint}
+            style={{ display: "inline-flex", color: "var(--text-dim)", opacity: 0.65, cursor: "help" }}
+          >
+            <Icons.info size={12} />
+          </span>
+        )}
       </span>
       <div style={{ flex: 1, display: "flex", justifyContent: "flex-end" }}>
         {children}
