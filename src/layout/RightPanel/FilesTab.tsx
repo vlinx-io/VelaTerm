@@ -7,7 +7,7 @@ import Icons from "../../components/Icons";
 import { Backdrop } from "../../components/Backdrop";
 import { fileIcon } from "./fileIcons";
 import { highlight } from "./highlight";
-import { directoriesToRefresh, reconcileChildren, toNode, updateFileNode, visibleDirectories, type FileNodeT } from "./fileTree";
+import { collapseAllBelow, directoriesToRefresh, hasOpenDescendant, reconcileChildren, toNode, updateFileNode, visibleDirectories, type FileNodeT } from "./fileTree";
 import { ContextMenu, type MenuItem } from "../../components/ContextMenu";
 import { FormModal } from "../../components/FormModal";
 import { useT } from "../../i18n";
@@ -789,6 +789,21 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
     <div ref={wrapRef} style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1 }}>
       <div className="files-head">
         <span className="files-path" title={root.path}>{root.name}</span>
+        {/* Hidden while a query is active: filtering force-expands the tree (`open = filter ? true`),
+            so collapsing during a filter changes state the user cannot see. When nothing is expanded
+            the button is disabled rather than hidden, since a freshly opened tree has every directory
+            closed and the control would otherwise be absent exactly when someone looks for it. */}
+        {!q && (
+          <button
+            className="files-toggle"
+            title={t("files.collapseAll")}
+            aria-label={t("files.collapseAll")}
+            disabled={!hasOpenDescendant(root)}
+            onClick={() => setRoot((r) => (r ? collapseAllBelow(r) : r))}
+          >
+            <Icons.collapse size={13} />
+          </button>
+        )}
         <button
           className={"files-toggle" + (filterOn ? " on" : "")}
           title={t("files.filterPlaceholder")}
