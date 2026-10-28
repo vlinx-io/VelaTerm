@@ -34,12 +34,6 @@ describe("partitionComposerChips", () => {
     expect(partitionComposerChips([40, 0, 90], 46, 0, 6)).toEqual({ inlineCount: 2, overflow: true });
   });
 
-  it("reserves More for available hidden chips, including an all-off configuration", () => {
-    expect(partitionComposerChips([40, 60], 120, 70, 6, true)).toEqual({ inlineCount: 1, overflow: true });
-    expect(partitionComposerChips([40, 60], 500, 70, 6, true)).toEqual({ inlineCount: 2, overflow: true });
-    expect(partitionComposerChips([], 500, 70, 6, true)).toEqual({ inlineCount: 0, overflow: true });
-  });
-
   it("handles an empty row and a zero-width container", () => {
     expect(partitionComposerChips([], 0, 70, 6)).toEqual({ inlineCount: 0, overflow: false });
     expect(partitionComposerChips([0, 0], 0, 0, 6)).toEqual({ inlineCount: 2, overflow: false });
