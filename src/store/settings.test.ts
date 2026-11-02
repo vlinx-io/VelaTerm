@@ -241,3 +241,29 @@ describe("composer inline chips", () => {
     expect(useTermStore.getState().composerInlineChips).toEqual(["permission", "model", "mcp"]);
   });
 });
+
+describe("project-scoped tabs preference", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("is off by default", () => {
+    expect(loadSettings().scopeTabsToProject).toBe(false);
+  });
+
+  it("keeps a saved choice and rejects non-boolean values", () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ scopeTabsToProject: true }));
+    expect(loadSettings().scopeTabsToProject).toBe(true);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ scopeTabsToProject: "yes" }));
+    expect(loadSettings().scopeTabsToProject).toBe(false);
+  });
+
+  it("persists the store setter", () => {
+    const before = useTermStore.getState().scopeTabsToProject;
+    try {
+      useTermStore.getState().setScopeTabsToProject(true);
+      expect(useTermStore.getState().scopeTabsToProject).toBe(true);
+      expect(JSON.parse(localStorage.getItem(SETTINGS_KEY)!).scopeTabsToProject).toBe(true);
+    } finally {
+      useTermStore.setState({ scopeTabsToProject: before });
+    }
+  });
+});

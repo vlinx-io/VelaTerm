@@ -316,6 +316,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const setNavLayout = useTermStore((s) => s.setNavLayout);
   const singleTabMode = useTermStore((s) => s.singleTabMode);
   const setSingleTabMode = useTermStore((s) => s.setSingleTabMode);
+  const scopeTabsToProject = useTermStore((s) => s.scopeTabsToProject);
+  const setScopeTabsToProject = useTermStore((s) => s.setScopeTabsToProject);
   const spawnConfirm = useTermStore((s) => s.spawnConfirm);
   const setSpawnConfirm = useTermStore((s) => s.setSpawnConfirm);
   const termRenderer = useTermStore((s) => s.termRenderer);
@@ -720,6 +722,19 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       onChange={(v) => setSingleTabMode(v === "single")}
                     />
                   </Field>
+                  <Field label={t("settings.scopeTabsToProject")}>
+                    <Seg<"on" | "off">
+                      value={scopeTabsToProject ? "on" : "off"}
+                      options={[
+                        ["on", t("common.on")],
+                        ["off", t("common.off")],
+                      ]}
+                      onChange={(v) => setScopeTabsToProject(v === "on")}
+                    />
+                  </Field>
+                  <div style={{ marginBottom: 8, fontSize: 11, lineHeight: 1.5, color: "var(--text-dim)" }}>
+                    {t("settings.scopeTabsToProjectHint")}
+                  </div>
                   <Field label={t("settings.dynamicStatusFilter")}>
                     <Seg<"on" | "off">
                       value={dynamicStatusFilter ? "on" : "off"}

@@ -167,6 +167,7 @@ afterEach(() => {
   cleanup();
   lifecycle.length = 0;
   localStorage.clear();
+  useTermStore.setState({ scopeTabsToProject: false, activeProjectId: null });
 });
 
 describe("keep-alive invariants when switching sessions in the centre pane", () => {
@@ -499,6 +500,28 @@ describe("keep-alive invariants when switching sessions in the centre pane", () 
     expect(st.liveTabs).not.toContain("A");
     expect(countMounts("A")).toBe(1); // A was mounted only once throughout.
     expect(countUnmounts("A")).toBe(0);
+  });
+});
+
+describe("empty state with tabs scoped to a project", () => {
+  it("shows the empty state when the active project has no visible tab, even though other tabs are open", () => {
+    seed(false);
+    const newScratchTab = vi.fn();
+    useTermStore.setState({
+      projects: [
+        { id: "p1", name: "P", rootPath: "/tmp", color: null, sortOrder: 0, collapsed: false, createdAt: 0 },
+        { id: "p2", name: "Q", rootPath: "/tmp2", color: null, sortOrder: 1, collapsed: false, createdAt: 0 },
+      ],
+      scopeTabsToProject: true,
+      activeProjectId: "p2",
+      openTabs: ["A"],
+      activeTabId: "A",
+      newScratchTab,
+    });
+    beforeEachRender();
+    expect(screen.getByText(t("center.noSession"))).toBeTruthy();
+    fireEvent.click(screen.getByText(t("center.createTerminal")));
+    expect(newScratchTab).toHaveBeenCalledTimes(1);
   });
 });
 

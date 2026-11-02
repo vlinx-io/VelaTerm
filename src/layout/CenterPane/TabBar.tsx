@@ -6,6 +6,7 @@
 //! lists background liveTabs.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { ContextMenu, type MenuItem } from "../../components/ContextMenu";
 import Icons from "../../components/Icons";
 import { GameCenterLink } from "../../components/GameCenterLink";
@@ -17,6 +18,7 @@ import { isShareSurface } from "../../ipc/shareBase";
 import { env } from "../../platform";
 import { labelWithCombo } from "../../hooks/shortcutRegistry";
 import { useTermStore } from "../../store/termStore";
+import { visibleTabIds } from "../../store/visibleTabs";
 import { effectiveStatus, type Session } from "../../types";
 import { type TreeNodeRef } from "../LeftSidebar/ProjectTree";
 import { useSessionMenu } from "../sessionMenu";
@@ -78,7 +80,8 @@ export function TabBar() {
   const sessions = useTermStore((s) => s.sessions);
   const ephemeralSessions = useTermStore((s) => s.ephemeralSessions);
   // Do not subscribe to complete runtime/notification maps; SessionTabStatus owns focused subscriptions.
-  const openTabs = useTermStore((s) => s.openTabs);
+  const visibleTabs = useTermStore(useShallow(visibleTabIds));
+  const scopeTabsToProject = useTermStore((s) => s.scopeTabsToProject);
   const activeTabId = useTermStore((s) => s.activeTabId);
   const docTabs = useTermStore((s) => s.docTabs);
   const browserTabs = useTermStore((s) => s.browserTabs);
@@ -168,7 +171,7 @@ export function TabBar() {
     (dropMark?.id === tabId ? ` drop-${dropMark.side}` : "");
 
   // Dropping on tab-bar whitespace, including the action area, moves the tab to the end.
-  const lastTabId = openTabs[openTabs.length - 1];
+  const lastTabId = visibleTabs[visibleTabs.length - 1];
   const onBarDragOver = (e: React.DragEvent) => {
     if (!isTabDrag(e)) return;
     e.preventDefault();
@@ -320,7 +323,7 @@ export function TabBar() {
       showTimer.current = null;
     }
     setTip(null);
-  }, [openTabs, activeTabId]);
+  }, [visibleTabs, activeTabId]);
 
   return (
     <div
@@ -329,7 +332,7 @@ export function TabBar() {
       onDrop={onBarDrop}
       onMouseLeave={() => { midPressTabId.current = null; }}
     >
-      {openTabs.map((tabId) => {
+      {visibleTabs.map((tabId) => {
         // Document tab: file icon, filename, dirty marker, and close action.
         const doc = docTabs[tabId];
         if (doc) {
@@ -472,7 +475,7 @@ export function TabBar() {
         const isAgent = session.kind !== "terminal";
         const isActive = tabId === activeTabId;
         // SessionTabStatus owns status/unread subscriptions. Compute one breadcrumb for both tooltip paths.
-        const pathTitle = sessionPathTitle(session);
+        const pathTitle = session.global ? t("tab.globalTerminal") : sessionPathTitle(session);
         return (
           <div
             key={tabId}
@@ -494,11 +497,15 @@ export function TabBar() {
                 position: "relative",
               }}
             >
-              <SessionKindIcon
-                session={session}
-                size={13}
-                rootPath={projects.find((pr) => pr.id === session.projectId)?.rootPath ?? null}
-              />
+              {session.global ? (
+                <Icons.globe size={13} />
+              ) : (
+                <SessionKindIcon
+                  session={session}
+                  size={13}
+                  rootPath={projects.find((pr) => pr.id === session.projectId)?.rootPath ?? null}
+                />
+              )}
             </span>
             {renamingTabId === tabId ? (
               <input
@@ -534,6 +541,11 @@ export function TabBar() {
       {!isShareSurface && <button className="tab-add" title={t("tab.newTerminal")} onClick={() => newScratchTab()}>
         <Icons.plus size={14} />
       </button>}
+      {!isShareSurface && !env.isRemoteWindow && scopeTabsToProject && (
+        <button className="tab-add" title={t("tab.newGlobalTerminal")} onClick={() => newScratchTab({ global: true })}>
+          <Icons.globe size={14} />
+        </button>
+      )}
       {/* Permanent entries on the right, separated from the tabs: new terminal, new document, built-in browser tab. */}
       {!isShareSurface && <div style={{ marginLeft: "auto", display: "flex", flex: "none" }}>
         <button className="tab-add" title={t("tab.newTerminal")} onClick={() => newScratchTab()}>
@@ -583,28 +595,28 @@ export function TabBar() {
       {menu &&
         (() => {
           const tabId = menu.tabId;
-          const idx = openTabs.indexOf(tabId);
-          // Close actions shared by all four tab types.
+          const idx = visibleTabs.indexOf(tabId);
+          // Close actions shared by all four tab types. They act on visible tabs only, so hidden projects keep running.
           const closeItems: MenuItem[] = [
             { label: t("doc.closeTab"), onClick: () => closeAnyTab(tabId) },
             {
               label: t("tab.closeOthers"),
-              disabled: openTabs.length <= 1,
+              disabled: visibleTabs.length <= 1,
               onClick: () => {
-                for (const id of openTabs) if (id !== tabId) closeAnyTab(id);
+                for (const id of visibleTabs) if (id !== tabId) closeAnyTab(id);
               },
             },
             {
               label: t("tab.closeRight"),
-              disabled: idx < 0 || idx === openTabs.length - 1,
+              disabled: idx < 0 || idx === visibleTabs.length - 1,
               onClick: () => {
-                for (const id of openTabs.slice(idx + 1)) closeAnyTab(id);
+                for (const id of visibleTabs.slice(idx + 1)) closeAnyTab(id);
               },
             },
             {
               label: t("tab.closeAll"),
               onClick: () => {
-                for (const id of openTabs) closeAnyTab(id);
+                for (const id of visibleTabs) closeAnyTab(id);
               },
             },
           ];

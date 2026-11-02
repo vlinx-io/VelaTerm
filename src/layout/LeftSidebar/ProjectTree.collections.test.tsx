@@ -128,6 +128,7 @@ beforeEach(() => {
     toggleSelect: vi.fn(),
     setSelection: vi.fn(),
     setInspectTarget: vi.fn(),
+    setActiveProject: vi.fn(),
     setSidebarTreeViewCollapsed: vi.fn(),
   };
 });
@@ -270,5 +271,43 @@ describe("dragging projects", () => {
     render(<ProjectTree {...handlers()} />);
     expect(fireEvent.dragOver(rowOf("Payments"), overData(["text/plain"]))).toBe(false);
     expect(fireEvent.dragOver(rowOf("Payments"), overData(["text/plain", PROJECT_DRAG_MIME]))).toBe(false);
+  });
+});
+
+describe("active project", () => {
+  it("makes a clicked project the active one", () => {
+    render(<ProjectTree {...handlers()} />);
+    fireEvent.click(rowOf("notes"));
+    expect(mocks.state.setActiveProject).toHaveBeenCalledWith("p-notes");
+  });
+
+  it("does not make a clicked collection the active project", () => {
+    render(<ProjectTree {...handlers()} />);
+    fireEvent.click(rowOf("Payments"));
+    expect(mocks.state.setActiveProject).not.toHaveBeenCalled();
+  });
+
+  it("makes a clicked session's project active before opening it", () => {
+    mocks.state.projects = [project("p-api", "payments-api", 1, null, false)];
+    mocks.state.sessions = [
+      {
+        id: "s1",
+        projectId: "p-api",
+        groupId: null,
+        parentSessionId: null,
+        name: "shell",
+        kind: "terminal",
+        collapsed: false,
+        sortOrder: 0,
+        createdAt: 0,
+      },
+    ];
+    render(<ProjectTree {...handlers()} />);
+    fireEvent.click(rowOf("shell"));
+    const setActiveProject = mocks.state.setActiveProject as ReturnType<typeof vi.fn>;
+    const openSession = mocks.state.openSession as ReturnType<typeof vi.fn>;
+    expect(setActiveProject).toHaveBeenCalledWith("p-api");
+    expect(openSession).toHaveBeenCalledWith("s1", undefined);
+    expect(setActiveProject.mock.invocationCallOrder[0]).toBeLessThan(openSession.mock.invocationCallOrder[0]);
   });
 });
