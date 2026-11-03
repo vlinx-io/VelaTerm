@@ -365,6 +365,21 @@ it("resynchronizes on reconnection and reuses the uncertain submission identifie
   expect(screen.getAllByText("Keep this message")).toHaveLength(1);
 });
 
+it("does not leave a stale error row when a dropped connection cuts a snapshot short", async () => {
+  const { container } = await mountPane();
+  const previous = vi.mocked(invoke).getMockImplementation()!;
+  const disconnected = new Error("Disconnected");
+  disconnected.name = "TransportError";
+  vi.mocked(invoke).mockImplementation((command, args) => command === "chat_snapshot"
+    ? Promise.reject(disconnected) : previous(command, args));
+  await act(async () => reconnectCallback());
+  vi.mocked(invoke).mockImplementation(previous);
+  await act(async () => reconnectCallback());
+  await waitFor(() => expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "chat_snapshot")).toHaveLength(3));
+  await act(async () => {});
+  expect(container.textContent).not.toContain("TransportError");
+});
+
 it("preserves input when an older server cannot deduplicate submissions", async () => {
   snapshotOverrides = { submissionReceipts: undefined };
   const { container } = await mountPane();

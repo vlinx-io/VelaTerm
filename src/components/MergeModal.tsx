@@ -16,6 +16,7 @@ import {
   type MergeBranchesPreview,
 } from "../ipc/commands";
 import { useTermStore } from "../store/termStore";
+import { worktreeGroup } from "../types";
 import Select from "./Select";
 
 type Phase = "loading" | "notRepo" | "ready" | "working" | "done" | "conflict" | "error";
@@ -33,14 +34,14 @@ export function MergeModal() {
   const group = target && !session ? groups.find((g) => g.id === target) : undefined;
   const entity = session ?? group;
   // Resolve the repository directory from worktree first, then session cwd, then project root.
-  // Groups without a worktree also use the project root, matching the sidebar Git menu.
+  // A group uses the worktree bound on it or an ancestor, else the project root, matching the sidebar Git menu.
   const projectRoot = entity
     ? projects.find((p) => p.id === entity.projectId)?.rootPath ?? ""
     : "";
   const repoDir = (
     session?.worktreePath ||
     session?.cwd ||
-    group?.worktreePath ||
+    (group ? worktreeGroup(groups, group.id)?.worktreePath : null) ||
     projectRoot ||
     ""
   ).trim();

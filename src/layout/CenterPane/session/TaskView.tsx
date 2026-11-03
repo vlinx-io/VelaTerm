@@ -5,7 +5,6 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import Icons from "../../../components/Icons";
 import { fmtTokens } from "../../../format";
 import { dateLocale, useT, type I18nKey } from "../../../i18n";
 import {
@@ -32,13 +31,7 @@ import { kindIconEl } from "../../sessionViewers/sessionMeta";
 import { assistantLabel } from "../../sessionViewers/TranscriptViewer";
 import { Entry } from "./ConversationRows";
 import { groupToolRuns, markAgentTurns } from "./toolRuns";
-
-/** The icon a task kind is drawn with, here and on its tab. */
-export function taskIcon(taskType: string) {
-  if (taskType === "local_workflow") return Icons.layers;
-  if (taskType === "local_agent") return Icons.bot;
-  return Icons.terminal;
-}
+import { fmtElapsed, taskIcon } from "./taskMeta";
 
 /** The label key for a task status; unknown values are shown as the agent wrote them. */
 export function taskStatusKey(status: string | undefined): I18nKey | null {
@@ -62,16 +55,6 @@ export function taskStatusKey(status: string | undefined): I18nKey | null {
     default:
       return null;
   }
-}
-
-/** "1:05" or "1:02:03": the duration format the phase list and the elapsed figure share. */
-export function fmtElapsed(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const seconds = total % 60;
-  const minutes = Math.floor(total / 60) % 60;
-  const hours = Math.floor(total / 3600);
-  const mm = hours ? String(minutes).padStart(2, "0") : String(minutes);
-  return `${hours ? `${hours}:` : ""}${mm}:${String(seconds).padStart(2, "0")}`;
 }
 
 /** Advance a backend duration using only the time since this client received it. */

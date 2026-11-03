@@ -16,7 +16,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -123,6 +123,27 @@ const MAX_PENDING_REPLIES: usize = 32;
 /// How long a reply may wait for earlier output to drain before the connection counts as stuck. It stays
 /// below the client's 30-second snapshot timeout so a stuck connection closes before the request gives up.
 const REPLY_PATIENCE: Duration = Duration::from_secs(20);
+
+/// An input or resize frame that arrived while its session's spawn was still running.
+struct DeferredPtyCall {
+    id: Value,
+    cmd: String,
+    args: Value,
+}
+
+/// PTY bookkeeping one connection shares between its read loop and spawns finishing on the blocking pool.
+#[derive(Default)]
+struct PtyState {
+    /// sid -> subscription ID, used for detach on disconnect.
+    subs: HashMap<String, u64>,
+    /// Sessions with a spawn in flight. Their input and resize frames wait here and run in arrival order
+    /// once the spawn returns, as they did when spawns ran inside the read loop.
+    spawning: HashMap<String, Vec<DeferredPtyCall>>,
+    /// Set by connection cleanup; a spawn finishing later detaches at once instead of leaving a subscription.
+    closed: bool,
+}
+
+type SharedPtyState = Arc<std::sync::Mutex<PtyState>>;
 
 async fn handle_socket(
     socket: WebSocket,
@@ -262,8 +283,8 @@ async fn handle_socket(
     });
 
     let mut event_ids: Vec<ListenerId> = Vec::new();
-    // PTY subscriptions owned by this connection: sid -> subscription ID, used for detach on disconnect.
-    let mut pty_subs: HashMap<String, u64> = HashMap::new();
+    // PTY subscriptions owned by this connection and spawns still running for it.
+    let pty_state: SharedPtyState = Default::default();
     // Sessions with status/exit forwarding already registered, preventing duplicates.
     let mut listened: HashSet<String> = HashSet::new();
     let mut chat_listened: HashSet<String> = HashSet::new();
@@ -322,7 +343,7 @@ async fn handle_socket(
             &conn_source,
             &out_tx,
             permit,
-            &mut pty_subs,
+            &pty_state,
             &mut listened,
             &mut chat_listened,
             &mut event_ids,
@@ -361,7 +382,7 @@ async fn handle_socket(
                             &conn_source,
                             &out_tx,
                             permit,
-                            &mut pty_subs,
+                            &pty_state,
                             &mut listened,
                             &mut chat_listened,
                             &mut event_ids,
@@ -406,8 +427,14 @@ async fn handle_socket(
         crate::web::presence::CLIENTS_EVENT,
         crate::web::presence::leave(&conn_source),
     );
+    let subs = {
+        let mut state = pty_state.lock().unwrap();
+        state.closed = true;
+        state.spawning.clear();
+        std::mem::take(&mut state.subs)
+    };
     let mgr = ctx.app.pty();
-    for (sid, sub) in pty_subs {
+    for (sid, sub) in subs {
         mgr.detach(&ctx.app, &sid, sub, &conn_source);
     }
     writer.abort();
@@ -521,7 +548,7 @@ fn handle_text(
     out_tx: &outbound::Sender,
     // Held until this frame's reply is queued; see MAX_PENDING_REPLIES.
     permit: OwnedSemaphorePermit,
-    pty_subs: &mut HashMap<String, u64>,
+    pty_state: &SharedPtyState,
     listened: &mut HashSet<String>,
     // Sessions whose chat channel this connection forwards. Separate from `listened`: a session can have
     // both a PTY and a chat engine, registered at different moments.
@@ -581,6 +608,14 @@ fn handle_text(
                 }
             }
             if matches!(cmd.as_str(), "pty_write" | "pty_resize") {
+                // A session still spawning has no process to take the frame yet; it runs when the spawn returns.
+                if let Some(sid) = args.get("sessionId").and_then(Value::as_str) {
+                    let mut state = pty_state.lock().unwrap();
+                    if let Some(deferred) = state.spawning.get_mut(sid) {
+                        deferred.push(DeferredPtyCall { id, cmd, args: args.clone() });
+                        return;
+                    }
+                }
                 // Keep frequent, lightweight keyboard and resize operations synchronous in the read loop for responsiveness.
                 let reply =
                     match dispatch_scoped(&ctx.app, share.as_ref(), &cmd, &args, conn_source, origin) {
@@ -676,25 +711,60 @@ fn handle_text(
                     out_tx.clone(),
                 ));
             }
-            // Serialize SpawnResult directly in camelCase to avoid maintaining parallel handwritten JSON. This
-            // automatically includes cols/rows/owner, the initial-size channel used by mirror mode.
-            let reply =
-                match web_pty_spawn(ctx, &sid, &args, conn_source, attach_only, out_tx.clone()) {
-                    Ok(res) => {
-                        pty_subs.insert(sid.clone(), res.sub_id);
-                        let result = serde_json::to_value(&res).unwrap_or(Value::Null);
-                        json!({"t":"reply","id":id,"ok":true,"result":result})
-                    }
-                    Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}),
+            // Starting a shell reads profiles and can take seconds. Run it on the blocking pool so a workspace
+            // restoring several terminals does not hold every other request on this connection behind them.
+            pty_state.lock().unwrap().spawning.entry(sid.clone()).or_default();
+            let ctx = ctx.clone();
+            let out_tx = out_tx.clone();
+            let conn_source = conn_source.to_string();
+            let pty_state = pty_state.clone();
+            let origin = CallOrigin::for_serve_mode(ctx.mode);
+            tokio::spawn(async move {
+                // An attach replays the session's whole scrollback. Reserve room for it before attaching, so a
+                // reconnect reattaching many busy terminals queues their replays instead of exceeding the budget.
+                let Ok(ticket) = out_tx.replay_ticket(REPLY_PATIENCE).await else {
+                    pty_state.lock().unwrap().spawning.remove(&sid);
+                    drop(permit);
+                    return;
                 };
-            let _ = out_tx.send(Message::Text(reply.to_string()));
+                let _ = tokio::task::spawn_blocking(move || {
+                    let spawned = web_pty_spawn(&ctx, &sid, &args, &conn_source, attach_only, out_tx.clone(), ticket);
+                    // Serialize SpawnResult directly in camelCase to avoid maintaining parallel handwritten JSON. This
+                    // automatically includes cols/rows/owner, the initial-size channel used by mirror mode.
+                    let reply = match &spawned {
+                        Ok(res) => {
+                            let result = serde_json::to_value(res).unwrap_or(Value::Null);
+                            json!({"t":"reply","id":id,"ok":true,"result":result})
+                        }
+                        Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}),
+                    };
+                    let mut state = pty_state.lock().unwrap();
+                    if state.closed {
+                        drop(state);
+                        if let Ok(res) = spawned { ctx.app.pty().detach(&ctx.app, &sid, res.sub_id, &conn_source); }
+                        drop(permit);
+                        return;
+                    }
+                    if let Ok(res) = &spawned { state.subs.insert(sid.clone(), res.sub_id); }
+                    let _ = out_tx.send(Message::Text(reply.to_string()));
+                    // Replay held frames under the lock, so a frame read meanwhile cannot overtake them.
+                    for call in state.spawning.remove(&sid).unwrap_or_default() {
+                        let reply = match dispatch_scoped(&ctx.app, share.as_ref(), &call.cmd, &call.args, &conn_source, origin) {
+                            Ok(result) => json!({"t":"reply","id":call.id,"ok":true,"result":result}),
+                            Err(e) => json!({"t":"reply","id":call.id,"ok":false,"error":e}),
+                        };
+                        let _ = out_tx.send(Message::Text(reply.to_string()));
+                    }
+                    drop(permit);
+                }).await;
+            });
         }
         "pty-detach" => {
             let sid = msg.get("sid").and_then(Value::as_str).unwrap_or("");
             if let Some(sub) = msg.get("subId").and_then(Value::as_u64) {
                 ctx.app.pty().detach(&ctx.app, sid, sub, conn_source);
             }
-            pty_subs.remove(sid);
+            pty_state.lock().unwrap().subs.remove(sid);
         }
         _ => {}
     }
@@ -746,10 +816,21 @@ fn owner_spawn_args(app: &AppCtx, session: &crate::models::Session, client: &Val
     args
 }
 
+/// Gives back a replay reservation the attach did not spend, on every return path of the spawn.
+struct ReleaseTicket(Arc<Mutex<Option<outbound::ReplayTicket>>>);
+impl Drop for ReleaseTicket {
+    fn drop(&mut self) {
+        if let Ok(mut ticket) = self.0.lock() {
+            ticket.take();
+        }
+    }
+}
+
 /// WS-side PTY spawn-or-attach. Builds a sink that wraps bytes in binary frames for the outbound channel,
 /// mirrors the reconnect/remote logic of `pty_spawn`, then calls `PtyManager::spawn`, which attaches and replays
 /// when the session already exists. `conn_source` identifies this connection and becomes sizing owner for a new
-/// process. `attach_only` permits attachment without starting, as used during reconnect.
+/// process. `attach_only` permits attachment without starting, as used during reconnect. `ticket` is the room
+/// reserved for the attach replay; it is released once the spawn returns if no replay used it.
 fn web_pty_spawn(
     ctx: &Ctx,
     sid: &str,
@@ -757,6 +838,7 @@ fn web_pty_spawn(
     conn_source: &str,
     attach_only: bool,
     out_tx: outbound::Sender,
+    ticket: outbound::ReplayTicket,
 ) -> Result<SpawnResult, String> {
     let _context=crate::diagnostics::Context::enter(args.get("diagnosticRequestId").and_then(Value::as_str));
     let _operation=crate::diagnostics::Operation::enter(args.get("diagnosticOperationId").and_then(Value::as_str));
@@ -840,15 +922,24 @@ fn web_pty_spawn(
     let hook = app.hooks().endpoint();
 
     // WS output sink wraps bytes as [len][sid][payload]. Once connection closure drops out_rx, send fails and
-    // returns false so the reader thread removes this destination.
+    // returns false so the reader thread removes this destination. The first chunk of an attach is the whole
+    // replay and spends the reserved ticket; later chunks are live output under the presentation quota.
     let sid_bytes = sid.as_bytes().to_vec();
+    let ticket = Arc::new(Mutex::new(Some(ticket)));
+    let sink_ticket = ticket.clone();
     let sink: OutputSink = Box::new(move |bytes: &[u8]| {
         let mut frame = Vec::with_capacity(1 + sid_bytes.len() + bytes.len());
         frame.push(sid_bytes.len() as u8);
         frame.extend_from_slice(&sid_bytes);
         frame.extend_from_slice(bytes);
-        out_tx.send(Message::Binary(frame)).is_ok()
+        let message = Message::Binary(frame);
+        match sink_ticket.lock().unwrap().take() {
+            Some(ticket) => out_tx.replay(message, ticket).is_ok(),
+            None => out_tx.send(message).is_ok(),
+        }
     });
+    // A new process or an empty session has no replay; give the reserved room back once the spawn returns.
+    let _release = ReleaseTicket(ticket);
 
     diagnostic.success();
     drop(diagnostic);
@@ -908,7 +999,7 @@ mod tests {
     /// spawn_blocking, so the reply arrives asynchronously on the outbound channel.
     async fn invoke_reply(ctx: &Ctx, cmd: &str) -> Value {
         let (out_tx, mut out_rx) = outbound::channel();
-        let mut pty_subs = HashMap::new();
+        let pty_state = SharedPtyState::default();
         let mut listened = HashSet::new();
         let mut chat_listened = HashSet::new();
         let mut event_ids = Vec::new();
@@ -919,7 +1010,7 @@ mod tests {
             "ws-test",
             &out_tx,
             Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap(),
-            &mut pty_subs,
+            &pty_state,
             &mut listened,
             &mut chat_listened,
             &mut event_ids,
@@ -961,13 +1052,13 @@ mod tests {
     async fn translation_session_subscribes_once_before_returning_its_snapshot() {
         let ctx=test_ctx(ServeMode::LoopbackHttp);
         let (out_tx,mut out_rx)=outbound::channel();
-        let mut pty_subs=HashMap::new();let mut listened=HashSet::new();let mut chat_listened=HashSet::new();let mut event_ids=Vec::new();
+        let pty_state=SharedPtyState::default();let mut listened=HashSet::new();let mut chat_listened=HashSet::new();let mut event_ids=Vec::new();
         let sid={let conn=ctx.app.db().conn.lock().unwrap();let project=crate::db::repo::create_virtual_project(&conn,"Translation event fixture").unwrap();
             let session=crate::db::repo::create_session(&conn,&project.id,None,"Translation",SessionKind::Codex,None,None,None,None,None).unwrap();
             crate::db::repo::set_session_engine(&conn,&session.id,"chat").unwrap();session.id};
         for id in [1,2] {
             let frame=json!({"t":"invoke","id":id,"cmd":"translation_session","args":{"sessionId":sid}}).to_string();
-            handle_text(&ctx,&frame,"translation-test",&out_tx,Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap(),&mut pty_subs,&mut listened,&mut chat_listened,&mut event_ids,None);
+            handle_text(&ctx,&frame,"translation-test",&out_tx,Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap(),&pty_state,&mut listened,&mut chat_listened,&mut event_ids,None);
             let message=tokio::time::timeout(std::time::Duration::from_secs(5),out_rx.recv()).await.unwrap().unwrap().message;
             let Message::Text(text)=message else {panic!("expected snapshot reply")};
             let value:Value=serde_json::from_str(&text).unwrap();assert_eq!(value["ok"],true);
@@ -976,6 +1067,54 @@ mod tests {
         let Message::Text(text)=out_rx.recv().await.unwrap().message else {panic!("expected translation event")};
         assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["name"],format!("translation://session/{sid}"));
         assert!(tokio::time::timeout(std::time::Duration::from_millis(200),out_rx.recv()).await.is_err(),"the event is delivered once");
+        for id in event_ids {ctx.app.unlisten(id);}
+    }
+
+    async fn next_reply(out_rx:&mut outbound::Receiver) -> Value {
+        let message=tokio::time::timeout(std::time::Duration::from_secs(5),out_rx.recv()).await.expect("expected a reply").unwrap().message;
+        let Message::Text(text)=message else {panic!("expected a text reply")};
+        serde_json::from_str(&text).unwrap()
+    }
+
+    /// Input for a session whose spawn is still running waits for that spawn instead of failing on a session
+    /// that does not exist yet.
+    #[tokio::test]
+    async fn pty_input_waits_for_a_running_spawn() {
+        let ctx=test_ctx(ServeMode::LoopbackHttp);
+        let (out_tx,mut out_rx)=outbound::channel();
+        let pty_state=SharedPtyState::default();let mut listened=HashSet::new();let mut chat_listened=HashSet::new();let mut event_ids=Vec::new();
+        pty_state.lock().unwrap().spawning.insert("spawning-session".into(),Vec::new());
+        let frame=json!({"t":"invoke","id":7,"cmd":"pty_write","args":{"sessionId":"spawning-session","data":"ls\r"}}).to_string();
+        handle_text(&ctx,&frame,"ws-test",&out_tx,Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap(),&pty_state,&mut listened,&mut chat_listened,&mut event_ids,None);
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(100),out_rx.recv()).await.is_err(),"no reply before the spawn returns");
+        let state=pty_state.lock().unwrap();
+        let deferred=&state.spawning["spawning-session"];
+        assert_eq!(deferred.len(),1);
+        assert_eq!(deferred[0].id,json!(7));
+        assert_eq!(deferred[0].cmd,"pty_write");
+    }
+
+    /// The spawn runs off the read loop, yet its reply still precedes input sent right after it, and a finished
+    /// spawn leaves nothing held for the session.
+    #[tokio::test]
+    async fn pty_spawn_replies_before_input_sent_after_it() {
+        let ctx=test_ctx(ServeMode::LoopbackHttp);
+        let (out_tx,mut out_rx)=outbound::channel();
+        let pty_state=SharedPtyState::default();let mut listened=HashSet::new();let mut chat_listened=HashSet::new();let mut event_ids=Vec::new();
+        let frames=[
+            json!({"t":"pty-spawn","id":1,"sid":"deleted-session","args":{"kind":"terminal"}}),
+            json!({"t":"invoke","id":2,"cmd":"pty_write","args":{"sessionId":"deleted-session","data":"x"}}),
+        ];
+        for frame in frames {
+            handle_text(&ctx,&frame.to_string(),"ws-test",&out_tx,Arc::new(Semaphore::new(1)).try_acquire_owned().unwrap(),&pty_state,&mut listened,&mut chat_listened,&mut event_ids,None);
+        }
+        let spawn=next_reply(&mut out_rx).await;
+        assert_eq!(spawn["id"],1);
+        assert_eq!(spawn["error"],"Session has been deleted");
+        assert_eq!(next_reply(&mut out_rx).await["id"],2);
+        let state=pty_state.lock().unwrap();
+        assert!(state.spawning.is_empty() && state.subs.is_empty());
+        drop(state);
         for id in event_ids {ctx.app.unlisten(id);}
     }
 

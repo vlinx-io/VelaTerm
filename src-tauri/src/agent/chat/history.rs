@@ -128,6 +128,8 @@ pub fn read(kind: SessionKind, agent_session_id: &str) -> Result<Vec<ChatEvent>,
         SessionKind::Pi | SessionKind::Omp => {
             pi_events(&resume::read_pi_transcript(kind, agent_session_id)?)
         }
+        // ZCode keeps messages and parts in its SQLite session store.
+        SessionKind::Zcode => crate::agent::zcode::history_events(agent_session_id)?,
         // Other agents keep their history in SQLite blobs or formats we do not parse. Use a fallback arm so a
         // newly added session kind compiles as unsupported rather than silently rendering an empty view.
         other => {
@@ -588,6 +590,17 @@ fn replay_recorded(kind: SessionKind, agent_session_id: &str) -> Result<Vec<Chat
         let content = resume::read_claude_transcript(agent_session_id)?;
         let mut read_child = claude_subagent_reader(path.with_extension("").join("subagents"),crate::agent::history_store::limits::PAGE_BYTES.saturating_sub(content.len()));
         return Ok(claude_replay(&content, &mut read_child, &mut HashSet::new(), 0));
+    }
+    if kind == SessionKind::Zcode {
+        // A recorded call without a result belongs to a process that is gone: it was interrupted or still
+        // waiting for approval, and can no longer finish.
+        let mut rows = to_rows(read(kind, agent_session_id)?);
+        for row in &mut rows {
+            if let ChatRow::Tool { status, .. } = row {
+                if *status == "running" { *status = "canceled"; }
+            }
+        }
+        return Ok(rows);
     }
     if kind != SessionKind::Codex {
         return Ok(to_rows(read(kind, agent_session_id)?));

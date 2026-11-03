@@ -1,7 +1,7 @@
 //! Building blocks shared by the artifact tab and the panel beside a conversation: header controls, the
 //! sandboxed frame on its stage, the console drawer, and the blocked-network and file-gone states.
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import Icons from "../../../../components/Icons";
 import { useT } from "../../../../i18n";
@@ -10,6 +10,12 @@ import { env, platform } from "../../../../platform";
 import { useTermStore } from "../../../../store/termStore";
 import type { ArtifactViewport } from "../../../../store/docTab";
 import { consoleReport } from "./artifactBridge";
+import {
+  addComment, artifactReview, clearComments, commentReport, describeTarget, optionReport, removeComment, setDraft,
+  setPicking, subscribeArtifactReview,
+} from "./artifactReview";
+import { copyText } from "../../../../ipc/transport";
+import { getTerminal, pasteToTerminal } from "../../../../terminal/registry";
 import { frameLayout, VIEWPORT_ORDER, viewportReadout, type ViewportSize } from "./artifactViewport";
 import { insertIntoComposer } from "./artifactWriters";
 import type { ArtifactState } from "./useArtifact";
@@ -48,8 +54,19 @@ export function ArtifactHeaderControls({
   const t = useT();
   const writerName = useTermStore((s) => (state.writer ? s.sessions.find((x) => x.id === state.writer)?.name : undefined));
   const canOpenExternally = (isTauri || env.isElectron) && !compact;
+  const review = useSyncExternalStore(subscribeArtifactReview, () => artifactReview(path));
   return (
     <>
+      <button
+        className={"artifact-chip" + (review.picking ? " picking" : "")}
+        title={t("artifact.commentTitle")}
+        aria-pressed={review.picking}
+        onClick={() => setPicking(path, !review.picking)}
+      >
+        <Icons.feedback size={12} />
+        {t("artifact.comment")}
+        {review.comments.length > 0 && <span className="artifact-count">{review.comments.length}</span>}
+      </button>
       {!compact && state.writer && writerName && (
         <button
           className="artifact-chip writer"
@@ -156,7 +173,9 @@ export function ArtifactPane({
           <button onClick={() => state.setNet(true)}>{t("artifact.allowForFile")}</button>
         </div>
       )}
+      {state.options.length > 0 && <ArtifactOptions state={state} path={path} />}
       <ArtifactStage state={state} viewport={viewport} title={title} />
+      <ArtifactReviewDrawer state={state} path={path} />
       {consoleOpen && <ArtifactConsole state={state} path={path} onClose={onCloseConsole} />}
     </div>
   );
@@ -208,21 +227,18 @@ function ArtifactStage({ state, viewport, title }: { state: ArtifactState; viewp
 
 function ArtifactConsole({ state, path, onClose }: { state: ArtifactState; path: string; onClose: () => void }) {
   const t = useT();
-  const writer = state.writer;
+  const { deliver, copied, sends } = useDeliver(state.writer);
   return (
     <div className="artifact-console">
       <div className="artifact-console-head">
         <span className="grow">{t("artifact.console")}</span>
-        {writer && state.errorCount > 0 && (
+        {state.errorCount > 0 && (
           <button
             className="vlx-btn"
-            title={t("artifact.sendToSessionTitle")}
-            onClick={() => {
-              insertIntoComposer(writer, consoleReport(path, state.console));
-              useTermStore.getState().openSession(writer);
-            }}
+            title={sends ? t("artifact.sendToSessionTitle") : undefined}
+            onClick={() => void deliver(consoleReport(path, state.console))}
           >
-            {t("artifact.sendToSession")}
+            {copied ? t("common.copied") : sends ? t("artifact.sendToSession") : t("common.copy")}
           </button>
         )}
         <button className="vlx-btn" onClick={state.clearConsole}>
@@ -242,6 +258,182 @@ function ArtifactConsole({ state, path, onClose }: { state: ArtifactState; path:
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Where text for the page's agent goes. A conversation takes it in its message box and an agent's own terminal
+ * interface as a paste, both without sending; a plain shell or an unknown writer gets nothing typed into it, so
+ * the text is copied instead.
+ */
+function deliveryTarget(writer: string | undefined): "composer" | "terminal" | "copy" {
+  if (!writer) return "copy";
+  const state = useTermStore.getState();
+  const session = state.sessions.find((s) => s.id === writer) ?? state.ephemeralSessions[writer];
+  if (!session || session.kind === "terminal") return "copy";
+  if (session.engine === "chat") return "composer";
+  return getTerminal(writer) ? "terminal" : "copy";
+}
+
+/** Hand text to the session that wrote the page, or copy it when it cannot take it. */
+function useDeliver(writer: string | undefined) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1600);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  // Read during render so the button names what will happen; the live check repeats on click.
+  const target = useTermStore(() => deliveryTarget(writer));
+  const deliver = async (text: string): Promise<boolean> => {
+    const now = deliveryTarget(writer);
+    if (writer && now === "composer") {
+      insertIntoComposer(writer, text);
+      useTermStore.getState().openSession(writer);
+      return true;
+    }
+    if (writer && now === "terminal") {
+      useTermStore.getState().openSession(writer);
+      pasteToTerminal(writer, text);
+      return true;
+    }
+    try {
+      await copyText(text);
+      setCopied(true);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  return { deliver, copied, sends: target !== "copy" };
+}
+
+/** The page's design options: jump to one, and tell the agent which to keep. */
+function ArtifactOptions({ state, path }: { state: ArtifactState; path: string }) {
+  const t = useT();
+  const [chosen, setChosen] = useState<string | null>(null);
+  const { deliver, copied, sends } = useDeliver(state.writer);
+  const current = state.options.find((o) => o.id === chosen) ?? null;
+  return (
+    <div className="artifact-options" role="group" aria-label={t("artifact.options")}>
+      <span className="artifact-options-label">{t("artifact.options")}</span>
+      <div className="artifact-options-list">
+        {state.options.map((o) => (
+          <button
+            key={o.id}
+            className={"artifact-option" + (o.id === chosen ? " on" : "")}
+            aria-pressed={o.id === chosen}
+            title={o.label || o.id}
+            onClick={() => { setChosen(o.id); state.revealOption(o.id); }}
+          >
+            <span className="artifact-option-id">{o.id}</span>
+            {o.label && <span className="artifact-option-label">{o.label}</span>}
+          </button>
+        ))}
+      </div>
+      {current && (
+        <button
+          className="vlx-btn vlx-btn-primary artifact-option-use"
+          title={t(sends ? "artifact.useOptionTitle" : "artifact.useOptionCopyTitle")}
+          onClick={() => void deliver(optionReport(path, current.id, current.label))}
+        >
+          {copied ? t("common.copied") : t("artifact.useOption", current.id)}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Pick prompt, the comment box for the picked element, and the comments waiting to be sent. */
+function ArtifactReviewDrawer({ state, path }: { state: ArtifactState; path: string }) {
+  const t = useT();
+  const review = useSyncExternalStore(subscribeArtifactReview, () => artifactReview(path));
+  const [note, setNote] = useState("");
+  const { deliver, copied, sends } = useDeliver(state.writer);
+  const input = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    setNote("");
+    if (review.draft) input.current?.focus();
+  }, [review.draft]);
+  // Esc leaves pick mode wherever focus is; inside the page the review script reports it instead.
+  useEffect(() => {
+    if (!review.picking) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
+      e.preventDefault();
+      setPicking(path, false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [review.picking, path]);
+  if (!review.picking && !review.draft && review.comments.length === 0) return null;
+  const add = () => { if (note.trim()) addComment(path, note); };
+  const send = async () => {
+    if (await deliver(commentReport(path, review.comments))) clearComments(path);
+  };
+  return (
+    <div className="artifact-review">
+      {review.picking && !review.draft && (
+        <div className="artifact-review-hint" role="status">
+          <Icons.feedback size={13} />
+          <span className="grow">{t("artifact.pickHint")}</span>
+          <button className="vlx-btn" onClick={() => setPicking(path, false)}>{t("common.cancel")}</button>
+        </div>
+      )}
+      {review.draft && (
+        <div className="artifact-review-draft">
+          <div className="artifact-review-target">{t("artifact.commentOn", describeTarget(review.draft))}</div>
+          <textarea
+            ref={input}
+            className="vlx-input artifact-review-input"
+            rows={2}
+            value={note}
+            placeholder={t("artifact.commentPlaceholder")}
+            aria-label={t("artifact.commentPlaceholder")}
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); add(); }
+              else if (e.key === "Escape") { e.preventDefault(); setDraft(path, null); }
+            }}
+          />
+          <div className="artifact-review-actions">
+            <button className="vlx-btn" onClick={() => setDraft(path, null)}>{t("common.cancel")}</button>
+            <button className="vlx-btn vlx-btn-primary" disabled={!note.trim()} onClick={add}>{t("artifact.commentAdd")}</button>
+          </div>
+        </div>
+      )}
+      {review.comments.length > 0 && (
+        <>
+          <div className="artifact-review-list">
+            {review.comments.map((c, i) => (
+              <div key={c.id} className="artifact-review-row">
+                <button className="artifact-review-pin" title={t("artifact.showInPage")} onClick={() => state.revealSelector(c.selector)}>
+                  {i + 1}
+                </button>
+                <div className="artifact-review-body">
+                  <span className="artifact-review-el">{describeTarget(c)}{c.option ? ` · ${c.option}` : ""}</span>
+                  <span className="artifact-review-note">{c.note}</span>
+                </div>
+                <button className="artifact-icon-btn" title={t("artifact.commentRemove")} aria-label={t("artifact.commentRemove")}
+                  onClick={() => removeComment(path, c.id)}>
+                  <Icons.close size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="artifact-review-foot">
+            <button className="vlx-btn" onClick={() => setPicking(path, true)} disabled={review.picking}>{t("artifact.commentMore")}</button>
+            <span className="grow" />
+            <button className="vlx-btn" onClick={() => clearComments(path)}>{t("artifact.clearConsole")}</button>
+            <button className="vlx-btn vlx-btn-primary" title={t(sends ? "artifact.sendCommentsTitle" : "artifact.copyCommentsTitle")}
+              onClick={() => void send()}>
+              {copied ? t("common.copied") : sends ? t("artifact.sendToSession") : t("common.copy")}
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

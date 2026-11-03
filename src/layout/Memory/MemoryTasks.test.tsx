@@ -15,7 +15,10 @@ vi.mock("../../ipc/memory", () => ({
     ],
     defaultAgent: "codex",
   }),
-  memoryModels: async () => [],
+}));
+vi.mock("../../ipc/launch", () => ({
+  launchOptions: async () => [{ id: "codex", label: "Codex", acceptsTask: true, effortFlag: "--effort", effortLevels: ["high"], supportsPlanExecute: false, supportsReferSummary: false }],
+  launchModels: async () => ({ models: [], effortLevels: [] }),
 }));
 vi.mock("../../store/termStore", () => ({
   useTermStore: Object.assign(
@@ -36,7 +39,8 @@ afterEach(cleanup);
 it("explains replacement and opens the new job returned by submission", async () => {
   api.start.mockResolvedValue({ id: "replacement", reused: false });
   render(<MemoryCompile sessionId="session" />);
-  await screen.findByRole("combobox", { name: "Model (optional)" });
+  const agents = await screen.findByRole("combobox", { name: "Agent" });
+  await waitFor(() => expect(agents.textContent).toContain("Codex"));
   expect(screen.getByText(/Submitting again cancels any unfinished task/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Organize and save" }));
   await waitFor(() => expect(api.start).toHaveBeenCalledWith("session", "codex", "", ""));

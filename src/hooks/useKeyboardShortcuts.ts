@@ -51,9 +51,9 @@ export function useKeyboardShortcuts() {
     // something else: an input, a conversation view, a document/browser/task tab or an IME composition.
     const focusedTerminalSession = (e: KeyboardEvent): string | null => {
       if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return null;
-      const { activeSessionId, activeTabId, docTabs, browserTabs, taskTabs } = useTermStore.getState();
+      const { activeSessionId, activeTabId, docTabs, browserTabs, taskTabs, newSessionTabs } = useTermStore.getState();
       if (!activeSessionId) return null;
-      if (activeTabId && (docTabs[activeTabId] || browserTabs[activeTabId] || taskTabs[activeTabId])) return null;
+      if (activeTabId && (docTabs[activeTabId] || browserTabs[activeTabId] || taskTabs[activeTabId] || newSessionTabs[activeTabId])) return null;
       const terminal = getTerminal(activeSessionId);
       if (!(e.target instanceof Node) || !terminal?.element?.contains(e.target)
         || !terminal.element.contains(document.activeElement)) return null;
@@ -80,11 +80,11 @@ export function useKeyboardShortcuts() {
         const isMinus = e.key === "-" || e.key === "_" || e.code === "Minus";
         const isZero = e.key === "0" || e.code === "Digit0";
         if (isPlus || isMinus || isZero) {
-          const { activeSessionId, activeTabId, docTabs, browserTabs, taskTabs, termFontSize, setTermFontSize } =
+          const { activeSessionId, activeTabId, docTabs, browserTabs, taskTabs, newSessionTabs, termFontSize, setTermFontSize } =
             useTermStore.getState();
           const onSessionTab =
             !!activeSessionId &&
-            !(activeTabId && (docTabs[activeTabId] || browserTabs[activeTabId] || taskTabs[activeTabId]));
+            !(activeTabId && (docTabs[activeTabId] || browserTabs[activeTabId] || taskTabs[activeTabId] || newSessionTabs[activeTabId]));
           if (onSessionTab) {
             e.preventDefault();
             if (isZero) setTermFontSize(13);
@@ -131,7 +131,7 @@ export function useKeyboardShortcuts() {
       }
 
       if (matchCombo(e, sc("closePane"))) {
-        const { activeTabId, docTabs, browserTabs, taskTabs, requestCloseDocTab, closeTab, activeSessionId, closePane } =
+        const { activeTabId, docTabs, browserTabs, taskTabs, newSessionTabs, requestCloseDocTab, closeTab, activeSessionId, closePane } =
           useTermStore.getState();
         // Document tabs close directly when clean or route dirty state to DocView confirmation.
         if (activeTabId && docTabs[activeTabId]) {
@@ -140,8 +140,8 @@ export function useKeyboardShortcuts() {
           return;
         }
         // Browser and task tabs close directly: a browser tab has no unsaved state (unmounting destroys the
-        // child WebView), and a task tab only shows what the agent reports.
-        if (activeTabId && (browserTabs[activeTabId] || taskTabs[activeTabId])) {
+        // child WebView), a task tab only shows what the agent reports, and a New Session tab has created nothing yet.
+        if (activeTabId && (browserTabs[activeTabId] || taskTabs[activeTabId] || newSessionTabs[activeTabId])) {
           e.preventDefault();
           closeTab(activeTabId);
           return;

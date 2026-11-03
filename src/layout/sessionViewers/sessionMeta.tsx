@@ -7,6 +7,7 @@ import {
   brandIconEl,
   CODEX_BRAND_COLOR,
   crushMarkEl,
+  DEEPSEEK_BRAND_COLOR,
   GROK_BRAND_COLOR,
   grokMarkEl,
   kimiMarkEl,
@@ -14,6 +15,7 @@ import {
   openAiMarkEl,
   ompMarkEl,
   piMarkEl,
+  zcodeMarkEl,
   zooMarkEl,
 } from "../../components/brandIcons";
 import Icons from "../../components/Icons";
@@ -48,7 +50,11 @@ const KIND_COLOR: Partial<Record<SessionKind, string>> = {
   kimi: "#7C6CF2", // Moon purple, distinct from the Codex blue and Copilot purple
   grok: GROK_BRAND_COLOR, // Official black mark in light mode, reversed to white in dark mode
   zoo: "#16A085", // Teal, distinct from the existing colors and paired with the Z-shaped mark
+  // ZCode's official mark is monochrome as well, so it shares Grok's theme-aware black/white token;
+  // the notched Z, not the colour, tells the two apart.
+  zcode: GROK_BRAND_COLOR,
   kiro: "#A855F7", // Violet, one step brighter than the Copilot and Kimi purples so the ghost mark reads apart
+  deepseek: DEEPSEEK_BRAND_COLOR, // DeepSeek blue; the whale mark tells it apart from OpenCode and Antigravity
 };
 
 /** Fallback local-agent display names used before install recipes arrive, preventing an empty title flash. */
@@ -67,6 +73,8 @@ export const AGENT_KIND_LABEL: Partial<Record<SessionKind, string>> = {
   kiro: "Kiro",
   grok: "Grok Build",
   zoo: "Zoo Code",
+  zcode: "ZCode",
+  deepseek: "DeepSeek Harness",
 };
 
 // Sidebar and tab icons can mount for the same session together. Share only the in-flight cwd lookup so they do
@@ -101,6 +109,8 @@ function rawKindIcon(kind: SessionKind, size: number) {
       return brandIconEl("cursor", size) ?? <Icons.bot size={size} />;
     case "cline":
       return brandIconEl("cline", size) ?? <Icons.bot size={size} />;
+    case "deepseek":
+      return brandIconEl("deepseek", size) ?? <Icons.bot size={size} />;
     // Antigravity uses a custom rising-chevron mark because simple-icons does not include it.
     case "antigravity":
       return antigravityMarkEl(size);
@@ -119,6 +129,8 @@ function rawKindIcon(kind: SessionKind, size: number) {
       return grokMarkEl(size);
     case "zoo":
       return zooMarkEl(size);
+    case "zcode":
+      return zcodeMarkEl(size);
     // Kiro uses a custom ghost mark because simple-icons does not include it.
     case "kiro":
       return kiroMarkEl(size);

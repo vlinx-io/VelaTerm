@@ -648,8 +648,12 @@ pub fn confirmed_missing(kind: SessionKind, id: &str) -> bool {
         // Crush uses an internal database. Do not verify initially; if invalid IDs hang or repeatedly error, add
         // session-list verification analogous to OpenCode.
         SessionKind::Crush => false,
+        SessionKind::Deepseek => crate::agent::chat::deepseek_history::confirmed_missing(id),
         // Kimi Code manages internal storage; let `--session` handle IDs when reliable verification is unavailable.
         SessionKind::Kimi => false,
+        // ZCode keeps sessions in SQLite under ~/.zcode/cli/db. An unknown or soft-deleted ID fails only once its
+        // server is asked to open it, so confirm absence from a readable database and start a new session instead.
+        SessionKind::Zcode => crate::agent::zcode::session_missing(id),
         // Kiro keeps sessions in a SQLite database under ~/.kiro with no flat files to scan. Never downgrade;
         // whether a stale `--resume-id` hangs is still unverified on a real machine.
         SessionKind::Kiro => false,

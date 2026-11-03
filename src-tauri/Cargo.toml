@@ -1,6 +1,6 @@
 [package]
 name = "velaterm"
-version = "0.2.14"
+version = "0.2.15"
 description = "VelaTerm multi-session terminal manager"
 authors = ["vlinx"]
 edition = "2021"
@@ -8,7 +8,9 @@ edition = "2021"
 [lib]
 # The `_lib` suffix avoids a known Windows conflict with the binary name.
 name = "velaterm_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# rlib only: staticlib/cdylib are the Tauri template's mobile outputs. No iOS/Android target exists, and
+# producing them cost every build a ~300 MB static archive plus an extra dylib link.
+crate-type = ["rlib"]
 
 [features]
 # GUI is enabled by default for the desktop app. Minimal vela-server builds use `--no-default-features`,
@@ -39,6 +41,18 @@ gui = [
 # identity (see `serve_identifier`) so it opens the same data directory the desktop app always used.
 sidecar = ["dep:font-kit"]
 
+[workspace]
+# Domain crates live under crates/. Profiles stay in this root manifest: Cargo ignores them in members.
+members = ["crates/*"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+tiny_http = "0.12"
+time = { version = "0.3", features = ["local-offset"] }
+libc = "0.2"
+
 [profile.dev]
 debug = false
 
@@ -60,6 +74,7 @@ tao = { git = "https://github.com/tauri-apps/tao", rev = "c704261c519c58cfdd0bc2
 tao-macros = { version = "=0.1.4", registry = "crates-io" }
 
 [dependencies]
+vlx-core = { path = "crates/vlx-core" }
 # Native font enumeration belongs to the display host, not the remote headless server.
 font-kit = { version = "0.14.3", optional = true }
 # The built-in browser needs unstable Window::add_child multi-WebView APIs. Their signatures may change,
@@ -83,8 +98,8 @@ tauri-plugin-single-instance = { version = "2", optional = true }
 # System-wide screenshot hotkey that works while another application has focus.
 # Pinned below 2.4, which requires Tauri 2.12; the built-in browser pins Tauri within 2.11.
 tauri-plugin-global-shortcut = { version = "~2.3.2", optional = true }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 # Source offsets let translation replace prose without rewriting Markdown, code, or link destinations.
 pulldown-cmark = { version = "0.13.4", default-features = false }
 semver = "1"
@@ -104,11 +119,13 @@ ureq = "2"
 keyring = { version = "3", features = ["apple-native", "windows-native"] }
 portable-pty = "0.8"
 rusqlite = { version = "0.32", features = ["bundled", "blob", "functions"] }
-uuid = { version = "1", features = ["v4"] }
+uuid = { workspace = true }
+# DeepSeek Harness writes its session logs as zstd-compressed JSONL; already in the tree through dependencies.
+zstd = "0.13"
 # Server audit-log timestamps use local `yyyy-MM-dd HH:mm:ss` date and time.
-time = { version = "0.3", features = ["local-offset"] }
+time = { workspace = true }
 # Lightweight loopback HTTP service receiving official agent hooks and Codex notify callbacks.
-tiny_http = "0.12"
+tiny_http = { workspace = true }
 
 # Browser remote-access service hosts static frontend assets and bridges commands, events, and PTY over
 # WebSocket. An axum Tokio runtime runs on its own thread outside the Tauri event loop.
@@ -127,6 +144,9 @@ rust-embed = { version = "8" }
 # SHA-256 for the self-signed-certificate fingerprint (tls.rs) and server-binary manifest verification
 # (server_supply.rs); login hashing moved to Argon2id below.
 sha2 = "0.10"
+# Open the ZCode account `zcode login` seals (AES-256-GCM) to tell its protocol server which plans the
+# account holds (agent/zcode_account.rs). Same version the SSH stack already locks.
+aes-gcm = { version = "0.11", default-features = false, features = ["aes", "alloc"] }
 # Memory-hard Argon2id password hashing so the remote-access password persists only as a PHC verifier
 # string (never plaintext) across restarts. Pure Rust, builds in headless --no-default-features too.
 argon2 = "0.5"
@@ -175,7 +195,7 @@ jieba-rs = "0.10.3"
 [target.'cfg(unix)'.dependencies]
 rlimit = "0.10"
 # Kill the separate process group when canceling Git clone so git-remote children cannot retain pipes.
-libc = "0.2"
+libc = { workspace = true }
 
 # The GTK version wry already uses; only the GUI connects to the WebKitGTK drag signal (native_drop.rs), so the
 # headless vela-server build keeps no GTK dependency.

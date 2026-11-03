@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
-import { MemoryIcon } from "./shared";
+import { MemoryIcon } from "./MemoryIcon";
 import { memoryNavigate, memoryUrl, useMemoryLocation } from "./navigation";
 
 /** Keep the opened library tab available when another tab is selected. */

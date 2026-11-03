@@ -59,6 +59,26 @@ pub(super) struct OpencodeState {
     /// Both idle event forms describe the same transition; only a preceding busy state ends a turn.
     busy: bool,
     v2: crate::agent::chat::opencode_v2::Projection,
+    /// When the usage limit that refused this turn resets, if the provider said; read at turn end.
+    usage_limit_reset: Option<crate::agent::chat::auto_continue::Reset>,
+}
+
+/// A turn failed with this error. A usage limit is remembered for automatic continuation at turn end.
+fn note_turn_error(proc: &ChatProcess, error: &Value) {
+    if !timeline::is_usage_limit(error) {
+        return;
+    }
+    let reset = timeline::usage_limit_reset(error, (now_ms() / 1000) as i64);
+    proc.extras.lock().unwrap().usage_limit_hit = true;
+    let mut state = proc.opencode.lock().unwrap();
+    if reset.is_some() {
+        state.usage_limit_reset = reset;
+    }
+}
+
+/// The reset of the usage limit that refused the turn just ended, if any was reported.
+pub(super) fn take_usage_limit_reset(proc: &ChatProcess) -> Option<crate::agent::chat::auto_continue::Reset> {
+    proc.opencode.lock().unwrap().usage_limit_reset.take()
 }
 
 fn server(proc: &ChatProcess) -> Result<Arc<Server>, String> {
@@ -535,11 +555,17 @@ fn handle_routed(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, path: 
         },
         "session.idle" if root => turn_idle(app, session_id, proc),
         "session.error" if root => {
-            if let Some(message) = props.get("error").and_then(timeline::error_message) {
-                proc.timeline.lock().unwrap().upsert(ChatRow::Error {
-                    id: format!("e-{}", now_ms()),
-                    message,
-                });
+            let error = props.get("error").unwrap_or(&Value::Null);
+            note_turn_error(proc, error);
+            if let Some(message) = timeline::error_message(error) {
+                let mut rows = proc.timeline.lock().unwrap();
+                // The failed message usually reported the same error already; one row is enough per turn.
+                let shown = rows.rows.iter().rev()
+                    .take_while(|row| !matches!(row, ChatRow::User { .. } | ChatRow::Shell { .. }))
+                    .any(|row| matches!(row, ChatRow::Error { message: shown, .. } if *shown == message));
+                if !shown {
+                    rows.upsert(ChatRow::Error { id: format!("e-{}", now_ms()), message });
+                }
             }
         }
         "session.compacted" if root => handle_compaction(proc, true, None, None),
@@ -668,6 +694,11 @@ fn message_updated(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, path
             None,
             None,
         );
+    }
+    if path.is_empty() {
+        if let Some(error) = info.get("error") {
+            note_turn_error(proc, error);
+        }
     }
     if let Some(message) = info.get("error").and_then(timeline::error_message) {
         proc.timeline.lock().unwrap().upsert_at(

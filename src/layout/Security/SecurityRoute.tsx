@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { usageBrandIconEl } from "../../components/brandIcons";
 import { Backdrop } from "../../components/Backdrop";
-import Select from "../../components/Select";
+import AgentSelect from "../../components/AgentSelect";
+import { LaunchField, LaunchLoadState, ModelEffortFields, useLaunchOptions } from "../../components/LaunchFields";
 import { useT } from "../../i18n";
-import { auditCancel, auditExport, auditGet, auditList, auditModels, auditOptions, auditStart, type AuditOptions, type AuditRun, type AuditSummary } from "../../ipc/security";
-import type { LaunchModel } from "../../ipc/launch";
+import { auditCancel, auditExport, auditGet, auditList, auditOptions, auditStart, type AuditOptions, type AuditRun, type AuditSummary } from "../../ipc/security";
 import { writeTextFile } from "../../ipc/info";
 import { env, platform } from "../../platform";
 import { useTermStore } from "../../store/termStore";
 import { ChatPane } from "../CenterPane/session/ChatPane";
 import { Markdown } from "../CenterPane/session/markdown";
 import { memoryNavigate, useMemoryLocation } from "../Memory/navigation";
+import type { SessionKind } from "../../types";
 import { AuditLink, securityUrl } from "./navigation";
 import { securityText as s } from "./text";
 import { auditError } from "./errors";
@@ -139,7 +139,7 @@ function UpstreamSummary({run, findingId}: {run: AuditRun; findingId: string | n
   const findings = upstream.findings?.findings ?? [];
   return <div className="security-upstream">
     <section className="security-report-section security-provenance"><strong>Codex Security · {upstream.pluginVersion}</strong><small>{upstream.package}@{upstream.packageVersion}</small></section>
-    <div className="security-metrics"><div><span>{s("findings")}</span><strong>{findings.length}</strong></div><div><span>{s("coverage")}</span><strong className="security-coverage-label">{s(upstream.evidenceError ? "failed" : upstream.coverage?.completeness === "complete" ? "completed" : "partial")}</strong></div><div><span>{s("gaps")}</span><strong>{(upstream.coverage?.deferred.length ?? 0) + (upstream.scan.warnings?.length ?? 0) + (upstream.evidenceError ? 1 : 0)}</strong></div></div>
+    <div className="security-metrics"><div><span>{s("findings")}</span><strong>{findings.length}</strong></div><div><span>{s("coverage")}</span><strong className="security-coverage-label">{s(upstream.evidenceError ? "failed" : (upstream.coverageComplete ?? upstream.coverage?.completeness === "complete") ? "completed" : "partial")}</strong></div><div><span>{s("gaps")}</span><strong>{(upstream.coverage?.deferred.length ?? 0) + (upstream.scan.warnings?.length ?? 0) + (upstream.evidenceError ? 1 : 0)}</strong></div></div>
     {!!upstream.scan.warnings?.length && <section className="security-report-section"><h3>{s("gaps")}</h3>{upstream.scan.warnings.map((warning,index)=><p key={index}>{warning}</p>)}</section>}
     {!!upstream.coverage?.deferred.length && <section className="security-report-section"><h3>{s("gaps")}</h3><ul>{upstream.coverage.deferred.map((gap,index)=><li key={index}>{gap.reason}</li>)}</ul></section>}
     <section className="security-report-section"><div className="security-section-title"><h3>{s("findings")}</h3><span>{findings.length}</span></div>
@@ -168,9 +168,7 @@ function NewAudit({ projectId }: { projectId: string }) {
   const [path, setPath] = useState("");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
-  const [models, setModels] = useState<LaunchModel[] | null>(null);
-  const [modelError, setModelError] = useState("");
-  const [modelRevision, setModelRevision] = useState(0);
+  const launch = useLaunchOptions(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
@@ -179,17 +177,11 @@ function NewAudit({ projectId }: { projectId: string }) {
     void auditOptions().then((v) => { if (active) { setOptions(v); setAgent(v.defaultAgent); setScope(v.defaultScope); setError(""); } }).catch((e) => { if (active) setError(String(e)); });
     return () => { active = false; };
   }, [revision]);
-  useEffect(() => {
-    if (!agent) return;
-    let active = true;
-    setModels(null); setModelError("");
-    void auditModels(agent).then((rows) => { if (active) setModels(rows); }).catch(() => { if (active) setModelError("security_models_unavailable"); });
-    return () => { active = false; };
-  }, [agent, modelRevision]);
-  const selected = models?.find((m) => m.id === model);
-  const changeModel = (value: string) => { setModel(value); if (!models?.find((m) => m.id === value)?.effortLevels.includes(effort)) setEffort(""); };
+  // The launch catalogue supplies the agent's model and effort fields; the audit list only says which
+  // agents can run an audit at all.
+  const spec = launch.options.find((o) => o.id === agent);
   return <form className="security-new" onSubmit={(e) => {
-    e.preventDefault(); if (!options || busy || !models) return;
+    e.preventDefault(); if (!options || busy || !spec) return;
     setBusy(true); setError("");
     void auditStart({ projectId, agent, scope, path: scope === "path" ? path.trim() : "", model, effort }).then((run) => memoryNavigate(securityUrl(projectId, { securityRun: run.id, securityNew: null, securityTab: null, securityFinding: null }))).catch((e) => setError(String(e))).finally(() => setBusy(false));
   }}>
@@ -199,21 +191,24 @@ function NewAudit({ projectId }: { projectId: string }) {
     {options && <>
       <p className="security-muted">{options.workflow.package}@{options.workflow.packageVersion} · Codex Security {options.workflow.pluginVersion}</p>
       <fieldset className="security-form-section"><legend><span>01</span>{s("agent")}</legend>
-        <div className="security-agent-grid">{options.agents.map((a) => <label key={a.id} className={`security-agent-choice${agent === a.id ? " selected" : ""}`}>
-          <input type="radio" name="audit-agent" value={a.id} checked={agent === a.id} disabled={busy} onChange={() => { setAgent(a.id); setModel(""); setEffort(""); setModels(null); }}/>
-          <span className="security-agent-symbol" aria-hidden="true">{usageBrandIconEl(a.id, 24)}</span><strong>{a.label}</strong><span className="security-choice-check" aria-hidden="true">{agent === a.id ? "✓" : ""}</span>
-        </label>)}</div>
-        <div className="security-field-grid">
-          <label>{t("spawn.modelLabel")}<Select width="100%" value={model} disabled={busy || !models} ariaLabel={t("spawn.modelLabel")} onChange={changeModel} options={[{ value: "", label: models ? t("chat.modelDefault") : t("spawn.modelLoading") }, ...(models?.map((m) => ({ value: m.id, label: m.label })) ?? [])]} /></label>
-          <label>{t("chat.effortTooltip")}<Select width="100%" value={effort} disabled={busy || !selected?.effortLevels.length} ariaLabel={t("chat.effortTooltip")} onChange={setEffort} options={[{ value: "", label: t("chat.effort.auto") }, ...(selected?.effortLevels.map((value) => ({ value, label: effortLabel(value, t) })) ?? [])]} /></label>
+        <div className="launch-model-grid">
+          <LaunchField label={t("orch.agentLabel")}>
+            <AgentSelect value={agent as SessionKind | ""} disabled={busy}
+              options={options.agents.map((a) => ({ id: a.id as SessionKind, label: a.label }))}
+              onChange={(next) => { if (next !== agent) { setAgent(next); setModel(""); setEffort(""); } }} />
+          </LaunchField>
         </div>
-        {modelError && <div className="security-error" role="alert">{auditError(modelError)}<button type="button" className="btn" onClick={() => setModelRevision((v) => v + 1)}>{t("common.retry")}</button></div>}
+        {launch.state !== "ready" && <LaunchLoadState state={launch.state} error={launch.error} retry={launch.retry} />}
+        {spec && <div className="launch-model-grid">
+          <ModelEffortFields spec={spec} model={model} effort={effort} disabled={busy} context={{ inheritArgs: true }}
+            onChange={(nextModel, nextEffort) => { setModel(nextModel); setEffort(nextEffort); }} />
+        </div>}
       </fieldset>
       <fieldset className="security-form-section"><legend><span>02</span>{s("scope")}</legend>
         <div className="security-scope-options">{options.scopes.map((value) => <label key={value} className={scope === value ? "selected" : ""}><input type="radio" name="audit-scope" value={value} checked={scope === value} disabled={busy} onChange={() => setScope(value)}/>{s(value === "path" ? "pathScope" : value)}</label>)}</div>
         {scope === "path" && <label className="security-path-field">{s("path")}<input required maxLength={4096} placeholder="src" value={path} disabled={busy} onChange={(e) => setPath(e.target.value)}/></label>}
       </fieldset>
-      <div className="security-form-footer"><p>{s("upstreamNote")}</p><button type="submit" className="btn btn-primary" disabled={busy || !models}>{busy ? t("common.loading") : s("start")} <span aria-hidden="true">→</span></button></div>
+      <div className="security-form-footer"><p>{s("upstreamNote")}</p><button type="submit" className="btn btn-primary" disabled={busy || !spec}>{busy ? t("common.loading") : s("start")} <span aria-hidden="true">→</span></button></div>
     </>}
   </form>;
 }

@@ -501,6 +501,8 @@ const ja: typeof en = {
     `起動時に ${flag} を付与し、すべての権限確認をスキップします。慎重に使用してください。`, // YOLO flag hint
   "settings.permViaEnvHint":
     "設定ファイル経由ですべての権限確認をスキップします（CLI フラグなし）。このセッションの起動時に適用されます。",
+  "settings.permViaAnswerHint":
+    "会話ビューでのすべての権限リクエストを自動的に許可します。ワークスペースの外に及ぶコマンドも含まれるため、慎重に使用してください。",
   "settings.catGeneral": "一般", // General
   "settings.cliLabel": "シェルコマンド",
   "settings.cliInstall": "‘vela’ コマンドをインストール",
@@ -633,6 +635,7 @@ const ja: typeof en = {
   "changes.noChanges": "変更なし",
   "changes.unchangedLines": "未変更の $ 行を表示",
   "changes.refresh": "更新",
+  "changes.openFile": "ファイルを開く",
   "changes.notRepo": "Git リポジトリではありません",
   "changes.selectFile": "ファイルを選択してください",
   "changes.binary": "バイナリファイル — 行差分は表示できません",
@@ -1074,6 +1077,7 @@ const ja: typeof en = {
   "tree.groupInfo": "グループ情報", // Group Info
   "tree.collectionInfo": "コレクション情報", // Collection Info
   "tree.projectInfo": "プロジェクト情報", // Project Info
+  "tree.codeAudit": "コード監査", // Code audit
   "info.branch": "ブランチ", // Branch
   "info.path": "パス", // Path
   "info.recentCommits": "最近のコミット", // Recent Commits
@@ -1391,6 +1395,7 @@ const ja: typeof en = {
   "browser.loading": "読み込み中…", // Loading…
   // Application-exit confirmation and dormant restored sessions.
   "quit.title": "VelaTerm を終了しますか？", // Quit VelaTerm?
+  "quit.closeWindowTitle": "メインウィンドウを閉じますか？", // Close the main window?
   "quit.body":
     "実行中のターミナルとエージェントのセッションはすべて停止します。", // Any running terminal and agent sessions will be stopped.
   "quit.remoteWindows": "開いている接続先の画面もすべて閉じます。", // Open remote windows will also be closed.
@@ -1445,6 +1450,22 @@ const ja: typeof en = {
   "agentVersion.update": (version) => `更新あり：v${version}`,
   "agentVersion.upgrade": (version) => `バージョン ${version} が公開されています。公式の更新手順を開きます。`,
   "agentVersion.checkFailed": "更新を確認できません。",
+  "agentVersion.upgradeAction": (version) => `バージョン ${version} が公開されています。クリックすると更新します。`,
+  "agentUpdate.title": (label) => `${label} を更新`,
+  "agentUpdate.commandHint": "VelaTerm がエージェント付属の更新コマンドを実行します：",
+  "agentUpdate.confirm": "更新",
+  "agentUpdate.docs": "公式の手順",
+  "agentUpdate.running": "更新しています…",
+  "agentUpdate.background": "このウィンドウを閉じても更新は続行されます。",
+  "agentUpdate.waiting": "出力を待っています…",
+  "agentUpdate.succeeded": (label, version) => `${label} を v${version} に更新しました。`,
+  "agentUpdate.unchanged": (version) => `コマンドは終了しましたが、インストール済みのバージョンは v${version} のままです。上の出力を確認してください。`,
+  "agentUpdate.finished": "更新コマンドが終了しました。上の出力を確認してください。",
+  "agentUpdate.failed": "更新を完了できませんでした。上の出力を確認するか、コマンドをコピーしてターミナルで実行してください。",
+  "agentUpdate.timedOut": "15 分経っても終わらなかったため、更新を停止しました。コマンドをコピーしてターミナルで実行してください。",
+  "agentUpdate.restartHint": "この会話はまだ以前のバージョンで動いています。エージェントを再起動すると切り替わります。会話の内容はそのまま残り、次のメッセージを送ると新しいバージョンで起動します。",
+  "agentUpdate.restart": "エージェントを再起動",
+  "agentUpdate.startFailed": "更新を開始できませんでした。もう一度お試しください。",
   "agentInstall.title": (label) => `${label} がインストールされていません`, // {label} is not installed
   "agentInstall.desc": (label) =>
     `VelaTerm は PATH 上で ${label} を見つけられませんでした。インストールするとこのセッションを起動できます。`, // couldn't find {label} on PATH
@@ -1453,6 +1474,10 @@ const ja: typeof en = {
   "agentInstall.dismiss": "自分でインストールする", // I'll do it myself
   "agentInstall.docs": "インストール手順", // Install docs
   "agentInstall.needsNode": "Node.js / npm が必要です", // Requires Node.js / npm
+  "agentInstall.runInTerminal": "ターミナルで次のコマンドを実行してインストールしてから、メッセージをもう一度送信してください。",
+  "agentInstall.installing": "インストール中…", // Installing…
+  "agentInstall.installingDesc": "ダウンロードしてインストールしています。数分かかる場合があります。", // Downloading and installing. This can take a few minutes.
+  "agentInstall.installFailed": "インストールが完了しませんでした。ターミナルで次のコマンドを実行して原因を確認してから、メッセージをもう一度送信してください。", // Installation didn't finish. Run this command in a terminal to see what went wrong, then send your message again.
   "agentInstall.afterInstall": "インストール後：", // After install:
   "agentInstall.pathSaved": (label: string) =>
     `${label} の実行ファイルパスを設定に保存しました:`, // executable path saved to Settings
@@ -2111,6 +2136,8 @@ const ja: typeof en = {
   "chat.attach.tooLarge": (name: string, mb: number) => `${name} は ${mb} MB を超えるため添付しませんでした`,
   "chat.attach.unreadable": (name: string) => `${name} を読み込めませんでした`,
   // ── Shell mode: `!` runs a command in the session's shell ──
+  "chat.findings.count": (n: number) => `${n} 件の問題が見つかりました`,
+  "chat.findings.none": "問題は見つかりませんでした",
   "chat.shell.title": "シェルコマンド",
   "chat.shell.running": "実行中…",
   "chat.shell.cancel": "キャンセル",
@@ -2227,6 +2254,13 @@ const ja: typeof en = {
   "chat.auth.claude.invalidCode": "今回の認証ページに表示されたコードを、# 以降も含めて貼り付けてください。",
   "chat.auth.claude.externalAuth": "API キーやその他の設定済みの認証方法は変更されません。",
   "chat.auth.open": "認証ページを開く",
+  "chat.auth.zcode.required": "この会話を使うには、Z.ai または BigModel のアカウントで ZCode にログインしてください。",
+  "chat.auth.zcode.pending": "認証ページを開き、アクセスを許可してください。ログインが完了すると、この画面が自動的に更新されます。",
+  "chat.auth.zcode.failed": "ログインを完了できませんでした。もう一度お試しください。",
+  "chat.auth.zcode.zai": "Z.ai でログイン",
+  "chat.auth.zcode.bigmodel": "BigModel でログイン",
+  "chat.auth.zcode.noPlan.zai": "ZCode には Z.ai アカウントでログインしていますが、このアカウントには利用できる GLM Coding Plan がないか、プランの利用枠を使い切っています。プランを BigModel で購入した場合は、「ZCode アカウント」メニューを開き、「BigModel でログイン」を選んでください。",
+  "chat.auth.zcode.noPlan.bigmodel": "ZCode には BigModel アカウントでログインしていますが、このアカウントには利用できる GLM Coding Plan がないか、プランの利用枠を使い切っています。プランを Z.ai で購入した場合は、「ZCode アカウント」メニューを開き、「Z.ai でログイン」を選んでください。",
   "chat.resetCredits.label": (n: string) => `リセット券：${n} 枚`,
   "chat.resetCredits.title": "Codex 利用上限のリセット券",
   "chat.resetCredits.unknown": "リセット券の枚数を取得できません。",
@@ -2307,11 +2341,11 @@ const ja: typeof en = {
     `${seconds} 秒後に再試行します（${attempt}/${max}）: ${message}`,
   "chat.notify.dismiss": "閉じる",
   "settings.completionMode": "コマンドの補完候補",
-  "settings.completionAuto": "自動表示",
-  "settings.completionTab": "Tab で表示",
+  "settings.completionAuto": "インライン + Tab",
+  "settings.completionTab": "Tab のみ",
   "settings.completionOff": "オフ",
   "settings.completionUnavailable": "設定を読み込めないか、保存できませんでした。",
-  "settings.completionHint": "新しい Zsh、Bash 4+、Fish、PowerShell のターミナルに適用されます。CMD では標準の Tab 動作を維持します。Tab で選択した候補を入力し、Enter で候補を適用せずに現在のコマンドを実行します。",
+  "settings.completionHint": "Zsh で入力していると、履歴の中で一致する最新のコマンドがカーソルの後ろに薄く表示され、→ または End で確定できます。Tab はシェル本来の動作と同じで、候補が 1 つならそのまま入力し、候補に共通する部分があれば先に補完し、複数の候補が残るときに一覧を表示します。新しい Zsh、Bash 4+、Fish、PowerShell のターミナルに適用されます。",
 
   // Native texts of the mobile remote plugin (iOS, Android, download bridge). They reach the apps through native-text.json; {name} placeholders are replaced natively.
   "mobile.native.trustTitle": "接続先のフィンガープリントを確認",
@@ -2418,6 +2452,9 @@ const ja: typeof en = {
   "term.runs.logEmpty": "まだ出力はありません",
   "chat.antigravity.placeholder": "Antigravity にメッセージを送信。@ファイル でファイルを参照できます",
   "chat.antigravity.textOnly": "Antigravity の会話ビューは現在、テキストメッセージのみに対応しています。",
+  "chat.textOnly": (agent: string) => `${agent} の会話ビューはテキストメッセージのみに対応しています。`,
+  "chat.signInRequired": (agent: string) => `会話ビューを使うには ${agent} へのログインが必要です。ターミナルビューに切り替えてログインしてから、メッセージをもう一度送信してください。`,
+  "chat.apiKeyRequired": "DeepSeek Harness には API キーが必要です。環境変数 DEEPSEEK_API_KEY を設定するか、`dsh web` を実行して Models ページでキーを保存してから、メッセージをもう一度送信してください。",
   "chat.antigravity.permissionsHint": "承認が必要なツールは、Antigravity の設定で事前に許可するか、ターミナルビューで使用してください。",
   "chat.antigravity.settingsHint": "モデル、推論の強度、権限はターンの合間に変更してください。",
   "chat.history.imageDownloadRequired": "この画像はここでは開けません。元の画像をダウンロードしてご確認ください。",
@@ -2490,6 +2527,38 @@ const ja: typeof en = {
   "artifact.cardOpenTitle": "このセッションの横に開く", // Open beside this session
   "artifact.cardKind": "HTML ページ", // HTML page
   "artifact.frameTitle": (name: string) => `${name} のプレビュー`, // Preview of ${name}
+  "newSession.menu": "新規セッション…", // New Session…
+  "newSession.heading": "何に取り組みますか？", // What should we work on?
+  "newSession.modelsUnavailable": "モデル一覧を取得できません。エージェントの既定モデルを使用します。", // Model list unavailable. The agent’s default model will be used.
+  "newSession.terminalOnly": "ターミナルビューのみ", // Terminal view only
+  "newSession.conversationOnly": "会話ビューのみ", // Conversation view only
+  "newSession.noConversationView": "このエージェントには会話ビューがないため、セッションはターミナルビューで開きます。", // This agent has no conversation view, so the session opens in the terminal view.
+  "newSession.noTerminalView": "このエージェントにはターミナルビューがないため、セッションは会話ビューで開きます。", // This agent has no terminal view, so the session opens in the conversation view.
+  "newSession.taskLabel": "最初のタスク", // First task
+  "newSession.placeholder": "タスクの説明や質問を入力", // Describe a task or ask a question
+  "newSession.enterHint": "Enter で開始 · Shift+Enter で改行", // Enter to start · Shift+Enter for a new line
+  "newSession.start": "開始", // Start
+  "newSession.starting": "開始しています…", // Starting…
+  "newSession.viewLabel": "表示", // View
+  "newSession.worktreeHint": "このセッションを専用のブランチと別フォルダーで実行します。", // Runs this session on its own branch in a separate folder.
+  "newSession.worktreeNotRepo": "独立したワークツリーには Git リポジトリが必要です。", // A separate worktree needs a Git repository.
+  "newSession.worktreeName": "ワークツリー名（任意）", // Worktree name (optional)
+  "newSession.worktreeNameHint": "新しいフォルダーとブランチの名前に使います。空欄の場合はセッション名を使います。", // Names the new folder and branch. Leave empty to use the session name.
+  "artifact.comment": "コメント", // Comment
+  "artifact.commentTitle": "ページの要素を選んで、エージェントへのコメントを残します", // Click elements in the page to leave comments for the agent
+  "artifact.pickHint": "ページ内の要素をクリックしてコメントします。Esc で終了します。", // Click an element in the page to comment on it. Press Esc to stop.
+  "artifact.commentOn": (target: string) => `${target} へのコメント`, // Comment on ${target}
+  "artifact.commentPlaceholder": "ここをどう変えますか？", // What should change here?
+  "artifact.commentAdd": "コメントを追加", // Add comment
+  "artifact.commentMore": "別の要素にコメント", // Comment on another element
+  "artifact.commentRemove": "コメントを削除", // Remove comment
+  "artifact.showInPage": "ページで表示", // Show in page
+  "artifact.sendCommentsTitle": "このページを書いたセッションの入力欄にコメントを入れます", // Put these comments in the message box of the session that wrote this page
+  "artifact.copyCommentsTitle": "エージェントに送るためにコメントをコピーします", // Copy these comments to send to an agent
+  "artifact.options": "案", // Options
+  "artifact.useOption": (id: string) => `${id} を採用`, // Use ${id}
+  "artifact.useOptionTitle": "この案を残すよう依頼するメッセージを、このページを書いたセッションの入力欄に入れます", // Put a message asking to keep this option in the message box of the session that wrote this page
+  "artifact.useOptionCopyTitle": "この案を残すよう依頼するメッセージをコピーします", // Copy a message asking to keep this option
 };
 
 export default ja;

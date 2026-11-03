@@ -39,6 +39,9 @@ fn list_args(agent: &str) -> Option<&'static [&'static str]> {
         "omp" => Some(&["models", "--json"]),
         // Kiro keeps model selection under its chat subcommand rather than at the top level.
         "kiro" => Some(&["chat", "--list-models"]),
+        // Copilot has no model-list command; its configuration help lists every accepted `model` value.
+        // Verified against Copilot CLI 1.0.63.
+        "copilot" => Some(&["help", "config"]),
         _ => None,
     }
 }
@@ -125,6 +128,9 @@ fn parse(agent: &str, text: &str) -> Vec<String> {
     if agent == "omp" {
         return parse_omp_json(text);
     }
+    if agent == "copilot" {
+        return parse_copilot_config(text);
+    }
     let mut out: Vec<String> = Vec::new();
     for raw in text.lines() {
         let line = raw.trim();
@@ -167,6 +173,36 @@ fn parse(agent: &str, text: &str) -> Vec<String> {
             continue;
         }
         out.push(id);
+        if out.len() >= MAX_MODELS {
+            break;
+        }
+    }
+    out
+}
+
+/// Pull the model values out of `copilot help config`.
+///
+/// The help describes each setting as a backquoted key followed by its accepted values, one per line as
+/// `    - "value"`. Only the values under the `model` key are models; other keys list values the same way.
+fn parse_copilot_config(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut inside = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('`') {
+            inside = trimmed.starts_with("`model`:");
+            continue;
+        }
+        if !inside {
+            continue;
+        }
+        let Some(value) = trimmed.strip_prefix("- \"").and_then(|rest| rest.strip_suffix('"')) else {
+            if trimmed.is_empty() { inside = false; }
+            continue;
+        };
+        if looks_like_id(value) && !out.iter().any(|m| m == value) {
+            out.push(value.to_string());
+        }
         if out.len() >= MAX_MODELS {
             break;
         }
@@ -223,6 +259,12 @@ fn looks_like_id(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn copilot_models_come_from_the_model_key_of_its_config_help() {
+        let text = "  `logLevel`: log level\n    - \"all\"\n\n  `model`: AI model to use\n    - \"claude-sonnet-4.6\"\n    - \"gpt-5.4-mini\"\n\n  `mouse`: mouse\n    - \"true\"\n";
+        assert_eq!(super::parse("copilot", text), ["claude-sonnet-4.6", "gpt-5.4-mini"]);
+    }
+
     use super::*;
 
     #[test]
@@ -294,7 +336,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let db = crate::db::Db::open(&dir.join("test.db")).unwrap();
         let app = crate::host::AppCtx::Headless(std::sync::Arc::new(crate::host::HeadlessHost::new(dir.clone(), db)));
-        assert_eq!(list_models(&app, "copilot"), Ok(Vec::new()));
+        assert_eq!(list_models(&app, "cline"), Ok(Vec::new()));
         drop(app);
         std::fs::remove_dir_all(dir).unwrap();
         assert!(list_args("opencode").is_some());

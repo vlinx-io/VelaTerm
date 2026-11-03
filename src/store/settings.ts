@@ -14,7 +14,7 @@ import type {
   PaneStyle,
   VisualSettings,
 } from "../theme";
-import type { SessionEngine, SessionKind } from "../types";
+import { hasTerminalInterface, type SessionEngine, type SessionKind } from "../types";
 
 /** User-configurable background keep-alive tab limit, defaulting to 32. */
 export const DEFAULT_MAX_LIVE_TABS = 32;
@@ -62,6 +62,7 @@ export function defaultEngineFor(
   kind: SessionKind,
   agentDefaults: Record<string, AgentDefaultConfig>,
 ): SessionEngine {
+  if (!hasTerminalInterface(kind)) return "chat";
   return agentDefaults[kind]?.engine ?? (kind === "claude" || kind === "codex" ? "chat" : "tui");
 }
 

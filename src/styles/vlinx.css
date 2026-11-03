@@ -440,6 +440,7 @@ svg { display: block; }
 /* Shared empty-state primary action. A neutral outline blends in until hover adds accent feedback. */
 .empty-action { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border: 1px solid var(--border-strong); border-radius: var(--r-md); color: var(--text-mid); font-size: var(--ui-fs); transition: background .12s, color .12s, border-color .12s; }
 .empty-action:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
+.empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
 .project-empty-actions { display: grid; grid-template-columns: minmax(0, 1fr); width: max-content; max-width: 100%; gap: var(--space-3, 12px); }
 .project-empty-actions .empty-action { min-width: 0; justify-content: center; overflow-wrap: anywhere; }
 .project-empty-actions .empty-action svg { flex: none; }

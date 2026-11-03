@@ -1,6 +1,6 @@
 //! Select the mobile layout only outside Tauri and when requested via `?view=` or on a narrow touch device.
 //!
-//! This decision is made once at startup where main.tsx branches. Resizing does not switch layouts:
+//! This decision is made once at startup where bootstrap.tsx branches. Resizing does not switch layouts:
 //! desktop keeps every terminal mounted, while mobile mounts a single terminal at a time, so a live
 //! switch would corrupt xterm ownership. Screen rotation therefore does not change the selected view.
 

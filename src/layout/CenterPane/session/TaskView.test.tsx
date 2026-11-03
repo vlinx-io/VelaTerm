@@ -11,7 +11,8 @@ vi.mock("../../../ipc/transport", async (original) => ({
 import { invoke, listen, onTransportReconnect, onTransportDisconnect } from "../../../ipc/transport";
 import { setLang } from "../../../i18n";
 import { useTermStore } from "../../../store/termStore";
-import { TaskView, fmtElapsed, plainOutput, taskStatusKey } from "./TaskView";
+import { TaskView, plainOutput, taskStatusKey } from "./TaskView";
+import { fmtElapsed } from "./taskMeta";
 
 let eventCallback: ((event: ChatEvent) => void) | undefined;
 let unlisten: ReturnType<typeof vi.fn>;

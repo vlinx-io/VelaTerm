@@ -114,6 +114,11 @@ pub fn export_markdown(
                 .ok_or("Pi session file not found")?;
             (path, pi_events(&resume::read_pi_transcript(kind, agent_session_id)?))
         }
+        SessionKind::Zcode => {
+            let path = crate::agent::zcode::session_db_path()
+                .ok_or("ZCode's session store could not be located")?;
+            (path, crate::agent::zcode::history_events(agent_session_id)?)
+        }
         SessionKind::Antigravity => {
             let path = crate::agent::antigravity::transcript_path(agent_session_id)
                 .ok_or("Antigravity transcript file not found")?;

@@ -1,0 +1,210 @@
+/* New Session tab: a heading and the location above a centered composer whose control row carries the
+   session's settings as chips, with the view switch, worktree switch and key hint underneath. */
+.nsv {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-1);
+  color: var(--text);
+}
+.nsv-main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  /* Extra room below lifts the composer slightly above center, where the eye rests, and leaves space
+     for chip menus that open downward. */
+  padding: 32px 24px 12vh;
+}
+.nsv-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  max-width: 100%;
+}
+.nsv-hero h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+.nsv-target {
+  margin: 0;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.nsv-target svg { flex: none; }
+.nsv-target-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-mid); }
+.nsv-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+.nsv-empty p { margin: 0; }
+
+.nsv-form {
+  width: min(720px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.nsv-composer {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--bg-2);
+  box-shadow: var(--shadow);
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.nsv-composer:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow);
+}
+.nsv-prompt {
+  resize: none;
+  min-height: 72px;
+  max-height: 40vh;
+  padding: 15px 16px 6px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  field-sizing: content;
+}
+.nsv-prompt::placeholder { color: var(--text-faint); }
+.nsv-composer-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 6px 8px 8px 8px;
+}
+.nsv-chips {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.nsv-chips .sv-chip { height: 28px; padding: 0 8px; gap: 6px; }
+.nsv-start {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--text-on-accent);
+  cursor: pointer;
+}
+.nsv-start:hover:not(:disabled) { filter: brightness(1.08); }
+.nsv-start:disabled { opacity: 0.4; cursor: default; }
+.nsv-start:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.nsv-spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: nsv-spin 0.8s linear infinite;
+}
+@keyframes nsv-spin { to { transform: rotate(360deg); } }
+
+.nsv-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 0 4px;
+  min-height: 26px;
+}
+/* A checkbox drawn as a switch; the tab has no other on/off control to match. */
+.nsv-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-mid);
+  font-size: 12px;
+  cursor: pointer;
+}
+.nsv-switch input {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 26px;
+  height: 15px;
+  margin: 0;
+  border-radius: 8px;
+  background: var(--border-strong);
+  cursor: inherit;
+  transition: background 0.12s;
+}
+.nsv-switch input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.25);
+  transition: left 0.12s;
+}
+.nsv-switch input:checked { background: var(--accent); }
+.nsv-switch input:checked::after { left: 13px; }
+.nsv-switch input:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.nsv-switch.is-disabled { color: var(--text-faint); cursor: not-allowed; }
+.nsv-switch.is-disabled input { opacity: 0.5; }
+.nsv-worktree-name {
+  width: 220px;
+  max-width: 100%;
+  height: 26px;
+  margin-left: -6px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.nsv-worktree-name::placeholder { color: var(--text-faint); }
+.nsv-worktree-name:focus { border-color: var(--accent-line); }
+.nsv-switch-note { margin-left: -8px; color: var(--text-faint); font-size: 11.5px; }
+.nsv-hint { margin-left: auto; color: var(--text-faint); font-size: 11.5px; }
+.nsv-notice {
+  margin: 0;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-dim);
+  font-size: 12.5px;
+}
+.nsv-error { margin: 0; padding: 0 4px; color: var(--red); font-size: 12.5px; overflow-wrap: anywhere; }
+
+@media (max-width: 560px) {
+  .nsv-hint { display: none; }
+}

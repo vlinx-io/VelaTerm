@@ -124,6 +124,13 @@ impl SessionEnvironment {
     }
 }
 
+/// The launch baseline with nothing read from startup files. A real terminal shell loads its own profiles, so
+/// starting it from this snapshot gives the same result as a fresh probe without running a hidden shell first.
+#[cfg(unix)]
+pub(crate) fn launch_baseline() -> SessionEnvironment {
+    SessionEnvironment::from_entries(Vec::new())
+}
+
 #[cfg(test)]
 fn latest_environment(shell: Option<&str>) -> Option<SessionEnvironment> {
     latest_environment_in(shell, None)

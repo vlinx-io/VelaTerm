@@ -217,6 +217,38 @@ describe("browser page entry in the tree context menu", () => {
   });
 });
 
+describe("agent session in a nested group", () => {
+  beforeEach(() => {
+    testState.addSession.mockReset();
+    testState.addSession.mockResolvedValue({ id: "agent-node-1" });
+    Object.assign(testState.state, {
+      groups: [
+        { id: "outer", projectId: "project-1", parentGroupId: null, worktreePath: "/repo/.vlx-worktrees/outer", worktreeBaseRef: "refs/heads/main" },
+        { id: "nested", projectId: "project-1", parentGroupId: "outer", worktreePath: null },
+      ],
+    });
+  });
+
+  it("starts in the worktree bound on an ancestor group", async () => {
+    const { result } = renderHook(() => useSessionMenu());
+    const agents = result.current.newSessionItems("project-1", "nested").find((item) => item.label === "tree.newAgentSessionGroup");
+    const claude = agents?.submenu?.find((item) => item.label === "tree.newAgentSession");
+    act(() => claude?.onClick?.({} as React.MouseEvent));
+
+    await waitFor(() => {
+      expect(testState.addSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          groupId: "nested",
+          kind: "claude",
+          cwd: "/repo/.vlx-worktrees/outer",
+          worktreePath: "/repo/.vlx-worktrees/outer",
+          worktreeBaseRef: "refs/heads/main",
+        }),
+      );
+    });
+  });
+});
+
 describe("terminal entry in the group context menu", () => {
   beforeEach(() => testState.newScratchTab.mockReset());
 

@@ -9,6 +9,7 @@ pub fn command_name(kind: SessionKind) -> &'static str {
         SessionKind::Antigravity => "agy",
         SessionKind::Kiro => "kiro-cli",
         SessionKind::Zoo => "roo",
+        SessionKind::Deepseek => "dsh",
         _ => kind.as_str(),
     }
 }
@@ -106,16 +107,16 @@ fn resolve_binary(
         .and_then(|v| v.get("path"))
         .and_then(|v| v.as_str());
     match configured_session(session_path, global) {
-        Some(path) => Ok(configured_binary(path)),
+        Some(path) => Ok(configured_binary(kind, path)),
         None => Ok(discover(kind)),
     }
 }
 
 /// A configured path stays authoritative even when missing, so the launch guard can point at
-/// Settings. A wrapper whose payload is gone is not a usable installation at all, so it takes the
-/// broken-install path instead.
-fn configured_binary(path: String) -> LaunchBinary {
-    if shim_payload_missing(Path::new(&path)) {
+/// Settings. A wrapper whose payload is gone, or a launcher whose installer stopped partway, is not a
+/// usable installation at all, so it takes the broken-install path instead.
+fn configured_binary(kind: SessionKind, path: String) -> LaunchBinary {
+    if shim_payload_missing(Path::new(&path)) || super::install::incomplete_install(kind.as_str(), Path::new(&path)) {
         return LaunchBinary::Broken;
     }
     LaunchBinary::Path(path)
@@ -129,11 +130,14 @@ fn discover(kind: SessionKind) -> LaunchBinary {
     if let Some(path) = super::install::locate_installed_bin(kind.as_str()) {
         return LaunchBinary::Path(path);
     }
+    // The known locations already skip a partial install; one reached through PATH or the shell profile is
+    // the same launcher, so it reports the agent as missing rather than starting a crash.
+    let partial = |path: &str| super::install::incomplete_install(kind.as_str(), Path::new(path));
     if let Some(path) = find_on_path(name) {
-        return LaunchBinary::Path(path);
+        return if partial(&path) { LaunchBinary::Broken } else { LaunchBinary::Path(path) };
     }
     if let Some(path) = find_in_shell(name) {
-        return LaunchBinary::Path(path);
+        return if partial(&path) { LaunchBinary::Broken } else { LaunchBinary::Path(path) };
     }
     if kind == SessionKind::Opencode {
         if let Some(path)=find_on_path("opencode2").or_else(||find_in_shell("opencode2")) {
@@ -626,7 +630,7 @@ mod tests {
             defaults.insert(option.id.as_str().into(), serde_json::json!({"path":bin}));
             expected.push(parent);
         }
-        assert_eq!(expected.len(), 14);
+        assert_eq!(expected.len(), 16);
         let preset_dir = dir.join("preset");
         std::fs::create_dir_all(&preset_dir).unwrap();
         let preset_bin = preset_dir.join("custom-agent");
@@ -933,5 +937,25 @@ mod tests {
         assert!(!shim_payload_missing(&wrapper));
         assert_eq!(shim_payload_exe(&wrapper), Some(bin.join("opencode.exe")));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn configured_partial_zoo_install_reports_the_agent_missing() {
+        use std::os::unix::fs::PermissionsExt;
+        let cli = std::env::temp_dir().join(format!("vlx-zoo-configured-{}", uuid::Uuid::new_v4()));
+        let roo = cli.join("bin").join("roo");
+        std::fs::create_dir_all(roo.parent().unwrap()).unwrap();
+        std::fs::write(&roo, "#!/usr/bin/env node\n").unwrap();
+        std::fs::set_permissions(&roo, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(cli.join("package.json"), r#"{"dependencies":{"commander":"^12.1.0"}}"#).unwrap();
+        let path = roo.to_string_lossy().into_owned();
+        // Launching it would crash on its first import, so the install guidance appears instead.
+        assert_eq!(configured_binary(SessionKind::Zoo, path.clone()), LaunchBinary::Broken);
+        let dep = cli.join("node_modules").join("commander");
+        std::fs::create_dir_all(&dep).unwrap();
+        std::fs::write(dep.join("package.json"), b"{}").unwrap();
+        assert_eq!(configured_binary(SessionKind::Zoo, path.clone()), LaunchBinary::Path(path));
+        let _ = std::fs::remove_dir_all(&cli);
     }
 }

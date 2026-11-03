@@ -21,13 +21,50 @@
         :root { color-scheme: light; }
         html, body { background: oklch(0.95 0.004 260); }
       }
+      /* Startup skeleton: the app shell's outline (title bar, sidebar, status bar), painted
+         before the script bundle has loaded so the window opens looking like the app rather than an empty
+         surface. React replaces it on its first render because it lives inside #root. Colors mirror the
+         [data-theme] surfaces in vlinx.css (--bg-0 / --bg-1 / --bg-2 / --border); sizes mirror .titlebar,
+         .statusbar and the default sidebar width (leftWidth in termStore). Keep them in sync when those change. */
+      html[data-theme="dark"] { color-scheme: dark; --sk-0: oklch(0.2 0.006 260); --sk-1: oklch(0.205 0.006 260); --sk-2: oklch(0.225 0.007 260); --sk-line: oklch(1 0 0 / 0.08); --sk-bar: oklch(1 0 0 / 0.06); }
+      html[data-theme="light"] { color-scheme: light; --sk-0: #ffffff; --sk-1: #ffffff; --sk-2: #ffffff; --sk-line: oklch(0 0 0 / 0.1); --sk-bar: oklch(0 0 0 / 0.05); }
+      html[data-theme] body { background: var(--sk-0); }
+      .startup-skeleton { position: fixed; inset: 0; display: flex; flex-direction: column; background: var(--sk-0); }
+      .startup-skeleton .sk-title { height: 38px; flex: none; background: var(--sk-2); border-bottom: 1px solid var(--sk-line); }
+      .startup-skeleton .sk-body { flex: 1; display: flex; min-height: 0; }
+      .startup-skeleton .sk-side { width: 240px; flex: none; padding: 14px 12px; background: var(--sk-1); border-right: 1px solid var(--sk-line); }
+      .startup-skeleton .sk-side i { display: block; height: 8px; margin: 0 0 14px; border-radius: 4px; background: var(--sk-bar); }
+      .startup-skeleton .sk-side i:nth-child(3n + 2) { width: 72%; margin-left: 14px; }
+      .startup-skeleton .sk-side i:nth-child(3n) { width: 58%; margin-left: 14px; }
+      .startup-skeleton .sk-status { height: 24px; flex: none; background: var(--sk-2); border-top: 1px solid var(--sk-line); }
+      @media (max-width: 767px) { .startup-skeleton .sk-side { display: none; } }
     </style>
+    <!-- Apply the saved scheme before the first paint so the skeleton matches it (theme.ts applies the full
+         theme once the bundle runs). Mirrors loadTheme/resolveTheme in src/theme.ts and its "vlx-theme" key. -->
+    <script>
+      (function () {
+        var mode = null;
+        try { mode = localStorage.getItem("vlx-theme"); } catch (e) { /* storage unavailable */ }
+        if (mode !== "dark" && mode !== "light") {
+          mode = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        document.documentElement.dataset.theme = mode;
+      })();
+    </script>
   </head>
 
   <!-- autocapitalize is inherited by every editable descendant, so setting it once on <body>
        turns off automatic capitalization for all inputs / textareas / contenteditable in the app. -->
   <body autocapitalize="none">
-    <div id="root"></div>
+    <div id="root">
+      <div class="startup-skeleton" aria-hidden="true">
+        <div class="sk-title"></div>
+        <div class="sk-body">
+          <div class="sk-side"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+        <div class="sk-status"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

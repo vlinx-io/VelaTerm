@@ -18,6 +18,14 @@ pub fn modes(kind: SessionKind) -> &'static [&'static str] {
         // OMP can ask for approval; its bypass maps to `--approval-mode=yolo`. Pi has no approval step at
         // all, so it exposes no modes and the composer shows no permission control for it.
         SessionKind::Omp => &["default", "bypassPermissions"],
+        // ZCode's own modes in the shared vocabulary: plan, build (ask before changes), edit (accept edits)
+        // and yolo (bypass). Its `guarded` mode has no shared counterpart and is not offered.
+        SessionKind::Zcode => &["plan", "default", "acceptEdits", "bypassPermissions"],
+        // ACP agents ask the client before acting; bypass is the client answering for the user. Their terminal
+        // interface maps the same two choices to its own skip flag.
+        SessionKind::Copilot | SessionKind::Cursor | SessionKind::Kimi | SessionKind::Grok => &["default", "bypassPermissions"],
+        // DeepSeek Harness keeps its own sandbox and asks before widening it; bypass answers those requests.
+        SessionKind::Deepseek => &["default", "bypassPermissions"],
         _ => &[],
     }
 }
@@ -44,6 +52,12 @@ fn kind(agent: &str) -> Result<SessionKind, String> {
         "opencode" => Ok(SessionKind::Opencode),
         "omp" => Ok(SessionKind::Omp),
         "antigravity" => Ok(SessionKind::Antigravity),
+        "zcode" => Ok(SessionKind::Zcode),
+        "copilot" => Ok(SessionKind::Copilot),
+        "cursor" => Ok(SessionKind::Cursor),
+        "kimi" => Ok(SessionKind::Kimi),
+        "grok" => Ok(SessionKind::Grok),
+        "deepseek" => Ok(SessionKind::Deepseek),
         _ => Err(format!("Unsupported permission agent: {agent}")),
     }
 }

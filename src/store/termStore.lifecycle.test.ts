@@ -169,4 +169,53 @@ describe("following a peer's layout", () => {
 
     expect(useTermStore.getState().dormantSessions[SID]).toBe(true);
   });
+
+  it("keeps an open chat pane whose process has exited when any frame arrives", () => {
+    // Reported from a remote window: opening and closing an unrelated tab sends a frame back, and the
+    // chat pane the user was reading turned into the "Restored from your saved workspace" placeholder.
+    useTermStore.setState({
+      runtimes: { [SID]: { status: "idle", alive: false } },
+      ephemeralSessions: {
+        [SID]: {
+          id: SID,
+          projectId: "project-1",
+          name: "Claude chat",
+          kind: "claude",
+          engine: "chat",
+          collapsed: false,
+          sortOrder: 0,
+          createdAt: 1,
+        },
+      },
+    });
+
+    useTermStore.getState().applyMirrorLayout({
+      v: 1,
+      center: {
+        openTabs: ["t1"],
+        liveTabs: ["t1"],
+        pinnedTabs: [],
+        activeTabId: "t1",
+        lastActiveSessionTabId: "t1",
+        activeSessionId: SID,
+        focusedPaneId: `p-${SID}`,
+        paneTrees: { t1: leaf(SID) },
+        ephemeralSessions: {},
+        docTabs: {},
+        browserTabs: {},
+      },
+      left: {
+        selection: [],
+        inspectTarget: null,
+        collapsed: false,
+        views: [],
+        tabs: [],
+        primaryViewId: "",
+        activeViewId: "",
+      },
+      right: { inspectorTab: "files", collapsed: false },
+    });
+
+    expect(SID in useTermStore.getState().dormantSessions).toBe(false);
+  });
 });

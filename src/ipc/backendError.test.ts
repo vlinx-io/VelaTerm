@@ -22,6 +22,23 @@ describe("mapBackendError", () => {
     expect(mapBackendError("image_requires_download: Excessive dimensions")).toBe("image_requires_download: chat.history.imageDownloadRequired");
     expect(mapBackendError(mapBackendError("index_busy: Another reader"))).toBe("index_busy: chat.history.indexBusy");
   });
+  it("names the agent an ACP sign-in requirement belongs to", () => {
+    expect(mapBackendError("agent_sign_in_required:copilot")).toBe("chat.signInRequired|Copilot");
+    expect(mapBackendError("agent_sign_in_required:grok")).toBe("chat.signInRequired|Grok Build");
+    expect(mapBackendError("agent_sign_in_required:future")).toBe("chat.signInRequired|future");
+  });
+
+  it("explains where DeepSeek Harness reads its API key from", () => {
+    expect(mapBackendError("agent_api_key_required:deepseek")).toBe("chat.apiKeyRequired");
+  });
+
+  it("names the platform a ZCode account without a usable plan signed in to, keeping the provider's words", () => {
+    expect(mapBackendError("zcode_plan_unavailable:zai")).toBe("chat.auth.zcode.noPlan.zai");
+    expect(mapBackendError("zcode_plan_unavailable:bigmodel:[1113][Insufficient balance][id]"))
+      .toBe("chat.auth.zcode.noPlan.bigmodel ([1113][Insufficient balance][id])");
+    expect(mapBackendError("zcode_plan_unavailable:other")).toBe("zcode_plan_unavailable:other");
+  });
+
   it("maps the command gate code to its i18n key with the command as detail", () => {
     expect(mapBackendError("remote_cmd_forbidden:web_server_start")).toBe(
       "transport.remoteCmdForbidden|web_server_start",

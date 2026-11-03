@@ -17,6 +17,7 @@ const storeState = vi.hoisted(() => ({
     "task-1": { id: "task-1", sessionId: "sess-1", taskId: "w1", title: "protocol probe", taskType: "local_workflow" },
     "task-2": { id: "task-2", sessionId: "sess-1", taskId: "sh1", title: "npm test", taskType: "local_bash" },
   },
+  newSessionTabs: {},
   runtimes: {},
   notifications: {},
   setActiveTab: vi.fn(),

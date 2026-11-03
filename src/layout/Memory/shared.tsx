@@ -4,12 +4,7 @@ import { md } from "../../markdownEngine";
 import { dateLocale, t, type I18nKey } from "../../i18n";
 import { memoryNavigate } from "./navigation";
 
-export function MemoryIcon({ size = 16 }: { size?: number }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M12 5v15M3 4.5c3.5-1 6-.5 9 1.5 3-2 5.5-2.5 9-1.5v14c-3.5-1-6-.5-9 1.5-3-2-5.5-2.5-9-1.5z" />
-    <path d="M6 8h2m8 0h2M6 12h2m8 0h2" />
-  </svg>;
-}
+export { MemoryIcon } from "./MemoryIcon";
 
 const errors: Record<string, I18nKey> = {
   memory_models_unavailable: "memory.loadError", memory_conflict: "memory.conflict", memory_duplicate_title: "memory.duplicate",

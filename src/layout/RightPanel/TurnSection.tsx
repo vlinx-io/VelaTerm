@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import Icons from "../../components/Icons";
 import { fmtTokens } from "../../format";
 import { useT } from "../../i18n";
-import { agentTurnStats, type AgentTurnStats, type TurnChangedFile } from "../../ipc/commands";
+import { agentTurnStats, gitChangedFiles, type AgentTurnStats, type TurnChangedFile } from "../../ipc/commands";
+import { getGitStatus } from "../../ipc/info";
 import { detectFlavor, isAbsolutePath, joinPath } from "../../remote/serverPath";
 import { useTermStore } from "../../store/termStore";
 import type { Session } from "../../types";
@@ -49,6 +50,32 @@ function fileRows(files: TurnChangedFile[], cwd: string | null | undefined) {
   return [...rows.values()].sort((a, b) => a.shown < b.shown ? -1 : a.shown > b.shown ? 1 : 0);
 }
 
+/** Show a changed file's uncommitted changes in a diff tab. A file outside a repository, or with
+ *  nothing left to compare because it has since been committed or reverted, opens in the editor. */
+async function openChangedFile(absolute: string) {
+  const { openDiffTab, openDocTab } = useTermStore.getState();
+  try {
+    const windows = detectFlavor(absolute) === "win";
+    // Git reports forward slashes even on Windows, where letter case does not tell paths apart either.
+    const norm = (p: string) => {
+      const slashed = p.replace(/\\/g, "/").replace(/\/+$/, "");
+      return windows ? slashed.toLowerCase() : slashed;
+    };
+    const cut = Math.max(absolute.lastIndexOf("/"), absolute.lastIndexOf("\\"));
+    const status = await getGitStatus(cut > 0 ? absolute.slice(0, cut) : absolute);
+    const root = status.isRepo ? status.root : null;
+    if (root && norm(absolute).startsWith(norm(root) + "/")) {
+      const rel = norm(absolute).slice(norm(root).length + 1);
+      const { files } = await gitChangedFiles(root);
+      const file = files.find((f) => norm(f.path) === rel);
+      if (file) { openDiffTab(absolute, root, file.path); return; }
+    }
+  } catch {
+    // Without Git the file itself is still worth opening.
+  }
+  openDocTab(absolute);
+}
+
 /** Added and removed lines, or nothing when they are not known. */
 function LineCounts({ additions, deletions }: { additions: number | null; deletions: number | null }) {
   if (additions == null || deletions == null) return null;
@@ -58,7 +85,6 @@ function LineCounts({ additions, deletions }: { additions: number | null; deleti
 /** The turn's changed files, in place of the statistics until the user goes back. */
 function ChangedFiles({ files, cwd, onBack }: { files: TurnChangedFile[]; cwd?: string | null; onBack: () => void }) {
   const t = useT();
-  const openDocTab = useTermStore((s) => s.openDocTab);
   const rows = fileRows(files, cwd);
   // Totals only when every file is countable, so a partial sum never passes for the whole turn.
   const counted = rows.length > 0 && rows.every((f) => f.additions != null && f.deletions != null);
@@ -81,7 +107,7 @@ function ChangedFiles({ files, cwd, onBack }: { files: TurnChangedFile[]; cwd?: 
           const FileIcon = Icons[spec.icon];
           return <li key={file.absolute ?? file.path}>
             <button type="button" className="turn-file" title={file.absolute ?? file.path}
-              disabled={!file.absolute} onClick={() => file.absolute && openDocTab(file.absolute)}>
+              disabled={!file.absolute} onClick={() => file.absolute && void openChangedFile(file.absolute)}>
               <span className="turn-file-icon" style={{ color: spec.color }}><FileIcon size={14} /></span>
               <span className="turn-file-name">{file.name}</span>
               <span className="turn-file-dir">{file.dir}</span>

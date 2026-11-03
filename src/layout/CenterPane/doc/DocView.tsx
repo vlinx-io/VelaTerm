@@ -21,6 +21,8 @@ import { DocFileTree } from "./DocFileTree";
 import { DocOutline, parseOutline, type OutlineHeading } from "./DocOutline";
 import { DocSearchBar } from "./DocSearchBar";
 import type { DocSearchControl } from "./docSearch";
+import { ChangesView } from "../../../components/diff/ChangesView";
+import { DiffDocView } from "./DiffDocView";
 import { ImageDocView } from "./ImageDocView";
 import { SourceEditor, type SourceHandle } from "./SourceEditor";
 import { MarkdownEditor, type MarkdownHandle, type MarkdownViewMode } from "./MarkdownEditor";
@@ -48,9 +50,12 @@ const OUTLINE_DEBOUNCE_MS = 600;
 /** Debounce status-bar statistics while typing; counting serializes the visual document. */
 const STATS_DEBOUNCE_MS = 500;
 
-/** Routes images to ImageViewer, HTML pages to the artifact preview, and markdown/code to TextDocView. */
+/** Routes images to ImageViewer, HTML pages to the artifact preview, diffs to DiffDocView, comparisons to
+ *  ChangesView, and markdown/code to TextDocView. */
 export function DocView({ tab, hidden }: { tab: DocTab; hidden: boolean }) {
   if (tab.kind === "image") return <ImageDocView tab={tab} hidden={hidden} />;
+  if (tab.kind === "diff") return <DiffDocView tab={tab} hidden={hidden} />;
+  if (tab.kind === "changes") return <ChangesView tab={tab} hidden={hidden} />;
   if (tab.kind === "artifact") return <ArtifactDocView tab={tab} hidden={hidden} />;
   return <TextDocView tab={tab} hidden={hidden} />;
 }

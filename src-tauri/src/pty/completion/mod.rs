@@ -28,6 +28,8 @@ pub struct Snapshot {
     pub items: Vec<Item>,
     pub query: String,
     pub pending: bool,
+    /// The candidates share text beyond the typed token, which the `extend` action inserts like native Tab.
+    pub extendable: bool,
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -46,6 +48,7 @@ pub struct State {
     collecting: Vec<Item>,
     collecting_revision: Option<u64>,
     collecting_query: String,
+    collecting_extendable: bool,
     pub owner: Option<String>,
 }
 
@@ -59,6 +62,7 @@ impl Default for State {
             collecting: Vec::new(),
             collecting_revision: None,
             collecting_query: String::new(),
+            collecting_extendable: false,
             owner: None,
         }
     }
@@ -76,12 +80,13 @@ impl State {
     pub fn input(&mut self, data: &str) {
         self.snapshot.input_version = self.snapshot.input_version.wrapping_add(1);
         self.snapshot.items.clear();
+        self.snapshot.extendable = false;
         // The queued Enter must close the gate before its pre-execution marker reaches the reader.
         let paste = data.starts_with("\x1b[200~") && data.ends_with("\x1b[201~");
         if !paste
             && data
                 .chars()
-                .any(|c| matches!(c, '\r' | '\n' | '\u{3}' | '\u{4}' | '\u{26}'))
+                .any(|c| matches!(c, '\r' | '\n' | '\u{3}' | '\u{4}' | '\u{1a}'))
         {
             self.snapshot.ready = false;
         }
@@ -106,6 +111,7 @@ impl State {
                 self.snapshot.supported = true;
                 self.snapshot.ready = true;
                 self.snapshot.items.clear();
+                self.snapshot.extendable = false;
                 self.requested = None;
                 self.snapshot.pending = false;
                 self.collecting_revision = None;
@@ -113,6 +119,7 @@ impl State {
             Some("X") => {
                 self.snapshot.ready = false;
                 self.snapshot.items.clear();
+                self.snapshot.extendable = false;
                 self.requested = None;
                 self.snapshot.pending = false;
                 self.collecting_revision = None;
@@ -120,8 +127,10 @@ impl State {
             Some("A") => {
                 self.collecting.clear();
                 self.collecting_query.clear();
+                self.collecting_extendable = false;
                 self.collecting_revision = fields.next().and_then(|s| s.parse().ok());
             }
+            Some("E") if self.collecting_revision.is_some() => self.collecting_extendable = true,
             Some("T") if self.collecting_revision.is_some() => {
                 self.collecting_query = fields.next().and_then(unhex).unwrap_or_default();
             }
@@ -154,6 +163,7 @@ impl State {
                     if self.snapshot.ready && version == self.snapshot.input_version {
                         self.snapshot.query = self.collecting_query.clone();
                         self.snapshot.items = std::mem::take(&mut self.collecting);
+                        self.snapshot.extendable = self.collecting_extendable && self.snapshot.items.len() > 1;
                         for item in &mut self.snapshot.items {
                             item.matches = match_ranges(&item.label, &self.snapshot.query);
                         }
@@ -362,6 +372,13 @@ pub fn configure_bash_startup(state: &State, binaries: &[String]) -> Result<Path
 
 fn startup_path(binaries: &[String]) -> String {
     crate::agent::executable::path_startup_script(&crate::agent::executable::binary_dirs(binaries))
+}
+
+/// Share the mode with running shells, which read it at each prompt to decide whether to draw history hints.
+pub fn write_mode(data_dir: &Path, mode: &str) -> Result<(), String> {
+    let dir = data_dir.join("terminal-completion");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("mode"), mode).map_err(|e| e.to_string())
 }
 
 /// Install only in application data; shell profiles are never edited.

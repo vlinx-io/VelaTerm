@@ -65,7 +65,12 @@ fn process_group_may_exist(pid: u32) -> bool {
 }
 
 fn previous_child_may_write(pid: u32, stamp: u64) -> bool {
-    may_be_same_process(pid,stamp) || process_group_may_exist(pid)
+    match birth(pid) {
+        Some(actual) => actual==stamp || actual==0,
+        // A process group ID is never reused while the group has members, so a live process with a
+        // different birth means the old group is gone. Only an absent leader leaves orphans to probe.
+        None => process_may_exist(pid) || process_group_may_exist(pid),
+    }
 }
 
 fn lock(app: &AppCtx, key: &str, drain_grace: bool) -> Result<File, String> {
@@ -96,19 +101,32 @@ pub(super) fn handoff_guard(app: &AppCtx, session: &str) -> Result<Vec<File>, St
 
 fn idle_guard_with(app: &AppCtx, session: &str, drain_grace: bool) -> Result<Vec<File>, String> {
     let file=lock(app,&format!("session:{session}"),drain_grace)?;
-    let child: Option<(Option<u32>,Option<u64>)> = app.db().conn.lock().unwrap().query_row("SELECT child_pid,child_birth FROM chat_process_owners WHERE session_id=?1",[session],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(|e|e.to_string())?;
-    if child.is_some_and(|(pid,stamp)|pid.zip(stamp).is_some_and(|(pid,stamp)|previous_child_may_write(pid,stamp))) {
+    let child: Option<(String,Option<u32>,Option<u64>)> = app.db().conn.lock().unwrap().query_row("SELECT token,child_pid,child_birth FROM chat_process_owners WHERE session_id=?1",[session],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional().map_err(|e|e.to_string())?;
+    if child.as_ref().is_some_and(|(_,pid,stamp)|pid.zip(*stamp).is_some_and(|(pid,stamp)|previous_child_may_write(pid,stamp))) {
         return Err("The previous agent is still running. Stop that process before continuing this conversation.".into());
     }
-    if child.is_some_and(|(pid,_)|pid.is_none()) && cfg!(not(unix)) {
+    if child.as_ref().is_some_and(|(_,pid,_)|pid.is_none()) && cfg!(not(unix)) {
         return Err("The previous agent's startup could not be verified. Process ownership requires inspection before this conversation can continue.".into());
+    }
+    // The lease is ours and the recorded writer is proven gone: drop the stale record so later
+    // probes cannot match a reused process ID.
+    if let Some((token,_,_))=child {
+        if app.db().conn.lock().unwrap().execute("DELETE FROM chat_process_owners WHERE session_id=?1 AND token=?2",params![session,token]).is_err() {
+            crate::diagnostic_warn!("chat ownership: could not clear stale process evidence");
+        }
     }
     let native: Option<(String,Option<String>)> = app.db().conn.lock().unwrap().query_row("SELECT kind,agent_session_id FROM sessions WHERE id=?1",[session],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(|e|e.to_string())?;
     let mut files=vec![file];
     if let Some((kind,Some(id)))=native {
         let native=lock(app,&format!("native:{kind}:{id}"),drain_grace)?;
-        if native_evidence(&native)?.is_some_and(|v|previous_native_may_write(&v)) {
-            return Err("The previous agent still owns this native conversation. Wait for that process to exit before continuing.".into());
+        if let Some(mut previous)=native_evidence(&native)? {
+            if previous_native_may_write(&previous) {
+                return Err("The previous agent still owns this native conversation. Wait for that process to exit before continuing.".into());
+            }
+            if !previous.retired {
+                previous.retired=true;
+                if record_native(&native,&previous).is_err() { crate::diagnostic_warn!("chat ownership: could not retire stale native process evidence"); }
+            }
         }
         files.push(native);
     }

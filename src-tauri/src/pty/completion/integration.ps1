@@ -27,6 +27,7 @@ Set-PSReadLineKeyHandler -Chord Ctrl+F12 -ScriptBlock {
     $script:VlxCompletionCursor = $cursor
     $script:VlxCompletionRevision++
     $script:VlxCompletionMatches = @()
+    $script:VlxCompletionPrefix = ''
     Send-VlxCompletion "A;$script:VlxCompletionRevision"
     try {
         if ($line.Length -gt 0) {
@@ -39,6 +40,23 @@ Set-PSReadLineKeyHandler -Chord Ctrl+F12 -ScriptBlock {
             foreach ($item in $script:VlxCompletionMatches) {
                 Send-VlxCompletion "C;$(ConvertTo-VlxHex $item.ListItemText);$(ConvertTo-VlxHex $item.ToolTip)"
             }
+            # Like native completion, offer the text all candidates share when it extends what was typed.
+            # Quoted candidates are skipped so a shared prefix never leaves a quote open.
+            $typed = $line.Substring($result.ReplacementIndex, $queryLength)
+            $texts = @($script:VlxCompletionMatches | ForEach-Object { $_.CompletionText })
+            if ($texts.Count -gt 1 -and -not ($texts | Where-Object { $_ -match '^[''"]' })) {
+                $common = $texts[0]
+                foreach ($text in $texts) {
+                    $length = 0
+                    while ($length -lt [Math]::Min($common.Length, $text.Length) -and
+                        [char]::ToLowerInvariant($common[$length]) -eq [char]::ToLowerInvariant($text[$length])) { $length++ }
+                    $common = $common.Substring(0, $length)
+                }
+                if ($common.Length -gt $typed.Length -and $common.StartsWith($typed, [StringComparison]::OrdinalIgnoreCase)) {
+                    $script:VlxCompletionPrefix = $common
+                    Send-VlxCompletion 'E'
+                }
+            }
         }
     } finally {
         $global:LASTEXITCODE = $savedExitCode
@@ -47,14 +65,21 @@ Set-PSReadLineKeyHandler -Chord Ctrl+F12 -ScriptBlock {
 }
 Set-PSReadLineKeyHandler -Chord Ctrl+F11 -ScriptBlock {
     $parts = [IO.File]::ReadAllText($script:VlxCompletionSelection).Trim().Split(' ')
-    if ($parts.Count -ne 2 -or $parts[0] -ne "$script:VlxCompletionRevision" -or $parts[1] -notmatch '^\d+$') { return }
-    $index = [int]$parts[1]
-    if ($index -ge $script:VlxCompletionMatches.Count) { return }
+    if ($parts.Count -ne 2 -or $parts[0] -ne "$script:VlxCompletionRevision" -or $parts[1] -notmatch '^(\d+|p)$') { return }
+    if ($parts[1] -eq 'p') {
+        if (-not $script:VlxCompletionPrefix) { return }
+        $text = $script:VlxCompletionPrefix
+    } else {
+        $index = [int]$parts[1]
+        if ($index -ge $script:VlxCompletionMatches.Count) { return }
+        $text = $script:VlxCompletionMatches[$index].CompletionText
+    }
     $line = ''; $cursor = 0
     [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
     if ($line -cne $script:VlxCompletionBuffer -or $cursor -ne $script:VlxCompletionCursor) { return }
-    [Microsoft.PowerShell.PSConsoleReadLine]::Replace($script:VlxCompletionStart, $script:VlxCompletionLength, $script:VlxCompletionMatches[$index].CompletionText)
+    [Microsoft.PowerShell.PSConsoleReadLine]::Replace($script:VlxCompletionStart, $script:VlxCompletionLength, $text)
     $script:VlxCompletionMatches = @()
+    $script:VlxCompletionPrefix = ''
 }
 # Cover all submit bindings, including custom handlers, without replacing Enter's behavior.
 $script:VlxOriginalReadLine = $function:global:PSConsoleHostReadLine

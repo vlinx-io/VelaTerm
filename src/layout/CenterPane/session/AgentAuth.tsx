@@ -6,7 +6,10 @@ import { platform } from "../../../platform";
 import Icons from "../../../components/Icons";
 import { ChipPopover } from "./extras";
 
-type AuthProps = { provider: "Claude" | "Codex"; sessionId: string; state?: ChatAuthState; busy: boolean };
+type AuthProps = { provider: "Claude" | "Codex" | "ZCode"; sessionId: string; state?: ChatAuthState; busy: boolean };
+
+/** Statuses whose wording differs per agent; the rest read the same for every provider. */
+const OWN_WORDING = { Claude: ["pending", "failed"], Codex: [], ZCode: ["required", "pending", "failed"] } as const;
 
 /** True while a sign-in or sign-out is unresolved; the account chip yields to the inline panel then. */
 export function needsAttention(state?: ChatAuthState) {
@@ -53,15 +56,16 @@ function AuthPanel({ provider, sessionId, state, busy }: AuthProps) {
     try { await action(); }
     catch (err) {
       const message = String(err);
-      setError(message === "codex_auth_logout_failed" || message === "claude_auth_logout_failed" ? t("chat.auth.logoutFailed")
+      setError(message === "codex_auth_logout_failed" || message === "claude_auth_logout_failed" || message === "zcode_auth_logout_failed" ? t("chat.auth.logoutFailed")
         : message === "claude_auth_invalid_code" ? t("chat.auth.claude.invalidCode") : message);
     }
     finally { inFlight.current = false; setSending(false); }
   }
 
   return <section className={`sv-auth${state ? " sv-auth-panel" : ""}`} aria-label={t("chat.auth.title", provider)}>
-    {state && <p role="status">{state.status === "required" || state.status === "signedOut" ? t(`chat.auth.${state.status}`, provider)
-      : provider === "Claude" && (state.status === "pending" || state.status === "failed") ? t(`chat.auth.claude.${state.status}`)
+    {state && <p role="status">{(OWN_WORDING[provider] as readonly string[]).includes(state.status)
+      ? t(`chat.auth.${provider === "Claude" ? "claude" : "zcode"}.${state.status}` as "chat.auth.claude.pending")
+      : state.status === "required" || state.status === "signedOut" ? t(`chat.auth.${state.status}`, provider)
         : t(`chat.auth.${state.status}`)}</p>}
     {(state?.status === "required" || active || !state) && <p className="sv-auth-hint">{t("chat.auth.scope", provider)}</p>}
     {state?.status === "pending" && state.verificationUrl && <div className="sv-auth-actions">
@@ -93,11 +97,18 @@ function AuthPanel({ provider, sessionId, state, busy }: AuthProps) {
       {active
         ? <button type="button" disabled={sending || state?.status === "submitting" || state?.status === "canceling"} onClick={() => void run(() => chatAuthCancel(sessionId))}>{t("common.cancel")}</button>
         : <>
-          <button type="button" disabled={sending || busy || signingOut} title={busy ? t("chat.auth.wait") : undefined} onClick={() => {
-            setConfirmLogout(false);
-            void run(() => chatAuthStart(sessionId));
-          }}>{t(signedOut ? "chat.auth.login" : "chat.auth.start")}</button>
-          {!signedOut && <button type="button" disabled={sending || busy || signingOut} title={busy ? t("chat.auth.wait") : undefined} onClick={() => {
+          {provider === "ZCode"
+            // ZCode signs in to one of two account providers: Z.ai, or BigModel in mainland China.
+            ? (["zai", "bigmodel"] as const).map(id => <button key={id} type="button" disabled={sending || busy || signingOut}
+              title={busy ? t("chat.auth.wait") : undefined} onClick={() => {
+                setConfirmLogout(false);
+                void run(() => chatAuthStart(sessionId, id));
+              }}>{t(id === "zai" ? "chat.auth.zcode.zai" : "chat.auth.zcode.bigmodel")}</button>)
+            : <button type="button" disabled={sending || busy || signingOut} title={busy ? t("chat.auth.wait") : undefined} onClick={() => {
+              setConfirmLogout(false);
+              void run(() => chatAuthStart(sessionId));
+            }}>{t(signedOut ? "chat.auth.login" : "chat.auth.start")}</button>}
+          {!signedOut && !(provider === "ZCode" && state?.status === "required") && <button type="button" disabled={sending || busy || signingOut} title={busy ? t("chat.auth.wait") : undefined} onClick={() => {
             setError(null);
             setConfirmLogout(true);
           }}>{t("chat.auth.logout")}</button>}

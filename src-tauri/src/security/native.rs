@@ -238,7 +238,7 @@ fn import_bundle(run: &mut Run, expected_status: &str) -> Result<()> {
     };
     let manifest = parse("scan-manifest.json", 16 * 1024 * 1024)?;
     let findings = parse("findings.json", 128 * 1024 * 1024)?;
-    let coverage = parse("coverage.json", 32 * 1024 * 1024)?;
+    let coverage = review_coverage(&directory, &manifest)?;
     if manifest["scan"]["id"] != id || manifest["scan"]["status"] != expected_status {
         return Err("security_upstream_not_completed".into());
     }
@@ -249,10 +249,7 @@ fn import_bundle(run: &mut Run, expected_status: &str) -> Result<()> {
     };
     let report = String::from_utf8(read_artifact(&directory, "report.md", 32 * 1024 * 1024)?)
         .map_err(|_| "security_upstream_invalid")?;
-    run.threat_model = manifest["scan"]["threatModel"]["summary"]
-        .as_str()
-        .unwrap_or("")
-        .into();
+    run.threat_model = threat_model_text(&manifest["scan"]["threatModel"]);
     run.gaps = coverage["deferred"]
         .as_array()
         .into_iter()
@@ -311,7 +308,7 @@ fn import_bundle(run: &mut Run, expected_status: &str) -> Result<()> {
         "failed"
     } else if expected_status != "completed" {
         expected_status
-    } else if coverage["completeness"] == "complete" && warnings.is_empty() {
+    } else if coverage_complete(&coverage) && warnings.is_empty() {
         "completed"
     } else {
         "partial"
@@ -322,12 +319,74 @@ fn import_bundle(run: &mut Run, expected_status: &str) -> Result<()> {
     }
     let upstream = run.upstream.as_mut().ok_or("security_upstream_missing")?;
     upstream["evidenceError"] = evidence_error.into();
+    upstream["coverageComplete"] = coverage_complete(&coverage).into();
     upstream["scan"] = verified["scan"].clone();
     upstream["manifest"] = manifest;
     upstream["findings"] = findings;
     upstream["coverage"] = coverage;
     upstream["report"] = report.into();
     Ok(())
+}
+
+/// What the scan reviewed and left open.
+///
+/// Releases before 0.8 seal it as `coverage.json`. Since 0.8 upstream keeps this bookkeeping out of the
+/// published result: the manifest carries only a summary, and the full review state stays with the latest
+/// checkpoint. Legacy detection follows upstream's own `uses_legacy_review`.
+fn review_coverage(directory: &Path, manifest: &Value) -> Result<Value> {
+    let parse = |name: &str, limit| -> Result<Value> {
+        serde_json::from_slice(&read_artifact(directory, name, limit)?)
+            .map_err(|_| "security_upstream_invalid".into())
+    };
+    let scan = &manifest["scan"];
+    if scan.get("coverageRef").is_some() || (scan.get("reviewState").is_none() && scan.get("review").is_none()) {
+        return parse("coverage.json", 32 * 1024 * 1024);
+    }
+    if let Some(state) = scan.get("reviewState") {
+        return Ok(state.clone());
+    }
+    let head = parse("checkpoint-head.json", 64 * 1024)?;
+    let name = head["checkpoint"]
+        .as_str()
+        .filter(|name| scope::safe_relative(name) && !name.contains(['/', '\\']))
+        .ok_or("security_upstream_invalid")?;
+    let checkpoint = parse(&format!("checkpoints/{name}"), 128 * 1024 * 1024)?;
+    let mut state = checkpoint["reviewState"].clone();
+    if !state.is_object() {
+        return Err("security_upstream_invalid".into());
+    }
+    for key in ["surfaces", "deferred"] {
+        if state[key].is_null() {
+            state[key] = json!([]);
+        }
+    }
+    Ok(state)
+}
+
+/// The threat model's summary, or since 0.8 its Markdown form when the scan retained one.
+fn threat_model_text(model: &Value) -> String {
+    model["summary"]
+        .as_str()
+        .or_else(|| model["content"].as_str())
+        .unwrap_or("")
+        .into()
+}
+
+/// Whether the sealed coverage leaves nothing open.
+///
+/// Upstream 0.8 no longer publishes `completeness`, so the claim is derived from what is still open: deferred
+/// work and surfaces that need follow-up. Bundles sealed by older releases keep their explicit field.
+fn coverage_complete(coverage: &Value) -> bool {
+    if let Some(completeness) = coverage.get("completeness") {
+        return completeness == "complete";
+    }
+    let open = |key: &str| coverage[key].as_array().is_some_and(|items| !items.is_empty());
+    let follow_up = coverage["surfaces"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|surface| surface["disposition"] == "needs_follow_up");
+    !open("deferred") && !follow_up
 }
 
 fn evidence_source(root_path: &str, base_revision: Option<&str>, path: &str) -> Result<String> {
@@ -614,7 +673,8 @@ fn continuation_checkpoint(run: &Run) -> Result<Value> {
     }
     let directory = Path::new(upstream["scan"]["scanDir"].as_str().ok_or("security_upstream_invalid")?);
     let mut checkpoint = json!({"progress":progress});
-    for name in ["findings.json", "coverage.json"] {
+    // Since 0.8 checkpoints move the head file instead of rewriting coverage.json.
+    for name in ["findings.json", "coverage.json", "checkpoint-head.json"] {
         if directory.join(name).exists() {
             checkpoint[name] = serde_json::from_slice(&read_artifact(directory, name, 32 * 1024 * 1024)?)
                 .map_err(|_| "security_upstream_invalid")?;
@@ -623,7 +683,12 @@ fn continuation_checkpoint(run: &Run) -> Result<Value> {
     Ok(checkpoint)
 }
 
-fn continuation_due(snapshot: &ChatSnapshot, message_id: &str, upstream_status: &str) -> Result<bool> {
+/// Whether the audit should prompt the agent to continue.
+///
+/// A turn that ends while the agent's background workers are still running is not idle: Claude Code wakes
+/// the conversation itself when a worker reports, so prompting it again would only produce turns without
+/// progress and end the audit while its workers are mid-review.
+fn continuation_due(snapshot: &ChatSnapshot, message_id: &str, upstream_status: &str, background_pending: bool) -> Result<bool> {
     if upstream_status != "running" {
         return Ok(false);
     }
@@ -640,7 +705,7 @@ fn continuation_due(snapshot: &ChatSnapshot, message_id: &str, upstream_status: 
     if rows.iter().any(|r| matches!(r, ChatRow::Error { .. })) {
         return Err("security_agent_failed".into());
     }
-    Ok(snapshot.turn_started_at.is_none() && snapshot.queue.is_empty() && snapshot.permissions.is_empty())
+    Ok(snapshot.turn_started_at.is_none() && snapshot.queue.is_empty() && snapshot.permissions.is_empty() && !background_pending)
 }
 
 fn execute(app: &AppCtx, run: &mut Run) -> Result<()> {
@@ -648,7 +713,7 @@ fn execute(app: &AppCtx, run: &mut Run) -> Result<()> {
     let skill = plugin.join(upstream::entry_skill(run.scope == "working-tree"));
     let prompt = format!(
         "Execute the installed Codex Security workflow at {}. Read that SKILL.md and its referenced instructions.\n\
-        This is VlxTerm's native {} host with the upstream local MCP server named vlx-codex-security.\n\
+        This is VlxTerm's native {} host with the upstream local MCP server named {server}.\n\
         Continue existing scanId {} using get_codex_security_scan_context. Never create another scan.\n\
         The registered target and scope are authoritative. Use the upstream MCP tools for context, progress,\n\
         draft checkpoints (complete:false before validation), the final draft, completion and report retrieval.\n\
@@ -676,11 +741,11 @@ fn execute(app: &AppCtx, run: &mut Run) -> Result<()> {
         and validate it normally. Never reject a finding merely because its ID was absent from an earlier\n\
         checkpoint. Rejection requires source-backed counterevidence under the upstream core rules.\n\
         For rejected or not-applicable candidates, record the exact candidateId and disposition on the\n\
-        corresponding coverage surface. Read scanDir/coverage.json after the final semantic draft call:\n\
+        corresponding reviewState surface. Read back the reviewState returned by the final semantic draft call:\n\
         draft_written is acceptance of a draft, not proof that retained candidates have been reconciled.\n\
-        If retained work is genuinely unresolved, keep partial coverage and explain it; never force closure.\n\
+        If retained work is genuinely unresolved, keep it deferred and explain it; never force closure.\n\
         Routine upcoming stages (for example\n\
-        final report assembly) belong in phase progress, not coverage.deferred. Use needs_follow_up surfaces\n\
+        final report assembly) belong in phase progress, not reviewState.deferred. Use needs_follow_up surfaces\n\
         for review still in progress and replace their dispositions under the same IDs when reviewed.\n\
         Preserve actual unresolved candidates and coverage gaps in deferred. Before complete_codex_security_scan,\n\
         read back the accepted final draft and reconcile any retained item claimed to be resolved through\n\
@@ -699,10 +764,10 @@ fn execute(app: &AppCtx, run: &mut Run) -> Result<()> {
         or reports. Review credential-bearing files through redacted structural inspection; containing\n\
         credentials alone does not exclude a file from the authorized audit. Use exact non-secret\n\
         consumer or control lines as report evidence, retaining precise locations for sensitive values.\n\
-        Write human-readable analysis, finding titles, summaries, threat-model text and coverage notes in {} while retaining canonical field names, identifiers, source evidence and enums.\n\
+        Write human-readable analysis, finding titles, summaries, threat-model text and reviewState notes in {} while retaining canonical field names, identifiers, source evidence and enums.\n\
         Finish with a concise explanation linking the generated report. A checkpoint, empty findings or\n\
         a finished chat turn is not scan completion; complete the upstream workflow before returning.",
-        skill.display(), run.agent,id,run.language);
+        skill.display(), run.agent,id,run.language, server = upstream::mcp_server_name(&run.agent));
     crate::command_core::chat_start(
         app,
         &run.session_id,
@@ -766,7 +831,7 @@ fn execute(app: &AppCtx, run: &mut Run) -> Result<()> {
             run.status = status.into();
             save(app, run)?;
         }
-        if continuation_due(&snapshot, &message_id, &upstream_status)? {
+        if continuation_due(&snapshot, &message_id, &upstream_status, app.chat().background_pending(&run.session_id))? {
             upstream_status = sync(app, run)?;
             if upstream_status == "completed" {
                 import_completed(run)?;
@@ -783,7 +848,7 @@ fn execute(app: &AppCtx, run: &mut Run) -> Result<()> {
             }
             let continuation = format!(
                 "Continue the same Codex Security scan {id} and native conversation. The last chat turn ended, \
-                but the upstream scan remains running. Read its current context and saved coverage, then finish \
+                but the upstream scan remains running. Read its current context and saved reviewState, then finish \
                 the remaining authorized review and candidate dispositions using the already loaded upstream workflow. \
                 Reuse existing worker results; do not restart the scan or repeat completed phases. Preserve candidate IDs \
                 and genuine evidence, and save source-backed progress after meaningful review batches. \
@@ -820,6 +885,24 @@ fn execute(app: &AppCtx, run: &mut Run) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn coverage_is_complete_only_when_nothing_remains_open() {
+        use serde_json::json;
+        assert!(super::coverage_complete(&json!({"deferred":[],"surfaces":[{"disposition":"no_issue_found"},{"disposition":"reported"}]})));
+        assert!(!super::coverage_complete(&json!({"deferred":[{"id":"d","reason":"later"}],"surfaces":[]})));
+        assert!(!super::coverage_complete(&json!({"deferred":[],"surfaces":[{"disposition":"needs_follow_up"}]})));
+        assert!(super::coverage_complete(&json!({"completeness":"complete","deferred":[]})));
+        assert!(!super::coverage_complete(&json!({"completeness":"partial","deferred":[]})));
+    }
+
+    #[test]
+    fn threat_model_reads_summary_or_markdown_content() {
+        use serde_json::json;
+        assert_eq!(super::threat_model_text(&json!({"summary":"Assets"})), "Assets");
+        assert_eq!(super::threat_model_text(&json!({"format":"markdown","content":"# Model"})), "# Model");
+        assert_eq!(super::threat_model_text(&serde_json::Value::Null), "");
+    }
+
     use super::*;
     #[test]
     fn incomplete_audit_continues_only_after_a_clean_finished_turn() {
@@ -827,24 +910,26 @@ mod tests {
         let mut snapshot = manager.snapshot("continuation-test");
         snapshot.running = true;
         snapshot.rows.push(ChatRow::User { id:"audit".into(), text:"audit".into(), images:vec![], at:None });
-        assert!(continuation_due(&snapshot, "audit", "running").unwrap());
+        assert!(continuation_due(&snapshot, "audit", "running", false).unwrap());
+        // Background workers will wake the agent themselves; prompting now would only waste a turn.
+        assert!(!continuation_due(&snapshot, "audit", "running", true).unwrap());
         for terminal in ["completed", "canceled", "failed", "interrupted"] {
-            assert!(!continuation_due(&snapshot, "audit", terminal).unwrap());
+            assert!(!continuation_due(&snapshot, "audit", terminal, false).unwrap());
         }
         snapshot.turn_started_at = Some(1);
-        assert!(!continuation_due(&snapshot, "audit", "running").unwrap());
+        assert!(!continuation_due(&snapshot, "audit", "running", false).unwrap());
         snapshot.turn_started_at = None;
         snapshot.permissions.push(json!({"id":"pending"}));
-        assert!(!continuation_due(&snapshot, "audit", "running").unwrap());
+        assert!(!continuation_due(&snapshot, "audit", "running", false).unwrap());
         snapshot.permissions.clear();
         snapshot.rows.push(ChatRow::Error { id:"failure".into(), message:"quota exhausted".into() });
-        assert_eq!(continuation_due(&snapshot, "audit", "running").unwrap_err(), "security_agent_failed");
+        assert_eq!(continuation_due(&snapshot, "audit", "running", false).unwrap_err(), "security_agent_failed");
         snapshot.rows.pop();
         snapshot.rows.push(ChatRow::User { id:"next".into(), text:"continue".into(), images:vec![], at:None });
-        assert_eq!(continuation_due(&snapshot, "audit", "running").unwrap_err(), "security_conversation_changed");
-        assert!(continuation_due(&snapshot, "next", "running").unwrap());
+        assert_eq!(continuation_due(&snapshot, "audit", "running", false).unwrap_err(), "security_conversation_changed");
+        assert!(continuation_due(&snapshot, "next", "running", false).unwrap());
         snapshot.running = false;
-        assert_eq!(continuation_due(&snapshot, "next", "running").unwrap_err(), "security_agent_stopped");
+        assert_eq!(continuation_due(&snapshot, "next", "running", false).unwrap_err(), "security_agent_stopped");
     }
 
     #[test]
@@ -930,7 +1015,7 @@ mod tests {
         let draft = directory.join("draft.json");
         std::fs::write(&draft,serde_json::to_vec(&json!({
             "scanId":id,"complete":false,"threatModel":{"summary":"Transport test only; no security review performed."},
-            "findings":[],"coverage":{"completeness":"partial","surfaces":[],"explicitExclusions":[],
+            "findings":[],"reviewState":{"surfaces":[],"explicitExclusions":[],
             "deferred":[{"id":"transport-only","reason":"No scan performed; verify checkpoint retention only."},
                 {"id":"resolved-candidate","candidateId":"resolved-candidate","reason":"Transport candidate awaiting an explicit disposition."}]}
         })).unwrap()).unwrap();
@@ -952,8 +1037,8 @@ try {
  const initial=JSON.parse(readFileSync(process.argv[3],'utf8'));
  const result=await send('tools/call',{name:'record_codex_security_scan_draft',arguments:initial});
  if(result.error||result.result?.isError)throw Error(JSON.stringify(result));
- const resolved={...initial,coverage:{...initial.coverage,
-   deferred:initial.coverage.deferred.filter(candidate=>candidate.id!=='resolved-candidate'),
+ const resolved={...initial,reviewState:{...initial.reviewState,
+   deferred:initial.reviewState.deferred.filter(candidate=>candidate.id!=='resolved-candidate'),
    surfaces:[{id:'resolved-surface',label:'Transport fixture',candidateId:'resolved-candidate',disposition:'rejected',notes:'This transport fixture is not a security finding.'}]}};
  const updated=await send('tools/call',{name:'record_codex_security_scan_draft',arguments:resolved});
  if(updated.error||updated.result?.isError)throw Error(JSON.stringify(updated));
@@ -990,7 +1075,8 @@ try {
             .any(|candidate| candidate["id"] == "resolved-candidate"));
         let scan_dir = PathBuf::from(value["scan"]["scanDir"].as_str().unwrap());
         value.as_object_mut().unwrap().remove("report");
-        std::fs::write(scan_dir.join("coverage.json"), "{}").unwrap();
+        // Since 0.8 review state is not a sealed file; tamper with a sealed one instead.
+        std::fs::write(scan_dir.join("findings.json"), "{}").unwrap();
         assert!(recover_terminal_artifacts(&mut run).is_err());
         assert_eq!(run.status, "canceled");
         std::fs::remove_dir_all(directory).unwrap();

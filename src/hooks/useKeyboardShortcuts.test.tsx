@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   docTabs: {} as Record<string, unknown>,
   browserTabs: {} as Record<string, unknown>,
   taskTabs: {} as Record<string, unknown>,
+  newSessionTabs: {} as Record<string, unknown>,
   shortcutOverrides: {} as Record<string, string>,
   splitNew: vi.fn(),
   newScratchTab: vi.fn(),
@@ -31,6 +32,7 @@ beforeEach(async () => {
   state.docTabs = {};
   state.browserTabs = {};
   state.taskTabs = {};
+  state.newSessionTabs = {};
   state.shortcutOverrides = {};
   terminalRegistry.getTerminal.mockReset();
   terminalRegistry.hasSelection.mockReset();
@@ -113,7 +115,7 @@ it("leaves conversation and dormant sessions without a registered terminal alone
   expect(terminalRegistry.selectAll).not.toHaveBeenCalled();
 });
 
-it.each(["docTabs", "browserTabs", "taskTabs"] as const)("leaves %s selection alone even with a stale active session", (tabs) => {
+it.each(["docTabs", "browserTabs", "taskTabs", "newSessionTabs"] as const)("leaves %s selection alone even with a stale active session", (tabs) => {
   const textarea = focusedTerminal();
   state.activeTabId = "other-tab";
   state[tabs] = { "other-tab": {} };

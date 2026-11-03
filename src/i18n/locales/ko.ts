@@ -501,6 +501,8 @@ const ko: typeof en = {
     `시작 시 ${flag} 를 추가해 모든 권한 확인을 건너뜁니다. 주의해서 사용하세요.`, // YOLO flag hint
   "settings.permViaEnvHint":
     "설정 파일을 통해 모든 권한 확인을 건너뜁니다 (CLI 플래그 없음). 이 세션 시작 시 적용됩니다.",
+  "settings.permViaAnswerHint":
+    "대화 보기의 모든 권한 요청을 자동으로 승인합니다. 작업 공간 밖에 영향을 주는 명령도 포함되므로 주의해서 사용하세요.",
   "settings.catGeneral": "일반", // General
   "settings.cliLabel": "셸 명령",
   "settings.cliInstall": "‘vela’ 명령 설치",
@@ -633,6 +635,7 @@ const ko: typeof en = {
   "changes.noChanges": "변경 사항 없음",
   "changes.unchangedLines": "변경되지 않은 $개 줄 표시",
   "changes.refresh": "새로 고침",
+  "changes.openFile": "파일 열기",
   "changes.notRepo": "Git 저장소가 아닙니다",
   "changes.selectFile": "파일을 선택하세요",
   "changes.binary": "바이너리 파일 — 줄 단위 diff 불가",
@@ -1070,6 +1073,7 @@ const ko: typeof en = {
   "tree.groupInfo": "그룹 정보", // Group Info
   "tree.collectionInfo": "컬렉션 정보", // Collection Info
   "tree.projectInfo": "프로젝트 정보", // Project Info
+  "tree.codeAudit": "코드 감사", // Code audit
   "info.branch": "브랜치", // Branch
   "info.path": "경로", // Path
   "info.recentCommits": "최근 커밋", // Recent Commits
@@ -1383,6 +1387,7 @@ const ko: typeof en = {
   "browser.loading": "로드 중…", // Loading…
   // Application-exit confirmation and dormant restored sessions.
   "quit.title": "VelaTerm을 종료할까요?", // Quit VelaTerm?
+  "quit.closeWindowTitle": "메인 창을 닫을까요?", // Close the main window?
   "quit.body": "실행 중인 터미널과 에이전트 세션이 모두 중지됩니다.", // Any running terminal and agent sessions will be stopped.
   "quit.remoteWindows": "열려 있는 원격 창도 함께 닫힙니다.", // Open remote windows will also be closed.
   "quit.saveWorkspace": "작업 공간 저장", // Save workspace
@@ -1434,6 +1439,22 @@ const ko: typeof en = {
   "agentVersion.update": (version) => `업데이트 가능: v${version}`,
   "agentVersion.upgrade": (version) => `버전 ${version}이(가) 출시되었습니다. 공식 업데이트 안내를 확인하세요.`,
   "agentVersion.checkFailed": "업데이트를 확인할 수 없습니다.",
+  "agentVersion.upgradeAction": (version) => `버전 ${version}이(가) 출시되었습니다. 클릭하면 업데이트합니다.`,
+  "agentUpdate.title": (label) => `${label} 업데이트`,
+  "agentUpdate.commandHint": "VelaTerm이 에이전트에 포함된 업데이트 명령을 실행합니다:",
+  "agentUpdate.confirm": "업데이트",
+  "agentUpdate.docs": "공식 안내",
+  "agentUpdate.running": "업데이트하는 중…",
+  "agentUpdate.background": "이 창을 닫아도 업데이트는 계속 진행됩니다.",
+  "agentUpdate.waiting": "출력을 기다리는 중…",
+  "agentUpdate.succeeded": (label, version) => `${label}이(가) v${version}(으)로 업데이트되었습니다.`,
+  "agentUpdate.unchanged": (version) => `명령은 끝났지만 설치된 버전은 여전히 v${version}입니다. 위의 출력을 확인하세요.`,
+  "agentUpdate.finished": "업데이트 명령이 끝났습니다. 위의 출력을 확인하세요.",
+  "agentUpdate.failed": "업데이트를 완료하지 못했습니다. 위의 출력을 확인하거나 명령을 복사해 터미널에서 실행하세요.",
+  "agentUpdate.timedOut": "업데이트가 15분을 넘겨 중단되었습니다. 명령을 복사해 터미널에서 실행하세요.",
+  "agentUpdate.restartHint": "이 대화는 아직 이전 버전으로 실행 중입니다. 에이전트를 재시작하면 새 버전으로 전환됩니다. 대화 내용은 유지되며, 다음 메시지를 보낼 때 새 버전이 시작됩니다.",
+  "agentUpdate.restart": "에이전트 재시작",
+  "agentUpdate.startFailed": "업데이트를 시작할 수 없습니다. 다시 시도하세요.",
   "agentInstall.title": (label) => `${label}이(가) 설치되어 있지 않습니다`, // {label} is not installed
   "agentInstall.desc": (label) =>
     `VelaTerm이 PATH에서 ${label}을(를) 찾지 못했습니다. 설치하면 이 세션을 시작할 수 있습니다.`, // couldn't find {label} on PATH
@@ -1442,6 +1463,10 @@ const ko: typeof en = {
   "agentInstall.dismiss": "직접 설치", // I'll do it myself
   "agentInstall.docs": "설치 문서", // Install docs
   "agentInstall.needsNode": "Node.js / npm 필요", // Requires Node.js / npm
+  "agentInstall.runInTerminal": "터미널에서 다음 명령을 실행해 설치한 다음 메시지를 다시 보내세요.",
+  "agentInstall.installing": "설치 중…", // Installing…
+  "agentInstall.installingDesc": "다운로드하여 설치하는 중입니다. 몇 분 정도 걸릴 수 있습니다.", // Downloading and installing. This can take a few minutes.
+  "agentInstall.installFailed": "설치를 완료하지 못했습니다. 터미널에서 다음 명령을 실행해 원인을 확인한 다음 메시지를 다시 보내세요.", // Installation didn't finish. Run this command in a terminal to see what went wrong, then send your message again.
   "agentInstall.afterInstall": "설치 후:", // After install:
   "agentInstall.pathSaved": (label: string) =>
     `${label} 실행 파일 경로를 설정에 저장했습니다:`, // executable path saved to Settings
@@ -2094,6 +2119,8 @@ const ko: typeof en = {
   "chat.attach.tooLarge": (name: string, mb: number) => `${name}은(는) ${mb} MB를 초과하여 첨부하지 않았습니다`,
   "chat.attach.unreadable": (name: string) => `${name}을(를) 읽지 못했습니다`,
   // ── Shell mode: `!` runs a command in the session's shell ──
+  "chat.findings.count": (n: number) => `문제 ${n}개 발견`,
+  "chat.findings.none": "발견된 문제가 없습니다",
   "chat.shell.title": "셸 명령",
   "chat.shell.running": "실행 중…",
   "chat.shell.cancel": "취소",
@@ -2210,6 +2237,13 @@ const ko: typeof en = {
   "chat.auth.claude.invalidCode": "이번 인증 페이지에 표시된 코드를 # 뒤의 내용까지 모두 붙여 넣으세요.",
   "chat.auth.claude.externalAuth": "API 키와 그 밖에 설정된 인증 방식은 변경되지 않습니다.",
   "chat.auth.open": "인증 페이지 열기",
+  "chat.auth.zcode.required": "현재 대화를 사용하려면 Z.ai 또는 BigModel 계정으로 ZCode에 로그인하세요.",
+  "chat.auth.zcode.pending": "인증 페이지를 열고 접근을 허용하세요. 로그인이 완료되면 이 화면이 자동으로 업데이트됩니다.",
+  "chat.auth.zcode.failed": "로그인을 완료하지 못했습니다. 다시 시도하세요.",
+  "chat.auth.zcode.zai": "Z.ai로 로그인",
+  "chat.auth.zcode.bigmodel": "BigModel로 로그인",
+  "chat.auth.zcode.noPlan.zai": "ZCode에 Z.ai 계정으로 로그인되어 있지만, 이 계정에는 사용할 수 있는 GLM Coding Plan이 없거나 요금제 사용량을 모두 소진했습니다. 요금제를 BigModel에서 구매했다면 ‘ZCode 계정’ 메뉴를 열고 ‘BigModel로 로그인’을 선택하세요.",
+  "chat.auth.zcode.noPlan.bigmodel": "ZCode에 BigModel 계정으로 로그인되어 있지만, 이 계정에는 사용할 수 있는 GLM Coding Plan이 없거나 요금제 사용량을 모두 소진했습니다. 요금제를 Z.ai에서 구매했다면 ‘ZCode 계정’ 메뉴를 열고 ‘Z.ai로 로그인’을 선택하세요.",
   "chat.resetCredits.label": (n: string) => `초기화 이용권: ${n}개`,
   "chat.resetCredits.title": "Codex 사용 한도 초기화 이용권",
   "chat.resetCredits.unknown": "초기화 이용권 수를 확인할 수 없습니다.",
@@ -2290,11 +2324,11 @@ const ko: typeof en = {
     `${seconds}초 후 다시 시도합니다(${attempt}/${max}): ${message}`,
   "chat.notify.dismiss": "닫기",
   "settings.completionMode": "명령어 자동 완성",
-  "settings.completionAuto": "자동 표시",
-  "settings.completionTab": "Tab으로 표시",
+  "settings.completionAuto": "인라인 + Tab",
+  "settings.completionTab": "Tab만",
   "settings.completionOff": "끄기",
   "settings.completionUnavailable": "설정을 불러오거나 저장할 수 없습니다.",
-  "settings.completionHint": "새로 연 Zsh, Bash 4+, Fish 및 PowerShell 터미널에 적용됩니다. CMD는 기본 Tab 동작을 유지합니다. Tab은 선택한 후보를 입력하고, Enter는 후보를 적용하지 않고 현재 명령을 실행합니다.",
+  "settings.completionHint": "Zsh에서 입력하는 동안 기록에서 가장 최근에 일치한 명령이 커서 뒤에 흐리게 표시되며, → 또는 End 키로 적용할 수 있습니다. Tab은 셸 기본 동작과 같습니다. 후보가 하나면 바로 입력하고, 후보에 공통된 부분이 있으면 먼저 채우며, 후보가 여러 개 남으면 목록을 표시합니다. 새로 연 Zsh, Bash 4+, Fish 및 PowerShell 터미널에 적용됩니다.",
 
   // Native texts of the mobile remote plugin (iOS, Android, download bridge). They reach the apps through native-text.json; {name} placeholders are replaced natively.
   "mobile.native.trustTitle": "원격 지문 확인",
@@ -2401,6 +2435,9 @@ const ko: typeof en = {
   "term.runs.logEmpty": "아직 출력이 없습니다",
   "chat.antigravity.placeholder": "Antigravity에 메시지를 보내세요. @파일로 파일을 참조할 수 있습니다",
   "chat.antigravity.textOnly": "Antigravity 대화 보기는 현재 텍스트 메시지만 지원합니다.",
+  "chat.textOnly": (agent: string) => `${agent} 대화 보기는 텍스트 메시지만 지원합니다.`,
+  "chat.signInRequired": (agent: string) => `대화 보기를 사용하려면 ${agent}에 로그인해야 합니다. 터미널 보기로 전환해 로그인한 다음 메시지를 다시 보내세요.`,
+  "chat.apiKeyRequired": "DeepSeek Harness를 사용하려면 API 키가 필요합니다. DEEPSEEK_API_KEY 환경 변수를 설정하거나 `dsh web`을 실행해 Models 페이지에서 키를 저장한 다음 메시지를 다시 보내세요.",
   "chat.antigravity.permissionsHint": "승인이 필요한 도구는 Antigravity 설정에서 미리 허용하거나 터미널 보기에서 사용해야 합니다.",
   "chat.antigravity.settingsHint": "모델, 추론 강도 또는 권한은 턴 사이에 변경하세요.",
   "chat.history.imageDownloadRequired": "이 이미지는 여기에서 열 수 없습니다. 원본을 다운로드하여 확인하세요.",
@@ -2473,6 +2510,38 @@ const ko: typeof en = {
   "artifact.cardOpenTitle": "이 세션 옆에 열기", // Open beside this session
   "artifact.cardKind": "HTML 페이지", // HTML page
   "artifact.frameTitle": (name: string) => `${name} 미리보기`, // Preview of ${name}
+  "newSession.menu": "새 세션…", // New Session…
+  "newSession.heading": "무엇을 작업할까요?", // What should we work on?
+  "newSession.modelsUnavailable": "모델 목록을 가져올 수 없습니다. 에이전트 기본 모델을 사용합니다.", // Model list unavailable. The agent’s default model will be used.
+  "newSession.terminalOnly": "터미널 보기만 지원", // Terminal view only
+  "newSession.conversationOnly": "대화 보기만 지원", // Conversation view only
+  "newSession.noConversationView": "이 에이전트는 대화 보기를 지원하지 않아 세션이 터미널 보기로 열립니다.", // This agent has no conversation view, so the session opens in the terminal view.
+  "newSession.noTerminalView": "이 에이전트는 터미널 보기를 지원하지 않아 세션이 대화 보기로 열립니다.", // This agent has no terminal view, so the session opens in the conversation view.
+  "newSession.taskLabel": "첫 작업", // First task
+  "newSession.placeholder": "작업을 설명하거나 질문하세요", // Describe a task or ask a question
+  "newSession.enterHint": "Enter로 시작 · Shift+Enter로 줄 바꿈", // Enter to start · Shift+Enter for a new line
+  "newSession.start": "시작", // Start
+  "newSession.starting": "시작하는 중…", // Starting…
+  "newSession.viewLabel": "보기", // View
+  "newSession.worktreeHint": "이 세션을 별도 폴더의 전용 브랜치에서 실행합니다.", // Runs this session on its own branch in a separate folder.
+  "newSession.worktreeNotRepo": "독립 워크트리를 만들려면 Git 저장소가 필요합니다.", // A separate worktree needs a Git repository.
+  "newSession.worktreeName": "워크트리 이름(선택)", // Worktree name (optional)
+  "newSession.worktreeNameHint": "새 폴더와 브랜치 이름에 사용됩니다. 비워 두면 세션 이름을 사용합니다.", // Names the new folder and branch. Leave empty to use the session name.
+  "artifact.comment": "댓글", // Comment
+  "artifact.commentTitle": "페이지 요소를 선택해 에이전트에게 댓글을 남깁니다", // Click elements in the page to leave comments for the agent
+  "artifact.pickHint": "페이지에서 요소를 클릭해 댓글을 답니다. Esc로 종료합니다.", // Click an element in the page to comment on it. Press Esc to stop.
+  "artifact.commentOn": (target: string) => `${target}에 댓글`, // Comment on ${target}
+  "artifact.commentPlaceholder": "여기를 어떻게 바꿀까요?", // What should change here?
+  "artifact.commentAdd": "댓글 추가", // Add comment
+  "artifact.commentMore": "다른 요소에 댓글", // Comment on another element
+  "artifact.commentRemove": "댓글 삭제", // Remove comment
+  "artifact.showInPage": "페이지에서 보기", // Show in page
+  "artifact.sendCommentsTitle": "이 페이지를 작성한 세션의 입력란에 댓글을 넣습니다", // Put these comments in the message box of the session that wrote this page
+  "artifact.copyCommentsTitle": "에이전트에게 보낼 수 있도록 댓글을 복사합니다", // Copy these comments to send to an agent
+  "artifact.options": "시안", // Options
+  "artifact.useOption": (id: string) => `${id} 사용`, // Use ${id}
+  "artifact.useOptionTitle": "이 시안을 유지해 달라는 메시지를 이 페이지를 작성한 세션의 입력란에 넣습니다", // Put a message asking to keep this option in the message box of the session that wrote this page
+  "artifact.useOptionCopyTitle": "이 시안을 유지해 달라는 메시지를 복사합니다", // Copy a message asking to keep this option
 };
 
 export default ko;

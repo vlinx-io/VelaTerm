@@ -14,7 +14,7 @@ const openSession = vi.fn(), loadTree = vi.fn(), addSession = vi.fn();
 beforeEach(() => {
   vi.clearAllMocks();
   loadTree.mockResolvedValue(undefined);
-  useTermStore.setState({ pendingSpawns: [], spawnReceipts: {}, notifyEnabled: false, loadTree, openSession, addSession });
+  useTermStore.setState({ pendingSpawns: [], spawnReceipts: {}, notifyEnabled: false, spawnConfirm: true, loadTree, openSession, addSession });
 });
 
 describe("durable spawn decisions", () => {
@@ -63,6 +63,21 @@ describe("durable spawn decisions", () => {
     await useTermStore.getState().handleSpawnRequest({ ...req, noConfirm: true });
     expect(useTermStore.getState().pendingSpawns).toEqual([req]);
     expect(ipc.resolveSpawn).not.toHaveBeenCalled(); expect(addSession).not.toHaveBeenCalled();
+  });
+  it.each([{ noConfirm: true, spawnConfirm: true }, { noConfirm: false, spawnConfirm: false }])(
+    "raises no card while an automatic launch is created (%o)", async ({ noConfirm, spawnConfirm }) => {
+      useTermStore.setState({ spawnConfirm });
+      ipc.spawnRequest.mockResolvedValue(receipt({ decision: "confirmed" }));
+      ipc.spawnRequests.mockResolvedValue([]);
+      await useTermStore.getState().handleSpawnRequest({ ...req, noConfirm });
+      expect(useTermStore.getState().pendingSpawns).toEqual([]);
+      await useTermStore.getState().applySpawnReceipt(receipt({ decision: "confirmed", state: "failed", error: "boom" }));
+      expect(useTermStore.getState().pendingSpawns).toEqual([req]);
+    });
+  it("keeps an open card while the confirmed launch is still being created", async () => {
+    useTermStore.setState({ pendingSpawns: [req] });
+    await useTermStore.getState().applySpawnReceipt(receipt({ decision: "confirmed" }));
+    expect(useTermStore.getState().pendingSpawns).toEqual([req]);
   });
   it("retains an event when the receipt read fails", async () => {
     ipc.spawnRequest.mockRejectedValue(new Error("offline"));

@@ -492,7 +492,9 @@ pub fn permission_flag(kind: SessionKind, mode: Option<&str>) -> Option<&'static
         // Grok Build's documented always-approve mode bypasses tool confirmations.
         SessionKind::Grok => Some("--always-approve"),
         // OpenCode has no equivalent flag, Pi has no confirmation mechanism, and Terminal/Browser do not apply.
-        SessionKind::Opencode | SessionKind::Pi | SessionKind::Terminal | SessionKind::Browser => {
+        // DeepSeek Harness and ZCode never run in a terminal; their conversation view sends the mode itself.
+        SessionKind::Opencode | SessionKind::Pi | SessionKind::Deepseek | SessionKind::Zcode | SessionKind::Terminal
+            | SessionKind::Browser => {
             None
         }
     }
@@ -991,8 +993,9 @@ pub fn prepare_with_args_capabilities(
     let shell = shell_kind(shell_path);
     let resume = resume_id.and_then(valid_resume_id);
     let mut spawn = match kind {
-        // Browser nodes should never reach PTY launch; handle them defensively like Terminal sessions.
-        SessionKind::Terminal | SessionKind::Browser => AgentSpawn {
+        // Browser nodes should never reach PTY launch; handle them defensively like Terminal sessions. DeepSeek
+        // Harness and ZCode have no terminal interface, and the PTY manager refuses them before this point.
+        SessionKind::Terminal | SessionKind::Browser | SessionKind::Deepseek | SessionKind::Zcode => AgentSpawn {
             env: Vec::new(),
             launch: None,
         },

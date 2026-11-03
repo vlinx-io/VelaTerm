@@ -2,7 +2,7 @@
 
 Created: 2026-09-09
 
-Updated: 2026-09-25 10:21
+Updated: 2026-11-01 15:46
 
 VelaTerm keeps the complete list of Claude models on velaterm.com, so new Claude models can appear in VelaTerm without an app update. This page explains where the model lists come from, how the Claude catalog stays up to date, and how to check its state.
 
@@ -10,7 +10,7 @@ VelaTerm keeps the complete list of Claude models on velaterm.com, so new Claude
 
 The same model list for each agent is used when you create a session or a child session, when you start a code audit, and when you organize a session into the knowledge base.
 
-- **Claude:** the catalog from velaterm.com, combined with the models the local Claude CLI reports and any models configured in Claude's `settings.json`. The models the CLI reports never replace the complete catalog. A model listed in the catalog is not necessarily available to your account.
+- **Claude:** the catalog from velaterm.com, combined with the models the local Claude CLI reports and any models configured in Claude's `settings.json`. A model in the list bundled with this version of VelaTerm that the website catalog does not yet include is added too, in its bundled position, as long as your Claude CLI is new enough for it; the website catalog's wording is used for models both list. The models the CLI reports never replace the complete catalog. A model listed in the catalog is not necessarily available to your account.
 - **Codex:** the list that the local Codex app server reports for your account. The website catalog is not used for Codex.
 - **OpenCode, Grok, Crush, Antigravity, Cursor, Pi, OMP and Kiro:** the list printed by the agent's own CLI.
 - **Kimi:** a fixed set of models.

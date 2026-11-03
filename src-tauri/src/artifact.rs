@@ -332,7 +332,40 @@ fn csp(source: &str, net: bool) -> String {
 /// the scroll position a reload passed back in the query. It posts messages and accepts none.
 const BOOTSTRAP: &str = r#"<script>(function(){var S="vlx-artifact";function send(m){try{m.source=S;parent.postMessage(m,"*")}catch(e){}}function txt(a){try{return Array.prototype.map.call(a,function(x){if(x instanceof Error)return x.stack||String(x);if(x&&typeof x==="object"){try{return JSON.stringify(x)}catch(e){return String(x)}}return String(x)}).join(" ").slice(0,2000)}catch(e){return""}}["error","warn"].forEach(function(l){var o=console[l];console[l]=function(){send({type:"console",level:l,text:txt(arguments)});return o.apply(console,arguments)}});addEventListener("error",function(e){var t=e.target;if(t&&t!==window&&(t.src||t.href)){send({type:"console",level:"error",text:"Failed to load "+String(t.src||t.href).slice(0,300)});return}send({type:"error",text:String(e.message||"Error").slice(0,2000),line:e.lineno|0})},true);addEventListener("unhandledrejection",function(e){send({type:"error",text:txt([e.reason]),line:0})});document.addEventListener("securitypolicyviolation",function(e){send({type:"blocked",uri:String(e.blockedURI||"").slice(0,300),directive:String(e.effectiveDirective||e.violatedDirective||"")})});var q=/[?&]__vlx_scroll=(\d+)/.exec(location.search),pend=0;addEventListener("scroll",function(){if(pend)return;pend=setTimeout(function(){pend=0;send({type:"scroll",y:scrollY|0})},250)},{passive:true});if(q)addEventListener("load",function(){scrollTo(0,+q[1])});send({type:"ready"})})();</script>"#;
 
-/// Insert the policy as a `<meta>` tag, then [`BOOTSTRAP`], as early as possible without pushing the doctype
+/// Review tools the preview drives from outside: picking an element to comment on, numbered pins on commented
+/// elements, scrolling to an element or a design option, and listing the page's design options (elements marked
+/// `data-vlx-option="<id>"`). It accepts messages only from the parent window and only in its own source tag;
+/// they change the overlay it draws (marked `data-vlx-ui`) and the scroll position, nothing in the page itself.
+const REVIEW: &str = r##"<script>(function(){
+var S="vlx-artifact",H="vlx-artifact-host",ACC="#10b981";
+function send(m){try{m.source=S;parent.postMessage(m,"*")}catch(e){}}
+var picking=false,hover=null,box=null,marks=[],pins=[],layer=null;
+function el(tag,css){var e=document.createElement(tag);e.style.cssText=css;e.setAttribute("data-vlx-ui","");return e}
+function root(){var host=document.body||document.documentElement;if(!layer)layer=el("div","position:fixed;inset:0;pointer-events:none;z-index:2147483647");if(!layer.isConnected)host.appendChild(layer);return layer}
+function ours(n){return !!(n&&n.closest&&n.closest("[data-vlx-ui]"))}
+function sel(n){var parts=[];while(n&&n.nodeType===1&&n!==document.documentElement&&parts.length<6){if(n.id&&document.querySelectorAll("#"+CSS.escape(n.id)).length===1){parts.unshift("#"+CSS.escape(n.id));break}var t=n.tagName.toLowerCase(),p=n.parentElement;if(p){var same=Array.prototype.filter.call(p.children,function(c){return c.tagName===n.tagName});if(same.length>1)t+=":nth-of-type("+(same.indexOf(n)+1)+")"}parts.unshift(t);n=p}return parts.join(" > ")}
+function find(s){try{return s?document.querySelector(s):null}catch(e){return null}}
+function optOf(n){var o=n&&n.closest&&n.closest("[data-vlx-option]");return o?String(o.getAttribute("data-vlx-option")).trim().slice(0,40):null}
+function label(n){var t=(n.innerText||n.textContent||"").replace(/\s+/g," ").trim();if(!t)t=n.getAttribute("aria-label")||n.getAttribute("alt")||n.getAttribute("placeholder")||"";return t.slice(0,120)}
+function place(b,n,pad){var r=n.getBoundingClientRect();b.style.left=(r.left-pad)+"px";b.style.top=(r.top-pad)+"px";b.style.width=(r.width+pad*2)+"px";b.style.height=(r.height+pad*2)+"px"}
+function showHover(n){if(!box){box=el("div","position:fixed;border:2px solid "+ACC+";background:rgba(16,185,129,.08);border-radius:4px");root().appendChild(box)}box.style.display=n?"block":"none";if(n)place(box,n,2)}
+function move(e){var n=e.target;if(ours(n)||n===document.documentElement||n===document.body){hover=null;showHover(null);return}hover=n;showHover(n)}
+function click(e){e.preventDefault();e.stopPropagation();var n=hover||e.target;if(!n||ours(n)||n.nodeType!==1)return;send({type:"picked",selector:sel(n).slice(0,500),tag:n.tagName.toLowerCase(),text:label(n),option:optOf(n)})}
+function block(e){e.preventDefault();e.stopPropagation()}
+function key(e){if(e.key==="Escape"){e.preventDefault();send({type:"pickCancel"})}}
+function setPick(on){if(on===picking)return;picking=on;var f=on?addEventListener:removeEventListener;f("mousemove",move,true);f("click",click,true);f("mousedown",block,true);f("mouseup",block,true);f("keydown",key,true);document.documentElement.style.cursor=on?"crosshair":"";if(!on){hover=null;showHover(null)}}
+function drawPins(){pins.forEach(function(p){p.remove()});pins=[];marks.forEach(function(m){var n=find(m.selector);if(!n)return;var r=n.getBoundingClientRect();if(!m.n){var o=el("div","position:fixed;border:2px dashed "+ACC+";border-radius:4px");place(o,n,2);root().appendChild(o);pins.push(o)}var p=el("div","position:fixed;min-width:18px;height:18px;padding:0 5px;box-sizing:border-box;border-radius:9px;background:"+ACC+";color:#fff;font:600 11px/18px system-ui,sans-serif;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.3)");p.textContent=m.n?String(m.n):"+";p.style.left=Math.max(2,r.right-10)+"px";p.style.top=Math.max(2,r.top-9)+"px";root().appendChild(p);pins.push(p)})}
+var raf=0;function redraw(){if(raf)return;raf=requestAnimationFrame(function(){raf=0;if(marks.length)drawPins();if(hover&&box)place(box,hover,2)})}
+addEventListener("scroll",redraw,true);addEventListener("resize",redraw);
+function options(){var seen={},list=[];Array.prototype.forEach.call(document.querySelectorAll("[data-vlx-option]"),function(n){var id=String(n.getAttribute("data-vlx-option")||"").trim().slice(0,40);if(!id||seen[id])return;seen[id]=1;var h=n.querySelector("[data-vlx-option-label],h1,h2,h3,h4,figcaption");var l=n.getAttribute("data-vlx-option-label")||(h?(h.getAttribute("data-vlx-option-label")||h.textContent||""):"");list.push({id:id,label:l.replace(/\s+/g," ").trim().slice(0,80)})});return list.slice(0,40)}
+var last="";function report(){var o=options(),k=JSON.stringify(o);if(k!==last){last=k;send({type:"options",options:o})}}
+var mt=0;function watch(){report();if(window.MutationObserver)new MutationObserver(function(ms){if(ms.every(function(m){return ours(m.target)}))return;clearTimeout(mt);mt=setTimeout(function(){report();if(marks.length)drawPins()},300)}).observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:["data-vlx-option","data-vlx-option-label"]})}
+function reveal(n){if(!n)return;var r=n.getBoundingClientRect();scrollTo({top:scrollY+r.top-24,left:scrollX+r.left-24,behavior:"smooth"});var f=el("div","position:fixed;border:2px solid "+ACC+";border-radius:6px;box-shadow:0 0 0 4px rgba(16,185,129,.25);transition:opacity .6s");root().appendChild(f);var t0=Date.now();(function tick(){place(f,n,4);if(Date.now()-t0<900)requestAnimationFrame(tick);else{f.style.opacity="0";setTimeout(function(){f.remove()},700)}})()}
+addEventListener("message",function(e){if(e.source!==parent)return;var m=e.data;if(!m||m.source!==H)return;if(m.type==="pick")setPick(!!m.on);else if(m.type==="marks"&&Array.isArray(m.marks)){marks=m.marks.slice(0,100).filter(function(x){return x&&typeof x.selector==="string"});drawPins()}else if(m.type==="reveal"){if(typeof m.option==="string")reveal(document.querySelector('[data-vlx-option="'+CSS.escape(m.option)+'"]'));else if(typeof m.selector==="string")reveal(find(m.selector))}});
+if(document.readyState==="loading")addEventListener("DOMContentLoaded",watch);else watch();
+})();</script>"##;
+
+/// Insert the policy as a `<meta>` tag, then [`BOOTSTRAP`] and [`REVIEW`], as early as possible without pushing the doctype
 /// off the first line, which would drop the page into quirks mode. The meta copy of the policy is a backstop
 /// for proxies that drop response headers; both copies are identical, so enforcing both changes nothing.
 fn inject_bootstrap(body: &[u8], policy: &str) -> Vec<u8> {
@@ -348,10 +381,11 @@ fn inject_bootstrap(body: &[u8], policy: &str) -> Vec<u8> {
     };
     let at = after_tag(b"<head").or_else(|| after_tag(b"<html")).or_else(|| after_tag(b"<!doctype")).unwrap_or(0);
     let meta = format!("<meta http-equiv=\"Content-Security-Policy\" content=\"{policy}\">");
-    let mut out = Vec::with_capacity(body.len() + meta.len() + BOOTSTRAP.len());
+    let mut out = Vec::with_capacity(body.len() + meta.len() + BOOTSTRAP.len() + REVIEW.len());
     out.extend_from_slice(&body[..at]);
     out.extend_from_slice(meta.as_bytes());
     out.extend_from_slice(BOOTSTRAP.as_bytes());
+    out.extend_from_slice(REVIEW.as_bytes());
     out.extend_from_slice(&body[at..]);
     out
 }

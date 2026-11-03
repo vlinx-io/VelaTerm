@@ -148,6 +148,11 @@ export interface WindowCapability {
 export interface QuitRequest {
   /** Open windows connected to another machine or workspace; they close together with the application. */
   remoteWindows: number;
+  /**
+   * Only the main window closes and the application keeps running, as in VS Code: on macOS it stays in the
+   * Dock, elsewhere remote windows are still open. Local sessions stop either way.
+   */
+  closeWindow: boolean;
 }
 
 /**

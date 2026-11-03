@@ -76,7 +76,7 @@ export const applyLaunchArgs = (
 
 
 export interface LaunchModelContext { parentSessionId?: string | null; cwd?: string | null; inheritArgs?: boolean }
-export interface LaunchModel { id: string; label: string; effortLevels: string[] }
+export interface LaunchModel { id: string; label: string; effortLevels: string[]; description?: string; largeContext?: boolean }
 export interface LaunchModelCatalog { models: LaunchModel[]; effortLevels: string[] }
 export const launchModels = (kind: string, context: LaunchModelContext) =>
   invoke<LaunchModelCatalog>("launch_models", { kind, context });
@@ -91,6 +91,17 @@ export interface AgentSessionContext {
 export interface NewAgentSessionRequest extends AgentSessionSelection {
   requestId: string;
   context: AgentSessionContext;
+  /** Choices from the New Session tab; omitted values keep the agent's defaults. */
+  engine?: import("../types").SessionEngine;
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
+  /** Run the session in a new worktree branched from the location's folder. */
+  worktree?: boolean;
+  /** Name the new worktree's folder and branch are derived from; omitted uses the session name. */
+  worktreeName?: string;
+  /** First task: sent as the first message of a conversation; a terminal session's client passes it at launch. */
+  prompt?: string;
 }
 export interface AgentSessionPreparation {
   context: AgentSessionContext;

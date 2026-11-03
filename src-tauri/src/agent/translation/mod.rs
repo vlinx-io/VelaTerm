@@ -521,7 +521,7 @@ pub fn dispatch(app: &AppCtx,cmd: &str,args: &Value,editable: bool) -> Result<Va
             Ok(json!(send(app,sid()?,args["text"].as_str().ok_or("translation:structure")?,images,args["behavior"].as_str(),args["messageId"].as_str().ok_or("translation:identity")?)?))},
         "translation_cancel"=>{cancel(app,sid()?,args["messageId"].as_str().ok_or("translation:identity")?)?;Ok(Value::Null)},
         "translation_reply"=>{reply(app,sid()?,args["rowId"].as_str().ok_or("translation:message")?)?;Ok(Value::Null)},
-        "translation_question"=>questions::question(app,sid()?,args["requestId"].as_str().ok_or("translation:identity")?),
+        "translation_question"=>questions::question(app,sid()?,args["requestId"].as_str().ok_or("translation:identity")?,args["manual"]==true),
         "translation_test"=>{let cfg=config::read_config(&app.db().conn.lock().unwrap())?;engine_ready(app,&cfg)?;
             Ok(json!(translate(app,&cfg,"en","de","Connection test.",&format!("connection-test-{}",uuid::Uuid::new_v4()))?))},
         _=>Err("translation:command".into()),

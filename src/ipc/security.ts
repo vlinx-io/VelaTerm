@@ -1,4 +1,3 @@
-import type { LaunchModel } from "./launch";
 import { invoke } from "./transport";
 import { getLocale } from "../i18n";
 export interface AuditRequest { projectId: string; agent: string; scope: string; path: string; language?: string; model?: string | null; effort?: string | null }
@@ -29,7 +28,9 @@ export interface AuditRun extends AuditRequest {
     failureDetail?: string;
     artifactReadError?: string;
   evidenceError?: string | null;
-    coverage?: { completeness: string; deferred: {id: string; reason: string}[] };
+    coverage?: { completeness?: string; deferred: {id: string; reason: string}[] };
+    /** Derived by the backend; absent on records imported before upstream 0.8 dropped `completeness`. */
+    coverageComplete?: boolean;
   } | null;
 }
 export type AuditSummary = Pick<AuditRun,"id"|"agent"|"agentLabel"|"status"|"phase"|"createdAt"|"scope"|"path"|"model"|"effort"> & {findingCount: number};
@@ -41,4 +42,3 @@ export const auditStart = (request: AuditRequest) => invoke<AuditRun>("security_
 export const auditCancel = (id: string) => invoke<AuditRun>("security_cancel",{id});
 export const auditExport = (id: string) => invoke<{markdown: string; run: AuditRun}>("security_export",{id});
 
-export const auditModels = (agent: string) => invoke<LaunchModel[]>("security_models", {agent});

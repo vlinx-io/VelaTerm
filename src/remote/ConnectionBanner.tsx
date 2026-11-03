@@ -9,7 +9,7 @@
 //! Manual reconnect also emits `vlx://ssh-reconnect` for the host, since remote contexts cannot invoke
 //! app commands directly. After the tunnel returns, forceReconnect replaces any half-open old socket.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useT } from "../i18n";
 import {
   emitNative,
@@ -34,13 +34,16 @@ export function ConnectionBanner() {
   // Disable the manual action and show progress until the attempt either connects or fails again.
   const [retrying, setRetrying] = useState(false);
   const [tunnel, setTunnel] = useState<TunnelState>(null);
+  // Read by the WebSocket listener, which is subscribed once and would otherwise see a stale value.
+  const tunnelRef = useRef<TunnelState>(null);
 
   useEffect(() => {
     if (isTauri) return;
     return wsClient.onConnState((state, attempts) => {
       setVisible(state === "offline" && attempts >= SHOW_AFTER_ATTEMPTS);
-      // Any resulting status settles the manual attempt, whether connected or disconnected again.
-      setRetrying(false);
+      // Any resulting status settles the manual attempt, whether connected or disconnected again. With
+      // the tunnel down, the socket retry fails at once; the tunnel event settles the attempt instead.
+      if (tunnelRef.current === null) setRetrying(false);
     });
   }, []);
 
@@ -59,10 +62,12 @@ export function ConnectionBanner() {
             if (payload.session !== remoteSshSession) return;
             const s = payload.state;
             if (s === "up") {
+              tunnelRef.current = null;
               setTunnel(null);
               // Replace the old potentially half-open socket immediately after tunnel recovery.
               wsClient.forceReconnect();
             } else if (s === "reconnecting" || s === "down") {
+              tunnelRef.current = s;
               setTunnel(s);
             }
             setRetrying(false);
@@ -91,7 +96,8 @@ export function ConnectionBanner() {
         try {
           await emitNative(remoteConnectionKind === "wsl" ? "vlx://wsl-reconnect" : "vlx://ssh-reconnect", { session: remoteSshSession });
         } catch {
-          /* Continue with WebSocket reconnection if emitting fails. */
+          // Continue with WebSocket reconnection if emitting fails; no tunnel event will settle it then.
+          if (tunnelRef.current !== null) setRetrying(false);
         }
       })();
     }

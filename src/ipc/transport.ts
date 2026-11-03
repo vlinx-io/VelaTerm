@@ -181,7 +181,7 @@ export function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<
 let pendingDiagnostics = 0;
 
 /** Submit only fixed diagnostic events. Delivery failure never re-enters request error logging. */
-export function diagnosticEvent(event: "request" | "shell_switch" | "restart" | "pty_output" | "ws_state" | "pty_spawn" | "input_latency", fields: Record<string, unknown>): void {
+export function diagnosticEvent(event: "request" | "shell_switch" | "restart" | "pty_output" | "ws_state" | "pty_spawn" | "input_latency" | "startup_ui", fields: Record<string, unknown>): void {
   if (pendingDiagnostics >= 24 || (!isTauri && !wsClient.isDiagnosticReady())) return;
   pendingDiagnostics++;
   void invokeInner("diagnostic_event", { operationId: diagnosticOperation(fields.sessionId), ...fields, event })

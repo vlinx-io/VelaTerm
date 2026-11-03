@@ -163,14 +163,83 @@ pub fn error_message(error: &Value) -> Option<String> {
     if name == "MessageAbortedError" || error.get("type").and_then(Value::as_str)==Some("aborted") {
         return None;
     }
-    let message = error
+    let mut message = error
         .pointer("/data/message")
         .or_else(||error.get("message"))
         .and_then(Value::as_str)
         .filter(|m| !m.trim().is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| error.to_string());
+    // "Go usage limit exceeded" alone does not say which of the 5-hour, weekly and monthly limits it was.
+    if let Some(limit) = limit_name(error).filter(|l| !message.to_ascii_lowercase().contains(&l.to_ascii_lowercase())) {
+        message = format!("{message} ({limit} limit)");
+    }
     Some(if name.is_empty() { message } else { format!("{name}: {message}") })
+}
+
+/// The provider's error body: v2 keeps it under `response.body`, v1 under `data.responseBody`.
+fn response_body(error: &Value) -> Option<Value> {
+    let raw = error.pointer("/response/body").or_else(|| error.pointer("/data/responseBody"))?.as_str()?;
+    serde_json::from_str(raw).ok()
+}
+
+/// Which subscription limit refused the request, as OpenCode Go names it: `5 hour`, `weekly`, `monthly`.
+fn limit_name(error: &Value) -> Option<String> {
+    response_body(error)?.pointer("/metadata/limitName")?.as_str()
+        .map(str::trim).filter(|l| !l.is_empty()).map(str::to_string)
+}
+
+/// Whether the error is a subscription usage limit rather than a short-term rate limit the next message
+/// can retry. OpenCode v2 types it `provider.quota`; v1 passes the provider's text through, which says
+/// "usage limit" ("5-hour usage limit reached", "Go usage limit exceeded").
+pub fn is_usage_limit(error: &Value) -> bool {
+    if error.get("type").and_then(Value::as_str) == Some("provider.quota") {
+        return true;
+    }
+    let text = [error.pointer("/data/message"), error.get("message"), error.pointer("/data/responseBody")]
+        .into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(" ").to_ascii_lowercase();
+    text.contains("usage limit") || text.contains("usagelimit")
+}
+
+/// When a usage limit resets, when the provider said so ("Resets in 2hr 43min", "Resets in 10 days").
+/// OpenCode Go stopped including this in its v2 errors, which then report no reset.
+pub fn usage_limit_reset(error: &Value, now_secs: i64) -> Option<super::auto_continue::Reset> {
+    let message = error.pointer("/data/message").or_else(|| error.get("message"))?.as_str()?;
+    let lower = message.to_ascii_lowercase();
+    let after = &lower[lower.find("resets in")? + "resets in".len()..];
+    let mut seconds = 0i64;
+    let mut number: Option<i64> = None;
+    for token in after.split(|c: char| c.is_whitespace() || c == ',').filter(|t| !t.is_empty()) {
+        let digits: String = token.chars().take_while(char::is_ascii_digit).collect();
+        let unit = &token[digits.len()..];
+        if !digits.is_empty() {
+            number = digits.parse().ok();
+        }
+        let Some(n) = number else { break };
+        let unit = unit.trim_end_matches('.');
+        let scale = match unit {
+            "" => continue,
+            u if u.starts_with('d') => 86_400,
+            u if u.starts_with('h') => 3_600,
+            u if u.starts_with('m') => 60,
+            u if u.starts_with('s') => 1,
+            _ => break,
+        };
+        seconds += n * scale;
+        number = None;
+    }
+    if seconds == 0 {
+        return None;
+    }
+    let name = limit_name(error).unwrap_or_else(|| lower.clone());
+    let limit_type = if name.contains("5 hour") || name.contains("5-hour") {
+        Some("five_hour".to_string())
+    } else if name.contains("week") || name.contains("7 day") || name.contains("7-day") {
+        Some("seven_day".to_string())
+    } else {
+        None
+    };
+    Some(super::auto_continue::Reset { resets_at: now_secs + seconds, limit_type })
 }
 
 /// Shell turns store a synthetic marker instead of the command the person typed. Recover the command
@@ -704,6 +773,28 @@ mod tests {
             error_message(&json!({"name":"APIError","data":{"message":"quota"}})).as_deref(),
             Some("APIError: quota")
         );
+    }
+
+    #[test]
+    fn usage_limits_are_recognised_with_their_window_and_reset() {
+        // OpenCode 2.0.32 refusing a request on an exhausted OpenCode Go 5-hour window.
+        let v2 = json!({"type":"provider.quota","message":"Go usage limit exceeded","status":429,"response":{"body":
+            "{\"type\":\"error\",\"error\":{\"type\":\"GoUsageLimitError\",\"message\":\"Go usage limit exceeded\"},\"metadata\":{\"limitName\":\"5 hour\"}}"}});
+        assert!(is_usage_limit(&v2));
+        assert_eq!(error_message(&v2).as_deref(), Some("Go usage limit exceeded (5 hour limit)"));
+        assert_eq!(usage_limit_reset(&v2, 1000), None, "v2 says no reset");
+
+        // OpenCode 1.x passed the provider's text through, which still said when the limit resets.
+        let five_hour = json!({"name":"APIError","data":{"message":"5-hour usage limit reached. Resets in 2hr 43min. To continue using this model now, enable usage from your available balance"}});
+        assert!(is_usage_limit(&five_hour));
+        assert_eq!(usage_limit_reset(&five_hour, 1000), Some(super::super::auto_continue::Reset {
+            resets_at: 1000 + 2 * 3600 + 43 * 60, limit_type: Some("five_hour".into()),
+        }));
+        let monthly = json!({"name":"APIError","data":{"message":"Monthly usage limit reached. Resets in 10 days. To continue using this model now"}});
+        assert_eq!(usage_limit_reset(&monthly, 0).map(|r| (r.resets_at, r.limit_type)), Some((10 * 86_400, None)));
+
+        // A short-term rate limit is retried by the next message, not waited out.
+        assert!(!is_usage_limit(&json!({"name":"APIError","data":{"message":"Error from provider (Console Go): Provider rate limit exceeded"}})));
     }
 
     #[test]

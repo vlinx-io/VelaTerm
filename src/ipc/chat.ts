@@ -399,7 +399,8 @@ export interface ChatAuthState {
   userCode?: string;
 }
 
-export const chatAuthStart = (sessionId: string) => invoke<void>("chat_auth_start", { sessionId });
+/** `provider` picks ZCode's account provider (`zai` or `bigmodel`); Claude and Codex have one each. */
+export const chatAuthStart = (sessionId: string, provider?: "zai" | "bigmodel") => invoke<void>("chat_auth_start", { sessionId, provider });
 export const chatAuthLogout = (sessionId: string) => invoke<void>("chat_auth_logout", { sessionId });
 export const chatAuthSubmit = (sessionId: string, code: string) => invoke<void>("chat_auth_submit", { sessionId, code });
 export const chatAuthCancel = (sessionId: string) => invoke<void>("chat_auth_cancel", { sessionId });
@@ -638,7 +639,7 @@ export type ChatEvent =
    * the view was closed, the session archived, or the engine switched — so there is nothing to report.
    */
   | { type: "exited"; code: number; stderr: string; released?: boolean }
-  | { type: "error"; message: string }
+  | { type: "error"; message: string; /** Text of messages that were waiting and will not be sent. */ unsent?: string[] }
   | { type: "storagePressure"; message: string }
   | { type: "extras"; extras: ChatExtras }
   /** The wait for a usage limit to reset began, moved, or ended; `reason` says why it ended unsent. */
@@ -1173,7 +1174,7 @@ export async function downloadCompleteChatDetail(row: ChatRow,field: ChatDetailF
   document.body.appendChild(link);link.click();link.remove();
 }
 
-export interface ChatSearchHit { rowId: string; snippet: string; detailRef?: string; chunkSequence?: number; offset: number; }
+export interface ChatSearchHit { rowId: string; snippet: string; detailRef?: string; chunkSequence?: number; offset: number; /** Literal strings the full-text index matched; absent for literal-scan hits. */ matched?: string[]; }
 export interface ChatSearchPage { historyGeneration?: string; hits: ChatSearchHit[]; jobId?: string; nextCursor: string | null; coverage: "complete" | "partial" | "error"; scannedBytes: number; scannedRows?: number; }
 export function chatSearch(sessionId: string, query: string, cursor?: string): Promise<ChatSearchPage> {
   return invoke("chat_search", { sessionId, query, cursor });

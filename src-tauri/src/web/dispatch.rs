@@ -333,11 +333,28 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         "agent_version" => to_value(crate::agent::version::for_session(app,
             &req_str(args, "sessionId")?, args.get("checkUpdates").and_then(Value::as_bool).unwrap_or(false),
         )?),
+        // Both resolve the session's executable; start spawns the self-update and returns at once.
+        "agent_update_status" => to_value(crate::agent::update::status(app, &req_str(args, "sessionId")?)?),
+        "agent_update_start" => to_value(crate::agent::update::start(app, &req_str(args, "sessionId")?)?),
         // Installation-path discovery performs filesystem I/O and an npm-prefix subprocess. Dispatch
         // already runs in desktop_call's blocking pool or a WebSocket worker, never the main thread.
         "agent_locate_bin" => to_value(crate::agent::install::locate_installed_bin(&req_str(
             args, "agent",
         )?)),
+        // One-click install: the typed command leaves a marker in the data directory once it returns, and
+        // completion polling checks for it before trusting a located binary. Both are small filesystem calls.
+        "agent_install_begin" => to_value(crate::agent::install::begin_install(
+            &app.data_dir()?, &req_str(args, "agent")?,
+        )),
+        "agent_install_finished" => to_value(crate::agent::install::install_finished(
+            &app.data_dir()?, &req_str(args, "token")?,
+        )),
+        // An agent without a terminal interface has no shell to type its install into, so the backend runs
+        // it and returns once it exits. Downloads take minutes; this is already off the main thread.
+        "agent_install_run" => {
+            crate::agent::install::run_install(&app.data_dir()?, &req_str(args, "agent")?)?;
+            Ok(Value::Null)
+        }
         // Model enumeration spawns the agent CLI and waits for it, so it belongs on the same blocking
         // path as agent_locate_bin rather than on the main thread.
         "session_permission_state" => to_value(crate::agent::permission_state::read(app, &req_str(args, "sessionId")?)?),
@@ -835,7 +852,7 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
                 personality.as_deref(),
             )?)
         }
-        "chat_auth_start" => to_value(core::chat_auth_start(app, &req_str(args, "sessionId")?)?),
+        "chat_auth_start" => to_value(core::chat_auth_start(app, &req_str(args, "sessionId")?, args.get("provider").and_then(Value::as_str))?),
         "chat_auth_logout" => to_value(core::chat_auth_logout(app, &req_str(args, "sessionId")?)?),
         "chat_auth_submit" => to_value(core::chat_auth_submit(app, &req_str(args, "sessionId")?, &req_str(args, "code")?)?),
         "chat_auth_cancel" => to_value(core::chat_auth_cancel(app, &req_str(args, "sessionId")?)?),
@@ -1022,7 +1039,10 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             }
             let idle_bounded=if prefer {
                 let kind=crate::db::repo::get_session_kind(&app.db().conn.lock().unwrap(),&sid)?;
-                matches!(kind,Some(SessionKind::Codex|SessionKind::Claude|SessionKind::Pi|SessionKind::Omp|SessionKind::Antigravity|SessionKind::Opencode|SessionKind::Kiro|SessionKind::Grok))
+                // A Grok conversation view draws its native stream through the ACP mapper, which keeps tool
+                // cards; the paged reader serves its read-only history views.
+                (matches!(kind,Some(SessionKind::Codex|SessionKind::Claude|SessionKind::Pi|SessionKind::Omp|SessionKind::Antigravity|SessionKind::Opencode|SessionKind::Kiro))
+                    || kind==Some(SessionKind::Grok) && history_only)
                     && (history_only || app.chat().snapshot_window(&sid,Some(&crate::agent::chat::engine::ChatWindow {control_only:true,..Default::default()})).pid.is_none())
             } else {false};
             if args.get("protocolVersion").and_then(Value::as_u64)==Some(2) || idle_bounded {

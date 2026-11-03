@@ -119,7 +119,30 @@ export function parsePermissionSuggestions(value: unknown): SuggestionOffer[] {
       }
       // OpenCode's "always": the patterns it would stop asking about, for the rest of the session and
       // beyond, which is why the button reads as a standing rule rather than a session one.
+      // ZCode's standing rule for this project, and its allowance for the rest of the session.
+      case "zcodeAlways":
+      case "zcodeSession": {
+        offers.push({
+          suggestion: raw,
+          kind: "rules",
+          session: raw.type === "zcodeSession",
+          subject: readString(raw, "subject") ?? "this action",
+        });
+        break;
+      }
       case "opencodeAlways": {
+        offers.push({
+          suggestion: raw,
+          kind: "rules",
+          session: false,
+          subject: readString(raw, "subject") ?? "this action",
+        });
+        break;
+      }
+      // An ACP agent's own "allow always" option. The agent decides how long it lasts, so the button reads
+      // as a standing rule rather than one for this conversation.
+      case "acpAllowAlways": {
+        if (!readString(raw, "optionId")) continue;
         offers.push({
           suggestion: raw,
           kind: "rules",

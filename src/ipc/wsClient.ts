@@ -88,7 +88,7 @@ interface Pending {
 /**
  * Expected transport errors include connection failures, disconnects, and handshake/auth failures.
  * The disconnect banner, automatic reconnect logic, or LoginGate already handles these recoverable
- * conditions, so they must not reach the global uncaught-error fallback in main.tsx, which is for
+ * conditions, so they must not reach the global uncaught-error fallback in bootstrap.tsx, which is for
  * genuinely unexpected bugs. The `expected` marker tells the global unhandledrejection handler to
  * call preventDefault and suppress the uncaught-error overlay.
  */

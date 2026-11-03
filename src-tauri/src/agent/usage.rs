@@ -1,12 +1,14 @@
-//! Account usage for Claude and Grok Build subscription plans.
+//! Account usage for Claude, Grok Build and ZCode subscription plans.
 //!
 //! - **Claude**: Anthropic `oauth/usage` (five-hour / weekly windows). Credentials come from the Claude
 //!   Code keychain item or `~/.claude/.credentials.json`.
 //! - **Grok**: `cli-chat-proxy.grok.com/v1/billing?format=credits` SuperGrok weekly usage pool
 //!   (same source as Grok Build `/usage`). Tokens come from `~/.grok/auth.json` (OIDC); expired
 //!   access tokens are refreshed via `auth.x.ai/oauth2/token`.
+//! - **ZCode**: the GLM Coding Plan quota at `<platform>/api/monitor/usage/quota/limit` (five-hour and weekly
+//!   windows), authorized by the plan's API key that `zcode login` saved; see `agent::zcode_account`.
 //!
-//! Both endpoints are rate-limited or network-bound, so process-wide TTL caches sit under the poller's
+//! The Claude and Grok endpoints are rate-limited or network-bound, so process-wide TTL caches sit under the poller's
 //! interval to absorb repeated manual clicks. A failed request is reported as `FetchError`; keeping the
 //! last good reading is `usage_store`'s job, so nothing here hides a failure behind cached data.
 
@@ -672,7 +674,7 @@ fn refresh_grok_token(refresh_token: &str, client_id: &str) -> Result<RefreshedT
     })
 }
 
-fn unix_to_rfc3339_utc(secs: u64) -> String {
+pub(crate) fn unix_to_rfc3339_utc(secs: u64) -> String {
     // Civil date from Unix days (Howard Hinnant).
     let z = (secs / 86400) as i64 + 719468;
     let era = if z >= 0 { z } else { z - 146096 } / 146097;
@@ -705,6 +707,105 @@ fn urlencoding_form(s: &str) -> String {
         }
     }
     out
+}
+
+/// The GLM Coding Plan quota of the platform ZCode is signed in to. Windows keep the server's order.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ZcodeUsage {
+    /// `zai` or `bigmodel`.
+    pub platform: String,
+    /// Plan level as the server names it, such as `lite` or `pro`.
+    pub level: Option<String>,
+    pub windows: Vec<ZcodeWindow>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ZcodeWindow {
+    /// Row label such as `5h` or `7d`; tool-call quotas are prefixed `mcp`.
+    pub label: String,
+    /// Used percentage, 0-100.
+    pub used_percent: f64,
+    /// Unix seconds of the next reset.
+    pub resets_at: Option<u64>,
+}
+
+/// Fetch the ZCode plan quota with the key of a plan the signed-in account holds.
+pub fn zcode_usage(platform: &str, api_key: &str) -> Result<ZcodeUsage, FetchError> {
+    let host = match platform {
+        "zai" => "https://api.z.ai",
+        "bigmodel" => "https://open.bigmodel.cn",
+        other => return Err(FetchError::from(format!("ZCode is signed in to an unknown platform ({other})"))),
+    };
+    let body = ureq::get(&format!("{host}/api/monitor/usage/quota/limit"))
+        .set("Authorization", api_key)
+        .set("Accept", "application/json")
+        .set("Accept-Language", "en-US,en")
+        .timeout(Duration::from_secs(10))
+        .call()
+        .map_err(|e| http_error("ZCode quota", e))?
+        .into_string()
+        .map_err(|e| FetchError::from(format!("ZCode quota response could not be read: {e}")))?;
+    let v: Value = serde_json::from_str(&body)
+        .map_err(|e| FetchError::from(format!("failed to parse ZCode quota JSON: {e}")))?;
+    parse_zcode_quota(platform, &v).map_err(FetchError::from)
+}
+
+/// Parse `{success, msg, data:{level, limits:[{type, unit, number, usage, currentValue, percentage,
+/// nextResetTime}]}}`. A refusal arrives as HTTP 200 with `success:false`, such as an account without a plan.
+fn parse_zcode_quota(platform: &str, v: &Value) -> Result<ZcodeUsage, String> {
+    if v.get("success").and_then(Value::as_bool) == Some(false) {
+        let msg = v.get("msg").and_then(Value::as_str).unwrap_or("request refused");
+        return Err(format!("ZCode quota query refused: {msg}"));
+    }
+    let data = v.get("data").ok_or("ZCode quota response has no data")?;
+    let windows: Vec<ZcodeWindow> = data
+        .get("limits")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(zcode_window)
+        .collect();
+    if windows.is_empty() {
+        return Err("ZCode quota response lists no limits".to_string());
+    }
+    Ok(ZcodeUsage {
+        platform: platform.to_string(),
+        level: data.get("level").and_then(Value::as_str).filter(|l| !l.is_empty()).map(str::to_string),
+        windows,
+    })
+}
+
+fn zcode_window(limit: &Value) -> Option<ZcodeWindow> {
+    let number = limit.get("number").and_then(Value::as_u64).filter(|n| *n > 0).unwrap_or(1);
+    // Units as the plan's windows use them: 3 counts hours (the five-hour window), 4 days, 5 months and
+    // 6 weeks (the weekly window). An unknown unit still shows, under the limit's own type.
+    let span = match limit.get("unit").and_then(Value::as_u64) {
+        Some(3) => format!("{number}h"),
+        Some(4) => format!("{number}d"),
+        Some(5) if number == 1 => "mo".to_string(),
+        Some(5) => format!("{number}mo"),
+        Some(6) => format!("{}d", number * 7),
+        _ => limit.get("type").and_then(Value::as_str).unwrap_or("quota").to_ascii_lowercase(),
+    };
+    // TIME_LIMIT counts tool calls (web search, readers) rather than model usage.
+    let label = match limit.get("type").and_then(Value::as_str) {
+        Some("TIME_LIMIT") => format!("mcp · {span}"),
+        _ => span,
+    };
+    // The server rounds `percentage` to whole numbers; the counts give the finer reading when present.
+    let total = limit.get("usage").and_then(Value::as_f64).filter(|t| *t > 0.0);
+    let used = limit.get("currentValue").and_then(Value::as_f64);
+    let used_percent = match (used, total) {
+        (Some(used), Some(total)) => used * 100.0 / total,
+        _ => limit.get("percentage").and_then(Value::as_f64)?,
+    };
+    Some(ZcodeWindow {
+        label,
+        used_percent: used_percent.clamp(0.0, 100.0),
+        resets_at: limit.get("nextResetTime").and_then(Value::as_u64).map(|ms| ms / 1000),
+    })
 }
 
 #[cfg(test)]
@@ -854,5 +955,23 @@ mod tests {
         // Fractional seconds stripped.
         let u2 = parse_rfc3339_unix("2026-07-28T14:08:44.883383Z").unwrap();
         assert_eq!(unix_to_rfc3339_utc(u2), "2026-07-28T14:08:44Z");
+    }
+
+    #[test]
+    fn zcode_quota_windows_and_refusal() {
+        let body = serde_json::json!({"code":200,"success":true,"data":{"level":"pro","limits":[
+            {"type":"CREDIT_LIMIT","unit":3,"number":5,"usage":12000,"currentValue":853,"remaining":11146,"percentage":7,"nextResetTime":1793106121817u64},
+            {"type":"CREDIT_LIMIT","unit":6,"number":1,"usage":60000,"currentValue":853,"percentage":1,"nextResetTime":1793673220956u64},
+            {"type":"TIME_LIMIT","unit":5,"number":1,"percentage":40}
+        ]}});
+        let u = parse_zcode_quota("bigmodel", &body).unwrap();
+        assert_eq!(u.level.as_deref(), Some("pro"));
+        let labels: Vec<&str> = u.windows.iter().map(|w| w.label.as_str()).collect();
+        assert_eq!(labels, ["5h", "7d", "mcp · mo"]);
+        assert!((u.windows[0].used_percent - 853.0 * 100.0 / 12000.0).abs() < 1e-9);
+        assert_eq!(u.windows[0].resets_at, Some(1793106121));
+        assert_eq!((u.windows[2].used_percent, u.windows[2].resets_at), (40.0, None));
+        let refused = serde_json::json!({"code":500,"msg":"no coding plan","success":false});
+        assert!(parse_zcode_quota("zai", &refused).unwrap_err().contains("no coding plan"));
     }
 }

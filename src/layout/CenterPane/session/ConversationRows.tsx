@@ -5,6 +5,7 @@ import { memo, type ReactNode } from "react";
 
 import { useT } from "../../../i18n";
 import type { ChatImageValue, ChatRewindScope, ChatRow } from "../../../ipc/chat";
+import { mapBackendError } from "../../../ipc/backendError";
 import { kindIconEl } from "../../sessionViewers/sessionMeta";
 import { messageSenderName } from "./MessageSender";
 import {
@@ -171,7 +172,8 @@ export function Row({
     case "reasoning":
       return <><ReasoningRow text={row.text} /><DeferredBody row={row} /></>;
     case "error":
-      return <ErrorRow message={row.message} />;
+      // Agents may record a stable backend code instead of prose, such as ZCode's unavailable plan.
+      return <ErrorRow message={mapBackendError(row.message)} />;
     case "command":
       return <CommandRow text={row.text} />;
     case "shell":

@@ -17,6 +17,7 @@ const storeState = vi.hoisted(() => ({
   } as Record<string, unknown>,
   browserTabs: {},
   taskTabs: {},
+  newSessionTabs: {},
   runtimes: {},
   notifications: {},
   setActiveTab: vi.fn(),

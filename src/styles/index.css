@@ -1,4 +1,7 @@
-@import "tailwindcss";
+/* Scan only src/ for utility classes. Both entries (index.html, screenshot.html) render from src/; the default
+   scan of the whole repository also read third_party/dbx, docs and plans, generating unused rules that every
+   window had to load before its first paint. */
+@import "tailwindcss" source("..");
 @import "./vlinx.css";
 
 /* ============================================================================

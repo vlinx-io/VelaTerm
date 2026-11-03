@@ -225,16 +225,18 @@ export function effectiveAccent(
  * title bar occupies with the window's web background, so the same choice arrives there as the window frame
  * color. The mode goes
  * over as-is rather than the resolved scheme: `system` hands control back to the OS, which is what that mode
- * means, and pinning a value there would freeze the title bar the next time the OS scheme changed. Linux
- * ignores this, where the window theme is an app-wide override rather than title-bar tinting.
+ * means, and pinning a value there would freeze the title bar the next time the OS scheme changed. The
+ * resolved scheme rides along for macOS, which paints its strip by color and needs to know which one the page
+ * shows under `system`; the window cannot tell it reliably. Linux ignores this, where the window theme is an
+ * app-wide override rather than title-bar tinting.
  *
  * Only the desktop shell calls this. Remote/SSH windows are native windows too, but they run in browser
  * transport and cannot reach native commands; the backend applies the same value to every window it owns and
  * builds later ones with it, so they follow without asking.
  */
-function syncNativeChrome(mode: ThemeMode) {
+function syncNativeChrome(mode: ThemeMode, resolved: ResolvedTheme) {
   if (!isTauri) return;
-  void invoke("set_native_theme", { mode }).catch(() => {
+  void invoke("set_native_theme", { mode, dark: resolved === "dark" }).catch(() => {
     /* Chrome tinting is cosmetic; an older backend without the command must not break theming. */
   });
 }
@@ -251,7 +253,7 @@ export function applyTheme(mode: ThemeMode, darkStyle: DarkStyle = "classic") {
   document.documentElement.style.colorScheme = resolved;
   localStorage.setItem(STORAGE_KEY, mode);
   setXtermTheme(xtermTheme(mode));
-  syncNativeChrome(mode);
+  syncNativeChrome(mode, resolved);
 }
 
 /**

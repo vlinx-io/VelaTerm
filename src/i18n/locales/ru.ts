@@ -511,6 +511,8 @@ const ru: typeof en = {
     `Запускается с ${flag}. Пропускает все подтверждения разрешений — используйте с осторожностью.`, // YOLO flag hint
   "settings.permViaEnvHint":
     "Пропускает все подтверждения разрешений через инъекцию конфига (без CLI флага). Применяется при запуске сессии.",
+  "settings.permViaAnswerHint":
+    "Автоматически одобряет все запросы разрешений в режиме диалога, включая команды, выходящие за пределы рабочей области. Используйте с осторожностью.",
   "settings.catGeneral": "Общие", // General
   "settings.cliLabel": "Команда оболочки",
   "settings.cliInstall": "Установить команду ‘vela’",
@@ -643,6 +645,7 @@ const ru: typeof en = {
   "changes.noChanges": "Нет изменений",
   "changes.unchangedLines": "Показать неизменённые строки: $",
   "changes.refresh": "Обновить",
+  "changes.openFile": "Открыть файл",
   "changes.notRepo": "Не git-репозиторий",
   "changes.selectFile": "Выберите файл",
   "changes.binary": "Двоичный файл — построчный diff недоступен",
@@ -1086,6 +1089,7 @@ const ru: typeof en = {
   "tree.groupInfo": "Сведения о группе", // Group Info
   "tree.collectionInfo": "Сведения о коллекции", // Collection Info
   "tree.projectInfo": "Сведения о проекте", // Project Info
+  "tree.codeAudit": "Аудит кода", // Code audit
   "info.branch": "Ветка", // Branch
   "info.path": "Путь", // Path
   "info.recentCommits": "Последние коммиты", // Recent Commits
@@ -1410,6 +1414,7 @@ const ru: typeof en = {
   "browser.loading": "Загрузка…", // Loading…
   // Application-exit confirmation and dormant restored sessions.
   "quit.title": "Закрыть VelaTerm?", // Quit VelaTerm?
+  "quit.closeWindowTitle": "Закрыть главное окно?", // Close the main window?
   "quit.body": "Все запущенные сеансы терминала и агента будут остановлены.", // Any running terminal and agent sessions will be stopped.
   "quit.remoteWindows": "Открытые окна удалённого подключения также будут закрыты.", // Open remote windows will also be closed.
   "quit.saveWorkspace": "Сохранить рабочее пространство", // Save workspace
@@ -1461,6 +1466,22 @@ const ru: typeof en = {
   "agentVersion.update": (version) => `Обновление: v${version}`,
   "agentVersion.upgrade": (version) => `Доступна версия ${version}. Открыть официальные инструкции по обновлению.`,
   "agentVersion.checkFailed": "Не удалось проверить обновления.",
+  "agentVersion.upgradeAction": (version) => `Доступна версия ${version}. Нажмите, чтобы обновить.`,
+  "agentUpdate.title": (label) => `Обновление ${label}`,
+  "agentUpdate.commandHint": "VelaTerm выполнит встроенную команду обновления агента:",
+  "agentUpdate.confirm": "Обновить",
+  "agentUpdate.docs": "Официальная инструкция",
+  "agentUpdate.running": "Идёт обновление…",
+  "agentUpdate.background": "Это окно можно закрыть — обновление продолжится.",
+  "agentUpdate.waiting": "Ожидание вывода…",
+  "agentUpdate.succeeded": (label, version) => `${label} обновлён до v${version}.`,
+  "agentUpdate.unchanged": (version) => `Команда завершилась, но установленная версия по-прежнему v${version}. Проверьте вывод выше.`,
+  "agentUpdate.finished": "Команда обновления завершилась. Проверьте вывод выше.",
+  "agentUpdate.failed": "Обновление не завершено. Проверьте вывод выше или скопируйте команду и выполните её в терминале.",
+  "agentUpdate.timedOut": "Обновление остановлено через 15 минут. Скопируйте команду и выполните её в терминале.",
+  "agentUpdate.restartHint": "Этот диалог всё ещё использует предыдущую версию. Перезапустите агента, чтобы перейти на новую: диалог сохранится, а новая версия запустится при следующем сообщении.",
+  "agentUpdate.restart": "Перезапустить агента",
+  "agentUpdate.startFailed": "Не удалось начать обновление. Повторите попытку.",
   "agentInstall.title": (label) => `${label} не установлен`, // {label} is not installed
   "agentInstall.desc": (label) =>
     `VelaTerm не нашёл ${label} в PATH. Установите его, чтобы запустить эту сессию.`, // couldn't find {label} on PATH
@@ -1469,6 +1490,10 @@ const ru: typeof en = {
   "agentInstall.dismiss": "Установлю сам", // I'll do it myself
   "agentInstall.docs": "Документация", // Install docs
   "agentInstall.needsNode": "Требуется Node.js / npm", // Requires Node.js / npm
+  "agentInstall.runInTerminal": "Выполните эту команду в терминале, чтобы установить агента, затем отправьте сообщение ещё раз.",
+  "agentInstall.installing": "Установка…", // Installing…
+  "agentInstall.installingDesc": "Идёт загрузка и установка. Это может занять несколько минут.", // Downloading and installing. This can take a few minutes.
+  "agentInstall.installFailed": "Установка не завершилась. Выполните эту команду в терминале, чтобы узнать причину, затем отправьте сообщение ещё раз.", // Installation didn't finish. Run this command in a terminal to see what went wrong, then send your message again.
   "agentInstall.afterInstall": "После установки:", // After install:
   "agentInstall.pathSaved": (label: string) =>
     `Путь к исполняемому файлу ${label} сохранён в настройках:`, // executable path saved to Settings
@@ -2130,6 +2155,8 @@ const ru: typeof en = {
   "chat.attach.tooLarge": (name: string, mb: number) => `${name} превышает ${mb} МБ и не был приложен`,
   "chat.attach.unreadable": (name: string) => `Не удалось прочитать ${name}`,
   // ── Shell mode: `!` runs a command in the session's shell ──
+  "chat.findings.count": (n: number) => `Найдено проблем: ${n}`,
+  "chat.findings.none": "Проблем не найдено",
   "chat.shell.title": "Команда оболочки",
   "chat.shell.running": "Выполняется…",
   "chat.shell.cancel": "Отменить",
@@ -2250,6 +2277,13 @@ const ru: typeof en = {
   "chat.auth.claude.invalidCode": "Вставьте полный код текущей попытки авторизации, включая часть после #.",
   "chat.auth.claude.externalAuth": "Ключи API и другие настроенные способы аутентификации не изменятся.",
   "chat.auth.open": "Открыть страницу авторизации",
+  "chat.auth.zcode.required": "Чтобы пользоваться этим разговором, войдите в ZCode с учётной записью Z.ai или BigModel.",
+  "chat.auth.zcode.pending": "Откройте страницу авторизации и разрешите доступ. После завершения входа это представление обновится автоматически.",
+  "chat.auth.zcode.failed": "Не удалось завершить вход. Попробуйте ещё раз.",
+  "chat.auth.zcode.zai": "Войти через Z.ai",
+  "chat.auth.zcode.bigmodel": "Войти через BigModel",
+  "chat.auth.zcode.noPlan.zai": "Вы вошли в ZCode через Z.ai, но у этой учётной записи Z.ai нет доступного GLM Coding Plan или лимит тарифа исчерпан. Если тариф оформлен в BigModel, откройте меню «Учётная запись ZCode» и выберите «Войти через BigModel».",
+  "chat.auth.zcode.noPlan.bigmodel": "Вы вошли в ZCode через BigModel, но у этой учётной записи BigModel нет доступного GLM Coding Plan или лимит тарифа исчерпан. Если тариф оформлен в Z.ai, откройте меню «Учётная запись ZCode» и выберите «Войти через Z.ai».",
   "chat.resetCredits.label": (n: string) => `Сбросов лимита: ${n}`,
   "chat.resetCredits.title": "Доступные сбросы лимитов Codex",
   "chat.resetCredits.unknown": "Не удалось получить количество доступных сбросов.",
@@ -2331,11 +2365,11 @@ const ru: typeof en = {
     `Повторная попытка (${attempt}/${max}) через ${seconds} с: ${message}`,
   "chat.notify.dismiss": "Закрыть",
   "settings.completionMode": "Подсказки команд",
-  "settings.completionAuto": "Автоматически",
-  "settings.completionTab": "По Tab",
+  "settings.completionAuto": "В строке + Tab",
+  "settings.completionTab": "Только Tab",
   "settings.completionOff": "Выключены",
   "settings.completionUnavailable": "Не удалось загрузить или сохранить настройки.",
-  "settings.completionHint": "Применяется к новым терминалам Zsh, Bash 4+, Fish и PowerShell. В CMD сохраняется стандартное действие Tab. Tab вставляет выбранную подсказку; Enter выполняет текущую команду без применения подсказки.",
+  "settings.completionHint": "При вводе в Zsh после курсора бледным текстом показывается последняя подходящая команда из истории; нажмите → или End, чтобы принять её. Tab работает так же, как в самой оболочке: единственный вариант вставляется сразу, общая часть дополняется первой, а список открывается, если вариантов остаётся несколько. Применяется к новым терминалам Zsh, Bash 4+, Fish и PowerShell.",
 
   // Native texts of the mobile remote plugin (iOS, Android, download bridge). They reach the apps through native-text.json; {name} placeholders are replaced natively.
   "mobile.native.trustTitle": "Подтверждение отпечатка удалённого узла",
@@ -2442,6 +2476,9 @@ const ru: typeof en = {
   "term.runs.logEmpty": "Вывода пока нет",
   "chat.antigravity.placeholder": "Напишите Antigravity или укажите файлы через @файлы",
   "chat.antigravity.textOnly": "В режиме диалога Antigravity пока поддерживаются только текстовые сообщения.",
+  "chat.textOnly": (agent: string) => `В режиме диалога ${agent} поддерживаются только текстовые сообщения.`,
+  "chat.signInRequired": (agent: string) => `Чтобы пользоваться режимом диалога, войдите в ${agent}. Перейдите в режим терминала, выполните вход и отправьте сообщение ещё раз.`,
+  "chat.apiKeyRequired": "Для DeepSeek Harness нужен ключ API. Задайте переменную окружения DEEPSEEK_API_KEY или запустите `dsh web` и сохраните ключ на странице Models, затем отправьте сообщение ещё раз.",
   "chat.antigravity.permissionsHint": "Инструменты, требующие одобрения, необходимо заранее разрешить в настройках Antigravity или использовать в режиме терминала.",
   "chat.antigravity.settingsHint": "Изменяйте модель, уровень рассуждений или разрешения между ходами.",
   "chat.history.imageDownloadRequired": "Это изображение нельзя открыть здесь. Скачайте оригинал, чтобы просмотреть его.",
@@ -2514,6 +2551,38 @@ const ru: typeof en = {
   "artifact.cardOpenTitle": "Открыть рядом с этой сессией", // Open beside this session
   "artifact.cardKind": "HTML-страница", // HTML page
   "artifact.frameTitle": (name: string) => `Просмотр: ${name}`, // Preview of ${name}
+  "newSession.menu": "Новая сессия…", // New Session…
+  "newSession.heading": "Над чем будем работать?", // What should we work on?
+  "newSession.modelsUnavailable": "Список моделей недоступен. Будет использована модель агента по умолчанию.", // Model list unavailable. The agent’s default model will be used.
+  "newSession.terminalOnly": "Только вид терминала", // Terminal view only
+  "newSession.conversationOnly": "Только вид беседы", // Conversation view only
+  "newSession.noConversationView": "У этого агента нет вида беседы, поэтому сессия откроется в виде терминала.", // This agent has no conversation view, so the session opens in the terminal view.
+  "newSession.noTerminalView": "У этого агента нет вида терминала, поэтому сессия откроется в виде беседы.", // This agent has no terminal view, so the session opens in the conversation view.
+  "newSession.taskLabel": "Первая задача", // First task
+  "newSession.placeholder": "Опишите задачу или задайте вопрос", // Describe a task or ask a question
+  "newSession.enterHint": "Enter — начать · Shift+Enter — новая строка", // Enter to start · Shift+Enter for a new line
+  "newSession.start": "Начать", // Start
+  "newSession.starting": "Запуск…", // Starting…
+  "newSession.viewLabel": "Вид", // View
+  "newSession.worktreeHint": "Сессия работает в собственной ветке в отдельной папке.", // Runs this session on its own branch in a separate folder.
+  "newSession.worktreeNotRepo": "Для отдельного рабочего дерева нужен Git-репозиторий.", // A separate worktree needs a Git repository.
+  "newSession.worktreeName": "Имя рабочего дерева (необязательно)", // Worktree name (optional)
+  "newSession.worktreeNameHint": "Задаёт имя новой папки и ветки. Оставьте пустым, чтобы использовать имя сессии.", // Names the new folder and branch. Leave empty to use the session name.
+  "artifact.comment": "Комментировать", // Comment
+  "artifact.commentTitle": "Выберите элементы страницы, чтобы оставить комментарии для агента", // Click elements in the page to leave comments for the agent
+  "artifact.pickHint": "Нажмите на элемент страницы, чтобы прокомментировать его. Esc — завершить.", // Click an element in the page to comment on it. Press Esc to stop.
+  "artifact.commentOn": (target: string) => `Комментарий к ${target}`, // Comment on ${target}
+  "artifact.commentPlaceholder": "Что здесь изменить?", // What should change here?
+  "artifact.commentAdd": "Добавить комментарий", // Add comment
+  "artifact.commentMore": "Прокомментировать другой элемент", // Comment on another element
+  "artifact.commentRemove": "Удалить комментарий", // Remove comment
+  "artifact.showInPage": "Показать на странице", // Show in page
+  "artifact.sendCommentsTitle": "Вставляет эти комментарии в поле ввода сессии, которая создала эту страницу", // Put these comments in the message box of the session that wrote this page
+  "artifact.copyCommentsTitle": "Копирует эти комментарии, чтобы отправить их агенту", // Copy these comments to send to an agent
+  "artifact.options": "Варианты", // Options
+  "artifact.useOption": (id: string) => `Выбрать ${id}`, // Use ${id}
+  "artifact.useOptionTitle": "Вставляет в поле ввода сессии, которая создала эту страницу, сообщение с просьбой оставить этот вариант", // Put a message asking to keep this option in the message box of the session that wrote this page
+  "artifact.useOptionCopyTitle": "Копирует сообщение с просьбой оставить этот вариант", // Copy a message asking to keep this option
 };
 
 export default ru;

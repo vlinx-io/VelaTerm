@@ -2,10 +2,31 @@
 //!
 //! The page is untrusted, so its messages are accepted only from the iframe we created and only in the
 //! shapes listed here, with every field type-checked and clipped. They feed displays (error count, console,
-//! blocked-request banner, scroll restore) and never trigger an action.
+//! blocked-request banner, scroll restore, the picked element and the option list) and never trigger an action
+//! by themselves: a picked element only opens the comment box, and nothing reaches a session until the user sends it.
 
 /** Source tag the injected script puts on every message. */
 export const BRIDGE_SOURCE = "vlx-artifact";
+
+/** Source tag on messages this window posts to the page's review script. */
+export const HOST_SOURCE = "vlx-artifact-host";
+
+/** An element the user picked in the page to comment on. */
+export interface PickedTarget {
+  /** CSS selector the page script built for it; used to pin and reveal it again. */
+  selector: string;
+  tag: string;
+  /** Its visible text, or its label, clipped. */
+  text: string;
+  /** The design option it sits in, if any. */
+  option: string | null;
+}
+
+/** A design option the page marks with `data-vlx-option`. */
+export interface ArtifactOption {
+  id: string;
+  label: string;
+}
 
 /** Longest message text kept; the script already clips, this guards against a page posting its own. */
 const MAX_TEXT = 2000;
@@ -15,7 +36,10 @@ export type BridgeMessage =
   | { type: "console"; level: "error" | "warn"; text: string }
   | { type: "error"; text: string; line: number }
   | { type: "blocked"; uri: string; directive: string }
-  | { type: "scroll"; y: number };
+  | { type: "scroll"; y: number }
+  | ({ type: "picked" } & PickedTarget)
+  | { type: "pickCancel" }
+  | { type: "options"; options: ArtifactOption[] };
 
 function clip(v: unknown, max = MAX_TEXT): string | null {
   return typeof v === "string" ? v.slice(0, max) : null;
@@ -53,9 +77,41 @@ export function parseBridgeMessage(data: unknown): BridgeMessage | null {
       const y = int(m.y);
       return y === null ? null : { type: "scroll", y };
     }
+    case "picked": {
+      const selector = clip(m.selector, 500);
+      const tag = clip(m.tag, 40);
+      const text = clip(m.text, 120);
+      if (!selector || tag === null || text === null) return null;
+      const option = m.option === null || m.option === undefined ? null : clip(m.option, 40);
+      return { type: "picked", selector, tag, text, option: option || null };
+    }
+    case "pickCancel":
+      return { type: "pickCancel" };
+    case "options": {
+      if (!Array.isArray(m.options)) return null;
+      const options: ArtifactOption[] = [];
+      for (const raw of m.options.slice(0, 40)) {
+        const o = raw as Record<string, unknown> | null;
+        const id = clip(o?.id, 40);
+        const label = clip(o?.label, 80);
+        if (id && label !== null && !options.some((x) => x.id === id)) options.push({ id, label });
+      }
+      return { type: "options", options };
+    }
     default:
       return null;
   }
+}
+
+/** Messages to the page's review script; posted to our own frame only. */
+export type HostMessage =
+  | { type: "pick"; on: boolean }
+  | { type: "marks"; marks: { n: number; selector: string }[] }
+  | { type: "reveal"; option?: string; selector?: string };
+
+export function postToFrame(frame: HTMLIFrameElement | null, message: HostMessage): void {
+  // The frame has an opaque origin, so "*" is the only target that reaches it; the message carries no secrets.
+  frame?.contentWindow?.postMessage({ ...message, source: HOST_SOURCE }, "*");
 }
 
 /** One line in the console drawer. */

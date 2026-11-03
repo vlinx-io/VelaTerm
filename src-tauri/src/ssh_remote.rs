@@ -1543,11 +1543,17 @@ pub fn kill_remote_service(host: &str, session: &str) {
 ///
 /// TCP alone is insufficient because ssh -L listens before the remote service is ready. Send a real HTTP
 /// request; any status, including 401/404, proves serving and prevents false-positive readiness.
+///
+/// Each probe may use all the time left before the deadline. A service that is up but slow (a remote
+/// desktop app under heavy load can take 5-15 s per request) must not be cut off and retried forever; a
+/// service that is not up yet fails the probe at once (the tunnel closes the connection), so retries
+/// stay quick in that case.
 pub(crate) fn wait_port_healthy(port: u16, timeout: Duration) -> Result<(), String> {
     let url = format!("http://127.0.0.1:{port}/");
     let deadline = Instant::now() + timeout;
     loop {
-        match ureq::get(&url).timeout(Duration::from_secs(3)).call() {
+        let left = deadline.saturating_duration_since(Instant::now()).max(Duration::from_secs(1));
+        match ureq::get(&url).timeout(left).call() {
             Ok(_) => return Ok(()),
             // Any HTTP status means the remote service is serving.
             Err(ureq::Error::Status(_, _)) => return Ok(()),
@@ -1946,8 +1952,23 @@ fn sleep_wanted(ctl: &TunnelCtl, total: Duration) -> bool {
     ctl.wanted.load(Ordering::SeqCst)
 }
 
-/// Start a monitor for the original local port. Notify reconnecting only after the first failed attempt,
-/// up on recovery, and down after automatic retries give up.
+/// Backoff wait that a manual kick cuts short, consuming the kick so the next attempt starts at once.
+/// Returns false immediately when no longer wanted.
+fn sleep_until_kick(ctl: &TunnelCtl, total: Duration) -> bool {
+    let deadline = Instant::now() + total;
+    loop {
+        if !ctl.wanted.load(Ordering::SeqCst) {
+            return false;
+        }
+        if ctl.kick.swap(false, Ordering::SeqCst) || Instant::now() >= deadline {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+/// Start a monitor for the original local port. Notify reconnecting after each failed attempt (never
+/// before the first one), up on recovery, and down after automatic retries give up.
 pub fn watch_tunnel(
     host: String,
     session: String,
@@ -1995,9 +2016,9 @@ pub fn watch_tunnel(
             // ── Dead child and port: bounded automatic rebuild with backoff ──
             crate::diagnostic_warn!("[ssh] tunnel for {host} ({session}) died; rebuilding…");
             let mut recovered = false;
-            let mut notified = false;
             for (i, secs) in BACKOFF_SECS.iter().enumerate() {
-                if !sleep_wanted(&ctl, Duration::from_secs(*secs)) {
+                // A manual kick skips the rest of the backoff instead of waiting for the down state.
+                if !sleep_until_kick(&ctl, Duration::from_secs(*secs)) {
                     return;
                 }
                 match rebuild_tunnel(&host, &session, &identifier, local_port) {
@@ -2013,14 +2034,15 @@ pub fn watch_tunnel(
                     Err(RebuildErr::Retryable(e)) => {
                         crate::diagnostic_warn!("[ssh] tunnel rebuild attempt {} failed: {e}", i + 1);
                         // Show the red banner only after the immediate attempt fails, avoiding brief flicker.
-                        if !notified {
-                            notify("reconnecting");
-                            notified = true;
-                        }
+                        // Repeat on every failure so a pending manual attempt in the banner settles.
+                        notify("reconnecting");
                     }
                 }
             }
             if recovered {
+                // A kick that arrived during the successful attempt is stale; drop it so the healthy
+                // phase does not rebuild a working tunnel.
+                ctl.kick.store(false, Ordering::SeqCst);
                 // Always emit up so the frontend replaces a potentially half-open old WebSocket.
                 notify("up");
                 continue;
@@ -2279,6 +2301,27 @@ mod tests {
         assert_eq!(a.arch, "x86_64");
         assert!(parse_uname("").is_none());
         assert!(parse_uname("Plan9").is_none()); // Missing architecture field.
+    }
+
+    #[test]
+    fn manual_kick_cuts_backoff_short() {
+        let ctl = TunnelCtl { wanted: AtomicBool::new(true), kick: AtomicBool::new(true) };
+        // A pending kick ends a long wait at once and is consumed.
+        let start = Instant::now();
+        assert!(sleep_until_kick(&ctl, Duration::from_secs(16)));
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert!(!ctl.kick.load(Ordering::SeqCst));
+        // A zero wait still consumes a kick, so it cannot linger into the healthy phase.
+        ctl.kick.store(true, Ordering::SeqCst);
+        assert!(sleep_until_kick(&ctl, Duration::ZERO));
+        assert!(!ctl.kick.load(Ordering::SeqCst));
+        // Without a kick the full wait elapses.
+        let start = Instant::now();
+        assert!(sleep_until_kick(&ctl, Duration::from_millis(400)));
+        assert!(start.elapsed() >= Duration::from_millis(400));
+        // A monitor that is no longer wanted stops waiting.
+        ctl.wanted.store(false, Ordering::SeqCst);
+        assert!(!sleep_until_kick(&ctl, Duration::from_secs(16)));
     }
 
     #[test]

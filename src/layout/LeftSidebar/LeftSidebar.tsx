@@ -2,14 +2,13 @@
 //! Session actions and dialogs are shared with the center tab bar through ../sessionMenu. This component
 //! retains tree-specific project/group menus, multiselection actions, inline rename, hover creation, and filtering.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ContextMenu, type MenuItem } from "../../components/ContextMenu";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
 import { env, platform } from "../../platform";
 import { knowledgeUrl } from "../Knowledge/navigation";
 import { securityUrl } from "../Security/navigation";
-import { securityText } from "../Security/text";
 import { memoryNavigate, memoryUrl } from "../Memory/navigation";
 import {
   type SidebarTreeView,
@@ -21,13 +20,13 @@ import {
   countByAgentState,
   isVirtualProject,
   projectRoot,
+  worktreeGroup,
   type AgentState,
   type NodeKind,
 } from "../../types";
 import { MARK_LABEL_KEYS, NODE_MARKS, normalizeMark } from "../../marks";
 import { useSessionMenu } from "../sessionMenu";
 import { GRID_MAX } from "../CenterPane/paneTree";
-import { GlobalSearch } from "../GlobalSearch/GlobalSearch";
 import { labelWithCombo } from "../../hooks/shortcutRegistry";
 import {
   ProjectTree,
@@ -48,6 +47,9 @@ import { moveToCollectionItem } from "./projectCollectionMenu";
 import { setProjectCollection } from "../../store/projectCollections";
 import { projectDialogUrl } from "../../remote/dialogNavigation";
 import { newGroupDialogUrl } from "./groupNavigation";
+
+// The search overlay and its result viewers load when it is first opened (Cmd+Shift+F or the search button).
+const GlobalSearch = lazy(() => import("../GlobalSearch/GlobalSearch").then((m) => ({ default: m.GlobalSearch })));
 
 /** Status filters: working (pulsing green), attention (pulsing yellow), replied (magenta), and replied with
  * background work still running (pulsing cyan). */
@@ -718,7 +720,7 @@ export function LeftSidebar() {
               onClick: (event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); memoryNavigate(knowledgeUrl(node.projectId)); } },
             },
             {
-              label: securityText("title"),
+              label: t("tree.codeAudit"),
               href: securityUrl(node.projectId),
               onClick: (event) => { if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); memoryNavigate(securityUrl(node.projectId)); } },
             },
@@ -743,16 +745,17 @@ export function LeftSidebar() {
       ];
     }
     if (node.kind === "group") {
-      // A group's Git directory prefers its own worktree and falls back to the project root.
+      // A group's Git directory is the worktree bound on it or its nearest ancestor, else the project root.
       const st = useTermStore.getState();
       const group = st.groups.find((g) => g.id === node.id);
+      const inheritedWorktree = worktreeGroup(st.groups, node.id)?.worktreePath;
       const gitRepoDir =
-        group?.worktreePath || projectRoot(st.projects.find((p) => p.id === node.projectId));
+        inheritedWorktree || projectRoot(st.projects.find((p) => p.id === node.projectId));
       // Populate Git actions only for repository directories and pass the group ID to MergeModal. Omit
       // the entire section and separator when empty to avoid duplicate separators.
       const gitItems = buildGitItems({
         repoDir: gitRepoDir,
-        worktreePath: group?.worktreePath,
+        worktreePath: inheritedWorktree,
         mergeTargetId: node.id,
       });
       // Group section contains child creation, worktree conversion/info, rename, archive, and delete.
@@ -983,7 +986,7 @@ export function LeftSidebar() {
 
       {dialogs}
 
-      {globalSearchOpen && <GlobalSearch />}
+      {globalSearchOpen && <Suspense fallback={null}><GlobalSearch /></Suspense>}
     </aside>
   );
 }

@@ -19,7 +19,8 @@ import {
 } from "../../../../ipc/artifact";
 import { onFsChanged } from "../../../../ipc/events";
 import { fsWatch, statFile } from "../../../../ipc/info";
-import { parseBridgeMessage, pushConsole, type ConsoleEntry } from "./artifactBridge";
+import { parseBridgeMessage, postToFrame, pushConsole, type ArtifactOption, type ConsoleEntry } from "./artifactBridge";
+import { artifactReview, reviewMarks, setDraft, setPicking, subscribeArtifactReview } from "./artifactReview";
 import { isNetAllowed, setNetAllowed } from "./artifactPrefs";
 import { artifactWriter, subscribeArtifactWriters } from "./artifactWriters";
 
@@ -68,6 +69,12 @@ export interface ArtifactState {
   versions: ArtifactVersion[];
   /** The session that last wrote this page, when known. */
   writer: string | undefined;
+  /** Design options the page marks with `data-vlx-option`, in page order. */
+  options: ArtifactOption[];
+  /** Scroll the page to one of its options and flash it. */
+  revealOption: (id: string) => void;
+  /** Scroll the page to a commented element and flash it. */
+  revealSelector: (selector: string) => void;
   /** Attach to the iframe so messages from other frames are ignored. */
   frameRef: React.RefObject<HTMLIFrameElement | null>;
 }
@@ -89,6 +96,9 @@ export function useArtifact(path: string, opts: { hidden: boolean; version?: num
   const scrollRef = useRef(0);
   const entryId = useRef(0);
   const [grantEpoch, setGrantEpoch] = useState(0);
+  const [options, setOptions] = useState<ArtifactOption[]>([]);
+  const pathRef = useRef(path);
+  pathRef.current = path;
 
   const writer = useSyncExternalStore(subscribeArtifactWriters, () => artifactWriter(path));
 
@@ -145,8 +155,18 @@ export function useArtifact(path: string, opts: { hidden: boolean; version?: num
       if (msg.type === "ready") {
         setEntries([]);
         setBlocked(0);
+        setOptions([]);
         blockedUris.current = new Set();
-      } else if (msg.type === "scroll") scrollRef.current = msg.y;
+        // A reload starts a fresh page: hand it the pins and pick mode it had.
+        const review = artifactReview(pathRef.current);
+        postToFrame(frameRef.current, { type: "marks", marks: reviewMarks(review) });
+        postToFrame(frameRef.current, { type: "pick", on: review.picking });
+      } else if (msg.type === "picked") {
+        const { type: _type, ...target } = msg;
+        setDraft(pathRef.current, target);
+      } else if (msg.type === "pickCancel") setPicking(pathRef.current, false);
+      else if (msg.type === "options") setOptions(msg.options);
+      else if (msg.type === "scroll") scrollRef.current = msg.y;
       else if (msg.type === "blocked") {
         if (blockedUris.current.has(msg.uri)) return;
         blockedUris.current.add(msg.uri);
@@ -158,6 +178,13 @@ export function useArtifact(path: string, opts: { hidden: boolean; version?: num
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, []);
+
+  // Keep the page's pins and pick mode in step with the review draft.
+  const review = useSyncExternalStore(subscribeArtifactReview, () => artifactReview(path));
+  useEffect(() => {
+    postToFrame(frameRef.current, { type: "marks", marks: reviewMarks(review) });
+    postToFrame(frameRef.current, { type: "pick", on: review.picking });
+  }, [review]);
 
   const snapshot = useCallback(() => {
     if (version !== null) return;
@@ -271,6 +298,9 @@ export function useArtifact(path: string, opts: { hidden: boolean; version?: num
     reload,
     versions,
     writer,
+    options,
+    revealOption: (id: string) => postToFrame(frameRef.current, { type: "reveal", option: id }),
+    revealSelector: (selector: string) => postToFrame(frameRef.current, { type: "reveal", selector }),
     frameRef,
   };
 }

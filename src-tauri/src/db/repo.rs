@@ -449,7 +449,9 @@ pub fn create_session_identified(
             .map(|s| s.to_string())
             .filter(|s| !s.is_empty()),
         agent_path: agent_path.map(|s| s.to_string()).filter(|s| !s.is_empty()),
+        // An agent without a terminal interface can only be driven as a conversation, whatever was asked.
         engine: match engine.map(str::trim) {
+            _ if !kind.has_terminal_interface() => "chat".to_string(),
             Some("chat") => "chat".to_string(),
             _ => "tui".to_string(),
         },

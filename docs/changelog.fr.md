@@ -1,3 +1,43 @@
+## v0.2.15 — 2026-11-03
+
+- 🆕 Un onglet Nouvelle session permet de choisir, autour d’une zone de saisie centrée, le projet, l’agent, le modèle, l’effort de raisonnement, les autorisations, la vue et un worktree isolé, puis démarre la session avec votre première tâche ; il s’ouvre depuis « Nouvelle session… » dans les menus de nouvelle session, depuis le bouton en forme d’étoile de la barre d’onglets ou depuis le volet central vide.
+- 🐋 DeepSeek Harness (`dsh`) rejoint les agents de la vue conversation, avec les cartes d’outils, le raisonnement, les demandes d’autorisation, le changement de modèle et d’effort, l’utilisation du contexte et un historique qui reprend après la réouverture.
+- 🧩 Copilot, Cursor, Kimi et Grok peuvent désormais s’exécuter dans la vue conversation.
+- 🤖 ZCode de Zhipu rejoint les agents de la vue conversation : il utilise l’agent intégré de l’application de bureau ZCode lorsque celle-ci est installée, et vous pouvez vous connecter avec Z.ai ou Zhipu BigModel, ou passer de l’un à l’autre, sans quitter la conversation.
+- 📊 Pour les sessions ZCode, le panneau Info affiche les jetons, le taux de succès du cache et la vitesse de génération du tour en cours, l’utilisation du contexte, ainsi que l’utilisation sur 5 heures et hebdomadaire du GLM Coding Plan.
+- 📦 ZCode (sous macOS et Windows) et DeepSeek Harness s’installent depuis la conversation avec « Installer », et le message qui avait échoué est renvoyé une fois l’installation terminée.
+- ⬆️ Un clic sur « Mise à jour » dans le badge de version d’un agent ouvre une boîte de dialogue qui exécute la commande de mise à jour propre à cet agent en affichant sa sortie en direct, et propose « Redémarrer l’agent » pour poursuivre la conversation avec la nouvelle version.
+- 🔌 Les connexions distantes comportant de nombreux terminaux actifs ne se coupent plus à répétition après la reconnexion.
+- 🔄 Après le redémarrage d’un serveur distant, les sessions ne restent plus bloquées en synchronisation pendant le démarrage de leurs terminaux.
+- 🔁 Lorsqu’une conversation ne parvient pas à se synchroniser, elle réessaie automatiquement, et l’espace situé sous la zone de saisie affiche l’état avec un bouton « Réessayer ».
+- 🐢 Les connexions SSH vers un hôte distant très chargé n’expirent plus pendant l’attente de la réponse du serveur.
+- 🔗 « Reconnecter maintenant » dans une fenêtre distante rétablit immédiatement le tunnel SSH au lieu d’attendre la prochaine tentative automatique.
+- 🪟 Sous macOS et Windows, la fermeture de la fenêtre principale demande une confirmation et laisse les fenêtres distantes ouvertes ; sous macOS, l’application reste dans le Dock, et la réouverture de la fenêtre principale restaure votre espace de travail enregistré.
+- 🧾 Les fichiers modifiés de la liste « This turn » et du panneau Git ouvrent leurs diffs dans un onglet plutôt que dans une boîte de dialogue.
+- ⌨️ Les suggestions de commandes du terminal n’apparaissent plus pendant la saisie : Zsh affiche en gris, dans la ligne, la dernière commande correspondante de l’historique, que → ou Fin permet d’accepter, et la liste ne s’affiche que lorsque vous appuyez sur Tab ; choisissez « En ligne + Tab », « Tab uniquement » ou « Désactivées » dans les paramètres.
+- 💬 Dans les aperçus Artifact, vous pouvez cliquer sur des éléments de la page pour laisser des commentaires à la session, et les options marquées sur la page sont listées au-dessus de l’aperçu pour passer de l’une à l’autre et en choisir une.
+- 🔍 La recherche dans une conversation s’effectue en texte intégral, trouve tous vos mots dans n’importe quel ordre et affiche « Aucun résultat » au lieu de « Chargement de la conversation… » lorsque rien ne correspond.
+- 🧰 Les compétences fournies, comme vspawn et vrefer, s’installent désormais dans le dossier partagé `~/.agents/skills`, ce qui permet à Pi, ZCode et DeepSeek Harness de les utiliser, et Codex n’affiche plus chaque compétence en double.
+- 📋 Dans la vue conversation, les résultats de `/code-review` s’affichent sous forme de liste de constats avec des emplacements de fichiers cliquables.
+- 🌐 Lorsque la traduction des réponses est désactivée pour une session, les cartes de question proposent un bouton « Traduction » qui traduit uniquement la carte concernée.
+- ✂️ Les questions et les options des cartes de question peuvent être sélectionnées et copiées.
+- 🌳 L’arborescence des sessions place sous la ligne d’un worktree les groupes et les sessions parentes qui lui appartiennent, y compris les sessions démarrées directement dans le dossier de ce worktree.
+- 🌲 Les groupes imbriqués utilisent le worktree du groupe parent le plus proche qui en possède un, pour les nouvelles sessions, les actions Git et les fusions.
+- 🔎 Renommer un élément pendant que l’arborescence des sessions est filtrée ne le fait plus disparaître des résultats.
+- ⏳ Lorsque OpenCode atteint une limite d’utilisation, une seule ligne d’erreur indique la limite concernée, et la conversation reprend automatiquement après la réinitialisation lorsque OpenCode en communique l’heure.
+- 📸 La superposition de capture d’écran apparaît plus rapidement après l’appui sur le raccourci.
+- 🚀 Les fenêtres affichent une ébauche de la disposition dès leur ouverture et chargent au démarrage moins de la moitié du code qu’auparavant.
+- ⚡ `vspawn --yes` crée directement la session enfant, sans afficher la carte de lancement.
+- 🛡️ Les audits de code utilisent Codex Security 0.8.2 et peuvent s’exécuter avec DeepSeek, et les formulaires d’audit et « Ajouter à la base de connaissances » reprennent les champs d’agent, de modèle et d’effort des nouvelles sessions, en acceptant les modèles absents de la liste.
+- 🌗 Sous macOS, lorsque le thème suit le système, la barre de titre passe en sombre en même temps que le reste de la fenêtre.
+- 📥 Les installations en un clic ne signalent leur fin qu’une fois la commande d’installation terminée, et une installation incomplète de Zoo Code est considérée comme absente au lieu de provoquer un plantage au démarrage.
+- 🖥️ Le passage d’une session à la vue terminal n’échoue plus avec l’erreur « The initial task was already claimed ».
+- 🧟 Les sessions ne signalent plus « The previous agent is still running » lorsque l’identifiant de processus de l’ancien agent a été réutilisé par un autre programme.
+- 🧯 Après la reconnexion du navigateur, les conversations ne conservent plus de ligne TransportError liée à la déconnexion.
+- 🪞 Avec le mode miroir activé, l’ouverture et la fermeture d’onglets ne transforment plus les sessions en vue conversation en cartes de remplacement « Restauré depuis l'espace de travail enregistré ».
+- 📜 Les conversations Claude contenant une réponse abandonnée chargent de nouveau leur historique normalement.
+- 🧠 Les modèles Claude intégrés qui manquent au catalogue de modèles du site apparaissent toujours dans les formulaires de nouvelle session et de lancement.
+
 ## v0.2.14 — 2026-10-23
 
 - 🔌 Les connexions distantes ne se coupent plus et ne se reconnectent plus chaque seconde lorsque plusieurs longues conversations sont ouvertes ; ces conversations s’ouvrent de nouveau normalement.

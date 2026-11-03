@@ -197,14 +197,23 @@ fn canceled_run_cannot_be_overwritten_and_orphaned_run_is_interrupted() {
 }
 
 #[test]
-fn selection_rejects_unknown_models_and_unsupported_efforts() {
-    let catalog = json!([{"id":"test-model","effortLevels":["low","high"]}]);
+fn selection_accepts_uncatalogued_models_and_rejects_unsupported_efforts() {
+    use crate::agent::launch_models::{Catalog, Model};
+    let catalog = Catalog {
+        models: vec![Model {
+            id: "test-model".into(), label: "Test".into(), effort_levels: vec!["low".into(), "high".into()],
+            description: String::new(), large_context: false,
+        }],
+        effort_levels: vec!["low".into(), "medium".into()],
+    };
     assert!(validate_selection(Some("test-model"), Some("high"), &catalog).is_ok());
     assert!(validate_selection(Some("test-model"), Some("max"), &catalog).is_err());
-    assert!(validate_selection(Some("missing"), None, &catalog).is_err());
-    assert!(validate_selection(None, Some("high"), &catalog).is_err());
+    // The detailed rules live in launch_models::check_choice; this only checks the audit's error codes.
+    assert!(validate_selection(Some("newer-model"), None, &catalog).is_ok());
+    assert_eq!(validate_selection(None, Some("high"), &catalog).unwrap_err(), "security_invalid:effort");
+    assert_eq!(validate_selection(Some("two words"), None, &catalog).unwrap_err(), "security_invalid:model");
     assert!(validate_selection(Some(""), Some(""), &catalog).is_ok());
-    assert!(validate_selection(Some("bad\nmodel"), None, &catalog).is_err());
+    assert_eq!(validate_selection(Some("bad\nmodel"), None, &catalog).unwrap_err(), "security_invalid:selection");
     let request: Request =
         serde_json::from_value(json!({"projectId":"p","agent":"codex","scope":"repository"}))
             .unwrap();

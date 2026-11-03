@@ -440,7 +440,7 @@ fn list_with_version(version: Option<(u32, u32, u32)>) -> Vec<ClaudeModel> {
             supports_fast_mode: false,
         })
         .collect();
-    if let Some(remote) = super::remote_model_catalog::models(version) { out = remote; }
+    if let Some(remote) = super::remote_model_catalog::models(version) { out = merge_remote(out, remote); }
     for (id, origin) in settings_models() {
         let id = normalize_id(&id).to_string();
         if out.iter().any(|m| m.id == id) {
@@ -459,6 +459,27 @@ fn list_with_version(version: Option<(u32, u32, u32)>) -> Vec<ClaudeModel> {
             large_context: false,
             supports_fast_mode: false,
         });
+    }
+    out
+}
+
+/// Lay the published catalogue over the bundled table without letting it hide what the table knows.
+///
+/// The published catalogue can lag behind a release: a model added to this build's table, which the
+/// installed CLI accepts, would otherwise vanish from every launch form while the conversation view, which
+/// asks the running CLI, still offers it. Published entries keep their order and wording; a table entry the
+/// catalogue lacks is placed before the first later table entry the catalogue does list, so a new model
+/// still leads its family. Both inputs have already been filtered by the installed CLI's version.
+fn merge_remote(curated: Vec<ClaudeModel>, remote: Vec<ClaudeModel>) -> Vec<ClaudeModel> {
+    let mut out = remote;
+    for (index, entry) in curated.iter().enumerate() {
+        if out.iter().any(|m| m.id == entry.id) {
+            continue;
+        }
+        let anchor = curated[index + 1..]
+            .iter()
+            .find_map(|later| out.iter().position(|m| m.id == later.id));
+        out.insert(anchor.unwrap_or(out.len()), entry.clone());
     }
     out
 }
@@ -571,6 +592,22 @@ fn config_dir() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn published_catalogue_keeps_table_models_it_lacks_in_table_order() {
+        let model = |id: &str, label: &str| super::ClaudeModel {
+            id: id.into(), label: label.into(), description: String::new(), effort_levels: vec![],
+            context_window: None, curated: true, large_context: false, supports_fast_mode: false,
+        };
+        let curated = vec![model("new", "Table new"), model("current", "Table current"), model("old", "Table old"), model("last", "Table last")];
+        let remote = vec![model("current", "Published current"), model("old", "Published old"), model("remote-only", "Published only")];
+        let merged = super::merge_remote(curated, remote);
+        let ids: Vec<_> = merged.iter().map(|m| m.id.as_str()).collect();
+        // A model newer than the published catalogue leads; one listed after every published entry trails.
+        assert_eq!(ids, ["new", "current", "old", "remote-only", "last"]);
+        // Published wording wins for a model both list.
+        assert_eq!(merged[1].label, "Published current");
+    }
+
     use super::*;
 
     #[test]

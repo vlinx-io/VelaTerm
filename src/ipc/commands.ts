@@ -167,6 +167,35 @@ export function agentLocateBin(agent: string): Promise<string | null> {
   return invoke<string | null>("agent_locate_bin", { agent });
 }
 
+/** One-click install command to type into the session shell, with the token its completion marker carries. */
+export interface AgentInstallRun {
+  /** Recommended command followed by the step that leaves the completion marker. */
+  command: string;
+  /** Token for agentInstallFinished; null when the backend could not add the marker step. */
+  token: string | null;
+}
+
+/**
+ * Builds the one-click install command for an agent. The shell leaves a completion marker once the command
+ * returns, so completion is never declared while the installer is still running. Null for unsupported kinds.
+ */
+export function agentInstallBegin(agent: string): Promise<AgentInstallRun | null> {
+  return invoke<AgentInstallRun | null>("agent_install_begin", { agent });
+}
+
+/** Whether the install started with this token has returned. A found marker is consumed. */
+export function agentInstallFinished(token: string): Promise<boolean> {
+  return invoke<boolean>("agent_install_finished", { token });
+}
+
+/**
+ * Runs the one-click install of an agent without a terminal interface on the host and resolves once it has
+ * exited successfully. Takes minutes for a download; rejects with a fixed code when it fails or does not apply.
+ */
+export function agentInstallRun(agent: string): Promise<void> {
+  return invoke<void>("agent_install_run", { agent });
+}
+
 /**
  * Asks an agent CLI to print the models it can run, normalized to bare identifiers.
  *
@@ -477,8 +506,27 @@ export interface GrokUsage {
   onDemandCap: number | null;
 }
 
+/** One ZCode plan quota window. */
+export interface ZcodeWindow {
+  /** Row label such as `5h` or `7d`; tool-call quotas are prefixed `mcp`. */
+  label: string;
+  /** Used percentage, 0-100. */
+  usedPercent: number;
+  /** Unix seconds of the next reset. */
+  resetsAt: number | null;
+}
+
+/** GLM Coding Plan quota of the platform ZCode is signed in to. */
+export interface ZcodeUsage {
+  /** `zai` or `bigmodel`. */
+  platform: string;
+  /** Plan level as the server names it, such as `lite` or `pro`. */
+  level: string | null;
+  windows: ZcodeWindow[];
+}
+
 /** Which account a usage row comes from; matches the session kinds that publish a quota. */
-export type UsageProvider = "claude" | "codex" | "grok";
+export type UsageProvider = "claude" | "codex" | "grok" | "zcode";
 
 /** One provider's stored reading, kept with the reason the last attempt failed. */
 export interface UsageEntry<T> {
@@ -502,6 +550,8 @@ export interface UsageSnapshot {
   claude: UsageEntry<ClaudeUsage>;
   codex: UsageEntry<CodexUsage>;
   grok: UsageEntry<GrokUsage>;
+  /** Absent in snapshots from a backend that predates the ZCode quota. */
+  zcode?: UsageEntry<ZcodeUsage>;
   /** Whether automatic polling is on; the panel hides its countdown when it is off. */
   auto: boolean;
   /** Effective poll interval in seconds, used for the countdown to the next refresh. */

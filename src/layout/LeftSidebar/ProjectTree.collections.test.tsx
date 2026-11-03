@@ -32,7 +32,7 @@ vi.mock("../../i18n", () => ({ useT: () => (key: string) => key }));
 vi.mock("../../components/Icons", () => ({ default: new Proxy({}, { get: () => () => null }) }));
 vi.mock("../../components/StatusIndicator", () => ({ StatusIndicator: () => null }));
 vi.mock("../sessionViewers/sessionMeta", () => ({ SessionKindIcon: () => null }));
-vi.mock("../../hooks/useGitBranch", () => ({ useGitBranch: () => null }));
+vi.mock("../../hooks/useGitBranch", () => ({ useGitBranch: () => null, useLinkedWorktrees: () => new Map() }));
 vi.mock("../../hooks/shortcutRegistry", () => ({
   DEFAULT_BINDINGS: { openProject: "Mod+O" },
   formatCombo: (combo: string) => combo,

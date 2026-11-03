@@ -69,21 +69,22 @@ fn settings(app: &AppCtx,sid: &str) -> Result<(config::Config,config::Preference
     let enabled=config::enabled_for(&conn,&cfg,sid)?;Ok((cfg,prefs,enabled))
 }
 
-fn still_current(app: &AppCtx,sid: &str,cfg: &config::Config,prefs: &config::Preferences,outgoing: bool) -> Result<(),String> {
+/// `manual` is a translation the user asked for on one question, so it does not depend on automatic replies.
+fn still_current(app: &AppCtx,sid: &str,cfg: &config::Config,prefs: &config::Preferences,outgoing: bool,manual: bool) -> Result<(),String> {
     let (current,next,enabled)=settings(app,sid)?;
     let same=if outgoing {next.outgoing && next.source==prefs.source && next.target==prefs.target}
-        else {next.replies && next.reply_source==prefs.reply_source && next.reply_target==prefs.reply_target};
+        else {(manual || next.replies) && next.reply_source==prefs.reply_source && next.reply_target==prefs.reply_target};
     if !enabled || current.version!=cfg.version || current.generation!=cfg.generation || !same {return Err("translation:canceled".into());}
     Ok(())
 }
 
-pub(super) fn question(app: &AppCtx,sid: &str,id: &str) -> Result<Value,String> {
+pub(super) fn question(app: &AppCtx,sid: &str,id: &str,manual: bool) -> Result<Value,String> {
     let request=pending(app,sid,id)?;let (cfg,prefs,enabled)=settings(app,sid)?;
-    if !enabled || !prefs.replies {return Err("translation:disabled".into());}
+    if !enabled || !manual && !prefs.replies {return Err("translation:disabled".into());}
     let started=Instant::now();
     let translated=translate_fields(app,&cfg,&prefs.reply_source,&prefs.reply_target,&fields(&request["input"] )?,id)?;
     let input=replace_fields(&request["input"],translated)?;
-    let _gate=GATE.lock().unwrap();still_current(app,sid,&cfg,&prefs,false)?;
+    let _gate=GATE.lock().unwrap();still_current(app,sid,&cfg,&prefs,false,manual)?;
     if pending(app,sid,id)?!=request {return Err("translation:canceled".into());}
     Ok(json!({"input":input,"originalInput":request["input"],"version":cfg.version,"generation":cfg.generation,
         "source":prefs.reply_source,"target":prefs.reply_target,"durationMs":started.elapsed().as_millis() as u64}))
@@ -128,7 +129,7 @@ pub fn answer(app: &AppCtx,sid: &str,id: &str,answers: &Value,send_original: boo
         for ((key,_),text) in typed.into_iter().zip(translated) {input["answers"][key]=json!(text);}
     }
     let _gate=GATE.lock().unwrap();
-    if translating {still_current(app,sid,&cfg,&prefs,true)?;}
+    if translating {still_current(app,sid,&cfg,&prefs,true,false)?;}
     if pending(app,sid,id)?!=request {return Err("translation:canceled".into());}
     app.chat().respond_permission(app,sid,id,true,Some(input),None,None)
 }

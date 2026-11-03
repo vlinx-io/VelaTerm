@@ -53,8 +53,8 @@ pub struct UserCliStatus {
     pub conflict: Option<String>,
 }
 
-/// Compile-time embedded agent skill definitions installed on demand into Claude and Codex user skill
-/// directories. They install as one bundle controlled by a single setting; add future skills here.
+/// Compile-time embedded agent skill definitions installed on demand into the Claude and the shared
+/// (`~/.agents`) user skill directories. They install as one bundle controlled by a single setting; add future skills here.
 const SKILLS: &[(&str, &str)] = &[
     ("vspawn", include_str!("../../../skills/vspawn/SKILL.md")),
     (
@@ -472,7 +472,21 @@ fn claude_skills_dir() -> std::io::Result<PathBuf> {
     Ok(home.join(".claude").join("skills"))
 }
 
-fn codex_skills_dir() -> std::io::Result<PathBuf> {
+/// Agent Skills' shared user directory. Codex, Pi, ZCode, DeepSeek Harness and OpenCode all read it; Pi, ZCode
+/// and DeepSeek Harness read no Claude or Codex directory, so without this copy they never see the bundle.
+fn agents_skills_dir() -> std::io::Result<PathBuf> {
+    let home = crate::host::home_dir().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "user home directory not found",
+        )
+    })?;
+    Ok(home.join(".agents").join("skills"))
+}
+
+/// Where earlier releases installed the Codex copy. Codex reads `~/.agents/skills` as well, so a bundle left
+/// here would list every skill twice; it moves to the shared directory instead.
+fn legacy_codex_skills_dir() -> std::io::Result<PathBuf> {
     if let Some(codex_home) = std::env::var_os("CODEX_HOME").filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(codex_home).join("skills"));
     }
@@ -485,8 +499,17 @@ fn codex_skills_dir() -> std::io::Result<PathBuf> {
     Ok(home.join(".codex").join("skills"))
 }
 
-fn skill_dirs() -> std::io::Result<[PathBuf; 2]> {
-    Ok([claude_skills_dir()?, codex_skills_dir()?])
+/// Install directories, Claude's first, and the legacy Codex directory to empty. The legacy one is dropped
+/// when `CODEX_HOME` points it at an install directory, so clearing it never removes the fresh copy.
+struct SkillDirs {
+    install: [PathBuf; 2],
+    legacy: Option<PathBuf>,
+}
+
+fn skill_dirs() -> std::io::Result<SkillDirs> {
+    let install = [claude_skills_dir()?, agents_skills_dir()?];
+    let legacy = Some(legacy_codex_skills_dir()?).filter(|dir| !install.contains(dir));
+    Ok(SkillDirs { install, legacy })
 }
 
 fn sentinel_exists(dir: &Path) -> bool {
@@ -494,9 +517,10 @@ fn sentinel_exists(dir: &Path) -> bool {
     dir.join(sentinel).join("SKILL.md").exists()
 }
 
-/// Claude and Codex share skill bodies, but three Claude frontmatter fields are outside the Codex schema.
-/// Strip them for Codex, including `allowed-tools: Bash(...)`, which would restrict it to a nonexistent tool.
-fn codex_skill_content(content: &str) -> String {
+/// Claude and the shared directory carry the same skill bodies, but three Claude frontmatter fields are
+/// outside the Codex schema, and Codex reads the shared directory. Strip them there, including
+/// `allowed-tools: Bash(...)`, which would restrict Codex to a nonexistent tool.
+fn agents_skill_content(content: &str) -> String {
     let mut rendered = content
         .lines()
         .filter(|line| {
@@ -510,7 +534,7 @@ fn codex_skill_content(content: &str) -> String {
     rendered
 }
 
-fn write_skills(dir: &Path, for_codex: bool) -> std::io::Result<()> {
+fn write_skills(dir: &Path, for_agents: bool) -> std::io::Result<()> {
     for (name, content) in SKILLS {
         let dest = dir.join(name);
         std::fs::create_dir_all(&dest)?;
@@ -518,8 +542,8 @@ fn write_skills(dir: &Path, for_codex: bool) -> std::io::Result<()> {
             std::fs::create_dir_all(dest.join("references"))?;
             std::fs::write(dest.join("references/plan-execute.md"), include_str!("../../../skills/vspawn/references/plan-execute.md"))?;
         }
-        if for_codex {
-            std::fs::write(dest.join("SKILL.md"), codex_skill_content(content))?;
+        if for_agents {
+            std::fs::write(dest.join("SKILL.md"), agents_skill_content(content))?;
             if *name == "vkb" {
                 let agents = dest.join("agents");
                 std::fs::create_dir_all(&agents)?;
@@ -547,7 +571,28 @@ fn remove_retired_skills(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Check whether bundled skills are installed in both user-level Claude and Codex directories. Use the
+/// Remove every bundled skill from `dir`, leaving the user's own skills in place.
+fn remove_bundle(dir: &Path) -> std::io::Result<()> {
+    remove_retired_skills(dir)?;
+    for (name, _) in SKILLS {
+        let dest = dir.join(name);
+        if dest.exists() {
+            std::fs::remove_dir_all(&dest)?;
+        }
+    }
+    Ok(())
+}
+
+fn install_into(dirs: &SkillDirs) -> std::io::Result<()> {
+    write_skills(&dirs.install[0], false)?;
+    write_skills(&dirs.install[1], true)?;
+    match &dirs.legacy {
+        Some(legacy) => remove_bundle(legacy),
+        None => Ok(()),
+    }
+}
+
+/// Check whether bundled skills are installed in both the Claude and the shared user directory. Use the
 /// uniquely prefixed first `vspawn` skill as a bundle sentinel. Startup refresh fills skills added after
 /// older partial installations without requiring the user to toggle the setting.
 pub fn skills_installed() -> bool {
@@ -555,26 +600,19 @@ pub fn skills_installed() -> bool {
         Ok(dirs) => dirs,
         Err(_) => return false,
     };
-    dirs.iter().all(|dir| sentinel_exists(dir))
+    dirs.install.iter().all(|dir| sentinel_exists(dir))
 }
 
-/// Install every bundled SKILLS entry into Claude and Codex user-level skill directories.
+/// Install every bundled SKILLS entry into the Claude and the shared user skill directory.
 pub fn install_skills() -> std::io::Result<()> {
-    let [claude_dir, codex_dir] = skill_dirs()?;
-    write_skills(&claude_dir, false)?;
-    write_skills(&codex_dir, true)
+    install_into(&skill_dirs()?)
 }
 
-/// Uninstall all bundled skills from Claude and Codex user-level skill directories.
+/// Uninstall all bundled skills from the Claude, the shared and the legacy Codex skill directory.
 pub fn uninstall_skills() -> std::io::Result<()> {
-    for dir in skill_dirs()? {
-        remove_retired_skills(&dir)?;
-        for (name, _) in SKILLS {
-            let dest = dir.join(name);
-            if dest.exists() {
-                std::fs::remove_dir_all(&dest)?;
-            }
-        }
+    let dirs = skill_dirs()?;
+    for dir in dirs.install.iter().chain(&dirs.legacy) {
+        remove_bundle(dir)?;
     }
     Ok(())
 }
@@ -582,22 +620,22 @@ pub fn uninstall_skills() -> std::io::Result<()> {
 /// Refresh installed skills at startup so contents follow application updates, like bin scripts. Leave
 /// uninstalled skills untouched because the setting controls installation. Log failures without aborting.
 pub fn refresh_installed_skills() {
-    if let Err(e) = skill_dirs().and_then(refresh_skills_in_dirs) {
+    if let Err(e) = skill_dirs().and_then(|dirs| refresh_skills_in_dirs(&dirs)) {
         crate::diagnostic_warn!("failed to refresh installed agent skills (skill content may lag behind the current version): {e}");
     }
 }
 
-fn refresh_skills_in_dirs(dirs: [PathBuf; 2]) -> std::io::Result<()> {
-    // Older releases wrote only ~/.claude/skills. A sentinel on either side means the user enabled the
-    // bundle, so refresh also fills the other directory.
-    let was_installed = dirs.iter().any(|dir| sentinel_exists(dir));
+fn refresh_skills_in_dirs(dirs: &SkillDirs) -> std::io::Result<()> {
+    // Older releases wrote only ~/.claude/skills, later ones ~/.claude/skills and the Codex directory. A
+    // sentinel in any of them means the user enabled the bundle, so refresh fills both install directories
+    // and moves the Codex copy to the shared one.
+    let was_installed = dirs.install.iter().chain(&dirs.legacy).any(|dir| sentinel_exists(dir));
     // Retired skills must also disappear from partial or disabled installations.
-    for dir in &dirs {
+    for dir in dirs.install.iter().chain(&dirs.legacy) {
         remove_retired_skills(dir)?;
     }
     if was_installed {
-        write_skills(&dirs[0], false)?;
-        write_skills(&dirs[1], true)?;
+        install_into(dirs)?;
     }
     Ok(())
 }
@@ -673,8 +711,8 @@ mod tests {
     }
 
     #[test]
-    fn codex_skill_content_removes_claude_only_frontmatter() {
-        let rendered = codex_skill_content(SKILLS[0].1);
+    fn agents_skill_content_removes_claude_only_frontmatter() {
+        let rendered = agents_skill_content(SKILLS[0].1);
         assert!(rendered.contains("name: vspawn"));
         assert!(rendered.contains("# /vspawn"));
         assert!(!rendered.contains("argument-hint:"));
@@ -728,7 +766,7 @@ mod tests {
     #[test]
     fn knowledge_skills_replace_retired_name_without_implicit_invocation() {
         let tmp = std::env::temp_dir().join(format!("vlx-vkb-skills-{}", uuid::Uuid::new_v4()));
-        for (provider, for_codex) in [("claude", false), ("codex", true)] {
+        for (provider, for_agents) in [("claude", false), ("agents", true)] {
             let dir = tmp.join(provider);
             // Simulate an older bundle that has only the original skill.
             std::fs::create_dir_all(dir.join("vknowledge/agents")).unwrap();
@@ -737,14 +775,14 @@ mod tests {
             std::fs::create_dir_all(dir.join("custom-skill")).unwrap();
             std::fs::write(dir.join("custom-skill/SKILL.md"), "keep").unwrap();
             for _ in 0..2 {
-                write_skills(&dir, for_codex).unwrap();
+                write_skills(&dir, for_agents).unwrap();
                 assert!(!dir.join("vknowledge").exists());
                 assert_eq!(std::fs::read_to_string(dir.join("custom-skill/SKILL.md")).unwrap(), "keep");
                 let content = std::fs::read_to_string(dir.join("vkb/SKILL.md")).unwrap();
                 assert!(content.contains("name: vkb\n"));
                 assert!(content.contains("only when the user explicitly"));
                 assert!(content.contains("vkb memories"));
-                if for_codex {
+                if for_agents {
                     assert!(!content.contains("disable-model-invocation:"));
                     let policy = std::fs::read_to_string(dir.join("vkb/agents/openai.yaml")).unwrap();
                     assert!(policy.contains("allow_implicit_invocation: false"));
@@ -761,20 +799,23 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("vlx-vkb-refresh-{}", uuid::Uuid::new_v4()));
         for enabled in [false, true] {
             let root = tmp.join(enabled.to_string());
-            let dirs = [root.join("claude"), root.join("codex")];
-            for dir in &dirs {
+            let dirs = SkillDirs {
+                install: [root.join("claude"), root.join("agents")],
+                legacy: None,
+            };
+            for dir in &dirs.install {
                 std::fs::create_dir_all(dir.join("vknowledge")).unwrap();
                 std::fs::write(dir.join("vknowledge/SKILL.md"), "old bundled skill").unwrap();
                 std::fs::create_dir_all(dir.join("vorch")).unwrap();
                 std::fs::write(dir.join("vorch/SKILL.md"), "old task splitter").unwrap();
             }
             if enabled {
-                std::fs::create_dir_all(dirs[0].join("vspawn")).unwrap();
-                std::fs::write(dirs[0].join("vspawn/SKILL.md"), "bundle sentinel").unwrap();
+                std::fs::create_dir_all(dirs.install[0].join("vspawn")).unwrap();
+                std::fs::write(dirs.install[0].join("vspawn/SKILL.md"), "bundle sentinel").unwrap();
             }
             for _ in 0..2 {
-                refresh_skills_in_dirs(dirs.clone()).unwrap();
-                for dir in &dirs {
+                refresh_skills_in_dirs(&dirs).unwrap();
+                for dir in &dirs.install {
                     assert!(!dir.join("vknowledge").exists());
                     assert!(!dir.join("vorch").exists());
                     assert_eq!(dir.join("vkb/SKILL.md").exists(), enabled);
@@ -790,6 +831,34 @@ mod tests {
             }
         }
         std::fs::remove_dir_all(tmp).unwrap();
+    }
+
+    #[test]
+    fn startup_moves_codex_bundle_to_shared_directory() {
+        let root = std::env::temp_dir().join(format!("vlx-skills-move-{}", uuid::Uuid::new_v4()));
+        let dirs = SkillDirs {
+            install: [root.join("claude"), root.join("agents")],
+            legacy: Some(root.join("codex")),
+        };
+        let legacy = dirs.legacy.clone().unwrap();
+        // An earlier release installed into Claude and Codex; the user keeps a skill of their own there.
+        write_skills(&dirs.install[0], false).unwrap();
+        write_skills(&legacy, true).unwrap();
+        std::fs::create_dir_all(legacy.join("custom-skill")).unwrap();
+        std::fs::write(legacy.join("custom-skill/SKILL.md"), "keep").unwrap();
+        for _ in 0..2 {
+            refresh_skills_in_dirs(&dirs).unwrap();
+            for (name, _) in SKILLS {
+                assert!(dirs.install[0].join(name).join("SKILL.md").is_file());
+                assert!(dirs.install[1].join(name).join("SKILL.md").is_file());
+                assert!(!legacy.join(name).exists(), "{name} should leave the Codex directory");
+            }
+            assert_eq!(std::fs::read_to_string(legacy.join("custom-skill/SKILL.md")).unwrap(), "keep");
+            let shared = std::fs::read_to_string(dirs.install[1].join("vask/SKILL.md")).unwrap();
+            assert!(shared.contains("name: vask"));
+            assert!(!shared.contains("allowed-tools:"));
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(feature = "gui")]

@@ -83,6 +83,24 @@ it("discards a late translation after the reply language changes or translation 
   expect(screen.getByText("Approve this plan?")).toBeTruthy();
 });
 
+it("offers an on-demand translation when automatic reply translation is off", async () => {
+  mocks.state!.value!.preferences.replies = false;
+  mocks.state!.value!.preferences.display = "original";
+  render(<PermissionCard request={request} onAnswer={vi.fn()} />);
+  expect(mocks.translate).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Translation" }));
+  expect(await screen.findByText("批准此方案吗？")).toBeTruthy();
+  expect(screen.getByText("Approve this plan?")).toBeTruthy();
+  expect(mocks.translate).toHaveBeenCalledWith("fixture", "ask-1", true);
+});
+
+it("offers no translation button when translation is off in Settings", () => {
+  mocks.state!.value!.preferences.replies = false;
+  mocks.state!.settings!.config.enabled = false;
+  render(<PermissionCard request={request} onAnswer={vi.fn()} />);
+  expect(screen.queryByRole("button", { name: "Translation" })).toBeNull();
+});
+
 it("keeps the question usable when display translation fails and supports retry", async () => {
   mocks.translate.mockRejectedValueOnce("translation:network");
   render(<PermissionCard request={request} onAnswer={vi.fn()} />);
@@ -102,4 +120,17 @@ it("preserves dismiss semantics and does not submit while confirming an IME comp
   fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
   expect(answer).toHaveBeenCalledWith(request, { allow: false, message: "Dismissed by user" });
   expect(mocks.translate).not.toHaveBeenCalled();
+});
+
+it("lets option text be selected without picking the option, and still picks from the keyboard", () => {
+  mocks.state = null;
+  render(<PermissionCard request={request} onAnswer={vi.fn()} />);
+  const option = screen.getByRole("radio", { name: /Zip only/ });
+  const range = document.createRange(); range.selectNodeContents(option);
+  window.getSelection()!.addRange(range);
+  fireEvent.click(option);
+  expect(option.getAttribute("aria-checked")).toBe("false");
+  window.getSelection()!.removeAllRanges();
+  fireEvent.keyDown(option, { key: " " });
+  expect(option.getAttribute("aria-checked")).toBe("true");
 });

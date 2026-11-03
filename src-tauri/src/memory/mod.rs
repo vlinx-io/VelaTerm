@@ -80,7 +80,6 @@ pub fn dispatch(app: &AppCtx, cmd: &str, args: &Value) -> Result<Value, String> 
     };
     match cmd {
         "memory_options" => runner::options(app),
-        "memory_models" => Ok(json!(runner::models(app, required("agent")?)?)),
         "memory_list" => repo::list(app, args),
         // Archived sessions grouped by their original project for the Collections hierarchy.
         "memory_collections" => {

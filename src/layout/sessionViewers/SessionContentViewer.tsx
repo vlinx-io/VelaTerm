@@ -15,15 +15,17 @@
 //! the transcript. An empty array selects recording playback, except for Kiro, where it is re-read to
 //! distinguish an empty record from a cached failure. Omitting the prop retains internal loading.
 
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import { t } from "../../i18n";
 import { readAgentTranscript, type TranscriptMessage } from "../../ipc/commands";
 import type { Session } from "../../types";
-import { RecordingViewer } from "./RecordingViewer";
 import { TranscriptViewer } from "./TranscriptViewer";
 import { PagedConversation } from "./PagedConversation";
 import { hasPagedHistory } from "./pagedHistory";
+
+// Recording playback embeds its own xterm, which would otherwise ride into the entry bundle with global search.
+const RecordingViewer = lazy(() => import("./RecordingViewer").then((m) => ({ default: m.RecordingViewer })));
 
 /** Whether this session type inherently lacks an agent transcript and should use recording playback. */
 function hasNoTranscript(kind: Session["kind"]): boolean {
@@ -60,7 +62,11 @@ export function SessionContentViewer(props: SessionContentProps) {
 }
 
 function RecordingContent({ session, highlightTerms, initialQuery, scrollToOrdinal }: SessionContentProps) {
-  return <RecordingViewer sessionId={session.id} initialQuery={highlightTerms?.[0] ?? initialQuery} scrollToOrdinal={scrollToOrdinal} />;
+  return (
+    <Suspense fallback={null}>
+      <RecordingViewer sessionId={session.id} initialQuery={highlightTerms?.[0] ?? initialQuery} scrollToOrdinal={scrollToOrdinal} />
+    </Suspense>
+  );
 }
 
 function LoadedTranscript(props: SessionContentProps) {

@@ -37,7 +37,14 @@ interface TabStateView {
   ephemeralSessions: Record<string, unknown>;
   /** Document-tab metadata; valid tabs without pane trees are exempted from invariants 1/2 through this map. */
   docTabs: Record<string, unknown>;
+  /** Browser, task and New Session tabs also live in openTabs without a pane tree. */
+  browserTabs?: Record<string, unknown>;
+  taskTabs?: Record<string, unknown>;
+  newSessionTabs?: Record<string, unknown>;
 }
+
+const hasTabContent = (s: TabStateView, id: string) => !!(s.paneTrees[id] || s.docTabs[id]
+  || s.browserTabs?.[id] || s.taskTabs?.[id] || s.newSessionTabs?.[id]);
 
 /**
  * Validate invariants that must hold after closing/switching tabs. Any violation directly produces a blank center
@@ -49,16 +56,16 @@ export function checkTabInvariants(label: string, s: TabStateView): void {
 
   // 1) Every openTab must have a pane tree (terminal tab) **or** document metadata in docTabs.
   for (const id of s.openTabs) {
-    if (!s.paneTrees[id] && !s.docTabs[id]) {
+    if (!hasTabContent(s, id)) {
       problems.push(`openTab "${id}" has no paneTree and is not a doc tab`);
     }
   }
 
-  // 2) activeTabId is null or references an openTab with a tree/document tab; otherwise the center pane is blank.
+  // 2) activeTabId is null or references an openTab with a tree, document, browser, task or New Session tab; otherwise the center pane is blank.
   if (s.activeTabId != null) {
     if (!s.openTabs.includes(s.activeTabId)) {
       problems.push(`activeTabId "${s.activeTabId}" is not in openTabs`);
-    } else if (!s.paneTrees[s.activeTabId] && !s.docTabs[s.activeTabId]) {
+    } else if (!hasTabContent(s, s.activeTabId)) {
       problems.push(
         `activeTabId "${s.activeTabId}" has no paneTree and is not a doc tab (center pane will blank out)`,
       );

@@ -26,6 +26,8 @@ export const AGENT_ARGS_KINDS: SessionKind[] = [
   "kiro",
   "grok",
   "zoo",
+  "zcode",
+  "deepseek",
 ];
 export function supportsAgentArgs(kind: SessionKind): boolean {
   return AGENT_ARGS_KINDS.includes(kind);
@@ -47,6 +49,8 @@ export const RESUMABLE_KINDS: { kind: SessionKind; label: string }[] = [
   { kind: "kiro", label: "Kiro" },
   { kind: "grok", label: "Grok Build" },
   { kind: "zoo", label: "Zoo Code" },
+  { kind: "zcode", label: "ZCode" },
+  { kind: "deepseek", label: "DeepSeek" },
 ];
 
 /** Worktree choice for a new session: none, create one, or attach to an existing worktree. */
@@ -72,6 +76,8 @@ export function kindLabel(kind: SessionKind): string {
   if (kind === "kimi") return "Kimi Code";
   if (kind === "kiro") return "Kiro";
   if (kind === "grok") return "Grok Build";
+  if (kind === "zcode") return "ZCode";
+  if (kind === "deepseek") return "DeepSeek";
   return "Zoo Code";
 }
 

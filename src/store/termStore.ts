@@ -100,7 +100,7 @@ import type {
   SessionKind,
   SessionRuntime,
 } from "../types";
-import { AGENT_STATES, effectiveStatus, matchesAgentState } from "../types";
+import { AGENT_STATES, effectiveStatus, matchesAgentState, worktreeGroup } from "../types";
 import {
   CLEAN_IMAGES_KEY,
   NOTIFY_KEY,
@@ -125,7 +125,7 @@ import {
   type ReferSummaryConfig,
   type TermRenderer,
 } from "./settings";
-import { docKindOf, makeDocTab, type DocTab } from "./docTab";
+import { docKindOf, makeChangesTab, makeDiffTab, makeDocTab, sameComparison, type ChangesTarget, type DocTab } from "./docTab";
 import { traceSplit, type SplitSource } from "./splitTrace";
 
 // Re-export the public API after moving implementations to settings/docTab, preserving existing import paths.
@@ -137,7 +137,7 @@ export type {
   TermRenderer,
 } from "./settings";
 export { docKindOf } from "./docTab";
-export type { DocKind, DocTab } from "./docTab";
+export type { ChangesTarget, DocKind, DocTab } from "./docTab";
 
 // A local claim lets a failed workflow or image upload retry its backend-owned request ID.
 const spawnRecovery = new Map<string, Promise<void>>();
@@ -679,6 +679,7 @@ function reconcileTabs(state: {
   docTabs: Record<string, DocTab>;
   browserTabs: Record<string, BrowserTab>;
   taskTabs: Record<string, TaskTab>;
+  newSessionTabs: Record<string, NewSessionTab>;
 }) {
   const valid = new Set([
     ...state.sessions.map((s) => s.id),
@@ -687,7 +688,7 @@ function reconcileTabs(state: {
   const paneTrees: Record<string, PaneNode> = {};
   const openTabs: string[] = [];
   for (const tabId of state.openTabs) {
-    if (state.docTabs[tabId] || state.browserTabs[tabId] || state.taskTabs[tabId]) {
+    if (state.docTabs[tabId] || state.browserTabs[tabId] || state.taskTabs[tabId] || state.newSessionTabs[tabId]) {
       // Preserve metadata-backed document/browser/task tabs without pane trees. A browser tab bound to a
       // tree node uses the node ID and closes when that node is deleted or archived.
       if (
@@ -720,11 +721,15 @@ function reconcileTabs(state: {
   for (const [id, task] of Object.entries(state.taskTabs)) {
     if (inOpen.has(id)) taskTabs[id] = task;
   }
+  const newSessionTabs: Record<string, NewSessionTab> = {};
+  for (const [id, draft] of Object.entries(state.newSessionTabs)) {
+    if (inOpen.has(id)) newSessionTabs[id] = draft;
+  }
   let { activeTabId, activeSessionId, focusedPaneId } = state;
   if (!activeTabId || !openTabs.includes(activeTabId)) {
     activeTabId = openTabs[0] ?? null;
   }
-  if (activeTabId && (docTabs[activeTabId] || browserTabs[activeTabId] || taskTabs[activeTabId])) {
+  if (activeTabId && (docTabs[activeTabId] || browserTabs[activeTabId] || taskTabs[activeTabId] || newSessionTabs[activeTabId])) {
     // Document/browser/task tabs have no active session or focused pane.
     activeSessionId = null;
     focusedPaneId = null;
@@ -760,6 +765,7 @@ function reconcileTabs(state: {
     docTabs,
     browserTabs,
     taskTabs,
+    newSessionTabs,
   };
 }
 
@@ -838,6 +844,30 @@ export interface TaskTab {
   returnPaneId?: string;
 }
 
+/**
+ * Tab for setting up a new agent session: location, agent, model, view and a first task. Like `TaskTab` it has
+ * no pane tree and is client-local: not persisted across restart and not published to mirror peers. The form
+ * itself lives in the mounted `NewSessionView`; the tab only records where the session will be created.
+ */
+export interface NewSessionTab {
+  /** `"new-session-" + genId()`, used in `openTabs` and the tab's URL. */
+  id: string;
+  projectId: string;
+  groupId: string | null;
+  /** Session the new one is created under, or null for the project or group root. */
+  parentSessionId: string | null;
+  /** The pane to return to when this tab closes without creating anything. */
+  returnTabId?: string;
+  returnPaneId?: string;
+}
+
+/** Where a new-session tab creates its session. */
+export interface NewSessionTarget {
+  projectId: string;
+  groupId?: string | null;
+  parentSessionId?: string | null;
+}
+
 /** Restore a task's source only within the selected tab; other navigation keeps the first-leaf fallback. */
 function taskReturnLeaf(tree: PaneNode, tabId: string, task?: TaskTab) {
   const source = task?.returnTabId === tabId && task.returnPaneId
@@ -886,24 +916,6 @@ interface TermStore {
   spawnReceipts: Record<string, SpawnReceipt>;
   /** Target ID for the open merge dialog, or `null`. */
   mergeTarget: SessionId | null;
-  /** Working directory for the open changes dialog, or `null`. */
-  changesCwd: string | null;
-  /** File the changes dialog should select on open, or `null` to select the first one. */
-  changesPath: string | null;
-  /** Which Git area the changes dialog is comparing. */
-  changesSide: import("../ipc/commands").GitChangeSide;
-  /**
-   * Commit the changes dialog should show instead of the worktree, or `null` for uncommitted work.
-   * Set from the Git panel's history so one dialog serves both "what changed since HEAD" and
-   * "what did this commit change".
-   */
-  changesCommit: string | null;
-  /**
-   * With `changesCommit`, compare from this commit instead of the commit's parent: the Git panel's
-   * branch comparison shows everything from the merge base to HEAD this way. `label` names the base.
-   */
-  changesBase: { from: string; label: string } | null;
-
   // Center tabs and split panes.
   openTabs: SessionId[]; // Visible tabs, identified by root session ID.
   activeTabId: SessionId | null; // Current tab.
@@ -947,6 +959,8 @@ interface TermStore {
   browserTabs: Record<string, BrowserTab>;
   /** Metadata for `task-` entries in `openTabs`. Client-local, see `TaskTab`. */
   taskTabs: Record<string, TaskTab>;
+  /** Metadata for `new-session-` entries in `openTabs`. Client-local, see `NewSessionTab`. */
+  newSessionTabs: Record<string, NewSessionTab>;
 
   // Mirror mode: one shared arrangement across every client of this service (see mirrorSync.ts).
   /**
@@ -1209,9 +1223,11 @@ interface TermStore {
   /** Closes branch merge. */
   closeMerge: () => void;
   /** Opens the changes dialog for a working directory. */
+  /** Open, or focus and refresh, the changes tab for this comparison, selecting `path` when given. */
   openChanges: (cwd: string, opts?: { path?: string; commit?: string; side?: import("../ipc/commands").GitChangeSide; base?: { from: string; label: string } }) => void;
+  /** Select a file in an open changes tab. */
+  selectChangesFile: (id: string, path: string | null) => void;
   /** Closes the changes dialog. */
-  closeChanges: () => void;
   /** Executes a spawn: creates the child and optional worktree, stores its prompt, and opens it. */
   executeSpawn: (req: SpawnRequest) => Promise<void>;
   /** Consumes a session's pending initial spawn prompt after PTY startup. */
@@ -1307,6 +1323,8 @@ interface TermStore {
    * Opens a document tab. Reopening an existing path focuses it and forces a disk reload; otherwise creates one.
    */
   openDocTab: (path: string) => void;
+  /** Open, or focus and refresh, the diff tab of `path`, whose repository-relative path under `root` is `relative`. */
+  openDiffTab: (path: string, root: string, relative: string) => void;
   /** Creates an untitled plain-text draft whose first Save As establishes path and syntax. */
   newDocTab: () => void;
   /**
@@ -1314,6 +1332,13 @@ interface TermStore {
    */
   openTaskTab: (sessionId: string, task: ChatBackgroundTask) => void;
   hydrateTaskTab: (sessionId: string, task: ChatBackgroundTask) => void;
+  /**
+   * Opens a New Session tab for a location and returns its ID. With `id`, focuses that tab when it is open,
+   * or opens one under that ID (restoring a tab from its URL).
+   */
+  openNewSessionTab: (target: NewSessionTarget, id?: string) => string;
+  /** Moves an open New Session tab to another location, such as when its project is changed. */
+  retargetNewSessionTab: (id: string, target: NewSessionTarget) => void;
   /** Applies Save As path/title/kind and converts a draft to normal read/write mode. */
   setDocTabPath: (id: string, path: string) => void;
   /** Refreshes a document by incrementing its reload nonce. */
@@ -1997,11 +2022,6 @@ export const useTermStore = create<TermStore>((set, get) => ({
   pendingSpawns: [],
   spawnReceipts: {},
   mergeTarget: null,
-  changesCwd: null,
-  changesPath: null,
-  changesSide: "all",
-  changesCommit: null,
-  changesBase: null,
 
   openTabs: [],
   activeTabId: null,
@@ -2019,6 +2039,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
   docTabs: {},
   browserTabs: {},
   taskTabs: {},
+  newSessionTabs: {},
 
   mirrorEnabled: false,
   remoteClients: 0,
@@ -2137,6 +2158,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
               docTabs: {},
               browserTabs: {},
               taskTabs: {},
+              newSessionTabs: {},
             });
             // Restore visible tabs, background tabs, and split trees intact.
             layoutPatch = {
@@ -2173,6 +2195,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
           docTabs: state.docTabs,
           browserTabs: state.browserTabs,
           taskTabs: state.taskTabs,
+          newSessionTabs: state.newSessionTabs,
         });
       }
       const sidebarTreeViews = state.sidebarTreeViews;
@@ -2354,9 +2377,14 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
 
   applySpawnReceipt: async (receipt, open = false) => {
-    const needsReview = receipt.decision === "pending" || receipt.state === "pending" || receipt.state === "failed" || receipt.state === "uncertain" || receipt.state === "dispatching";
     set((s) => {
       const index = s.pendingSpawns.findIndex((r) => r.requestId === receipt.requestId);
+      // Creation in progress keeps a card the user already has open, but never raises a new one:
+      // an automatic launch (`vspawn --yes` or confirmation turned off) needs no one's attention
+      // until it fails.
+      const creating = receipt.decision === "confirmed" && receipt.state === "pending";
+      const needsReview = receipt.decision === "pending" || (creating && index >= 0)
+        || receipt.state === "failed" || receipt.state === "uncertain" || receipt.state === "dispatching";
       const next = s.pendingSpawns.filter((r) => r.requestId !== receipt.requestId);
       if (needsReview) next.splice(index < 0 ? next.length : index, 0, receipt.request);
       return { pendingSpawns: next, spawnReceipts: { ...s.spawnReceipts, [receipt.requestId]: receipt } };
@@ -2386,8 +2414,11 @@ export const useTermStore = create<TermStore>((set, get) => ({
     if (!req.requestId) { await get().syncSpawnRequests(); return; }
     // The event is a hint. Settings, the decision and the result come from the durable backend row.
     // Keep the hint visible if the read fails; reconnect can recover it without executing locally.
-    set((s) => ({ pendingSpawns: s.pendingSpawns.some((r) => r.requestId === req.requestId)
-      ? s.pendingSpawns : [...s.pendingSpawns, req] }));
+    // Requests the backend confirms on its own raise no card, so nothing pops up to be clicked by mistake.
+    if (!req.noConfirm && get().spawnConfirm !== false) {
+      set((s) => ({ pendingSpawns: s.pendingSpawns.some((r) => r.requestId === req.requestId)
+        ? s.pendingSpawns : [...s.pendingSpawns, req] }));
+    }
     const receipt = await spawnRequest(req.requestId);
     await get().applySpawnReceipt(receipt, receipt.decision === "confirmed");
     if (receipt.decision === "confirmed" && receipt.state === "pending") await get().syncSpawnRequests();
@@ -2425,16 +2456,48 @@ export const useTermStore = create<TermStore>((set, get) => ({
 
   openMerge: (id) => set({ mergeTarget: id }),
   closeMerge: () => set({ mergeTarget: null }),
-  openChanges: (cwd, opts) =>
-    set({
-      changesCwd: cwd,
-      changesPath: opts?.path ?? null,
-      changesSide: opts?.side ?? "all",
-      changesCommit: opts?.commit ?? null,
-      changesBase: opts?.commit && opts.base ? opts.base : null,
+  openChanges: (cwd, opts) => {
+    set((state) => {
+      const target: ChangesTarget = {
+        cwd,
+        side: opts?.side ?? "all",
+        commit: opts?.commit ?? null,
+        base: opts?.commit && opts.base ? opts.base : null,
+        path: opts?.path ?? null,
+      };
+      // One tab per comparison: opening it again selects the requested file there and rereads it.
+      const existing = Object.values(state.docTabs).find(
+        (d) => d.kind === "changes" && d.changes && sameComparison(d.changes, target),
+      );
+      if (existing) {
+        const path = target.path ?? existing.changes!.path;
+        return {
+          docTabs: {
+            ...state.docTabs,
+            [existing.id]: { ...existing, changes: { ...target, path }, reloadNonce: existing.reloadNonce + 1 },
+          },
+          activeTabId: existing.id,
+          activeSessionId: null,
+          focusedPaneId: null,
+        };
+      }
+      const tab = makeChangesTab(target);
+      return {
+        docTabs: { ...state.docTabs, [tab.id]: tab },
+        openTabs: [...state.openTabs, tab.id],
+        activeTabId: tab.id,
+        activeSessionId: null,
+        focusedPaneId: null,
+      };
+    });
+    saveLayoutTick();
+  },
+  selectChangesFile: (id, path) =>
+    set((state) => {
+      const tab = state.docTabs[id];
+      if (!tab?.changes || tab.changes.path === path) return {};
+      return { docTabs: { ...state.docTabs, [id]: { ...tab, changes: { ...tab.changes, path } } } };
     }),
-  closeChanges: () =>
-    set({ changesCwd: null, changesPath: null, changesCommit: null, changesSide: "all", changesBase: null }),
 
   executeSpawn: async (req) => {
     await get().confirmSpawn(req);
@@ -2930,8 +2993,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
 
   setActiveTab: (tabId) => {
     set((state) => {
-      if (state.docTabs[tabId] || state.browserTabs[tabId] || state.taskTabs[tabId]) {
-        // Document/browser/task tabs have no session or focused pane, naturally disabling session-only controls.
+      if (state.docTabs[tabId] || state.browserTabs[tabId] || state.taskTabs[tabId] || state.newSessionTabs[tabId]) {
+        // Document/browser/task/new-session tabs have no session or focused pane, naturally disabling session-only controls.
         return {
           activeTabId: tabId,
           activeSessionId: null,
@@ -2939,7 +3002,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
         };
       }
       const t = state.paneTrees[tabId];
-      const task = state.activeTabId ? state.taskTabs[state.activeTabId] : undefined;
+      const task = state.activeTabId ? state.taskTabs[state.activeTabId] ?? state.newSessionTabs[state.activeTabId] : undefined;
       const leaf = t ? taskReturnLeaf(t, tabId, task) : null;
       return {
         activeTabId: tabId,
@@ -2984,8 +3047,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
       const browserTabs = { ...state.browserTabs };
       delete browserTabs[tabId];
       const taskTabs = { ...state.taskTabs };
-      const closingTask = taskTabs[tabId];
+      const newSessionTabs = { ...state.newSessionTabs };
+      const closingTask = taskTabs[tabId] ?? newSessionTabs[tabId];
       delete taskTabs[tabId];
+      delete newSessionTabs[tabId];
 
       let { activeTabId, activeSessionId, focusedPaneId } = state;
       if (activeTabId === tabId) {
@@ -3016,6 +3081,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
         docTabs,
         browserTabs,
         taskTabs,
+        newSessionTabs,
         pinnedTabs,
         activeTabId,
         lastActiveSessionTabId,
@@ -3032,7 +3098,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
     set((state) => {
       // Focus and reload an already-open canonical path because another `view` request asks for current content.
       const existing = Object.values(state.docTabs).find(
-        (d) => d.path === path,
+        (d) => d.path === path && d.kind !== "diff" && d.kind !== "changes",
       );
       if (existing) {
         return {
@@ -3049,6 +3115,30 @@ export const useTermStore = create<TermStore>((set, get) => ({
         };
       }
       const tab = makeDocTab(path);
+      return {
+        docTabs: { ...state.docTabs, [tab.id]: tab },
+        openTabs: [...state.openTabs, tab.id],
+        activeTabId: tab.id,
+        activeSessionId: null,
+        focusedPaneId: null,
+      };
+    });
+    saveLayoutTick();
+  },
+
+  openDiffTab: (path, root, relative) => {
+    set((state) => {
+      // A file's diff tab is separate from its editor tab, and a second open refreshes it like `openDocTab`.
+      const existing = Object.values(state.docTabs).find((d) => d.path === path && d.kind === "diff");
+      if (existing) {
+        return {
+          docTabs: { ...state.docTabs, [existing.id]: { ...existing, diff: { root, path: relative }, reloadNonce: existing.reloadNonce + 1 } },
+          activeTabId: existing.id,
+          activeSessionId: null,
+          focusedPaneId: null,
+        };
+      }
+      const tab = makeDiffTab(path, root, relative);
       return {
         docTabs: { ...state.docTabs, [tab.id]: tab },
         openTabs: [...state.openTabs, tab.id],
@@ -3135,6 +3225,46 @@ export const useTermStore = create<TermStore>((set, get) => ({
       } } };
     });
   },
+
+  // ── New Session tabs opened from the New Session menu item ──
+  openNewSessionTab: (target, requested) => {
+    let opened = requested ?? "";
+    set((state) => {
+      if (requested && state.newSessionTabs[requested]) {
+        return { activeTabId: requested, activeSessionId: null, focusedPaneId: null };
+      }
+      const id = requested ?? `new-session-${genId()}`;
+      opened = id;
+      // Leaving one local tab for another keeps the original return point, as task tabs do.
+      const local = state.activeTabId ? state.taskTabs[state.activeTabId] ?? state.newSessionTabs[state.activeTabId] : undefined;
+      const tab: NewSessionTab = {
+        id,
+        projectId: target.projectId,
+        groupId: target.groupId ?? null,
+        parentSessionId: target.parentSessionId ?? null,
+        returnTabId: local ? local.returnTabId : state.activeTabId ?? undefined,
+        returnPaneId: (local ? local.returnPaneId : undefined) ?? state.focusedPaneId ?? undefined,
+      };
+      return {
+        newSessionTabs: { ...state.newSessionTabs, [id]: tab },
+        openTabs: [...state.openTabs, id],
+        activeTabId: id,
+        activeSessionId: null,
+        focusedPaneId: null,
+      };
+    });
+    saveLayoutTick();
+    return opened;
+  },
+
+  retargetNewSessionTab: (id, target) =>
+    set((state) => {
+      const tab = state.newSessionTabs[id];
+      if (!tab) return {};
+      return { newSessionTabs: { ...state.newSessionTabs, [id]: { ...tab,
+        projectId: target.projectId, groupId: target.groupId ?? null, parentSessionId: target.parentSessionId ?? null,
+      } } };
+    }),
 
   setDocTabPath: (id, path) =>
     set((state) => {
@@ -4236,18 +4366,25 @@ export const useTermStore = create<TermStore>((set, get) => ({
     // anchor this client published in its place (or whatever the peer is looking at). Following it would
     // pull the user out of the task tab on every peer interaction; stay until they leave it themselves.
     const local = get();
-    const inTaskTab = !!(local.activeTabId && local.taskTabs[local.activeTabId]);
+    const inTaskTab = !!(local.activeTabId && (local.taskTabs[local.activeTabId] || local.newSessionTabs[local.activeTabId]));
     const activeSessionId = inTaskTab ? local.activeSessionId : c.activeSessionId;
     set((s) => ({
       // A leaf arriving from a peer is not a request to start anything. If the backend says no process
       // stands behind that session, render a placeholder: mounting a terminal is what starts one, and
       // that is how a browser following a desktop which had merely *restored* a workspace launched every
       // one of those sessions for real. A leaf the user opened here is intent to start and never lands
-      // in this branch.
+      // in this branch. Chat panes are exempt, as in applySessionStates: they never register a terminal, so
+      // "not displayed" is always true for them, and an idle chat whose process has exited would otherwise
+      // turn into a placeholder on every frame — opening and closing any other tab was enough.
       dormantSessions: Object.values(c.paneTrees).reduce(
         (acc, tree) => {
           for (const sid of collectSessionIds(tree)) {
-            if (!displayed.has(sid) && s.runtimes[sid]?.alive === false)
+            const engine = (
+              s.sessions.find((session) => session.id === sid) ??
+              c.ephemeralSessions[sid] ??
+              s.ephemeralSessions[sid]
+            )?.engine;
+            if (!displayed.has(sid) && engine !== "chat" && s.runtimes[sid]?.alive === false)
               acc[sid] = true;
           }
           return acc;
@@ -4256,7 +4393,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
       ),
       // Task tabs are client-local and absent from the peer's snapshot; keep this client's own at the end
       // so following the layout never closes them.
-      openTabs: [...c.openTabs, ...s.openTabs.filter((id) => s.taskTabs[id] && !c.openTabs.includes(id))],
+      openTabs: [...c.openTabs, ...s.openTabs.filter((id) => (s.taskTabs[id] || s.newSessionTabs[id]) && !c.openTabs.includes(id))],
       liveTabs: c.liveTabs,
       pinnedTabs: c.pinnedTabs,
       activeTabId: inTaskTab ? s.activeTabId : c.activeTabId,
@@ -4943,7 +5080,8 @@ export const useTermStore = create<TermStore>((set, get) => ({
       }
       cwd = cwd ?? targetSession.cwd ?? null;
     }
-    cwd = cwd ?? targetGroup?.worktreePath ?? null;
+    // A nested group starts in the worktree bound on it or its nearest ancestor group.
+    cwd = cwd ?? (targetGroup ? worktreeGroup(st.groups, targetGroup.id)?.worktreePath : null) ?? null;
     if (cwd == null && !opts?.target && !overrideProject && active) {
       try {
         cwd = await getSessionCwd(active.id);

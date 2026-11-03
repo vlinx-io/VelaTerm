@@ -16,8 +16,12 @@ export function useQuestionTranslation(request: ChatPermission) {
   const [result, setResult] = useState<{ key: string; value?: QuestionTranslation; error?: string } | null>(null);
   const [retry, setRetry] = useState(0);
   const [override, setOverride] = useState<TranslationDisplay | null>(null);
+  // Set once the user asks for this card's translation while automatic reply translation is off.
+  const [manual, setManual] = useState(false);
   const prefs = state?.value?.preferences;
-  const enabled = !!(state?.settings?.config.enabled && state.value?.enabled && prefs?.replies);
+  const available = !!(state?.settings?.config.enabled && state.value?.enabled && prefs);
+  const auto = available && !!prefs?.replies;
+  const enabled = auto || (available && manual);
   const sessionId = state?.sessionId ?? "";
   const key = JSON.stringify([sessionId, request.id, request.input, enabled, state?.value?.version,
     state?.value?.generation, prefs?.replySource, prefs?.replyTarget]);
@@ -25,7 +29,7 @@ export function useQuestionTranslation(request: ChatPermission) {
     if (!enabled) return;
     let disposed = false;
     setResult(null);
-    void translateQuestion(sessionId, request.id).then(value => {
+    void translateQuestion(sessionId, request.id, !auto).then(value => {
       if (!disposed) setResult({ key, value });
     }, error => { if (!disposed) setResult({ key, error: String(error) }); });
     return () => { disposed = true; };
@@ -36,18 +40,22 @@ export function useQuestionTranslation(request: ChatPermission) {
     && value.source === prefs?.replySource && value.target === prefs?.replyTarget;
   const questions = valid ? parseQuestionFormQuestions(value.input) : null;
   const error = current?.error || (value && !questions ? "translation:structure" : "");
-  const mode = override ?? prefs?.display ?? "original";
+  // A translation the user asked for must show up even where replies are set to display the original.
+  const display = prefs?.display ?? "original";
+  const mode = override ?? (!auto && display === "original" ? "both" : display);
   return {
     questions, mode, target: prefs?.replyTarget,
     outgoing: !!(state?.settings?.config.enabled && state.value?.enabled && prefs?.outgoing),
-    control: enabled ? <div className="translation-question-controls">
+    control: !enabled ? (available ? <div className="translation-question-controls">
+      <button className="vlx-btn" onClick={() => setManual(true)}>{t("translation.title")}</button>
+    </div> : null) : <div className="translation-question-controls">
       {!current && <span className="translation-message-status" role="status"><StatusDot status="working" size={6} />{t("translation.translating")}</span>}
       {questions && <><Select value={mode} width="auto" size="sm" menuPortal
         options={(state?.settings?.displays ?? []).map(display => ({ value: display, label: t(`translation.${display}`) }))}
         onChange={setOverride} ariaLabel={t("translation.replyDisplay")} /><TranslationTime timing={value} /></>}
       {error && <><span className="translation-hint" role="alert">{translationError(error, t)}</span>
         <button className="vlx-btn" onClick={() => setRetry(value => value + 1)}>{t("translation.retry")}</button></>}
-    </div> : null,
+    </div>,
   };
 }
 

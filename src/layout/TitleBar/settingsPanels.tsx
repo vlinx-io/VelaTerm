@@ -4,7 +4,6 @@
 
 import { useEffect, useState } from "react";
 import { normalizeArgDashes } from "../../args";
-import Select from "../../components/Select";
 import AgentSelect from "../../components/AgentSelect";
 import {
   LaunchLoadState,
@@ -42,8 +41,7 @@ import {
 import { env } from "../../platform";
 import { useTermStore } from "../../store/termStore";
 import { defaultEngineFor } from "../../store/settings";
-import { supportsChatEngine, type SessionKind } from "../../types";
-import { kindIconEl } from "../sessionViewers/sessionMeta";
+import { hasTerminalInterface, supportsChatEngine, type SessionKind } from "../../types";
 import { Field, Seg, SectionTitle } from "./settingsParts";
 import { AgentPresetsSection } from "./AgentPresetsSection";
 
@@ -265,7 +263,7 @@ const AGENT_DEFAULT_KINDS: {
   kind: SessionKind;
   label: string;
   yolo: string;
-  permVia: "flag" | "env" | "none" | "inverse";
+  permVia: "flag" | "env" | "none" | "inverse" | "answer";
 }[] = [
   { kind: "claude", label: "Claude", yolo: "--dangerously-skip-permissions", permVia: "flag" },
   { kind: "codex", label: "Codex", yolo: "--dangerously-bypass-approvals-and-sandbox", permVia: "flag" },
@@ -288,6 +286,10 @@ const AGENT_DEFAULT_KINDS: {
   { kind: "grok", label: "Grok Build", yolo: "--always-approve", permVia: "flag" },
   // Zoo auto-approves natively; VelaTerm injects --require-approval in default mode and no skip flag.
   { kind: "zoo", label: "Zoo Code", yolo: "", permVia: "inverse" },
+  // DeepSeek Harness and ZCode run only in the conversation view, where YOLO means the view approves their
+  // requests (ZCode is also sent its own yolo mode with every message).
+  { kind: "zcode", label: "ZCode", yolo: "", permVia: "answer" },
+  { kind: "deepseek", label: "DeepSeek", yolo: "", permVia: "answer" },
 ];
 
 /** Multiline default-arguments field with a label above a full-width textarea. Edits remain local until
@@ -450,21 +452,13 @@ export function ReferenceContextPanel() {
           {launch.state === "ready" && summarySpec && (
             <>
               <Field label={t("settings.referSummaryAgent")}>
-                <Select<SessionKind>
+                <AgentSelect
                   value={referSummary.agent}
-                  onChange={(agent) => setReferSummary({ agent, model: "", effort: "" })}
-                  options={summaryOptions.map((option) => ({
-                    value: option.id as SessionKind,
-                    label: option.label,
-                    icon: (
-                      <span style={{ display: "inline-flex", flex: "none" }}>
-                        {kindIconEl(option.id as SessionKind, 15)}
-                      </span>
-                    ),
-                  }))}
+                  onChange={(agent) => { if (agent) setReferSummary({ agent, model: "", effort: "" }); }}
+                  options={summaryOptions.map((option) => ({ id: option.id as SessionKind, label: option.label }))}
                   width={220}
                   align="right"
-                  menuPortal
+                  ariaLabel={t("settings.referSummaryAgent")}
                 />
               </Field>
               <div style={{ display: "grid", gap: 12, paddingTop: 2 }}>
@@ -493,7 +487,7 @@ export function AgentsPanel() {
   const [selKind, setSelKind] = useState<SessionKind>("claude");
   const meta = AGENT_DEFAULT_KINDS.find((a) => a.kind === selKind);
   const supportsYolo =
-    !!meta?.yolo || meta?.permVia === "env" || meta?.permVia === "inverse";
+    !!meta?.yolo || meta?.permVia === "env" || meta?.permVia === "inverse" || meta?.permVia === "answer";
   const cfg = agentDefaults[selKind] ?? {};
   const skip = ["skip", "bypassPermissions", "full-access"].includes(cfg.permissionMode ?? "");
   const isEnvPerm = meta?.permVia === "env";
@@ -570,12 +564,14 @@ export function AgentsPanel() {
         >
           {isEnvPerm
             ? t("settings.permViaEnvHint")
-            : t("settings.yoloHint", meta.yolo)}
+            : meta.permVia === "answer"
+              ? t("settings.permViaAnswerHint")
+              : t("settings.yoloHint", meta.yolo)}
         </div>
       )}
 
       {/* Only agents the chat engine can drive have two views; everything else always runs its own terminal. */}
-      {supportsChatEngine(selKind) && (
+      {supportsChatEngine(selKind) && hasTerminalInterface(selKind) && (
         <>
           <Field label={t("settings.agentDefaultView")}>
             <Seg<"chat" | "tui">

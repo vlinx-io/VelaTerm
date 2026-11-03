@@ -75,7 +75,36 @@ fn snippets(text:&str,query:&str,offset:usize,skip_end:usize,limit:usize) -> (Ve
 }
 
 pub fn read(app:&AppCtx,session:&str,query:&str,cursor:Option<&str>) -> Result<Value,String> {
+    if cursor.is_none() && !query.trim().is_empty() {
+        if let Some(page)=indexed(app,session,query)? {return Ok(page);}
+    }
     read_with(session,query,cursor,||api::prepare(app,session))
+}
+
+/// Full-text search through the global content index, scoped to this session: every whitespace-separated
+/// term must match, in any order, whole words first. Returns None when the index has no transcript match,
+/// or cannot answer, so the caller falls back to the literal scan, which also covers content newer than
+/// the index.
+fn indexed(app:&AppCtx,session:&str,query:&str) -> Result<Option<Value>,String> {
+    let Ok(result)=crate::search::jobs::blocking(app,query,crate::search::SearchScope::All,Some(session),1,true) else {return Ok(None);};
+    let Some(matches)=result["hits"].as_array().and_then(|hits|hits.iter().find(|hit|hit["sessionId"]==session))
+        .and_then(|hit|hit["matches"].as_array()).filter(|matches|!matches.is_empty()) else {return Ok(None);};
+    let branch=api::prepare(app,session)?;
+    let mut prose=None;
+    let mut hits=Vec::new();
+    for found in matches {
+        let mut row=match found["recordOffset"].as_u64() {Some(offset)=>branch.row_at_record(offset)?,None=>None};
+        if row.is_none() {
+            let Some(index)=found["messageIndex"].as_u64() else {continue;};
+            if prose.is_none() {prose=Some(super::prose::Prose::new(branch.clone(),&AtomicBool::new(false))?);}
+            row=prose.as_ref().unwrap().row_id(index)?;
+        }
+        let Some(row)=row else {continue;};
+        hits.push(json!({"rowId":row,"snippet":found["snippet"],"offset":0,"matched":found["matched"]}));
+    }
+    if hits.is_empty() {return Ok(None);}
+    Ok(Some(json!({"protocolVersion":2,"historyGeneration":branch.generation,"hits":hits,"nextCursor":null,
+        "coverage":"complete","scannedBytes":0,"fullText":true})))
 }
 
 fn read_with(session:&str,query:&str,cursor:Option<&str>,mut prepare:impl FnMut()->Result<Branch,String>) -> Result<Value,String> {
@@ -146,7 +175,6 @@ fn read_with(session:&str,query:&str,cursor:Option<&str>,mut prepare:impl FnMut(
                 pieces.push(row["name"].as_str().unwrap_or_default().to_owned());
                 if !fields.iter().any(|(_,label)|label=="input") {pieces.push(row["input"].to_string());}
                 if !fields.iter().any(|(_,label)|label=="output") {pieces.push(row["output"].as_str().unwrap_or_default().to_owned());}
-                if matches!(row["name"].as_str(),Some("Task"|"Agent")) {job.complete=false;}
             } else {
                 if fields.is_empty() {
                     if let Some(text)=row.get("text").or_else(||row.get("message")).and_then(Value::as_str) {pieces.push(text.to_owned());}

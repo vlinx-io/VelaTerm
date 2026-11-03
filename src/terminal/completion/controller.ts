@@ -7,12 +7,15 @@ import "./completion.css";
 interface Item { index: number; label: string; description: string; matches: [number, number][] }
 interface Snapshot {
   configured: boolean; supported: boolean; ready: boolean; revision: number; inputVersion: number;
-  pending: boolean; query: string; items: Item[];
+  pending: boolean; query: string; items: Item[]; extendable?: boolean;
 }
 const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 let nextMenuId = 0;
 
-/** Shells own editing and matching; the popup only keeps the current presentation and selection. */
+/**
+ * Shells own editing and matching; the popup only keeps the current presentation and selection.
+ * The list opens only on request (Tab or Ctrl+Space). While typing, the shell itself draws an inline history hint.
+ */
 export function installCompletion(term: Terminal, write: (data: string) => Promise<unknown>, sessionId: string) {
   let disposed = false, composing = false, generation = 0, active = 0, requesting = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -179,6 +182,12 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
       if (disposed || version !== generation) return;
       if (result.pending) { hide(); return; }
       if (manual && result.items.length === 0) { hide(); await write("\t"); return; }
+      // Tab behaves like the shell's own: a single candidate is applied, and shared text is inserted first.
+      if (manual && menu.hidden && result.items.length === 1) { snapshot = result; void accept(0); return; }
+      if (manual && menu.hidden && result.extendable) {
+        try { await call("extend", { revision: result.revision }); } catch { /* The shell rejects changed input. */ }
+        hide(); return;
+      }
       show(result);
     } catch { if (version === generation) hide(); }
     finally {
@@ -186,7 +195,7 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
       if (queuedQuery !== null && focused()) {
         const nextManual = queuedQuery; queuedQuery = null;
         clearTimeout(timer); timer = setTimeout(() => void query(nextManual), 0);
-      } else if (autoDue && focused() && getCompletionConfig()?.mode === "auto") {
+      } else if (autoDue && focused() && getCompletionConfig()?.mode !== "off") {
         clearTimeout(timer); timer = setTimeout(() => void query(false), 0);
       }
     }
@@ -198,14 +207,13 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
     if (/[\r\n\x03]/.test(data)) searchMode = false;
     // Arrow keys walk the shell's own history. Requesting suggestions between two presses would run the
     // query widget in the middle of that walk, and Zsh's continuing history search ends after the first
-    // entry once another widget runs, so Up would stop recalling anything. Leave the line to the shell;
-    // typing again resumes automatic suggestions.
+    // entry once another widget runs, so Up would stop recalling anything. Leave the line to the shell.
     if (/^\x1b(\[[AB]|O[AB])$/.test(data)) { cancel(); return; }
-    if (!focused() || searchMode || getCompletionConfig()?.mode !== "auto" || (!paste && /[\r\n\x03\x04\x1a]/.test(data))) { cancel(); return; }
+    // Typing never opens the list; it only refreshes one the user already opened.
+    if (menu.hidden || !focused() || searchMode || getCompletionConfig()?.mode === "off"
+      || (!paste && /[\r\n\x03\x04\x1a]/.test(data)) || /[\s\x00-\x1f]/.test(data)) { cancel(); return; }
     // Keep the list mounted while native results update; never accept its stale revision.
-    if (!menu.hidden && !/[\s\x00-\x1f]/.test(data)) {
-      menu.setAttribute("aria-busy", "true"); status.textContent = t("common.loading");
-    } else hide();
+    menu.setAttribute("aria-busy", "true"); status.textContent = t("common.loading");
     autoDue = true;
     if (!requesting && timer === undefined) timer = setTimeout(() => void query(false), getCompletionConfig()!.debounceMs);
   }

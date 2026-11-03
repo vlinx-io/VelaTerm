@@ -6,6 +6,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 
 export interface ScreenshotShortcutStatus {
   /** Effective accelerator such as "Ctrl+Cmd+S"; empty when the hotkey is off. */
@@ -27,11 +28,18 @@ export const screenshotStart = () => invoke<void>("screenshot_start");
 
 // ── Overlay window (screenshot.html) ──
 
+/** Subscribe to new screenshots. The overlay window is reused, so each one arrives as an event. */
+export const onScreenshotFrame = (cb: (id: number) => void) =>
+  getCurrentWebviewWindow().listen<number>("screenshot-frame", ({ payload }) => cb(payload));
+
+/** Id of the screenshot whose frame is already waiting, for a page that loaded after the event. */
+export const screenshotPending = () => invoke<number | null>("screenshot_pending");
+
 /** PNG of the captured monitor. */
 export const screenshotFrame = () => invoke<ArrayBuffer>("screenshot_frame");
 
-/** The frame has painted: show the overlay and focus it. */
-export const screenshotReady = () => invoke<void>("screenshot_ready");
+/** The frame of screenshot `id` has painted: show the overlay and focus it. */
+export const screenshotReady = (id: number) => invoke<void>("screenshot_ready", { id });
 
 /** Discard the screenshot and close the overlay. */
 export const screenshotClose = () => invoke<void>("screenshot_close");

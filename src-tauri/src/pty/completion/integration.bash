@@ -6,7 +6,7 @@ _vlxc_emit() { printf '\e]6973;%s;%s\a' "$_vlxc_nonce" "$1"; }
 if (( BASH_VERSINFO[0] < 4 )); then _vlxc_emit U; return; fi
 _vlxc_selection='@SELECTION@'
 _vlxc_revision=0
-_vlxc_values=() _vlxc_cursors=()
+_vlxc_values=() _vlxc_cursors=() _vlxc_prefix_value='' _vlxc_prefix_cursor=0
 _vlxc_hex() {
   local LC_ALL=C value=$1 byte i
   REPLY=''
@@ -118,14 +118,51 @@ _vlxc_query() {
     _vlxc_hex "$candidate"
     _vlxc_emit "C;$REPLY;"
   done
+  _vlxc_prefix "$line" "$point"
   _vlxc_emit Z
   return "$saved_status"
+}
+# Like native Tab, offer the text all candidates share when it extends what was typed. Offsets are bytes,
+# matching the candidate cursors computed above.
+_vlxc_prefix() {
+  local LC_ALL=C line=$1 point=$2 common head tail i byte need continuation=0
+  _vlxc_prefix_value='' _vlxc_prefix_cursor=0
+  ((${#_vlxc_values[@]} > 1)) || return 0
+  common=${_vlxc_values[0]:0:${_vlxc_cursors[0]}}
+  for ((i=1; i<${#_vlxc_values[@]}; i++)); do
+    head=${_vlxc_values[i]:0:${_vlxc_cursors[i]}}
+    while [[ -n $common && ${head:0:${#common}} != "$common" ]]; do common=${common:0:${#common}-1}; done
+  done
+  # Never stop inside a multibyte character, an escape sequence or ANSI-C quoting.
+  for ((i=${#common}; i>0; i--)); do
+    printf -v byte '%d' "'${common:i-1:1}"
+    ((byte < 0)) && byte=$((byte + 256))
+    if ((byte >= 128 && byte < 192)); then continuation=$((continuation + 1)); continue; fi
+    if ((byte >= 192)); then
+      need=$(( byte >= 240 ? 3 : byte >= 224 ? 2 : 1 ))
+      ((continuation < need)) && common=${common:0:i-1}
+    fi
+    break
+  done
+  tail=${common##*[!\\]}
+  ((${#tail} % 2)) && common=${common:0:${#common}-1}
+  [[ ${common:point} == *"\$'"* ]] && return 0
+  ((${#common} > point)) && [[ ${common:0:point} == "${line:0:point}" ]] || return 0
+  _vlxc_prefix_value=$common${_vlxc_values[0]:${_vlxc_cursors[0]}}
+  _vlxc_prefix_cursor=${#common}
+  _vlxc_emit E
 }
 _vlxc_accept() {
   local revision index
   read -r revision index < "$_vlxc_selection" || return
-  [[ $revision == "$_vlxc_revision" && $index =~ ^[0-9]+$ ]] || return
+  [[ $revision == "$_vlxc_revision" && ( $index =~ ^[0-9]+$ || $index == p ) ]] || return
   [[ $READLINE_LINE == "$_vlxc_buffer" && $READLINE_POINT == "$_vlxc_cursor" ]] || return
+  if [[ $index == p ]]; then
+    [[ -n $_vlxc_prefix_value ]] || return
+    READLINE_LINE=$_vlxc_prefix_value READLINE_POINT=$_vlxc_prefix_cursor
+    _vlxc_values=() _vlxc_prefix_value=''
+    return
+  fi
   ((index < ${#_vlxc_values[@]})) || return
   READLINE_LINE=${_vlxc_values[index]} READLINE_POINT=${_vlxc_cursors[index]}
   _vlxc_values=()

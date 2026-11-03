@@ -47,6 +47,13 @@ impl BrowserManager {
     fn label_of(&self, tab_id: &str) -> Option<String> {
         self.0.lock().ok()?.get(tab_id).cloned()
     }
+
+    /// Forget every tab once the main window that hosted their child views is gone.
+    pub fn clear(&self) {
+        if let Ok(mut tabs) = self.0.lock() {
+            tabs.clear();
+        }
+    }
 }
 
 /// `browser://state/{tabId}` payload. Every field is optional so the document-title handler can reuse the

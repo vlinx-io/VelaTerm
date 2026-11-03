@@ -844,6 +844,8 @@ pub(crate) fn is_auto_name(name: &str) -> bool {
         "Kiro",
         "Grok",
         "Grok Build",
+        "ZCode",
+        "DeepSeek",
         // Localized common.session values used as default terminal-session name prefixes.
         "Session",    // en
         "会话",       // zh-CN, retained for compatibility with existing data

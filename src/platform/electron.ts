@@ -215,7 +215,11 @@ const windowCap: WindowCapability = {
 
 const quit: QuitCapability = {
   async onRequested(cb): Promise<UnlistenFn | null> {
-    return bridge()?.quit?.onRequested((request) => cb({ remoteWindows: request?.remoteWindows ?? 0 })) ?? null;
+    return (
+      bridge()?.quit?.onRequested((request) =>
+        cb({ remoteWindows: request?.remoteWindows ?? 0, closeWindow: request?.closeWindow ?? false }),
+      ) ?? null
+    );
   },
   async ack() {
     await bridge()?.quit?.ack();

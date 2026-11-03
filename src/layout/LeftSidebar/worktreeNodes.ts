@@ -1,14 +1,16 @@
-//! Virtual worktree level in the sidebar tree. Sibling sessions that share a persisted Git worktree are gathered
-//! under one display-only worktree node, placed where the first of them sat. The node exists only in the rendered
-//! tree: sessions keep their real group and parent, so moves, menus, and storage are unaffected.
+//! Virtual worktree level in the sidebar tree. Sibling groups and sessions that belong to the same Git worktree are
+//! gathered under one display-only worktree node, placed where the first of them sat. Only the outermost level is
+//! gathered: anything inside an item that belongs to a worktree is shown without further worktree nodes. The node
+//! exists only in the rendered tree: groups and sessions keep their real parent, so moves, menus, and storage are
+//! unaffected.
 
 import { useCallback, useState } from "react";
 import type { Session } from "../../types";
 
-/** One sibling entry after gathering: a plain session, or a worktree node holding its sessions in order. */
-export type WorktreeItem =
-  | { kind: "session"; session: Session }
-  | { kind: "worktree"; id: string; path: string; name: string; sessions: Session[] };
+/** One sibling entry after gathering: a plain item, or a worktree node holding its items in order. */
+export type WorktreeItem<T> =
+  | { kind: "item"; item: T }
+  | { kind: "worktree"; id: string; path: string; name: string; items: T[] };
 
 /** Compare paths without trailing separators so `/a/wt` and `/a/wt/` name the same worktree. */
 export function normalizeWorktreePath(path?: string | null): string {
@@ -33,43 +35,74 @@ export function worktreeNodeId(containerId: string, path: string): string {
   return `wt:${containerId}:${hashPath(normalizeWorktreePath(path))}`;
 }
 
-/** Gather siblings by worktree. `containerWorktree` is the worktree the container itself stands for (a bound
- *  group, or a parent session already in that worktree); its sessions stay direct children because a second
- *  level for the same worktree would add nothing. */
-export function gatherByWorktree(
-  siblings: Session[],
+/** Gather siblings by the worktree each belongs to (`worktreeOf`, normalized, empty for none). `containerWorktree`
+ *  is the worktree the container itself stands for (a project opened at a worktree directory); its items stay
+ *  direct children because a level for the same worktree would add nothing. */
+export function gatherByWorktree<T>(
+  siblings: T[],
+  worktreeOf: (item: T) => string,
   containerId: string,
   containerWorktree?: string | null,
-): WorktreeItem[] {
+): WorktreeItem<T>[] {
   const own = normalizeWorktreePath(containerWorktree);
-  const out: WorktreeItem[] = [];
-  const nodes = new Map<string, Extract<WorktreeItem, { kind: "worktree" }>>();
-  for (const session of siblings) {
-    const path = normalizeWorktreePath(session.worktreePath);
+  const out: WorktreeItem<T>[] = [];
+  const nodes = new Map<string, Extract<WorktreeItem<T>, { kind: "worktree" }>>();
+  for (const item of siblings) {
+    const path = worktreeOf(item);
     if (!path || path === own) {
-      out.push({ kind: "session", session });
+      out.push({ kind: "item", item });
       continue;
     }
     let node = nodes.get(path);
     if (!node) {
-      node = { kind: "worktree", id: worktreeNodeId(containerId, path), path, name: worktreeName(path), sessions: [] };
+      node = { kind: "worktree", id: worktreeNodeId(containerId, path), path, name: worktreeName(path), items: [] };
       nodes.set(path, node);
       out.push(node);
     }
-    node.sessions.push(session);
+    node.items.push(item);
   }
   return out;
 }
 
-/** ID of the worktree node a session is gathered under, or null when it is a direct child of its container. */
-export function worktreeNodeIdFor(
-  session: Session,
-  containerId: string,
-  containerWorktree?: string | null,
-): string | null {
-  const path = normalizeWorktreePath(session.worktreePath);
-  if (!path || path === normalizeWorktreePath(containerWorktree)) return null;
-  return worktreeNodeId(containerId, path);
+/** Worktree each session subtree belongs to, keyed by session ID. A session in a worktree belongs to it; a session
+ *  outside any worktree whose descendants all sit in one worktree belongs to that worktree, so the whole session
+ *  group is gathered under it. Sessions belonging to no single worktree are absent. `worktreeOf` gives a session's
+ *  own worktree and defaults to its persisted `worktreePath`. */
+export function sessionGroupWorktrees(
+  sessions: Session[],
+  worktreeOf: (s: Session) => string | null | undefined = (s) => s.worktreePath,
+): Map<string, string> {
+  const kids = new Map<string, Session[]>();
+  for (const s of sessions) {
+    if (!s.parentSessionId) continue;
+    const list = kids.get(s.parentSessionId);
+    if (list) list.push(s);
+    else kids.set(s.parentSessionId, [s]);
+  }
+  // Worktree shared by a session and every descendant, or "" when any of them is outside it.
+  const whole = new Map<string, string>();
+  const subtree = (s: Session): string => {
+    const known = whole.get(s.id);
+    if (known !== undefined) return known;
+    whole.set(s.id, ""); // Guards against a parent cycle in corrupt data.
+    let wt = normalizeWorktreePath(worktreeOf(s));
+    if (wt && (kids.get(s.id) ?? []).some((k) => subtree(k) !== wt)) wt = "";
+    whole.set(s.id, wt);
+    return wt;
+  };
+  const out = new Map<string, string>();
+  for (const s of sessions) {
+    const own = normalizeWorktreePath(worktreeOf(s));
+    if (own) {
+      out.set(s.id, own);
+      continue;
+    }
+    const children = kids.get(s.id);
+    if (!children) continue;
+    const first = subtree(children[0]);
+    if (first && children.every((k) => subtree(k) === first)) out.set(s.id, first);
+  }
+  return out;
 }
 
 const STORAGE_KEY = "vlx-sidebar-worktree-collapsed";

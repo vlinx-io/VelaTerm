@@ -502,6 +502,8 @@ const fr: typeof en = {
     `Lance avec ${flag}. Ignore toutes les confirmations de permission — à utiliser avec prudence.`, // YOLO flag hint
   "settings.permViaEnvHint":
     "Ignore toutes les confirmations de permission via injection de config (pas de flag CLI). S'applique au lancement de cette session.",
+  "settings.permViaAnswerHint":
+    "Approuve toutes les demandes d'autorisation dans la vue de conversation, y compris les commandes qui dépassent l'espace de travail. À utiliser avec prudence.",
   "settings.catGeneral": "Général", // General
   "settings.cliLabel": "Commande shell",
   "settings.cliInstall": "Installer la commande ‘vela’",
@@ -634,6 +636,7 @@ const fr: typeof en = {
   "changes.noChanges": "Aucune modification",
   "changes.unchangedLines": "Afficher les $ lignes inchangées",
   "changes.refresh": "Actualiser",
+  "changes.openFile": "Ouvrir le fichier",
   "changes.notRepo": "Pas un dépôt git",
   "changes.selectFile": "Sélectionnez un fichier",
   "changes.binary": "Fichier binaire — diff par ligne indisponible",
@@ -1077,6 +1080,7 @@ const fr: typeof en = {
   "tree.groupInfo": "Infos du groupe", // Group Info
   "tree.collectionInfo": "Infos de la collection", // Collection Info
   "tree.projectInfo": "Infos du projet", // Project Info
+  "tree.codeAudit": "Audit de code", // Code audit
   "info.branch": "Branche", // Branch
   "info.path": "Chemin", // Path
   "info.recentCommits": "Commits récents", // Recent Commits
@@ -1404,6 +1408,7 @@ const fr: typeof en = {
   "browser.loading": "Chargement…", // Loading…
   // Application-exit confirmation and dormant restored sessions.
   "quit.title": "Quitter VelaTerm ?", // Quit VelaTerm?
+  "quit.closeWindowTitle": "Fermer la fenêtre principale ?", // Close the main window?
   "quit.body":
     "Toutes les sessions de terminal et d'agent en cours seront arrêtées.", // Any running terminal and agent sessions will be stopped.
   "quit.remoteWindows": "Les fenêtres distantes ouvertes seront également fermées.", // Open remote windows will also be closed.
@@ -1457,6 +1462,22 @@ const fr: typeof en = {
   "agentVersion.update": (version) => `Mise à jour : v${version}`,
   "agentVersion.upgrade": (version) => `La version ${version} est disponible. Ouvrir les instructions officielles de mise à jour.`,
   "agentVersion.checkFailed": "Impossible de vérifier les mises à jour.",
+  "agentVersion.upgradeAction": (version) => `La version ${version} est disponible. Cliquer pour mettre à jour.`,
+  "agentUpdate.title": (label) => `Mettre à jour ${label}`,
+  "agentUpdate.commandHint": "VelaTerm va exécuter la commande de mise à jour fournie par l’agent :",
+  "agentUpdate.confirm": "Mettre à jour",
+  "agentUpdate.docs": "Instructions officielles",
+  "agentUpdate.running": "Mise à jour en cours…",
+  "agentUpdate.background": "Vous pouvez fermer cette fenêtre ; la mise à jour se poursuivra.",
+  "agentUpdate.waiting": "En attente de la sortie…",
+  "agentUpdate.succeeded": (label, version) => `${label} a été mis à jour vers la v${version}.`,
+  "agentUpdate.unchanged": (version) => `La commande est terminée, mais la version installée est toujours la v${version}. Consultez la sortie ci-dessus.`,
+  "agentUpdate.finished": "La commande de mise à jour est terminée. Consultez la sortie ci-dessus.",
+  "agentUpdate.failed": "La mise à jour n’a pas abouti. Consultez la sortie ci-dessus, ou copiez la commande et exécutez-la dans un terminal.",
+  "agentUpdate.timedOut": "La mise à jour a été interrompue au bout de 15 minutes. Copiez la commande et exécutez-la dans un terminal.",
+  "agentUpdate.restartHint": "Cette conversation utilise encore la version précédente. Redémarrez l’agent pour passer à la nouvelle : la conversation est conservée et la nouvelle version démarrera à votre prochain message.",
+  "agentUpdate.restart": "Redémarrer l’agent",
+  "agentUpdate.startFailed": "Impossible de lancer la mise à jour. Veuillez réessayer.",
   "agentInstall.title": (label) => `${label} n'est pas installé`, // {label} is not installed
   "agentInstall.desc": (label) =>
     `VelaTerm n'a pas trouvé ${label} dans votre PATH. Installez-le pour lancer cette session.`, // couldn't find {label} on PATH
@@ -1465,6 +1486,10 @@ const fr: typeof en = {
   "agentInstall.dismiss": "Je m'en occupe", // I'll do it myself
   "agentInstall.docs": "Documentation", // Install docs
   "agentInstall.needsNode": "Nécessite Node.js / npm", // Requires Node.js / npm
+  "agentInstall.runInTerminal": "Exécutez cette commande dans un terminal pour l'installer, puis renvoyez votre message.",
+  "agentInstall.installing": "Installation…", // Installing…
+  "agentInstall.installingDesc": "Téléchargement et installation en cours. Cela peut prendre quelques minutes.", // Downloading and installing. This can take a few minutes.
+  "agentInstall.installFailed": "L'installation n'a pas abouti. Exécutez cette commande dans un terminal pour en voir la cause, puis renvoyez votre message.", // Installation didn't finish. Run this command in a terminal to see what went wrong, then send your message again.
   "agentInstall.afterInstall": "Après l'installation :", // After install:
   "agentInstall.pathSaved": (label: string) =>
     `Chemin de l'exécutable de ${label} enregistré dans les réglages :`, // executable path saved to Settings
@@ -2128,6 +2153,8 @@ const fr: typeof en = {
   "chat.attach.tooLarge": (name: string, mb: number) => `${name} dépasse ${mb} Mo et n’a pas été joint`,
   "chat.attach.unreadable": (name: string) => `Impossible de lire ${name}`,
   // ── Shell mode: `!` runs a command in the session's shell ──
+  "chat.findings.count": (n: number) => (n === 1 ? "1 problème détecté" : `${n} problèmes détectés`),
+  "chat.findings.none": "Aucun problème détecté",
   "chat.shell.title": "Commande shell",
   "chat.shell.running": "En cours…",
   "chat.shell.cancel": "Annuler",
@@ -2244,6 +2271,13 @@ const fr: typeof en = {
   "chat.auth.claude.invalidCode": "Collez le code complet de cette tentative d’autorisation, y compris la partie après #.",
   "chat.auth.claude.externalAuth": "Les clés API et les autres méthodes d’authentification configurées restent inchangées.",
   "chat.auth.open": "Ouvrir la page d’autorisation",
+  "chat.auth.zcode.required": "Connectez-vous à ZCode avec votre compte Z.ai ou BigModel pour utiliser cette conversation.",
+  "chat.auth.zcode.pending": "Ouvrez la page d’autorisation et accordez l’accès. Cette vue sera mise à jour une fois la connexion terminée.",
+  "chat.auth.zcode.failed": "La connexion n’a pas pu aboutir. Veuillez réessayer.",
+  "chat.auth.zcode.zai": "Se connecter avec Z.ai",
+  "chat.auth.zcode.bigmodel": "Se connecter avec BigModel",
+  "chat.auth.zcode.noPlan.zai": "Vous êtes connecté à ZCode avec Z.ai, mais ce compte Z.ai ne dispose d’aucun GLM Coding Plan, ou son quota est épuisé. Si vous avez souscrit votre forfait sur BigModel, ouvrez le menu « Compte ZCode » et choisissez « Se connecter avec BigModel ».",
+  "chat.auth.zcode.noPlan.bigmodel": "Vous êtes connecté à ZCode avec BigModel, mais ce compte BigModel ne dispose d’aucun GLM Coding Plan, ou son quota est épuisé. Si vous avez souscrit votre forfait sur Z.ai, ouvrez le menu « Compte ZCode » et choisissez « Se connecter avec Z.ai ».",
   "chat.resetCredits.label": (n: string) => `Crédits de réinitialisation : ${n}`,
   "chat.resetCredits.title": "Crédits de réinitialisation des limites Codex",
   "chat.resetCredits.unknown": "Le nombre de crédits de réinitialisation est indisponible.",
@@ -2325,11 +2359,11 @@ const fr: typeof en = {
     `Nouvelle tentative (${attempt}/${max}) dans ${seconds} s : ${message}`,
   "chat.notify.dismiss": "Fermer",
   "settings.completionMode": "Suggestions de commandes",
-  "settings.completionAuto": "Automatiques",
-  "settings.completionTab": "Avec Tab",
+  "settings.completionAuto": "En ligne + Tab",
+  "settings.completionTab": "Tab uniquement",
   "settings.completionOff": "Désactivées",
   "settings.completionUnavailable": "Impossible de charger ou d’enregistrer les paramètres.",
-  "settings.completionHint": "S’applique aux nouveaux terminaux Zsh, Bash 4+, Fish et PowerShell. CMD conserve le comportement habituel de Tab. Tab insère la suggestion sélectionnée ; Entrée exécute la commande actuelle sans appliquer de suggestion.",
+  "settings.completionHint": "Pendant la saisie dans Zsh, la commande la plus récente de l’historique qui correspond s’affiche en grisé après le curseur ; appuyez sur → ou Fin pour l’accepter. Tab se comporte comme dans le shell : une correspondance unique est insérée directement, la partie commune est complétée d’abord, et la liste s’ouvre lorsque plusieurs choix subsistent. S’applique aux nouveaux terminaux Zsh, Bash 4+, Fish et PowerShell.",
 
   // Native texts of the mobile remote plugin (iOS, Android, download bridge). They reach the apps through native-text.json; {name} placeholders are replaced natively.
   "mobile.native.trustTitle": "Confirmer l’empreinte distante",
@@ -2436,6 +2470,9 @@ const fr: typeof en = {
   "term.runs.logEmpty": "Aucune sortie pour le moment",
   "chat.antigravity.placeholder": "Écrivez à Antigravity ou utilisez @fichiers pour référencer des fichiers",
   "chat.antigravity.textOnly": "La vue de conversation d’Antigravity ne prend actuellement en charge que les messages texte.",
+  "chat.textOnly": (agent: string) => `La vue de conversation de ${agent} ne prend en charge que les messages texte.`,
+  "chat.signInRequired": (agent: string) => `Connectez-vous à ${agent} pour utiliser la vue de conversation. Passez à la vue terminal pour vous connecter, puis renvoyez votre message.`,
+  "chat.apiKeyRequired": "DeepSeek Harness a besoin d'une clé API. Définissez la variable d'environnement DEEPSEEK_API_KEY, ou lancez `dsh web` et enregistrez la clé sur sa page Models, puis renvoyez votre message.",
   "chat.antigravity.permissionsHint": "Les outils nécessitant une autorisation doivent être autorisés dans les paramètres d’Antigravity ou utilisés dans la vue terminal.",
   "chat.antigravity.settingsHint": "Modifiez le modèle, le niveau de raisonnement ou les autorisations entre les tours.",
   "chat.history.imageDownloadRequired": "Cette image ne peut pas être ouverte ici. Téléchargez l’original pour la consulter.",
@@ -2508,6 +2545,38 @@ const fr: typeof en = {
   "artifact.cardOpenTitle": "Ouvrir à côté de cette session", // Open beside this session
   "artifact.cardKind": "Page HTML", // HTML page
   "artifact.frameTitle": (name: string) => `Aperçu de ${name}`, // Preview of ${name}
+  "newSession.menu": "Nouvelle session…", // New Session…
+  "newSession.heading": "Sur quoi voulez-vous travailler ?", // What should we work on?
+  "newSession.modelsUnavailable": "La liste des modèles est indisponible. Le modèle par défaut de l’agent sera utilisé.", // Model list unavailable. The agent’s default model will be used.
+  "newSession.terminalOnly": "Vue terminal uniquement", // Terminal view only
+  "newSession.conversationOnly": "Vue conversation uniquement", // Conversation view only
+  "newSession.noConversationView": "Cet agent n’a pas de vue conversation : la session s’ouvrira en vue terminal.", // This agent has no conversation view, so the session opens in the terminal view.
+  "newSession.noTerminalView": "Cet agent n’a pas de vue terminal : la session s’ouvrira en vue conversation.", // This agent has no terminal view, so the session opens in the conversation view.
+  "newSession.taskLabel": "Première tâche", // First task
+  "newSession.placeholder": "Décrire une tâche ou poser une question", // Describe a task or ask a question
+  "newSession.enterHint": "Entrée pour démarrer · Maj+Entrée pour aller à la ligne", // Enter to start · Shift+Enter for a new line
+  "newSession.start": "Démarrer", // Start
+  "newSession.starting": "Démarrage…", // Starting…
+  "newSession.viewLabel": "Vue", // View
+  "newSession.worktreeHint": "Exécute cette session sur sa propre branche, dans un dossier distinct.", // Runs this session on its own branch in a separate folder.
+  "newSession.worktreeNotRepo": "Un worktree distinct nécessite un dépôt Git.", // A separate worktree needs a Git repository.
+  "newSession.worktreeName": "Nom du worktree (facultatif)", // Worktree name (optional)
+  "newSession.worktreeNameHint": "Nomme le nouveau dossier et la nouvelle branche. Laissez vide pour utiliser le nom de la session.", // Names the new folder and branch. Leave empty to use the session name.
+  "artifact.comment": "Commenter", // Comment
+  "artifact.commentTitle": "Cliquer sur des éléments de la page pour laisser des commentaires à l'agent", // Click elements in the page to leave comments for the agent
+  "artifact.pickHint": "Cliquez sur un élément de la page pour le commenter. Appuyez sur Échap pour arrêter.", // Click an element in the page to comment on it. Press Esc to stop.
+  "artifact.commentOn": (target: string) => `Commentaire sur ${target}`, // Comment on ${target}
+  "artifact.commentPlaceholder": "Que faut-il changer ici ?", // What should change here?
+  "artifact.commentAdd": "Ajouter le commentaire", // Add comment
+  "artifact.commentMore": "Commenter un autre élément", // Comment on another element
+  "artifact.commentRemove": "Supprimer le commentaire", // Remove comment
+  "artifact.showInPage": "Afficher dans la page", // Show in page
+  "artifact.sendCommentsTitle": "Place ces commentaires dans la zone de message de la session qui a écrit cette page", // Put these comments in the message box of the session that wrote this page
+  "artifact.copyCommentsTitle": "Copie ces commentaires pour les envoyer à un agent", // Copy these comments to send to an agent
+  "artifact.options": "Variantes", // Options
+  "artifact.useOption": (id: string) => `Retenir ${id}`, // Use ${id}
+  "artifact.useOptionTitle": "Place dans la zone de message de la session qui a écrit cette page un message demandant de garder cette variante", // Put a message asking to keep this option in the message box of the session that wrote this page
+  "artifact.useOptionCopyTitle": "Copie un message demandant de garder cette variante", // Copy a message asking to keep this option
 };
 
 export default fr;

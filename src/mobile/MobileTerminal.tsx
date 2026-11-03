@@ -153,6 +153,8 @@ export function MobileTerminal({
                                 ? "Grok Build"
                               : session.kind === "zoo"
                                 ? "Zoo Code"
+                              : session.kind === "zcode"
+                                ? "ZCode"
                             : "Claude",
           )}
         </div>

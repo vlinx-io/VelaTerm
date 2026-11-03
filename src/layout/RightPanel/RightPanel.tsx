@@ -4,7 +4,7 @@
 //! - Info resource/turn details and per-file Git changes retain design placeholders until their
 //!   backend IPC is available; their DOM structure already matches the design.
 
-import { useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
 import { useTermStore } from "../../store/termStore";
@@ -13,9 +13,13 @@ import { FilesTab } from "./FilesTab";
 import { GitTab } from "./git/GitTab";
 import { InfoTab } from "./InfoTab";
 import { KV, Section } from "./parts";
-import { KnowledgeNavigation } from "../Notebook/KnowledgeNavigation";
-import { MemoryIcon } from "../Memory/shared";
+import { MemoryIcon } from "../Memory/MemoryIcon";
 import { memoryNavigate, useMemoryLocation } from "../Memory/navigation";
+
+// The knowledge tab brings the Markdown engine, transcript viewer and search kit with it, so it loads on first use.
+const KnowledgeNavigation = lazy(() =>
+  import("../Notebook/KnowledgeNavigation").then((m) => ({ default: m.KnowledgeNavigation })),
+);
 
 const INSPECTOR_TABS = [
   { id: "files" as const, label: "Files", Icon: Icons.file },
@@ -127,7 +131,7 @@ export function RightPanel() {
         ))}
       </nav>
       <div className="insp-body" style={{ display: "flex", flexDirection: "column" }}>
-        {inspectorTab === "knowledge" && <KnowledgeNavigation/>}
+        {inspectorTab === "knowledge" && <Suspense fallback={null}><KnowledgeNavigation/></Suspense>}
         {inspectorTab === "files" && <FilesTab rootPath={cwd} rootName={project?.name ?? null} />}
         {inspectorTab === "info" &&
           (session ? (

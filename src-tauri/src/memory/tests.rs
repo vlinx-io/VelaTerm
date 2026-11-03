@@ -718,20 +718,6 @@ fn job_history_names_the_entries_that_still_exist() {
     assert_eq!(job["entryLinks"], json!([{"id":kept.id,"title":"Kept entry"}]));
 }
 
-#[test]
-fn model_selection_rejects_unknown_models_and_unsupported_effort() {
-    let options = vec![runner::ModelOption {
-        id: "model".into(),
-        label: "Model".into(),
-        effort_levels: vec!["high".into()],
-    }];
-    assert!(runner::validate_model(&options, "model", "high").is_ok());
-    assert!(runner::validate_model(&options, "model", "").is_ok());
-    assert!(runner::validate_model(&options, "unknown", "high").is_err());
-    assert!(runner::validate_model(&options, "model", "ultra").is_err());
-    assert!(runner::validate_model(&options, "", "high").is_err());
-}
-
 #[cfg(unix)]
 #[test]
 fn compilation_preserves_effort_on_retry_and_replaces_completed_results() {

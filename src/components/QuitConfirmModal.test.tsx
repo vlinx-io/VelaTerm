@@ -29,16 +29,17 @@ vi.mock("../store/termStore", () => {
   return { useTermStore };
 });
 
+import type { QuitRequest } from "../platform/types";
 import { QuitConfirmModal } from "./QuitConfirmModal";
 
 /** Fire the shell's exit request captured by the component's listener. */
-let fireQuitRequest: (request?: { remoteWindows: number }) => void;
+let fireQuitRequest: (request?: QuitRequest) => void;
 
 beforeEach(() => {
   vi.clearAllMocks();
   store.saveWorkspaceOnQuit = false;
-  quit.onRequested.mockImplementation((cb: (request: { remoteWindows: number }) => void) => {
-    fireQuitRequest = (request = { remoteWindows: 0 }) => cb(request);
+  quit.onRequested.mockImplementation((cb: (request: QuitRequest) => void) => {
+    fireQuitRequest = (request = { remoteWindows: 0, closeWindow: false }) => cb(request);
     return Promise.resolve(() => {});
   });
 });
@@ -55,7 +56,7 @@ async function confirmExit() {
 async function open(remoteWindows = 0) {
   render(<QuitConfirmModal />);
   await waitFor(() => expect(quit.onRequested).toHaveBeenCalled());
-  act(() => fireQuitRequest({ remoteWindows }));
+  act(() => fireQuitRequest({ remoteWindows, closeWindow: false }));
   await screen.findByText("quit.title");
 }
 
@@ -78,6 +79,18 @@ describe("QuitConfirmModal", () => {
     cleanup();
     await open(2);
     expect(screen.getByText("quit.remoteWindows")).toBeTruthy();
+  });
+
+  it("asks to close only the main window when the application stays", async () => {
+    render(<QuitConfirmModal />);
+    await waitFor(() => expect(quit.onRequested).toHaveBeenCalled());
+    act(() => fireQuitRequest({ remoteWindows: 2, closeWindow: true }));
+    await screen.findByText("quit.closeWindowTitle");
+    expect(screen.queryByText("quit.title")).toBeNull();
+    // The remote windows stay open, so the line saying they close does not apply.
+    expect(screen.queryByText("quit.remoteWindows")).toBeNull();
+    fireEvent.click(screen.getByText("common.close"));
+    await waitFor(() => expect(quit.confirm).toHaveBeenCalled());
   });
 
   it("cancels without saving or exiting", async () => {

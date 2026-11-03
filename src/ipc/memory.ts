@@ -1,5 +1,5 @@
 //! Knowledge base protocol. Business data and defaults are supplied by the backend.
-import type { Session } from "../types";
+import type { Session, SessionKind } from "../types";
 import { invoke } from "./transport";
 export interface MemoryEntry {
   id: string; title: string; summary: string; content: string; tags: string[]; related: string[];
@@ -29,10 +29,8 @@ export interface MemoryJob {
   /** Entries this job produced that still exist, with their current titles. */
   entryLinks: { id: string; title: string }[];
 }
-export interface MemoryOptions { agents: { id: string; label: string; available: boolean }[]; defaultAgent: string; maxSourceChars: number; catalog: { id: string; title: string }[] }
+export interface MemoryOptions { agents: { id: SessionKind; label: string; available: boolean }[]; defaultAgent: string; maxSourceChars: number; catalog: { id: string; title: string }[] }
 export type MemoryEdit = Pick<MemoryEntry, "title" | "summary" | "content" | "tags" | "related" | "version"> & { id: string | null };
-export interface MemoryModel { id: string; label: string; effortLevels: string[] }
-export const memoryModels = (agent: string) => invoke<MemoryModel[]>("memory_models", { agent });
 export const memoryOptions = () => invoke<MemoryOptions>("memory_options");
 export const memoryList = (args: { query: string; tag: string; sort: string; page: number; sessionId?: string; projectId?: string; selectedId?: string }) => invoke<MemoryList>("memory_list", args);
 export const memoryCollections = () => invoke<MemoryCollections>("memory_collections");

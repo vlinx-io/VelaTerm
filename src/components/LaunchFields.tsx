@@ -70,6 +70,29 @@ function models(kind: string, context: LaunchModelContext) {
   return request;
 }
 
+/** The model catalogue an agent offers for a launch context. `current` is null while a request is pending;
+ * otherwise it holds the catalogue or the error for the latest context. */
+export function useLaunchModels(kind: string | null | undefined, context: LaunchModelContext = {}) {
+  const key = kind ? JSON.stringify([kind, context.parentSessionId || null, context.cwd || null, !!context.inheritArgs]) : "";
+  const [response, setResponse] = useState<{ key: string; catalog?: LaunchModelCatalog; error?: string } | null>(null);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    let live = true;
+    setResponse(null);
+    if (!key) return;
+    // Directory editing should not start a discovery process for every keystroke.
+    const timer = setTimeout(() => {
+      const [kind, parentSessionId, cwd, inheritArgs] = JSON.parse(key) as [string, string | null, string | null, boolean];
+      void models(kind, { parentSessionId, cwd, inheritArgs }).then(catalog => {
+        if (live) setResponse({ key, catalog });
+      }).catch(cause => { if (live) setResponse({ key, error: launchErrorText(cause) }); });
+    }, 180);
+    return () => { live = false; clearTimeout(timer); };
+  }, [key, revision]);
+  const current = key && response?.key === key ? response : null;
+  return { current, catalog: current?.catalog, retry: () => setRevision(r => r + 1) };
+}
+
 /** A model and its effort share one native catalogue and one atomic draft update. */
 export function ModelEffortFields({
   spec, model, effort, onChange, onModelCommit, onEffortCommit,
@@ -88,23 +111,7 @@ export function ModelEffortFields({
   disabled?: boolean;
 }) {
   const t = useT();
-  const key = JSON.stringify([spec.id, context.parentSessionId || null, context.cwd || null, !!context.inheritArgs]);
-  const [response, setResponse] = useState<{ key: string; catalog?: LaunchModelCatalog; error?: string } | null>(null);
-  const [revision, setRevision] = useState(0);
-  useEffect(() => {
-    let live = true;
-    setResponse(null);
-    // Directory editing should not start a discovery process for every keystroke.
-    const timer = setTimeout(() => {
-      const [kind, parentSessionId, cwd, inheritArgs] = JSON.parse(key) as [string, string | null, string | null, boolean];
-      void models(kind, { parentSessionId, cwd, inheritArgs }).then(catalog => {
-        if (live) setResponse({ key, catalog });
-      }).catch(cause => { if (live) setResponse({ key, error: launchErrorText(cause) }); });
-    }, 180);
-    return () => { live = false; clearTimeout(timer); };
-  }, [key, revision]);
-  const current = response?.key === key ? response : null;
-  const catalog = current?.catalog;
+  const { current, catalog, retry } = useLaunchModels(spec.id, context);
   const selected = catalog?.models.find(entry => entry.id === (model || inheritedModel));
   const levels = selected?.effortLevels ?? catalog?.effortLevels ?? [];
   const defaultEffort = effortPlaceholder || t("spawn.modelDefault");
@@ -129,7 +136,7 @@ export function ModelEffortFields({
       {!current && <span className="launch-hint" role="status">{t("spawn.modelLoading")}</span>}
       {current && (!catalog?.models.length || current.error) && <div className="launch-hint">
         <div className="launch-inline"><span>{t("spawn.modelListUnavailable")}</span>
-          <button type="button" className="launch-link" onClick={() => setRevision(r => r + 1)}>{t("common.retry")}</button>
+          <button type="button" className="launch-link" onClick={retry}>{t("common.retry")}</button>
         </div>
         {current.error && <span className="launch-error-detail">{current.error}</span>}
       </div>}

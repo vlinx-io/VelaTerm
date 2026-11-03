@@ -2,14 +2,30 @@
 //! from termStore because these types and helpers are self-contained and shared by DocView.
 
 import { genId } from "../genId";
+import type { GitChangeSide } from "../ipc/commands";
 
 /**
  * Document content type used by DocView dispatch:
  * markdown supports visual, source, and comparison modes; image uses the built-in viewer; code uses the source
  * editor with filename-based language highlighting and plain-text fallback; artifact renders an HTML page in a
- * sandboxed preview with preview, source, and split modes.
+ * sandboxed preview with preview, source, and split modes; diff shows the file's uncommitted changes read-only;
+ * changes lists a repository comparison's files beside the selected file's diff.
  */
-export type DocKind = "markdown" | "code" | "image" | "artifact";
+export type DocKind = "markdown" | "code" | "image" | "artifact" | "diff" | "changes";
+
+/** One comparison a changes tab shows, and the file selected in it. */
+export interface ChangesTarget {
+  /** Repository folder the Git commands run in. */
+  cwd: string;
+  /** Git area compared when `commit` is null. */
+  side: GitChangeSide;
+  /** Commit to show instead of the worktree, or null for uncommitted work. */
+  commit: string | null;
+  /** With `commit`, compare from this commit instead of its parent; `label` names the base. */
+  base: { from: string; label: string } | null;
+  /** Repository-relative path of the selected file, or null to select the first one. */
+  path: string | null;
+}
 
 /** Editor modes: visual/source/compare for Markdown, preview/source/split for artifacts, source for the rest. */
 export type DocMode = "visual" | "source" | "compare" | "preview" | "split";
@@ -43,6 +59,10 @@ export interface DocTab {
   /** New unsaved draft with an empty path. DocView skips disk I/O and uses Save As. Existing files
    * opened by view leave this undefined; setDocTabPath clears it after persistence. */
   isNew?: boolean;
+  /** For kind=diff: the repository's top-level folder and the file's path relative to it. */
+  diff?: { root: string; path: string };
+  /** For kind=changes: the comparison shown. */
+  changes?: ChangesTarget;
 }
 
 /** Markdown-family extensions start as kind=markdown in visual mode. */
@@ -78,4 +98,21 @@ export function makeDocTab(path: string): DocTab {
     pendingClose: false,
     reloadNonce: 0,
   };
+}
+
+/** A read-only tab comparing a file in the working tree with HEAD. */
+export function makeDiffTab(path: string, root: string, relative: string): DocTab {
+  return { ...makeDocTab(path), kind: "diff", mode: "source", diff: { root, path: relative } };
+}
+
+/** Whether two targets show the same comparison, whichever file is selected in it. */
+export function sameComparison(a: ChangesTarget, b: ChangesTarget): boolean {
+  return a.cwd === b.cwd && a.side === b.side && a.commit === b.commit
+    && a.base?.from === b.base?.from && a.base?.label === b.base?.label;
+}
+
+/** A read-only tab listing a comparison's changed files beside the selected file's diff. */
+export function makeChangesTab(target: ChangesTarget): DocTab {
+  const title = target.cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || target.cwd;
+  return { ...makeDocTab(target.cwd), title, kind: "changes", mode: "source", changes: target };
 }

@@ -9,6 +9,7 @@
 
 import { useSyncExternalStore } from "react";
 import en from "./locales/en";
+import { loadSharingText } from "../sharing/copy";
 
 /** Supported locales. */
 export const LOCALES = [
@@ -87,8 +88,10 @@ function ensureDict(locale: Locale): Promise<void> {
   const existing = loading.get(locale);
   if (existing) return existing;
 
-  const task = LOADERS[locale as Exclude<Locale, "en">]()
-    .then((mod) => {
+  // The sharing panels keep their own copy outside this dictionary; loading it here keeps it ready
+  // exactly when the interface language is.
+  const task = Promise.all([LOADERS[locale as Exclude<Locale, "en">](), loadSharingText(locale)])
+    .then(([mod]) => {
       loaded.set(locale, mod.default);
     })
     .catch(() => {
@@ -102,7 +105,7 @@ function ensureDict(locale: Locale): Promise<void> {
 }
 
 /**
- * Load the active locale before the first render. `main.tsx` awaits this so the UI does not paint
+ * Load the active locale before the first render. `bootstrap.tsx` awaits this so the UI does not paint
  * English and then swap to the user's language a moment later.
  */
 export function initI18n(): Promise<void> {
@@ -248,6 +251,22 @@ export function setLang(choice: LangChoice) {
       if (currentLocale === target) bump();
     });
   }
+}
+
+/**
+ * Re-read the persisted choice and switch to it once its dictionary has loaded. For a long-lived
+ * secondary window, such as the screenshot overlay, which would otherwise keep the language it
+ * started with.
+ */
+export async function reloadLangChoice(): Promise<void> {
+  const choice = loadLangChoice();
+  const locale = resolveChoice(choice);
+  if (choice === currentChoice && locale === currentLocale) return;
+  await ensureDict(locale);
+  currentChoice = choice;
+  currentLocale = locale;
+  syncHtmlLang();
+  bump();
 }
 
 /** Parameter tuple for function entries; string entries use an empty tuple. */

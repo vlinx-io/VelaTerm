@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 #[folder = "resources/codex-security/"]
 struct Bundle;
 
-pub const PACKAGE_VERSION: &str = "0.1.26";
+pub const PACKAGE_VERSION: &str = "0.8.2";
 pub const PLUGIN_VERSION: &str = "0.1.95";
 pub const ADAPTER_VERSION: &str = "vlx-native-mcp-v2";
 const MCP_GUARD: &[u8] = include_bytes!("../../resources/security-mcp-guard.mjs");
@@ -85,12 +85,26 @@ fn install_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
     result
 }
 
+/// Embedded files lose their mode bits. Since 0.8 the skills run `scripts/launch_codex_security_mcp`
+/// directly, so a script with a shebang must stay executable, as it is in the npm package.
+fn mark_executable(path: &Path, bytes: &[u8]) -> Result<()> {
+    #[cfg(unix)]
+    if bytes.starts_with(b"#!") {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(unix))]
+    let _ = (path, bytes);
+    Ok(())
+}
+
 /// Materialize the embedded release, verifying each byte against its source manifest.
 /// This directory is application data, never the user's native agent configuration.
 pub fn materialize(data_dir: &Path) -> Result<PathBuf> {
+    // The package version is part of the name because upstream releases can keep the plugin version.
     let destination = data_dir
         .join("security")
-        .join(format!("codex-security-{PLUGIN_VERSION}-{ADAPTER_VERSION}"));
+        .join(format!("codex-security-{PACKAGE_VERSION}-{PLUGIN_VERSION}-{ADAPTER_VERSION}"));
     for path in [data_dir.join("security"), destination.clone()] {
         if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
             return Err("security_upstream_invalid".into());
@@ -115,10 +129,10 @@ pub fn materialize(data_dir: &Path) -> Result<PathBuf> {
             patches.push(serde_json::json!({"path":name,"upstreamSha256":digest,"installedSha256":scope::digest(&bytes),"purpose":"single-file scope compatibility"}));
         }
         let path = installed_path(&destination, name)?;
-        if std::fs::read(&path).is_ok_and(|current| current == bytes) {
-            continue;
+        if !std::fs::read(&path).is_ok_and(|current| current == bytes) {
+            install_bytes(&path, &bytes)?;
         }
-        install_bytes(&path, &bytes)?;
+        mark_executable(&path, &bytes)?;
     }
     install_bytes(
         &installed_path(&destination, "UPSTREAM.json")?,
@@ -161,6 +175,9 @@ mod tests {
         let plugin = materialize(&temp.0).unwrap();
         let source = provenance().unwrap();
         assert_eq!(source["license"], "Apache-2.0");
+        assert_eq!(source["packageVersion"], PACKAGE_VERSION);
+        assert_eq!(source["pluginVersion"], PLUGIN_VERSION);
+        assert!(plugin.ends_with(format!("codex-security-{PACKAGE_VERSION}-{PLUGIN_VERSION}-{ADAPTER_VERSION}")));
         for (name, expected) in source["files"].as_object().unwrap() {
             let original = Bundle::get(name).unwrap();
             assert_eq!(
@@ -173,6 +190,13 @@ mod tests {
                 adapted_source(name, &original.data).unwrap(),
                 "{name}"
             );
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let launcher = plugin.join("scripts/launch_codex_security_mcp");
+            assert_eq!(std::fs::metadata(&launcher).unwrap().permissions().mode() & 0o777, 0o755);
+            assert_eq!(std::fs::metadata(plugin.join("mcp/server.mjs")).unwrap().permissions().mode() & 0o111, 0);
         }
         std::fs::write(plugin.join("references/core-scan.md"), "corrupted cache").unwrap();
         materialize(&temp.0).unwrap();
@@ -187,11 +211,25 @@ mod tests {
         let temp = Temp::new();
         let plugin = temp.0.join("plugin's files");
         let state = temp.0.join("state with spaces");
-        for agent in ["codex", "claude"] {
+        for agent in ["codex", "claude", "deepseek"] {
             let args = launch_args(agent, &plugin, &state, "--existing 'a b'").unwrap();
             let parsed = crate::agent::inject::split_extra_args(Some(&args));
             assert_eq!(&parsed[..2], &["--existing", "a b"]);
-            if agent == "codex" {
+            if agent == "deepseek" {
+                assert_eq!(parsed[2], "--patch");
+                let patch: Value = serde_json::from_slice(&std::fs::read(&parsed[3]).unwrap()).unwrap();
+                let config = &patch[0]["insert"][0]["config"];
+                assert_eq!(patch[0]["insert"][0]["name"], "@deepseek-ai/dsh-mcp-client");
+                assert_eq!(config["serverName"], mcp_server_name(agent));
+                assert_eq!(config["args"][0], plugin.join("vlx-security-mcp.mjs").to_string_lossy().as_ref());
+                assert_eq!(config["env"]["CODEX_SECURITY_STATE_DIR"], state.to_string_lossy().as_ref());
+                // DeepSeek hashes function names over 64 characters; every scan tool must keep its name.
+                for tool in ["record_codex_security_candidate_validations", "record_codex_security_discovery_candidates"] {
+                    assert!(format!("mcp__{}__{tool}", mcp_server_name(agent)).len() <= 64, "{tool}");
+                }
+            } else if agent == "codex" {
+                assert!(parsed.windows(2).any(|pair| pair == ["-c", "mcp_servers.codex-security.command=\"node\""]));
+                assert!(parsed.windows(2).any(|pair| pair == ["-c", "mcp_servers.codex-security.enabled=false"]));
                 let table: toml_edit::DocumentMut = parsed[3].parse().unwrap();
                 assert_eq!(
                     table["mcp_servers"]["vlx-codex-security"]["env"]["CODEX_SECURITY_STATE_DIR"]
@@ -390,31 +428,36 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result["scan"]["diffTarget"]["baseRevision"], base);
-        let inventory = temp.0.join("in_scope_files.txt");
-        let python = std::env::var("PYTHON")
-            .unwrap_or_else(|_| if cfg!(windows) { "python" } else { "python3" }.into());
-        let result = crate::host::command(python)
-            .arg(plugin.join("scripts/generate_in_scope_files.py"))
-            .arg("--repo")
-            .arg(&source)
-            .args([
-                "--scope",
-                ".",
-                "--diff-base",
-                &base,
-                "--diff-mode",
-                "local-patch",
-                "--out",
-            ])
-            .arg(&inventory)
+        // Since 0.8 the MCP server, not a standalone script, writes the changed-file inventory.
+        let scan_id = result["scan"]["scanId"].as_str().unwrap();
+        let mut server = crate::host::command("node")
+            .arg(plugin.join("mcp/server.mjs"))
+            .arg("--stdio")
+            .env("CODEX_SECURITY_STATE_DIR", temp.0.join("state"))
             .env("PYTHONDONTWRITEBYTECODE", "1")
-            .output()
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
             .unwrap();
-        assert!(
-            result.status.success(),
-            "{}",
-            String::from_utf8_lossy(&result.stderr)
-        );
+        let mut input = server.stdin.take().unwrap();
+        for message in [
+            serde_json::json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"vlx-test","version":"1"}}}),
+            serde_json::json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"prepare_codex_security_review_items","arguments":{"scanId":scan_id}}}),
+        ] {
+            use std::io::Write;
+            writeln!(input, "{message}").unwrap();
+        }
+        let output = std::io::BufRead::lines(std::io::BufReader::new(server.stdout.take().unwrap()))
+            .map(|line| serde_json::from_str::<Value>(&line.unwrap()).unwrap())
+            .find(|message| message["id"] == 2)
+            .unwrap();
+        drop(input);
+        let _ = server.wait();
+        assert_eq!(output["result"]["structuredContent"]["reviewItemsTotal"], 1, "{output}");
+        let inventory = Path::new(result["scan"]["scanDir"].as_str().unwrap())
+            .join("artifacts/02_discovery/in_scope_files.txt");
         assert_eq!(
             std::fs::read_to_string(inventory).unwrap().trim(),
             "main.py"
@@ -506,6 +549,19 @@ fn explicit_selection_preserves_other_native_arguments() {
     );
 }
 
+/// The name each agent registers the audit MCP server under, which prefixes every tool it exposes.
+///
+/// DeepSeek limits a function name to 64 characters and hashes anything longer, so the long default
+/// prefix would rename tools the workflow names explicitly, such as
+/// `record_codex_security_candidate_validations`. A shorter server name keeps every scan tool intact.
+pub fn mcp_server_name(agent: &str) -> &'static str {
+    if agent == "deepseek" {
+        "vlx-security"
+    } else {
+        "vlx-codex-security"
+    }
+}
+
 pub fn launch_args(agent: &str, plugin: &Path, state: &Path, existing: &str) -> Result<String> {
     let verifier = std::env::current_exe().map_err(|_| "security_verifier_unavailable")?;
     let server = serde_json::json!({
@@ -538,7 +594,34 @@ pub fn launch_args(agent: &str, plugin: &Path, state: &Path, existing: &str) -> 
                 toml_string(&verifier.to_string_lossy())?,
                 toml_string(&state.to_string_lossy())?
             );
-            Ok(format!("{existing} -c {}", quote_argument(&command)))
+            // Codex also loads a Codex Security plugin installed from its own marketplace, under the server
+            // name `codex-security`. Offered both, an agent once called that copy and started a separate deep
+            // scan the audit could neither see nor stop; the plugin's own workers switch it off the same way.
+            // A bare `enabled=false` is rejected as an entry without a transport, so it names one as they do.
+            Ok(format!(
+                "{existing} -c {} -c {} -c {}",
+                quote_argument(&command),
+                quote_argument("mcp_servers.codex-security.command=\"node\""),
+                quote_argument("mcp_servers.codex-security.enabled=false")
+            ))
+        }
+        "deepseek" => {
+            // DeepSeek Harness composes its profile from patch layers; an inserted MCP client entry adds
+            // the server for this session only. JSON is valid YAML, so the patch is written as JSON.
+            std::fs::create_dir_all(state).map_err(|e| e.to_string())?;
+            let patch = state.join("dsh-mcp.json");
+            std::fs::write(
+                &patch,
+                serde_json::to_vec_pretty(&serde_json::json!([{"insert":[{
+                    "id":"mcp-vlx-security", "name":"@deepseek-ai/dsh-mcp-client",
+                    "config":{"serverName":mcp_server_name(agent), "transport":"stdio",
+                        "command":server["command"], "args":server["args"], "env":server["env"],
+                        "toolCallTimeoutMs":600_000, "failOnStartupError":true}
+                }]}]))
+                .map_err(|e| e.to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(format!("{existing} --patch {}", quote_argument(&patch.to_string_lossy())))
         }
         _ => Err("security_invalid:agent".into()),
     }

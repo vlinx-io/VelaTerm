@@ -45,6 +45,28 @@ describe("InfoTab sections", () => {
     expect(screen.queryByText("turn tokens")).toBeNull();
     expect(screen.queryByText("session total")).toBeNull();
   });
+  it("shows ZCode's plan windows and its turn statistics", async () => {
+    const entry = { error: null, fetchedAt: Date.now(), errorAt: null };
+    useTermStore.setState({
+      usage: {
+        claude: { data: null, ...entry }, codex: { data: null, ...entry }, grok: { data: null, ...entry },
+        zcode: {
+          data: { platform: "bigmodel", level: "pro", windows: [
+            { label: "5h", usedPercent: 7.1, resetsAt: null }, { label: "7d", usedPercent: 1.4, resetsAt: null },
+          ] },
+          ...entry,
+        },
+        auto: true, intervalSec: 300,
+      },
+    });
+    render(<InfoTab session={{ ...session, kind: "zcode", agentSessionId: "sess_1" }} cwd="/tmp" />);
+    expect(screen.getByText("ZCode")).toBeTruthy();
+    expect(screen.getByText("5h")).toBeTruthy();
+    expect(screen.getByText("7% used")).toBeTruthy();
+    expect(screen.getByText("1% used")).toBeTruthy();
+    expect(await screen.findByText("This turn")).toBeTruthy();
+    useTermStore.setState({ usage: null });
+  });
   it("gives every section a collapse button and folds its body away", () => {
     render(<InfoTab session={session} cwd="/tmp" />);
     expect(screen.getByText("Process")).toBeTruthy();

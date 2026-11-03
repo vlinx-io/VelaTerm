@@ -1,3 +1,43 @@
+## v0.2.15 — 2026-11-03
+
+- 🆕 A aba “Nova sessão” permite escolher o projeto, o agente, o modelo, o esforço de raciocínio, as permissões, a visão e um worktree isolado em torno de uma caixa de entrada centralizada, e inicia a sessão com a sua primeira tarefa; ela pode ser aberta pelo item “Nova sessão…” dos menus de nova sessão, pelo botão de estrela na barra de abas ou pelo painel central vazio.
+- 🐋 O DeepSeek Harness (`dsh`) passa a funcionar como agente na visão de conversa, com cartões de ferramentas, raciocínio, solicitações de permissão, troca de modelo e de esforço, uso do contexto e um histórico que é retomado ao reabrir.
+- 🧩 Copilot, Cursor, Kimi e Grok agora podem ser executados na visão de conversa.
+- 🤖 O Zhipu ZCode passa a funcionar como agente na visão de conversa: quando o aplicativo de desktop ZCode está instalado, ele usa o agente integrado desse aplicativo, e é possível entrar com Z.ai ou Zhipu BigModel, ou alternar entre os dois, sem sair da conversa.
+- 📊 No painel Info, as sessões do ZCode mostram os tokens, a taxa de acertos de cache e a velocidade de geração deste turno, o uso do contexto e o uso de 5 horas e semanal do GLM Coding Plan.
+- 📦 O ZCode (no macOS e no Windows) e o DeepSeek Harness podem ser instalados pela própria conversa com “Instalar agora”, e a mensagem que falhou é enviada novamente assim que a instalação termina.
+- ⬆️ Clicar em “Atualização” no selo de versão de um agente abre uma caixa de diálogo que executa o comando de atualização do próprio agente com a saída ao vivo e oferece “Reiniciar agente” para que a conversa continue na nova versão.
+- 🔌 As conexões remotas com muitos terminais em atividade não caem mais repetidamente depois de se reconectarem.
+- 🔄 Depois que um servidor remoto é reiniciado, as sessões não ficam mais presas na sincronização enquanto seus terminais são iniciados.
+- 🔁 Quando a sincronização de uma conversa falha, ela é repetida automaticamente, e a área abaixo da caixa de entrada mostra o status com um botão “Tentar novamente”.
+- 🐢 As conexões SSH com um host remoto muito sobrecarregado não expiram mais enquanto aguardam a resposta do servidor.
+- 🔗 “Reconectar agora” em uma janela remota recria o túnel SSH imediatamente, em vez de esperar a próxima tentativa automática.
+- 🪟 No macOS e no Windows, fechar a janela principal pede confirmação e mantém as janelas remotas abertas; no macOS, o aplicativo permanece no Dock, e reabrir a janela principal restaura o espaço de trabalho salvo.
+- 🧾 Os arquivos alterados na lista “This turn” e no painel Git abrem seus diffs em uma aba, e não mais em uma caixa de diálogo.
+- ⌨️ As sugestões de comandos do terminal não aparecem mais enquanto você digita: no Zsh, o comando mais recente do histórico que corresponde ao texto aparece em cinza na própria linha e pode ser aceito com → ou End, e a lista só aparece quando você pressiona Tab; escolha “Em linha + Tab”, “Apenas Tab” ou “Desativadas” em Configurações.
+- 💬 Nas prévias de Artifact, é possível clicar em elementos da página para deixar comentários para a sessão, e as opções marcadas na página são listadas acima da prévia para que você navegue entre elas e escolha uma.
+- 🔍 A busca em uma conversa usa pesquisa de texto completo, que encontra todas as suas palavras em qualquer ordem, e mostra “Sem resultados” em vez de “Carregando a conversa…” quando não há correspondências.
+- 🧰 As habilidades incluídas, como vspawn e vrefer, agora são instaladas na pasta compartilhada `~/.agents/skills`, para que o Pi, o ZCode e o DeepSeek Harness possam usá-las, e o Codex não lista mais cada habilidade duas vezes.
+- 📋 Na visão de conversa, os resultados de `/code-review` aparecem como uma lista de problemas encontrados com locais de arquivo clicáveis.
+- 🌐 Quando a tradução de respostas está desativada em uma sessão, os cartões de pergunta oferecem um botão “Tradução” que traduz apenas aquele cartão.
+- ✂️ As perguntas e as opções dos cartões de pergunta podem ser selecionadas e copiadas.
+- 🌳 A árvore de sessões coloca sob a linha de um worktree os grupos e as sessões pai que pertencem a ele, inclusive as sessões iniciadas diretamente na pasta do worktree.
+- 🌲 Para novas sessões, ações do Git e merges, os grupos aninhados usam o worktree do grupo pai mais próximo que tiver um.
+- 🔎 Renomear um item enquanto a árvore de sessões está filtrada não faz mais com que ele desapareça dos resultados.
+- ⏳ Quando o OpenCode atinge um limite de uso, uma única linha de erro indica qual é o limite, e a conversa continua automaticamente após a redefinição quando o OpenCode informa o horário em que ela ocorre.
+- 📸 A sobreposição de captura de tela aparece mais rápido depois que você pressiona o atalho.
+- 🚀 As janelas mostram um esboço do layout assim que abrem e carregam na inicialização menos da metade do código de antes.
+- ⚡ `vspawn --yes` cria a sessão filha diretamente, sem mostrar o cartão de inicialização.
+- 🛡️ As auditorias de código usam o Codex Security 0.8.2 e podem ser executadas com o DeepSeek, e os formulários de auditoria e de “Adicionar à base de conhecimento” usam os mesmos campos de agente, modelo e esforço das novas sessões, aceitando modelos que não estão na lista.
+- 🌗 No macOS, quando o tema acompanha o sistema, a barra de título fica escura junto com o restante da janela.
+- 📥 As instalações em um clique só informam a conclusão depois que o comando de instalação termina, e uma instalação incompleta do Zoo Code é tratada como não instalada, em vez de causar uma falha na inicialização.
+- 🖥️ Mudar uma sessão para a visão de terminal não falha mais com “The initial task was already claimed”.
+- 🧟 As sessões não informam mais “The previous agent is still running” depois que o ID de processo do agente antigo é reutilizado por outro programa.
+- 🧯 Depois que o navegador se reconecta, as conversas não mantêm mais uma linha TransportError da desconexão.
+- 🪞 Com o espelhamento ativado, abrir e fechar abas não transforma mais as sessões de conversa em espaços reservados “Restaurado do espaço de trabalho salvo”.
+- 📜 As conversas do Claude que contêm uma resposta descartada voltam a carregar o histórico normalmente.
+- 🧠 Os modelos integrados do Claude que não constam do catálogo de modelos do site continuam aparecendo nos formulários de nova sessão e de inicialização.
+
 ## v0.2.14 — 2026-10-23
 
 - 🔌 As conexões remotas não caem nem se reconectam mais a cada segundo quando várias conversas longas estão abertas, e essas conversas voltam a abrir normalmente.

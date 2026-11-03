@@ -107,6 +107,45 @@ afterEach(() => {
   localStorage.clear();
 });
 
+describe("openDiffTab", () => {
+  it("keeps a file's diff tab apart from its editor tab and refreshes it when opened again", () => {
+    seed();
+    const store = useTermStore.getState();
+    store.openDiffTab("/repo/src/a.ts", "/repo", "src/a.ts");
+    store.openDocTab("/repo/src/a.ts");
+    const tabs = Object.values(useTermStore.getState().docTabs);
+    expect(tabs.map((tab) => tab.kind).sort()).toEqual(["code", "diff"]);
+    const diff = tabs.find((tab) => tab.kind === "diff")!;
+    expect(diff.diff).toEqual({ root: "/repo", path: "src/a.ts" });
+    store.openDiffTab("/repo/src/a.ts", "/repo", "src/a.ts");
+    const s = useTermStore.getState();
+    expect(Object.keys(s.docTabs)).toHaveLength(2);
+    expect(s.activeTabId).toBe(diff.id);
+    expect(s.docTabs[diff.id].reloadNonce).toBe(1);
+  });
+});
+
+describe("openChanges", () => {
+  it("keeps one tab per comparison and selects the requested file in it", () => {
+    seed();
+    const store = useTermStore.getState();
+    store.openChanges("/repo", { side: "staged", path: "a.ts" });
+    store.openChanges("/repo", { commit: "abc" });
+    expect(Object.keys(useTermStore.getState().docTabs)).toHaveLength(2);
+    store.openChanges("/repo", { side: "staged", path: "b.ts" });
+    const s = useTermStore.getState();
+    const staged = Object.values(s.docTabs).filter((tab) => tab.changes?.side === "staged" && !tab.changes.commit);
+    expect(staged).toHaveLength(1);
+    expect(s.activeTabId).toBe(staged[0].id);
+    expect(staged[0].changes).toMatchObject({ cwd: "/repo", path: "b.ts" });
+    expect(staged[0].title).toBe("repo");
+    // Opening it again without a file keeps the one picked inside the tab.
+    store.selectChangesFile(staged[0].id, "c.ts");
+    store.openChanges("/repo", { side: "staged" });
+    expect(useTermStore.getState().docTabs[staged[0].id].changes?.path).toBe("c.ts");
+  });
+});
+
 describe("openDocTab: creating, focusing and deduplicating", () => {
   it("a new document tab is appended to openTabs and activated, with activeSessionId null", () => {
     seed();

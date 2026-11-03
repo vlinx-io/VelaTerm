@@ -18,7 +18,7 @@ import tempfile
 import time
 import urllib.request
 
-VERSION = "0.2.5"
+VERSION = "0.2.14"
 # Same two-line minisign public key as src-tauri/src/server_supply.rs.
 PUBLIC_KEY_FILE = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg3QkY3RjE5NjU5NEIzN0YKUldSL3M1UmxHWCsvaDF4bkdReURmL2FLV2ZRbDU1V0xyRGV0dHZwQnBibWxPU3pGdXRjc2x4eCsK"
 ROOT = Path.home() / ".velaterm"

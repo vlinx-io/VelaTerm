@@ -21,6 +21,13 @@ pub struct Model {
     pub label: String,
     #[serde(default)]
     pub effort_levels: Vec<String>,
+    /// What the model is for, from the native catalogue; the launch menus show it as the conversation
+    /// composer does. Empty for catalogues that only list identifiers.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    /// A 1M-context variant, listed after the others.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub large_context: bool,
 }
 
 #[derive(Serialize)]
@@ -29,6 +36,42 @@ pub struct Catalog {
     pub models: Vec<Model>,
     /// Native levels offered before the user chooses a specific model.
     pub effort_levels: Vec<String>,
+}
+
+/// Which part of a launch choice the catalogue cannot accept.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ChoiceError {
+    Model,
+    Effort,
+}
+
+/// Check a model and effort the way the shared launch fields offer them.
+///
+/// A model outside the catalogue is accepted, as it is when starting a session: the catalogue can lag
+/// behind what the installed CLI supports, and the CLI rejects a name it does not know. Effort is held to
+/// the listed levels whenever the catalogue can say which apply: the chosen model's levels, or the agent's
+/// own levels when no model is chosen. Only for a model the catalogue does not know is effort left to a
+/// format check. Empty strings mean "use the CLI's configuration".
+pub fn check_choice(catalog: &Catalog, model: &str, effort: &str) -> Result<(), ChoiceError> {
+    let (model, effort) = (model.trim(), effort.trim());
+    if model.len() > 256 || model.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err(ChoiceError::Model);
+    }
+    if effort.is_empty() {
+        return Ok(());
+    }
+    let listed = |levels: &[String]| levels.iter().any(|level| level == effort);
+    let allowed = match catalog.models.iter().find(|m| !model.is_empty() && m.id == model) {
+        Some(known) => listed(&known.effort_levels),
+        None if model.is_empty() => listed(&catalog.effort_levels),
+        None => {
+            let mut chars = effort.chars();
+            effort.len() <= 32
+                && chars.next().is_some_and(|c| c.is_ascii_lowercase())
+                && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+        }
+    };
+    if allowed { Ok(()) } else { Err(ChoiceError::Effort) }
 }
 
 pub fn list(app: &AppCtx, kind: SessionKind, context: &Context) -> Result<Catalog, String> {
@@ -112,6 +155,8 @@ pub fn list(app: &AppCtx, kind: SessionKind, context: &Context) -> Result<Catalo
                     label: id.clone(),
                     id,
                     effort_levels: levels.clone(),
+                    description: String::new(),
+                    large_context: false,
                 })
                 .collect();
             return Ok(Catalog {
@@ -260,5 +305,30 @@ mod tests {
         assert!((10000..=49151).contains(&ports[0]));
         drop(app);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod choice_tests {
+    use super::*;
+
+    #[test]
+    fn choice_accepts_uncatalogued_models_and_checks_effort_against_the_catalogue() {
+        let catalog = Catalog {
+            models: vec![Model { id: "listed".into(), label: "Listed".into(), effort_levels: vec!["low".into(), "high".into()], description: String::new(), large_context: false }],
+            effort_levels: vec!["low".into(), "medium".into()],
+        };
+        assert_eq!(check_choice(&catalog, "", ""), Ok(()));
+        assert_eq!(check_choice(&catalog, "listed", "high"), Ok(()));
+        assert_eq!(check_choice(&catalog, "listed", "max"), Err(ChoiceError::Effort));
+        // The catalogue can lag behind the CLI, so a model it does not list is still accepted.
+        assert_eq!(check_choice(&catalog, "newer-model", ""), Ok(()));
+        assert_eq!(check_choice(&catalog, "newer-model", "xhigh"), Ok(()));
+        assert_eq!(check_choice(&catalog, "newer-model", "High Effort"), Err(ChoiceError::Effort));
+        // Without a model, effort is held to the levels the agent offers before one is chosen.
+        assert_eq!(check_choice(&catalog, "", "medium"), Ok(()));
+        assert_eq!(check_choice(&catalog, "", "high"), Err(ChoiceError::Effort));
+        assert_eq!(check_choice(&catalog, "two words", ""), Err(ChoiceError::Model));
+        assert_eq!(check_choice(&catalog, "bad\nmodel", ""), Err(ChoiceError::Model));
     }
 }

@@ -12,7 +12,7 @@ import { useT } from "../../i18n";
 import { runLogTail, runStop, type BackgroundRun, type RunLog } from "../../ipc/runs";
 import { useTermStore } from "../../store/termStore";
 import type { SessionId } from "../../types";
-import { fmtElapsed } from "./session/TaskView";
+import { fmtElapsed } from "./session/taskMeta";
 import { parseAnsi, spanCss } from "./ansiLog";
 import "./run-strip.css";
 

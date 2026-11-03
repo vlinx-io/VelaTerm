@@ -1,4 +1,4 @@
-//! Shared CodeMirror colors, highlighting, and language loading for the ChangesModal diff view.
+//! Shared CodeMirror colors, highlighting, and language loading for the diff views.
 //! The theme uses Vlinx CSS variables and follows light/dark mode automatically; the highlight map uses the
 //! five-color palette plus text-hierarchy variables. SourceEditor.tsx currently carries an equivalent definition
 //! that can later be consolidated into this module.

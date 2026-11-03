@@ -7,6 +7,9 @@
 
 import { t } from "../i18n";
 
+/** Product names for the agents whose sign-in requirement the backend reports by kind. */
+const SIGN_IN_AGENT_LABEL: Record<string, string> = { copilot: "Copilot", cursor: "Cursor", kimi: "Kimi Code", grok: "Grok Build" };
+
 /** Reason the E2EE WebSocket handshake failed, derived from the server's `e2ee_error` code. */
 export type HandshakeFailure = "rate_limited" | "unauthorized";
 
@@ -53,6 +56,22 @@ export function mapBackendError(raw: string): string {
       return t("transport.remoteSettingForbidden", detail);
     case "remote_path_forbidden":
       return t("transport.remotePathForbidden", detail);
+    // An ACP agent refused to open the conversation until its user signs in.
+    case "agent_sign_in_required":
+      return t("chat.signInRequired", SIGN_IN_AGENT_LABEL[detail] ?? detail);
+    // The agent has no API key to call its model with; DeepSeek Harness is the one that reports this.
+    case "agent_api_key_required":
+      return t("chat.apiKeyRequired");
+    // Signed in to ZCode, but the account holds no usable GLM Coding Plan on that platform
+    // (`zcode_plan_unavailable:<zai|bigmodel>[:<provider message>]`). The provider's own words follow.
+    case "zcode_plan_unavailable": {
+      const sep = detail.indexOf(":");
+      const platform = sep < 0 ? detail : detail.slice(0, sep);
+      const said = sep < 0 ? "" : detail.slice(sep + 1).trim();
+      if (platform !== "zai" && platform !== "bigmodel") return raw;
+      const message = t(platform === "zai" ? "chat.auth.zcode.noPlan.zai" : "chat.auth.zcode.noPlan.bigmodel");
+      return said ? `${message} (${said})` : message;
+    }
     default:
       return raw;
   }

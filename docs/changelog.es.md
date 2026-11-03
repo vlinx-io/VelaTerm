@@ -1,3 +1,43 @@
+## v0.2.15 — 2026-11-03
+
+- 🆕 Una pestaña «Nueva sesión» te permite elegir el proyecto, el agente, el modelo, el esfuerzo de razonamiento, los permisos, la vista y un worktree independiente alrededor de un cuadro de entrada centrado, y después inicia la sesión con tu primera tarea; ábrela desde «Nueva sesión…» en los menús de nueva sesión, con el botón de estrella de la barra de pestañas o desde el panel central vacío.
+- 🐋 DeepSeek Harness (`dsh`) se incorpora como agente de la vista de conversación, con tarjetas de herramientas, razonamiento, solicitudes de permiso, cambio de modelo y de esfuerzo, uso del contexto e historial que se reanuda al volver a abrir la sesión.
+- 🧩 Copilot, Cursor, Kimi y Grok ya pueden ejecutarse en la vista de conversación.
+- 🤖 Zhipu ZCode se incorpora como agente de la vista de conversación: usa el agente integrado de la aplicación de escritorio de ZCode cuando está instalada, y puedes iniciar sesión con Z.ai o Zhipu BigModel, o cambiar entre ambos, sin salir de la conversación.
+- 📊 Las sesiones de ZCode muestran en el panel Info los tokens de este turno, la tasa de aciertos de caché y la velocidad de generación, el uso del contexto y el uso de GLM Coding Plan en los periodos de 5 horas y semanal.
+- 📦 ZCode (en macOS y Windows) y DeepSeek Harness se pueden instalar desde la conversación con «Instalar ahora», y el mensaje que falló se vuelve a enviar en cuanto termina la instalación.
+- ⬆️ Al hacer clic en «Actualización» en la insignia de versión de un agente se abre un cuadro de diálogo que ejecuta el propio comando de actualización del agente con la salida en directo y ofrece «Reiniciar agente» para que la conversación continúe con la nueva versión.
+- 🔌 Las conexiones remotas con muchos terminales activos ya no se desconectan una y otra vez después de reconectarse.
+- 🔄 Tras reiniciarse un servidor remoto, las sesiones ya no se quedan bloqueadas sincronizándose mientras se inician sus terminales.
+- 🔁 Cuando una conversación no logra sincronizarse, se vuelve a intentar automáticamente, y la zona situada bajo el cuadro de entrada muestra el estado con un botón «Reintentar».
+- 🐢 Las conexiones SSH a un host remoto muy cargado ya no agotan el tiempo de espera mientras aguardan la respuesta del servidor.
+- 🔗 «Reconectar ahora» en una ventana remota reconstruye el túnel SSH de inmediato en lugar de esperar al siguiente reintento automático.
+- 🪟 En macOS y Windows, cerrar la ventana principal pide confirmación y deja abiertas las ventanas remotas; en macOS la aplicación permanece en el Dock, y al volver a abrir la ventana principal se restaura tu espacio de trabajo guardado.
+- 🧾 Los archivos modificados de la lista «This turn» y del panel Git abren sus diffs en una pestaña en lugar de en un cuadro de diálogo.
+- ⌨️ Las sugerencias de comandos del terminal ya no aparecen mientras escribes: Zsh muestra en gris, en línea, el comando más reciente del historial que coincide, que se acepta con → o Fin, y la lista solo aparece al pulsar Tab; elige «En línea + Tab», «Solo Tab» o «Desactivadas» en Ajustes.
+- 💬 En las vistas previas de Artifact puedes hacer clic en elementos de la página para dejar comentarios a la sesión, y las opciones marcadas en la página aparecen sobre la vista previa para que puedas saltar de una a otra y elegir una.
+- 🔍 La búsqueda dentro de una conversación es de texto completo, encuentra todas tus palabras en cualquier orden y muestra «Sin resultados» en lugar de «Cargando la conversación…» cuando no hay coincidencias.
+- 🧰 Las habilidades incluidas, como vspawn y vrefer, ahora se instalan en la carpeta compartida `~/.agents/skills`, de modo que Pi, ZCode y DeepSeek Harness pueden usarlas, y Codex ya no muestra cada habilidad dos veces.
+- 📋 Los resultados de `/code-review` en la vista de conversación aparecen como una lista de problemas encontrados con ubicaciones de archivo en las que se puede hacer clic.
+- 🌐 Cuando la traducción de respuestas está desactivada en una sesión, las tarjetas de preguntas ofrecen un botón «Traducción» que traduce solo esa tarjeta.
+- ✂️ Las preguntas y las opciones de las tarjetas de preguntas se pueden seleccionar y copiar.
+- 🌳 El árbol de sesiones coloca bajo la fila de cada worktree los grupos y las sesiones principales que pertenecen a él, incluidas las sesiones iniciadas directamente en la carpeta del worktree.
+- 🌲 Los grupos anidados usan el worktree del grupo superior más cercano que tenga uno para las sesiones nuevas, las acciones de Git y las fusiones.
+- 🔎 Renombrar un elemento mientras el árbol de sesiones está filtrado ya no hace que desaparezca de los resultados.
+- ⏳ Cuando OpenCode alcanza un límite de uso, una sola línea de error indica de qué límite se trata, y la conversación continúa automáticamente tras el reinicio del límite cuando OpenCode informa de la hora de reinicio.
+- 📸 La superposición de captura de pantalla aparece más rápido después de pulsar el atajo.
+- 🚀 Las ventanas muestran un esquema de la disposición en cuanto se abren y cargan menos de la mitad de código al iniciarse.
+- ⚡ `vspawn --yes` crea la sesión hija directamente, sin mostrar la tarjeta de inicio.
+- 🛡️ Las auditorías de código usan Codex Security 0.8.2 y pueden ejecutarse con DeepSeek, mientras que los formularios de auditoría y de «Añadir a la base de conocimientos» usan los mismos campos de agente, modelo y esfuerzo que las sesiones nuevas y admiten modelos que no figuran en la lista.
+- 🌗 En macOS, cuando el tema sigue al del sistema, la barra de título se oscurece junto con el resto de la ventana.
+- 📥 Las instalaciones con un clic solo indican que han terminado cuando el comando de instalación ha finalizado, y una instalación incompleta de Zoo Code se considera no instalada en lugar de provocar un fallo al iniciar.
+- 🖥️ Cambiar una sesión a la vista de terminal ya no falla con «The initial task was already claimed».
+- 🧟 Las sesiones ya no indican «The previous agent is still running» cuando otro programa ha reutilizado el ID de proceso del agente anterior.
+- 🧯 Después de que el navegador se reconecte, las conversaciones ya no conservan una línea TransportError de la desconexión.
+- 🪞 Con la duplicación activada, abrir y cerrar pestañas ya no convierte las sesiones de conversación en marcadores de posición «Restaurado desde el espacio de trabajo guardado».
+- 📜 Las conversaciones de Claude que contienen una respuesta descartada vuelven a cargar su historial con normalidad.
+- 🧠 Los modelos integrados de Claude que faltan en el catálogo de modelos del sitio web siguen apareciendo en los formularios de nueva sesión y de inicio.
+
 ## v0.2.14 — 2026-10-23
 
 - 🔌 Las conexiones remotas ya no se cortan y se reconectan cada segundo cuando hay varias conversaciones largas abiertas, y esas conversaciones vuelven a abrirse con normalidad.

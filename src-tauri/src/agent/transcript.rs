@@ -927,6 +927,7 @@ pub fn read(kind: SessionKind, agent_session_id: &str) -> Result<Vec<TranscriptM
         SessionKind::Kimi => {
             Err("Transcript view is not supported for kimi sessions yet".to_string())
         }
+        SessionKind::Deepseek => crate::agent::chat::deepseek_history::transcript(agent_session_id),
         SessionKind::Kiro => {
             Ok(super::kiro_store::read(agent_session_id)?.messages?.into_iter().map(|message| TranscriptMessage {
                 role: message.role.into(), text: message.text, timestamp: message.timestamp, tools: Vec::new(),
@@ -939,6 +940,11 @@ pub fn read(kind: SessionKind, agent_session_id: &str) -> Result<Vec<TranscriptM
         }
         SessionKind::Zoo => {
             Err("Transcript view is not supported for Zoo Code sessions yet".to_string())
+        }
+        // ZCode keeps messages and parts in its SQLite session store; the shared event reader serves here too.
+        SessionKind::Zcode => {
+            let events = crate::agent::zcode::history_events(agent_session_id)?;
+            Ok(merge(events_pieces(events).into_iter()))
         }
         SessionKind::Terminal => Err("Terminal sessions have no agent transcript".to_string()),
         SessionKind::Browser => Err("Browser pages have no agent transcript".to_string()),
@@ -1058,6 +1064,20 @@ fn append_grok_text(
 
 /// OpenCode's messages as transcript pieces: one per user message, one per assistant message with the
 /// tools it called, read through the same converter the export uses.
+/// Pieces from the shared export events, for stores that already decode into them.
+fn events_pieces(events: Vec<crate::agent::export::Event>) -> Vec<Piece> {
+    use crate::agent::export::Event;
+    events
+        .into_iter()
+        .filter_map(|event| match event {
+            Event::User { text, ts } => Some(Piece { role: "user", text, timestamp: ts, tools: Vec::new() }),
+            Event::AssistantText { text, ts } => Some(Piece { role: "assistant", text, timestamp: ts, tools: Vec::new() }),
+            Event::ToolUse { name, ts, .. } => Some(Piece { role: "assistant", text: String::new(), timestamp: ts, tools: vec![name] }),
+            _ => None,
+        })
+        .collect()
+}
+
 pub(crate) fn opencode_pieces(messages: &[crate::agent::opencode_store::OpencodeMessage]) -> Vec<Piece> {
     let mut pieces: Vec<Piece> = Vec::new();
     for event in crate::agent::chat::opencode_timeline::events(messages) {

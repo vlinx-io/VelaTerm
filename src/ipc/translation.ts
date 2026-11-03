@@ -47,4 +47,5 @@ export const translateReply = (sessionId: string, rowId: string) => invoke<void>
 export interface QuestionTranslation extends TranslationTiming {
   input: unknown; originalInput: unknown; version: number; generation: number; source: string; target: string;
 }
-export const translateQuestion = (sessionId: string, requestId: string) => invoke<QuestionTranslation>("translation_question", { sessionId, requestId });
+// `manual` translates a question the user asked for while automatic reply translation is off.
+export const translateQuestion = (sessionId: string, requestId: string, manual = false) => invoke<QuestionTranslation>("translation_question", { sessionId, requestId, manual });

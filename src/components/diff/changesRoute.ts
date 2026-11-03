@@ -1,9 +1,9 @@
-//! URL state for the changes dialog, so a diff survives a reload, can be bookmarked or shared, and
-//! closes and reopens with the browser's back and forward.
+//! URL state for the changes tab, so a diff survives a reload, can be bookmarked or shared, and
+//! reopens with the browser's back and forward.
 //!
-//! The store stays the source of truth while the app runs. Opening the dialog pushes a history
-//! entry, choosing another file replaces it, and closing pushes the URL without the parameters.
-//! On load and on back/forward the URL is read back into the store.
+//! The store stays the source of truth while the app runs. Showing a different comparison pushes a
+//! history entry; choosing another file in it, or switching to another kind of tab, replaces it.
+//! On load and on back/forward the URL opens or focuses the matching tab.
 
 import { useEffect } from "react";
 import type { GitChangeSide } from "../../ipc/commands";
@@ -53,53 +53,57 @@ export function changesUrl(href: string, route: Route | null): string {
   return url.href;
 }
 
-function storeRoute(): Route | null {
-  const s = useTermStore.getState();
-  return s.changesCwd
-    ? { cwd: s.changesCwd, side: s.changesSide ?? "all", path: s.changesPath, commit: s.changesCommit, base: s.changesBase }
+/** The comparison on screen: the active tab's, when it is a changes tab. */
+function storeRoute(state = useTermStore.getState()): Route | null {
+  const target = state.activeTabId ? state.docTabs[state.activeTabId]?.changes : undefined;
+  return target
+    ? { cwd: target.cwd, side: target.side, path: target.path, commit: target.commit, base: target.base }
     : null;
 }
 
 const same = (a: Route | null, b: Route | null) => JSON.stringify(a) === JSON.stringify(b);
 
-/** Point the URL at the file shown in the open dialog, without adding a history entry. */
-export function replaceChangesPath(path: string | null): void {
-  const current = readChangesRoute(window.location.search);
-  if (!current || current.path === path) return;
-  window.history.replaceState(window.history.state, "", changesUrl(window.location.href, { ...current, path }));
-}
-
-/** Keep the dialog and the URL in step. Mount once, where the dialog is mounted. */
+/** Keep the active changes tab and the URL in step. Mount once, at the app root. */
 export function useChangesRoute(): void {
   useEffect(() => {
+    // A changes URL opens its tab, or focuses it if open. Without one there is nothing to undo: leaving a
+    // changes tab for another tab is not navigation, so the tabs stay as they are.
     const apply = () => {
+      // Restoring the saved workspace replaces the open tabs, so wait for it.
+      if (!useTermStore.getState().treeLoaded) return;
       const route = readChangesRoute(window.location.search);
-      if (same(route, storeRoute())) return;
-      const store = useTermStore.getState();
-      if (!route) store.closeChanges();
-      else store.openChanges(route.cwd, {
+      if (!route || same(route, storeRoute())) return;
+      useTermStore.getState().openChanges(route.cwd, {
         path: route.path ?? undefined, side: route.side, commit: route.commit ?? undefined, base: route.base ?? undefined,
       });
     };
     apply();
     window.addEventListener("popstate", apply);
     const unsubscribe = useTermStore.subscribe((state, previous) => {
-      if (state.changesCwd === previous.changesCwd && state.changesCommit === previous.changesCommit
-        && state.changesSide === previous.changesSide && state.changesBase === previous.changesBase
-        && state.changesPath === previous.changesPath) return;
-      const next = storeRoute();
+      if (state.treeLoaded && !previous.treeLoaded) { apply(); return; }
+      // Until then the URL is a request still waiting to be applied, not a picture of the tabs: a mirrored
+      // layout landing first must not overwrite it.
+      if (!state.treeLoaded) return;
+      const next = storeRoute(state);
+      if (same(next, storeRoute(previous))) return;
       const shown = readChangesRoute(window.location.search);
       if (same(next, shown)) return;
-      // Picking a file inside an open dialog is not a new place to go back to.
-      const sameDialog = next && shown && next.cwd === shown.cwd && next.commit === shown.commit
-        && next.side === shown.side && JSON.stringify(next.base) === JSON.stringify(shown.base);
-      // Forced: opening or closing this dialog never discards a draft, so the unsaved-draft guard
-      // has nothing to protect.
-      memoryNavigate(changesUrl(window.location.href, next), Boolean(sameDialog), true);
+      // Only a different comparison is a new place to go back to; picking a file in it, or switching to
+      // another kind of tab, rewrites the current entry.
+      const replace = !next || Boolean(shown && next.cwd === shown.cwd && next.commit === shown.commit
+        && next.side === shown.side && JSON.stringify(next.base) === JSON.stringify(shown.base));
+      // Forced: opening a changes tab never discards a draft, so the unsaved-draft guard has nothing to protect.
+      memoryNavigate(changesUrl(window.location.href, next), replace, true);
     });
     return () => {
       window.removeEventListener("popstate", apply);
       unsubscribe();
     };
   }, []);
+}
+
+/** Mounts the URL sync at the app root; renders nothing. */
+export function ChangesRoute(): null {
+  useChangesRoute();
+  return null;
 }

@@ -201,7 +201,10 @@ const quit: QuitCapability = {
     if (!env.isTauri) return null;
     const { listen } = await import("@tauri-apps/api/event");
     return listen<Partial<QuitRequest> | null>("app://quit-requested", (event) =>
-      cb({ remoteWindows: event.payload?.remoteWindows ?? 0 }),
+      cb({
+        remoteWindows: event.payload?.remoteWindows ?? 0,
+        closeWindow: event.payload?.closeWindow ?? false,
+      }),
     );
   },
   async ack() {

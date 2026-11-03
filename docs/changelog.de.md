@@ -1,3 +1,43 @@
+## v0.2.15 — 2026-11-03
+
+- 🆕 Im neuen Tab „Neue Sitzung“ wählen Sie rund um ein zentriertes Eingabefeld Projekt, Agent, Modell, Denkaufwand, Berechtigungen, Ansicht und einen separaten Worktree aus und starten die Sitzung mit Ihrer ersten Aufgabe; Sie öffnen ihn über „Neue Sitzung…“ in den Menüs für neue Sitzungen, über die Stern-Schaltfläche in der Tab-Leiste oder über den leeren mittleren Bereich.
+- 🐋 DeepSeek Harness (`dsh`) kommt als Agent für die Gesprächsansicht hinzu, mit Werkzeugkarten, Denkprozess, Berechtigungsabfragen, Wechsel von Modell und Denkaufwand, Kontextauslastung und einem Verlauf, der nach dem erneuten Öffnen fortgesetzt wird.
+- 🧩 Copilot, Cursor, Kimi und Grok lassen sich jetzt in der Gesprächsansicht ausführen.
+- 🤖 Zhipu ZCode kommt als Agent für die Gesprächsansicht hinzu: Ist die ZCode-Desktop-App installiert, wird deren integrierter Agent verwendet, und Sie können sich mit Z.ai oder Zhipu BigModel anmelden oder zwischen beiden wechseln, ohne das Gespräch zu verlassen.
+- 📊 ZCode-Sitzungen zeigen im Infobereich die Tokens, die Cache-Trefferrate und die Generierungsgeschwindigkeit des aktuellen Durchgangs, die Kontextauslastung sowie die 5-Stunden- und Wochennutzung des GLM Coding Plan.
+- 📦 ZCode (unter macOS und Windows) und DeepSeek Harness lassen sich direkt im Gespräch mit „Jetzt installieren“ installieren, und die fehlgeschlagene Nachricht wird nach Abschluss der Installation erneut gesendet.
+- ⬆️ Ein Klick auf „Update“ in der Versionsanzeige eines Agenten öffnet einen Dialog, der den eigenen Update-Befehl des Agenten mit Live-Ausgabe ausführt und „Agent neu starten“ anbietet, damit das Gespräch mit der neuen Version weitergeht.
+- 🔌 Remote-Verbindungen mit vielen ausgelasteten Terminals brechen nach dem Wiederverbinden nicht mehr immer wieder ab.
+- 🔄 Nach einem Neustart des Remote-Servers bleiben Sitzungen nicht mehr in der Synchronisierung hängen, während ihre Terminals starten.
+- 🔁 Schlägt die Synchronisierung eines Gesprächs fehl, wird sie automatisch wiederholt, und unter dem Eingabefeld erscheint der Status mit der Schaltfläche „Erneut versuchen“.
+- 🐢 SSH-Verbindungen zu einem stark ausgelasteten Remote-Host brechen nicht mehr wegen Zeitüberschreitung ab, während sie auf die Antwort des Servers warten.
+- 🔗 „Jetzt neu verbinden“ in einem Remote-Fenster baut den SSH-Tunnel sofort neu auf, statt auf den nächsten automatischen Wiederholungsversuch zu warten.
+- 🪟 Unter macOS und Windows fragt das Schließen des Hauptfensters nach einer Bestätigung und lässt Remote-Fenster geöffnet; unter macOS bleibt die App im Dock, und beim erneuten Öffnen des Hauptfensters wird Ihr gespeicherter Arbeitsbereich wiederhergestellt.
+- 🧾 Geänderte Dateien in der Liste „This turn“ und im Git-Panel öffnen ihre Diffs in einem Tab statt in einem Dialog.
+- ⌨️ Die Befehlsvorschläge im Terminal erscheinen nicht mehr während der Eingabe: Zsh zeigt den neuesten passenden Befehl aus dem Verlauf als grauen Inline-Text an, den Sie mit → oder Ende übernehmen, und die Liste erscheint erst, wenn Sie Tab drücken; in den Einstellungen wählen Sie „Inline + Tab“, „Nur Tab“ oder „Aus“.
+- 💬 In Artifact-Vorschauen können Sie Seitenelemente anklicken, um Kommentare für die Sitzung zu hinterlassen, und auf der Seite markierte Optionen werden über der Vorschau aufgelistet, sodass Sie zwischen ihnen springen und eine davon auswählen können.
+- 🔍 Die Suche in einem Gespräch arbeitet als Volltextsuche, findet alle Ihre Wörter in beliebiger Reihenfolge und zeigt „Keine Treffer“ statt „Unterhaltung wird geladen…“, wenn nichts gefunden wird.
+- 🧰 Mitgelieferte Skills wie vspawn und vrefer werden jetzt im gemeinsamen Ordner `~/.agents/skills` installiert, sodass Pi, ZCode und DeepSeek Harness sie nutzen können, und Codex führt nicht mehr jeden Skill doppelt auf.
+- 📋 Ergebnisse von `/code-review` erscheinen in der Gesprächsansicht als Liste von Befunden mit anklickbaren Dateipositionen.
+- 🌐 Ist die Übersetzung von Antworten für eine Sitzung deaktiviert, bieten Fragekarten die Schaltfläche „Übersetzung“, die nur die jeweilige Karte übersetzt.
+- ✂️ Fragen und Optionen auf Fragekarten lassen sich markieren und kopieren.
+- 🌳 Der Sitzungsbaum ordnet Gruppen und übergeordnete Sitzungen, die zu einem Worktree gehören – auch Sitzungen, die direkt in einem Worktree-Ordner gestartet wurden –, unter der Zeile dieses Worktrees ein.
+- 🌲 Verschachtelte Gruppen verwenden für neue Sitzungen, Git-Aktionen und Merges den Worktree der nächstgelegenen übergeordneten Gruppe, die einen Worktree hat.
+- 🔎 Wird ein Element umbenannt, während der Sitzungsbaum gefiltert ist, verschwindet es nicht mehr aus den Ergebnissen.
+- ⏳ Erreicht OpenCode ein Nutzungslimit, nennt eine einzige Fehlerzeile das betreffende Limit, und das Gespräch wird nach dem Zurücksetzen automatisch fortgesetzt, sofern OpenCode den Zeitpunkt der Zurücksetzung meldet.
+- 📸 Die Bildschirmfoto-Überlagerung erscheint schneller, nachdem Sie das Tastenkürzel gedrückt haben.
+- 🚀 Fenster zeigen beim Öffnen sofort einen Umriss des Layouts und laden beim Start weniger als halb so viel Code.
+- ⚡ `vspawn --yes` erstellt die Untersitzung direkt, ohne die Startkarte anzuzeigen.
+- 🛡️ Codeprüfungen verwenden Codex Security 0.8.2 und lassen sich mit DeepSeek ausführen, und die Formulare für die Codeprüfung und „Zur Wissensdatenbank hinzufügen“ bieten dieselben Felder für Agent, Modell und Denkaufwand wie neue Sitzungen und akzeptieren auch Modelle, die nicht in der Liste stehen.
+- 🌗 Folgt das Theme unter macOS dem System, wird die Titelleiste zusammen mit dem übrigen Fenster dunkel.
+- 📥 Ein-Klick-Installationen melden den Abschluss erst, wenn der Installationsbefehl beendet ist, und eine unvollständige Installation von Zoo Code gilt als nicht installiert, statt beim Start zum Absturz zu führen.
+- 🖥️ Das Umschalten einer Sitzung in die Terminalansicht schlägt nicht mehr mit „The initial task was already claimed“ fehl.
+- 🧟 Sitzungen melden nicht mehr „The previous agent is still running“, wenn die Prozess-ID des alten Agenten inzwischen von einem anderen Programm verwendet wird.
+- 🧯 Nachdem sich der Browser neu verbunden hat, behalten Gespräche keine TransportError-Zeile aus der Verbindungsunterbrechung mehr.
+- 🪞 Bei aktiviertem Spiegelmodus werden Sitzungen in der Gesprächsansicht beim Öffnen und Schließen von Tabs nicht mehr zu Platzhaltern mit „Aus dem gespeicherten Arbeitsbereich wiederhergestellt“.
+- 📜 Claude-Gespräche, die eine verworfene Antwort enthalten, laden ihren Verlauf wieder normal.
+- 🧠 Integrierte Claude-Modelle, die im Modellkatalog der Website fehlen, erscheinen weiterhin in den Dialogen für neue Sitzungen und in den Startdialogen.
+
 ## v0.2.14 — 2026-10-23
 
 - 🔌 Remote-Verbindungen brechen nicht mehr jede Sekunde ab und verbinden sich neu, wenn mehrere lange Gespräche geöffnet sind; diese Gespräche lassen sich wieder normal öffnen.

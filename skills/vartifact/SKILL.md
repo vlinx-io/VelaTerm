@@ -34,6 +34,22 @@ $ARGUMENTS
 - Use realistic sample content, not lorem ipsum, and make the layout work at narrow widths: the panel is often
   half a screen.
 
+### Showing several options
+
+When the user asks for alternatives, or the direction is open, put two to four options side by side on one page
+and mark each with `data-vlx-option`:
+
+```html
+<section data-vlx-option="1a" data-vlx-option-label="Filled primary button">…</section>
+<section data-vlx-option="1b" data-vlx-option-label="Action tiles">…</section>
+```
+
+- IDs are short and stable: a round number plus a letter (`1a`, `1b`, then `2a` for the next round). Never reuse
+  or renumber an ID; add a new round above the older ones instead.
+- The label is a few words saying how the option differs. Without one, the option's first heading is used.
+- VelaTerm lists the marked options above the preview. The user can jump to each and pick one, which sends you a
+  message such as "go with option 1b". Then keep that design, apply it, and remove the other options.
+
 ## Step 3: Open it
 
 ```bash
@@ -46,6 +62,12 @@ Run it once; later edits reload the preview on their own, so there is no need to
 
 Say in one or two lines what the page shows and what to look at. Do not paste the HTML into the conversation; the
 user is looking at the page.
+
+## Comments from the preview
+
+The user can click elements in the preview and comment on them. The comments arrive as a message listing each
+element by tag, visible text, CSS selector and option, followed by the note. Change those elements in place, keep
+the rest of the page as it is, and save the same file.
 
 ## Notes
 

@@ -201,6 +201,10 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         )
         .map_err(|e| format!("Failed to migrate sessions.engine: {e}"))?;
     }
+    // ZCode lost its terminal interface before any release; a development session created with it moves to the
+    // conversation view, the only one it can open in. Matches nothing once done.
+    conn.execute("UPDATE sessions SET engine = 'chat' WHERE kind = 'zcode' AND engine <> 'chat'", [])
+        .map_err(|e| format!("Failed to migrate ZCode sessions to the conversation view: {e}"))?;
     // Add the nullable emoji marker to all three node tables. Unmarked nodes keep NULL, so old databases stay
     // unchanged and the sidebar simply renders no marker for them.
     if !column_exists(conn, "sessions", "mark") {

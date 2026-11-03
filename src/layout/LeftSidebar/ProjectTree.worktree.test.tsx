@@ -6,6 +6,7 @@ import type { TreeHandlers } from "./ProjectTree";
 const mocks = vi.hoisted(() => ({
   state: {} as Record<string, unknown>,
   setProjectCollection: vi.fn(),
+  cwdWorktrees: new Map<string, string>(),
 }));
 
 vi.mock("@tanstack/react-virtual", () => ({
@@ -32,7 +33,10 @@ vi.mock("../../i18n", () => ({ useT: () => (key: string) => key }));
 vi.mock("../../components/Icons", () => ({ default: new Proxy({}, { get: () => () => null }) }));
 vi.mock("../../components/StatusIndicator", () => ({ StatusIndicator: () => null }));
 vi.mock("../sessionViewers/sessionMeta", () => ({ SessionKindIcon: () => null }));
-vi.mock("../../hooks/useGitBranch", () => ({ useGitBranch: () => null }));
+vi.mock("../../hooks/useGitBranch", () => ({
+  useGitBranch: () => null,
+  useLinkedWorktrees: () => mocks.cwdWorktrees,
+}));
 vi.mock("../../hooks/shortcutRegistry", () => ({
   DEFAULT_BINDINGS: { openProject: "Mod+O" },
   formatCombo: (combo: string) => combo,
@@ -131,6 +135,7 @@ const WT_B = "/repo/.vlx-worktrees/app-bbb";
 
 beforeEach(() => {
   localStorage.clear();
+  mocks.cwdWorktrees = new Map();
   mocks.state.groups = [group("g1", "Feature")];
 });
 
@@ -153,27 +158,71 @@ describe("worktree rows", () => {
     expect(rowOf("plain-1").style.paddingLeft).toBe("32px");
   });
 
-  it("keeps sessions directly under a group bound to the same worktree", () => {
-    mocks.state.groups = [group("g1", "Feature", WT_A)];
+  it("shows a bound group under its worktree row and no worktree rows inside it", () => {
+    mocks.state.groups = [
+      group("g1", "Feature", WT_A),
+      { ...group("g2", "Nested"), parentGroupId: "g1" },
+      group("g3", "Plain"),
+    ];
     mocks.state.sessions = [
       session("wt-a-1", 1, { worktreePath: WT_A }),
       session("wt-b-1", 2, { worktreePath: WT_B }),
+      session("nested-b", 3, { groupId: "g2", worktreePath: WT_B }),
+      session("root-a", 4, { groupId: null, worktreePath: WT_A }),
     ];
     const { container } = render(<ProjectTree {...handlers()} />);
-    expect(names(container)).toEqual(["app", "Feature", "wt-a-1", "app-bbb", "wt-b-1"]);
+    expect(names(container)).toEqual([
+      "app", "app-aaa", "Feature", "Nested", "nested-b", "wt-a-1", "wt-b-1", "root-a", "Plain",
+    ]);
+    expect(container.querySelectorAll(".row.worktree")).toHaveLength(1);
+    expect(rowOf("app-aaa").style.paddingLeft).toBe(rowOf("Plain").style.paddingLeft);
+    expect(rowOf("Feature").style.paddingLeft).toBe("32px");
+    expect(rowOf("root-a").style.paddingLeft).toBe("32px");
+    expect(rowOf("Nested").style.paddingLeft).toBe("45px");
   });
 
-  it("gathers project-root and child sessions within their own container", () => {
+  it("gathers a session group whose descendants all share a worktree above its parent session", () => {
     mocks.state.sessions = [
       session("root-wt", 1, { groupId: null, worktreePath: WT_A }),
       session("parent", 2),
       session("child-1", 3, { parentSessionId: "parent", worktreePath: WT_B }),
       session("child-2", 4, { parentSessionId: "parent", worktreePath: WT_B }),
+      session("grandchild", 5, { parentSessionId: "child-1", worktreePath: WT_B }),
     ];
     const { container } = render(<ProjectTree {...handlers()} />);
     expect(names(container)).toEqual([
-      "app", "Feature", "parent", "app-bbb", "child-1", "child-2", "app-aaa", "root-wt",
+      "app", "Feature", "app-bbb", "parent", "child-1", "grandchild", "child-2", "app-aaa", "root-wt",
     ]);
+  });
+
+  it("gathers a session started in a worktree directory by the worktree its cwd sits in", () => {
+    mocks.cwdWorktrees = new Map([[`${WT_B}/sub`, WT_B]]);
+    mocks.state.sessions = [
+      session("parent", 1),
+      session("child", 2, { parentSessionId: "parent", cwd: `${WT_B}/sub` }),
+    ];
+    const { container } = render(<ProjectTree {...handlers()} />);
+    expect(names(container)).toEqual(["app", "Feature", "app-bbb", "parent", "child"]);
+  });
+
+  it("shows no worktree rows under a session in a worktree", () => {
+    mocks.state.sessions = [
+      session("parent", 1, { worktreePath: WT_A }),
+      session("child-a", 2, { parentSessionId: "parent", worktreePath: WT_A }),
+      session("child-b", 3, { parentSessionId: "parent", worktreePath: WT_B }),
+    ];
+    const { container } = render(<ProjectTree {...handlers()} />);
+    expect(names(container)).toEqual(["app", "Feature", "app-aaa", "parent", "child-a", "child-b"]);
+  });
+
+  it("keeps worktree rows for children of a session group spanning several worktrees", () => {
+    mocks.state.sessions = [
+      session("parent", 1),
+      session("child-a", 2, { parentSessionId: "parent", worktreePath: WT_A }),
+      session("child-plain", 3, { parentSessionId: "parent" }),
+    ];
+    const { container } = render(<ProjectTree {...handlers()} />);
+    expect(names(container)).toEqual(["app", "Feature", "parent", "app-aaa", "child-a", "child-plain"]);
   });
 
   it("collapses a worktree row and remembers it", () => {

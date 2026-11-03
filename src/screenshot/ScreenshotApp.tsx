@@ -7,19 +7,25 @@
 //! cancels; a right click clears the region, or cancels when there is none. Enter or a double click inside the region
 //! finishes. Losing focus cancels, so the overlay can never be left covering the screen.
 //!
+//! The window itself is created hidden ahead of time and reused (see src-tauri/src/screenshot.rs):
+//! `ScreenshotOverlay` mounts a fresh editor for each screenshot and unmounts it when it ends.
+//!
 //! Outside the desktop shell (a plain browser during development) a generated test frame stands in
 //! for the capture and results are kept on `window.__vlxScreenshotLast`.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import Icons from "../components/Icons";
 import {
   onScreenshotFocusChanged,
+  onScreenshotFrame,
   screenshotClose,
   screenshotFinish,
   screenshotFrame,
+  screenshotPending,
   screenshotReady,
 } from "../ipc/screenshot";
-import { useT, type I18nKey } from "../i18n";
+import { reloadLangChoice, useT, type I18nKey } from "../i18n";
 import {
   COLORS,
   MOSAIC_WIDTHS,
@@ -110,7 +116,60 @@ function textWidth(text: string, size: number): number {
   return Math.max(...text.split("\n").map((l) => measureCtx!.measureText(l).width));
 }
 
-export function ScreenshotApp() {
+/** Resolve once the current content has been painted, or shortly after when nothing is painting. */
+function afterPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = window.setTimeout(resolve, 100);
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        window.clearTimeout(timer);
+        resolve();
+      }),
+    );
+  });
+}
+
+/**
+ * Root of the reused overlay window. Each screenshot gets its own editor, keyed by the screenshot id,
+ * so no selection or annotation carries over from the previous one.
+ */
+export function ScreenshotOverlay() {
+  const [session, setSession] = useState<number | null>(IS_TAURI ? null : 1);
+
+  useEffect(() => {
+    if (!IS_TAURI) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    // The language may have changed in the main window since this page loaded.
+    const begin = (id: number) =>
+      void reloadLangChoice().then(() => {
+        if (!disposed) setSession(id);
+      });
+    void onScreenshotFrame(begin).then((fn) => {
+      if (disposed) return fn();
+      unlisten = fn;
+      // A frame captured while this page was still loading announced itself before anyone listened.
+      void screenshotPending().then((id) => {
+        if (id != null) begin(id);
+      });
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // Clear the editor and let that paint before the window hides, so the next screenshot cannot
+  // briefly show this one's frame when the window reappears.
+  const end = useCallback(async () => {
+    flushSync(() => setSession(null));
+    await afterPaint();
+  }, []);
+
+  return session === null ? null : <ScreenshotApp key={session} session={session} onEnd={end} />;
+}
+
+function ScreenshotApp({ session, onEnd }: { session: number; onEnd: () => Promise<void> }) {
   const t = useT();
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [url, setUrl] = useState<string | null>(null);
@@ -156,9 +215,7 @@ export function ScreenshotApp() {
         setUrl(objectUrl);
         // decode() rather than onload: the frame must be fully decoded before the window is revealed.
         void image.decode().then(() => {
-          if (cancelled) return;
-          mosaic.current = makeMosaicSource(image, window.innerWidth, window.innerHeight);
-          setImg(image);
+          if (!cancelled) setImg(image);
         });
       })
       .catch(() => void close());
@@ -169,13 +226,35 @@ export function ScreenshotApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Reveal the window once the decoded frame is in the DOM. Not requestAnimationFrame: WebKit does not
-  // run animation frames for a hidden window, so the signal would never arrive.
+  // Reveal the window once the decoded frame is in the DOM. Neither requestAnimationFrame nor a timer:
+  // WebKit runs no animation frames for a hidden window and may throttle timers on a hidden page, which
+  // this page is until the call. A message-channel task is not throttled.
   useEffect(() => {
     if (!img || !IS_TAURI) return;
-    const timer = window.setTimeout(() => void screenshotReady(), 0);
-    return () => window.clearTimeout(timer);
-  }, [img]);
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => void screenshotReady(session);
+    channel.port2.postMessage(null);
+    return () => channel.port1.close();
+  }, [img, session]);
+
+  // The pixelated frame behind mosaic strokes costs two full-frame canvas draws, so it is built when
+  // first needed rather than before the window appears, and again after a resize.
+  const ensureMosaic = useCallback((): MosaicSource | null => {
+    if (!img) return null;
+    const m = mosaic.current;
+    if (!m || m.cssWidth !== view.w || m.cssHeight !== view.h) {
+      mosaic.current = makeMosaicSource(img, view.w, view.h);
+    }
+    return mosaic.current;
+  }, [img, view.w, view.h]);
+  const mosaicFor = useCallback(
+    (list: Shape[]) => (list.some((s) => s.kind === "mosaic") ? ensureMosaic() : null),
+    [ensureMosaic],
+  );
+  // Picking the tool prepares it, so the first stroke does not stall.
+  useEffect(() => {
+    if (tool === "mosaic") ensureMosaic();
+  }, [tool, ensureMosaic]);
 
   useEffect(() => {
     const onResize = () => setView({ w: window.innerWidth, h: window.innerHeight });
@@ -201,14 +280,16 @@ export function ScreenshotApp() {
   }, []);
 
   const close = useCallback(async () => {
-    if (IS_TAURI) await screenshotClose();
-    else {
+    if (IS_TAURI) {
+      await onEnd();
+      await screenshotClose();
+    } else {
       setSel(null);
       setShapes([]);
       setTool(null);
       setText(null);
     }
-  }, []);
+  }, [onEnd]);
 
   // ── Shapes ──
 
@@ -240,9 +321,11 @@ export function ScreenshotApp() {
       setBusy(true);
       setError(null);
       try {
-        const png = await exportPng(img, sel, all, mosaic.current, view.w);
+        const png = await exportPng(img, sel, all, mosaicFor(all), view.w);
         if (IS_TAURI) {
-          await screenshotFinish(action, png);
+          await onEnd();
+          // The editor is gone from here on, so a failure cannot be shown; the overlay must not stay up.
+          await screenshotFinish(action, png).catch(() => screenshotClose());
         } else {
           (window as unknown as Record<string, unknown>).__vlxScreenshotLast = { action, bytes: png.length };
           setBusy(false);
@@ -253,7 +336,7 @@ export function ScreenshotApp() {
         setError(e instanceof Error ? e.message : String(e));
       }
     },
-    [img, sel, busy, text, textShape, shapes, view.w, close],
+    [img, sel, busy, text, textShape, shapes, view.w, close, mosaicFor, onEnd],
   );
 
   // ── Pointer handling ──
@@ -431,8 +514,9 @@ export function ScreenshotApp() {
     ctx.clearRect(0, 0, w, h);
     if (!sel) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawShapes(ctx, draft ? [...shapes, draft] : shapes, sel, mosaic.current);
-  }, [shapes, draft, sel, view, img]);
+    const all = draft ? [...shapes, draft] : shapes;
+    drawShapes(ctx, all, sel, mosaicFor(all));
+  }, [shapes, draft, sel, view, img, mosaicFor]);
 
   const showToolbar = !!sel && !!img && (dragMode === null || dragMode === "draw");
   useLayoutEffect(() => {

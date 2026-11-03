@@ -102,3 +102,35 @@ fn relevance_ranking_handles_paths_unicode_and_empty_tokens() {
     assert_eq!(items[0].label, "中文/");
     assert_eq!(items[0].index, 1);
 }
+
+#[test]
+fn shared_prefix_is_published_only_with_several_current_candidates() {
+    let mut state = state();
+    state.message(b"test;P");
+    state.requested = Some((0, Instant::now()));
+    state.message(b"test;A;1");
+    state.message(b"test;C;446f63756d656e74732f;");
+    state.message(b"test;C;446f776e6c6f6164732f;");
+    state.message(b"test;E");
+    state.message(b"test;Z");
+    assert!(state.snapshot.extendable);
+    state.input("x");
+    assert!(!state.snapshot.extendable);
+    // A shared prefix with a single candidate is just that candidate; accept it instead.
+    state.requested = Some((state.snapshot.input_version, Instant::now()));
+    state.message(b"test;A;2");
+    state.message(b"test;C;446f63756d656e74732f;");
+    state.message(b"test;E");
+    state.message(b"test;Z");
+    assert!(!state.snapshot.extendable);
+}
+
+#[test]
+fn ampersand_keeps_the_line_ready_and_ctrl_z_closes_it() {
+    let mut state = state();
+    state.message(b"test;P");
+    state.input("make && ");
+    assert!(state.snapshot.ready);
+    state.input("\u{1a}");
+    assert!(!state.snapshot.ready);
+}

@@ -182,11 +182,17 @@ fn tree_selection(kind:SessionKind,path:&Path,cancel:&AtomicBool) -> Result<Sele
             for (offset,parent,logical) in found {
                 // Only a parent written earlier is followed, as the history index does, so the walk
                 // cannot loop; a compaction boundary whose summarized history is named by a later
-                // record continues from the record written just before it.
+                // record, and a record whose parent was never written (Claude drops a reply that
+                // failed to produce a valid tool call but keeps the retry prompt naming it), continue
+                // from the record written just before it.
+                let earlier=||records[..records.partition_point(|(at,_)|at<offset)].iter().rev().find_map(|(_,uuid)|uuid.clone());
                 let parent=match parent {
-                    Some(parent) if parents.get(parent).is_some_and(|starts|!starts.iter().any(|(at,..)|at<offset)) =>
-                        if *logical {records[..records.partition_point(|(at,_)|at<offset)].iter().rev().find_map(|(_,uuid)|uuid.clone())} else {None},
-                    parent=>parent.clone(),
+                    Some(parent)=>match parents.get(parent) {
+                        Some(starts) if starts.iter().any(|(at,..)|at<offset) =>Some(parent.clone()),
+                        Some(_) =>if *logical {earlier()} else {None},
+                        None=>earlier(),
+                    },
+                    None=>None,
                 };
                 match parent {Some(parent)=>pending.push(parent),None=>root=true}
             }

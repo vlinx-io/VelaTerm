@@ -1,7 +1,7 @@
 //! Vela-style application header with branding, theme toggle, appearance settings, and panel controls.
 //! The window retains native decorations; this row sits below the system title bar.
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from "react";
 import Icons from "../../components/Icons";
 import { getLocale, useT } from "../../i18n";
 import { SharingLink, sharingNavigate, useSharingLocation } from "../../sharing/navigation";
@@ -18,11 +18,14 @@ import { useTermStore } from "../../store/termStore";
 import { runAfterInitialSettings } from "../../store/settingsWatch";
 import { navigateTranslation, translationUrl, useTranslationRoute } from "../../translation/navigation";
 import { resolveTheme } from "../../theme";
-import { ShareModal } from "../../components/ShareModal";
 import { AppMenuBar } from "./AppMenuBar";
-import { ConnectRemotePanel } from "./ConnectRemotePanel";
-import { RemoteAccessPanel } from "./RemoteAccessPanel";
-import { SettingsModal } from "./SettingsModal";
+
+// The dialogs opened from the title bar load on first use, keeping them out of what the window must load
+// before its first paint.
+const ShareModal = lazy(() => import("../../components/ShareModal").then((m) => ({ default: m.ShareModal })));
+const ConnectRemotePanel = lazy(() => import("./ConnectRemotePanel").then((m) => ({ default: m.ConnectRemotePanel })));
+const RemoteAccessPanel = lazy(() => import("./RemoteAccessPanel").then((m) => ({ default: m.RemoteAccessPanel })));
+const SettingsModal = lazy(() => import("./SettingsModal").then((m) => ({ default: m.SettingsModal })));
 
 const FEEDBACK_URL = "https://velaterm.com/feedback";
 
@@ -623,20 +626,22 @@ export function TitleBar() {
         </button>
       </div>
 
-      {settingsOpen && <SettingsModal onClose={closeSettings} />}
-      {shareOpen && <ShareModal onClose={() => setShareOpen(false)} />}
-      {remoteOpen && (
-        <RemoteAccessPanel
-          onClose={() => setRemoteOpen(false)}
-          onStatusChange={syncRemoteStatus}
-        />
-      )}
-      {connectOpen && (
-        <ConnectRemotePanel
-          onClose={() => setConnectOpen(false)}
-          showSharedDb={connectSharedDb}
-        />
-      )}
+      <Suspense fallback={null}>
+        {settingsOpen && <SettingsModal onClose={closeSettings} />}
+        {shareOpen && <ShareModal onClose={() => setShareOpen(false)} />}
+        {remoteOpen && (
+          <RemoteAccessPanel
+            onClose={() => setRemoteOpen(false)}
+            onStatusChange={syncRemoteStatus}
+          />
+        )}
+        {connectOpen && (
+          <ConnectRemotePanel
+            onClose={() => setConnectOpen(false)}
+            showSharedDb={connectSharedDb}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

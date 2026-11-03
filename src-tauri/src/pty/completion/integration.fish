@@ -19,6 +19,7 @@ function _vlxc_query
     set -g _vlxc_cursor (commandline --cursor)
     set -g _vlxc_revision (math $_vlxc_revision + 1)
     set -g _vlxc_values
+    set -g _vlxc_prefix ''
     _vlxc_emit "A;$_vlxc_revision"
     set -l query (commandline --current-token --cut-at-cursor | string collect)
     set -l query_hex (printf %s "$query" | _vlxc_hex)
@@ -34,15 +35,44 @@ function _vlxc_query
         end
         _vlxc_emit "C;$label;$description"
     end
+    _vlxc_common_prefix "$query"
     _vlxc_emit Z
     commandline -f repaint
+end
+# Like native Tab, offer the text all candidates share when it extends the token typed so far.
+function _vlxc_common_prefix
+    test (count $_vlxc_values) -gt 1; or return
+    set -l common $_vlxc_values[1]
+    for value in $_vlxc_values[2..-1]
+        while test -n "$common"
+            set -l head (string sub -l (string length -- "$common") -- "$value")
+            test "$head" = "$common"; and break
+            set common (string sub -l (math (string length -- "$common") - 1) -- "$common")
+        end
+    end
+    # Never stop inside an escape sequence.
+    string match -qr '(?<!\\\\)(?:\\\\\\\\)*\\\\$' -- "$common"; and set common (string sub -l (math (string length -- "$common") - 1) -- "$common")
+    set -l typed (string length -- "$argv[1]")
+    test (string length -- "$common") -gt $typed; or return
+    set -l head (string sub -l $typed -- "$common")
+    test "$head" = "$argv[1]"; or return
+    set -g _vlxc_prefix $common
+    _vlxc_emit E
 end
 function _vlxc_accept
     read -l revision index < $_vlxc_selection; or return
     test "$revision" = "$_vlxc_revision"; or return
-    string match -qr '^[0-9]+$' -- "$index"; or return
+    string match -qr '^([0-9]+|p)$' -- "$index"; or return
     test (commandline --cursor) = $_vlxc_cursor; or return
     test (commandline --current-buffer | string collect) = "$_vlxc_buffer"; or return
+    if test "$index" = p
+        test -n "$_vlxc_prefix"; or return
+        commandline --current-token --replace -- $_vlxc_prefix
+        set -g _vlxc_values
+        set -g _vlxc_prefix ''
+        commandline -f repaint
+        return
+    end
     set -l slot (math $index + 1)
     test $slot -le (count $_vlxc_values); or return
     commandline --current-token --replace -- $_vlxc_values[$slot]

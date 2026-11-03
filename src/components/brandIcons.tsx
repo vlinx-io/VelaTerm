@@ -3,7 +3,7 @@
 //! and accent colors. simple-icons excludes OpenAI, so OPENAI_PATH embeds the official Codex mark.
 //! Session-tree and Usage source icons share these assets; Claude Usage uses its orange siClaude star
 //! while the session tree retains the robot icon.
-import { siClaude, siCline, siCursor, siGithubcopilot, siOpencode } from "simple-icons";
+import { siClaude, siCline, siCursor, siDeepseek, siGithubcopilot, siOpencode } from "simple-icons";
 import type { SimpleIcon } from "simple-icons";
 
 /**
@@ -79,7 +79,12 @@ const BRAND: Record<string, SimpleIcon> = {
   cursor: siCursor,
   // Cline's near-black #18181B mark falls back to currentColor through brandFill.
   cline: siCline,
+  // DeepSeek's whale, the mark DeepSeek Harness uses for itself.
+  deepseek: siDeepseek,
 };
+
+/** DeepSeek's brand blue, shared by its session icon and accent. */
+export const DEEPSEEK_BRAND_COLOR = `#${siDeepseek.hex}`;
 
 /** Return an official agent brand icon, or null for the caller's fallback. */
 export function brandIconEl(name: string, size = 14) {
@@ -249,6 +254,21 @@ function ZooMark({ size = 14 }: { size?: number }) {
 
 export function zooMarkEl(size = 14) {
   return <ZooMark size={size} />;
+}
+
+/** ZCode mark: the notched Z from Z.ai's own logo artwork, cropped to the glyph without its tile. */
+function ZcodeMark({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="2.25 2.27 13 13" fill="currentColor" role="img" aria-label="ZCode">
+      <path d="M9.03854 3.86902L8.2306 5.01755C8.1036 5.19645 7.89598 5.306 7.67092 5.306H3.26767V3.86902H9.03854Z" />
+      <path d="M14.5209 3.86328L7.59573 13.6741H2.97913L9.90426 3.86328H14.5209Z" />
+      <path d="M8.46146 13.6732L9.27514 12.5189C9.40214 12.34 9.60975 12.2305 9.83482 12.2305H14.2323V13.6732H8.46146Z" />
+    </svg>
+  );
+}
+
+export function zcodeMarkEl(size = 14) {
+  return <ZcodeMark size={size} />;
 }
 
 /**

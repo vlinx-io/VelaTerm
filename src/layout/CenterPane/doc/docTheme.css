@@ -894,3 +894,7 @@
   .doc-markdown-code .cm-line,
   .doc-frontmatter { transition: none; }
 }
+
+/* Diff tab: the comparison label sits in the header row instead of under a title. */
+.docview-diff-comparison { flex: none; margin-top: 0; }
+.docview-diff-body { flex: 1; min-height: 0; overflow: hidden; }

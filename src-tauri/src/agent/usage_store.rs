@@ -19,7 +19,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::transcript::CodexUsage;
-use crate::agent::usage::{ClaudeUsage, FetchError, GrokUsage};
+use crate::agent::usage::{ClaudeUsage, FetchError, GrokUsage, ZcodeUsage};
 use crate::host::AppCtx;
 use crate::models::SessionKind;
 
@@ -87,6 +87,9 @@ pub struct UsageSnapshot {
     pub claude: UsageEntry<ClaudeUsage>,
     pub codex: UsageEntry<CodexUsage>,
     pub grok: UsageEntry<GrokUsage>,
+    /// Defaults so snapshots persisted before ZCode had a quota still load.
+    #[serde(default)]
+    pub zcode: UsageEntry<ZcodeUsage>,
     /// True while automatic polling is enabled in settings; the panel hides its countdown when off.
     pub auto: bool,
     /// Effective poll interval in seconds, so the panel can count down to the next refresh.
@@ -99,11 +102,12 @@ pub enum Provider {
     Claude,
     Codex,
     Grok,
+    Zcode,
 }
 
 impl Provider {
     /// All providers, in the order the poller visits them.
-    const ALL: [Provider; 3] = [Provider::Claude, Provider::Codex, Provider::Grok];
+    const ALL: [Provider; 4] = [Provider::Claude, Provider::Codex, Provider::Grok, Provider::Zcode];
 
     /// Parse the frontend's session-kind string; unknown names have no quota source.
     pub fn parse(s: &str) -> Option<Provider> {
@@ -111,6 +115,7 @@ impl Provider {
             "claude" => Some(Provider::Claude),
             "codex" => Some(Provider::Codex),
             "grok" => Some(Provider::Grok),
+            "zcode" => Some(Provider::Zcode),
             _ => None,
         }
     }
@@ -125,6 +130,9 @@ impl Provider {
             Provider::Claude => super::resume::claude_home().is_some_and(|p| p.is_dir()),
             Provider::Codex => super::resume::codex_home().is_some_and(|p| p.is_dir()),
             Provider::Grok => grok_home().is_some_and(|p| p.join("auth.json").is_file()),
+            // The store `zcode login` writes; the platform and key inside are read only when fetching.
+            Provider::Zcode => crate::host::home_dir()
+                .is_some_and(|h| h.join(".zcode").join("v2").join("credentials.json").is_file()),
         }
     }
 }
@@ -173,6 +181,7 @@ fn key(p: Provider) -> &'static str {
         Provider::Claude => "claude",
         Provider::Codex => "codex",
         Provider::Grok => "grok",
+        Provider::Zcode => "zcode",
     }
 }
 
@@ -318,6 +327,7 @@ fn fetch_one(ctx: &AppCtx, p: Provider, force: bool) -> bool {
             .map(StoredValue::Codex)
             .map_err(FetchError::from),
         Provider::Grok => crate::agent::usage::grok_usage(force).map(StoredValue::Grok),
+        Provider::Zcode => zcode_account_usage(ctx).map(StoredValue::Zcode),
     };
 
     let mut guard = STATE.lock().unwrap();
@@ -345,11 +355,13 @@ fn fetch_one(ctx: &AppCtx, p: Provider, force: bool) -> bool {
         Ok(StoredValue::Claude(u)) => mark_ok(&mut st.snapshot.claude, u, now),
         Ok(StoredValue::Codex(u)) => mark_ok(&mut st.snapshot.codex, u, now),
         Ok(StoredValue::Grok(u)) => mark_ok(&mut st.snapshot.grok, u, now),
+        Ok(StoredValue::Zcode(u)) => mark_ok(&mut st.snapshot.zcode, u, now),
         // Keep the previous reading on failure: a stale number with a stale marker beats an empty panel.
         Err(e) => match p {
             Provider::Claude => mark_err(&mut st.snapshot.claude, e, now),
             Provider::Codex => mark_err(&mut st.snapshot.codex, e, now),
             Provider::Grok => mark_err(&mut st.snapshot.grok, e, now),
+            Provider::Zcode => mark_err(&mut st.snapshot.zcode, e, now),
         },
     }
     st.snapshot != before
@@ -374,6 +386,20 @@ enum StoredValue {
     Claude(ClaudeUsage),
     Codex(CodexUsage),
     Grok(GrokUsage),
+    Zcode(ZcodeUsage),
+}
+
+/// The ZCode plan quota, with the key of the plan the signed-in account holds. The key is read the way a
+/// conversation reads it, through the provider config the installed agent ships with.
+fn zcode_account_usage(ctx: &AppCtx) -> Result<ZcodeUsage, FetchError> {
+    let bin = crate::agent::executable::resolve(ctx, SessionKind::Zcode, None)
+        .ok_or_else(|| FetchError::from("ZCode is not installed".to_string()))?;
+    let account = crate::agent::zcode_account::Account::for_command(&crate::agent::zcode::command(&bin))
+        .ok_or_else(|| FetchError::from("ZCode's provider config could not be found".to_string()))?;
+    let (platform, key) = account
+        .plan_api_key()
+        .ok_or_else(|| FetchError::from("Sign in to ZCode with a GLM Coding Plan to see its quota".to_string()))?;
+    crate::agent::usage::zcode_usage(&platform, &key)
 }
 
 /// Account-level Codex limits without any session context.
@@ -448,6 +474,9 @@ fn restore_once(ctx: &AppCtx) {
     if st.snapshot.grok.data.is_none() {
         st.snapshot.grok = snap.grok;
     }
+    if st.snapshot.zcode.data.is_none() {
+        st.snapshot.zcode = snap.zcode;
+    }
 }
 
 /// Persist the snapshot so the next launch paints immediately. Failures are logged, never fatal.
@@ -474,6 +503,7 @@ mod tests {
         assert_eq!(Provider::parse("Claude"), Some(Provider::Claude));
         assert_eq!(Provider::parse(" codex "), Some(Provider::Codex));
         assert_eq!(Provider::parse("grok"), Some(Provider::Grok));
+        assert_eq!(Provider::parse("zcode"), Some(Provider::Zcode));
         assert_eq!(Provider::parse("terminal"), None);
     }
 

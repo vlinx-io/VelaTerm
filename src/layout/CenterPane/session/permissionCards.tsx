@@ -35,6 +35,7 @@ import {
   type QuestionFormQuestion,
 } from "./questionForm";
 import { ToolCard } from "./rows";
+import { useMessageCopyMenu } from "./useMessageCopyMenu";
 import {
   buildElicitationContent,
   initialElicitationValues,
@@ -242,6 +243,12 @@ function ElicitationInput({
 /** Chosen option indices, by question index. */
 type Selections = Record<number, Set<number>>;
 
+/** Whether the current text selection reaches into `element`, including one that lies wholly inside it. */
+function selectsTextIn(element: Element): boolean {
+  const selection = window.getSelection();
+  return !!selection && !selection.isCollapsed && selection.rangeCount > 0 && selection.getRangeAt(0).intersectsNode(element);
+}
+
 /**
  * A question the agent asked, as a form.
  *
@@ -260,6 +267,7 @@ function QuestionCard({
 }) {
   const t = useT();
   const translation = useQuestionTranslation(request);
+  const { onContextMenu, copyMenu } = useMessageCopyMenu();
   const [selections, setSelections] = useState<Selections>({});
   const [otherTexts, setOtherTexts] = useState<Record<number, string>>({});
   const [active, setActive] = useState(0);
@@ -338,7 +346,7 @@ function QuestionCard({
   };
 
   return (
-    <div className="sv-permission sv-question">
+    <div className="sv-permission sv-question" onContextMenu={onContextMenu}>
       <div className="sv-permission-head">
         <Icons.info size={13} />
         <span className="sv-permission-title">{t("chat.question.heading")}</span>
@@ -368,13 +376,24 @@ function QuestionCard({
       {question.options.length > 0 && (
         <div className="sv-question-options" role={question.multiSelect ? undefined : "radiogroup"}>
           {question.options.map((option, i) => (
-            <button
+            // Not a <button>: text inside one cannot be selected reliably across engines, and the wording
+            // of an option is often worth copying.
+            <div
               key={option.label}
               role={question.multiSelect ? "checkbox" : "radio"}
               aria-checked={selected.has(i)}
-              disabled={busy}
+              aria-disabled={busy || undefined}
+              tabIndex={busy ? -1 : 0}
               className={"sv-question-option" + (selected.has(i) ? " sv-question-option-on" : "")}
-              onClick={() => toggle(i)}
+              onClick={(e) => {
+                // A drag that selected part of the option was a copy, not a pick.
+                if (!busy && !selectsTextIn(e.currentTarget)) toggle(i);
+              }}
+              onKeyDown={(e) => {
+                if (busy || (e.key !== "Enter" && e.key !== " ")) return;
+                e.preventDefault();
+                toggle(i);
+              }}
             >
               <span
                 className={
@@ -390,7 +409,7 @@ function QuestionCard({
                   <span className="sv-question-option-desc"><QuestionText original={option.description} translated={translation.questions?.[index]?.options[i]?.description} mode={translation.mode} target={translation.target} /></span>
                 ) : null}
               </span>
-            </button>
+            </div>
           ))}
         </div>
       )}
@@ -435,6 +454,7 @@ function QuestionCard({
           {isLast ? t("chat.question.submit") : t("chat.question.next")}
         </button>
       </div>
+      {copyMenu}
     </div>
   );
 }

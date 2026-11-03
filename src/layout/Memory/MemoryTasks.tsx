@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useT } from "../../i18n";
-import Select from "../../components/Select";
-import { memoryCancel, memoryJobs, memoryModels, memoryOptions, memoryRetry, memoryStart, type MemoryJob, type MemoryOptions } from "../../ipc/memory";
+import AgentSelect from "../../components/AgentSelect";
+import { LaunchLoadState, ModelEffortFields, useLaunchOptions } from "../../components/LaunchFields";
+import { memoryCancel, memoryJobs, memoryOptions, memoryRetry, memoryStart, type MemoryJob, type MemoryOptions } from "../../ipc/memory";
 import { useTermStore } from "../../store/termStore";
 import type { SessionKind } from "../../types";
 import { MemoryLink, memoryNavigate, memoryUrl, useMemoryLocation } from "./navigation";
@@ -23,29 +24,24 @@ export function MemoryCompile({ sessionId }: { sessionId: string }) {
   const { data, error, reload } = useMemoryLoad(memoryOptions, []);
   const [agent, setAgent] = useState(""); const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
-  const models = useMemoryLoad(async () => ({ agent, items: agent ? await memoryModels(agent) : [] }), [agent]);
-  const modelReady = !!agent && models.data?.agent === agent;
-  const selectedModel = modelReady ? models.data?.items.find((item) => item.id === model) : undefined;
+  // The launch catalogue supplies the model and effort fields; the organizer only says which agents it runs.
+  const launch = useLaunchOptions(true);
+  const spec = launch.options.find((option) => option.id === agent);
   const [busy, setBusy] = useState(false); const [failure, setFailure] = useState("");
-  const seeded = useRef(false);
   const remember = (patch: { agent?: SessionKind | null; model?: string | null; effort?: string | null }) =>
     useTermStore.getState().setMemoryPrefs(patch);
-  useEffect(() => { if (data) setAgent(rememberedAgent(data)); }, [data]);
-  // Restore the remembered model and effort once, as soon as the seeded agent's catalogue arrives. A model
-  // the agent no longer offers falls back to its default, and an effort the model no longer supports to none.
+  // Seed the remembered agent, and its model and effort when they were chosen for that same agent. A model
+  // the catalogue no longer lists is kept, as every launch form keeps it; the agent's CLI decides.
   useEffect(() => {
-    if (seeded.current || !data || !modelReady) return;
-    seeded.current = true;
+    if (!data) return;
+    const next = rememberedAgent(data);
     const prefs = useTermStore.getState().memoryPrefs;
-    const items = models.data?.items ?? [];
-    const chosen = prefs.agent === agent && items.some((item) => item.id === prefs.model) ? (prefs.model ?? "") : "";
-    const spec = items.find((item) => item.id === chosen);
-    setModel(chosen);
-    setEffort(chosen && prefs.effort && spec?.effortLevels.includes(prefs.effort) ? prefs.effort : "");
-  }, [data, modelReady, agent, models.data]);
+    setAgent(next);
+    setModel(prefs.agent === next ? prefs.model ?? "" : "");
+    setEffort(prefs.agent === next ? prefs.effort ?? "" : "");
+  }, [data]);
   if (!data) return <LoadState error={error} reload={reload} />;
   const start = async () => {
-    if (!modelReady) return;
     setBusy(true); setFailure("");
     try { const job = await memoryStart(sessionId, agent, model, effort); memoryNavigate(memoryUrl(`job/${job.id}`)); }
     catch (e) { setFailure(memoryError(e)); }
@@ -53,16 +49,16 @@ export function MemoryCompile({ sessionId }: { sessionId: string }) {
   };
   return <form className="memory-document memory-editor memory-compile" onSubmit={(e) => { e.preventDefault(); void start(); }}>
     <h2>{t("memory.add")}</h2><p className="memory-lead">{session?.name ?? sessionId}</p><p>{t("memory.compileHelp")}</p>
-    <label>{t("memory.selectAgent")}<Select width="100%" value={agent} disabled={busy} ariaLabel={t("memory.selectAgent")}
-      onChange={(value) => { setAgent(value); setModel(""); setEffort(""); remember({ agent: value as SessionKind, model: null, effort: null }); }}
-      options={data.agents.map((item) => ({ value: item.id, label: item.available ? item.label : `${item.label} — ${t("memory.unavailable")}`, disabled: !item.available }))} /></label>
-    {!modelReady ? <LoadState error={models.error} reload={models.reload} /> : <>
-      <label>{t("memory.model")}<Select width="100%" value={model} disabled={busy} ariaLabel={t("memory.model")} onChange={(value) => { setModel(value); setEffort(""); remember({ model: value, effort: null }); }} options={[{ value: "", label: t("chat.modelDefault") }, ...models.data!.items.map((item) => ({ value: item.id, label: item.label }))]} /></label>
-      <label>{t("chat.effortTooltip")}<Select width="100%" value={effort} disabled={busy || !selectedModel?.effortLevels.length} ariaLabel={t("chat.effortTooltip")} onChange={(value) => { setEffort(value); remember({ effort: value }); }} options={[{ value: "", label: t("spawn.modelDefault") }, ...(selectedModel?.effortLevels.map((level) => ({ value: level, label: memoryEffortLabel(level) })) ?? [])]} /></label>
-    </>}
+    <label>{t("memory.selectAgent")}<AgentSelect value={agent as SessionKind | ""} disabled={busy} options={data.agents}
+      onChange={(value) => { setAgent(value); setModel(""); setEffort(""); remember({ agent: value || null, model: null, effort: null }); }} /></label>
+    {spec ? <div className="launch-model-grid"><ModelEffortFields spec={spec} model={model} effort={effort} disabled={busy}
+      onChange={(nextModel, nextEffort) => { setModel(nextModel); setEffort(nextEffort); }}
+      onModelCommit={(value) => remember({ model: value || null })}
+      onEffortCommit={(value) => remember({ effort: value || null })} /></div>
+      : launch.state !== "ready" && <LaunchLoadState state={launch.state} error={launch.error} retry={launch.retry} />}
     {failure && <p className="memory-error" role="alert">{failure}</p>}
     <p className="memory-muted">{t("memory.schedulingHint")} {t("memory.closeHint")}</p>
-    <footer className="memory-row"><MemoryLink route="" className="btn">{t("common.cancel")}</MemoryLink><span className="memory-spacer" /><button className="btn btn-primary" disabled={busy || !modelReady || !data.agents.some((item) => item.id === agent && item.available)}>{t(busy ? "common.loading" : "memory.compile")}</button></footer>
+    <footer className="memory-row"><MemoryLink route="" className="btn">{t("common.cancel")}</MemoryLink><span className="memory-spacer" /><button className="btn btn-primary" disabled={busy || !data.agents.some((item) => item.id === agent && item.available)}>{t(busy ? "common.loading" : "memory.compile")}</button></footer>
   </form>;
 }
 

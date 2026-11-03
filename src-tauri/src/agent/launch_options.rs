@@ -87,6 +87,10 @@ pub fn catalog() -> Vec<LaunchOption> {
         ),
         (Crush, "Crush", None, &[]),
         (Kimi, "Kimi Code", None, &[]),
+        // ZCode takes its model and reasoning level with every message of its protocol server, not as launch flags.
+        (Zcode, "ZCode", None, &[]),
+        // DeepSeek Harness takes its model and reasoning over ACP, not as launch flags.
+        (Deepseek, "DeepSeek", None, &[]),
         (
             Kiro,
             "Kiro",
@@ -343,7 +347,7 @@ mod tests {
         let mut workflow: Vec<_> = options.iter().filter(|option| option.supports_plan_execute).map(|option| option.id.as_str()).collect();
         workflow.sort_unstable();
         assert_eq!(workflow, ["claude", "codex", "omp", "opencode", "pi"]);
-        assert_eq!(options.iter().filter(|s| s.accepts_task).count(), 14);
+        assert_eq!(options.iter().filter(|s| s.accepts_task).count(), 16);
         assert!(
             !options
                 .iter()

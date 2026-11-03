@@ -9,7 +9,7 @@ fn account_remote_browser_fixture() {
     use serde_json::json;
     let dir =
         std::path::PathBuf::from(std::env::var("VLX_REMOTE_AUDIT_DIR").expect("fixture directory"));
-    crate::diagnostics::init(&dir);
+    crate::diagnostics::init(&dir, crate::VERSION);
     let seed: serde_json::Value =
         serde_json::from_slice(&std::fs::read(dir.join("seed.json")).unwrap()).unwrap();
     let origin = seed["origin"].as_str().unwrap();

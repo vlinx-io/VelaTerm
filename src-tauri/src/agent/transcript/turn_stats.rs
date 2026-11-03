@@ -1,7 +1,7 @@
 //! Provider-reported turn accounting. Read complete histories once, then consume only appended lines.
 //! Token usage is deduplicated by message/response identity; absent usage is never represented as zero.
 //! Claude, Codex and OpenCode are read from their own recordings; Pi and OMP keep one JSONL tree each,
-//! whose active branch supplies the same numbers.
+//! whose active branch supplies the same numbers. ZCode keeps its own usage tables; see `agent::zcode_info`.
 
 use super::{resume, AgentContextInfo};
 use crate::agent::opencode_store::{self, OpencodeMessage};
@@ -901,6 +901,7 @@ fn pi_read_cached(entry: &mut PiCached) -> Result<TurnStats, String> {
 
 pub fn current_turn_stats(kind: SessionKind, agent_session_id: &str) -> Result<TurnStats, String> {
     if kind == SessionKind::Kiro { return crate::agent::kiro_info::turn_stats(agent_session_id); }
+    if kind == SessionKind::Zcode { return crate::agent::zcode_info::turn_stats(agent_session_id); }
     if kind == SessionKind::Opencode {
         return Ok(opencode_stats_from_messages(&opencode_store::messages(agent_session_id)?));
     }

@@ -52,7 +52,11 @@ pub mod status_watch;
 pub mod transcript;
 pub mod usage;
 pub mod usage_store;
+pub mod update;
 pub mod version;
+pub mod zcode;
+pub mod zcode_account;
+pub mod zcode_info;
 
 pub mod permission_state;
 pub mod plan_execute;

@@ -6,7 +6,7 @@
 //! Window focus re-probes every live path, which covers platforms that cannot watch (Linux) and linked
 //! worktrees, whose HEAD lives in the main repository's git directory outside the watched root.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { gitWatch } from "../ipc/commands";
 import { onFsChanged } from "../ipc/events";
 import { getGitBranchInfo } from "../ipc/info";
@@ -220,6 +220,32 @@ export function useGitBranchInfo(path?: string | null, live = true): GitBranchIn
   }, [path, live]);
 
   return info;
+}
+
+/** Linked worktree containing each path, keyed by path; paths outside a linked worktree are absent. Like sidebar
+ *  icons this only fills and reads the shared cache, probing uncached paths once, and never watches or polls. */
+export function useLinkedWorktrees(paths: string[]): Map<string, string> {
+  const key = paths.join("\n");
+  const [version, setVersion] = useState(0);
+  useEffect(() => {
+    if (!key) return;
+    const list = key.split("\n");
+    const bump = () => setVersion((v) => v + 1);
+    const releases = list.map((path) => track(path, bump, false));
+    for (const path of list) if (!cache.has(path)) void probe(path);
+    return () => { for (const release of releases) release(); };
+  }, [key]);
+  return useMemo(() => {
+    const out = new Map<string, string>();
+    if (!key) return out;
+    for (const path of key.split("\n")) {
+      const info = cache.get(path);
+      if (info?.isWorktree && info.worktreePath) out.set(path, info.worktreePath);
+    }
+    return out;
+    // `version` changes whenever a tracked path's cached answer does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, version]);
 }
 
 /** Get only the branch name for compatibility with legacy callers. */

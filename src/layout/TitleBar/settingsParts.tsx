@@ -19,6 +19,8 @@ export function Seg<T extends string>({
         return (
           <button
             key={v}
+            // Inside a form (the New Session tab) an untyped button would submit it.
+            type="button"
             className={value === v ? "on" : ""}
             disabled={disabled}
             style={{

@@ -36,6 +36,7 @@ import { artifactPaths, ToolBody, toolSummary } from "./toolCards";
 import { ArtifactCards } from "../doc/artifact/ArtifactCard";
 import { DeferredContents } from "./DeferredContents";
 import { ChildConversation } from "./ChildConversation";
+import { CommandFindings, parseCommandFindings } from "./CommandFindings";
 import { runSummaryText, type ToolRow, type TurnFold } from "./toolRuns";
 import { copyAttributes } from "./selectionCopy";
 import { handleMessageCopy, useMessageCopyMenu } from "./useMessageCopyMenu";
@@ -771,12 +772,14 @@ export function ErrorRow({ message }: { message: string }): ReactNode {
  * What a slash command the agent answered itself printed back, such as `/effort` or `/context`.
  *
  * Set apart from the answers around it because nobody said it: it is the session reporting on itself.
- * The text is Markdown — `/context` replies with a table — so it is rendered rather than shown raw.
+ * The text is Markdown — `/context` replies with a table — so it is rendered rather than shown raw. Review
+ * findings printed as JSON are drawn as a list instead.
  */
 export function CommandRow({ text }: { text: string }): ReactNode {
+  const findings = useMemo(() => parseCommandFindings(text), [text]);
   return (
     <div className="sv-row-command">
-      <Markdown text={text} />
+      {findings ? <CommandFindings findings={findings} /> : <Markdown text={text} />}
     </div>
   );
 }

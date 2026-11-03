@@ -1,7 +1,8 @@
 //! Continue a conversation on its own once the subscription usage limit that stopped it resets.
 //!
 //! Claude and Codex both refuse a turn when a five-hour or weekly quota is exhausted, and both say when
-//! that quota resets. With `autoContinueAtUsageLimit` switched on in the shared `vlx-settings` block, the
+//! that quota resets. OpenCode reports a subscription limit too, with a reset only in older OpenCode Go
+//! messages ("Resets in 2hr 43min"); without one the pane says the task will not continue. With `autoContinueAtUsageLimit` switched on in the shared `vlx-settings` block, the
 //! engine reports the refusal here, this module waits for the reset on the wall clock, and then sends one
 //! continuation prompt to the same conversation, starting its agent again if the view had released it.
 //!
@@ -268,7 +269,7 @@ fn fire(ctx: &AppCtx, session_id: &str, waiting: Waiting) {
     let Some(session) = session else { return };
     if session.archived_at.is_some()
         || session.engine != "chat"
-        || !matches!(session.kind, SessionKind::Claude | SessionKind::Codex)
+        || !matches!(session.kind, SessionKind::Claude | SessionKind::Codex | SessionKind::Opencode)
         || crate::security::session_active(session_id)
     {
         return;

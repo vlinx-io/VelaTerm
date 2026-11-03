@@ -3,11 +3,11 @@
 
 import ReactDOM from "react-dom/client";
 import { initI18n } from "../i18n";
-import { ScreenshotApp } from "./ScreenshotApp";
+import { ScreenshotOverlay } from "./ScreenshotApp";
 import "./screenshot.css";
 
 document.addEventListener("contextmenu", (event) => event.preventDefault(), { capture: true });
 
 void initI18n().finally(() => {
-  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(<ScreenshotApp />);
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(<ScreenshotOverlay />);
 });

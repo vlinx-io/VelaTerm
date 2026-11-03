@@ -216,6 +216,11 @@ fn settings(app: &AppCtx, agent: &str) -> Result<Value> {
 /// and picks up the website-hosted Claude catalogue without knowing it exists. Only the two agents the
 /// audit can actually attach its MCP server to are accepted; see `upstream::launch_args`.
 fn models(app: &AppCtx, agent: &str) -> Result<Value> {
+    serde_json::to_value(catalog(app, agent)?.models).map_err(|e| e.to_string())
+}
+
+/// The launch catalogue the audit picker shows: its models plus the levels offered before one is chosen.
+fn catalog(app: &AppCtx, agent: &str) -> Result<crate::agent::launch_models::Catalog> {
     let kind = audit_kind(agent)?;
     // The configured launch arguments select a provider for some CLIs, so the catalogue has to be read
     // with the same arguments the audit will run with.
@@ -223,9 +228,8 @@ fn models(app: &AppCtx, agent: &str) -> Result<Value> {
         inherit_args: true,
         ..Default::default()
     };
-    let catalog = crate::agent::launch_models::list(app, kind, &context)
-        .map_err(|_| "security_models_unavailable".to_string())?;
-    serde_json::to_value(catalog.models).map_err(|e| e.to_string())
+    crate::agent::launch_models::list(app, kind, &context)
+        .map_err(|_| "security_models_unavailable".to_string())
 }
 
 /// Agents the audit can run, in the order the dialog lists them.
@@ -233,7 +237,7 @@ fn models(app: &AppCtx, agent: &str) -> Result<Value> {
 /// The audit attaches its own MCP server to collect findings, and the argument that does so is written
 /// differently by every CLI. Adding an agent here means teaching `upstream::launch_args` that CLI's
 /// syntax first; listing one without it would offer an audit that silently collects nothing.
-const AUDIT_AGENTS: &[&str] = &["codex", "claude"];
+const AUDIT_AGENTS: &[&str] = &["codex", "claude", "deepseek"];
 
 /// The agent kind for an audit request, rejecting any agent the audit cannot instrument.
 fn audit_kind(agent: &str) -> Result<SessionKind> {
@@ -248,32 +252,23 @@ fn agent_label(agent: &str) -> String {
     crate::agent::launch_options::label(SessionKind::from_db(agent))
 }
 
-fn validate_selection(model: Option<&str>, effort: Option<&str>, catalog: &Value) -> Result<()> {
+/// Check an explicit model and effort with the rules every launch form shares.
+fn validate_selection(
+    model: Option<&str>,
+    effort: Option<&str>,
+    catalog: &crate::agent::launch_models::Catalog,
+) -> Result<()> {
     for value in [model, effort].into_iter().flatten() {
         if value.len() > 256 || value.chars().any(char::is_control) {
             return Err("security_invalid:selection".into());
         }
     }
-    let model = model.map(str::trim).filter(|s| !s.is_empty());
-    let effort = effort.map(str::trim).filter(|s| !s.is_empty());
-    if model.is_none() && effort.is_none() {
-        return Ok(());
+    use crate::agent::launch_models::{check_choice, ChoiceError};
+    match check_choice(catalog, model.unwrap_or(""), effort.unwrap_or("")) {
+        Ok(()) => Ok(()),
+        Err(ChoiceError::Model) => Err("security_invalid:model".into()),
+        Err(ChoiceError::Effort) => Err("security_invalid:effort".into()),
     }
-    let row = catalog
-        .as_array()
-        .and_then(|rows| rows.iter().find(|row| row["id"].as_str() == model));
-    let Some(row) = row else {
-        return Err("security_invalid:model".into());
-    };
-    if let Some(effort) = effort {
-        if !row["effortLevels"]
-            .as_array()
-            .is_some_and(|levels| levels.iter().any(|v| v.as_str() == Some(effort)))
-        {
-            return Err("security_invalid:effort".into());
-        }
-    }
-    Ok(())
 }
 
 fn start(app: &AppCtx, request: Request) -> Result<Run> {
@@ -297,9 +292,9 @@ fn start(app: &AppCtx, request: Request) -> Result<Run> {
             .as_deref()
             .is_some_and(|s| !s.trim().is_empty());
     let catalog = if explicit {
-        models(app, &request.agent)?
+        catalog(app, &request.agent)?
     } else {
-        json!([])
+        crate::agent::launch_models::Catalog { models: vec![], effort_levels: vec![] }
     };
     validate_selection(
         request.model.as_deref(),

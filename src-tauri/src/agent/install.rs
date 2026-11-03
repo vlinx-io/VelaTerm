@@ -154,6 +154,17 @@ pub fn install_recipe(agent: &str) -> Option<InstallRecipe> {
                 "Run `crush` and pick a provider in onboarding (sign in or set a provider API key)."
                     .into(),
         },
+        "deepseek" => InstallRecipe {
+            label: "DeepSeek Harness".into(),
+            bin: "dsh".into(),
+            // Published on npm only; the package's `dsh` launcher runs every profile, including `acp`.
+            command: "npm install -g @deepseek-ai/dsh".into(),
+            needs_node: true,
+            docs_url: "https://github.com/deepseek-ai/deepseek-harness".into(),
+            auth_hint:
+                "Set `DEEPSEEK_API_KEY`, or run `dsh web` and save your API key on its Models page."
+                    .into(),
+        },
         "kimi" => InstallRecipe {
             label: "Kimi Code".into(),
             bin: "kimi".into(),
@@ -203,6 +214,33 @@ pub fn install_recipe(agent: &str) -> Option<InstallRecipe> {
                 "Run `grok login` to sign in, or set `XAI_API_KEY`; use `grok models` to list available models."
                     .into(),
         },
+        "zcode" => {
+            // ZCode publishes no command-line package; its agent ships inside the desktop release. macOS takes
+            // only the agent from the release (`ZCODE_MAC_INSTALL`) and runs it with Node; Windows installs the
+            // desktop app silently for the current user, and its agent then runs through the app's binary (see
+            // `agent::zcode::command`). There is no Linux release.
+            let mac = cfg!(target_os = "macos");
+            InstallRecipe {
+                label: "ZCode".into(),
+                bin: "zcode".into(),
+                command: if win {
+                    ZCODE_WINDOWS_INSTALL.into()
+                } else if mac {
+                    ZCODE_MAC_INSTALL.trim().into()
+                } else {
+                    String::new()
+                },
+                needs_node: mac,
+                docs_url: "https://github.com/zai-org/ZCode/releases/latest".into(),
+                auth_hint: if win {
+                    "Open the ZCode desktop app once and sign in; VelaTerm uses its agent and account.".into()
+                } else if mac {
+                    "Run `zcode login` to sign in, or sign in once in the ZCode desktop app; both use the same account.".into()
+                } else {
+                    "ZCode ships desktop releases for macOS and Windows only. If you built it from source, set a `zcode` path in Settings > Agents.".into()
+                },
+            }
+        }
         "zoo" => {
             // Zoo Code currently reuses Roo CLI and `roo`. Its installer lacks Windows support and there is
             // no public npm package, so return an empty Windows command to hide one-click installation while
@@ -231,6 +269,240 @@ pub fn install_recipe(agent: &str) -> Option<InstallRecipe> {
     Some(r)
 }
 
+/// macOS one-click install for ZCode: copy the agent, its provider config and (on Apple silicon, the only
+/// architecture the release targets) its search tools out of the latest desktop release into
+/// `~/.zcode/vlx-term/agent`, then write a `~/.local/bin/zcode` shim that runs it with Node, unless another
+/// `zcode` is already there. The agent reads its store through `node:sqlite`, hence the Node check. The
+/// subshell keeps `set -e` and `exit` from reaching an interactive shell the command is pasted into.
+const ZCODE_MAC_INSTALL: &str = r##"
+(
+set -e
+node -e 'require("node:sqlite")' >/dev/null 2>&1 || { echo "ZCode needs Node.js 22.13 or later." >&2; exit 1; }
+url=$(curl -fsSL https://api.github.com/repos/zai-org/ZCode/releases/latest | grep -o 'https://[^"]*-mac-arm64\.dmg' | head -n 1)
+[ -n "$url" ] || { echo "The latest ZCode release has no macOS download." >&2; exit 1; }
+tmp=$(mktemp -d)
+trap 'hdiutil detach "$tmp/mnt" -quiet >/dev/null 2>&1; rm -rf "$tmp"' EXIT
+curl -fL --progress-bar -o "$tmp/ZCode.dmg" "$url"
+hdiutil attach -nobrowse -readonly -mountpoint "$tmp/mnt" "$tmp/ZCode.dmg" >/dev/null
+res="$tmp/mnt/ZCode.app/Contents/Resources"
+dir="$HOME/.zcode/vlx-term/agent"
+rm -rf "$dir.new"
+mkdir -p "$dir.new"
+cp -R "$res/glm" "$res/config" "$dir.new/"
+if [ "$(uname -m)" = arm64 ]; then cp -R "$res/tools" "$dir.new/"; fi
+rm -rf "$dir"
+mv "$dir.new" "$dir"
+bin="$HOME/.local/bin/zcode"
+if [ -e "$bin" ] && ! grep -q 'Installed by VelaTerm' "$bin"; then
+  echo "Kept the existing $bin; the agent is in $dir."
+else
+  mkdir -p "$HOME/.local/bin"
+  {
+    echo '#!/bin/sh'
+    echo '# ZCode agent from the ZCode desktop release. Installed by VelaTerm.'
+    echo "root='$dir'"
+    echo 'export ZCODE_BUILTIN_PROVIDER_CONFIG_FILE="${ZCODE_BUILTIN_PROVIDER_CONFIG_FILE:-$root/config/provider/zcode-builtin.json}"'
+    echo '[ -x "$root/tools/ripgrep/rg" ] && export ZCODE_RG_BINARY="${ZCODE_RG_BINARY:-$root/tools/ripgrep/rg}"'
+    echo '[ -x "$root/tools/bfs/bfs" ] && export ZCODE_BFS_BINARY="${ZCODE_BFS_BINARY:-$root/tools/bfs/bfs}"'
+    echo '[ -x "$root/tools/ugrep/ugrep" ] && export ZCODE_UGREP_BINARY="${ZCODE_UGREP_BINARY:-$root/tools/ugrep/ugrep}"'
+    echo 'exec node "$root/glm/zcode.cjs" "$@"'
+  } > "$bin"
+  chmod +x "$bin"
+fi
+)
+"##;
+
+/// Windows one-click install for ZCode: run the latest desktop installer silently for the current user. It
+/// is an NSIS installer that asks for no elevation, so it lands in `%LOCALAPPDATA%\Programs\ZCode`.
+const ZCODE_WINDOWS_INSTALL: &str = "$ErrorActionPreference = 'Stop'; $ProgressPreference = 'SilentlyContinue'; \
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
+$release = Invoke-RestMethod 'https://api.github.com/repos/zai-org/ZCode/releases/latest'; \
+$asset = $release.assets | Where-Object { $_.name -like '*-win-x64.exe' } | Select-Object -First 1; \
+if (-not $asset) { throw 'The latest ZCode release has no Windows installer.' }; \
+$setup = Join-Path $env:TEMP $asset.name; \
+Invoke-WebRequest $asset.browser_download_url -OutFile $setup -UseBasicParsing; \
+Start-Process -FilePath $setup -ArgumentList '/S', '/currentuser' -Wait; \
+Remove-Item $setup";
+
+/// A one-click install as typed into the session shell, serialized to frontend camelCase.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallRun {
+    /// The recommended command, followed by a step that leaves a completion marker once it returns.
+    pub command: String,
+    /// Marker token for `install_finished`. None when the marker path cannot be quoted for the shell; the
+    /// command is then the bare recipe and the frontend falls back to location polling alone.
+    pub token: Option<String>,
+}
+
+/// Directory under the data directory where finished one-click installs leave their markers.
+const INSTALL_MARKER_DIR: &str = "install-markers";
+
+/// Markers left behind by an abandoned poll are removed on the next install after this age.
+const INSTALL_MARKER_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// Build the one-click install command for `agent`.
+///
+/// An executable appearing on disk does not mean its installer is done: Zoo's script extracts `bin/roo`
+/// first and fetches its npm dependencies afterwards, and npm creates a wrapper before the package is in
+/// place. Declaring completion on the binary alone lets "Restart now" kill the installer midway. The shell
+/// therefore creates a marker after the recipe returns, and completion is only judged once it exists.
+pub fn begin_install(data_dir: &std::path::Path, agent: &str) -> Option<InstallRun> {
+    let command = install_recipe(agent)?.command.trim().to_string();
+    if command.is_empty() {
+        return None;
+    }
+    let dir = data_dir.join(INSTALL_MARKER_DIR);
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    let wrapped = std::fs::create_dir_all(&dir).ok().and_then(|_| {
+        prune_install_markers(&dir);
+        with_install_marker(&command, &dir.join(&token), cfg!(target_os = "windows"))
+    });
+    Some(match wrapped {
+        Some(command) => InstallRun { command, token: Some(token) },
+        None => InstallRun { command, token: None },
+    })
+}
+
+/// Whether the install started with `token` has returned. A found marker is consumed.
+pub fn install_finished(data_dir: &std::path::Path, token: &str) -> bool {
+    // The token names a file, so accept only the hex form `begin_install` generates.
+    if token.len() != 32 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return false;
+    }
+    let marker = data_dir.join(INSTALL_MARKER_DIR).join(token);
+    marker.is_file() && std::fs::remove_file(&marker).is_ok()
+}
+
+/// Longest a backgrounded install may run before it is stopped and reported as failed.
+const BACKGROUND_INSTALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// Run the one-click install for an agent that has no terminal interface, and wait for it to return.
+///
+/// Such an agent has no session shell to type the recipe into, so it runs here instead: `/bin/sh -c` on Unix,
+/// PowerShell on Windows, both with the user's login environment so `node` and `npm` resolve as they would in
+/// a terminal. Its output goes to `<data dir>/install-logs/<agent>.log` for support, never to the caller: the
+/// view shows its own wording. Errors are fixed codes the frontend maps to text.
+pub fn run_install(data_dir: &std::path::Path, agent: &str) -> Result<(), String> {
+    let kind = crate::models::SessionKind::from_db(agent);
+    if kind.has_terminal_interface() {
+        return Err("agent_install_unsupported".into());
+    }
+    let command = install_recipe(agent).map(|r| r.command.trim().to_string()).unwrap_or_default();
+    if command.is_empty() {
+        return Err("agent_install_unsupported".into());
+    }
+    let logs = data_dir.join("install-logs");
+    std::fs::create_dir_all(&logs).map_err(|_| "agent_install_failed")?;
+    let log = std::fs::File::create(logs.join(format!("{agent}.log"))).map_err(|_| "agent_install_failed")?;
+    let err = log.try_clone().map_err(|_| "agent_install_failed")?;
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut cmd = crate::host::command("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &command]);
+        cmd
+    };
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut cmd = crate::host::command("/bin/sh");
+        cmd.arg("-c").arg(&command);
+        cmd
+    };
+    if let Some(home) = crate::host::home_dir() {
+        cmd.current_dir(home);
+    }
+    crate::login_env::refresh_command(&mut cmd);
+    cmd.stdin(std::process::Stdio::null()).stdout(log).stderr(err);
+    let mut child = cmd.spawn().map_err(|_| "agent_install_failed")?;
+    let deadline = std::time::Instant::now() + BACKGROUND_INSTALL_LIMIT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(_)) => return Err("agent_install_failed".into()),
+            Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(250)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("agent_install_failed".into());
+            }
+        }
+    }
+}
+
+/// Append the marker step in the session shell's syntax: PowerShell on Windows, and on Unix a form that
+/// sh, Bash, zsh and Fish all read alike. PowerShell runs it from `finally`, so a terminating error in the
+/// recipe still reports completion; a Unix recipe interrupted with Ctrl-C leaves no marker and polling
+/// simply times out. Returns None for a path that single quotes cannot carry in every Unix shell.
+fn with_install_marker(command: &str, marker: &std::path::Path, win: bool) -> Option<String> {
+    let path = marker.to_str()?;
+    if path.chars().any(char::is_control) {
+        return None;
+    }
+    if win {
+        let quoted = path.replace('\'', "''");
+        return Some(format!(
+            "try {{ {command} }} finally {{ New-Item -ItemType File -Force -Path '{quoted}' | Out-Null }}"
+        ));
+    }
+    // Fish treats `\` inside single quotes as an escape, unlike POSIX shells, so it cannot be quoted uniformly.
+    if path.contains('\'') || path.contains('\\') {
+        return None;
+    }
+    Some(format!("{command}; touch '{path}'"))
+}
+
+/// Remove markers older than `INSTALL_MARKER_TTL`. Best effort: a failure only leaves a stale empty file.
+fn prune_install_markers(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return; };
+    for entry in entries.flatten() {
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > INSTALL_MARKER_TTL);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Whether an executable at `path` belongs to an installation that stopped partway.
+///
+/// Zoo's installer extracts `bin/roo` before `npm install` fetches the packages it imports, so an interrupted
+/// or failed install leaves a launcher that dies on its first import. Count it only once every dependency in
+/// its manifest is present. A missing manifest means a hand-built layout, which is left to the user.
+pub(crate) fn incomplete_install(agent: &str, path: &std::path::Path) -> bool {
+    if agent != "zoo" {
+        return false;
+    }
+    let Ok(real) = std::fs::canonicalize(path) else {
+        return false;
+    };
+    // The launcher is `<root>/bin/roo`; the ~/.local/bin entry is a symlink resolved above.
+    match real.parent().and_then(std::path::Path::parent) {
+        Some(root) => node_dependencies_missing(root),
+        None => false,
+    }
+}
+
+/// Whether a self-contained Node package at `root` lacks any dependency its `package.json` declares.
+fn node_dependencies_missing(root: &std::path::Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(root.join("package.json")) else {
+        return false;
+    };
+    let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return false;
+    };
+    let Some(deps) = manifest.get("dependencies").and_then(|d| d.as_object()) else {
+        return false;
+    };
+    deps.keys().any(|name| {
+        let dir = name.split('/').fold(root.join("node_modules"), |dir, part| dir.join(part));
+        !dir.join("package.json").is_file()
+    })
+}
+
 /// Detect an installed executable only at known locations produced by the recommended command. Stat each
 /// candidate, require Unix executability, return an absolute match, and never guess.
 ///
@@ -249,17 +521,21 @@ pub fn locate_installed_bin(agent: &str) -> Option<String> {
     }
     candidates
         .into_iter()
-        .find(|p| super::executable::is_executable_file(p))
+        .find(|p| super::executable::is_executable_file(p) && !incomplete_install(agent, p))
         .map(|p| p.to_string_lossy().to_string())
 }
 
 /// The launch catalogue owns the complete agent list. Share npm probes across the whole terminal, rather than
 /// starting a shell for each npm-based agent. Every returned path is validated by the same install guard.
 pub(crate) fn locate_installed_bins(shell: &str, cwd: Option<&std::path::Path>, agent: bool) -> (Vec<String>, Option<crate::login_env::SessionEnvironment>) {
+    // A plain terminal is itself a login shell and finds commands through its own profiles; probing first only
+    // delays its start by a full profile load. Agent sessions still probe to locate the program they launch.
     #[cfg(unix)]
-    let _ = agent;
-    #[cfg(unix)]
-    let (prefixes, discovered, path) = shell_installations_in(shell, cwd);
+    let (prefixes, discovered, path) = if agent {
+        shell_installations_in(shell, cwd)
+    } else {
+        (Vec::new(), Vec::new(), Some(crate::login_env::launch_baseline()))
+    };
     #[cfg(windows)]
     let (prefixes, discovered, path) = (npm_global_prefixes(), Vec::<String>::new(), crate::login_env::latest_terminal_environment(shell, cwd, agent));
     let current_path = path.as_ref().and_then(|env| env.path());
@@ -290,7 +566,9 @@ fn locate_installed_bins_with(
             let prefixes = prefixes.get_or_insert_with(&npm_prefixes);
             for prefix in prefixes.iter() { push_npm_candidates_at(&mut candidates, bin, prefix); }
         }
-        if let Some(path) = candidates.into_iter().find(|path| super::executable::is_executable_file(path)) {
+        if let Some(path) = candidates.into_iter()
+            .find(|path| super::executable::is_executable_file(path) && !incomplete_install(option.id.as_str(), path))
+        {
             binaries.push(path.to_string_lossy().into_owned());
         }
     }
@@ -403,6 +681,8 @@ fn agent_layout_at(agent: &str, home: &std::path::Path) -> Option<(&'static str,
                 ("crush", true)
             }
         }
+        // DeepSeek Harness installs through global npm on every platform.
+        "deepseek" => ("dsh", true),
         // Kimi installers have used ~/.kimi-code/bin and ~/.local/bin; prefer KIMI_CODE_HOME/bin when set.
         "kimi" => {
             if let Some(root) = std::env::var_os("KIMI_CODE_HOME") {
@@ -442,6 +722,29 @@ fn agent_layout_at(agent: &str, home: &std::path::Path) -> Option<(&'static str,
             ("kiro-cli", false)
         }
         // Zoo/Roo installs at ~/.roo/cli/bin/roo with a ~/.local/bin symlink, so probe both.
+        // A `zcode` command comes first: ZCode's source-built installer writes it to ZCODE_DIST_BIN_DIR, default
+        // ~/.local/bin, where VelaTerm's macOS install puts its shim too. Then the desktop app, whose binary runs
+        // the agent it bundles; only an install that carries that bundle counts.
+        "zcode" => {
+            if let Some(dir) = std::env::var_os("ZCODE_DIST_BIN_DIR").filter(|d| !d.is_empty()) {
+                candidates.push(std::path::PathBuf::from(dir).join(exe_name("zcode", win)));
+            }
+            candidates.push(home.join(".local").join("bin").join(exe_name("zcode", win)));
+            let desktop = if win {
+                let mut apps = vec![local_app_data(home).join("Programs").join("ZCode").join("ZCode.exe")];
+                if let Some(dir) = std::env::var_os("ProgramFiles").filter(|d| !d.is_empty()) {
+                    apps.push(std::path::PathBuf::from(dir).join("ZCode").join("ZCode.exe"));
+                }
+                apps
+            } else if cfg!(target_os = "macos") {
+                let app = |root: &std::path::Path| root.join("ZCode.app").join("Contents").join("MacOS").join("ZCode");
+                vec![app(std::path::Path::new("/Applications")), app(&home.join("Applications"))]
+            } else {
+                Vec::new()
+            };
+            candidates.extend(desktop.into_iter().filter(|bin| super::zcode::desktop_resources(bin).is_some()));
+            ("zcode", false)
+        }
         "zoo" => {
             candidates.push(home.join(".local").join("bin").join(exe_name("roo", win)));
             candidates.push(
@@ -636,7 +939,7 @@ mod tests {
             fixture_executable(&path, &script);
             kinds.push(option.id);
         }
-        assert_eq!(kinds.len(), 14);
+        assert_eq!(kinds.len(), 16);
         probes.set(0);
         let binaries = locate_installed_bins_with(layout, prefixes);
         assert_eq!(probes.get(), 1, "all npm agents share one prefix lookup");
@@ -708,7 +1011,7 @@ mod tests {
         assert_eq!(prefixes, vec![prefix]);
         binaries.sort();
         expected.sort();
-        assert_eq!(binaries, expected, "all 14 commands come from .bashrc, excluding the startup banner");
+        assert_eq!(binaries, expected, "all 15 commands come from .bashrc, excluding the startup banner");
         std::fs::write(home.join(".bash_profile"), "source \"$HOME/.bashrc\"\n").unwrap();
         let (prefixes, mut binaries, _) = shell_installations(shell.to_str().unwrap());
         binaries.sort();
@@ -736,8 +1039,10 @@ mod tests {
             ("omp", false),
             ("antigravity", false),
             ("kimi", false),
+            ("deepseek", true),
             ("kiro", false),
             ("zoo", false),
+            ("zcode", false),
         ];
         for (agent, npm) in expected {
             let (bin, _, use_npm) =
@@ -857,5 +1162,84 @@ mod tests {
         // Do not probe unknown or unguided types, matching install_recipe coverage.
         assert!(locate_installed_bin("terminal").is_none());
         assert!(locate_installed_bin("").is_none());
+    }
+
+    #[test]
+    fn install_marker_step_matches_the_session_shell() {
+        let unix = with_install_marker("curl -fsSL https://x/install.sh | sh", std::path::Path::new("/data/install-markers/ab"), false);
+        assert_eq!(unix.as_deref(), Some("curl -fsSL https://x/install.sh | sh; touch '/data/install-markers/ab'"));
+        // A quote or backslash cannot be carried by single quotes in both POSIX shells and Fish.
+        assert!(with_install_marker("x", std::path::Path::new("/it's/ab"), false).is_none());
+        assert!(with_install_marker("x", std::path::Path::new("/a\\b/ab"), false).is_none());
+        assert!(with_install_marker("x", std::path::Path::new("/a\nb/ab"), false).is_none());
+        // PowerShell reports completion from `finally`, doubling single quotes inside the literal.
+        let win = with_install_marker("irm https://x/install.ps1 | iex", std::path::Path::new("C:\\Users\\O'Neil\\m\\ab"), true);
+        assert_eq!(
+            win.as_deref(),
+            Some("try { irm https://x/install.ps1 | iex } finally { New-Item -ItemType File -Force -Path 'C:\\Users\\O''Neil\\m\\ab' | Out-Null }")
+        );
+    }
+
+    #[test]
+    fn install_finishes_only_after_the_marker_appears() {
+        let data = std::env::temp_dir().join(format!("vlx-install-marker-{}", uuid::Uuid::new_v4()));
+        let run = begin_install(&data, "codex").unwrap();
+        let token = run.token.expect("a plain temp path takes the marker step");
+        assert!(run.command.starts_with(install_recipe("codex").unwrap().command.as_str()));
+        assert!(!install_finished(&data, &token));
+        std::fs::write(data.join(INSTALL_MARKER_DIR).join(&token), b"").unwrap();
+        assert!(install_finished(&data, &token));
+        // The marker is consumed, and only generated tokens name a file.
+        assert!(!install_finished(&data, &token));
+        assert!(!install_finished(&data, "../../etc/passwd"));
+        assert!(begin_install(&data, "terminal").is_none());
+        let _ = std::fs::remove_dir_all(&data);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_marker_step_runs_in_every_unix_shell() {
+        let dir = std::env::temp_dir().join(format!("vlx-install-shells-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shells = ["/bin/sh", "/bin/bash", "/bin/zsh", "/usr/bin/fish", "/opt/homebrew/bin/fish", "/usr/local/bin/fish"];
+        for (i, shell) in shells.iter().filter(|s| std::path::Path::new(s).exists()).enumerate() {
+            let marker = dir.join(format!("m{i}"));
+            // A failing recipe still reports that it returned; completion is then judged by the located binary.
+            let command = with_install_marker("false | cat && false", &marker, false).unwrap();
+            let status = std::process::Command::new(shell).arg("-c").arg(&command).status().unwrap();
+            assert!(status.success(), "{shell}");
+            assert!(marker.is_file(), "{shell} left no marker");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zoo_launcher_counts_only_with_its_dependencies() {
+        let root = std::env::temp_dir().join(format!("vlx-zoo-partial-{}", uuid::Uuid::new_v4()));
+        let cli = root.join(".roo").join("cli");
+        let roo = cli.join("bin").join("roo");
+        fixture_executable(&roo, "#!/usr/bin/env node\n");
+        std::fs::write(cli.join("package.json"), r#"{"dependencies":{"commander":"^12.1.0","@inkjs/ui":"^2.0.0"}}"#).unwrap();
+        // The release archive ships only ripgrep; `npm install` adds the rest.
+        std::fs::create_dir_all(cli.join("node_modules").join("@vscode").join("ripgrep")).unwrap();
+        let link = root.join(".local").join("bin").join("roo");
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&roo, &link).unwrap();
+        assert!(incomplete_install("zoo", &roo));
+        assert!(incomplete_install("zoo", &link));
+        assert!(!incomplete_install("codex", &roo));
+        for dep in ["commander", "@inkjs/ui"] {
+            let dir = dep.split('/').fold(cli.join("node_modules"), |d, p| d.join(p));
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("package.json"), b"{}").unwrap();
+        }
+        assert!(!incomplete_install("zoo", &roo));
+        assert!(!incomplete_install("zoo", &link));
+        // A hand-built launcher without a manifest is left to the user.
+        let custom = root.join("custom").join("bin").join("roo");
+        fixture_executable(&custom, "#!/bin/sh\n");
+        assert!(!incomplete_install("zoo", &custom));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

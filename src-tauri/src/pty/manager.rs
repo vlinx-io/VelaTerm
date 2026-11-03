@@ -65,7 +65,7 @@ const HEAL_POLL: Duration = Duration::from_millis(500);
 const QUIET_HEAL: Duration = Duration::from_secs(6);
 
 /// Output replay limit. Roughly 512 KB covers several full TUI redraws and recent history for new subscribers.
-const SCROLLBACK_CAP: usize = 512 * 1024;
+pub(crate) const SCROLLBACK_CAP: usize = 512 * 1024;
 /// Report waiting for the session map at least this long. `pty_write` takes that lock on the UI thread for
 /// every keystroke, so a holder that runs long freezes the whole application rather than one session, and
 /// 50 ms is roughly where the delay stops being invisible.
@@ -291,6 +291,10 @@ impl PtyManager {
         attach_only: bool,
         first_sink: OutputSink,
     ) -> Result<SpawnResult, String> {
+        if !kind.has_terminal_interface() {
+            return Err(format!("{} has no terminal interface. Open this conversation in the conversation view.",
+                crate::agent::launch_options::label(kind)));
+        }
         // A delayed terminal launch must not cross a completed Chat handoff.
         let transition_app=app.clone();
         let _transition=kind.supports_chat().then(||transition_app.chat().engine_guard());
@@ -898,6 +902,8 @@ impl PtyManager {
         // this gate for the settings UI, and `install_wsl` remains for a later re-enable.
         #[cfg(not(windows))]
         if kind == SessionKind::Terminal {
+            // Shells read the mode at each prompt; refresh it here in case the data directory was reset.
+            let _ = super::completion::write_mode(&app.data_dir()?, &completion_mode(&app));
             if let Some((state, command)) = super::completion::install(&app.data_dir()?, &shell)? {
                 let stem = std::path::Path::new(&shell)
                     .file_stem()
@@ -1241,8 +1247,9 @@ impl PtyManager {
         }
 
         match kind {
-            // Browser nodes should never spawn PTYs; defensively attach no monitor or agent marker.
-            SessionKind::Browser => {}
+            // Browser nodes should never spawn PTYs, and DeepSeek and ZCode are refused above; attach no monitor or
+            // marker.
+            SessionKind::Browser | SessionKind::Deepseek | SessionKind::Zcode => {}
             // Terminal retains activity-based busy/idle only. Process-tree agent detection was too expensive.
             SessionKind::Terminal => {
                 spawn_status_monitor(
@@ -1574,6 +1581,22 @@ impl PtyManager {
                     return Err("Completion is no longer current".into());
                 }
                 std::fs::write(&state.selection_file, format!("{} {index}\n", state.snapshot.revision))
+                    .map_err(|e| e.to_string())?;
+                session.input.try_send(super::completion::ACCEPT_KEY.to_vec())
+                    .map_err(|_| "Terminal input queue is unavailable")?;
+                state.input("");
+            }
+            // Insert the text every candidate shares, which the shell computed while collecting them.
+            "extend" => {
+                #[cfg(unix)]
+                if session.master.process_group_leader().is_some_and(|pid| pid as u32 != session.pid) {
+                    return Err("The shell is not editing a command".into());
+                }
+                if !state.snapshot.ready || state.snapshot.pending || state.owner.as_deref() != Some(source)
+                    || revision != Some(state.snapshot.revision) || !state.snapshot.extendable {
+                    return Err("Completion is no longer current".into());
+                }
+                std::fs::write(&state.selection_file, format!("{} p\n", state.snapshot.revision))
                     .map_err(|e| e.to_string())?;
                 session.input.try_send(super::completion::ACCEPT_KEY.to_vec())
                     .map_err(|_| "Terminal input queue is unavailable")?;
@@ -1941,6 +1964,13 @@ fn codex_lifecycle_hooks_supported(bin_path: Option<&str>) -> bool {
     let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
     text.push_str(&String::from_utf8_lossy(&output.stderr));
     text.contains("--dangerously-bypass-hook-trust")
+}
+
+#[cfg(not(windows))]
+fn completion_mode(app: &AppCtx) -> String {
+    crate::command_core::get_app_settings(app).ok()
+        .and_then(|mut map| map.remove(super::completion::MODE_KEY))
+        .unwrap_or_else(|| super::completion::DEFAULT_MODE.into())
 }
 
 fn recording_enabled(app: &AppCtx) -> bool {

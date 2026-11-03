@@ -1,6 +1,7 @@
 //! Provider-managed authorization. Credentials remain inside the provider process.
 
 pub(super) mod claude;
+pub(super) mod zcode;
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -200,7 +201,11 @@ fn finish(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, status: &'sta
     };
     crate::diagnostics::record(
         "INFO",
-        if proc.kind == crate::models::SessionKind::Claude { "claude_account" } else { "codex_device_login" },
+        match proc.kind {
+            crate::models::SessionKind::Claude => "claude_account",
+            crate::models::SessionKind::Zcode => "zcode_account",
+            _ => "codex_device_login",
+        },
         json!({"method":"program","sessionId":session_id,"status":if status == "canceled" { "cancelled" } else { status },"durationMs":duration}),
     );
     emit_extras(app, session_id, proc);

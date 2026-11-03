@@ -56,7 +56,7 @@ export function ArtifactDock({ path, onClose, style }: { path: string; onClose: 
     const store = useTermStore.getState();
     store.openDocTab(path);
     if (!mode) return;
-    const tab = Object.values(useTermStore.getState().docTabs).find((d) => d.path === path);
+    const tab = Object.values(useTermStore.getState().docTabs).find((d) => d.path === path && d.kind !== "diff" && d.kind !== "changes");
     if (tab) store.setDocTabMode(tab.id, mode);
   };
 

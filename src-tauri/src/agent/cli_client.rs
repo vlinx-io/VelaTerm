@@ -158,7 +158,7 @@ const SPAWN_USAGE: &str =
     --plan-agent / --exec-agent / --review-agent <agent>   agent for each role\n\
     --plan-model / --exec-model / --review-model <model>   model for each role\n\
     --plan-effort / --exec-effort / --review-effort <level> reasoning effort for each role\n\
-    --agent <agent>   child agent: claude, codex, opencode, copilot, cursor, antigravity, cline, pi, omp, crush, kimi, kiro, grok or zoo\n\
+    --agent <agent>   child agent: claude, codex, opencode, copilot, cursor, antigravity, cline, pi, omp, crush, kimi, kiro, grok, zoo, zcode or deepseek\n\
     --claude / --codex / --copilot / --kiro / --pi   shortcuts for --agent with that agent\n\
     --cwd <path>      child working directory and repository used to create a worktree\n\
     --request-id <uuid> reuse the same request identity after a lost acknowledgement\n\

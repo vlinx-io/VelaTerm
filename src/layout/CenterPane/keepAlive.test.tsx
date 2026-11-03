@@ -8,7 +8,7 @@
 
 import * as React from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 // Record mount and unmount events per session; this is hoisted above the mock factory.
 const { lifecycle } = vi.hoisted(() => ({ lifecycle: [] as string[] }));
@@ -164,6 +164,20 @@ const countMounts = (id: string) => lifecycle.filter((e) => e === `mount:${id}`)
 const countUnmounts = (id: string) => lifecycle.filter((e) => e === `unmount:${id}`).length;
 
 afterEach(() => {
+  cleanup();
+  lifecycle.length = 0;
+  localStorage.clear();
+});
+
+// CenterPane loads TerminalView lazily, so the first render of a terminal waits for that load. Resolve it
+// once here so every case below renders terminals synchronously and counts only reconciliation.
+beforeAll(async () => {
+  seed(true);
+  beforeEachRender();
+  open("A");
+  await act(async () => {
+    await import("./TerminalView");
+  });
   cleanup();
   lifecycle.length = 0;
   localStorage.clear();

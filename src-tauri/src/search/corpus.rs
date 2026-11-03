@@ -746,9 +746,11 @@ mod tests {
         db.conn.lock().unwrap().execute_batch("INSERT INTO projects(id,name,root_path,sort_order,created_at) VALUES('p','p','/p',0,0);
             INSERT INTO sessions(id,project_id,name,kind,sort_order,created_at,agent_session_id) VALUES('s','p','claude','claude',0,0,'thread');").unwrap();
         let app=AppCtx::Headless(Arc::new(crate::host::HeadlessHost::new(root.clone(),db)));
-        // The only message names a parent the recording does not contain.
+        // A rewind names a leaf the recording does not contain. A parent that was never written is
+        // followed past (Claude drops failed replies), but a missing leaf leaves no branch to read.
         let transcript=root.join("thread.jsonl");
-        std::fs::write(&transcript,serde_json::json!({"type":"user","uuid":"b","parentUuid":"missing","message":{"role":"user","content":"Orphan"}}).to_string()+"\n").unwrap();
+        std::fs::write(&transcript,serde_json::json!({"type":"user","uuid":"b","message":{"role":"user","content":"Orphan"}}).to_string()+"\n"
+            +&serde_json::json!({"type":"last-prompt","rewound":true,"leafUuid":"missing"}).to_string()+"\n").unwrap();
         let conn=open(&app).unwrap();
         conn.execute("INSERT INTO corpus_state VALUES('s','transcript',?1,0,NULL,NULL,0,0,NULL)",[transcript.to_string_lossy()]).unwrap();
         let session=sessions(&app,None).unwrap().remove(0);let cancel=Arc::new(AtomicBool::new(false));

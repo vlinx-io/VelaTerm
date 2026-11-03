@@ -70,14 +70,16 @@ fn placement(app: &AppCtx, context: &Context) -> Result<Placement, String> {
     if let Some(parent) = &parent {
         names.push(parent.name.clone());
     }
+    // A nested group runs in the worktree bound on it or its nearest ancestor group.
+    let bound = tree.worktree_group(context.group_id.as_deref());
     let inherited_worktree = parent
         .as_ref()
         .and_then(|p| p.worktree_path.clone())
-        .or_else(|| group.and_then(|g| g.worktree_path.clone()));
+        .or_else(|| bound.and_then(|g| g.worktree_path.clone()));
     let inherited_base = parent
         .as_ref()
         .and_then(|p| p.worktree_base_ref.clone())
-        .or_else(|| group.and_then(|g| g.worktree_base_ref.clone()));
+        .or_else(|| bound.and_then(|g| g.worktree_base_ref.clone()));
     let cwd = parent
         .as_ref()
         .and_then(|p| p.cwd.clone())

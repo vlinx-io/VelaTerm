@@ -84,11 +84,11 @@ fn conversation_scope_migrates_validates_and_survives_reload() {
     assert_eq!(initial["config"]["defaultEnabled"],true);
     let supported=initial["conversationKinds"].as_array().unwrap().iter().map(|kind|kind["id"].clone()).collect::<Vec<_>>();
     assert_eq!(initial["config"]["conversationKinds"],json!(supported));
-    assert!(supported.contains(&json!("antigravity")));assert!(!supported.contains(&json!("grok")));
+    assert!(supported.contains(&json!("antigravity")));assert!(!supported.contains(&json!("cline")));
     assert_eq!(session_state(&app,&sid).unwrap()["enabled"],true);
     config::set_conversation_kinds(&app,&json!(["codex","codex"])).unwrap();
     assert_eq!(session_state(&app,&sid).unwrap()["enabled"],false);
-    for invalid in [json!(["shell"]),json!(["grok"]),json!(["unknown"]),json!(null),json!("codex")] {
+    for invalid in [json!(["shell"]),json!(["cline"]),json!(["unknown"]),json!(null),json!("codex")] {
         assert_eq!(config::set_conversation_kinds(&app,&invalid).unwrap_err(),"translation:configuration");
     }
     // Saving provider settings from an older client must not restore excluded conversation types.

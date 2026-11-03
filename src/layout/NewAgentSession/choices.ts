@@ -32,3 +32,13 @@ export function agentChoices(options: LaunchOption[], presets: AgentPreset[], re
   const rank = (id: string) => { const index = recent.indexOf(id); return index < 0 ? Infinity : index; };
   return choices.map(choice => ({ ...choice, recent: recent.includes(choice.id) })).sort((a, b) => rank(a.id) - rank(b.id));
 }
+
+const PROJECT_KEY = "vlx-new-session-project";
+/** Project the last session was created in, so a New Session tab opened without a location starts there. */
+export function recentProjectId(): string | null {
+  try { return localStorage.getItem(PROJECT_KEY); } catch { return null; }
+}
+export function rememberProject(id: string) {
+  try { localStorage.setItem(PROJECT_KEY, id); }
+  catch { /* Storage restrictions must not turn a successful creation into a failure. */ }
+}

@@ -28,6 +28,8 @@ export function QuitConfirmModal() {
   const [save, setSave] = useState(saveWorkspaceOnQuit);
   /** Remote windows live in this process, so the exit closes them as well. */
   const [remoteWindows, setRemoteWindows] = useState(0);
+  /** Only the main window closes, VS Code-style; the application and its remote windows stay. */
+  const [closeWindow, setCloseWindow] = useState(false);
   /** Set once the exit is approved, to keep the in-flight settings flush from being re-entered. */
   const [exiting, setExiting] = useState(false);
 
@@ -39,6 +41,7 @@ export function QuitConfirmModal() {
         // Seed from the remembered preference each time, then acknowledge so the shell keeps waiting for us.
         setSave(useTermStore.getState().saveWorkspaceOnQuit);
         setRemoteWindows(request.remoteWindows);
+        setCloseWindow(request.closeWindow);
         setAsking(true);
         void platform.quit.ack();
       })
@@ -77,7 +80,8 @@ export function QuitConfirmModal() {
     // lesser failure -- localStorage keeps this shell correct, and reconciliation is only wrong when another
     // shell has since changed the same key.
     await flushNow(FLUSH_TIMEOUT_MS);
-    // Write the snapshot before approving the exit; the shell terminates the process as soon as confirm resolves.
+    // Write the snapshot before approving; the shell terminates the process, or destroys this window, as soon as
+    // confirm resolves.
     if (save) saveWorkspaceSnapshot();
     setAsking(false);
     void platform.quit.confirm();
@@ -93,9 +97,9 @@ export function QuitConfirmModal() {
         }}
       >
         <div className="quit-head">
-          <div className="quit-title">{t("quit.title")}</div>
+          <div className="quit-title">{t(closeWindow ? "quit.closeWindowTitle" : "quit.title")}</div>
           <div className="quit-body">{t("quit.body")}</div>
-          {remoteWindows > 0 && <div className="quit-body">{t("quit.remoteWindows")}</div>}
+          {!closeWindow && remoteWindows > 0 && <div className="quit-body">{t("quit.remoteWindows")}</div>}
         </div>
 
         <label className={save ? "quit-opt on" : "quit-opt"}>
@@ -134,7 +138,7 @@ export function QuitConfirmModal() {
             disabled={exiting}
             onClick={() => void confirm()}
           >
-            {t("quit.confirm")}
+            {t(closeWindow ? "common.close" : "quit.confirm")}
           </button>
         </div>
       </div>

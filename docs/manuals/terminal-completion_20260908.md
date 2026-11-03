@@ -2,9 +2,9 @@
 
 Created: 2026-09-08
 
-Updated: 2026-09-25 10:21
+Updated: 2026-11-01 13:47
 
-Command suggestions show a list of candidates taken from your shell's own completion definitions while you type in a plain terminal session. The command stays in the terminal's normal input line, and choosing a suggestion inserts text without running it. This feature does not use an AI model.
+Command suggestions help in two ways in a plain terminal session. While you type in Zsh, the latest matching command from your history appears dimmed after the cursor. When you press Tab, the shell's own completion definitions provide the candidates, and a list opens when there is more than one choice. The command stays in the terminal's normal input line, and accepting a suggestion inserts text without running it. This feature does not use an AI model.
 
 Suggestions are available on macOS and Linux. On Windows the feature is currently turned off (see [Windows](#windows)).
 
@@ -12,24 +12,39 @@ Suggestions are available on macOS and Linux. On Windows the feature is currentl
 
 Settings ▸ Terminal ▸ "Command suggestions" offers three modes:
 
-- **Automatic** (default): VelaTerm collects your input for about 25 ms and then asks the shell for suggestions; typing more does not restart that wait. If you keep typing while a request is running, only your latest input is used for the next request, and outdated results are discarded. An exact match stays in the list.
-- **On Tab**: suggestions appear only when you press Tab.
-- **Off**: no suggestion list is shown, and Tab keeps the shell's native behavior.
+- **Inline + Tab** (default): history hints while you type, and the Tab behavior described below.
+- **Tab only**: no history hints; Tab works as described below.
+- **Off**: no hints and no list; Tab keeps the shell's native behavior.
 
-A change takes effect in open terminals immediately, and the choice is shared by every client connected to the same VelaTerm backend.
+Typing never opens the list in any mode. A change takes effect in open terminals immediately; Zsh picks up a change to history hints at its next prompt. The choice is shared by every client connected to the same VelaTerm backend.
 
-Keys and mouse:
+### History hints
+
+When the cursor is at the end of the line in Zsh, VelaTerm looks up the most recent history entry that starts with what you typed and shows the rest of it in dim text. Press Right arrow or End, or Ctrl+E with Emacs key bindings, to accept it; any other key keeps typing normally. Elsewhere on the line, those keys keep the behavior they had before. Hints skip multi-line history entries and pause while you type faster than the shell redraws, during incremental history search and in vi command mode.
+
+If zsh-autosuggestions is loaded, VelaTerm leaves the hints to it. Fish has its own inline suggestions, and PSReadLine can show history predictions through its `PredictionSource` option, so VelaTerm adds none to those shells. Bash has no way to draw a hint after the cursor and shows none.
+
+### Tab
+
+Tab first asks the shell for candidates and then behaves like the shell's own completion:
+
+- With a single candidate, Tab inserts it directly.
+- When all candidates share text beyond what you typed, Tab inserts that shared text, for example `cd D` becomes `cd Do` when `Documents/` and `Downloads/` are the only matches.
+- When more than one choice remains, Tab opens the list. Press Tab again to insert the highlighted candidate.
+
+Ctrl+Space always opens the list, even for a single candidate.
+
+Keys and mouse in the list:
 
 - Up and Down select a candidate; Page Up and Page Down move through longer lists.
 - Tab, or a mouse click, inserts the selected candidate.
 - Enter always goes to the shell and runs the current command as typed, without applying a suggestion.
 - Escape closes the list.
-- Ctrl+Space requests suggestions manually.
 - When the selection cannot move any further, Up and Down go back to the shell. Pressing Up on the first candidate therefore recalls the previous command from history.
 
 Candidates are ordered as exact matches, prefix matches, substring matches and then other matches from the shell. Within exact and prefix matches, case-sensitive matches come first; within each group, shorter candidates come first, and ties are ordered alphabetically.
 
-The list highlights the part of each candidate that matches what you typed and shows the shell's description when one is available; hover over a candidate to read a long description. The list keeps its position and selection while results refresh. Accepting a suggestion closes the list, including when the candidate is a directory ending in `/`. Press Tab again to see the next directory level. In Automatic mode, further typing opens the list again.
+The list highlights the part of each candidate that matches what you typed and shows the shell's description when one is available; hover over a candidate to read a long description. While the list is open, typing more letters refreshes it and keeps its position and selection; typing a space closes it. Accepting a suggestion closes the list, including when the candidate is a directory ending in `/`. Press Tab again to see the next directory level.
 
 If you change the input while an insertion is pending, VelaTerm waits for a fresh result from the shell and inserts the candidate only if it is still offered.
 
@@ -57,7 +72,7 @@ VelaTerm loads its shell integration when a terminal starts. Your shell startup 
 
 PowerShell's execution policy still applies to the integration script; VelaTerm does not bypass it.
 
-Suggestions pause while a command is running, while a full-screen program is open, during input method (IME) composition and during history navigation (Ctrl+R, Ctrl+S and the arrow keys). The arrow keys never start an automatic request, so repeated Up presses keep moving through earlier commands. When no integration is active or no candidates were found, Tab keeps its native behavior.
+Suggestions pause while a command is running, while a full-screen program is open, during input method (IME) composition and during history navigation (Ctrl+R, Ctrl+S and the arrow keys). The arrow keys close an open list and go to the shell, so repeated Up presses keep moving through earlier commands. When no integration is active or no candidates were found, Tab keeps its native behavior.
 
 Starting SSH or another nested shell inside the terminal does not install the integration in that environment.
 
@@ -67,10 +82,10 @@ On Windows no integration is loaded, whatever the setting says, and the "Command
 
 ## Limits
 
-- Candidates depend on the completion definitions installed for your shell. VelaTerm does not provide its own command catalog or history-based predictions.
+- Tab candidates depend on the completion definitions installed for your shell. VelaTerm does not provide its own command catalog. History hints use only the Zsh history of the session.
 - Some complex Bash completion scripts rely on Readline internals that the integration cannot reproduce exactly.
 - Completion functions can run external programs and may be slow. The list stops waiting after two seconds, but a shell function that is still running is not killed; press Ctrl+C to interrupt it as usual.
-- The integration reserves Ctrl+F12 for collecting candidates and Ctrl+F11 for inserting a selection. A shell configuration that rebinds these keys after the terminal starts can disable suggestions. With Bash 4.0 to 4.3, the integration also wraps Enter and Ctrl+J.
+- The integration reserves Ctrl+F12 for collecting candidates and Ctrl+F11 for inserting a selection. A shell configuration that rebinds these keys after the terminal starts can disable suggestions. With Bash 4.0 to 4.3, the integration also wraps Enter and Ctrl+J. In Zsh, Right arrow, End and Ctrl+E are bound to accept hints and fall back to the widget each key had when the integration loaded; a plugin that rebinds them later takes them over.
 - Descriptions come from the shell. Many Bash completion definitions provide none, so their candidates show no description.
 
 ## Testing

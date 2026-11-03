@@ -1,3 +1,43 @@
+## v0.2.15 — 2026-11-03
+
+- 🆕 Thẻ phiên mới cho phép chọn dự án, tác nhân, mô hình, mức suy luận, quyền, chế độ xem và một worktree riêng ngay quanh ô nhập ở giữa, rồi bắt đầu phiên với nhiệm vụ đầu tiên của bạn; bạn có thể mở thẻ này từ “Phiên mới…” trong các menu tạo phiên mới, từ nút ngôi sao trên thanh thẻ hoặc từ khung giữa đang trống.
+- 🐋 DeepSeek Harness (`dsh`) được bổ sung làm tác nhân chạy ở chế độ hội thoại, có thẻ công cụ, quá trình suy luận, yêu cầu cấp quyền, chuyển đổi mô hình và mức suy luận, mức sử dụng ngữ cảnh, cùng lịch sử được tiếp tục sau khi mở lại.
+- 🧩 Copilot, Cursor, Kimi và Grok giờ đã có thể chạy ở chế độ hội thoại.
+- 🤖 Zhipu ZCode được bổ sung làm tác nhân chạy ở chế độ hội thoại: khi ứng dụng máy tính ZCode đã được cài đặt, tác nhân này dùng tác nhân tích hợp sẵn của ứng dụng đó, và bạn có thể đăng nhập bằng Z.ai hoặc Zhipu BigModel, hoặc chuyển qua lại giữa hai nền tảng này, mà không phải rời khỏi cuộc hội thoại.
+- 📊 Với các phiên ZCode, bảng Info hiển thị số token, tỷ lệ trúng bộ đệm và tốc độ tạo của lượt này, mức sử dụng ngữ cảnh, cùng mức sử dụng trong 5 giờ và hằng tuần của GLM Coding Plan.
+- 📦 Có thể cài đặt ZCode (trên macOS và Windows) và DeepSeek Harness ngay trong cuộc hội thoại bằng “Cài đặt ngay”, và tin nhắn gửi không thành công sẽ được gửi lại khi quá trình cài đặt hoàn tất.
+- ⬆️ Nhấn “Bản cập nhật” trên huy hiệu phiên bản của tác nhân sẽ mở một hộp thoại chạy lệnh cập nhật riêng của tác nhân đó và hiển thị đầu ra trực tiếp, kèm nút “Khởi động lại tác nhân” để cuộc hội thoại tiếp tục trên phiên bản mới.
+- 🔌 Kết nối từ xa có nhiều terminal đang bận không còn bị ngắt liên tục sau khi kết nối lại.
+- 🔄 Sau khi máy chủ từ xa khởi động lại, các phiên không còn bị kẹt ở trạng thái đang đồng bộ trong lúc terminal của chúng khởi động.
+- 🔁 Khi một cuộc hội thoại đồng bộ không thành công, việc đồng bộ sẽ tự động được thử lại, và khu vực bên dưới ô nhập hiển thị trạng thái kèm nút “Thử lại”.
+- 🐢 Kết nối SSH tới máy từ xa đang tải nặng không còn bị hết thời gian chờ trong lúc đợi máy chủ phản hồi.
+- 🔗 “Kết nối lại ngay” trong cửa sổ từ xa sẽ dựng lại đường hầm SSH ngay lập tức thay vì chờ đến lần tự động thử lại tiếp theo.
+- 🪟 Trên macOS và Windows, đóng cửa sổ chính sẽ yêu cầu xác nhận và vẫn giữ các cửa sổ từ xa đang mở; trên macOS, ứng dụng vẫn ở lại trên Dock, và khi mở lại cửa sổ chính, không gian làm việc đã lưu của bạn sẽ được khôi phục.
+- 🧾 Các tệp đã thay đổi trong danh sách “This turn” và trong bảng Git mở diff trong một thẻ thay vì trong hộp thoại.
+- ⌨️ “Gợi ý lệnh” trong terminal không còn bật lên khi bạn đang gõ: Zsh hiển thị lệnh khớp gần nhất trong lịch sử dưới dạng chữ xám ngay trên dòng, có thể chấp nhận bằng → hoặc End, và danh sách chỉ xuất hiện khi bạn nhấn Tab; bạn có thể chọn “Trên dòng + Tab”, “Chỉ Tab” hoặc “Tắt” trong Cài đặt.
+- 💬 Trong bản xem trước Artifact, bạn có thể nhấp vào các phần tử trên trang để để lại bình luận cho phiên, và các tùy chọn được đánh dấu trên trang được liệt kê phía trên bản xem trước để bạn chuyển qua lại giữa chúng và chọn một tùy chọn.
+- 🔍 Tìm kiếm trong hội thoại dùng tìm kiếm toàn văn, khớp với tất cả các từ bạn nhập theo bất kỳ thứ tự nào, và hiển thị “Không có kết quả” thay vì “Đang tải cuộc trò chuyện…” khi không có nội dung nào khớp.
+- 🧰 Các kỹ năng đi kèm như vspawn và vrefer giờ được cài vào thư mục dùng chung `~/.agents/skills`, nhờ đó Pi, ZCode và DeepSeek Harness có thể sử dụng chúng, và Codex không còn liệt kê mỗi kỹ năng hai lần.
+- 📋 Kết quả `/code-review` trong chế độ hội thoại hiển thị dưới dạng danh sách các phát hiện, kèm vị trí tệp có thể nhấp vào.
+- 🌐 Khi một phiên tắt tính năng dịch câu trả lời, biểu mẫu câu hỏi có nút “Dịch” để chỉ dịch riêng biểu mẫu đó.
+- ✂️ Có thể chọn và sao chép câu hỏi cùng các tùy chọn trên biểu mẫu câu hỏi.
+- 🌳 Cây phiên đặt các nhóm và phiên cha thuộc một worktree, kể cả những phiên được khởi động trực tiếp trong thư mục worktree, vào dưới hàng của worktree đó.
+- 🌲 Các nhóm lồng nhau dùng worktree của nhóm cha gần nhất có worktree khi tạo phiên mới, thực hiện thao tác Git và hợp nhất.
+- 🔎 Đổi tên một mục trong lúc cây phiên đang được lọc không còn khiến mục đó biến mất khỏi kết quả.
+- ⏳ Khi OpenCode chạm đến giới hạn sử dụng, một dòng lỗi duy nhất sẽ nêu rõ giới hạn đó, và nếu OpenCode cho biết thời điểm đặt lại, cuộc hội thoại sẽ tự động tiếp tục sau khi giới hạn được đặt lại.
+- 📸 Lớp phủ chụp màn hình xuất hiện nhanh hơn sau khi bạn nhấn phím tắt.
+- 🚀 Cửa sổ hiển thị khung bố cục ngay khi vừa mở, và lượng mã cần tải khi khởi động giảm xuống còn chưa đến một nửa.
+- ⚡ `vspawn --yes` tạo phiên con trực tiếp mà không hiển thị thẻ khởi chạy.
+- 🛡️ Kiểm toán mã nguồn dùng Codex Security 0.8.2 và có thể chạy với DeepSeek, đồng thời biểu mẫu kiểm toán và biểu mẫu “Thêm vào kho kiến thức” dùng cùng các trường tác nhân, mô hình và mức suy luận như khi tạo phiên mới, và chấp nhận cả những mô hình không có trong danh sách.
+- 🌗 Trên macOS, khi giao diện được đặt theo hệ thống, thanh tiêu đề chuyển sang màu tối cùng với phần còn lại của cửa sổ.
+- 📥 Cài đặt một chạm chỉ báo hoàn tất sau khi lệnh cài đặt đã chạy xong, và bản cài đặt Zoo Code chưa hoàn chỉnh được xem là chưa cài đặt thay vì làm ứng dụng gặp sự cố khi khởi động.
+- 🖥️ Chuyển một phiên sang chế độ terminal không còn thất bại với lỗi “The initial task was already claimed”.
+- 🧟 Các phiên không còn báo “The previous agent is still running” sau khi ID tiến trình của tác nhân cũ được một chương trình khác sử dụng lại.
+- 🧯 Sau khi trình duyệt kết nối lại, các cuộc hội thoại không còn giữ lại dòng TransportError từ lần mất kết nối.
+- 🪞 Khi bật phản chiếu, việc mở và đóng thẻ không còn biến các phiên ở chế độ hội thoại thành phần giữ chỗ “Đã khôi phục từ không gian làm việc đã lưu”.
+- 📜 Các cuộc hội thoại Claude có chứa câu trả lời bị loại bỏ đã tải lịch sử bình thường trở lại.
+- 🧠 Các mô hình Claude tích hợp sẵn nhưng không có trong danh mục mô hình của website vẫn xuất hiện trong biểu mẫu tạo phiên mới và biểu mẫu khởi chạy.
+
 ## v0.2.14 — 2026-10-23
 
 - 🔌 Kết nối từ xa không còn ngắt và kết nối lại mỗi giây khi đang mở nhiều cuộc hội thoại dài, nên các cuộc hội thoại đó lại mở được bình thường.

@@ -5,7 +5,7 @@
 import { AgentPermissionSelect } from "../components/AgentPermissionSelect";
 import { Backdrop } from "../components/Backdrop";
 import { chatStop } from "../ipc/chat";
-import { useEffect, useId, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useId, useRef, useState } from "react";
 import { type MenuItem } from "../components/ContextMenu";
 import { FormModal, type FieldDef } from "../components/FormModal";
 import Icons from "../components/Icons";
@@ -26,6 +26,7 @@ import { copyText, openDir } from "../ipc/info";
 import { createAgentPreset } from "../ipc/presets";
 import { PresetIcon } from "./agentPresetIcon";
 import { agentPickerUrl, navigateAgentPicker, newAgentPickerRoute } from "./NewAgentSession/navigation";
+import { newSessionHref, openNewSession } from "./NewSession/navigation";
 import { onGitbashDownloadDone } from "../ipc/events";
 import { env } from "../platform";
 import { DOC_SAVE_EVENT } from "../hooks/useKeyboardShortcuts";
@@ -47,26 +48,29 @@ import {
   type SessionEngine,
   type SessionKind,
   supportsPermissionToggle,
+  worktreeGroup,
 } from "../types";
 import { MARK_LABEL_KEYS, NODE_MARKS, normalizeMark } from "../marks";
 import { type TreeNodeRef } from "./LeftSidebar/ProjectTree";
 import { lockGroupNavigation, navigateNewGroup, useNewGroupRoute } from "./LeftSidebar/groupNavigation";
 import { kindIconEl } from "./sessionViewers/sessionMeta";
-import {
-  ConfirmDelete,
-  DeleteWorktree,
-  NewAgentSession,
-  GroupInfo,
-  MoveGroupToWorktree,
-  NewGroup,
-  ProjectInfo,
-  ResumeSession,
-  SessionInfo,
-} from "./sessionMenuDialogs";
 import { importSessionsUrl, openImportSessions } from "./ImportSessions";
 import { memoryNavigate, memoryUrl } from "./Memory/navigation";
 import { kindLabel, supportsAgentArgs } from "./sessionMenuShared";
 import { navigatePlanExecute, planExecuteUrl } from "../components/planExecuteNavigation";
+
+// The menu's dialogs (about 30 KB) open only from a menu action, so they load on first use instead of with
+// the sidebar that is on screen at startup.
+const loadDialogs = () => import("./sessionMenuDialogs");
+const ConfirmDelete = lazy(() => loadDialogs().then((m) => ({ default: m.ConfirmDelete })));
+const DeleteWorktree = lazy(() => loadDialogs().then((m) => ({ default: m.DeleteWorktree })));
+const NewAgentSession = lazy(() => loadDialogs().then((m) => ({ default: m.NewAgentSession })));
+const GroupInfo = lazy(() => loadDialogs().then((m) => ({ default: m.GroupInfo })));
+const MoveGroupToWorktree = lazy(() => loadDialogs().then((m) => ({ default: m.MoveGroupToWorktree })));
+const NewGroup = lazy(() => loadDialogs().then((m) => ({ default: m.NewGroup })));
+const ProjectInfo = lazy(() => loadDialogs().then((m) => ({ default: m.ProjectInfo })));
+const ResumeSession = lazy(() => loadDialogs().then((m) => ({ default: m.ResumeSession })));
+const SessionInfo = lazy(() => loadDialogs().then((m) => ({ default: m.SessionInfo })));
 
 /** Number of direct agent shortcuts on the first New Session menu level. */
 const QUICK_AGENT_COUNT = 3;
@@ -88,6 +92,8 @@ const QUICK_AGENT_KINDS: SessionKind[] = [
   "kiro",
   "grok",
   "zoo",
+  "zcode",
+  "deepseek",
 ];
 
 /**
@@ -346,14 +352,14 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
     return { label: t("tree.openInSplit"), disabled, submenu };
   };
 
-  // Quick create/resume inherits a parent group's worktree into cwd/path/baseRef for local sessions. Browser nodes
-  // do not inherit, and explicit custom-dialog worktree choices always take precedence.
+  // Quick create/resume inherits the worktree of the group or its nearest bound ancestor into cwd/path/baseRef for
+  // local sessions. Browser nodes do not inherit, and explicit custom-dialog worktree choices always take precedence.
   const groupWorktreeDefault = (
     groupId: string | null,
     kind: SessionKind,
   ): { cwd: string; worktreePath: string; worktreeBaseRef: string | null } | null => {
     if (!groupId || kind === "browser") return null;
-    const g = useTermStore.getState().groups.find((x) => x.id === groupId);
+    const g = worktreeGroup(useTermStore.getState().groups, groupId);
     if (!g?.worktreePath) return null;
     return {
       cwd: g.worktreePath,
@@ -371,10 +377,9 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
   ): string | null => {
     const st = useTermStore.getState();
     const parent = parentSessionId ? st.sessions.find((s) => s.id === parentSessionId) : null;
-    const group = groupId ? st.groups.find((g) => g.id === groupId) : null;
     return (
       parent?.cwd ||
-      group?.worktreePath ||
+      worktreeGroup(st.groups, groupId)?.worktreePath ||
       projectRoot(st.projects.find((p) => p.id === projectId)) ||
       null
     );
@@ -435,6 +440,10 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
                             ? "Grok Build"
                           : kind === "zoo"
                             ? "Zoo Code"
+                          : kind === "zcode"
+                            ? "ZCode"
+                          : kind === "deepseek"
+                            ? "DeepSeek"
                         : kind === "browser"
                           ? t("kind.browser")
                         : t("kind.terminal");
@@ -647,6 +656,13 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
     parentSessionId: string | null = null,
     opts?: { withTerminal?: boolean; withBrowser?: boolean },
   ): MenuItem[] => [
+    // New Session opens a tab for choosing the agent, model, view and worktree and typing the first task.
+    {
+      label: t("newSession.menu"),
+      icon: <Icons.sparkle size={14} />,
+      href: newSessionHref({ projectId, groupId, parentSessionId }),
+      onClick: () => openNewSession({ projectId, groupId, parentSessionId }),
+    },
     ...(opts?.withBrowser && (env.isTauri || env.isElectron)
       ? [
           {
@@ -749,6 +765,16 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
           label: t("tree.newAgentSession", "Zoo Code"),
           icon: kindIconEl("zoo"),
           onClick: () => void handleNewSession(projectId, groupId, "zoo", parentSessionId),
+        },
+        {
+          label: t("tree.newAgentSession", "ZCode"),
+          icon: kindIconEl("zcode"),
+          onClick: () => void handleNewSession(projectId, groupId, "zcode", parentSessionId),
+        },
+        {
+          label: t("tree.newAgentSession", "DeepSeek"),
+          icon: kindIconEl("deepseek"),
+          onClick: () => void handleNewSession(projectId, groupId, "deepseek", parentSessionId),
         },
         // Saved presets, listed after the built-in agents they behave like. Each launches directly with
         // its own executable and defaults, which is the point of saving one.
@@ -1263,6 +1289,7 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
           </div>
         </Backdrop>
       )}
+      <Suspense fallback={null}>
       {newGroup && (
         <NewGroup
           key={`${newGroup.projectId}:${newGroup.parentGroupId}`}
@@ -1275,12 +1302,10 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
             // Dialog remains open to show errors and closes only on success.
             if (worktree.mode === "new") {
               const st = useTermStore.getState();
-              const parentGroup = newGroup.parentGroupId
-                ? st.groups.find((g) => g.id === newGroup.parentGroupId)
-                : null;
               const project = st.projects.find((p) => p.id === newGroup.projectId);
-              // Use the parent group's worktree as repository root when nested, otherwise project root.
-              const repoRoot = parentGroup?.worktreePath || project?.rootPath || null;
+              // Use the worktree bound above the new group as repository root when nested, otherwise project root.
+              const repoRoot =
+                worktreeGroup(st.groups, newGroup.parentGroupId)?.worktreePath || project?.rootPath || null;
               if (!repoRoot) throw new Error(t("worktree.noRepoRoot"));
               const wt = await createWorktree(repoRoot, worktree.name);
               await addGroup(newGroup.projectId, newGroup.parentGroupId, name, {
@@ -1309,12 +1334,10 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
             let path: string;
             let baseRef: string | null = null;
             if (worktree.mode === "new") {
-              // Resolve the repository against the parent group or project, not this group's own binding.
-              const parentGroup = group?.parentGroupId
-                ? st.groups.find((g) => g.id === group.parentGroupId)
-                : null;
+              // Resolve the repository against the ancestor groups or project, not this group's own binding.
               const project = st.projects.find((p) => p.id === group?.projectId);
-              const repoRoot = parentGroup?.worktreePath || project?.rootPath || null;
+              const repoRoot =
+                worktreeGroup(st.groups, group?.parentGroupId)?.worktreePath || project?.rootPath || null;
               if (!repoRoot) throw new Error(t("worktree.noRepoRoot"));
               const wt = await createWorktree(repoRoot, worktree.name);
               path = wt.path;
@@ -1509,6 +1532,7 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
           }}
         />
       )}
+      </Suspense>
     </>
   );
 

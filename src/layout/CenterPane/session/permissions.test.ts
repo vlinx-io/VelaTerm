@@ -113,4 +113,10 @@ describe("parsePermissionSuggestions", () => {
     expect(parsePermissionSuggestions([{ type: "addRules", behavior: "allow" }])).toEqual([]);
     expect(parsePermissionSuggestions([{ type: "addDirectories", directories: [] }])).toEqual([]);
   });
+  it("offers an ACP agent's allow-always option as a standing rule and drops one without an option", () => {
+    const always = { type: "acpAllowAlways", optionId: "allow_always", subject: "Run cargo test" };
+    expect(parsePermissionSuggestions([always, { type: "acpAllowAlways", subject: "No option" }])).toEqual([
+      { suggestion: always, kind: "rules", session: false, subject: "Run cargo test" },
+    ]);
+  });
 });

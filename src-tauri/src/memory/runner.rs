@@ -141,59 +141,19 @@ pub fn options(app: &AppCtx) -> Result<Value, String> {
     )
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelOption {
-    pub id: String,
-    pub label: String,
-    pub effort_levels: Vec<String>,
-}
-
-/// The models one organizer agent offers, with the reasoning levels each supports.
-///
-/// Enumeration is the same one the spawn dialog uses, so every agent the organizer accepts gets its
-/// catalogue without the organizer knowing how that CLI lists models. An agent whose CLI cannot
-/// enumerate returns an empty list, which the dialog shows as the configured default.
-pub fn models(app: &AppCtx, agent: &str) -> Result<Vec<ModelOption>, String> {
-    process::executable(app, agent)?;
-    let kind = crate::models::SessionKind::from_db(agent);
-    crate::agent::launch_models::list(app, kind, &Default::default())
-        .map(|catalog| {
-            catalog
-                .models
-                .into_iter()
-                .map(|m| ModelOption {
-                    id: m.id,
-                    label: m.label,
-                    effort_levels: m.effort_levels,
-                })
-                .collect()
-        })
-        .map_err(|_| "memory_models_unavailable".to_string())
-}
-
+/// Check an explicit model and effort with the rules every launch form shares.
 fn validate_selection(app: &AppCtx, agent: &str, model: &str, effort: &str) -> Result<(), String> {
     // Legacy jobs with no overrides still use the CLI configuration.
     if model.is_empty() && effort.is_empty() {
         return Ok(());
     }
-    let options = models(app, agent)?;
-    validate_model(&options, model, effort)
-}
-
-pub(super) fn validate_model(
-    options: &[ModelOption],
-    model: &str,
-    effort: &str,
-) -> Result<(), String> {
-    let selected = options
-        .iter()
-        .find(|m| m.id == model)
-        .ok_or("memory_invalid:model")?;
-    if !effort.is_empty() && !selected.effort_levels.iter().any(|e| e == effort) {
-        return Err("memory_invalid:effort".into());
-    }
-    Ok(())
+    use crate::agent::launch_models::{check_choice, list, ChoiceError};
+    let catalog = list(app, crate::models::SessionKind::from_db(agent), &Default::default())
+        .map_err(|_| "memory_models_unavailable".to_string())?;
+    check_choice(&catalog, model, effort).map_err(|error| match error {
+        ChoiceError::Model => "memory_invalid:model".to_string(),
+        ChoiceError::Effort => "memory_invalid:effort".to_string(),
+    })
 }
 
 pub fn start(

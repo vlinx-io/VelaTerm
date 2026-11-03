@@ -2,11 +2,11 @@
 
 Created: 2026-09-08
 
-Updated: 2026-09-25 10:21
+Updated: 2026-11-02 13:20
 
 > Code audits are experimental.
 
-A code audit is a security review of a project that runs through your local coding agent. Right-click a project in the sidebar and choose "Experimental" → "Code audit", then "New audit". Under "Local agent", choose "Codex" or "Claude"; then choose a "Model", a "Thinking effort" and the "Scope", and click "Start audit". The report page shows the scan's current phase. "Agent session" shows the agent's original tool calls, analysis and pending permission requests; answer requests there to let the audit continue. The report appears when Codex Security seals its results.
+A code audit is a security review of a project that runs through your local coding agent. Right-click a project in the sidebar and choose "Experimental" → "Code audit", then "New audit". Under "Local agent", choose "Codex", "Claude" or "DeepSeek"; then choose a "Model", a "Thinking effort" and the "Scope", and click "Start audit". The report page shows the scan's current phase. "Agent session" shows the agent's original tool calls, analysis and pending permission requests; answer requests there to let the audit continue. The report appears when Codex Security seals its results.
 
 The audit runs on the machine that hosts the project and uses the selected agent's installed CLI with its existing login, configuration and permission handling ("Uses this machine's agent login and configuration. No separate model API setup is needed."). VelaTerm adds a Codex Security MCP server for the audit session only; your other MCP servers stay as they are, and VelaTerm does not call a model API itself. The CLI must be installed, signed in and within its account limits. The CLI's own configuration may select a model provider; VelaTerm does not change it.
 
@@ -14,19 +14,21 @@ The "Code audit" item also appears for collections. A collection without a root 
 
 ## Models and thinking effort
 
-The model list is the same one the new-session dialog uses for that agent, and it takes the agent's default launch arguments into account, so the list matches how the audit will run (see [Model Catalog Sync](model-catalog-sync_20260909.md)). "Default model" keeps the agent's own choice. "Thinking effort" becomes available when you choose a model that offers effort levels; "Auto" keeps the agent's own choice. If the list cannot be loaded, a retry button appears. The backend checks explicit combinations, and the audit saves the selected values for its history and for later runs. A model appearing in the list does not mean your account may use it. Provider failures, including exhausted usage limits, end the audit as failed.
+The "Agent", "Model" and "Reasoning effort" fields are the same ones used when you start a session. The model list is the one the new-session dialog uses for that agent, and it takes the agent's default launch arguments into account, so the list matches how the audit will run (see [Model Catalog Sync](model-catalog-sync_20260909.md)). You can also type a model identifier that is not listed, for example a model released after the list was last updated. "Agent default" keeps the agent's own choice. "Reasoning effort" lists the levels of the chosen model, or the agent's own levels when no model is chosen. If the list cannot be loaded, a retry link appears and you can still type an identifier. The backend checks that a listed model is given one of its own effort levels, and the audit saves the selected values for its history and for later runs. A model appearing in the list does not mean your account may use it. Provider failures, including exhausted usage limits, end the audit as failed.
 
 New audits ask for the analysis in the interface language. Protocol fields, paths, identifiers and quoted source evidence are left unchanged.
 
 ## Codex Security integration
 
-VelaTerm bundles the public Apache-2.0 release `@openai/codex-security@0.1.26`, whose plugin manifest is version `0.1.95`; the new-audit page shows both versions. The original skills, references, schemas, scripts, runtime and license are kept under `src-tauri/resources/codex-security/`, and `UPSTREAM.json` records the package source, integrity value and file hashes.
+VelaTerm bundles the public Apache-2.0 release `@openai/codex-security@0.8.2`, whose plugin manifest is version `0.1.95`; the new-audit page shows both versions. The original skills, references, schemas, scripts, runtime and license are kept under `src-tauri/resources/codex-security/`, and `UPSTREAM.json` records the package source, integrity value and file hashes.
 
 Every new audit registers a real upstream workbench scan. The agent reads the bundled entry skill and uses the upstream MCP tools and result format. Records from the earlier, independently implemented batch workflow remain readable and are labeled "Legacy audit · This record did not use the Codex Security workflow."
 
-Both agents use the same upstream workflow. The public TypeScript SDK drives the Codex runtime and does not offer a Claude Code executor, so VelaTerm integrates through the upstream MCP server and local workbench. Support for Claude Code is a VelaTerm adapter, not an upstream claim of official Claude support.
+All three agents use the same upstream workflow. The public TypeScript SDK drives the Codex runtime and does not offer a Claude Code or DeepSeek Harness executor, so VelaTerm integrates through the upstream MCP server and local workbench. Support for Claude Code and DeepSeek Harness is a VelaTerm adapter, not an upstream claim of official support.
 
-The runtime needs Node.js on PATH, in a version supported by the upstream package, and Python 3.10 or later; Python 3.10 also needs the `tomli` package, which Python 3.11 and later replace with the built-in `tomllib`. VelaTerm checks the bundled resources and unpacks them into its data directory. It does not install them into your Codex or Claude configuration.
+DeepSeek audits run through DeepSeek Harness (`dsh`), the same program a DeepSeek conversation uses. Install it first (`npm install -g @deepseek-ai/dsh`), then make your API key available to it: export `DEEPSEEK_API_KEY` in the environment VelaTerm starts from, or save the key on the Models page of `dsh web`. The models offered are the ones your DeepSeek account can call.
+
+The runtime needs Node.js on PATH, in a version supported by the upstream package (22.13 or later within 22.x, or 24.x or 26.x), and Python 3.10 or later; Python 3.10 also needs the `tomli` package, which Python 3.11 and later replace with the built-in `tomllib`. VelaTerm checks the bundled resources and unpacks them into its data directory. It does not install them into your Codex or Claude configuration.
 
 ## Scope and workflow
 

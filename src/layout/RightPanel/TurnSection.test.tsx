@@ -1,11 +1,13 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { TurnSection, TurnStatsView } from "./TurnSection";
-import { agentTurnStats, type AgentTurnStats } from "../../ipc/commands";
+import { agentTurnStats, gitChangedFiles, type AgentTurnStats, type ChangedFile } from "../../ipc/commands";
+import { getGitStatus } from "../../ipc/info";
 import type { Session } from "../../types";
 import { setLang } from "../../i18n";
 import { useTermStore } from "../../store/termStore";
-vi.mock("../../ipc/commands", () => ({ agentTurnStats: vi.fn() }));
+vi.mock("../../ipc/commands", () => ({ agentTurnStats: vi.fn(), gitChangedFiles: vi.fn() }));
+vi.mock("../../ipc/info", () => ({ getGitStatus: vi.fn() }));
 const stats: AgentTurnStats = {
   model: "gpt-5.2-codex", tokens: 1600, inputTokens: 12000, totalTokens: 13600, cachedTokens: 10560,
   cacheHitPercent: 88, sessionTokens: 320000, toolsUsed: 3, filesTouched: 0, changedFiles: [],
@@ -78,9 +80,12 @@ describe("This turn", () => {
     expect(screen.getByRole("status").textContent).toContain("first turn");
     expect(vi.mocked(agentTurnStats).mock.calls.length).toBe(calls);
   });
-  it("swaps the statistics for the changed files and remembers the choice until the user goes back", () => {
+  it("swaps the statistics for the changed files and remembers the choice until the user goes back", async () => {
     const openDocTab = vi.fn();
-    useTermStore.setState({ turnFilesView: false, openDocTab });
+    const openDiffTab = vi.fn();
+    useTermStore.setState({ turnFilesView: false, openDocTab, openDiffTab });
+    vi.mocked(getGitStatus).mockResolvedValue({ isRepo: true, root: "/repo", ahead: 0, behind: 0, staged: 0, unstaged: 1, untracked: 0 });
+    vi.mocked(gitChangedFiles).mockResolvedValue({ files: [{ path: "src/a.ts" } as ChangedFile], truncated: false });
     const changed = { ...stats, filesTouched: 3, changedFiles: [
       { path: "/repo/src/a.ts", additions: 12, deletions: 3 },
       { path: "README.md", additions: 1, deletions: 0 },
@@ -96,8 +101,14 @@ describe("This turn", () => {
     expect(screen.getByText("a.ts").nextElementSibling?.textContent).toBe("src");
     expect(screen.getByText("a.ts").closest("button")?.textContent).toBe("a.tssrc+12−3");
     expect(screen.getByText("b.rs").nextElementSibling?.textContent).toBe("/elsewhere");
+    // A file with uncommitted changes opens in a diff tab at its repository-relative path.
+    fireEvent.click(screen.getByText("a.ts"));
+    await waitFor(() => expect(openDiffTab).toHaveBeenCalledWith("/repo/src/a.ts", "/repo", "src/a.ts"));
+    expect(vi.mocked(getGitStatus)).toHaveBeenCalledWith("/repo/src");
+    // One with nothing left to compare opens in the editor instead.
     fireEvent.click(screen.getByText("README.md"));
-    expect(openDocTab).toHaveBeenCalledWith("/repo/README.md");
+    await waitFor(() => expect(openDocTab).toHaveBeenCalledWith("/repo/README.md"));
+    expect(openDiffTab).toHaveBeenCalledTimes(1);
     // A later turn opens on the list as well.
     rerender(<TurnStatsView stats={{ ...changed, filesTouched: 0, changedFiles: [] }} cwd="/repo" />);
     expect(screen.getByText("No files were edited in this turn.")).toBeTruthy();

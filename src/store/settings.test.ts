@@ -90,6 +90,11 @@ describe("defaultEngineFor", () => {
     expect(defaultEngineFor("omp", { omp: { engine: "chat" } })).toBe("chat");
     expect(defaultEngineFor("pi", { pi: { engine: "chat" } })).toBe("chat");
   });
+
+  it("always opens DeepSeek Harness in the conversation view, which is the only view it has", () => {
+    expect(defaultEngineFor("deepseek", {})).toBe("chat");
+    expect(defaultEngineFor("deepseek", { deepseek: { engine: "tui" } })).toBe("chat");
+  });
 });
 
 describe("planExecutePrefs sanitization", () => {

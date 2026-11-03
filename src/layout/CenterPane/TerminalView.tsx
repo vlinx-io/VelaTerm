@@ -16,6 +16,8 @@ import { useGitBranch } from "../../hooks/useGitBranch";
 import { IS_PLAIN_BROWSER, labelWithCombo } from "../../hooks/shortcutRegistry";
 import { copyText } from "../../ipc/info";
 import {
+  agentInstallBegin,
+  agentInstallFinished,
   agentInstallRecipe,
   agentLocateBin,
   ptyWrite,
@@ -511,6 +513,8 @@ export const TerminalView = memo(function TerminalView({
                                     ? "Grok Build"
                                   : session.kind === "zoo"
                                     ? "Zoo Code"
+                                  : session.kind === "zcode"
+                                    ? "ZCode"
                                 : "Claude",
               )}
             </div>
@@ -617,7 +621,13 @@ async function locateAndSaveAgentPath(
 }
 
 /** Installation-location polling for immediate post-install action. While runtime.agentInstalling is set, probe
- *  every three seconds and save the path as soon as the binary appears, then show the completion dialog.
+ *  every three seconds and save the path as soon as the installation is usable, then show the completion dialog.
+ *
+ *  A binary on disk is not proof the installer is done: Zoo's script extracts `roo` before fetching its npm
+ *  dependencies, and restarting then kills the installer midway. With a completion-marker token the probe waits
+ *  until the shell reports that the install command returned. If nothing usable turns up after that, the
+ *  installer failed, so polling stops and the information card returns. Without a token (the backend could
+ *  not add the marker step) location polling alone decides, as before.
  *
  *  Attach polling to TerminalView rather than AgentInstallCard, which unmounts when its pane is hidden. The
  *  keep-alive TerminalView continues across tab switches. Stop after success, after roughly 15 minutes (clearing
@@ -628,38 +638,69 @@ function useAgentInstallLocator(session: Session) {
     const rt = s.runtimes[session.id];
     return !!rt?.agentMissing && !!rt?.agentInstalling && !rt?.agentPathSaved;
   });
+  const token = useTermStore((s) => s.runtimes[session.id]?.agentInstallToken ?? null);
   const kind = session.kind;
   useEffect(() => {
     if (!active || !(kind in AGENT_KIND_LABEL)) return;
     let inFlight = false;
     let ticks = 0;
-    const timer = setInterval(() => {
-      if (inFlight) return;
-      if (++ticks > 300) {
-        useTermStore.getState().setRuntime(session.id, { agentInstalling: false });
+    // The marker is consumed when read, so remember that the installer returned.
+    let finished = false;
+    // Probes after the installer returned; a few allow for files that settle just after exit.
+    let misses = 0;
+    const stop = () => {
+      useTermStore.getState().setRuntime(session.id, { agentInstalling: false, agentInstallToken: null });
+      clearInterval(timer);
+    };
+    const probe = async () => {
+      if (token && !finished) {
+        finished = await agentInstallFinished(token);
+        if (!finished) return;
+      }
+      if (await locateAndSaveAgentPath(kind, session.id, true)) {
         clearInterval(timer);
         return;
       }
+      if (token && ++misses >= 3) stop();
+    };
+    const timer = setInterval(() => {
+      if (inFlight) return;
+      if (++ticks > 300) {
+        stop();
+        return;
+      }
       inFlight = true;
-      locateAndSaveAgentPath(kind, session.id, true)
-        .then((hit) => {
-          if (hit) clearInterval(timer);
-        })
+      probe()
         .catch(() => {})
         .finally(() => {
           inFlight = false;
         });
     }, 3000);
     return () => clearInterval(timer);
-  }, [active, kind, session.id]);
+  }, [active, kind, session.id, token]);
 }
 
-/** Write the recipe into this session's shell, mark installation active, and start location polling.
- *  Shared by the card's button and a request handed over from the conversation view. */
-function runInstall(sessionId: string, command: string) {
-  void ptyWrite(sessionId, command + "\r");
-  useTermStore.getState().setRuntime(sessionId, { agentInstalling: true, agentAutoInstall: false });
-  focusTerminal(sessionId);
+/** Sessions whose install command is being prepared, so a repeated click cannot type it twice. */
+const startingInstalls = new Set<string>();
+
+/** Write the install command into this session's shell, mark installation active, and start location polling.
+ *  The backend appends the completion-marker step; if that call fails, the bare recipe runs with location
+ *  polling alone. Shared by the card's button and a request handed over from the conversation view. */
+async function runInstall(sessionId: string, kind: Session["kind"], recipeCommand: string) {
+  if (startingInstalls.has(sessionId)) return;
+  startingInstalls.add(sessionId);
+  try {
+    const run = await agentInstallBegin(kind).catch(() => null);
+    void ptyWrite(sessionId, (run?.command ?? recipeCommand) + "\r");
+    useTermStore.getState().setRuntime(sessionId, {
+      agentInstalling: true,
+      agentAutoInstall: false,
+      agentInstallToken: run?.token ?? null,
+    });
+    focusTerminal(sessionId);
+  } finally {
+    startingInstalls.delete(sessionId);
+  }
 }
 
 /** Missing-agent guidance card shown for local agent sessions when runtime.agentMissing is set.
@@ -717,8 +758,8 @@ function AgentInstallCard({ session }: { session: Session }) {
     }
     if (autoInstallHandled.current || !missing || !eligible || !recipe?.command.trim()) return;
     autoInstallHandled.current = true;
-    runInstall(session.id, recipe.command);
-  }, [autoInstall, missing, eligible, recipe, session.id]);
+    void runInstall(session.id, kind, recipe.command);
+  }, [autoInstall, missing, eligible, recipe, kind, session.id]);
 
   if (!eligible || (!missing && !pathSaved)) return null;
 
@@ -760,7 +801,7 @@ function AgentInstallCard({ session }: { session: Session }) {
   };
   const doInstall = () => {
     if (!recipe) return;
-    runInstall(session.id, recipe.command);
+    void runInstall(session.id, kind, recipe.command);
   };
   // Save a manually entered executable path for this agent type and show the same completion dialog
   // as a located installation, which offers the relaunch that applies it.

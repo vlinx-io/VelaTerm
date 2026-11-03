@@ -1,11 +1,13 @@
 //! System-wide screenshots: global hotkey, screen capture, and the annotation overlay window.
 //!
-//! Flow: the global hotkey (or `screenshot_start`) captures the monitor under the cursor on a worker
-//! thread and keeps the PNG in memory, then opens a borderless, top-level `screenshot` window that
-//! exactly covers that monitor. The overlay page (`screenshot.html`) pulls the frame through
-//! `screenshot_frame`, calls `screenshot_ready` once it has painted, and lets the user select a region
-//! and annotate it. The finished PNG comes back through `screenshot_copy` or `screenshot_save`;
-//! `screenshot_close` discards everything.
+//! Flow: a borderless, top-level `screenshot` window is created hidden shortly after startup and
+//! reused, so a screenshot never waits for a web view to start and load its page. The global hotkey
+//! (or `screenshot_start`) captures the monitor under the cursor on a worker thread, keeps the PNG in
+//! memory, moves the hidden window over that monitor, and tells the overlay page (`screenshot.html`)
+//! through [`FRAME_EVENT`]. The page pulls the frame through `screenshot_frame`, calls
+//! `screenshot_ready` once it has painted, and lets the user select a region and annotate it. The
+//! finished PNG comes back through `screenshot_copy` or `screenshot_save`; `screenshot_close`
+//! discards everything. Ending a screenshot hides the window again.
 //!
 //! Capture backends: macOS runs the system `screencapture` tool (it follows Screen Recording
 //! permission and every display API change without extra code here), Windows uses xcap, and Linux
@@ -19,7 +21,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 use crate::db::{repo, Db};
@@ -28,6 +30,12 @@ use crate::db::{repo, Db};
 pub const SHORTCUT_KEY: &str = "vlx-screenshot-shortcut";
 /// Label of the overlay window.
 pub const OVERLAY_LABEL: &str = "screenshot";
+/// Event sent to the overlay page when a new frame is waiting; the payload is the screenshot id.
+const FRAME_EVENT: &str = "screenshot-frame";
+/// How long after startup the hidden overlay is created, so it does not compete with the main window.
+const WARM_UP_DELAY: Duration = Duration::from_secs(3);
+/// How long a captured frame may wait for the overlay to show it before the window is recreated.
+const SHOW_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Default accelerator. macOS follows the Ctrl+Cmd family used by chat apps' screenshot keys
 /// (WeChat and QQ use Ctrl+Cmd+A) without taking their key. Windows avoids Alt+A (WeChat),
@@ -48,9 +56,12 @@ pub fn supported() -> bool {
 /// Captured frame waiting for the overlay page, plus bookkeeping for one screenshot session.
 #[derive(Default)]
 struct Session {
+    /// Nonzero while a screenshot is in progress. The page reports it back with `screenshot_ready`,
+    /// so a late signal from an earlier screenshot cannot reveal the window.
+    id: u64,
     png: Option<Vec<u8>>,
-    /// When the overlay was created; an overlay that never became visible is replaced after a timeout.
-    opened_at: Option<Instant>,
+    /// The overlay has painted this frame and is on screen.
+    shown: bool,
     /// macOS: the application that was frontmost before the hotkey, reactivated when the overlay closes.
     #[cfg(target_os = "macos")]
     previous_app_pid: Option<i32>,
@@ -66,6 +77,10 @@ pub struct ScreenshotState {
     session: Mutex<Session>,
     /// Set while a capture is running so a held or repeated hotkey starts only one.
     capturing: std::sync::atomic::AtomicBool,
+    /// Source of screenshot ids.
+    last_id: std::sync::atomic::AtomicU64,
+    /// Serializes creation of the overlay window: the warm-up and a capture may both need it.
+    building: Mutex<()>,
 }
 
 /// Shortcut status reported to Settings.
@@ -91,11 +106,20 @@ pub fn plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
         .build()
 }
 
-/// Register the stored (or default) accelerator at startup. Failures are kept for Settings.
+/// Register the stored (or default) accelerator at startup and prepare the hidden overlay window.
+/// Registration failures are kept for Settings.
 pub fn init<R: Runtime>(app: &AppHandle<R>) {
     if !supported() {
         return;
     }
+    // The overlay is also needed with the hotkey off: the title bar starts screenshots too.
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(WARM_UP_DELAY);
+        if let Err(e) = ensure_overlay(&handle) {
+            crate::diagnostic_warn!("failed to prepare the screenshot window: {e}");
+        }
+    });
     let stored = read_stored(app);
     let accel = stored.unwrap_or_else(|| default_shortcut().to_string());
     if accel.is_empty() {
@@ -215,20 +239,12 @@ pub fn start<R: Runtime>(app: &AppHandle<R>) {
         return;
     }
     let state = app.state::<ScreenshotState>();
+    // A screenshot already on screen keeps its work.
     if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
-        // An overlay that is already up keeps its work; one that never became visible is stale.
-        let stale = !win.is_visible().unwrap_or(false)
-            && state
-                .session
-                .lock()
-                .unwrap()
-                .opened_at
-                .is_some_and(|t| t.elapsed() > Duration::from_secs(10));
-        if !stale {
+        if win.is_visible().unwrap_or(false) {
             let _ = win.set_focus();
             return;
         }
-        let _ = win.destroy();
     }
     if state.capturing.swap(true, Ordering::SeqCst) {
         return;
@@ -256,14 +272,26 @@ fn capture_and_open<R: Runtime>(app: &AppHandle<R>, previous_app_pid: Option<i32
     let pos = *monitor.position();
     let size = *monitor.size();
     let scale = monitor.scale_factor();
-    let png = capture_monitor(app, pos, size, scale)?;
+    // Make sure the overlay exists while the capture runs. Normally the warm-up created it already
+    // and this returns at once; right after startup, or after the window was lost, it overlaps the
+    // capture instead of following it.
+    let overlay = {
+        let app = app.clone();
+        std::thread::spawn(move || ensure_overlay(&app))
+    };
+    let png = capture_monitor(app, pos, size, scale);
+    let win = overlay
+        .join()
+        .map_err(|_| "the screenshot window task panicked".to_string())??;
+    let png = png?;
 
+    let state = app.state::<ScreenshotState>();
+    let id = state.last_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
     {
-        let state = app.state::<ScreenshotState>();
         let mut session = state.session.lock().unwrap();
         *session = Session::default();
+        session.id = id;
         session.png = Some(png);
-        session.opened_at = Some(Instant::now());
         #[cfg(target_os = "macos")]
         {
             session.previous_app_pid = previous_app_pid;
@@ -271,13 +299,40 @@ fn capture_and_open<R: Runtime>(app: &AppHandle<R>, previous_app_pid: Option<i32
         #[cfg(not(target_os = "macos"))]
         let _ = previous_app_pid;
     }
+    cover_monitor(&win, pos, size);
+    // The page loads the frame on this event; a page that is still loading asks with
+    // `screenshot_pending` once it is ready, so the event may safely go unheard.
+    let _ = app.emit_to(OVERLAY_LABEL, FRAME_EVENT, id);
+    if wait_until_shown(app, id) {
+        return Ok(());
+    }
+    // The page never showed the frame, e.g. because WebKit ended its process while it was hidden.
+    // A fresh window picks up the waiting frame as soon as its page has loaded.
+    crate::diagnostic_warn!("the screenshot window did not respond; recreating it");
+    if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
+        let _ = win.destroy();
+    }
+    let win = ensure_overlay(app)?;
+    cover_monitor(&win, pos, size);
+    if wait_until_shown(app, id) {
+        Ok(())
+    } else {
+        Err("the screenshot window did not appear".into())
+    }
+}
 
-    // Built off the main thread: building a window from a main-thread callback deadlocks on Windows.
-    // The page stays hidden until it reports `screenshot_ready`, so the user never sees an empty frame.
-    let win = WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App("screenshot.html".into()))
+/// The overlay window, created hidden when it does not exist yet. Must not run on the main thread:
+/// building a window from a main-thread callback deadlocks on Windows.
+fn ensure_overlay<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, String> {
+    let state = app.state::<ScreenshotState>();
+    let _building = state.building.lock().unwrap();
+    if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
+        return Ok(win);
+    }
+    // Hidden until the page reports `screenshot_ready`, so the user never sees an empty frame.
+    // Position and size are set for each screenshot by `cover_monitor`.
+    WebviewWindowBuilder::new(app, OVERLAY_LABEL, WebviewUrl::App("screenshot.html".into()))
         .title("Screenshot")
-        .position(pos.x as f64 / scale, pos.y as f64 / scale)
-        .inner_size(size.width as f64 / scale, size.height as f64 / scale)
         .decorations(false)
         .resizable(false)
         .shadow(false)
@@ -287,11 +342,36 @@ fn capture_and_open<R: Runtime>(app: &AppHandle<R>, previous_app_pid: Option<i32
         .visible(false)
         .background_color(tauri::window::Color(0, 0, 0, 255))
         .build()
-        .map_err(|e| format!("failed to open the screenshot window: {e}"))?;
-    // Re-apply the exact physical frame: logical placement can round differently on mixed-DPI setups.
+        .map_err(|e| format!("failed to open the screenshot window: {e}"))
+}
+
+/// Place the hidden overlay exactly over one monitor. Physical units on purpose: logical placement
+/// can round differently on mixed-DPI setups.
+fn cover_monitor<R: Runtime>(
+    win: &WebviewWindow<R>,
+    pos: tauri::PhysicalPosition<i32>,
+    size: tauri::PhysicalSize<u32>,
+) {
     let _ = win.set_position(pos);
     let _ = win.set_size(size);
-    Ok(())
+}
+
+/// Wait until screenshot `id` is on screen or has ended; false when the overlay never showed it.
+fn wait_until_shown<R: Runtime>(app: &AppHandle<R>, id: u64) -> bool {
+    let state = app.state::<ScreenshotState>();
+    let deadline = Instant::now() + SHOW_TIMEOUT;
+    loop {
+        {
+            let session = state.session.lock().unwrap();
+            if session.id != id || session.shown {
+                return true;
+            }
+        }
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// The monitor whose physical frame contains `point`, falling back to the primary monitor.
@@ -362,10 +442,28 @@ pub fn screenshot_frame(state: tauri::State<'_, ScreenshotState>) -> Result<taur
     Ok(tauri::ipc::Response::new(png))
 }
 
-/// The overlay has painted the frame: show it above everything and give it keyboard focus.
+/// Id of the screenshot whose frame is waiting for the overlay, for a page that loaded after the
+/// frame event was sent.
 #[tauri::command]
-pub fn screenshot_ready(app: AppHandle) {
+pub fn screenshot_pending(state: tauri::State<'_, ScreenshotState>) -> Option<u64> {
+    // Category 1: reads in-memory state.
+    let session = state.session.lock().unwrap();
+    session.png.as_ref().map(|_| session.id)
+}
+
+/// The overlay has painted the frame of screenshot `id`: show it above everything and give it
+/// keyboard focus.
+#[tauri::command]
+pub fn screenshot_ready(app: AppHandle, id: u64) {
     // Category 2: window operations that must reach the main thread; no IO.
+    {
+        let state = app.state::<ScreenshotState>();
+        let mut session = state.session.lock().unwrap();
+        if id == 0 || session.id != id {
+            return;
+        }
+        session.shown = true;
+    }
     let Some(win) = app.get_webview_window(OVERLAY_LABEL) else {
         return;
     };
@@ -375,7 +473,7 @@ pub fn screenshot_ready(app: AppHandle) {
     let _ = win.set_focus();
 }
 
-/// Discard the screenshot and close the overlay.
+/// Discard the screenshot and hide the overlay.
 #[tauri::command]
 pub fn screenshot_close(app: AppHandle) {
     // Category 2: destroys a window; no IO.
@@ -385,8 +483,9 @@ pub fn screenshot_close(app: AppHandle) {
 fn close_overlay<R: Runtime>(app: &AppHandle<R>) {
     let state = app.state::<ScreenshotState>();
     let session = std::mem::take(&mut *state.session.lock().unwrap());
+    // Hidden rather than destroyed: the next screenshot reuses the loaded page.
     if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
-        let _ = win.destroy();
+        let _ = win.hide();
     }
     #[cfg(target_os = "macos")]
     if let Some(pid) = session.previous_app_pid {

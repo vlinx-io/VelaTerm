@@ -90,6 +90,8 @@ export function ControlChip<T extends string>({
   defaultLabel = "Default",
   footer,
   advancedFooter,
+  placement = "up",
+  actions,
 }: {
   glyph: ReactNode;
   label?: string;
@@ -119,6 +121,14 @@ export function ControlChip<T extends string>({
   footer?: ReactNode;
   /** Diagnostic details under the list, revealed only when the menu is opened with Option held. */
   advancedFooter?: ReactNode;
+  /**
+   * Which way the menu opens. The composer row sits at the bottom of its pane, so "up" is the default;
+   * "auto" opens downward when the space below the chip is enough for the menu, for rows placed mid-page.
+   */
+  placement?: "up" | "auto";
+  /** Commands listed under the values, set off by a rule (e.g. "Import Project" under the project list).
+   * Choosing one closes the menu and runs it; it never changes the chip's value. */
+  actions?: { id: string; label: string; glyph?: ReactNode; onSelect: () => void }[];
 }) {
   const [open, setOpen] = useState(false);
   const [advanced, setAdvanced] = useState(false);
@@ -128,6 +138,7 @@ export function ControlChip<T extends string>({
   // starts with is the deliberate one.
   const [keep, setKeep] = useState(false);
   const [hover, setHover] = useState(false);
+  const [downward, setDownward] = useState(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [viewportWidth, setViewportWidth] = useState(window.innerWidth);
   useEffect(() => {
@@ -184,6 +195,8 @@ export function ControlChip<T extends string>({
   return (
     <div className="sv-chip-box" ref={boxRef}>
       <button
+        // A chip inside a form (the New Session composer) must open its menu, not submit the form.
+        type="button"
         className="sv-chip"
         title={title}
         disabled={disabled}
@@ -191,7 +204,12 @@ export function ControlChip<T extends string>({
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
         onClick={(e) => {
-          if (!open) setAdvanced(e.altKey);
+          if (!open) {
+            setAdvanced(e.altKey);
+            const rect = boxRef.current?.getBoundingClientRect();
+            const below = rect ? window.innerHeight - rect.bottom : 0;
+            setDownward(placement === "auto" && !!rect && (below >= 320 || below > rect.top));
+          }
           setOpen(!open);
         }}
       >
@@ -207,8 +225,8 @@ export function ControlChip<T extends string>({
           style={{
             ...SELECT_PANEL,
             fontFamily: "var(--chat-font)",
-            top: "auto",
-            bottom: "calc(100% + 4px)",
+            top: downward ? "calc(100% + 4px)" : "auto",
+            bottom: downward ? "auto" : "calc(100% + 4px)",
             left: panelLeft,
             width: panelWidth,
             maxHeight: "none",
@@ -228,8 +246,9 @@ export function ControlChip<T extends string>({
               // Typing into the box is not choosing a value, so the menu stays open under it.
               onMouseDown={(e) => e.stopPropagation()}
               onKeyDown={(e) => {
+                // Enter never leaves the box: with no match it would otherwise submit a surrounding form.
+                if (e.key === "Enter") e.preventDefault();
                 if (e.key === "Enter" && shown.length > 0) {
-                  e.preventDefault();
                   onPick(shown[0].value, keep);
                   setOpen(false);
                 }
@@ -298,6 +317,27 @@ export function ControlChip<T extends string>({
               </div>
             ))}
           </div>
+          {actions?.length ? (
+            <div role="group" style={{ marginTop: 4, paddingTop: 4, borderTop: "1px solid var(--border)" }}>
+              {actions.map((action) => (
+                <div
+                  key={action.id}
+                  role="menuitem"
+                  // Colours come from .sv-chip-action so the row can take a hover state.
+                  style={{ ...selectRowStyle(false, false, "sm"), gap: 7, color: undefined, background: undefined }}
+                  className="sv-chip-action"
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setOpen(false);
+                    action.onSelect();
+                  }}
+                >
+                  {action.glyph ? <span style={{ flex: "none", display: "grid", placeItems: "center", width: 18, color: "var(--text-dim)" }}>{action.glyph}</span> : null}
+                  {action.label}
+                </div>
+              ))}
+            </div>
+          ) : null}
           {footer}
           {advanced && advancedFooter}
           {keepLabel ? (

@@ -5,7 +5,25 @@
 .sv-agent-version { display: inline-flex; align-items: center; gap: 7px; flex: 0 1 auto; min-width: 0; font-size: 10.5px; color: var(--text-faint); }
 .sv-agent-version-current { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sv-agent-version-update { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--accent); white-space: nowrap; text-decoration: none; }
-a.sv-agent-version-update:hover { text-decoration: underline; }
+button.sv-agent-version-update { padding: 0; border: none; background: none; font: inherit; cursor: pointer; }
+a.sv-agent-version-update:hover, button.sv-agent-version-update:hover { text-decoration: underline; }
+.agent-update { display: flex; flex-direction: column; width: min(620px, 92vw); max-height: min(560px, 86vh); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4); overflow: hidden; }
+.agent-update-head { display: flex; align-items: center; gap: 8px; padding: 14px 18px 0; }
+.agent-update-icon { display: grid; color: var(--text-secondary); }
+.agent-update-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.agent-update-versions { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+.agent-update-body { display: flex; flex-direction: column; gap: 10px; min-height: 0; padding: 14px 18px; }
+.agent-update-hint { font-size: 12px; line-height: 1.55; color: var(--text-dim); }
+.agent-update-command { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-term); }
+.agent-update-command code { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 12px; color: var(--text); overflow-wrap: anywhere; user-select: text; }
+.agent-update-log { flex: 1 1 auto; min-height: 120px; max-height: 280px; margin: 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-term); color: var(--text); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.agent-update-status { font-size: 12px; line-height: 1.55; color: var(--text-secondary); }
+.agent-update-status.is-done { color: var(--green); }
+.agent-update-status.is-failed { color: var(--red); }
+.agent-update-foot { display: flex; align-items: center; gap: 8px; padding: 0 18px 16px; }
+.agent-update-spacer { flex: 1; }
+.agent-update-link { padding: 0; border: none; background: none; color: var(--text-dim); font-size: 11.5px; text-decoration: underline; cursor: pointer; }
+.agent-update-link:hover { color: var(--text-secondary); }
 
 .sv {
   position: absolute;
@@ -1517,6 +1535,10 @@ a.sv-agent-version-update:hover { text-decoration: underline; }
   max-width: 22ch;
 }
 
+/* A command row under a chip menu's values, e.g. "Import Project" under the project list. */
+.sv-chip-action { color: var(--text-mid); }
+.sv-chip-action:hover { background: var(--bg-hover); color: var(--text); }
+
 /* The filter box above a long chip menu, drawn like the rows under it rather than like a form field. */
 .sv-chip-filter {
   flex: none;
@@ -1611,6 +1633,39 @@ select.sv-pill {
 }
 .sv-row-command > :last-child {
   margin-bottom: 0;
+}
+
+/* Review findings a command printed as JSON, drawn as a numbered list instead of raw text. */
+.sv-findings-head {
+  margin-bottom: 6px;
+  font-weight: 600;
+  color: var(--text);
+}
+.sv-findings-list {
+  margin: 0;
+  padding-left: 20px;
+}
+.sv-finding + .sv-finding {
+  margin-top: 8px;
+}
+.sv-finding-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+.sv-finding-tag {
+  padding: 0 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  font-size: calc(var(--ui-fs) - 2px);
+}
+.sv-finding-summary {
+  margin-top: 2px;
+  color: var(--text);
+}
+.sv-finding-scenario {
+  margin-top: 2px;
 }
 
 /* A shell command run with `!` from the composer. Monospace and boxed, so it reads as neither side of
@@ -1756,12 +1811,24 @@ select.sv-pill {
 /* Missing-agent guidance inside the conversation. The install itself runs in the terminal view, so this
    notice stays informational: it explains the state and offers the way there. */
 .sv-agent-missing {
-  margin: 10px 0;
-  padding: 10px 12px;
+  position: relative;
+  /* Shares the message text column, like error rows, instead of reaching into the icon gutter. */
+  margin: 10px 0 10px calc(var(--sv-gutter) + var(--sv-gutter-gap));
+  padding: 10px 12px 10px 14px;
   border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
   border-radius: var(--r-md);
   background: var(--bg-hover);
+}
+/* The accent stripe is its own straight line, inset from the rounded corners so it never bends with them. */
+.sv-agent-missing::before {
+  content: "";
+  position: absolute;
+  top: var(--r-md);
+  bottom: var(--r-md);
+  left: -1px;
+  width: 3px;
+  border-radius: 0;
+  background: var(--accent);
 }
 .sv-agent-missing-head {
   display: flex;
@@ -1784,6 +1851,27 @@ select.sv-pill {
   align-items: center;
   gap: 8px;
   margin-top: 8px;
+}
+.sv-agent-missing-command {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 6px;
+}
+.sv-agent-missing-command code {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 4px 8px;
+  border-radius: var(--r-sm);
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: calc(var(--ui-fs) - 1px);
+  /* Some recipes are short scripts; keep their lines and scroll a long one rather than growing the card. */
+  white-space: pre;
+  max-height: 12em;
+  overflow-y: auto;
 }
 .sv-agent-missing-spacer {
   flex: 1;
@@ -2026,6 +2114,20 @@ select.sv-pill {
 }
 .sv-question-option:hover {
   background: var(--bg-1);
+}
+.sv-question-option:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.sv-question-option[aria-disabled="true"] {
+  cursor: default;
+}
+/* The question and its options can be selected and copied; the controls around them stay inert. */
+.sv-question .sv-permission-head,
+.sv-question-text,
+.sv-question-option-text {
+  -webkit-user-select: text;
+  user-select: text;
 }
 .sv-question-option-on {
   border-color: var(--accent-line);
@@ -2467,6 +2569,8 @@ select.sv-pill {
   font-size: 12px;
 }
 
+.sv-sync-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 4px 10px; color: var(--text-dim); font-size: 11px; }
+.sv-sync-notice .vlx-btn { padding: 2px 8px; font-size: 11px; }
 .sv-sync-state { display: flex; align-items: center; gap: 8px; color: var(--text-muted); padding: 8px 0; font-size: 12px; }
 /* Reading a long conversation in the background: a quiet centered spinner that appears only when the
    wait is long enough to notice, so a quick load never flashes it. */

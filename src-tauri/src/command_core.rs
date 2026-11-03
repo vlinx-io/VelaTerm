@@ -613,6 +613,12 @@ pub fn set_app_settings(
         let conn = ctx.db().conn.lock().unwrap();
         repo::set_app_settings(&conn, &entries)?;
     }
+    if let Some(mode) = entries.get(crate::pty::completion::MODE_KEY) {
+        // Running shells pick up the new mode at their next prompt.
+        if let Err(e) = ctx.data_dir().and_then(|dir| crate::pty::completion::write_mode(&dir, mode)) {
+            crate::diagnostic_warn!("failed to share the terminal completion mode: {e}");
+        }
+    }
     // An empty batch changes nothing; staying quiet avoids waking every client for no reason.
     if !entries.is_empty() {
         let keys: Vec<String> = entries.keys().cloned().collect();
@@ -896,6 +902,10 @@ pub fn set_session_engine(ctx: &AppCtx, session_id: &str, engine: &str) -> Resul
     if !session.kind.supports_chat() {
         return Err("This session does not support switching conversation engines".into());
     }
+    if engine == "tui" && !session.kind.has_terminal_interface() {
+        return Err(format!("{} has no terminal interface; this conversation stays in the conversation view.",
+            crate::agent::launch_options::label(session.kind)));
+    }
     // Leaving an engine means leaving its process behind; two agents must never share one conversation.
     if engine == "tui" {
         let snapshot = ctx.chat().snapshot(session_id);
@@ -1106,9 +1116,9 @@ pub fn chat_set_personality(
 }
 
 /// Begin provider-managed authorization in the existing conversation.
-pub fn chat_auth_start(ctx: &AppCtx, session_id: &str) -> Result<(), String> {
+pub fn chat_auth_start(ctx: &AppCtx, session_id: &str, provider: Option<&str>) -> Result<(), String> {
     prepare_chat_account(ctx, session_id)?;
-    ctx.chat().auth_start(ctx, session_id)
+    ctx.chat().auth_start(ctx, session_id, provider)
 }
 
 pub fn chat_auth_logout(ctx: &AppCtx, session_id: &str) -> Result<(), String> {
@@ -1120,11 +1130,11 @@ fn prepare_chat_account(ctx: &AppCtx, session_id: &str) -> Result<(), String> {
     {
         let conn = ctx.db().conn.lock().unwrap();
         let session = repo::get_session(&conn, session_id)?.ok_or("Session not found")?;
-        if !matches!(session.kind, SessionKind::Codex | SessionKind::Claude)
+        if !matches!(session.kind, SessionKind::Codex | SessionKind::Claude | SessionKind::Zcode)
             || session.engine != "chat"
         {
             return Err(
-                "Account operations are available only in Claude or Codex chat sessions.".into(),
+                "Account operations are available only in Claude, Codex or ZCode chat sessions.".into(),
             );
         }
     }
@@ -1505,7 +1515,10 @@ pub fn chat_set_model(ctx: &AppCtx, session_id: &str, model: Option<&str>) -> Re
     let session = session_settings::session(ctx, session_id)?;
     let mut selection = session_settings::resolve(ctx, &session)?;
     selection.model = session_settings::clean(model);
-    if session.kind == SessionKind::Antigravity {
+    // A model the running process cannot switch to is a launch setting: it applies when the process restarts.
+    let launch_only = crate::agent::chat::acp_protocol::supported(session.kind) && ctx.chat().is_alive(session_id)
+        && !ctx.chat().acp_switchable(session_id).0;
+    if session.kind == SessionKind::Antigravity || launch_only {
         return ctx.chat().update_launch_settings(ctx, session_id, || {
             session_settings::persist(ctx, &session, &selection)?;
             ctx.emit(&crate::agent::chat::engine::event_name(session_id), serde_json::json!({"type":"settingsChanged","model":selection.model}));
@@ -1530,7 +1543,9 @@ pub fn chat_set_effort(ctx: &AppCtx, session_id: &str, effort: Option<&str>) -> 
     let session = session_settings::session(ctx, session_id)?;
     let mut selection = session_settings::resolve(ctx, &session)?;
     selection.effort = session_settings::clean(effort);
-    if session.kind == SessionKind::Antigravity {
+    let launch_only = crate::agent::chat::acp_protocol::supported(session.kind) && ctx.chat().is_alive(session_id)
+        && !ctx.chat().acp_switchable(session_id).1;
+    if session.kind == SessionKind::Antigravity || launch_only {
         if selection.effort.as_deref().is_some_and(|value| !crate::agent::chat::antigravity_protocol::EFFORTS.contains(&value)) {
             return Err("Antigravity effort must be low, medium, high, max, or automatic".into());
         }
@@ -1553,6 +1568,24 @@ pub fn chat_set_effort(ctx: &AppCtx, session_id: &str, effort: Option<&str>) -> 
 }
 
 /// Models reported by the agent behind this session.
+/// DeepSeek's model picker while its agent is not running: the catalogue the last session reported, or the
+/// models dsh 0.2.1 ships with until one has. dsh names a model by its provider route and model id as a
+/// JSON pair, the same opaque value its ACP selector takes.
+fn deepseek_idle_models(ctx: &AppCtx) -> serde_json::Value {
+    let saved = ctx.db().conn.lock().ok()
+        .and_then(|conn| crate::db::repo::get_app_settings(&conn).ok())
+        .and_then(|settings| settings.get(crate::agent::chat::engine::DEEPSEEK_MODELS_SETTING).cloned())
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .filter(|models| models.as_array().is_some_and(|models| !models.is_empty()));
+    saved.unwrap_or_else(|| {
+        let efforts = ["off", "low", "high", "max"];
+        serde_json::json!([
+            {"id":"[\"deepseek-official\",\"deepseek-v4-flash\"]","label":"deepseek-v4-flash","description":"","effortLevels":efforts},
+            {"id":"[\"deepseek-official\",\"deepseek-v4-pro\"]","label":"DeepSeek-V4-Pro","description":"","effortLevels":efforts},
+        ])
+    })
+}
+
 pub fn chat_models(ctx: &AppCtx, session_id: &str) -> Result<serde_json::Value, String> {
     let session = {
         let conn = ctx.db().conn.lock().unwrap();
@@ -1614,6 +1647,39 @@ pub fn chat_models(ctx: &AppCtx, session_id: &str) -> Result<serde_json::Value, 
                 cwd.as_deref(),
                 running,
             )?)
+        }
+        SessionKind::Zcode => {
+            if let Some(models) = ctx.chat().zcode_models(session_id) {
+                return serde_json::to_value(models).map_err(|e| format!("Failed to serialize model catalogue: {e}"));
+            }
+            let bin = crate::agent::executable::for_session(ctx, &session);
+            let root = {
+                let conn = ctx.db().conn.lock().unwrap();
+                repo::get_project_root(&conn, &session.project_id)?
+            };
+            let cwd = session.cwd.as_deref().filter(|c| !c.trim().is_empty()).map(str::to_string).or(root)
+                .ok_or("ZCode needs a working directory to list its models")?;
+            serde_json::to_value(crate::agent::zcode::list_models(&bin, &cwd)?)
+        }
+        // A running ACP session lists the models it can switch to. Without one, the CLI's own catalogue is
+        // what its next launch can be given.
+        kind if crate::agent::chat::acp_protocol::supported(kind) => {
+            if let Some(models) = ctx.chat().acp_models(session_id) {
+                return Ok(serde_json::Value::Array(models));
+            }
+            if kind == SessionKind::Deepseek {
+                return Ok(deepseek_idle_models(ctx));
+            }
+            let efforts: &[&str] = if kind == SessionKind::Copilot { crate::agent::chat::acp_protocol::COPILOT_EFFORTS } else { &[] };
+            let models = if kind == SessionKind::Kimi {
+                crate::agent::model_catalog::list_models(ctx, kind.as_str())?
+            } else {
+                let bin = crate::agent::executable::for_session(ctx, &session);
+                crate::agent::model_catalog::list_models_at(kind.as_str(), &bin)?
+            };
+            serde_json::to_value(models.into_iter().map(|id| serde_json::json!({
+                "label":id,"id":id,"description":"","effortLevels":efforts,
+            })).collect::<Vec<_>>())
         }
         SessionKind::Pi | SessionKind::Omp => {
             if let Some(models) = ctx.chat().pi_models(session_id) {
@@ -1746,7 +1812,12 @@ pub fn chat_snapshot_window(
             repo::get_session(&conn, session_id)?
         };
         if let Some((kind, id)) = session.and_then(|s| s.agent_session_id.map(|id| (s.kind, id))) {
-            match crate::agent::chat::history::replay(kind, &id) {
+            let replayed = if crate::agent::chat::acp_protocol::supported(kind) {
+                crate::agent::chat::acp_protocol::replay(ctx.data_dir().ok().as_deref(), kind, &id)
+            } else {
+                crate::agent::chat::history::replay(kind, &id)
+            };
+            match replayed {
                 Ok(rows) => snapshot.rows = rows,
                 Err(e) if e.starts_with("detail_requires_paging:") => return Err(e),
                 // A recording that is gone, or a thread Codex never wrote, is the same empty pane as before.

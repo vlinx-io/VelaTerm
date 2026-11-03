@@ -262,6 +262,7 @@ fn launch_defaults(app: &AppCtx, conn: &Connection, parent: Option<&Session>, ki
     let permission = permission_catalog::effective(conn, kind, same.and_then(|p| p.permission_mode.as_deref()))?;
     permission_catalog::validate(kind, permission.as_deref())?;
     let engine = if !kind.supports_chat() { "tui" }
+        else if !kind.has_terminal_interface() { "chat" }
         else if let Some(parent) = parent.filter(|p| p.kind.supports_chat()) { &parent.engine }
         else { prefs["agentDefaults"][kind.as_str()]["engine"].as_str()
             .unwrap_or(if matches!(kind, SessionKind::Claude | SessionKind::Codex) { "chat" } else { "tui" }) };
@@ -483,9 +484,12 @@ pub fn pty_initial(app: &AppCtx, session_id: &str) -> Result<Option<PtyInitial>,
         |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|e| e.to_string())?;
     match row {
         None => Ok(None),
-        Some((_,_,_,state)) if state == "complete" => Ok(None),
         Some((_,_,_,state)) if matches!(state.as_str(), "dispatching" | "uncertain") => Err("spawn_initial_delivery_uncertain".into()),
-        Some((request_id,message_id,prompt,_)) => Ok(Some(PtyInitial { request_id,message_id,prompt })),
+        // Only 'ready'/'failed' still need a PTY delivery; 'complete' is done, 'waiting' was taken by the
+        // chat engine, and 'cancelled' was dropped by the user. Anything else must not hand the PTY path a
+        // task pty_dispatching can never claim, or switching to the TUI engine deadlocks the terminal view.
+        Some((request_id,message_id,prompt,state)) if matches!(state.as_str(), "ready" | "failed") => Ok(Some(PtyInitial { request_id,message_id,prompt })),
+        Some(_) => Ok(None),
     }
 }
 pub fn pty_dispatching(app: &AppCtx, initial: &PtyInitial) -> Result<(), String> {
@@ -517,6 +521,19 @@ pub enum Placement { Sibling, Child }
 pub struct AgentSessionRequest {
     pub request_id: String, pub context: AgentSessionContext,
     pub kind: Option<String>, pub preset_id: Option<String>,
+    // Choices made in the New Session tab. Absent values keep the agent's defaults, and skipping them when
+    // serializing keeps the stored snapshot of a plain picker request unchanged, so its retries still match.
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub engine: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub permission_mode: Option<String>,
+    /// Run the session in a new worktree branched from the location's directory.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")] pub worktree: bool,
+    /// Name the new worktree's folder and branch are derived from; absent uses the session name.
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub worktree_name: Option<String>,
+    /// First task. A conversation receives it as its first message; a terminal session takes it as the
+    /// launch argument the client passes when it starts the process.
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub prompt: Option<String>,
 }
 
 struct Location { project_id: String, group_id: Option<String>, parent_id: Option<String>, cwd: Option<String>, worktree: Option<String>, base: Option<String>, names: Vec<String> }
@@ -533,8 +550,9 @@ fn agent_location(conn: &Connection, context: &AgentSessionContext) -> Result<Lo
     let parent_id = active.as_ref().and_then(|s| match context.placement { Placement::Sibling => s.parent_session_id.clone(), Placement::Child => Some(s.id.clone()) });
     let parent = parent_id.as_deref().map(|id| active_session(conn, id)).transpose()?;
     if parent.as_ref().is_some_and(|p| p.project_id != project_id || p.group_id != group_id) { return Err("The parent session has moved; refresh the creation location".into()); }
-    let worktree = active.as_ref().and_then(|s| s.worktree_path.clone()).or_else(|| group.and_then(|g| g.worktree_path.clone()));
-    let base = active.as_ref().and_then(|s| s.worktree_base_ref.clone()).or_else(|| group.and_then(|g| g.worktree_base_ref.clone()));
+    let bound = tree.worktree_group(group_id.as_deref());
+    let worktree = active.as_ref().and_then(|s| s.worktree_path.clone()).or_else(|| bound.and_then(|g| g.worktree_path.clone()));
+    let base = active.as_ref().and_then(|s| s.worktree_base_ref.clone()).or_else(|| bound.and_then(|g| g.worktree_base_ref.clone()));
     let cwd = active.as_ref().and_then(|s| s.cwd.clone()).or(worktree.clone()).or_else(|| (!project.root_path.trim().is_empty()).then(|| project.root_path.clone()));
     let mut names = vec![project.name.clone()];
     if let Some(group) = group { names.push(group.name.clone()); }
@@ -552,45 +570,104 @@ pub fn prepare_agent_session(app: &AppCtx, context: &AgentSessionContext) -> Res
 pub fn create_agent_session(app: &AppCtx, request: &AgentSessionRequest) -> Result<Session, String> {
     let _guard = request_lock(app, &request.request_id)?;
     let raw = encoded(request)?;
-    let mut conn = app.db().conn.lock().unwrap();
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    let existing: Option<(String, String)> = tx.query_row("SELECT request,session_id FROM agent_session_creations WHERE id=?1", [&request.request_id], |r| Ok((r.get(0)?,r.get(1)?)))
-        .optional().map_err(|e| e.to_string())?;
-    if let Some((saved, id)) = existing {
-        if saved != raw { return Err("The creation request already has a different selection or location".into()); }
-        return active_session(&tx, &id);
+    let prompt = request.prompt.as_deref().map(str::trim).filter(|p| !p.is_empty());
+    let mut launch = {
+        let conn = app.db().conn.lock().unwrap();
+        let existing: Option<(String, String)> = conn.query_row("SELECT request,session_id FROM agent_session_creations WHERE id=?1", [&request.request_id], |r| Ok((r.get(0)?,r.get(1)?)))
+            .optional().map_err(|e| e.to_string())?;
+        if let Some((saved, id)) = existing {
+            if saved != raw { return Err("The creation request already has a different selection or location".into()); }
+            return active_session(&conn, &id);
+        }
+        agent_launch(app, &conn, request, prompt)?
+    };
+    // The worktree is created outside the database lock; the request lock keeps a retry from making a second one.
+    if request.worktree {
+        let cwd = launch.cwd.clone().ok_or("This location has no folder to create a worktree from")?;
+        if crate::git::worktree_list(&cwd).is_err() { return Err("This folder is not a Git repository, so no worktree can be created".into()); }
+        let name = request.worktree_name.as_deref().map(str::trim).filter(|n| !n.is_empty()).unwrap_or(&launch.name);
+        let wt = owned_worktree(app, &request.request_id, &cwd, name, false)?;
+        launch.cwd = Some(wt.path.clone()); launch.worktree = Some(wt.path); launch.base = Some(wt.base_ref);
     }
-    let location = agent_location(&tx, &request.context)?;
+    let created = (|| -> Result<Session, String> {
+        let mut conn = app.db().conn.lock().unwrap();
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        // The tree may have changed while the worktree was being created.
+        agent_location(&tx, &request.context)?;
+        let session = insert_session(&tx, &uuid::Uuid::new_v4().to_string(), &launch)?;
+        tx.execute("INSERT INTO agent_session_creations(id,request,session_id) VALUES (?1,?2,?3)", params![request.request_id,raw,session.id]).map_err(|e| e.to_string())?;
+        if request.worktree { bind_worktree(&tx, &request.request_id, &session.id)?; }
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(session)
+    })();
+    let session = match created {
+        Ok(session) => session,
+        Err(error) if request.worktree => return match cleanup_worktree(app, &request.request_id) {
+            Ok(()) => Err(error), Err(cleanup) => Err(format!("{error}; worktree cleanup needs attention: {cleanup}")),
+        },
+        Err(error) => return Err(error),
+    };
+    app.emit(TREE_CHANGED, ());
+    if let Some(prompt) = prompt.filter(|_| session.engine == "chat") {
+        // The session exists either way. A first message that cannot be sent stays queued in the
+        // conversation, where the user sees it and the agent-missing notice, instead of failing creation.
+        let message_id = format!("msg-{}", request.request_id);
+        let delivered = (|| -> Result<(), String> {
+            let payload = serde_json::to_vec(&json!([prompt,Vec::<Value>::new(),"queue"])).map_err(|e| e.to_string())?;
+            super::chat::submissions::recover_queued(&app.db().conn.lock().unwrap(), &session.id, &message_id, &payload)?;
+            core::chat_start(app, &session.id, None, None, false)?;
+            core::chat_send(app, &session.id, prompt, Vec::new(), Some("queue"), Some(&message_id)).map(|_| ())
+        })();
+        if let Err(error) = delivered {
+            crate::diagnostics::record("WARN", "new_session_first_message", json!({"sessionId":session.id,"error":error}));
+        }
+    }
+    Ok(session)
+}
+
+/// Resolve what a new session runs with: the agent's saved defaults, then any choice made in the request.
+fn agent_launch(app: &AppCtx, conn: &Connection, request: &AgentSessionRequest, prompt: Option<&str>) -> Result<Launch, String> {
+    let location = agent_location(conn, &request.context)?;
     let preset = match (&request.kind, &request.preset_id) {
         (Some(_), None) => None,
-        (None, Some(id)) => Some(repo::list_agent_presets(&tx)?.into_iter().find(|p| &p.id == id).ok_or("The selected agent preset no longer exists")?),
+        (None, Some(id)) => Some(repo::list_agent_presets(conn)?.into_iter().find(|p| &p.id == id).ok_or("The selected agent preset no longer exists")?),
         _ => return Err("Select either an agent or a preset".into()),
     };
     let kind = if let Some(preset) = &preset { parse_agent(preset.base_kind.as_str())? } else { parse_agent(request.kind.as_deref().unwrap())? };
-    let (mut args, mut permission, engine) = launch_defaults(app, &tx, None, kind)?;
+    let (mut args, mut permission, mut engine) = launch_defaults(app, conn, None, kind)?;
     if let Some(preset) = &preset {
         // A preset's empty arguments deliberately clear the kind's custom CLI arguments.
         args = preset.agent_args.clone();
-        permission = permission_catalog::effective(&tx, kind, preset.permission_mode.as_deref())?;
+        permission = permission_catalog::effective(conn, kind, preset.permission_mode.as_deref())?;
+    }
+    if let Some(mode) = request.permission_mode.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
+        permission = permission_catalog::effective(conn, kind, Some(mode))?;
     }
     permission_catalog::validate(kind, permission.as_deref())?;
-    let name = if let Some(preset) = &preset { preset.name.clone() } else {
-        let label = launch_options::label(kind);
-        let prefix = format!("{label} ");
-        let next = repo::list_tree(&tx)?.sessions.iter().filter(|s| s.project_id == location.project_id && s.kind == kind)
-            .filter_map(|s| s.name.strip_prefix(&prefix)?.parse::<u64>().ok()).max().unwrap_or(0).saturating_add(1);
-        format!("{label} {next}")
-    };
-    let launch = Launch { project_id: location.project_id, group_id: location.group_id, parent_id: location.parent_id,
-        name, kind,
-        cwd: location.cwd, selection: default_selection(&tx, kind, args.as_deref())?, args, permission, engine,
-        preset_id: preset.as_ref().map(|p| p.id.clone()), agent_path: preset.and_then(|p| p.exec_path), worktree: location.worktree, base: location.base };
-    let session = insert_session(&tx, &uuid::Uuid::new_v4().to_string(), &launch)?;
-    tx.execute("INSERT INTO agent_session_creations(id,request,session_id) VALUES (?1,?2,?3)", params![request.request_id,raw,session.id]).map_err(|e| e.to_string())?;
-    tx.commit().map_err(|e| e.to_string())?;
-    drop(conn);
-    app.emit(TREE_CHANGED, ());
-    Ok(session)
+    match request.engine.as_deref() {
+        None => {}
+        Some("chat") if kind.supports_chat() => engine = "chat".into(),
+        Some("tui") if kind.has_terminal_interface() => engine = "tui".into(),
+        Some(_) => return Err("This agent cannot open in the selected view".into()),
+    }
+    let model = request.model.as_deref().map(str::trim).filter(|m| !m.is_empty());
+    let effort = request.effort.as_deref().map(str::trim).filter(|e| !e.is_empty());
+    if model.is_some() || effort.is_some() { args = launch_options::apply(kind, args.as_deref(), model, effort)?; }
+    let mut selection = default_selection(conn, kind, args.as_deref())?;
+    if model.is_some() { selection.model = session_settings::clean(model); }
+    if effort.is_some() { selection.effort = session_settings::clean(effort); }
+    let name = if let Some(preset) = &preset { preset.name.clone() }
+        else if let Some(prompt) = prompt { prompt.lines().next().unwrap_or(prompt).trim().chars().take(24).collect() }
+        else {
+            let label = launch_options::label(kind);
+            let prefix = format!("{label} ");
+            let next = repo::list_tree(conn)?.sessions.iter().filter(|s| s.project_id == location.project_id && s.kind == kind)
+                .filter_map(|s| s.name.strip_prefix(&prefix)?.parse::<u64>().ok()).max().unwrap_or(0).saturating_add(1);
+            format!("{label} {next}")
+        };
+    Ok(Launch { project_id: location.project_id, group_id: location.group_id, parent_id: location.parent_id,
+        name, kind, cwd: location.cwd, selection, args, permission, engine,
+        preset_id: preset.as_ref().map(|p| p.id.clone()), agent_path: preset.and_then(|p| p.exec_path), worktree: location.worktree, base: location.base })
 }
 
 /// Draft display choices are read from the same backend rules used at final creation.
@@ -854,6 +931,20 @@ mod tests {
     }
 
     #[test]
+    fn pty_initial_skips_tasks_the_chat_engine_or_a_cancellation_already_settled() {
+        // A chat-delivered ('waiting') or cancelled task has no PTY delivery left. pty_initial must not
+        // hand it back, or switching such a session to the TUI engine would deadlock on pty_dispatching,
+        // which only claims 'ready'/'failed', with "the initial task was already claimed".
+        for state in ["waiting", "cancelled"] {
+            let f = fixture(); let result = confirm(&f, request(&f, false));
+            assert!(pty_initial(&f.app, &result.session_id).unwrap().is_some());
+            f.app.db().conn.lock().unwrap().execute("UPDATE spawn_requests SET state=?2 WHERE id=?1",
+                params![result.request_id, state]).unwrap();
+            assert!(pty_initial(&f.app, &result.session_id).unwrap().is_none(), "state {state} must not deliver");
+        }
+    }
+
+    #[test]
     fn pty_spawn_settings_are_persisted_and_archived_sessions_cannot_restart() {
         let f=fixture();let result=confirm(&f,request(&f,true));
         assert!(pty_session(&f.app,&f.parent.id).unwrap().is_none());
@@ -911,7 +1002,7 @@ mod tests {
     fn selector(f: &Fixture) -> AgentSessionRequest {
         AgentSessionRequest { request_id: uuid::Uuid::new_v4().to_string(), context: AgentSessionContext {
             project_id: Some(f.parent.project_id.clone()), group_id: None, active_session_id: Some(f.parent.id.clone()), placement: Placement::Child,
-        }, kind: Some("claude".into()), preset_id: None }
+        }, kind: Some("claude".into()), preset_id: None, engine: None, model: None, effort: None, permission_mode: None, worktree: false, worktree_name: None, prompt: None }
     }
 
     #[test]
@@ -923,6 +1014,24 @@ mod tests {
         req.preset_id = Some("missing".into()); assert!(create_agent_session(&f.app, &req).is_err());
         req.request_id = uuid::Uuid::new_v4().to_string(); assert!(create_agent_session(&f.app, &req).is_err());
         req.kind = None; req.preset_id = None; assert!(create_agent_session(&f.app, &req).is_err());
+    }
+
+    #[test]
+    fn selector_in_a_nested_group_runs_in_the_nearest_bound_worktree() {
+        let f = fixture(); let conn = f.app.db().conn.lock().unwrap();
+        let outer = repo::create_group_full(&conn, &f.parent.project_id, None, "Release", Some("/repo/.vlx-worktrees/outer"), Some("refs/heads/main")).unwrap();
+        let nested = repo::create_group(&conn, &f.parent.project_id, Some(&outer.id), "Nested").unwrap();
+        let own = repo::create_group_full(&conn, &f.parent.project_id, Some(&nested.id), "Own", Some("/repo/.vlx-worktrees/own"), None).unwrap();
+        drop(conn);
+        let mut req = selector(&f); req.context.active_session_id = None; req.context.placement = Placement::Sibling;
+        req.context.group_id = Some(nested.id.clone());
+        let inherited = create_agent_session(&f.app, &req).unwrap();
+        assert_eq!(inherited.cwd.as_deref(), Some("/repo/.vlx-worktrees/outer"));
+        assert_eq!(inherited.worktree_path.as_deref(), Some("/repo/.vlx-worktrees/outer"));
+        assert_eq!(inherited.worktree_base_ref.as_deref(), Some("refs/heads/main"));
+        req.request_id = uuid::Uuid::new_v4().to_string(); req.context.group_id = Some(own.id.clone());
+        let bound = create_agent_session(&f.app, &req).unwrap();
+        assert_eq!(bound.worktree_path.as_deref(), Some("/repo/.vlx-worktrees/own")); assert_eq!(bound.worktree_base_ref, None);
     }
 
     #[test]

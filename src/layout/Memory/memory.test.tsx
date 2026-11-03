@@ -12,9 +12,14 @@ import { MemoryMarkdown } from "./shared";
 import { memoryNavigate, memoryUrl } from "./navigation";
 
 const api = vi.hoisted(() => ({ list: vi.fn(), collections: vi.fn(), get: vi.fn(), options: vi.fn(), save: vi.fn(), start: vi.fn(), models: vi.fn() }));
+const launchSpec = (id: string, label: string) => ({ id, label, acceptsTask: true, effortFlag: "--effort", effortLevels: ["low", "high"], supportsPlanExecute: false, supportsReferSummary: false });
+vi.mock("../../ipc/launch", () => ({
+  launchOptions: async () => [launchSpec("claude", "Claude"), launchSpec("codex", "Codex")],
+  launchModels: api.models,
+}));
 vi.mock("../../ipc/memory", () => ({
   memoryList: api.list, memoryCollections: api.collections,
-  memoryModels: api.models, memoryGet: api.get, memoryOptions: api.options, memorySave: api.save, memoryStart: api.start,
+  memoryGet: api.get, memoryOptions: api.options, memorySave: api.save, memoryStart: api.start,
   memoryDelete: vi.fn(), memoryRestore: vi.fn(), memorySource: vi.fn(), memoryJobs: vi.fn(), memoryCancel: vi.fn(), memoryRetry: vi.fn(),
 }));
 const store = vi.hoisted(() => ({
@@ -33,7 +38,7 @@ beforeEach(() => {
   store.memoryPrefs = {}; store.setMemoryPrefs.mockReset();
   api.list.mockReset().mockResolvedValue({ projects: [], selectedSessionId: null, entries: [], tags: [], total: 0, pageSize: 40 });
   api.get.mockReset(); api.options.mockReset(); api.save.mockReset(); api.start.mockReset(); api.models.mockReset();
-  api.models.mockResolvedValue([{ id: "chosen-model", label: "Chosen model", effortLevels: ["low", "high"] }, { id: "simple-model", label: "Simple model", effortLevels: [] }]);
+  api.models.mockResolvedValue({ models: [{ id: "chosen-model", label: "Chosen model", effortLevels: ["low", "high"] }, { id: "simple-model", label: "Simple model", effortLevels: [] }], effortLevels: ["low", "high"] });
   api.options.mockResolvedValue({ agents: [{ id: "claude", label: "Claude", available: true }, { id: "codex", label: "Codex", available: true }], defaultAgent: "codex", catalog: [] });
 });
 afterEach(cleanup);
@@ -47,6 +52,13 @@ function choose(label: string, option: string) {
   fireEvent.click(screen.getByRole("option", { name: option }));
   if (screen.queryAllByRole("listbox").length) fireEvent.click(trigger);
 }
+
+/** Commit one catalogue entry on the shared launch fields, whose inputs list the model identifiers. */
+async function pick(label: string, option: RegExp | string) {
+  fireEvent.click(screen.getByRole("combobox", { name: label }));
+  fireEvent.click(await screen.findByRole("option", { name: option }));
+}
+const field = (label: string) => screen.getByRole("combobox", { name: label }) as HTMLInputElement;
 
 describe("Knowledge Base interactions", () => {
   it.each(["tauri://localhost", "tauri://localhost/"])("builds an explicit close URL for %s", (base) => {
@@ -77,27 +89,27 @@ describe("Knowledge Base interactions", () => {
     const agents = await screen.findByRole("combobox", { name: "Agent" });
     await waitFor(() => expect(agents.textContent).toContain("Codex"));
     choose("Agent", "Claude");
-    await screen.findByRole("combobox", { name: "Model (optional)" });
-    choose("Model (optional)", "Chosen model");
-    choose("Thinking effort", "High");
+    await screen.findByRole("combobox", { name: "Model" });
+    await pick("Model", /chosen-model/);
+    await pick("Reasoning effort", "high");
     fireEvent.click(screen.getByRole("button", { name: "Organize and save" }));
     await waitFor(() => expect(api.start).toHaveBeenCalledWith("session", "claude", "chosen-model", "high"));
     await waitFor(() => expect(new URLSearchParams(location.search).get("memory")).toBe("job/job-1"));
   });
 
-  it("clears effort when changing models and clears both overrides when changing agents", async () => {
+  it("clears an effort the new model lacks and clears both overrides when changing agents", async () => {
     render(<MemoryCompile sessionId="session" />);
-    await screen.findByRole("combobox", { name: "Model (optional)" });
-    choose("Model (optional)", "Chosen model");
-    choose("Thinking effort", "High");
-    choose("Model (optional)", "Simple model");
-    expect(screen.getByRole("combobox", { name: "Model (optional)" }).textContent).toContain("Simple model");
-    expect((screen.getByRole("combobox", { name: "Thinking effort" }) as HTMLButtonElement).disabled).toBe(true);
-    choose("Model (optional)", "Chosen model");
-    choose("Thinking effort", "Low");
+    await screen.findByRole("combobox", { name: "Model" });
+    await pick("Model", /chosen-model/);
+    await pick("Reasoning effort", "high");
+    await pick("Model", /simple-model/);
+    expect(field("Model").value).toBe("simple-model");
+    expect(field("Reasoning effort").value).toBe("");
+    await pick("Model", /chosen-model/);
+    await pick("Reasoning effort", "low");
     choose("Agent", "Claude");
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Model (optional)" }).textContent).toContain("Default model"));
-    expect(screen.getByRole("combobox", { name: "Thinking effort" }).textContent).toContain("Agent default");
+    await waitFor(() => expect(field("Model").value).toBe(""));
+    expect(field("Reasoning effort").value).toBe("");
   });
 
   it("restores the remembered agent, model and effort on reopen", async () => {
@@ -105,19 +117,19 @@ describe("Knowledge Base interactions", () => {
     render(<MemoryCompile sessionId="session" />);
     const agents = await screen.findByRole("combobox", { name: "Agent" });
     await waitFor(() => expect(agents.textContent).toContain("Claude"));
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Model (optional)" }).textContent).toContain("Chosen model"));
-    expect(screen.getByRole("combobox", { name: "Thinking effort" }).textContent).toContain("High");
+    await waitFor(() => expect(field("Model").value).toBe("chosen-model"));
+    expect(field("Reasoning effort").value).toBe("high");
   });
 
   it("remembers each selection for the next visit", async () => {
     render(<MemoryCompile sessionId="session" />);
-    await screen.findByRole("combobox", { name: "Model (optional)" });
+    await screen.findByRole("combobox", { name: "Model" });
     choose("Agent", "Claude");
     expect(store.setMemoryPrefs).toHaveBeenCalledWith({ agent: "claude", model: null, effort: null });
-    await screen.findByRole("combobox", { name: "Model (optional)" });
-    choose("Model (optional)", "Chosen model");
-    expect(store.setMemoryPrefs).toHaveBeenCalledWith({ model: "chosen-model", effort: null });
-    choose("Thinking effort", "High");
+    await screen.findByRole("combobox", { name: "Model" });
+    await pick("Model", /chosen-model/);
+    expect(store.setMemoryPrefs).toHaveBeenCalledWith({ model: "chosen-model" });
+    await pick("Reasoning effort", "high");
     expect(store.setMemoryPrefs).toHaveBeenCalledWith({ effort: "high" });
   });
 
@@ -127,16 +139,19 @@ describe("Knowledge Base interactions", () => {
     render(<MemoryCompile sessionId="session" />);
     const agents = await screen.findByRole("combobox", { name: "Agent" });
     await waitFor(() => expect(agents.textContent).toContain("Codex"));
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Model (optional)" }).textContent).toContain("Default model"));
+    await screen.findByRole("combobox", { name: "Model" });
+    expect(field("Model").value).toBe("");
   });
 
-  it("blocks compilation after a catalogue failure and retries without submitting", async () => {
-    api.models.mockRejectedValueOnce(new Error("memory_models_unavailable"));
+  it("keeps the agent default usable when the model list fails and retries it", async () => {
+    api.models.mockRejectedValueOnce(new Error("Provider catalogue unavailable"));
     render(<MemoryCompile sessionId="session" />);
-    await screen.findByRole("alert");
-    expect((screen.getByRole("button", { name: "Organize and save" }) as HTMLButtonElement).disabled).toBe(true);
+    await screen.findByText("Provider catalogue unavailable");
+    // The shared fields accept a typed identifier or the agent default, so a missing list does not block.
+    expect((screen.getByRole("button", { name: "Organize and save" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    await screen.findByRole("combobox", { name: "Model (optional)" });
+    fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
+    await screen.findByRole("option", { name: /chosen-model/ });
     expect(api.start).not.toHaveBeenCalled();
   });
 

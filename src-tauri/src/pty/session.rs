@@ -324,13 +324,11 @@ impl OutputStream {
     /// Attaches a subscriber by replaying mode prelude plus snapshot before registration.
     ///
     /// The prelude restores alternate-screen, mouse, paste, and other modes that likely fell out of the ring; the
-    /// snapshot immediately restores the visible screen.
+    /// snapshot immediately restores the visible screen. Both go out as one chunk, so a transport can treat the
+    /// first chunk a new subscriber receives as its whole replay.
     pub fn attach(&mut self, id: u64, sink: OutputSink) {
-        let prelude = self.modes.prelude();
-        if !prelude.is_empty() {
-            sink(&prelude);
-        }
-        let replay = self.ring.snapshot();
+        let mut replay = self.modes.prelude();
+        replay.extend_from_slice(&self.ring.snapshot());
         if !replay.is_empty() {
             sink(&replay);
         }
@@ -646,11 +644,10 @@ mod tests {
         s.ingest(b" world");
 
         let chunks = got.lock().unwrap().clone();
-        assert_eq!(chunks.len(), 3, "expected a prelude, a snapshot and a live chunk");
-        // Prelude is sorted by mode number regardless of ingest order.
-        assert_eq!(chunks[0], b"\x1b[?1000h\x1b[?1049h");
-        assert_eq!(chunks[1], b"\x1b[?1049h\x1b[?1000hhello");
-        assert_eq!(chunks[2], b" world");
+        assert_eq!(chunks.len(), 2, "expected one replay chunk and a live chunk");
+        // Prelude is sorted by mode number regardless of ingest order, and precedes the snapshot.
+        assert_eq!(chunks[0], b"\x1b[?1000h\x1b[?1049h\x1b[?1049h\x1b[?1000hhello");
+        assert_eq!(chunks[1], b" world");
     }
 
     /// Concurrency stress: single-lock ingest and attach are atomic, so every subscriber receives a **contiguous
