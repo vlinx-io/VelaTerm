@@ -9,6 +9,7 @@ v0.1.91 is the first public release; earlier version numbers were internal itera
 
 ## v0.3.0 — 2026-11-08
 
+- 🔏 macOS builds are now signed with the Vlinx Software, Inc. certificate instead of the previous one, so after updating you may need to grant some macOS permissions again, and items saved in the keychain, such as remote connection passwords, need your approval once more: enter your login password when asked and choose Always Allow.
 - 🗂️ Sessions now come in three types, Task, Project and Chat, chosen at the top of the New Session page, and the left sidebar is organized into fixed Projects, Terminals, Tasks and Chats collections, with Terminals listing every running terminal and the agents detected in them.
 - 🧭 A new activity bar along the left edge switches between Projects, Terminals, Tasks, Chats, Archived Sessions and Knowledge Base, and holds Settings, Account, Feedback, Share and Game Center at the bottom.
 - 📦 Collections can be archived as a whole with Archive Collection in their context menu, and restoring any of their sessions brings the collection back.

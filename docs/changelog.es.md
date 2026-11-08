@@ -1,5 +1,6 @@
 ## v0.3.0 — 2026-11-08
 
+- 🔏 La versión para macOS ahora se firma con el certificado de Vlinx Software, Inc. en lugar del anterior, por lo que tras actualizar puede que deba volver a conceder algunos permisos de macOS, y los elementos guardados en el llavero, como las contraseñas de conexiones remotas, requieren una nueva autorización: cuando se le solicite, introduzca su contraseña de inicio de sesión y elija «Permitir siempre».
 - 🗂️ Las sesiones se dividen ahora en tres tipos, Tarea, Proyecto y Chat, que se eligen en la parte superior de la página «Nueva sesión», y la barra lateral izquierda se organiza en las colecciones fijas Proyectos, Terminales, Tareas y Chats, donde Terminales muestra todos los terminales en ejecución y los agentes detectados en ellos.
 - 🧭 Una nueva barra de actividad en el borde izquierdo permite cambiar entre Proyectos, Terminales, Tareas, Chats, Sesiones archivadas y Base de conocimientos, y reúne en la parte inferior Ajustes, Cuenta, Comentarios, Compartir y Centro de juegos.
 - 📦 Las colecciones pueden archivarse por completo con «Archivar colección» en su menú contextual, y al restaurar cualquiera de sus sesiones la colección vuelve a aparecer.

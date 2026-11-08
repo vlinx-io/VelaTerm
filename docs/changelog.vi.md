@@ -1,5 +1,6 @@
 ## v0.3.0 — 2026-11-08
 
+- 🔏 Bản macOS nay được ký bằng chứng chỉ của Vlinx Software, Inc. thay cho chứng chỉ trước đây, nên sau khi cập nhật có thể bạn cần cấp lại một số quyền của macOS, và các mục lưu trong Chuỗi khóa, như mật khẩu kết nối từ xa, cần được cho phép lại: khi được hỏi, hãy nhập mật khẩu đăng nhập và chọn “Luôn cho phép”.
 - 🗂️ Phiên giờ được chia thành ba loại “Nhiệm vụ”, “Dự án” và “Trò chuyện”, chọn ở đầu trang “Phiên mới”, còn thanh bên trái được sắp xếp thành các bộ sưu tập cố định “Dự án”, “Terminal”, “Nhiệm vụ” và “Trò chuyện”, trong đó “Terminal” liệt kê mọi terminal đang chạy cùng các tác nhân được phát hiện trong đó.
 - 🧭 Thanh hoạt động mới dọc theo cạnh trái giúp chuyển qua lại giữa “Dự án”, “Terminal”, “Nhiệm vụ”, “Trò chuyện”, “Phiên đã lưu trữ” và “Kho kiến thức”, đồng thời đặt “Cài đặt”, “Tài khoản”, “Phản hồi”, “Chia sẻ” và “Trung tâm trò chơi” ở phía dưới.
 - 📦 Có thể lưu trữ toàn bộ một bộ sưu tập bằng “Lưu trữ bộ sưu tập” trong menu chuột phải, và khôi phục bất kỳ phiên nào trong đó sẽ đưa bộ sưu tập trở lại.

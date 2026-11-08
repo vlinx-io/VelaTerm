@@ -1,5 +1,6 @@
 ## v0.3.0 — 2026-11-08
 
+- 🔏 Die macOS-Version wird jetzt mit dem Zertifikat von Vlinx Software, Inc. statt mit dem bisherigen signiert. Nach dem Update müssen Sie einige macOS-Berechtigungen möglicherweise erneut erteilen, und im Schlüsselbund gespeicherte Einträge wie Passwörter für Remote-Verbindungen müssen noch einmal freigegeben werden: Geben Sie bei der Abfrage Ihr Anmeldepasswort ein und wählen Sie „Immer erlauben“.
 - 🗂️ Sitzungen gibt es jetzt in drei Typen – Aufgabe, Projekt und Chat –, die Sie oben auf der Seite „Neue Sitzung“ auswählen, und die linke Seitenleiste ist in die festen Sammlungen Projekte, Terminals, Aufgaben und Chats gegliedert, wobei Terminals alle laufenden Terminals und die darin erkannten Agenten auflistet.
 - 🧭 Über eine neue Aktivitätsleiste am linken Rand wechseln Sie zwischen den Bereichen Projekte, Terminals, Aufgaben, Chats, Archivierte Sitzungen und Wissensbasis, und unten finden Sie Einstellungen, Konto, Feedback, Teilen und Spielecenter.
 - 📦 Sammlungen lassen sich über „Sammlung archivieren“ im Kontextmenü vollständig archivieren; wird eine ihrer Sitzungen wiederhergestellt, ist auch die Sammlung wieder da.

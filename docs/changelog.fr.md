@@ -1,5 +1,6 @@
 ## v0.3.0 — 2026-11-08
 
+- 🔏 La version macOS est désormais signée avec le certificat de Vlinx Software, Inc. au lieu du précédent : après la mise à jour, certaines autorisations macOS peuvent devoir être accordées à nouveau, et les éléments enregistrés dans le trousseau, comme les mots de passe des connexions distantes, doivent être autorisés une nouvelle fois ; saisissez votre mot de passe de session lorsque macOS le demande et choisissez « Toujours autoriser ».
 - 🗂️ Les sessions se répartissent désormais en trois types, Tâche, Projet et Discussion, à choisir en haut de la page Nouvelle session, et la barre latérale gauche s’organise en collections fixes Projets, Terminaux, Tâches et Discussions, la collection Terminaux listant tous les terminaux en cours d’exécution et les agents qui y sont détectés.
 - 🧭 Une nouvelle barre d’activité, le long du bord gauche, permet de basculer entre Projets, Terminaux, Tâches, Discussions, Sessions archivées et Base de connaissances, et regroupe en bas Paramètres, Compte, Votre avis, Partager et Centre de jeux.
 - 📦 Une collection peut être archivée en entier avec « Archiver la collection » dans son menu contextuel, et la restauration de l’une de ses sessions la fait réapparaître.
