@@ -24,7 +24,7 @@ vi.mock("../../ipc/notebook", () => ({
   uploadNotebookFiles: vi.fn(),
   notebookDroppedFiles: vi.fn(),
 }));
-vi.mock("../../ipc/memory", () => ({ memoryList: api.list, memoryGet: api.get, memoryCollections: api.collections }));
+vi.mock("../../ipc/memory", () => ({ memoryAttention: () => Promise.resolve(0), memoryList: api.list, memoryGet: api.get, memoryCollections: api.collections }));
 vi.mock("../../platform", () => ({ platform: { env: api.env, dialog: { pickDirectory: vi.fn() } } }));
 vi.mock("../../remote/ServerFileBrowser", () => ({
   cardStyle: {},
@@ -138,4 +138,12 @@ it("leaves a nested folder for its parent, then the vault, then the home page", 
   await waitFor(() => expect(route()).toEqual({ memory: "notebook/vault-1" }));
   fireEvent.click(await up());
   await waitFor(() => expect(route()).toEqual({ memory: "notebooks" }));
+});
+
+it("explains a source only while it has nothing to show", async () => {
+  render(<MemoryRoute />);
+  await screen.findAllByText("Throttle design");
+  await waitFor(() => expect(screen.getByText(/Markdown folders on this computer/)).toBeTruthy());
+  expect(screen.queryByText(/Knowledge organized from your sessions/)).toBeNull();
+  expect(screen.getByText(/Finished conversations/)).toBeTruthy();
 });

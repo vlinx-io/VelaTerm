@@ -1,7 +1,9 @@
-//! Recursive pane layout for saved sidebar tree projections. Top-level entries remain browser-style tabs;
-//! each tab owns an independent binary split tree whose leaves reference sidebar view IDs.
+//! Recursive pane layout for saved sidebar tree projections. Each top-level tab is the pane group of one
+//! activity-bar section and owns an independent binary split tree whose leaves reference sidebar view IDs. The
+//! sidebar shows one group at a time; switching sections swaps the whole group and keeps the others intact.
 
 import { genId } from "../../genId";
+import { parseRailSection, type RailSection } from "./systemCollections";
 
 export type SidebarSplitDirection = "horizontal" | "vertical";
 
@@ -26,6 +28,40 @@ export interface SidebarTreeTab {
   id: string;
   root: SidebarViewPaneNode;
   activeViewId: string;
+  /** Activity-bar section shown by every pane of this group. Absent means Projects. */
+  section?: RailSection;
+}
+
+/** The section a pane group shows; groups saved before sections existed show Projects. */
+export const sidebarTabSection = (tab: { section?: RailSection } | undefined): RailSection =>
+  tab?.section ?? "projects";
+
+/** The group holding a view, if any. */
+export const sidebarTabOfView = <T extends SidebarTreeTab>(tabs: T[], viewId: string): T | undefined =>
+  tabs.find((tab) => collectSidebarViewIds(tab.root).includes(viewId));
+
+/**
+ * Give every pane group a section. The group holding the primary view is always Projects, because project reveal
+ * and the global filter aliases target that view; it is listed first so the activity bar finds it before any other
+ * Projects group. Another group keeps its own section, or else the section its first pane showed when sections
+ * were stored per pane. Nothing is dropped: the activity bar opens the first group of a section, and any further
+ * group of the same section keeps its panes and conditions.
+ */
+export function assignSidebarTabSections(
+  tabs: SidebarTreeTab[],
+  primaryViewId: string,
+  legacyViewSection: (viewId: string) => unknown = () => undefined,
+): SidebarTreeTab[] {
+  const primaryTab = sidebarTabOfView(tabs, primaryViewId);
+  const ordered = primaryTab ? [primaryTab, ...tabs.filter((tab) => tab !== primaryTab)] : tabs;
+  return ordered.map((tab) => ({
+    ...tab,
+    section: tab === primaryTab
+      ? "projects"
+      : parseRailSection(tab.section) ??
+        parseRailSection(legacyViewSection(firstSidebarViewId(tab.root))) ??
+        "projects",
+  }));
 }
 
 export interface SidebarViewRect {
@@ -41,11 +77,12 @@ export function makeSidebarViewLeaf(viewId: string): SidebarViewLeaf {
   return { kind: "leaf", paneId: genId(), viewId };
 }
 
-export function makeSidebarTreeTab(viewId: string): SidebarTreeTab {
+export function makeSidebarTreeTab(viewId: string, section?: RailSection): SidebarTreeTab {
   return {
     id: `tree-tab-${genId()}`,
     root: makeSidebarViewLeaf(viewId),
     activeViewId: viewId,
+    ...(section ? { section } : {}),
   };
 }
 
@@ -201,7 +238,7 @@ export function migrateLegacySidebarTabs(
   viewIds: string[],
   layout: "tabs" | "stack",
 ): SidebarTreeTab[] {
-  if (layout === "tabs") return viewIds.map(makeSidebarTreeTab);
+  if (layout === "tabs") return viewIds.map((viewId) => makeSidebarTreeTab(viewId));
   const [firstId, ...rest] = viewIds;
   if (!firstId) return [];
   let root: SidebarViewPaneNode = makeSidebarViewLeaf(firstId);

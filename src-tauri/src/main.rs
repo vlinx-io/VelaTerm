@@ -28,6 +28,13 @@ fn exit_with_parent() {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // Hidden: the paste gate runs this as a helper process on every paste, so it comes first to keep
+    // the startup cost out of the shortcut's latency.
+    #[cfg(all(feature = "gui", target_os = "macos"))]
+    if args.get(1).map(String::as_str) == Some("--clipboard-probe") {
+        velaterm_lib::run_clipboard_probe();
+        return;
+    }
     #[cfg(any(feature = "gui", feature = "sidecar"))]
     if args.get(1).map(String::as_str) == Some("--font-catalog") {
         velaterm_lib::print_font_catalog();

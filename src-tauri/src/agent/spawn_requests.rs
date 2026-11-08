@@ -534,6 +534,9 @@ pub struct AgentSessionRequest {
     /// First task. A conversation receives it as its first message; a terminal session takes it as the
     /// launch argument the client passes when it starts the process.
     #[serde(default, skip_serializing_if = "Option::is_none")] pub prompt: Option<String>,
+    /// Images pasted with the first task. Only a conversation receives them here, with its first message; a
+    /// terminal session's client uploads them and adds their paths to the prompt it passes at launch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")] pub images: Vec<super::chat::protocol::ChatImage>,
 }
 
 struct Location { project_id: String, group_id: Option<String>, parent_id: Option<String>, cwd: Option<String>, worktree: Option<String>, base: Option<String>, names: Vec<String> }
@@ -571,6 +574,7 @@ pub fn create_agent_session(app: &AppCtx, request: &AgentSessionRequest) -> Resu
     let _guard = request_lock(app, &request.request_id)?;
     let raw = encoded(request)?;
     let prompt = request.prompt.as_deref().map(str::trim).filter(|p| !p.is_empty());
+    core::check_images(&request.images)?;
     let mut launch = {
         let conn = app.db().conn.lock().unwrap();
         let existing: Option<(String, String)> = conn.query_row("SELECT request,session_id FROM agent_session_creations WHERE id=?1", [&request.request_id], |r| Ok((r.get(0)?,r.get(1)?)))
@@ -608,15 +612,17 @@ pub fn create_agent_session(app: &AppCtx, request: &AgentSessionRequest) -> Resu
         Err(error) => return Err(error),
     };
     app.emit(TREE_CHANGED, ());
-    if let Some(prompt) = prompt.filter(|_| session.engine == "chat") {
+    // A first message may be images alone.
+    if session.engine == "chat" && (prompt.is_some() || !request.images.is_empty()) {
+        let prompt = prompt.unwrap_or("");
         // The session exists either way. A first message that cannot be sent stays queued in the
         // conversation, where the user sees it and the agent-missing notice, instead of failing creation.
         let message_id = format!("msg-{}", request.request_id);
         let delivered = (|| -> Result<(), String> {
-            let payload = serde_json::to_vec(&json!([prompt,Vec::<Value>::new(),"queue"])).map_err(|e| e.to_string())?;
+            let payload = serde_json::to_vec(&json!([prompt,request.images,"queue"])).map_err(|e| e.to_string())?;
             super::chat::submissions::recover_queued(&app.db().conn.lock().unwrap(), &session.id, &message_id, &payload)?;
             core::chat_start(app, &session.id, None, None, false)?;
-            core::chat_send(app, &session.id, prompt, Vec::new(), Some("queue"), Some(&message_id)).map(|_| ())
+            core::chat_send(app, &session.id, prompt, request.images.clone(), Some("queue"), Some(&message_id)).map(|_| ())
         })();
         if let Err(error) = delivered {
             crate::diagnostics::record("WARN", "new_session_first_message", json!({"sessionId":session.id,"error":error}));
@@ -649,6 +655,11 @@ fn agent_launch(app: &AppCtx, conn: &Connection, request: &AgentSessionRequest, 
         Some("chat") if kind.supports_chat() => engine = "chat".into(),
         Some("tui") if kind.has_terminal_interface() => engine = "tui".into(),
         Some(_) => return Err("This agent cannot open in the selected view".into()),
+    }
+    // A chat session is a plain conversation, so it always opens in the conversation view.
+    if location.project_id == crate::db::system_collections::CHAT {
+        if !kind.supports_chat() { return Err("This agent cannot hold a chat session".into()); }
+        engine = "chat".into();
     }
     let model = request.model.as_deref().map(str::trim).filter(|m| !m.is_empty());
     let effort = request.effort.as_deref().map(str::trim).filter(|e| !e.is_empty());
@@ -1002,7 +1013,7 @@ mod tests {
     fn selector(f: &Fixture) -> AgentSessionRequest {
         AgentSessionRequest { request_id: uuid::Uuid::new_v4().to_string(), context: AgentSessionContext {
             project_id: Some(f.parent.project_id.clone()), group_id: None, active_session_id: Some(f.parent.id.clone()), placement: Placement::Child,
-        }, kind: Some("claude".into()), preset_id: None, engine: None, model: None, effort: None, permission_mode: None, worktree: false, worktree_name: None, prompt: None }
+        }, kind: Some("claude".into()), preset_id: None, engine: None, model: None, effort: None, permission_mode: None, worktree: false, worktree_name: None, prompt: None, images: Vec::new() }
     }
 
     #[test]
@@ -1014,6 +1025,17 @@ mod tests {
         req.preset_id = Some("missing".into()); assert!(create_agent_session(&f.app, &req).is_err());
         req.request_id = uuid::Uuid::new_v4().to_string(); assert!(create_agent_session(&f.app, &req).is_err());
         req.kind = None; req.preset_id = None; assert!(create_agent_session(&f.app, &req).is_err());
+    }
+
+    #[test]
+    fn selector_images_stay_out_of_plain_snapshots_and_invalid_ones_are_refused() {
+        let f = fixture(); let mut req = selector(&f);
+        assert!(!encoded(&req).unwrap().contains("images"));
+        req.images = vec![super::super::chat::protocol::ChatImage { mime_type: "text/plain".into(), data: "AQID".into() }];
+        assert!(create_agent_session(&f.app, &req).is_err());
+        let conn = f.app.db().conn.lock().unwrap();
+        let saved: i64 = conn.query_row("SELECT COUNT(*) FROM agent_session_creations WHERE id=?1", [&req.request_id], |r| r.get(0)).unwrap();
+        assert_eq!(saved, 0);
     }
 
     #[test]

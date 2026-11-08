@@ -28,7 +28,7 @@
 .import-sessions-search-row { display: flex; gap: 8px; }
 .import-sessions-search { position: relative; flex: 1; min-width: 0; }
 .import-sessions-search > svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
-.import-sessions-search .vlx-input { padding-left: 34px; height: 36px; font-family: inherit; }
+.import-sessions-search .vlx-input { padding-left: 34px; height: 32px; font-family: inherit; }
 .import-sessions-selection { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 0 12px; font-size: 12px; color: var(--text-secondary); }
 .import-sessions-selection label { display: flex; align-items: center; gap: 8px; }
 .import-sessions-content { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; border-top: 1px solid var(--border); }

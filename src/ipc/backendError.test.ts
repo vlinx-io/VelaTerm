@@ -39,6 +39,12 @@ describe("mapBackendError", () => {
     expect(mapBackendError("zcode_plan_unavailable:other")).toBe("zcode_plan_unavailable:other");
   });
 
+  it("asks a ZCode account ZCode lists no model for to sign in again, without claiming the quota is spent", () => {
+    expect(mapBackendError("zcode_no_models:bigmodel")).toBe("chat.auth.zcode.noModels.bigmodel");
+    expect(mapBackendError("zcode_no_models:zai")).toBe("chat.auth.zcode.noModels.zai");
+    expect(mapBackendError("zcode_no_models:other")).toBe("zcode_no_models:other");
+  });
+
   it("maps the command gate code to its i18n key with the command as detail", () => {
     expect(mapBackendError("remote_cmd_forbidden:web_server_start")).toBe(
       "transport.remoteCmdForbidden|web_server_start",

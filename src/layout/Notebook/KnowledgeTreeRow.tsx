@@ -8,12 +8,7 @@ import { useT } from "../../i18n";
 import { stripControlChars, useCtrlCharGuard } from "../../hooks/textInputGuards";
 import { MemoryLink } from "../Memory/navigation";
 
-export const knowledgeSelection = {
-  memoryPath: null, memoryQuery: null, memoryFolder: null, memoryFilter: null,
-  memoryTag: null, memoryProject: null, memorySession: null, memoryPage: null,
-  memorySort: null, memoryQuickQuery: null, memoryLinkPicker: null, kbAction: null,
-  memoryImportPage: null, memoryCollectionProject: null, memoryCollectionQuery: null, memoryCollectionTab: null,
-};
+export { knowledgeSelection } from "./knowledgeSelection";
 
 /** A data row the tree can rename, move or delete. Synthetic groups (`__manual__`, `__legacy__`,
  *  `__unknown__`) are marked so the actions menu can omit rename. */
@@ -65,11 +60,17 @@ export const treeKey = {
 
 /** Every folder, including each knowledge-base root, uses the same inline tree row. Files with an
  *  onActivate callback open through their owning surface instead of navigating the memory route. */
-export function KnowledgeTreeRow({ name, route, values, depth, selected, icon, expanded, onToggle, onOpen, onActivate, children, title, count, target }: {
+export function KnowledgeTreeRow({ name, route, values, depth, selected, icon, expanded, onToggle, onOpen, onActivate, children, title, count, knowledge, attention, target, prose }: {
   name: string; route?: string; values?: Record<string, string | number | null>; depth: number;
   selected?: boolean; icon: ReactNode; expanded?: boolean; onToggle?: () => void;
   onOpen?: () => void; onActivate?: () => void; children?: ReactNode; title?: string; count?: number;
+  /** Knowledge entries organized from this archived project or session. */
+  knowledge?: number;
+  /** Failed runs, shown as a warning badge. */
+  attention?: number;
   target?: KnowledgeRowTarget;
+  /** The name is natural language (a session, an entry, a note) rather than a project or folder. */
+  prose?: boolean;
 }) {
   const t = useT();
   const actions = useKnowledgeTree();
@@ -79,7 +80,10 @@ export function KnowledgeTreeRow({ name, route, values, depth, selected, icon, e
   const renaming = !!target && !!actions && actions.renameKey === target.key;
   const payload = target && actions ? actions.dragPayload(target) : null;
   const dropTarget = !!target && !!actions && actions.dropKey === target.key;
-  const label = <>{icon}<span>{name}</span>{count != null && <small>{count}</small>}</>;
+  const label = <>{icon}<span className={"nb-tree-label" + (prose ? " p" : "")}>{name}</span>
+    {!!attention && <em className="kbx-fail">{attention}</em>}
+    {!!knowledge && <em className="kbx-count"><Icons.layers size={12} aria-hidden="true" />{knowledge}</em>}
+    {count != null && <small>{count.toLocaleString()}</small>}</>;
   const renameInput = <input
     ref={ctrlCharGuard}
     className="rename-input"
@@ -98,7 +102,7 @@ export function KnowledgeTreeRow({ name, route, values, depth, selected, icon, e
     <div
       ref={row}
       className={"nb-tree-row" + (selected ? " active" : "") + (dropTarget ? " drop-over" : "") + (target && actions?.dragKey === target.key ? " dragging" : "")}
-      style={{ paddingLeft: 4 + depth * 14 }}
+      style={{ paddingLeft: 3 + depth * 13 }}
       onContextMenu={target && actions ? (event) => {
         event.preventDefault();
         event.stopPropagation();

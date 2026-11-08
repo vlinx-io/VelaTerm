@@ -419,6 +419,7 @@
 .m-session-content .sv-box { position: relative; }
 .m-session-content .sv-composer[data-options-expanded="false"] .sv-controls,
 .m-session-content .sv-composer[data-options-expanded="false"] .sv-action-feedback { display: none; }
+.m-session-content .sv-action-feedback { flex-wrap: wrap; white-space: normal; }
 .m-session-content .sv-composer textarea { padding: 12px 0 12px 12px; min-height: 64px; width: calc(100% - 104px); }
 .m-session-content .sv-composer[data-options-expanded="false"] textarea:not(:focus) { min-height: 52px; height: 52px !important; white-space: nowrap; overflow: hidden; }
 .m-session-content .sv-composer[data-options-expanded="true"] .sv-controls { padding: 6px; gap: 4px; }

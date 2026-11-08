@@ -417,7 +417,9 @@ pub fn run_install(data_dir: &std::path::Path, agent: &str) -> Result<(), String
     let deadline = std::time::Instant::now() + BACKGROUND_INSTALL_LIMIT;
     loop {
         match child.try_wait() {
-            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(status)) if status.success() => {
+                return if installed_and_working(kind) { Ok(()) } else { Err("agent_install_failed".into()) };
+            }
             Ok(Some(_)) => return Err("agent_install_failed".into()),
             Ok(None) if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(250)),
             _ => {
@@ -427,6 +429,27 @@ pub fn run_install(data_dir: &std::path::Path, agent: &str) -> Result<(), String
             }
         }
     }
+}
+
+/// Whether an install that just exited left an agent that can be found and starts. An installer can exit
+/// cleanly and still leave a launcher whose package never arrived.
+fn installed_and_working(kind: crate::models::SessionKind) -> bool {
+    match super::executable::discover(kind) {
+        super::executable::LaunchBinary::Path(path) => {
+            super::health::forget(&path);
+            super::health::check(kind, &path) != super::health::Health::Broken
+        }
+        _ => false,
+    }
+}
+
+/// The installation completion polling may report as finished: located, and able to start. Asked again after
+/// an installer exits, so what is known about the file from before the install does not count.
+pub fn locate_working_bin(agent: &str) -> Option<String> {
+    let path = locate_installed_bin(agent)?;
+    super::health::forget(&path);
+    let kind = crate::models::SessionKind::from_db(agent);
+    (super::health::check(kind, &path) != super::health::Health::Broken).then_some(path)
 }
 
 /// Append the marker step in the session shell's syntax: PowerShell on Windows, and on Unix a form that

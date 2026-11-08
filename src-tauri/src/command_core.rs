@@ -502,6 +502,17 @@ pub fn archive_group(ctx: &AppCtx, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Archives a user collection: archive its sessions, release member projects, and retain the collection as a
+/// hidden tombstone that any restored session revives. See `repo::archive_collection`.
+pub fn archive_collection(ctx: &AppCtx, id: &str) -> Result<(), String> {
+    {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::archive_collection(&conn, id)?;
+    }
+    ctx.emit(TREE_CHANGED, ());
+    Ok(())
+}
+
 /// Lists all archived sessions newest-first for the archive browser.
 pub fn list_archived_sessions(ctx: &AppCtx) -> Result<Vec<Session>, String> {
     let conn = ctx.db().conn.lock().unwrap();
@@ -575,6 +586,9 @@ pub fn get_app_settings(ctx: &AppCtx) -> Result<std::collections::HashMap<String
     settings
         .entry(crate::pty::completion::MODE_KEY.into())
         .or_insert_with(|| crate::pty::completion::DEFAULT_MODE.into());
+    settings
+        .entry(crate::pty::completion::TAB_BEHAVIOR_KEY.into())
+        .or_insert_with(|| crate::pty::completion::DEFAULT_TAB_BEHAVIOR.into());
     Ok(settings)
 }
 
@@ -607,6 +621,11 @@ pub fn set_app_settings(
     if let Some(mode) = entries.get(crate::pty::completion::MODE_KEY) {
         if !matches!(mode.as_str(), "auto" | "tab" | "off") {
             return Err("Invalid terminal completion mode".into());
+        }
+    }
+    if let Some(behavior) = entries.get(crate::pty::completion::TAB_BEHAVIOR_KEY) {
+        if !matches!(behavior.as_str(), "accept" | "complete") {
+            return Err("Invalid terminal Tab behavior".into());
         }
     }
     {
@@ -1017,6 +1036,11 @@ pub fn chat_start(
     let cwd = crate::host::spawn_dir(
         session.cwd.as_deref().filter(|c| !c.trim().is_empty()).or(project_root.as_deref()),
     );
+    if crate::agent::executable::resolve_launch_binary(ctx, session_id, session.kind)?
+        == crate::agent::executable::LaunchBinary::Broken
+    {
+        return Err(format!("agent_not_installed:{}", session.kind.as_str()));
+    }
     let bin = crate::agent::executable::for_session(ctx, &session);
     let mut selection = session_settings::resolve(ctx, &session)?;
     if model.is_some() {
@@ -1113,6 +1137,11 @@ pub fn chat_set_personality(
         serde_json::json!({"type":"codexSettingsChanged","personality":personality}),
     );
     Ok(())
+}
+
+/// Whether the conversation's agent is installed and signed in, checked before anything is sent.
+pub fn chat_agent_readiness(ctx: &AppCtx, session_id: &str) -> Result<impl serde::Serialize, String> {
+    ctx.chat().agent_readiness(ctx, session_id)
 }
 
 /// Begin provider-managed authorization in the existing conversation.

@@ -101,13 +101,24 @@ pub fn confirmed_missing(id: &str) -> bool {
 /// A log being written by a running dsh ends in a frame that is not finished yet; reading stops at the
 /// last complete line, which is what dsh itself has made durable.
 pub fn read_events(path: &Path) -> Result<Vec<Value>, String> {
+    let mut events = Vec::new();
+    each_line(path, |line| {
+        if unwanted(line) { return true; }
+        let Ok(event) = serde_json::from_slice::<Value>(line) else { return true };
+        if event.get("type").and_then(Value::as_str).is_some_and(|kind| WANTED.contains(&kind)) { events.push(event); }
+        true
+    })?;
+    Ok(events)
+}
+
+/// Feed each complete line of a log, decoded, to `visit` until it returns false or the log ends.
+fn each_line(path: &Path, mut visit: impl FnMut(&[u8]) -> bool) -> Result<(), String> {
     let file = std::fs::File::open(path).map_err(|_| "source_missing: The DeepSeek conversation log could not be found".to_string())?;
     let reader: Box<dyn Read> = if path.extension().is_some_and(|ext| ext == "zstd") {
         Box::new(zstd::stream::read::Decoder::new(file).map_err(|error| format!("The DeepSeek conversation log could not be read: {error}"))?)
     } else {
         Box::new(file)
     };
-    let mut events = Vec::new();
     let mut reader = BufReader::new(reader.take(MAX_LOG_BYTES));
     let mut line = Vec::new();
     loop {
@@ -119,11 +130,97 @@ pub fn read_events(path: &Path) -> Result<Vec<Value>, String> {
             Err(_) => break,
         }
         if line.last() != Some(&b'\n') { break; }
-        if unwanted(&line) { continue; }
-        let Ok(event) = serde_json::from_slice::<Value>(&line) else { continue };
-        if event.get("type").and_then(Value::as_str).is_some_and(|kind| WANTED.contains(&kind)) { events.push(event); }
+        if !visit(&line) { break; }
     }
-    Ok(events)
+    Ok(())
+}
+
+/// A conversation in the log root, as the session import lists it.
+pub struct Listed {
+    pub id: String,
+    pub cwd: String,
+    /// The latest `session/title`, else the first prompt the person wrote; empty when neither exists.
+    pub title: String,
+    /// The current log's last write, in milliseconds.
+    pub updated_at: i64,
+}
+
+/// Every conversation under `root/sessions` whose header `cwd` satisfies `belongs`, with the number of logs that
+/// could not be read. Subagent runs (`origin: subagent` or a nonzero `delegationDepth`) belong to the
+/// conversation that delegated them and are left out.
+pub fn list_in(root: &Path, belongs: impl Fn(&str) -> bool) -> Result<(Vec<Listed>, usize), String> {
+    let projects = match std::fs::read_dir(root.join("sessions")) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((Vec::new(), 0)),
+        Err(e) => return Err(format!("Cannot read history directory: {e}")),
+    };
+    let mut found = Vec::new();
+    let mut failures = 0;
+    for project in projects.flatten() {
+        let Ok(sessions) = std::fs::read_dir(project.path()) else { continue };
+        for session in sessions.flatten() {
+            let id = session.file_name().to_string_lossy().into_owned();
+            if !valid_id(&id) { continue; }
+            let Some(log) = current_log(&session.path()) else { continue };
+            match summarize(&log, &belongs) {
+                Ok(Some(mut listed)) if listed.id == id => {
+                    listed.updated_at = std::fs::metadata(&log).ok().and_then(|m| m.modified().ok())
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_millis() as i64).unwrap_or(0);
+                    found.push(listed);
+                }
+                Ok(_) => {}
+                Err(_) => failures += 1,
+            }
+        }
+    }
+    Ok((found, failures))
+}
+
+/// The header and title of one log. Only the header, title events and the first prompt are parsed.
+fn summarize(log: &Path, belongs: &impl Fn(&str) -> bool) -> Result<Option<Listed>, String> {
+    let mut header: Option<Value> = None;
+    let mut named = String::new();
+    let mut prompt = String::new();
+    each_line(log, |line| {
+        // The first line is the header; a log for another directory or a subagent stops right there.
+        if header.is_none() {
+            let Ok(first) = serde_json::from_slice::<Value>(line) else { return false };
+            let cwd = first.get("cwd").and_then(Value::as_str).unwrap_or_default();
+            let delegated = first.get("origin").and_then(Value::as_str) == Some("subagent")
+                || first.get("delegationDepth").and_then(Value::as_u64).unwrap_or(0) > 0;
+            if first.get("type").and_then(Value::as_str) != Some("session") || delegated || cwd.is_empty() || !belongs(cwd) {
+                return false;
+            }
+            header = Some(first);
+            return true;
+        }
+        // dsh writes `type` first, so most lines are skipped unparsed; a line written otherwise is parsed and checked.
+        let tagged = |kind: &[u8]| line.strip_prefix(br#"{"type":""#).and_then(|rest| rest.strip_prefix(kind))
+            .is_some_and(|rest| rest.first() == Some(&b'"'));
+        let wanted = tagged(b"session/title") || (prompt.is_empty() && tagged(b"user/message"));
+        if line.starts_with(br#"{"type":""#) && !wanted { return true; }
+        let Ok(event) = serde_json::from_slice::<Value>(line) else { return true };
+        let data = event.get("data");
+        match event.get("type").and_then(Value::as_str) {
+            Some("session/title") => {
+                named = data.and_then(|d| d.get("title")).and_then(Value::as_str).unwrap_or_default().trim().to_string();
+            }
+            Some("user/message") if prompt.is_empty()
+                && data.and_then(|d| d.pointer("/source/kind")).and_then(Value::as_str) == Some("user") => {
+                prompt = text_of(data.and_then(|d| d.get("content"))).trim().to_string();
+            }
+            _ => {}
+        }
+        true
+    })?;
+    let Some(header) = header else { return Ok(None) };
+    Ok(Some(Listed {
+        id: header.get("id").and_then(Value::as_str).unwrap_or_default().to_string(),
+        cwd: header.get("cwd").and_then(Value::as_str).unwrap_or_default().to_string(),
+        title: if named.is_empty() { prompt } else { named },
+        updated_at: 0,
+    }))
 }
 
 /// Whether a raw line is known to be an event the timeline skips, judged from a leading `"type"` field
@@ -502,5 +599,37 @@ mod tests {
         assert!(unwanted(br#"{"type":"turn/endless","seq":1}"#));
         assert!(unwanted(br#"{"type":"request/header","seq":1}"#));
         assert!(!unwanted(br#"{"seq":1,"type":"request/header"}"#));
+    }
+
+    #[test]
+    fn listing_reads_headers_and_titles_and_leaves_out_subagents() {
+        let root = std::env::temp_dir().join(format!("dsh-list-{}", uuid::Uuid::new_v4()));
+        let log = |id: &str, lines: &[Value]| {
+            let dir = root.join("sessions").join("--w--").join(id);
+            std::fs::create_dir_all(&dir).unwrap();
+            let text: String = lines.iter().map(|line| format!("{line}\n")).collect();
+            std::fs::write(dir.join("session.v4.jsonl.zstd"), zstd::encode_all(text.as_bytes(), 3).unwrap()).unwrap();
+        };
+        let user = |text: &str, kind: &str| json!({"type":"user/message","seq":1,"data":{"content":[{"type":"text","text":text}],"source":{"kind":kind}}});
+        log("s-1", &[
+            json!({"type":"session","version":4,"id":"s-1","createdAt":1,"cwd":"/w","isSeeded":false,"delegationDepth":0}),
+            user("Runtime context", "runtime-context"),
+            user("Create hello.txt", "user"),
+            json!({"type":"session/title","seq":2,"data":{"title":"First"}}),
+            json!({"type":"session/title","seq":3,"data":{"title":"Hello file"}}),
+        ]);
+        log("s-2", &[
+            json!({"type":"session","version":4,"id":"s-2","createdAt":1,"cwd":"/w","isSeeded":false,"delegationDepth":0}),
+            user("List files", "user"),
+        ]);
+        log("s-3", &[json!({"type":"session","version":4,"id":"s-3","createdAt":1,"cwd":"/w","isSeeded":false,"origin":"subagent","delegationDepth":1})]);
+        log("s-4", &[json!({"type":"session","version":4,"id":"s-4","createdAt":1,"cwd":"/other","isSeeded":false,"delegationDepth":0})]);
+        let (mut found, failures) = list_in(&root, |cwd| cwd == "/w").unwrap();
+        found.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(failures, 0);
+        assert_eq!(found.iter().map(|s| (s.id.as_str(), s.title.as_str())).collect::<Vec<_>>(),
+            [("s-1", "Hello file"), ("s-2", "List files")]);
+        assert!(list_in(&root.join("missing"), |_| true).unwrap().0.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

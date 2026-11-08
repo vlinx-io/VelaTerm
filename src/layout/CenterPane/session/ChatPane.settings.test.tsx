@@ -113,6 +113,23 @@ it("reads an archive range without acquiring a process or replacing its runtime 
   expect(commands).toContain("chat_read_cancel");
 });
 
+it("recovers from a reconnect backlog too large for one response by reading the recent rows", async () => {
+  snapshotOverrides = { startedAt: 1, rowsRevision: 1, rows: [{ kind: "user", id: "stale", text: "Stale message" }] };
+  await mountPane();
+  await screen.findByText("Stale message");
+  const answer = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    const since = (args as { window?: { since?: number } } | undefined)?.window?.since;
+    if (command === "chat_snapshot" && since !== undefined) return Promise.reject(new Error("detail_requires_paging: Too large")) as Promise<never>;
+    return answer(command, args);
+  });
+  snapshotOverrides = { startedAt: 1, rowsRevision: 9, rows: [{ kind: "user", id: "fresh", text: "Fresh message" }] };
+  await act(async () => reconnectCallback());
+  await screen.findByText("Fresh message");
+  expect(screen.queryByText("Stale message")).toBeNull();
+  expect(screen.queryByText(/detail_requires_paging/)).toBeNull();
+});
+
 it("bounds the v2 window during live updates and process reset while retaining a history entry", async () => {
   snapshotOverrides = { protocolVersion: 2, historyGeneration: "generation", coverage: "complete", rowsRevision: 1, startedAt: 1, readJobId: "index:owned" };
   const view = await mountPane();
@@ -432,6 +449,26 @@ it("guards queue editors mounted after the pane and removes the listener on unmo
   unmount();
   root.append(editor);
   expect(insert()).toBe(true);
+});
+
+it("leaves the Enter that confirms IME composition to the input method", async () => {
+  const { container } = await mountPane();
+  act(() => eventCallback({ type: "queued", items: [{ id: "ime-q", text: "Queued input" }] }));
+  fireEvent.click(screen.getByText("Queued input"));
+  const editor = container.querySelector<HTMLTextAreaElement>(".sv-queue-edit")!;
+  // WebKit reports the confirming Enter with isComposing false and keyCode 229.
+  expect(fireEvent.keyDown(editor, { key: "Enter", keyCode: 229 })).toBe(true);
+  expect(container.querySelector(".sv-queue-edit")).toBe(editor);
+  fireEvent.keyDown(editor, { key: "Escape" });
+
+  const input = container.querySelector<HTMLTextAreaElement>(".sv-box textarea")!;
+  const sends = () => vi.mocked(invoke).mock.calls.filter(([command]) => command === "chat_send");
+  fireEvent.change(input, { target: { value: "hello" } });
+  expect(fireEvent.keyDown(input, { key: "Enter", keyCode: 229 })).toBe(true);
+  expect(input.value).toBe("hello");
+  expect(sends()).toHaveLength(0);
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(sends()).toHaveLength(1));
 });
 
 it("recalls session inputs in order while busy and restores the unsent draft", async () => {
@@ -2049,4 +2086,59 @@ it("Antigravity rejects dropped images with a clear text-only notice", async () 
   await screen.findByText("Antigravity conversation view currently supports text messages only.");
   expect(container.querySelector(".sv-attach-thumb")).toBeNull();
   expect(container.querySelector<HTMLTextAreaElement>(".sv-composer textarea")?.placeholder).toBe("Message Antigravity, or use @files");
+});
+
+function mockReadiness(readiness: { installed: boolean; signedIn?: boolean | null }) {
+  const previous = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    if (command === "chat_agent_readiness") return Promise.resolve(readiness) as Promise<never>;
+    return previous(command, args);
+  });
+}
+
+const sendButton = () => document.querySelector<HTMLButtonElement>(".sv-send")!;
+const composer = () => document.querySelector<HTMLTextAreaElement>("textarea")!;
+
+it("holds messages back with no way to dismiss the notice while the agent is not installed", async () => {
+  mockReadiness({ installed: false });
+  await mountPane("claude");
+  await screen.findByText(/is not installed/);
+  expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+  act(() => eventCallback({ type: "unsent", text: "Keep this", images: [] }));
+  await waitFor(() => expect(composer().value).toBe("Keep this"));
+  expect(sendButton().disabled).toBe(true);
+  fireEvent.keyDown(composer(), { key: "Enter" });
+  expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "chat_send")).toBe(false);
+});
+
+it("asks for a sign-in when the conversation opens and lets go once it is confirmed", async () => {
+  mockReadiness({ installed: true, signedIn: false });
+  await mountPane("claude");
+  await screen.findByRole("region", { name: "Claude account" });
+  expect(screen.getByRole("button", { name: "Sign in" })).toBeTruthy();
+  act(() => eventCallback({ type: "unsent", text: "Keep this", images: [] }));
+  await waitFor(() => expect(composer().value).toBe("Keep this"));
+  expect(sendButton().disabled).toBe(true);
+
+  mockReadiness({ installed: true, signedIn: true });
+  act(() => eventCallback({ type: "extras", extras: { auth: { status: "success" } } }));
+  await waitFor(() => expect(screen.queryByRole("region", { name: "Claude account" })).toBeNull());
+  await waitFor(() => expect(sendButton().disabled).toBe(false));
+});
+
+it("does not hold a message back when the sign-in cannot be told", async () => {
+  mockReadiness({ installed: true, signedIn: null });
+  await mountPane("claude");
+  await waitFor(() => expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "chat_agent_readiness")).toBe(true));
+  act(() => eventCallback({ type: "unsent", text: "Send this", images: [] }));
+  await waitFor(() => expect(sendButton().disabled).toBe(false));
+  expect(screen.queryByRole("region", { name: "Claude account" })).toBeNull();
+});
+
+it("puts a refused message and its images back ahead of what is being typed", async () => {
+  await mountPane("claude");
+  fireEvent.change(composer(), { target: { value: "Later thought" } });
+  act(() => eventCallback({ type: "unsent", text: "First message", images: [{ mimeType: "image/png", data: "AAAA" }] }));
+  await waitFor(() => expect(composer().value).toBe("First message\n\nLater thought"));
+  expect(document.querySelectorAll(".sv-attach-item").length).toBe(1);
 });

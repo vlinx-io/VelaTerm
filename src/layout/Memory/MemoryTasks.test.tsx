@@ -6,7 +6,7 @@ import type { MemoryJob } from "../../ipc/memory";
 
 const api = vi.hoisted(() => ({ jobs: vi.fn(), cancel: vi.fn(), start: vi.fn() }));
 vi.mock("../../ipc/memory", () => ({
-  memoryJobs: api.jobs, memoryCancel: api.cancel, memoryStart: api.start, memoryRetry: vi.fn(),
+  memoryJobs: api.jobs, memoryJobSessions: api.jobs, memoryCancel: api.cancel, memoryStart: api.start, memoryRetry: vi.fn(),
   memoryOptions: async () => ({
     agents: [
       { id: "claude", label: "Claude", available: false },
@@ -76,8 +76,11 @@ it("links a finished job to the entries it produced by title", async () => {
   // With a single entry the job title opens that entry directly.
   expect((await screen.findByRole("link", { name: "Session one" })).getAttribute("href")).toContain("memory=entry%2Fe1");
   expect(screen.getByRole("link", { name: "Session two" }).getAttribute("href")).toContain("memory=job%2Ftwo");
-  expect(screen.getByRole("link", { name: "First entry ↗" }).getAttribute("href")).toContain("memory=entry%2Fe1");
-  expect(screen.getByRole("link", { name: "Third ↗" }).getAttribute("href")).toContain("memory=entry%2Fe3");
+  expect(screen.getByRole("link", { name: "First entry" }).getAttribute("href")).toContain("memory=entry%2Fe1");
+  // Older runs list their entries on request.
+  expect(screen.queryByRole("link", { name: "Third" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "2 entries" }));
+  expect(screen.getByRole("link", { name: "Third" }).getAttribute("href")).toContain("memory=entry%2Fe3");
 });
 
 it("offers every organizer agent and starts the job with the one that was picked", async () => {
@@ -100,4 +103,23 @@ it("names the agent of a past job from the backend label", async () => {
   render(<MemoryJobs />);
   const article = (await screen.findByRole("link", { name: "Session A" })).closest("article")!;
   expect(within(article).getByText(/OMP/)).toBeTruthy();
+});
+
+it("lists each session by its current state and only explains the one that needs attention", async () => {
+  const broken = { ...job("broken", "failed"), error: "memory_process_failed", failedAttempts: 2 };
+  const recovered = { ...job("recovered", "completed"), model: "gpt-5.6", failedAttempts: 3, entries: ["e"], entryLinks: [{ id: "e", title: "Entry" }] };
+  api.jobs.mockResolvedValue({ jobs: [broken, recovered], total: 2, pageSize: 40, attention: 1, organized: 1 });
+  render(<MemoryJobs />);
+  const first = (await screen.findByRole("link", { name: "Session broken" })).closest("article")!;
+  expect(within(first).getByText("Needs attention")).toBeTruthy();
+  expect(within(first).getByText("Failed 2 times")).toBeTruthy();
+  expect(within(first).getByRole("button", { name: /Retry/ })).toBeTruthy();
+  const second = screen.getByRole("link", { name: "Session recovered" }).closest("article")!;
+  expect(within(second).getByText("Organized")).toBeTruthy();
+  expect(within(second).getByText("Succeeded after 3 failed attempts")).toBeTruthy();
+  expect(within(second).getByText("gpt-5.6")).toBeTruthy();
+  expect(within(second).queryByRole("button", { name: /Retry/ })).toBeNull();
+  expect(screen.getByText("2 sessions")).toBeTruthy();
+  expect(screen.getByText("1 organized")).toBeTruthy();
+  expect(screen.getByText("1 needs attention")).toBeTruthy();
 });

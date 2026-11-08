@@ -1,6 +1,7 @@
 //! Vlinx application root: title bar, project/terminal/info columns, and status bar.
 
 import { lazy, Suspense, useEffect } from "react";
+import { ClipboardNotice } from "./components/ClipboardNotice";
 import { GitbashDownloadBanner } from "./components/GitbashDownloadBanner";
 import { ErrorLogModal } from "./components/ErrorLogModal";
 import { Splitter } from "./components/Splitter";
@@ -12,6 +13,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotifications } from "./hooks/useNotifications";
 import { CenterPane } from "./layout/CenterPane/CenterPane";
 import { LeftSidebar } from "./layout/LeftSidebar/LeftSidebar";
+import { SidebarRail } from "./layout/LeftSidebar/SidebarRail";
 import { RightPanel } from "./layout/RightPanel/RightPanel";
 import { StatusBar } from "./layout/StatusBar/StatusBar";
 import { TitleBar } from "./layout/TitleBar/TitleBar";
@@ -28,6 +30,8 @@ import {
   refreshSettingsFromBackend,
   startSettingsWatch,
 } from "./store/settingsWatch";
+import { isClaudeArtifactUrl } from "./ipc/browserUrl";
+import { safeError } from "./ipc/diagnosticSafety";
 import { diagnosticEvent, isTauri } from "./ipc/transport";
 import { startSpawnRecovery } from "./ipc/spawnRecovery";
 import { isShareSurface } from "./ipc/shareBase";
@@ -45,6 +49,7 @@ import { useTermStore } from "./store/termStore";
 import { isArtifactPath, noteArtifactWriter, openBesideSession } from "./layout/CenterPane/doc/artifact/artifactWriters";
 import { startUsageSync } from "./store/usageSync";
 import { watchSystemTheme } from "./theme";
+import { memoryRouteHidesRightPanel, useMemoryLocation } from "./layout/Memory/navigation";
 
 // Full-screen surfaces driven entirely by query parameters. Each renders null until its parameter is
 // present, so importing them on demand keeps their code and dependencies out of the entry chunk.
@@ -96,6 +101,7 @@ function NotificationsManager() {
 function App() {
   const leftCollapsed = useTermStore((s) => s.leftCollapsed);
   const rightCollapsed = useTermStore((s) => s.rightCollapsed);
+  const noRightPanel = memoryRouteHidesRightPanel(useMemoryLocation());
   const resizeLeft = useTermStore((s) => s.resizeLeft);
   const resizeRight = useTermStore((s) => s.resizeRight);
   const loadTree = useTermStore((s) => s.loadTree);
@@ -178,15 +184,20 @@ function App() {
     const unlistenView = onViewRequest((req) => {
       if (req.isUrl) {
         // The built-in browser requires a Tauri child or Electron WebContentsView, so only desktop opens it.
-        if (isTauri || env.isElectron) useTermStore.getState().openBrowserTab(req.path);
+        if (!isTauri && !env.isElectron) return;
+        if (isClaudeArtifactUrl(req.path)) {
+          void platform.opener.openExternal(req.path).catch((error: unknown) => {
+            console.warn("[view] failed to open Claude artifact link", safeError(error));
+          });
+          return;
+        }
+        useTermStore.getState().openBrowserTab(req.path);
         return;
       }
-      // An HTML page opened from a conversation shows beside it, the way the agent's own reply presents it;
-      // anywhere else it opens as a tab.
-      if (isArtifactPath(req.path)) {
-        noteArtifactWriter(req.path, req.sessionId);
-        if (openBesideSession(req.sessionId, req.path)) return;
-      }
+      // `vopen` always opens a tab. `vartifact` opens the file beside the calling conversation, and falls
+      // back to a tab when that conversation is not on screen (terminal session, hidden pane, phone).
+      if (isArtifactPath(req.path)) noteArtifactWriter(req.path, req.sessionId);
+      if (req.beside && openBesideSession(req.sessionId, req.path)) return;
       useTermStore.getState().openDocTab(req.path);
     });
     // Synchronize the tree across clients by debouncing backend `tree://changed` broadcasts. Bursts
@@ -261,6 +272,7 @@ function App() {
     <div className="app">
       <TitleBar />
       <div className="body">
+        <SidebarRail />
         {!leftCollapsed && (
           <>
             <LeftSidebar />
@@ -270,7 +282,7 @@ function App() {
 
         <CenterPane />
 
-        {!rightCollapsed && !isShareSurface && (
+        {!rightCollapsed && !noRightPanel && !isShareSurface && (
           <>
             <Splitter onDrag={resizeRight} />
             <RightPanel />
@@ -321,6 +333,7 @@ function App() {
       <NotificationsManager />
       {!isShareSurface && <ExportProgressDialog />}
       <GitbashDownloadBanner />
+      <ClipboardNotice />
     </div>
   );
 }

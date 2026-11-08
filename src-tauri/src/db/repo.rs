@@ -8,6 +8,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use uuid::Uuid;
 
+use super::system_collections;
+
 use crate::models::{
     AgentPreset, Group, NodeKind, Project, Session, SessionKind, Tree, AGENT_PRESET_ICON_MAX_BYTES,
 };
@@ -174,21 +176,22 @@ pub fn import_project(conn: &Connection, root_path: &str) -> Result<Project, Str
         .unwrap_or("project")
         .to_string();
 
+    let id = new_id();
     let project = Project {
-        id: new_id(),
+        collection_id: system_collections::default_parent(conn, &id, None)?.map(str::to_string),
+        id,
         name,
         root_path: normalize_windows_verbatim_path(canonical.to_string_lossy().into_owned()),
         color: None,
         sort_order: now_millis(),
         collapsed: false,
         mark: None,
-        collection_id: None,
         created_at: now_secs(),
     };
 
     conn.execute(
-        "INSERT INTO projects (id, name, root_path, color, sort_order, collapsed, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)",
+        "INSERT INTO projects (id, name, root_path, color, sort_order, collapsed, created_at, collection_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7)",
         params![
             project.id,
             project.name,
@@ -196,6 +199,7 @@ pub fn import_project(conn: &Connection, root_path: &str) -> Result<Project, Str
             project.color,
             project.sort_order,
             project.created_at,
+            project.collection_id,
         ],
     )
     .map_err(|e| format!("Failed to write project: {e}"))?;
@@ -216,21 +220,22 @@ pub fn create_virtual_project(conn: &Connection, name: &str) -> Result<Project, 
     if collection_name_taken(conn, trimmed, None)? {
         return Err(DUPLICATE_COLLECTION_NAME.to_string());
     }
+    let id = new_id();
     let project = Project {
-        id: new_id(),
+        collection_id: system_collections::default_parent(conn, &id, None)?.map(str::to_string),
+        id,
         name: trimmed.to_string(),
         root_path: String::new(),
         color: None,
         sort_order: now_millis(),
         collapsed: false,
         mark: None,
-        collection_id: None,
         created_at: now_secs(),
     };
 
     conn.execute(
-        "INSERT INTO projects (id, name, root_path, color, sort_order, collapsed, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6)",
+        "INSERT INTO projects (id, name, root_path, color, sort_order, collapsed, created_at, collection_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, ?7)",
         params![
             project.id,
             project.name,
@@ -238,6 +243,7 @@ pub fn create_virtual_project(conn: &Connection, name: &str) -> Result<Project, 
             project.color,
             project.sort_order,
             project.created_at,
+            project.collection_id,
         ],
     )
     .map_err(|e| format!("Failed to write project: {e}"))?;
@@ -1684,6 +1690,7 @@ pub fn rename_node(conn: &Connection, kind: NodeKind, id: &str, name: &str) -> R
     let name = name.trim();
     if name.is_empty() { return Err("Name must not be empty".into()); }
     if matches!(kind, NodeKind::Project) {
+        system_collections::guard(id)?;
         let is_collection = conn
             .query_row("SELECT root_path = '' FROM projects WHERE id = ?1", params![id], |row| row.get::<_, bool>(0))
             .optional()
@@ -1791,14 +1798,22 @@ pub fn delete_node(conn: &Connection, kind: NodeKind, id: &str) -> Result<Vec<St
         NodeKind::Session => delete_session_node(conn, id),
         NodeKind::Group => delete_group_node(conn, id),
         NodeKind::Project => {
+            system_collections::guard(id)?;
             let tx = conn.unchecked_transaction().map_err(|e| format!("Failed to begin project deletion: {e}"))?;
-            tx.execute("UPDATE projects SET collection_id = NULL WHERE collection_id = ?1", params![id])
-                .map_err(|e| format!("Failed to release collection projects: {e}"))?;
-            let deleted = delete_project_node(&tx, id)?;
+            let deleted = release_and_delete_project(&tx, id)?;
             tx.commit().map_err(|e| format!("Failed to commit project deletion: {e}"))?;
             Ok(deleted)
         },
     }
+}
+
+/// Return a project's member projects to their default parent, then delete it per [`delete_node`].
+fn release_and_delete_project(conn: &Connection, id: &str) -> Result<Vec<String>, String> {
+    // Members go back to Projects when it exists, so nothing but the fixed collections sits at the top.
+    let parent = system_collections::projects_collection(conn)?;
+    conn.execute("UPDATE projects SET collection_id = ?2 WHERE collection_id = ?1", params![id, parent])
+        .map_err(|e| format!("Failed to release collection projects: {e}"))?;
+    delete_project_node(conn, id)
 }
 
 /// Physically delete sessions by generated IN placeholders; empty input is a no-op.
@@ -2390,6 +2405,9 @@ pub fn set_project_collection(
 }
 
 fn apply_project_collection(conn: &Connection, project_id: &str, collection_id: Option<&str>) -> Result<(), String> {
+    system_collections::guard(project_id)?;
+    system_collections::guard_destination(conn, collection_id)?;
+    let collection_id = system_collections::default_parent(conn, project_id, collection_id)?;
     let source = conn.query_row("SELECT 1 FROM projects WHERE id = ?1 AND deleted_at IS NULL",
         params![project_id], |_| Ok(())).optional().map_err(|e| format!("Failed to read project: {e}"))?;
     if source.is_none() { return Err(format!("Project not found: {project_id}")); }
@@ -2606,6 +2624,35 @@ pub fn archive_group(conn: &Connection, group_id: &str) -> Result<(), String> {
     }
     // Delete the group into a tombstone when archives exist; an empty group is removed physically.
     delete_group_node(conn, group_id)?;
+    Ok(())
+}
+
+/// Archive a user collection the way [`archive_group`] archives a group: archive every session in it,
+/// return member projects to their default parent as deletion does, then delete the collection. Because
+/// it now contains archives, deletion turns it into a hidden tombstone that restoring any session revives.
+///
+/// A collection without sessions contains nothing restorable and is deleted permanently. Fixed
+/// collections and folder projects cannot be archived.
+pub fn archive_collection(conn: &Connection, id: &str) -> Result<(), String> {
+    system_collections::guard(id)?;
+    let tx = conn.unchecked_transaction().map_err(|e| format!("Failed to begin collection archive: {e}"))?;
+    let virtual_project: Option<bool> = tx
+        .query_row("SELECT root_path = '' FROM projects WHERE id = ?1 AND deleted_at IS NULL", params![id], |r| r.get(0))
+        .optional()
+        .map_err(|e| format!("Failed to read collection: {e}"))?;
+    match virtual_project {
+        None => return Err("Collection not found".into()),
+        Some(false) => return Err("Only collections can be archived".into()),
+        Some(true) => {}
+    }
+    // Preserve original archive timestamps on sessions already archived.
+    tx.execute(
+        "UPDATE sessions SET archived_at = ?1 WHERE archived_at IS NULL AND project_id = ?2",
+        params![now_secs(), id],
+    )
+    .map_err(|e| format!("Failed to archive collection sessions: {e}"))?;
+    release_and_delete_project(&tx, id)?;
+    tx.commit().map_err(|e| format!("Failed to commit collection archive: {e}"))?;
     Ok(())
 }
 
@@ -4029,6 +4076,34 @@ mod tests {
         assert_eq!(r.group_id.as_deref(), Some(g.id.as_str()), "the session returns to its original group");
         assert_eq!(list_archived(&conn).unwrap().len(), 1, "the other one is still archived");
         let _ = s2;
+    }
+
+    /// Archiving a collection archives its sessions, releases member projects, and tombstones the
+    /// collection; restoring one session revives it. Folder projects and fixed collections are refused.
+    #[test]
+    fn archive_collection_archives_sessions_and_tombstones_collection() {
+        let conn = mem_conn();
+        let collection = create_virtual_project(&conn, "Research").unwrap();
+        let member = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        set_project_collection(&conn, &member.id, Some(&collection.id)).unwrap();
+        let g = create_group(&conn, &collection.id, None, "group").unwrap();
+        let s1 = create_session(&conn, &collection.id, Some(&g.id), "session 1", SessionKind::Claude, None, None, None, None, None)
+            .unwrap();
+        create_session(&conn, &collection.id, None, "session 2", SessionKind::Terminal, None, None, None, None, None).unwrap();
+
+        assert!(archive_collection(&conn, &member.id).is_err(), "folder projects cannot be archived");
+        archive_collection(&conn, &collection.id).unwrap();
+        let tree = list_tree(&conn).unwrap();
+        assert!(tree.projects.iter().all(|p| p.id != collection.id), "the collection is hidden as a tombstone");
+        assert!(tree.groups.is_empty() && tree.sessions.is_empty());
+        assert!(tree.projects.iter().any(|p| p.id == member.id && p.collection_id.is_none()), "member projects are released");
+        assert_eq!(list_archived(&conn).unwrap().len(), 2);
+
+        set_archived(&conn, &s1.id, false).unwrap();
+        let tree = list_tree(&conn).unwrap();
+        assert!(tree.projects.iter().any(|p| p.id == collection.id), "the collection is restored");
+        assert_eq!(tree.groups.len(), 1, "the session's group is restored");
+        assert_eq!(list_archived(&conn).unwrap().len(), 1, "the other session is still archived");
     }
 
     /// Archiving an empty group becomes permanent deletion because nothing is restorable.

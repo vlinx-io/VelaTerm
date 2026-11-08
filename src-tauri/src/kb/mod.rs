@@ -280,7 +280,7 @@ pub fn dispatch(app: &AppCtx, cmd: &str, args: &Value) -> Result<Value> {
 fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value) -> Result<Value> {
     match cmd {
         "kb_overview" => Ok(
-            json!({"vaults":vaults(app)?,"limits":{"noteBytes":MAX_NOTE,"assetBytes":MAX_ASSET,"files":MAX_FILES,"chunkBytes":1024*1024},"defaultRoot":crate::host::home_dir().map(|p|p.join("Notes")).map(|p|p.to_string_lossy().into_owned())}),
+            json!({"vaults":vaults(app)?,"limits":{"noteBytes":MAX_NOTE,"assetBytes":MAX_ASSET,"files":MAX_FILES,"chunkBytes":1024*1024},"defaultRoot":crate::host::home_dir().map(|p|p.join("Notes")).map(|p|p.to_string_lossy().into_owned()),"home":crate::host::home_dir().map(|p|p.to_string_lossy().into_owned())}),
         ),
         "kb_register" => register(app, args),
         "kb_search" => files::search(app, args),

@@ -55,7 +55,8 @@ export function DeferredBody({ row }: { row: ChatRow }) {
     return () => window.removeEventListener("popstate",update);
   },[row.id]);
   if (!row.bodyAvailable || !hasBoundedChatDetails(row)) return null;
-  return <div className="sv-deferred">
+  // A message or thought keeps the conversation's text face when read in full; tool details stay monospace.
+  return <div className="sv-deferred sv-deferred-prose">
     <a className="vlx-btn" href={routeUrl(row,"",0)} onClick={event => {
       if (event.button!==0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault(); window.history.pushState(null,"",event.currentTarget.href); window.dispatchEvent(new PopStateEvent("popstate"));

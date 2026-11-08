@@ -1,4 +1,4 @@
-//! The conversation side of artifact previews: `vopen page.html` from this session opens the side panel,
+//! The conversation side of artifact previews: `vartifact page.html` from this session opens the side panel,
 //! and "Send to session" puts text in the composer without sending it.
 
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -60,6 +60,21 @@ describe("artifact panel beside a conversation", () => {
     expect(frame.getAttribute("sandbox")).toBe("allow-scripts allow-forms allow-modals");
     expect(frame.src).toContain("/g1/index.html");
     expect(vi.mocked(invoke).mock.calls.find(([command]) => command === "artifact_grant")?.[1]).toMatchObject({ path: PAGE, net: false });
+  });
+
+  it("opens other files beside it in the document view, and closing the panel drops the document", async () => {
+    await mountPane();
+    let taken = false;
+    await act(async () => { taken = openBesideSession("s", "/p/site/notes.md"); });
+    expect(taken).toBe(true);
+    await waitFor(() => expect(document.querySelector(".dock-doc-body[data-dock-doc-id]")).toBeTruthy());
+    const docs = Object.values(useTermStore.getState().dockDocs);
+    expect(docs).toHaveLength(1);
+    expect(docs[0]).toMatchObject({ path: "/p/site/notes.md", kind: "markdown" });
+    expect(useTermStore.getState().openTabs).not.toContain(docs[0].id);
+    await act(async () => screen.getByLabelText("Close preview").click());
+    await waitFor(() => expect(document.querySelector(".artifact-dock")).toBeNull());
+    expect(useTermStore.getState().dockDocs).toEqual({});
   });
 
   it("leaves other sessions' pages and hidden panes to open as tabs", async () => {

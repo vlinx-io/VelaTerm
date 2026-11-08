@@ -2,22 +2,22 @@
 
 Created: 2026-09-10
 
-Updated: 2026-09-25 10:21
+Updated: 2026-11-06 10:32
 
-A local knowledge base is an ordinary folder of Markdown files that you write and organize in VelaTerm. Notes and attachments stay in that folder, so you can keep editing them with other editors. Some menu items call a local knowledge base a "notebook"; both words refer to the same folder.
+A local knowledge base is an ordinary folder of Markdown files that you write and organize in VelaTerm. Notes and attachments stay in that folder, so you can keep editing them with other editors.
 
 The built-in "Session Knowledge Base" sits next to your local knowledge bases. It holds knowledge that agents organize from your sessions and keeps its own entries, sources and revision history; see [Session Knowledge Base](global-memory_20260905_2027.md).
 
 ## Opening the knowledge base
 
-Click the knowledge icon in the right panel (tooltip "Knowledge Base"). A "Knowledge Base" tab opens in the center with the home page:
+Click the "Knowledge Base" button in the activity bar on the far left. A "Knowledge Base" tab opens in the center with the home page:
 
 - a search box ("Search session knowledge and local notes…", see [Searching](#searching));
-- the "Session Knowledge Base";
-- your "Local knowledge bases";
+- cards for the "Session Knowledge Base", your "Local knowledge bases" and "Archived Sessions", with their counts, and how many sessions need attention in "Processing history". A card explains itself only while it has nothing to show;
+- the "Recently updated" list of entries and notes, with where each one lives;
 - the "Open knowledge base" and "Create knowledge base" buttons.
 
-The right panel shows a tree with three roots: "Session Knowledge Base", "Archived Sessions" and "Local knowledge bases". Click an arrow to expand a folder in place; several knowledge bases can be expanded at once. Click a folder name to show its contents, and click a note to open it. The "Knowledge bases" link at the top of the tree returns to the home page, and the "Up one level" button in a page header goes to the parent page without leaving the knowledge base.
+The left sidebar shows "Overview" and three groups: "Session Knowledge Base" with "Processing history", "Local knowledge bases", and "Sources" with "Archived Sessions". Click an arrow to expand a folder in place; several knowledge bases can be expanded at once. Click a folder name to show its contents, and click a note to open it. "Overview" returns to the home page, and the "Up one level" button in a page bar goes to the parent page without leaving the knowledge base.
 
 Notes open in ordinary document tabs, with the same editing, saving, search and PDF export as any other Markdown file (see [Document & Browser Tabs](document-and-browser-tabs_20260709_2041.md)). The "Knowledge Base" tab stays in the tab bar so that you can return to where you were.
 
@@ -26,7 +26,7 @@ Notes open in ordinary document tabs, with the same editing, saving, search and 
 - **Open:** click "Open knowledge base" and choose a folder. The desktop app shows the system folder picker; a browser client shows a folder browser for the connected computer. An existing Obsidian vault can be opened directly: files stay where they are, and hidden folders such as `.obsidian` are neither indexed nor changed.
 - **Create:** click "Create knowledge base", enter a "Name", choose a "Folder" (or "Browse"; the suggestion is `~/Notes`), and confirm. VelaTerm creates the folder and opens it. The parent folder must exist, and a folder with the same name must not; otherwise VelaTerm shows "The destination already exists. Choose another name or folder." To use an existing folder, choose "Open knowledge base" instead.
 - **Rename:** right-click a knowledge base in the tree and choose "Rename". This renames the folder on disk.
-- **Close:** click "Close notebook" in the knowledge base toolbar, or right-click it in the tree. Closing removes the folder from the list; its files remain on disk. When you open the same folder again, its trash and import history are still there.
+- **Close:** open the "More actions" menu in the knowledge base page bar and click "Close knowledge base", or right-click it in the tree. Closing removes the folder from the list; its files remain on disk. When you open the same folder again, its trash and import history are still there.
 
 "Local" means the computer that runs the VelaTerm backend you are connected to. In a browser client, "Open knowledge base" browses that computer's folders, and importing uploads the files you choose in the browser to that computer.
 
@@ -46,7 +46,7 @@ One import can contain up to 5,000 files (hidden files that are skipped count to
 
 ## Writing and organizing notes
 
-A knowledge base page has the views "Recent notes", "Trash" and "Import history", a "New note" button, and toolbar buttons for "New folder", "Import" and "Close notebook". The note list can be filtered by tag ("All tags") and sorted by "Recently updated" or "Title".
+A knowledge base page has the views "Recent notes", "Favorites", "Trash" and "Import history", a "New note" button, buttons for "New folder" and "Import", and a "More actions" menu with "Close knowledge base". The note list can be filtered by tag ("All tags") and sorted by "Recently updated" or "Title". "Layout" shows notes as "Cards" or a "List"; the choice is remembered and kept in the URL. Note cards and the home page leave a trailing date such as `_20260904_1346` out of the title, and each card shows its folder. Its summary starts at the first sentence, skipping `Created:` and `Updated:` lines at the top of the file.
 
 - While a knowledge base page is shown, ⌘N / Ctrl+N creates a "New note", ⌘O / Ctrl+O opens "Quick open" (find a note by its path), and ⌘⇧F / Ctrl+Shift+F moves to the "Search notes…" box.
 - To rename a note, right-click it in the tree and choose "Rename". To move it, drag it onto another folder of the same knowledge base. "Delete" moves it to the knowledge base's trash.
@@ -73,13 +73,13 @@ VelaTerm looks for exact matches first and falls back to approximate matches onl
 
 VelaTerm recognizes the common `[[note]]`, `[[folder/note|label]]` and `[[note#heading]]` forms, standard relative Markdown links, and `![[image.png]]`. It uses them to update links when notes move, to list "Related notes" in search results, and for the `vkb` commands below. In the editor, `[[…]]` links are shown as plain text. When several files share a name, a short link is resolved only if the target is unique; otherwise write the folder path.
 
-Files remain plain Markdown, and YAML front matter stays in the file; Source mode in the editor shows it exactly. Markdown files that are not UTF-8 or larger than 5 MiB are not listed as notes and are counted under "Skipped". A knowledge base can contain up to 50,000 files and folders; a larger folder cannot be opened and shows "The file or selection exceeds the notebook limits." Symbolic links are not followed.
+Files remain plain Markdown, and YAML front matter stays in the file; Source mode in the editor shows it exactly. Markdown files that are not UTF-8 or larger than 5 MiB are not listed as notes and are counted under "Skipped". A knowledge base can contain up to 50,000 files and folders; a larger folder cannot be opened and shows "The file or selection exceeds the knowledge base limits." Symbolic links are not followed.
 
 These features cover everyday work with local files, folders, Markdown, links and search. Obsidian plugins, themes, Canvas, block references, embedded notes and YAML aliases are not supported; the corresponding files are left unchanged. For the file model and link syntax, see Obsidian's documentation on [vaults](https://help.obsidian.md/vault), [internal links](https://help.obsidian.md/links) and [attachments](https://help.obsidian.md/attachments).
 
 ## Copying from the Session Knowledge Base and agent queries
 
-Open an entry in the Session Knowledge Base, choose "Copy to a local notebook", then pick the target knowledge base and file name. The copy is an independent Markdown note; the original entry, its source snapshots and its revision history stay where they are.
+Open an entry in the Session Knowledge Base, choose "Copy to a local knowledge base", then pick the target knowledge base and file name. The copy is an independent Markdown note; the original entry, its source snapshots and its revision history stay where they are.
 
 In a VelaTerm session, you or an agent can read registered local knowledge bases with `vkb`:
 

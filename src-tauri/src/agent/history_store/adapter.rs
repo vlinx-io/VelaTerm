@@ -106,8 +106,9 @@ pub fn preview(text:&str,bytes:usize) -> String {
 
 /// Subtrees no reader addresses field by field. Codex writes the whole conversation so far into
 /// every compaction record; indexing those copies again made a long session's index several times
-/// its own size. The record projection still carries the record for classification.
-const UNADDRESSED_SUBTREES:[&str;1]=["/payload/replacement_history"];
+/// its own size. The record projection still carries the record for classification. A reasoning
+/// item's `encrypted_content` is opaque ciphertext no view shows; it can be a third of a long session.
+const UNADDRESSED_SUBTREES:[&str;2]=["/payload/replacement_history","/payload/encrypted_content"];
 pub(super) fn addressed(path:&str) -> bool {!UNADDRESSED_SUBTREES.iter().any(|subtree|path.starts_with(subtree))}
 
 /// Codex records that only carry usage, settings or lifecycle state. Readers take them from the

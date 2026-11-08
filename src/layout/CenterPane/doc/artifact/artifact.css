@@ -96,6 +96,8 @@ button.artifact-chip:hover { background: var(--bg-hover); color: var(--text); }
 .artifact-dock-head { flex: none; display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 4px 8px 4px 12px; border-bottom: 1px solid var(--border); background: var(--bg-1); font-size: var(--ui-fs); }
 .artifact-dock-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--text); }
 .artifact-dock-head .grow { flex: 1; min-width: 0; }
+/* Body of a non-HTML file beside a conversation; the document view fills it. */
+.dock-doc-body { position: relative; flex: 1; min-height: 0; }
 .artifact-versions { flex: none; display: flex; gap: 2px; }
 .artifact-version { padding: 2px 7px; border-radius: 4px; color: var(--text-dim); font-size: 11px; font-variant-numeric: tabular-nums; }
 .artifact-version:hover { background: var(--bg-hover); color: var(--text); }

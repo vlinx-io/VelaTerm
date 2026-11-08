@@ -25,7 +25,6 @@ function openRegisteredVault(id: string) {
   // Filters and selected files belong to the previously selected knowledge base.
   [...url.searchParams.keys()].filter(key => key.startsWith("memory") && key !== "memory").forEach(key => url.searchParams.delete(key));
   url.searchParams.delete("kbAction");
-  url.searchParams.set("inspector", "knowledge");
   dismissVaultAction();
   memoryNavigate(url.href);
 }
@@ -40,7 +39,6 @@ export function KnowledgeVaultDialogs() {
     if (!["notebooks/open", "notebooks/new"].includes(route ?? "")) return;
     const url = new URL(memoryUrl("notebooks"));
     url.searchParams.set("kbAction", route!.split('/')[1]);
-    url.searchParams.set("inspector", "knowledge");
     memoryNavigate(url.href, true);
   }, [route]);
   if (action === "open") return <OpenVaultDialog />;

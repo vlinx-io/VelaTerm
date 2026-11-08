@@ -1,3 +1,33 @@
+## v0.3.0 — 2026-11-08
+
+- 🗂️ Sitzungen gibt es jetzt in drei Typen – Aufgabe, Projekt und Chat –, die Sie oben auf der Seite „Neue Sitzung“ auswählen, und die linke Seitenleiste ist in die festen Sammlungen Projekte, Terminals, Aufgaben und Chats gegliedert, wobei Terminals alle laufenden Terminals und die darin erkannten Agenten auflistet.
+- 🧭 Über eine neue Aktivitätsleiste am linken Rand wechseln Sie zwischen den Bereichen Projekte, Terminals, Aufgaben, Chats, Archivierte Sitzungen und Wissensbasis, und unten finden Sie Einstellungen, Konto, Feedback, Teilen und Spielecenter.
+- 📦 Sammlungen lassen sich über „Sammlung archivieren“ im Kontextmenü vollständig archivieren; wird eine ihrer Sitzungen wiederhergestellt, ist auch die Sammlung wieder da.
+- 🆕 Auf der Seite „Neue Sitzung“ wählen Sie Projekt, Agent, Modell, Denkaufwand und Berechtigungen in einer Einstellungskarte über dem Eingabefeld, und über die Projektliste können Sie ein Projekt erstellen, importieren oder klonen, ohne die Seite zu verlassen.
+- 🩺 Beim Öffnen eines Gesprächs wird geprüft, ob dessen Agent installiert und angemeldet ist: Falls nicht, erscheint ein Installationshinweis oder ein Anmeldebereich, und „Senden“ bleibt deaktiviert, bis der Agent bereit ist.
+- 🔧 Ein Agent gilt nur dann als installiert, wenn er tatsächlich läuft: Eine abgebrochene Installation oder ein fehlerhaftes Upgrade zeigt daher die Installationsanleitung an, Ein-Klick-Installationen gelten erst als abgeschlossen, wenn der Agent startet, und ein Update, nach dem der Agent nicht mehr startet, wird als unvollständig gemeldet.
+- 🪟 Der neue Befehl `vartifact <file|URL>` öffnet eine Datei in einem Bereich neben dem Gespräch, mit Live-Vorschau für HTML und bearbeitbaren Ansichten für Markdown, Bilder und Code, die Sie mit ⌘S speichern, während `vopen` jetzt immer einen Tab öffnet.
+- 💤 Abgeblendete Inline-Vorschläge im Terminal sind jetzt standardmäßig aus, die Vervollständigung steht wieder auf „Nur Tab“, und eine bestehende Einstellung „Inline + Tab“ wird mit diesem Update einmalig auf „Nur Tab“ umgestellt; in den Einstellungen lassen sich die Vorschläge wieder einschalten.
+- ⌨️ Im Modus „Inline + Tab“ können Sie über die neue Einstellung „Tab-Taste“ festlegen, dass Tab den abgeblendeten Vorschlag übernimmt; ein zweites Tab macht dies rückgängig und listet die Treffer auf, und die Titelleiste des Terminals zeigt, welche Tasten verfügbar sind, solange ein Vorschlag sichtbar ist.
+- 🎨 Beim Bearbeiten einer Zsh-Befehlszeile wird bereits eingegebener Text nicht mehr grau dargestellt, und die Beschreibung des Vorschlagsmodus in den Einstellungen entspricht dem ausgewählten Modus.
+- 📡 Die Tab-Vervollständigung über Remote-Verbindungen antwortet nach einem einzigen Hin- und Rückweg.
+- 💬 In ZCode-Sitzungen können Sie mit Option/Alt+Enter eine Ergänzung senden, die nach dem nächsten Werkzeugaufruf in den laufenden Durchgang einfließt.
+- 🔑 Ab ZCode 3.15 ist die Anmeldung per OAuth möglich, und ein erworbener GLM Coding Plan wird nicht mehr als fehlend oder aufgebraucht gemeldet.
+- 📥 Sitzungen aus Pi, OMP, ZCode und DeepSeek Harness lassen sich importieren, und der Dialog „Sitzungen importieren“ kann nach Agent filtern.
+- 🔤 Die Oberfläche verwendet durchgehend Inter, während Code, Werkzeugausgaben, Pfade und Terminals in JetBrains Mono bleiben, und die Einstellung für die Schriftart der Oberfläche entfällt.
+- 📚 Die Wissensbasis zeigt Einträge in einer zentrierten Spalte an, listet archivierte Sitzungen als Baum aus Projekten, Gruppen und übergeordneten Sitzungen mit einer Ansicht „Nach Datum“ auf, und die lokale Wissensbasis lässt sich zwischen Karten- und Listenansicht umschalten.
+- 🔔 Unter macOS und Windows holt ein Klick auf eine Benachrichtigung das zugehörige Fenster in den Vordergrund, sodass eine Benachrichtigung aus einem Remote-Fenster nicht mehr das Hauptfenster davor schiebt.
+- 📋 Unter macOS friert das Einfügen die App nicht mehr ein, wenn die Quell-App der Zwischenablage nicht mehr reagiert: VelaTerm bricht nach 5 Sekunden ab und weist Sie darauf hin.
+- 📝 „Alles auswählen“ im macOS-Menü oder im Kontextmenü des Quelltexteditors markiert die ganze Datei, sodass beim Kopieren keine Zeilen außerhalb des sichtbaren Bereichs mehr fehlen.
+- 📏 Das Eingabefeld wird nach dem Senden einer Nachricht nicht mehr erst größer und dann wieder kleiner.
+- 📂 Die Sammlungen Terminals, Aufgaben und Chats zeigen ihre Inhalte aufgeklappt an, unabhängig davon, was unter Projekte eingeklappt ist.
+- 🔄 Neue Sitzungen scheitern nicht mehr mit `cursor_expired` an der Synchronisierung, nachdem Sie das Gespräch einer Teilaufgabe geöffnet haben.
+- 🧯 Nach einer langen Verbindungsunterbrechung mit großem Rückstand bleibt das Gespräch beim Wiederverbinden nicht mehr mit deaktiviertem „Senden“ hängen.
+- 🪞 Remote-Verbindungen zu Windows-Hosts mit Cygwin oder Git Bash nutzen die dort bereits laufende VelaTerm-Desktop-App, sodass das Senden einer Nachricht nicht mehr fehlschlägt, während diese App die Sitzung ausführt.
+- ⚡ Das Indizieren langer Codex-Gespräche benötigt nur noch etwa halb so viel CPU-Zeit.
+- 🔗 Links zu Claude-Artefakten öffnen sich in Ihrem Standardbrowser.
+- 🗄️ Die Schaltfläche „Archivierte Sitzungen“ ist von der Tab-Leiste in die Aktivitätsleiste umgezogen.
+
 ## v0.2.15 — 2026-11-03
 
 - 🆕 Im neuen Tab „Neue Sitzung“ wählen Sie rund um ein zentriertes Eingabefeld Projekt, Agent, Modell, Denkaufwand, Berechtigungen, Ansicht und einen separaten Worktree aus und starten die Sitzung mit Ihrer ersten Aufgabe; Sie öffnen ihn über „Neue Sitzung…“ in den Menüs für neue Sitzungen, über die Stern-Schaltfläche in der Tab-Leiste oder über den leeren mittleren Bereich.

@@ -65,9 +65,12 @@ pub(super) struct ZcodeState {
     account: Option<Arc<crate::agent::zcode_account::Account>>,
 }
 
-/// The view's code for a signed-in account with no usable plan: `zcode_plan_unavailable:<platform>`, then
-/// the provider's own words when it gave any.
+/// The view's code for a signed-in account the platform says has no usable plan (1113):
+/// `zcode_plan_unavailable:<platform>:<the provider's own words>`.
 const PLAN_UNAVAILABLE: &str = "zcode_plan_unavailable";
+/// The view's code for a signed-in account ZCode lists no model for: `zcode_no_models:<platform>`. No plan
+/// of that platform was found in the sign-in, which is not the same as the platform refusing one.
+const NO_MODELS: &str = "zcode_no_models";
 
 /// Z.ai and BigModel answer 1113 when the account has no plan package or its quota is spent. Said as it
 /// is, it reads like a billing fault; the view names the platform signed in to and how to switch instead.
@@ -128,11 +131,23 @@ pub(super) fn handle_line(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess
             // Before each model call on a plan: the plan's API key, which the desktop app supplies too.
             "interaction/requestProviderRuntimeHeaders" => {
                 let account = proc.zcode.lock().unwrap().account.clone();
-                let answer = match account {
-                    Some(account) => account.runtime_headers(&params),
-                    None => json!({"headersApplied": false, "errorMessage": "Sign in to ZCode to use this plan."}),
-                };
-                let _ = proc.write(&wire::reply(&id, answer));
+                match account {
+                    // An OAuth sign-in exchanges its token with the platform first; this thread reads the
+                    // agent's output and must not wait on the network.
+                    Some(account) if account.runtime_headers_need_network(&params) => {
+                        let proc = proc.clone();
+                        std::thread::spawn(move || {
+                            let _ = proc.write(&wire::reply(&id, account.runtime_headers(&params)));
+                        });
+                    }
+                    Some(account) => {
+                        let _ = proc.write(&wire::reply(&id, account.runtime_headers(&params)));
+                    }
+                    None => {
+                        let refusal = json!({"headersApplied": false, "errorMessage": "Sign in to ZCode to use this plan."});
+                        let _ = proc.write(&wire::reply(&id, refusal));
+                    }
+                }
             }
             // Answered through the V4 interaction instead; see the module documentation.
             "interaction/requestPermission" | "interaction/requestUserInput" => {}
@@ -802,7 +817,7 @@ pub(super) fn dispatch(
         state.awaited_turn = None;
     }
     let (app, session_id, proc) = (app.clone(), session_id.to_string(), proc.clone());
-    let (text, images) = (text.to_string(), images.to_vec());
+    let (row_id, text, images) = (row_id.to_string(), text.to_string(), images.to_vec());
     std::thread::spawn(move || {
         if let Err(message) = send_turn(&app, &session_id, &proc, &cwd, &command_id, &text, &images) {
             let no_plan = {
@@ -814,12 +829,14 @@ pub(super) fn dispatch(
             } && selection(&proc).is_none();
             // No plan, ZCode lists no models, and its refusal only says the message named none ("Session model
             // must be provider-qualified"). Signed out, the account panel takes its place and signs the user
-            // in; signed in, the account holds no plan on that platform, which a sign-in prompt would misstate.
+            // in; signed in, no plan of that platform was found in the sign-in, which a sign-in prompt would
+            // misstate and which is not the platform refusing the plan either.
             let platform = no_plan.then(|| proc.zcode.lock().unwrap().account.clone()).flatten()
                 .and_then(|account| account.signed_in());
             if let Some(platform) = &platform {
-                emit(&app, &session_id, json!({"type":"error","message":format!("{PLAN_UNAVAILABLE}:{platform}")}));
+                emit(&app, &session_id, json!({"type":"error","message":format!("{NO_MODELS}:{platform}")}));
             } else if no_plan {
+                hand_back(&app, &session_id, &proc, &row_id, &text, &images);
                 super::auth::zcode::require(&app, &session_id, &proc);
             } else {
                 emit(&app, &session_id, json!({"type":"error","message":message}));
@@ -831,6 +848,19 @@ pub(super) fn dispatch(
         }
     });
     Ok(())
+}
+
+/// ZCode refused the message, so this timeline holds the only copy, and signing in replaces the process that
+/// owns it. The message goes back to the composer rather than staying on screen as if it had been delivered.
+fn hand_back(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, row_id: &str, text: &str, images: &[ChatImage]) {
+    {
+        let mut timeline = proc.timeline.lock().unwrap();
+        let kept = timeline.rows.iter().filter(|row| row.id() != row_id).cloned().collect();
+        timeline.replace_all(kept);
+    }
+    emit(app, session_id, reset_event(proc));
+    super::emit_queue(app, session_id, proc);
+    emit(app, session_id, json!({"type":"unsent","text":text,"images":images}));
 }
 
 fn send_turn(
@@ -895,6 +925,46 @@ fn send_turn(
     Ok(())
 }
 
+/// Steer one user message into the turn that is already running. `guide` delivery hands it to that turn
+/// at its next tool boundary, and ZCode itself queues it when the turn has none left to offer, so a
+/// refusal here belongs to this message alone: the turn keeps running either way. Runs on its own thread
+/// like `dispatch`, for the same round trips.
+pub(super) fn steer(
+    app: &AppCtx,
+    session_id: &str,
+    proc: &Arc<ChatProcess>,
+    row_id: &str,
+    text: &str,
+    images: &[ChatImage],
+) -> Result<(), String> {
+    let native = proc.agent_session_id.lock().unwrap().clone()
+        .ok_or("ZCode has not opened this conversation yet")?;
+    let command_id = uuid::Uuid::new_v4().to_string();
+    // The steered message comes back as a projected row; claiming the command keeps the bubble the
+    // engine drew, which holds the images, instead of drawing both.
+    proc.zcode.lock().unwrap().own_inputs.insert(command_id.clone(), row_id.to_string());
+    let (app, session_id, proc) = (app.clone(), session_id.to_string(), proc.clone());
+    let (text, images) = (text.to_string(), images.to_vec());
+    std::thread::spawn(move || {
+        let guide = (|| {
+            let attachments = images
+                .iter()
+                .enumerate()
+                .map(|(index, image)| upload(&proc, &native, index, image))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut payload = json!({"text": text, "requestedDelivery": "guide"});
+            if !attachments.is_empty() {
+                payload["attachments"] = json!(attachments);
+            }
+            send_command(&proc, Some(&native), "sendText", payload, &command_id)
+        })();
+        if let Err(message) = guide {
+            emit(&app, &session_id, json!({"type":"error","message":message}));
+        }
+    });
+    Ok(())
+}
+
 pub(super) fn stop(proc: &Arc<ChatProcess>) -> Result<(), String> {
     let native = proc.agent_session_id.lock().unwrap().clone().ok_or("ZCode has not opened this conversation yet")?;
     let id = proc.request_id("zcode_command");
@@ -918,4 +988,10 @@ pub(super) fn test_await(proc: &ChatProcess, command_id: &str, row_id: &str) {
     let mut state = proc.zcode.lock().unwrap();
     state.own_inputs.insert(command_id.to_string(), row_id.to_string());
     state.awaiting = Some(command_id.to_string());
+}
+
+/// Whether any command was claimed for a row, for tests checking sends without waiting for frames.
+#[cfg(test)]
+pub(super) fn test_claimed(proc: &ChatProcess, row_id: &str) -> bool {
+    proc.zcode.lock().unwrap().own_inputs.values().any(|row| row == row_id)
 }

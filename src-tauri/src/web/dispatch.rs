@@ -185,7 +185,7 @@ pub fn dispatch(
     let _context = crate::diagnostics::Context::enter(Some(&inherited));
     let mut span = crate::diagnostics::Span::new("rpc", serde_json::json!({"command":cmd,"clientId":source,"sessionId":args.get("sessionId").or_else(||args.get("id"))}));
     let result = dispatch_inner(app, cmd, args, source, origin);
-    if let Err(error)=&result { crate::diagnostics::record("WARN","rpc_failure",serde_json::json!({"command":cmd,"errorCode":crate::diagnostics::error_code(error)})); }
+    if let Err(error)=&result { crate::diagnostics::record("WARN","rpc_failure",serde_json::json!({"command":cmd,"errorCode":crate::diagnostics::error_code(error),"errorReason":crate::diagnostics::error_reason(error)})); }
     span.finish(&result);
     result
 }
@@ -249,6 +249,7 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             let settings = core::get_app_settings(app)?;
             Ok(serde_json::json!({
                 "mode": settings.get(crate::pty::completion::MODE_KEY),
+                "tabBehavior": settings.get(crate::pty::completion::TAB_BEHAVIOR_KEY),
                 "available": crate::pty::completion::AVAILABLE,
                 "modes": ["auto", "tab", "off"], "debounceMs": crate::pty::completion::DEBOUNCE_MS,
             }))
@@ -258,6 +259,7 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
                 &req_str(args, "sessionId")?, &req_str(args, "action")?, source,
                 args.get("revision").and_then(Value::as_u64),
                 args.get("index").and_then(Value::as_u64).and_then(|v| usize::try_from(v).ok()),
+                args.get("apply").and_then(Value::as_bool).unwrap_or(false),
             )?)
         }
         "pty_write" => {
@@ -338,7 +340,7 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         "agent_update_start" => to_value(crate::agent::update::start(app, &req_str(args, "sessionId")?)?),
         // Installation-path discovery performs filesystem I/O and an npm-prefix subprocess. Dispatch
         // already runs in desktop_call's blocking pool or a WebSocket worker, never the main thread.
-        "agent_locate_bin" => to_value(crate::agent::install::locate_installed_bin(&req_str(
+        "agent_locate_bin" => to_value(crate::agent::install::locate_working_bin(&req_str(
             args, "agent",
         )?)),
         // One-click install: the typed command leaves a marker in the data directory once it returns, and
@@ -601,6 +603,10 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             core::archive_group(app, &req_str(args, "id")?)?;
             Ok(Value::Null)
         }
+        "archive_collection" => {
+            core::archive_collection(app, &req_str(args, "id")?)?;
+            Ok(Value::Null)
+        }
         "list_archived_sessions" => to_value(core::list_archived_sessions(app)?),
         // Persist a browser node's latest URL. Electron renders with main-process WebContentsView, but
         // persistence belongs in the sidecar, so Electron and remote clients dispatch here without a
@@ -852,6 +858,7 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
                 personality.as_deref(),
             )?)
         }
+        "chat_agent_readiness" => to_value(core::chat_agent_readiness(app, &req_str(args, "sessionId")?)?),
         "chat_auth_start" => to_value(core::chat_auth_start(app, &req_str(args, "sessionId")?, args.get("provider").and_then(Value::as_str))?),
         "chat_auth_logout" => to_value(core::chat_auth_logout(app, &req_str(args, "sessionId")?)?),
         "chat_auth_submit" => to_value(core::chat_auth_submit(app, &req_str(args, "sessionId")?, &req_str(args, "code")?)?),

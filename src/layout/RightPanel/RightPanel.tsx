@@ -13,19 +13,14 @@ import { FilesTab } from "./FilesTab";
 import { GitTab } from "./git/GitTab";
 import { InfoTab } from "./InfoTab";
 import { KV, Section } from "./parts";
-import { MemoryIcon } from "../Memory/MemoryIcon";
 import { memoryNavigate, useMemoryLocation } from "../Memory/navigation";
-
-// The knowledge tab brings the Markdown engine, transcript viewer and search kit with it, so it loads on first use.
-const KnowledgeNavigation = lazy(() =>
-  import("../Notebook/KnowledgeNavigation").then((m) => ({ default: m.KnowledgeNavigation })),
-);
+// Brings the Markdown editor with it, so it loads only when a knowledge page first asks for it.
+const MemoryInfo = lazy(() => import("../Memory/MemoryInfo").then((module) => ({ default: module.MemoryInfo })));
 
 const INSPECTOR_TABS = [
   { id: "files" as const, label: "Files", Icon: Icons.file },
   { id: "info" as const, label: "Info", Icon: Icons.info },
   { id: "git" as const, label: "Git", Icon: Icons.git },
-  { id: "knowledge" as const, label: "", Icon: MemoryIcon },
 ];
 
 
@@ -55,13 +50,13 @@ export function RightPanel() {
   const setInspectorTab = useTermStore((s) => s.setInspectorTab);
   const search=useMemoryLocation();
   const initialInspectorTab = useRef(inspectorTab);
-  useEffect(()=>{const tab=new URLSearchParams(search).get("inspector") ?? initialInspectorTab.current;if((tab==="files"||tab==="info"||tab==="git"||tab==="knowledge")&&useTermStore.getState().inspectorTab!==tab)setInspectorTab(tab);},[search,setInspectorTab]);
+  useEffect(()=>{const tab=new URLSearchParams(search).get("inspector") ?? initialInspectorTab.current;if((tab==="files"||tab==="info"||tab==="git")&&useTermStore.getState().inspectorTab!==tab)setInspectorTab(tab);},[search,setInspectorTab]);
   // Settings and mirror sync can switch the tab without touching the URL. A stale inspector param would
   // make that tab's link equal to the current URL, so clicking it could never switch back. A missing param
   // is written too: otherwise the next unrelated navigation falls back to the initial tab above.
   const previousInspectorTab = useRef(inspectorTab);
   useEffect(()=>{if(previousInspectorTab.current===inspectorTab)return;previousInspectorTab.current=inspectorTab;const url=new URL(window.location.href);if(url.searchParams.get("inspector")!==inspectorTab){url.searchParams.set("inspector",inspectorTab);memoryNavigate(url.href,true,true);}},[inspectorTab]);
-  const tabUrl=(tab:string)=>{const url=new URL(window.location.href);url.searchParams.set("inspector",tab);if(tab==="knowledge"&&!url.searchParams.has("memory"))url.searchParams.set("memory","notebooks");return url.href;};
+  const tabUrl=(tab:string)=>{const url=new URL(window.location.href);url.searchParams.set("inspector",tab);return url.href;};
   // Switching only the inspector leaves the center page mounted, so an unsaved-draft guard has nothing to protect.
   const onlyInspectorChanges=(href:string)=>{const next=new URL(href),current=new URL(window.location.href);next.searchParams.delete("inspector");current.searchParams.delete("inspector");return next.href===current.href;};
   const sessions = useTermStore((s) => s.sessions);
@@ -112,6 +107,9 @@ export function RightPanel() {
     ({ session, project, group } = resolve(lastTargetRef.current));
   }
   const cwd = session?.cwd || project?.rootPath || null;
+  // An open knowledge entry or archived session takes over the Info tab while its page is showing.
+  const memoryRoute = new URLSearchParams(search).get("memory") ?? "";
+  const memoryInfoRoute = /^(entry|history|collection)\//.test(memoryRoute) ? memoryRoute : "";
 
   return (
     <aside className="col col-right" style={{ width, borderLeft: "none" }}>
@@ -119,8 +117,8 @@ export function RightPanel() {
         {INSPECTOR_TABS.map(({ id, label, Icon }) => (
           <a
             href={tabUrl(id)}
-            title={id==="knowledge"?t("memory.title"):label}
-            aria-label={id==="knowledge"?t("memory.title"):label}
+            title={label}
+            aria-label={label}
             aria-current={inspectorTab===id?"page":undefined}
             key={id}
             className={"insp-tab" + (inspectorTab === id ? " on" : "")}
@@ -131,10 +129,11 @@ export function RightPanel() {
         ))}
       </nav>
       <div className="insp-body" style={{ display: "flex", flexDirection: "column" }}>
-        {inspectorTab === "knowledge" && <Suspense fallback={null}><KnowledgeNavigation/></Suspense>}
         {inspectorTab === "files" && <FilesTab rootPath={cwd} rootName={project?.name ?? null} />}
         {inspectorTab === "info" &&
-          (session ? (
+          (memoryInfoRoute ? (
+            <Suspense fallback={null}><MemoryInfo route={memoryInfoRoute} /></Suspense>
+          ) : session ? (
             <InfoTab key={session.id} session={session} cwd={cwd} />
           ) : project ? (
             <ScopeInfo project={project} group={group} />

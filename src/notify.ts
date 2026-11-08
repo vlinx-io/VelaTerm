@@ -1,6 +1,6 @@
 //! System notification wrapper that requests permission on first use, then sends directly:
 //! - Main Tauri window: call local `native_notify` for clickable native notifications (macOS
-//!   UNUserNotificationCenter, Windows WinRT toasts), falling back to the official plugin.
+//!   UNUserNotificationCenter, Windows WinRT toasts, Linux freedesktop), falling back to the official plugin.
 //! - Remote window: unable to call application commands from its remote context, so emit
 //!   `vlx://remote-notify` for the local backend to relay; use the official plugin for permission checks.
 //! - Browser/mobile: use the Web Notification API.
@@ -25,13 +25,14 @@ const UA =
   "";
 const isMac = /Mac|iPhone|iPad/i.test(UA);
 const isWindows = !isMac && /Win/i.test(UA);
+const isLinux = !isMac && !isWindows && /Linux|X11/i.test(UA);
 
 /**
- * Whether a clickable native notification channel exists: macOS UNUserNotificationCenter, or Windows
- * WinRT toasts. Both carry the window label and session ID so a click navigates to that session, which
- * the official plugin cannot do. Linux has no native channel and always uses the plugin.
+ * Whether a clickable native notification channel exists: macOS UNUserNotificationCenter, Windows WinRT
+ * toasts, or the Linux freedesktop service. All carry the window label and session ID so a click navigates
+ * to that session, which the official plugin cannot do.
  */
-const hasNativeChannel = isMac || isWindows;
+const hasNativeChannel = isMac || isWindows || isLinux;
 
 let granted: boolean | null = null;
 
@@ -203,7 +204,7 @@ export async function notify(
       if (isRemoteWindow) {
         // Remote contexts cannot call native_notify, so emit `vlx://remote-notify` for the local
         // backend to relay. Include the window label in the notification identifier so clicking
-        // activates that window, plus session metadata. Linux has no native relay and uses the plugin.
+        // activates that window, plus session metadata.
         if (sessionId && hasNativeChannel) {
           try {
             const { emit } = await import("@tauri-apps/api/event");
@@ -231,8 +232,8 @@ export async function notify(
         return;
       }
       // In the main window, try the clickable native channel: UNUserNotificationCenter on macOS,
-      // WinRT toasts on Windows. Fall back on false or invocation failure, including unbundled or
-      // unsigned development builds. Linux goes directly through the official plugin.
+      // WinRT toasts on Windows, the freedesktop service on Linux. Fall back on false or invocation
+      // failure, including unbundled or unsigned development builds.
       if (sessionId && hasNativeChannel) {
         try {
           const native = await nativeInvoke<boolean>("native_notify", {

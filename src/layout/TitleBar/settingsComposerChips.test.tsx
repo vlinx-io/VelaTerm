@@ -19,6 +19,7 @@ import { pushSetting } from "../../ipc/settingsSync";
 import { COMPOSER_CHIP_IDS, loadSettings, SETTINGS_KEY } from "../../store/settings";
 import { useTermStore } from "../../store/termStore";
 import { SettingsModal } from "./SettingsModal";
+import { SidebarRail } from "../LeftSidebar/SidebarRail";
 import { TitleBar } from "./TitleBar";
 
 beforeEach(() => {
@@ -37,7 +38,8 @@ afterEach(() => {
 const row = (name: string) => within(screen.getByText(name).parentElement!);
 
 it("reveals Translation only for an Alt settings opening and hides it on the next normal opening", async () => {
-  await act(async () => render(<TitleBar />));
+  // The title bar mounts the settings dialog; the gear that opens it lives at the bottom of the activity bar.
+  await act(async () => render(<><TitleBar /><SidebarRail /></>));
   await act(async () => fireEvent.click(screen.getByTitle("Settings")));
   expect(screen.getByRole("dialog")).toBeTruthy();
   expect(screen.queryByRole("link", { name: "Translation" })).toBeNull();

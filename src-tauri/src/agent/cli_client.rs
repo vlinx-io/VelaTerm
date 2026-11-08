@@ -105,17 +105,26 @@ pub fn run_spawn(args: &[String]) -> ! {
     }
 }
 
-/// `vlx-term --view <file|URL>...` entry point: POST each item to `/view`; any failure returns code 1.
+/// `vlx-term --view [--beside] <file|URL>...` entry point: POST each item to `/view`; any failure returns code 1.
+///
+/// `vopen` opens every item as a tab. `vartifact` passes `--beside`: files open the same way but in the panel
+/// beside the calling conversation (or as a tab when that conversation is not on screen); URLs still open a
+/// browser tab, since the panel cannot host one.
 pub fn run_view(args: &[String]) -> ! {
-    let rest = &args[args.len().min(2)..];
+    let mut rest = &args[args.len().min(2)..];
+    let beside = rest.first().is_some_and(|a| a == "--beside");
+    if beside {
+        rest = &rest[1..];
+    }
+    let (cmd, usage) = if beside { ("vartifact", ARTIFACT_USAGE) } else { ("vopen", VIEW_USAGE) };
     if let Some(first) = rest.first() {
         if first == "-h" || first == "--help" {
-            println!("{VIEW_USAGE}");
+            println!("{usage}");
             std::process::exit(0);
         }
     }
     if rest.is_empty() {
-        eprintln!("{VIEW_USAGE}");
+        eprintln!("{usage}");
         std::process::exit(2);
     }
 
@@ -134,14 +143,14 @@ pub fn run_view(args: &[String]) -> ! {
 
     let mut exit = 0;
     for f in rest {
-        let body = build_view_body(&sid, f, &cwd);
+        let body = build_view_body(&sid, f, &cwd, beside);
         match post_json(&endpoint, &body) {
             Some(code) if (200..300).contains(&code) => {
-                println!("opened in VelaTerm: {f}");
+                println!("opened by VelaTerm: {f}");
             }
             _ => {
                 // `/view` validation returns 404 for missing/nonregular files; connection failure returns None.
-                eprintln!("vopen: open failed (file missing or not a regular file): {f}");
+                eprintln!("{cmd}: open failed (file missing or not a regular file): {f}");
                 exit = 1;
             }
         }
@@ -167,7 +176,12 @@ const SPAWN_USAGE: &str =
     --effort <level>  reasoning effort for agents that offer one, such as low, medium, or high";
 const VIEW_USAGE: &str = "usage: vopen <file|url>...   (relative paths resolve against the current dir; opens multiple at once)\n\
     opens by type: markdown editor / image viewer / code editor (syntax highlight)\n\
-    http/https urls open in an in-app browser tab (desktop only)";
+    html pages open as a live preview tab; use vartifact to open a file beside the conversation instead\n\
+    http/https urls open in an in-app browser tab (desktop only); Claude artifact links open in the system browser";
+const ARTIFACT_USAGE: &str = "usage: vartifact <file|url>...   (relative paths resolve against the current dir)\n\
+    like vopen, but files open in the panel beside this conversation instead of a tab\n\
+    html pages show a live preview there; markdown, images and code open in the same views as vopen\n\
+    when the conversation is not on screen (terminal session, hidden pane, phone) files open as tabs; urls always open a browser tab";
 
 /// Read the three session environment variables and return a user-facing error if any is missing.
 fn session_env() -> Result<(String, String, String), String> {
@@ -446,8 +460,8 @@ fn build_spawn_body(sid: &str, args: &SpawnArgs, cwd: &str) -> String {
 }
 
 /// Build the `/view` JSON body.
-fn build_view_body(sid: &str, path: &str, cwd: &str) -> String {
-    serde_json::json!({ "sessionId": sid, "path": path, "cwd": cwd }).to_string()
+fn build_view_body(sid: &str, path: &str, cwd: &str, beside: bool) -> String {
+    serde_json::json!({ "sessionId": sid, "path": path, "cwd": cwd, "beside": beside }).to_string()
 }
 
 /// Send an HTTP/1.1 POST to the local hook service and return its status code, or None on connection
@@ -2750,10 +2764,14 @@ mod tests {
 
     #[test]
     fn build_view_body_shape() {
-        let body = build_view_body("s1", "notes.md", "/work/dir");
+        let body = build_view_body("s1", "notes.md", "/work/dir", false);
         let v: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(v["sessionId"], "s1");
         assert_eq!(v["path"], "notes.md");
         assert_eq!(v["cwd"], "/work/dir");
+        assert_eq!(v["beside"], false);
+        let v: serde_json::Value = serde_json::from_str(&build_view_body("s1", "a.html", "/w", true)).unwrap();
+        assert_eq!(v["beside"], true);
     }
+
 }

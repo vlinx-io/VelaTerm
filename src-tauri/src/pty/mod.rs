@@ -1,5 +1,6 @@
 //! PTY subsystem: pseudoterminal creation, I/O, resizing, and cleanup.
 
+pub mod agent_probe;
 pub mod manager;
 pub mod completion;
 pub mod monitor;

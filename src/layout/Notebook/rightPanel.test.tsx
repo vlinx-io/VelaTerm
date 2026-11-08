@@ -18,40 +18,39 @@ beforeEach(()=>{
 });
 afterEach(()=>{cleanup();useTermStore.setState({setInspectorTab:original});});
 
-it("keeps Info as the default and exposes four labeled icons",()=>{
+it("keeps Info as the default and exposes three labeled icons without a knowledge tab",()=>{
   localStorage.removeItem(SETTINGS_KEY);expect(loadSettings().inspectorTab).toBe("info");render(<RightPanel/>);
-  for(const name of ["Files","Info","Git","Knowledge Base"]){const link=screen.getByRole("link",{name});expect(link.textContent).toBe("");expect(link.getAttribute("title")).toBe(name);}
+  for(const name of ["Files","Info","Git"]){const link=screen.getByRole("link",{name});expect(link.textContent).toBe("");expect(link.getAttribute("title")).toBe(name);}
+  expect(screen.queryByRole("link",{name:"Knowledge Base"})).toBeNull();
+  expect(document.querySelectorAll(".insp-tab")).toHaveLength(3);
   expect(screen.getByRole("link",{name:"Info"}).getAttribute("aria-current")).toBe("page");
 });
 
-it("opens knowledge through its right tab URL and keeps the directory in that panel",async()=>{
-  render(<RightPanel/>);fireEvent.click(screen.getByRole("link",{name:"Knowledge Base"}));
-  await screen.findByRole("link",{name:"Personal"});expect(new URLSearchParams(location.search).get("inspector")).toBe("knowledge");
-  expect(new URLSearchParams(location.search).get("memory")).toBe("notebooks");
-  expect(screen.getByRole("link",{name:"Session Knowledge Base"})).toBeTruthy();
-  expect(screen.getByRole("button",{name:"Open knowledge base"})).toBeTruthy();
-  fireEvent.click(screen.getByRole("link",{name:"Personal"}));
-  await screen.findByRole("button",{name:"Hello"});expect(document.querySelector(".col-right .nb-file-tree")).not.toBeNull();
-  fireEvent.click(screen.getByRole("link",{name:"Info"}));
-  await waitFor(()=>expect(useTermStore.getState().inspectorTab).toBe("info"));
-  expect(new URLSearchParams(location.search).get("inspector")).toBe("info");
-  expect(new URLSearchParams(location.search).get("memory")).toBe("notebook/local");
+it("opens Info for a saved knowledge tab from an older version",()=>{
+  localStorage.setItem(SETTINGS_KEY,JSON.stringify({inspectorTab:"knowledge"}));
+  try { expect(loadSettings().inspectorTab).toBe("info"); } finally { localStorage.removeItem(SETTINGS_KEY); }
+});
+
+it("ignores an old knowledge inspector URL",()=>{
+  window.history.replaceState(null,"","/?inspector=knowledge");render(<RightPanel/>);
+  expect(useTermStore.getState().inspectorTab).toBe("info");
+  expect(screen.getByRole("link",{name:"Info"}).getAttribute("aria-current")).toBe("page");
 });
 
 it("lets a tab be reselected after settings sync switched away from the URL's tab",async()=>{
   window.history.replaceState(null,"","/?inspector=info");render(<RightPanel/>);
-  act(()=>useTermStore.setState({inspectorTab:"knowledge"}));
-  await waitFor(()=>expect(new URLSearchParams(location.search).get("inspector")).toBe("knowledge"));
+  act(()=>useTermStore.setState({inspectorTab:"git"}));
+  await waitFor(()=>expect(new URLSearchParams(location.search).get("inspector")).toBe("git"));
   fireEvent.click(screen.getByRole("link",{name:"Info"}));
   await waitFor(()=>expect(useTermStore.getState().inspectorTab).toBe("info"));
 });
 
 it("keeps an externally selected tab when an unrelated navigation follows",()=>{
   render(<RightPanel/>);
-  act(()=>useTermStore.setState({inspectorTab:"knowledge"}));
-  expect(new URLSearchParams(location.search).get("inspector")).toBe("knowledge");
+  act(()=>useTermStore.setState({inspectorTab:"git"}));
+  expect(new URLSearchParams(location.search).get("inspector")).toBe("git");
   act(()=>memoryNavigate(memoryUrl("notebooks")));
-  expect(useTermStore.getState().inspectorTab).toBe("knowledge");
+  expect(useTermStore.getState().inspectorTab).toBe("git");
 });
 
 it("switches tabs while an unsaved-draft guard blocks page navigation",()=>{

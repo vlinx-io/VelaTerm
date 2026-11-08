@@ -357,6 +357,7 @@ pub fn safe_fields(data: &Value) -> Value {
             "operation" => matches!(s,"copy"|"move"|"rename"|"trash"|"restore"|"purge"|"compress"|"extract"),
             "requestId" | "operationId" | "sessionId" | "jobId" | "entryId" | "parentSessionId" | "vaultId"
             | "tabId" => identity(s),
+            "errorReason" => plain_reason(s),
             "sha256" | "stderrSha256" => s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()),
             "status" => matches!(
                 s,
@@ -548,6 +549,23 @@ pub fn safe_fields(data: &Value) -> Value {
         }
     }
     Value::Object(out)
+}
+
+/// Fixed wording only: letters, spaces, `-`, `_` and `'`. Anything that could carry a path, an id, a number
+/// or quoted user content (slashes, digits, colons, dots, quotes) is rejected rather than redacted.
+fn plain_reason(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 120 && s.bytes().all(|b| b.is_ascii_alphabetic() || matches!(b, b' ' | b'-' | b'_' | b'\''))
+}
+
+/// The fixed explanation after a history code, e.g. which of the many `cursor_expired` checks failed.
+/// Details built from other errors (paths, OS messages) fail [`plain_reason`] and are left out.
+pub fn error_reason(error: &str) -> Option<String> {
+    let (code, detail) = error.split_once(':')?;
+    if error_code(error) != code {return None;}
+    if !matches!(code, "detail_unavailable" | "source_changed" | "source_missing" | "index_incomplete"
+        | "unsupported_record" | "cursor_expired" | "detail_requires_paging" | "index_busy") {return None;}
+    let detail = detail.trim();
+    plain_reason(detail).then(|| detail.to_owned())
 }
 
 pub fn error_code(error: &str) -> &'static str {
@@ -1252,6 +1270,19 @@ mod tests {
         assert_eq!(error_code("Rows mention detail_unavailable: elsewhere"), "operation_failed");
         let line = render("WARN", "rpc_failure", json!({"command":"chat_row","errorCode":error_code("detail_unavailable: history row is unavailable")}));
         assert!(line.contains("detail_unavailable"));
+    }
+    #[test]
+    fn history_failures_keep_only_fixed_reasons() {
+        let reason = error_reason("cursor_expired: history row is outside the current branch");
+        assert_eq!(reason.as_deref(), Some("history row is outside the current branch"));
+        let line = render("WARN", "rpc_failure", json!({"command":"chat_snapshot","errorCode":"cursor_expired","errorReason":reason}));
+        assert!(line.contains("outside the current branch"));
+        // Details built from other errors can carry paths or numbers and are dropped.
+        assert_eq!(error_reason("source_missing: /Users/someone/.claude/projects/x.jsonl not found"), None);
+        assert_eq!(error_reason("index_incomplete: os error 2"), None);
+        assert_eq!(error_reason("Session not found"), None);
+        let forged = render("WARN", "rpc_failure", json!({"errorReason":"C:\\Users\\someone"}));
+        assert!(!forged.contains("someone"));
     }
     #[test]
     fn filtered_metadata_survives_disk_roundtrip() {

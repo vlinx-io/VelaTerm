@@ -11,11 +11,10 @@
   /* Place CJK fallbacks (PingFang, Microsoft YaHei, Noto) before generic monospace. Common monospace
      fonts lack CJK glyphs; otherwise browsers fall through to bitmap-serif SimSun beside Latin text. */
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, "VlxSymbols", "Symbola", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", monospace;
-  /* Prose face for the one place this app shows written language rather than machine output: the agent
-     conversation. Everything else — paths, output, code, the chrome around it — stays monospace, so the
-     two faces mark the difference between what was said and what was run. System stack only: no webfont
-     is downloaded, and each platform's own text face already carries the CJK ranges named after it. */
-  --font-prose: -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  /* Interface face: menus, labels, buttons, lists and reading text. Inter has no CJK glyphs, so Chinese comes from the
+     platform fonts after it. Terminals, code, paths and hashes use --font-mono. */
+  --font-ui: "Inter Variable", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", "Segoe UI", system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-prose: var(--font-ui);
   --r-sm: 5px; --r-md: 8px; --r-lg: 12px;
   --pane-gap: 3px;
   /* accent (overridden by [data-accent] and set inline by App.jsx) */
@@ -29,7 +28,11 @@
   --ui-fs: 12.5px;
   --term-fs: 13px;
   /* Startup fallbacks; applyVisual supplies the independently persisted conversation settings. */
-  --chat-font: var(--font-mono);
+  --chat-font: var(--font-ui);
+  /* Code and tool output stay monospace at their natural width whatever face the text uses. */
+  --chat-code-font: var(--font-mono);
+  /* Inter reads cramped at small sizes without a little tracking. */
+  --chat-tracking: 0.2px;
   --chat-fs: 13.5px;
   --chat-line-height: 1.2;
   /* Startup fallback colors. theme.ts writes data-theme after React mounts; without initial --bg-0
@@ -115,7 +118,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
 body {
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
   background: var(--bg-0);
   color: var(--text);
   font-size: var(--ui-fs);
@@ -220,6 +223,8 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
 .col-head { height: 34px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 12px; border-bottom: 1px solid var(--border); }
 .col-head .title { font-size: 10.5px; letter-spacing: 1.2px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
 .col-left .col-head .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-left .col-head a.title { text-decoration: none; }
+.col-left .col-head a.title:hover { color: var(--accent); }
 .col-head .sp { flex: 1; }
 .icon-btn { width: 24px; height: 24px; display: grid; place-items: center; border-radius: var(--r-sm); color: var(--text-dim); }
 .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
@@ -244,13 +249,18 @@ svg { display: block; }
 /* Recursively split sidebar projections share node data while keeping search and filters pane-local. */
 .sidebar-tree-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .sidebar-tree-position { display: flex; min-width: 0; min-height: 0; overflow: visible; }
-.sidebar-tree-pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg-1); }
-.sidebar-tree-pane.split.active { box-shadow: inset 0 0 0 1px var(--accent-line); }
+.sidebar-tree-pane { position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg-1); }
+/* The active split pane gets a straight accent line along its top edge. A full inset frame was partly covered by the
+   opaque footer and doubled the sidebar's own left border. */
+.sidebar-tree-pane.split.active::before { content: ""; position: absolute; top: 0; left: 6px; right: 6px; height: 2px; border-radius: 1px; background: var(--accent); z-index: 2; pointer-events: none; }
 .sidebar-tree-search { display: flex; align-items: center; gap: 4px; padding: 4px 6px; }
 .sidebar-tree-search .box { flex: 1; min-width: 0; height: 24px; padding: 0 7px; gap: 6px; }
 .sidebar-tree-search input { font-size: 12px; }
 .sidebar-tree-close { flex: none; }
 .sidebar-tree-body { position: relative; flex: 1; min-height: 0; }
+/* A pane on the Knowledge section hosts the knowledge tree, which lays itself out as a column. */
+.sidebar-knowledge-body { display: flex; flex-direction: column; overflow: hidden; }
+.sidebar-knowledge-body .nb-navigation-search { margin: 6px 6px 4px; }
 .sidebar-tree-footer { height: 30px; flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 4px; padding: 3px 6px; border-top: 1px solid var(--border); background: var(--bg-1); }
 .sidebar-tree-footer .icon-btn { flex: none; }
 /* Keep the global clear-notifications action on the left; pane actions stay on the right. */
@@ -316,6 +326,40 @@ svg { display: block; }
 /* Display-only worktree level gathering sibling sessions that share a worktree. */
 .row.worktree .nm { color: var(--text-mid); }
 .row.collection .nm { font-weight: 700; color: var(--text-mid); letter-spacing: 0.2px; }
+/* Fixed sidebar collections: each type has its own icon color, and the runtime lists show how many are running. */
+.row.system .nm { color: var(--text); }
+.sys-collection-ic { display: inline-flex; }
+.sys-collection-ic.is-projects { color: var(--blue); }
+.sys-collection-ic.is-agents { color: var(--mag); }
+.sys-collection-ic.is-terminals { color: var(--green); }
+.sys-collection-ic.is-tasks { color: var(--yellow); }
+.sys-collection-ic.is-chat { color: var(--cyan); }
+.sys-collection-ic.is-knowledge { color: var(--mag); }
+.sys-collection-ic.is-archive { color: oklch(0.5 0.06 62); }
+[data-theme="dark"] .sys-collection-ic.is-archive { color: oklch(0.76 0.05 65); }
+.sidebar-rail-sep { width: 16px; height: 1px; flex: none; margin: 4px 0; background: var(--border-strong); }
+.row .live-count { flex: none; margin-left: auto; padding: 0 6px; font-size: 10.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+/* Activity bar left of the sidebar: one button per fixed section. The current one carries a straight accent line
+   on the bar's left edge, drawn apart from the rounded button so it never bends. */
+.sidebar-rail { flex: none; width: 36px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; background: var(--bg-1); border-right: 1px solid var(--border); }
+.sidebar-rail-btn { position: relative; width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--r-sm); }
+/* Idle section icons: light themes keep a faded section color; dark themes use the same neutral as the tool icons, because
+   tinted icons look off there. --blue is overridden for the project icon's marker, which strokes that token directly.
+   Hover and active show the full section color. */
+.sidebar-rail-btn .sys-collection-ic { transition: opacity .1s, color .1s; }
+[data-theme="light"] .sidebar-rail-btn:not(:hover, .active) .sys-collection-ic { opacity: 0.6; }
+[data-theme="dark"] .sidebar-rail-btn:not(:hover, .active) .sys-collection-ic { --blue: var(--tb-icon, var(--text-mid)); color: var(--tb-icon, var(--text-mid)); }
+.sidebar-rail-btn:hover { background: var(--bg-hover); }
+.sidebar-rail-btn.active, .sidebar-rail-btn.active:hover { background: var(--accent-soft); }
+.sidebar-rail-btn.active::before { content: ""; position: absolute; left: -4px; top: 6px; bottom: 6px; width: 2px; border-radius: 1px; background: var(--accent); }
+.sidebar-rail-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sidebar-rail-sp { flex: 1; }
+.sidebar-rail-tool { color: var(--tb-icon, var(--text-mid)); }
+.sidebar-rail-tool:hover { color: var(--tb-icon-hover, var(--text)); }
+.sidebar-rail-tool.on, .sidebar-rail-tool.account-on, .sidebar-rail-tool.account-on:hover { color: var(--accent); }
+.sidebar-rail-tool.account-on svg { filter: drop-shadow(0 0 4px color-mix(in oklch, var(--accent) 60%, transparent)); }
+.sidebar-rail-count { position: absolute; right: -2px; bottom: 0; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--bg-2); border: 1px solid var(--border); color: var(--text-dim); font-size: 9px; line-height: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+.sidebar-section-empty { padding: 16px 14px; display: flex; flex-direction: column; align-items: center; gap: 10px; font-size: 12px; color: var(--text-faint); text-align: center; line-height: 1.6; }
 .row.session .nm { font-weight: 400; }
 .row .meta { flex: none; min-width: 18px; justify-content: flex-end; color: var(--text-faint); font-size: 10px; opacity: 0; transition: opacity .1s; display: flex; gap: 2px; }
 .row:hover .meta { opacity: 1; }
@@ -364,6 +408,8 @@ svg { display: block; }
 .tab.drop-before::before { left: 0; }
 .tab.drop-after::before { right: 0; }
 .tab-add { width: 38px; display: grid; place-items: center; color: var(--text-dim); flex: none; border-right: 1px solid var(--border); }
+.tab-add.on { color: oklch(0.5 0.06 62); }
+[data-theme="dark"] .tab-add.on { color: oklch(0.76 0.05 65); }
 .tab-add:hover { background: var(--bg-hover); color: var(--text); }
 
 /* ============================ SPLIT PANES ========================== */
@@ -512,7 +558,7 @@ svg { display: block; }
 .transfer-bar > span { display: block; height: 100%; background: var(--accent); transition: width 0.15s linear; }
 
 .insp-section { padding: 12px 14px; border-bottom: 1px solid var(--border); }
-.insp-section h4 { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); font-weight: 600; margin-bottom: 10px; }
+.insp-section h4 { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); font-weight: 700; margin-bottom: 10px; }
 /* Section captions double as disclosure controls. The caption sits in a button so keyboard users get a
    real target, and the plus/minus button on the right makes the affordance visible without hovering.
    Collapsing leaves the header in place, so the section keeps its name and any header controls. */
@@ -526,12 +572,12 @@ svg { display: block; }
 .insp-section.collapsed > .insp-head { margin-bottom: 0; }
 /* Right-aligned qualifier in a section title (the agent name, the pid): reads as part of the caption,
    so it keeps the title's size and letter-spacing but drops the uppercasing that would mangle a name. */
-.insp-head-tag { margin-left: auto; font-size: 11px; text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.insp-head-tag { margin-left: auto; font-size: 11px; text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kv { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 11.5px; }
 /* Secondary value sharing a row with the primary one (uptime beside the start time). */
 .kv .v .kv-sub { margin-left: 7px; color: var(--text-dim); }
 .kv .v .kv-sub::before { content: "\00b7"; margin-right: 7px; color: var(--text-faint); }
-.kv .k { color: var(--text-dim); } .kv .v { color: var(--text); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv .k { color: var(--text-dim); font-weight: 500; } .kv .v { color: var(--text); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Dark only: full-brightness values outshine their dim keys and read as detached from them. */
 [data-theme="dark"] .kv .v { color: var(--text-dim); }
 .kv .v.accent { color: var(--accent); }
@@ -541,7 +587,7 @@ svg { display: block; }
 .insp-empty { font-size: 11.5px; color: var(--text-dim); padding: 2px 0; }
 /* Resources subgroup label: separates "this session" from "system" inside one section without the
    heavier rule and spacing of a second section header. */
-.res-sub { margin: 9px 0 3px; font-size: 9.5px; letter-spacing: 0.8px; text-transform: uppercase; color: var(--text-faint); }
+.res-sub { margin: 9px 0 3px; font-size: 9.5px; letter-spacing: 0.8px; text-transform: uppercase; color: var(--text-faint); font-weight: 600; }
 .kv + .res-sub { margin-top: 11px; }
 /* Inline meter for the system rows, sized so the number beside it still fits on one line. */
 /* Meter rows: a fixed key column aligns every bar, and the number keeps the right edge. */
@@ -568,7 +614,7 @@ svg { display: block; }
 .git-head { display: flex; align-items: center; gap: 7px; padding: 9px 14px; border-bottom: 1px solid var(--border); font-size: 11.5px; }
 .git-head .ic { color: var(--text-dim); display: grid; place-items: center; }
 .git-head .br { flex: 1; min-width: 0; color: var(--accent); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.git-head .sync { color: var(--text-dim); font-size: 10.5px; font-family: var(--font-mono); }
+.git-head .sync { color: var(--text-dim); font-size: 10.5px; font-family: var(--font-ui); }
 .git-pad { padding: 12px 14px; }
 .git-head .br:has(+ .up) { flex: 0 0 auto; max-width: 70%; }
 .git-head .up { flex: 1 100 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-size: 10.5px; font-family: var(--font-mono); }
@@ -576,7 +622,7 @@ svg { display: block; }
 .git-sync-row { display: flex; align-items: center; gap: 6px; }
 .git-sync-btn { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; font-size: 11px; }
 .git-sync-btn:disabled { opacity: 0.45; cursor: default; }
-.git-sync-btn .cnt { min-width: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-family: var(--font-mono); font-size: 10px; text-align: center; }
+.git-sync-btn .cnt { min-width: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-family: var(--font-ui); font-size: 10px; text-align: center; }
 .git-sync-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: 10.5px; }
 .git-sync-more { margin-left: auto; flex: none; width: 24px; height: 24px; display: grid; place-items: center; border-radius: var(--r-sm); color: var(--text-dim); }
 .git-sync-more:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
@@ -600,7 +646,7 @@ svg { display: block; }
 .git-pr-note { color: var(--text-dim); }
 .git-pr-note a { color: var(--accent); }
 .git-pr-body { resize: vertical; font-family: inherit; }
-.git-compare-counts { flex: none; color: var(--text-dim); font-family: var(--font-mono); font-size: 10.5px; }
+.git-compare-counts { flex: none; color: var(--text-dim); font-family: var(--font-ui); font-size: 10.5px; }
 .git-row.sel { background: var(--bg-active); }
 .git-row.sel:hover { background: var(--bg-active); }
 .git-row-main .tw { width: 12px; flex: none; display: grid; place-items: center; color: var(--text-faint); }
@@ -647,7 +693,7 @@ svg { display: block; }
 .git-sec-toggle:hover { background: var(--bg-hover); }
 .git-sec-toggle .tw { width: 14px; flex: none; display: grid; place-items: center; color: var(--text-faint); }
 .git-sec-toggle .ttl { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.git-sec-toggle .cnt { color: var(--text-dim); font-family: var(--font-mono); font-size: 10.5px; }
+.git-sec-toggle .cnt { color: var(--text-dim); font-family: var(--font-ui); font-size: 10.5px; }
 /* The group action stays hidden until the group is hovered, keeping the header line calm. */
 .git-sec-act { flex: none; opacity: 0; padding: 3px 6px; border-radius: var(--r-sm); color: var(--text-dim); font-size: 10.5px; white-space: nowrap; }
 .git-sec:hover .git-sec-act, .git-sec-act:focus-visible { opacity: 1; }
@@ -678,7 +724,7 @@ svg { display: block; }
    pointer tells you there is no viewer behind it. */
 .git-row-main:disabled { cursor: default; }
 .git-row-main:disabled:hover .nm { color: var(--text-mid); }
-.git-row-main .n { flex: none; font-size: 10px; font-family: var(--font-mono); }
+.git-row-main .n { flex: none; font-size: 10px; font-family: var(--font-ui); }
 .git-row-main .n .plus { color: var(--green); }
 .git-row-main .n .minus { color: var(--red); }
 .git-row-main .n.bin { color: var(--text-faint); }

@@ -24,6 +24,7 @@ import {
   requestEffectiveNotifyPermission,
   requestNotifyPermission,
 } from "../notify";
+import { ClipboardUnresponsiveError, reportClipboardUnresponsive } from "./clipboardStall";
 import { env } from "./env";
 import type {
   BadgeCapability,
@@ -117,9 +118,30 @@ const badge: BadgeCapability = {
   },
 };
 
+/**
+ * Local windows wait for the clipboard to become readable before touching it, so a stalled source fails this
+ * read instead of leaving a stuck read inside the app (see clipboard_gate.rs). Remote windows cannot call
+ * application commands; a rejected invoke means this check is unavailable, not that the clipboard is stuck.
+ */
+async function ensureClipboardResponsive(): Promise<void> {
+  if (!env.isTauri) return;
+  let ready = true;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    ready = await invoke<boolean>("clipboard_wait_ready");
+  } catch {
+    return;
+  }
+  if (!ready) {
+    reportClipboardUnresponsive();
+    throw new ClipboardUnresponsiveError();
+  }
+}
+
 const clipboard: ClipboardCapability = {
   writeText: copyText,
   async readText() {
+    await ensureClipboardResponsive();
     // Native main and remote windows read through the local plugin, symmetric with copyText. On
     // Windows this avoids WebView2's clipboard-read permission prompt because plugin IPC bypasses web
     // permissions. The main capability and runtime remote-window capability must allow read-text.
@@ -142,6 +164,7 @@ const clipboard: ClipboardCapability = {
   },
   async readImage() {
     if (!env.isTauri) return null;
+    await ensureClipboardResponsive();
     const { readImage } = await import("@tauri-apps/plugin-clipboard-manager");
     const image = await readImage();
     try {

@@ -21,7 +21,11 @@ use super::projection::{Checkpoint,Projector,Record};
 use super::source::{self,Segment};
 
 pub(super) fn digest(value:&[u8]) -> String {
-    Sha256::digest(value).iter().map(|byte|format!("{byte:02x}")).collect()
+    // A scan names every field this way; formatting each byte separately allocated per byte.
+    const HEX:&[u8;16]=b"0123456789abcdef";
+    let mut text=String::with_capacity(64);
+    for byte in Sha256::digest(value) {text.push(HEX[(byte>>4) as usize] as char);text.push(HEX[(byte&15) as usize] as char);}
+    text
 }
 
 /// How long an index nobody holds stays in memory.

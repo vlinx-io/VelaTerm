@@ -52,6 +52,8 @@ pub use vlx_core::{diagnostic_warn, diagnostics};
 mod native_menu;
 #[cfg(feature = "gui")]
 mod native_drop;
+#[cfg(feature = "gui")]
+mod clipboard_gate;
 // GUI-only watchdog reporting stalls of the platform event loop, which are what a frozen window actually is.
 #[cfg(feature = "gui")]
 mod stall;
@@ -78,6 +80,9 @@ mod notify_native;
 // GUI-only Windows WinRT toasts with foreground session-aware click navigation.
 #[cfg(all(feature = "gui", target_os = "windows"))]
 mod notify_win;
+// GUI-only Linux freedesktop notifications with session-aware click navigation.
+#[cfg(all(feature = "gui", target_os = "linux"))]
+mod notify_linux;
 // Windows self-update installed from VelaTerm's own data folder instead of the updater plugin's Temp folder.
 #[cfg(feature = "gui")]
 mod updater_win;
@@ -472,6 +477,12 @@ pub const GIT_COMMIT: &str = match option_env!("VLX_GIT_COMMIT") {
 /// Binary semver from Cargo.toml.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Hidden helper process for the paste gate: reads the clipboard and exits. See `clipboard_gate`.
+#[cfg(all(feature = "gui", target_os = "macos"))]
+pub fn run_clipboard_probe() {
+    clipboard_gate::run_probe();
+}
+
 /// Print stable version/commit output for --version/-V and exit without windows or services.
 ///
 /// SSH provisioning parses line one as `velaterm <semver>` and line two as `commit: <hash>` to decide
@@ -482,8 +493,8 @@ pub fn print_version() {
 }
 
 /// Send a session-aware native notification and return whether the platform handled it. macOS uses
-/// UNUserNotificationCenter, Windows uses WinRT toast, and other/unsupported builds return false for
-/// frontend plugin fallback.
+/// UNUserNotificationCenter, Windows uses WinRT toast, Linux uses the freedesktop service, and
+/// other/unsupported builds return false for frontend plugin fallback.
 #[cfg(feature = "gui")]
 #[tauri::command]
 fn native_notify(
@@ -516,7 +527,18 @@ fn native_notify(
             sound,
         )
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(target_os = "linux")]
+    {
+        notify_linux::send(
+            window.app_handle(),
+            window.label().to_string(),
+            session_id,
+            title,
+            body,
+            sound,
+        )
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         let _ = (window, session_id, title, body, sound);
         false
@@ -762,10 +784,15 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 // Omit native undo/redo so Cmd+Z/Cmd+Shift+Z reach CodeMirror/ProseMirror's JS histories;
                 // NSApplication would otherwise consume them while native WebView undo cannot control those
                 // editors. Keep cut/copy/paste/select-all because WebKit translates them into DOM events.
+                // Paste is a custom item so a stalled clipboard source cannot freeze the main thread; see
+                // clipboard_gate.
+                let paste_item = MenuItemBuilder::with_id("paste", "Paste")
+                    .accelerator("CmdOrCtrl+V")
+                    .build(app)?;
                 let edit_menu = SubmenuBuilder::new(app, "Edit")
                     .cut()
                     .copy()
-                    .paste()
+                    .item(&paste_item)
                     .select_all()
                     .build()?;
                 // Register terminal split accelerators with AppKit as well as the frontend keydown
@@ -804,6 +831,12 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                     use tauri_plugin_opener::OpenerExt;
                     let id = event.id().0.as_str();
                     match id {
+                        "paste" => {
+                            let window = app_handle
+                                .get_focused_window()
+                                .map(|window| window.label().to_string());
+                            clipboard_gate::request_paste(app_handle, window);
+                        }
                         // Forward custom application and terminal commands to the frontend.
                         "settings"
                         | "check-update"
@@ -912,6 +945,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             ssh_remote::set_data_dir(data_dir.clone());
             diagnostics::init(&data_dir, VERSION);
             let db = Db::open(&data_dir.join("vlx-term.db"))?;
+            db::system_collections::ensure(&db.conn.lock().unwrap())?;
 
             // When cleanup is enabled, remove pasted images older than 24h left by crashes. Normal exit
             // removes this process's files precisely; disabling the setting skips both paths.
@@ -1062,8 +1096,8 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             notify_native::install(app.handle().clone());
 
             // Remote contexts cannot call native_notify directly, so relay vlx://remote-notify through
-            // the backend with its window/session identity. Native macOS/Windows channels target that
-            // window on click; unsupported/failed delivery falls back to the official plugin.
+            // the backend with its window/session identity. Native channels target that window on click;
+            // unsupported/failed delivery falls back to the official plugin.
             {
                 let handle = app.handle().clone();
                 app.listen_any("vlx://remote-notify", move |event| {
@@ -1083,7 +1117,16 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                         p.body.clone(),
                         p.sound,
                     );
-                    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+                    #[cfg(target_os = "linux")]
+                    let shown = notify_linux::send(
+                        &handle,
+                        p.window_label.clone(),
+                        p.session_id.clone(),
+                        p.title.clone(),
+                        p.body.clone(),
+                        p.sound,
+                    );
+                    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
                     let shown = false;
                     if !shown {
                         use tauri_plugin_notification::NotificationExt;
@@ -1232,6 +1275,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             browser::browser_close,
             // 6) Paths of files dropped from the OS file manager, read from the platform drag channel.
             native_drop::take_dropped_paths,
+            clipboard_gate::clipboard_wait_ready,
             // Desktop-only screenshots: global hotkey settings and the annotation overlay window.
             screenshot::screenshot_shortcut_get,
             screenshot::screenshot_shortcut_set,
@@ -1828,6 +1872,7 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
     std::fs::create_dir_all(&data_dir).map_err(|e| format!("failed to create data dir: {e}"))?;
     diagnostics::init(&data_dir, VERSION);
     let db = Db::open(&data_dir.join("vlx-term.db"))?;
+    db::system_collections::ensure(&db.conn.lock().unwrap())?;
 
     // Match GUI cleanup of stale pasted images from abnormal exits when enabled.
     if pasted_image_cleanup_enabled(&db) {

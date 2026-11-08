@@ -3,8 +3,6 @@
 import type en from "./en";
 
 const ko: typeof en = {
-  "panel.averageOutput": "평균 출력 속도",
-  "panel.averageOutputHint": "측정된 응답 시간을 기준으로 추정한 초당 출력 토큰 수입니다. 보고된 추론 토큰을 포함하며, 도구 실행 시간과 사용자 대기 시간은 제외합니다. 사용량과 측정 시간을 신뢰할 수 있게 대응시킬 수 없으면 표시하지 않습니다. 모델 자체의 디코딩 속도를 나타내는 값은 아닙니다.",
   "panel.turnStats": "턴 통계",
   "panel.fileCount": (n: number) => `파일 ${n}개`,
   "panel.showChangedFiles": "이번 턴에서 변경된 파일 보기",
@@ -202,20 +200,20 @@ const ko: typeof en = {
   "nb.attach": "파일 첨부",
   "nb.browse": "찾아보기",
   "nb.chooseNote": "첫 노트 작성하기",
-  "nb.closeHint": "목록에서만 보관함을 제거합니다. 디스크의 파일은 그대로 유지됩니다.",
-  "nb.closeVault": "보관함 닫기",
+  "nb.closeHint": "목록에서만 지식 베이스를 제거합니다. 디스크의 파일은 그대로 유지됩니다.",
+  "nb.closeVault": "지식 베이스 닫기",
   "nb.conflict": "파일이 외부에서 변경되었습니다. 작성 중인 내용은 유지됩니다. 파일을 다시 불러오거나 새 노트로 저장하세요.",
-  "nb.copyTo": "로컬 보관함에 복사",
+  "nb.copyTo": "로컬 지식 베이스에 복사",
   "nb.createVault": "지식 베이스 만들기",
   "nb.destination": "대상 경로",
   "nb.download": "다운로드",
   "nb.downloadHint": "첨부 파일을 다운로드하면 다른 앱에서 열 수 있습니다.",
-  "nb.empty": "폴더를 열거나 새 보관함을 만들어 기록을 시작하세요.",
+  "nb.empty": "폴더를 열거나 새 지식 베이스를 만들어 기록을 시작하세요.",
   "nb.emptyImport": "가져올 수 있는 파일을 선택하지 않았습니다.",
   "nb.emptyNotes": "노트는 Markdown 파일로 저장됩니다.",
   "nb.emptyOutline": "문서의 제목이 여기에 표시됩니다.",
   "nb.emptyTrash": "휴지통이 비어 있습니다.",
-  "nb.error": "보관함에 접근할 수 없습니다. 연결과 폴더를 확인한 후 다시 시도하세요.",
+  "nb.error": "지식 베이스에 접근할 수 없습니다. 연결과 폴더를 확인한 후 다시 시도하세요.",
   "nb.exists": "대상이 이미 존재합니다. 다른 이름이나 폴더를 선택하세요.",
   "nb.favorites": "즐겨찾기",
   "nb.files": "파일",
@@ -223,6 +221,9 @@ const ko: typeof en = {
   "nb.generatedHint": "세션에서 정리된 지식으로, 출처와 수정 기록도 확인할 수 있습니다.",
   "nb.homeHint": "세션 지식 베이스와 로컬 지식 베이스를 살펴보세요.",
   "nb.homeSearch": "세션 지식과 로컬 노트 검색…",
+  "nb.layout": "레이아웃",
+  "nb.layoutCards": "카드",
+  "nb.layoutList": "목록",
   "nb.loadMore": "더 불러오기",
   "nb.import": "가져오기",
   "nb.importFiles": "파일 선택",
@@ -256,7 +257,7 @@ const ko: typeof en = {
   "nb.local": "로컬 파일",
   "nb.localVaults": "로컬 지식 베이스",
   "nb.move": "이름 변경 또는 이동",
-  "nb.moveHint": "보관함 루트를 기준으로 상대 경로를 입력하세요. 파일이나 폴더를 이동하면 기존 노트의 링크도 갱신됩니다.",
+  "nb.moveHint": "지식 베이스 루트를 기준으로 상대 경로를 입력하세요. 파일이나 폴더를 이동하면 기존 노트의 링크도 갱신됩니다.",
   "nb.name": "이름",
   "nb.newFolder": "새 폴더",
   "nb.newNote": "새 노트",
@@ -290,14 +291,14 @@ const ko: typeof en = {
   "nb.searchThisVault": "현재 지식 베이스",
   "nb.skipped": "건너뛴 파일",
   "nb.split": "분할 보기",
-  "nb.tooLarge": "파일 또는 선택한 항목이 보관함의 허용 범위를 초과합니다.",
+  "nb.tooLarge": "파일 또는 선택한 항목이 지식 베이스의 허용 범위를 초과합니다.",
   "nb.trash": "휴지통",
-  "nb.trashHint": "이 항목을 보관함의 휴지통으로 이동합니다. 나중에 복원할 수 있습니다.",
+  "nb.trashHint": "이 항목을 지식 베이스의 휴지통으로 이동합니다. 나중에 복원할 수 있습니다.",
   "nb.unsaved": "저장하지 않은 변경 사항",
   "nb.vaults": "지식 베이스",
   "nb.view": "보기 모드",
-  "nb.welcome": "내 노트 보관함",
-  "nb.welcomeText": "자유롭게 기록하고 생각을 연결하며 일반 로컬 파일로 노트를 보관하세요. 기존 Markdown 폴더를 열거나 새 보관함에 자료를 가져올 수 있습니다.",
+  "nb.welcome": "내 지식 베이스",
+  "nb.welcomeText": "자유롭게 기록하고 생각을 연결하며 일반 로컬 파일로 노트를 보관하세요. 기존 Markdown 폴더를 열거나 새 지식 베이스에 자료를 가져올 수 있습니다.",
   "memory.globalMemory": "세션 지식 베이스",
   "memory.collections": "보관된 세션",
   "memory.collectionConversation": "대화",
@@ -310,7 +311,6 @@ const ko: typeof en = {
   "memory.entries": "지식 항목",
   "memory.emptyJobs": "아직 정리 기록이 없습니다.",
   "memory.jobs": "정리 기록",
-  "memory.search": "항목 제목과 본문 검색…",
   "memory.empty": "일치하는 항목이 없습니다. 세션에서 지식 항목을 생성하거나 직접 만드세요.",
   "memory.emptyDetail": "항목을 선택하면 내용, 관련 항목, 출처를 확인할 수 있습니다.",
   "memory.new": "새 항목",
@@ -319,7 +319,6 @@ const ko: typeof en = {
   "memory.content": "본문(Markdown)",
   "memory.tags": "태그(쉼표로 구분)",
   "memory.related": "관련 항목",
-  "memory.backlinks": "이 항목을 참조하는 항목",
   "memory.sources": "출처",
   "memory.history": "수정 이력",
   "memory.restore": "이 버전 복원",
@@ -378,6 +377,8 @@ const ko: typeof en = {
   "chat.imageCopy": "이미지 복사",
   "chat.imageSave": "이미지 저장",
   "chat.imageActionFailed": "이미지 작업을 완료하지 못했습니다. 다시 시도해 주세요.",
+  "clipboard.unresponsive":
+    "클립보드 내용을 제공하는 앱이 응답하지 않아 붙여넣지 못했습니다. 잠시 후 다시 시도해 주세요.",
   "common.copy": "복사", // Copy
   "common.cut": "잘라내기", // Cut
   "common.paste": "붙여넣기", // Paste
@@ -822,10 +823,9 @@ const ko: typeof en = {
   "settings.recordSessionsHint":
     "기본값은 끔. 켜면 터미널 출력을 로그 파일로 저장해 보관 재생과 검색에 사용합니다. 일반 터미널 세션은 기록하지 않으며, 에이전트 세션은 자체 대화 기록을 읽습니다.", // Record session logs hint
   "settings.fonts": "Fonts", // TODO translate
-  "settings.uiFont": "Interface font", // TODO translate
-  "settings.uiFontSize": "Interface size", // TODO translate
-  "settings.termFont": "Terminal font", // TODO translate
-  "settings.termFontSize": "Terminal size", // TODO translate
+  "settings.uiFontSize": "인터페이스 글꼴 크기",
+  "settings.termFont": "터미널 글꼴",
+  "settings.termFontSize": "터미널 글꼴 크기",
   "settings.termLineHeight": "터미널 줄 높이",
   "settings.chatTypography": "대화 보기",
   "settings.chatTypographyHint": "글꼴 설정은 터미널과 별도로 저장되며 변경 사항은 즉시 적용됩니다.",
@@ -848,7 +848,7 @@ const ko: typeof en = {
   "settings.composerChip.tasks": "백그라운드 작업",
   "settings.composerChip.account": "계정",
   "settings.composerChip.codexCredits": "Codex 초기화 이용권",
-  "settings.fontDefault": "Default", // TODO translate
+  "settings.fontDefault": "기본값",
   "settings.fontCustom": "Custom…", // TODO translate
   "settings.fontListUnavailable": "시스템 글꼴 목록을 가져올 수 없습니다. 글꼴 이름을 직접 입력할 수 있습니다.",
   "settings.fontUnconfirmed": "이 글꼴을 사용할 수 있는지 확인할 수 없습니다.",
@@ -1082,6 +1082,7 @@ const ko: typeof en = {
   "tree.killProcessConfirm": (name: string) => `“${name}”의 프로세스를 종료하시겠습니까? 현재 작업이 중단됩니다. 저장된 대화 기록과 파일은 유지됩니다.`,
   "tree.archiveSession": "세션 보관", // Archive Session
   "tree.archiveGroup": "그룹 보관", // Archive Group
+  "tree.archiveCollection": "컬렉션 보관", // Archive Collection
   // Temporary (draft) sessions
   "tree.scratchTag": "임시", // scratch
   "tree.persistSession": "영구 세션으로 전환…", // Make Permanent Session…
@@ -1271,10 +1272,12 @@ const ko: typeof en = {
   "importSessions.results": ({ count }: { count: number }) => `검색 결과 ${count}개`,
   "importSessions.selected": ({ count }: { count: number }) => `${count}개 선택됨`,
   "importSessions.clearSelection": "선택 해제",
-  "importSessions.clearSearch": "검색 지우기",
+  "importSessions.clearFilters": "필터 지우기",
+  "importSessions.agentFilter": "에이전트별 필터",
+  "importSessions.allAgents": "모든 에이전트",
   "importSessions.noHistory": "이 프로젝트 디렉터리에 세션 기록이 없습니다.",
   "importSessions.title": "세션 가져오기",
-  "importSessions.description": "작업 디렉터리가 이 프로젝트와 일치하는 기존 Codex, Claude, OpenCode, Kiro 세션을 찾습니다. 세션을 선택하여 프로젝트에 추가한 후 열면 대화를 이어갈 수 있습니다. 현재 Kiro 기록은 텍스트로만 구성된 경우에만 볼 수 있습니다.",
+  "importSessions.description": "작업 디렉터리가 이 프로젝트와 일치하는 기존 Codex, Claude, OpenCode, Pi, OMP, ZCode, DeepSeek, Kiro 세션을 찾습니다. 세션을 선택하여 프로젝트에 추가한 후 열면 대화를 이어갈 수 있습니다. 현재 Kiro 기록은 텍스트로만 구성된 경우에만 볼 수 있습니다.",
   "importSessions.search": "제목, 에이전트 또는 세션 ID로 검색",
   "importSessions.empty": "일치하는 세션이 없습니다.",
   "importSessions.imported": "이미 가져옴",
@@ -1451,6 +1454,7 @@ const ko: typeof en = {
   "agentUpdate.unchanged": (version) => `명령은 끝났지만 설치된 버전은 여전히 v${version}입니다. 위의 출력을 확인하세요.`,
   "agentUpdate.finished": "업데이트 명령이 끝났습니다. 위의 출력을 확인하세요.",
   "agentUpdate.failed": "업데이트를 완료하지 못했습니다. 위의 출력을 확인하거나 명령을 복사해 터미널에서 실행하세요.",
+  "agentUpdate.broken": (label) => `업데이트 후 ${label}이(가) 시작되지 않아 업데이트가 완료되지 않았습니다. 위의 출력을 확인하거나 ${label}을(를) 다시 설치하세요.`,
   "agentUpdate.timedOut": "업데이트가 15분을 넘겨 중단되었습니다. 명령을 복사해 터미널에서 실행하세요.",
   "agentUpdate.restartHint": "이 대화는 아직 이전 버전으로 실행 중입니다. 에이전트를 재시작하면 새 버전으로 전환됩니다. 대화 내용은 유지되며, 다음 메시지를 보낼 때 새 버전이 시작됩니다.",
   "agentUpdate.restart": "에이전트 재시작",
@@ -2244,6 +2248,8 @@ const ko: typeof en = {
   "chat.auth.zcode.bigmodel": "BigModel로 로그인",
   "chat.auth.zcode.noPlan.zai": "ZCode에 Z.ai 계정으로 로그인되어 있지만, 이 계정에는 사용할 수 있는 GLM Coding Plan이 없거나 요금제 사용량을 모두 소진했습니다. 요금제를 BigModel에서 구매했다면 ‘ZCode 계정’ 메뉴를 열고 ‘BigModel로 로그인’을 선택하세요.",
   "chat.auth.zcode.noPlan.bigmodel": "ZCode에 BigModel 계정으로 로그인되어 있지만, 이 계정에는 사용할 수 있는 GLM Coding Plan이 없거나 요금제 사용량을 모두 소진했습니다. 요금제를 Z.ai에서 구매했다면 ‘ZCode 계정’ 메뉴를 열고 ‘Z.ai로 로그인’을 선택하세요.",
+  "chat.auth.zcode.noModels.zai": "ZCode가 현재 Z.ai 로그인에서 GLM Coding Plan을 찾지 못해 사용할 수 있는 모델이 없습니다. ‘ZCode 계정’ 메뉴를 열고 ‘Z.ai로 로그인’을 선택해 다시 로그인하세요. 요금제를 BigModel에서 구매했다면 ‘BigModel로 로그인’을 선택하세요.",
+  "chat.auth.zcode.noModels.bigmodel": "ZCode가 현재 BigModel 로그인에서 GLM Coding Plan을 찾지 못해 사용할 수 있는 모델이 없습니다. ‘ZCode 계정’ 메뉴를 열고 ‘BigModel로 로그인’을 선택해 다시 로그인하세요. 요금제를 Z.ai에서 구매했다면 ‘Z.ai로 로그인’을 선택하세요.",
   "chat.resetCredits.label": (n: string) => `초기화 이용권: ${n}개`,
   "chat.resetCredits.title": "Codex 사용 한도 초기화 이용권",
   "chat.resetCredits.unknown": "초기화 이용권 수를 확인할 수 없습니다.",
@@ -2329,6 +2335,15 @@ const ko: typeof en = {
   "settings.completionOff": "끄기",
   "settings.completionUnavailable": "설정을 불러오거나 저장할 수 없습니다.",
   "settings.completionHint": "Zsh에서 입력하는 동안 기록에서 가장 최근에 일치한 명령이 커서 뒤에 흐리게 표시되며, → 또는 End 키로 적용할 수 있습니다. Tab은 셸 기본 동작과 같습니다. 후보가 하나면 바로 입력하고, 후보에 공통된 부분이 있으면 먼저 채우며, 후보가 여러 개 남으면 목록을 표시합니다. 새로 연 Zsh, Bash 4+, Fish 및 PowerShell 터미널에 적용됩니다.",
+  "settings.completionTabOnlyHint": "입력하는 동안에는 제안이 표시되지 않습니다. Tab을 누르면 셸 기본 동작과 같이 완성합니다. 후보가 하나면 바로 입력하고, 후보에 공통된 부분이 있으면 먼저 채우며, 후보가 여러 개 남으면 목록을 표시합니다. 새로 연 Zsh, Bash 4+, Fish 및 PowerShell 터미널에 적용됩니다.",
+  "settings.completionTabKey": "Tab 키",
+  "settings.completionTabAccept": "제안 적용",
+  "settings.completionTabComplete": "명령어 완성",
+  "settings.completionTabAcceptHint": "흐리게 표시된 제안이 있으면 Tab으로 적용합니다. 바로 이어서 Tab을 한 번 더 누르면 적용을 취소하고 후보 목록을 표시합니다. → 또는 End 키로도 적용할 수 있습니다.",
+  "settings.completionTabCompleteHint": "흐리게 표시된 제안이 있어도 Tab은 항상 명령어를 완성합니다. 제안을 적용하려면 → 또는 End 키를 누르세요.",
+  "term.completionTipAccept": "제안 적용",
+  "term.completionTipComplete": "명령어 완성",
+  "term.completionTipUndo": "취소하고 후보 목록 표시",
 
   // Native texts of the mobile remote plugin (iOS, Android, download bridge). They reach the apps through native-text.json; {name} placeholders are replaced natively.
   "mobile.native.trustTitle": "원격 지문 확인",
@@ -2512,7 +2527,6 @@ const ko: typeof en = {
   "artifact.frameTitle": (name: string) => `${name} 미리보기`, // Preview of ${name}
   "newSession.menu": "새 세션…", // New Session…
   "newSession.heading": "무엇을 작업할까요?", // What should we work on?
-  "newSession.modelsUnavailable": "모델 목록을 가져올 수 없습니다. 에이전트 기본 모델을 사용합니다.", // Model list unavailable. The agent’s default model will be used.
   "newSession.terminalOnly": "터미널 보기만 지원", // Terminal view only
   "newSession.conversationOnly": "대화 보기만 지원", // Conversation view only
   "newSession.noConversationView": "이 에이전트는 대화 보기를 지원하지 않아 세션이 터미널 보기로 열립니다.", // This agent has no conversation view, so the session opens in the terminal view.
@@ -2527,6 +2541,31 @@ const ko: typeof en = {
   "newSession.worktreeNotRepo": "독립 워크트리를 만들려면 Git 저장소가 필요합니다.", // A separate worktree needs a Git repository.
   "newSession.worktreeName": "워크트리 이름(선택)", // Worktree name (optional)
   "newSession.worktreeNameHint": "새 폴더와 브랜치 이름에 사용됩니다. 비워 두면 세션 이름을 사용합니다.", // Names the new folder and branch. Leave empty to use the session name.
+  "newSession.typeLabel": "세션 유형",
+  "newSession.typeTask": "작업",
+  "newSession.typeProject": "프로젝트",
+  "newSession.typeChat": "채팅",
+  "newSession.typeTaskHint": "프로젝트를 고르지 않고 작업을 처리합니다. 프로젝트 가져오기 등에 쓸 수 있습니다.",
+  "newSession.typeProjectHint": "프로젝트 폴더에서 작업합니다.",
+  "newSession.typeChatHint": "프로젝트나 파일 없이 대화만 합니다.",
+  "newSession.location": "프로젝트 또는 컬렉션",
+  "newSession.locationSearch": "프로젝트 및 컬렉션 필터",
+  "newSession.collectionOption": "컬렉션",
+  "newSession.newTask": "새 작업 세션",
+  "newSession.newChat": "새 채팅 세션",
+  "systemCollection.projects": "프로젝트",
+  "systemCollection.agents": "에이전트",
+  "systemCollection.terminals": "터미널",
+  "systemCollection.tasks": "작업",
+  "systemCollection.chat": "채팅",
+  "systemCollection.projectsHint": "모든 프로젝트입니다. 기본 제공 컬렉션이라 삭제할 수 없습니다.",
+  "systemCollection.agentsHint": "터미널에서 실행 중인 에이전트입니다. 종료되면 목록에서 사라집니다.",
+  "systemCollection.terminalsHint": "지금 실행 중인 터미널입니다.",
+  "systemCollection.tasksHint": "어느 프로젝트에도 속하지 않는 작업 세션입니다.",
+  "systemCollection.chatHint": "채팅 세션입니다.",
+  "sidebarSection.nav": "사이드바 섹션",
+  "sidebarSection.noTasks": "아직 작업 세션이 없습니다.",
+  "sidebarSection.noChats": "아직 채팅 세션이 없습니다.",
   "artifact.comment": "댓글", // Comment
   "artifact.commentTitle": "페이지 요소를 선택해 에이전트에게 댓글을 남깁니다", // Click elements in the page to leave comments for the agent
   "artifact.pickHint": "페이지에서 요소를 클릭해 댓글을 답니다. Esc로 종료합니다.", // Click an element in the page to comment on it. Press Esc to stop.
@@ -2542,6 +2581,55 @@ const ko: typeof en = {
   "artifact.useOption": (id: string) => `${id} 사용`, // Use ${id}
   "artifact.useOptionTitle": "이 시안을 유지해 달라는 메시지를 이 페이지를 작성한 세션의 입력란에 넣습니다", // Put a message asking to keep this option in the message box of the session that wrote this page
   "artifact.useOptionCopyTitle": "이 시안을 유지해 달라는 메시지를 복사합니다", // Copy a message asking to keep this option
+  // Knowledge base and archived sessions pages.
+  "kb.overview": "개요",
+  "kb.sources": "출처",
+  "kb.searchAll": "지식 및 노트 검색…",
+  "kb.localHint": "이 컴퓨터의 Markdown 폴더입니다. 여기나 다른 편집기에서 편집할 수 있습니다.",
+  "kb.archiveHint": "종료된 대화입니다. 남겨 둘 만한 대화는 지식 베이스에 추가하세요.",
+  "kb.recent": "최근 업데이트",
+  "kb.openArchived": "보관된 세션 열기",
+  "kb.editDetails": "세부 정보 편집",
+  "kb.moreActions": "추가 작업",
+  "archive.allSessions": "모든 세션",
+  "archive.projects": "프로젝트",
+  "archive.allProjects": "모든 프로젝트",
+  "archive.allAgents": "모든 에이전트",
+  "archive.anyKnowledge": "지식 유무 전체",
+  "archive.withKnowledge": "지식 베이스에 추가됨",
+  "archive.withoutKnowledge": "아직 추가되지 않음",
+  "archive.view": "보기",
+  "archive.viewTree": "트리",
+  "archive.viewTime": "날짜순",
+  "archive.newest": "최신순",
+  "archive.oldest": "오래된순",
+  "archive.colSession": "세션",
+  "archive.colProject": "프로젝트",
+  "archive.colAgent": "에이전트",
+  "archive.colKnowledge": "지식",
+  "archive.colArchived": "보관일",
+  "archive.restoreShort": "복원",
+  "kb.needsAttention": (count: string) => `확인 필요 ${count}건`,
+  "kb.statusAttention": "확인 필요",
+  "kb.statusOrganized": "정리됨",
+  "kb.organizedCount": (count: string) => `정리됨 ${count}개`,
+  "kb.failedTimes": (count: string) => `${count}번 실패했습니다`,
+  "kb.succeededAfter": (count: string) => `${count}번 실패한 후 성공했습니다`,
+  "kb.fromSession": "원본 세션",
+  "kb.showAllTags": "모든 태그 보기",
+  "kb.inKnowledgeBase": (count: string) => `지식 베이스에 ${count}개`,
+  "kb.entriesCount": (count: string) => `항목 ${count}개`,
+  "kb.entriesFrom": (_count: string, sessions: string) => `개 항목 · 세션 ${sessions}개`,
+  "kb.notesIn": (_count: string, folders: string) => `개 노트 · 폴더 ${folders}개`,
+  "kb.sessionsIn": (_count: string, projects: string) => `개 세션 · 프로젝트 ${projects}개`,
+  "kb.lastArchived": "최근 보관",
+  "nb.notesWord": (_count: string) => "개 노트",
+  "archive.sessionsInProjects": (sessions: string, projects: string) => `세션 ${sessions}개 · 프로젝트 ${projects}개`,
+  "archive.collapseAll": "모두 접기",
+  "kb.andMore": (count: string) => `외 ${count}개`,
+  "kb.searchEntries": "항목 검색…",
+  "kb.updatedOn": (date: string) => `${date} 업데이트`,
+  "archive.sessionsCount": (count: string) => `세션 ${count}개`,
 };
 
 export default ko;

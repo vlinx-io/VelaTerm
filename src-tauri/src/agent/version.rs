@@ -2,7 +2,6 @@
 
 use std::collections::HashMap;
 use std::io::Read;
-use std::process::Stdio;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use crate::{host::AppCtx, models::SessionKind};
@@ -54,34 +53,10 @@ pub fn for_session(app: &AppCtx, id: &str, check_updates: bool) -> Result<AgentV
 
 /// Capture the selected executable before launch, retaining that version throughout the process lifetime.
 pub fn installed(bin: &str) -> Option<String> {
-    // The ZCode desktop app's binary opens its window when run bare; its bundled agent answers instead.
-    let mut command = if super::zcode::desktop_resources(std::path::Path::new(bin)).is_some() {
-        super::zcode::command(bin)
-    } else {
-        crate::host::command(bin)
-    };
-    super::executable::prepare_command(&mut command, bin);
-    command.arg("--version").env("NO_COLOR", "1")
-        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
-    let mut child = command.spawn().ok()?;
-    let stdout = child.stdout.take()?;
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let result = stdout.take(16_384).read_to_end(&mut bytes);
-        let _ = tx.send(result.ok().map(|_|bytes));
-    });
-    let deadline = Instant::now() + Duration::from_secs(3);
-    let success = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status.success(),
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
-            _ => { let _ = child.kill(); let _ = child.wait(); break false; }
-        }
-    };
-    if !success { return None; }
-    let bytes = rx.recv_timeout(Duration::from_millis(100)).ok()??;
-    parse(&String::from_utf8_lossy(&bytes))
+    match super::health::run_version(bin, Duration::from_secs(3)) {
+        super::health::Outcome::Exited { success: true, stdout } => parse(&stdout),
+        _ => None,
+    }
 }
 
 fn parse(text: &str) -> Option<String> {

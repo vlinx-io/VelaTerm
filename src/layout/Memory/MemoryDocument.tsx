@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { ContextMenu } from "../../components/ContextMenu";
+import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
+import { useTermStore } from "../../store/termStore";
 import { memoryDelete, memoryGet, memoryOptions, memoryRestore, memorySave, memorySource, type MemoryDetail, type MemoryEntry, type MemoryEdit } from "../../ipc/memory";
 import { kindLabel } from "../sessionMenuShared";
 import type { SessionKind } from "../../types";
@@ -7,7 +10,7 @@ import { platform } from "../../platform";
 import { writeTextFile } from "../../ipc/info";
 import { isTauri } from "../../ipc/transport";
 import { MemoryLink, memoryNavigate, memoryUrl } from "./navigation";
-import { LoadState, MemoryMarkdown, memoryError, memoryTime, useMemoryLoad } from "./shared";
+import { fullDate, runTime, LoadState, MemoryMarkdown, memoryError, memoryTime, useMemoryLoad } from "./shared";
 import { WysiwygEditor, type WysiwygHandle } from "../CenterPane/doc/WysiwygEditor";
 import "../CenterPane/doc/docTheme.css";
 import { KnowledgeReferences } from "../Knowledge/KnowledgeReferences";
@@ -22,6 +25,10 @@ export function MemoryDocument({ id, version }: { id: string; version?: number }
   const saving = useRef(false);
   const [savedVersions, setSavedVersions] = useState<MemoryDetail["versions"]>([]);
   const [pending, setPending] = useState<{ url: string; replace: boolean } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  const rightCollapsed = useTermStore((state) => state.rightCollapsed);
+  useEffect(() => { setTagsOpen(false); }, [id]);
   useEffect(() => {
     const unload = (event: BeforeUnloadEvent) => { if (dirty || busy) { event.preventDefault(); event.returnValue = ""; } };
     const navigate = (event: Event) => {
@@ -36,6 +43,11 @@ export function MemoryDocument({ id, version }: { id: string; version?: number }
   if (!data) return <LoadState error={error} reload={reload} />;
   const entry = version == null ? saved ?? data.entry : data.revision;
   if (!entry) return <p className="memory-empty">{t("memory.notFound")}</p>;
+  // Revisions only matter once there is more than one, so a single version shows no number.
+  const revised = version != null || data.versions.length + savedVersions.length > 1;
+  // Tags on this entry alone connect it to nothing, so they wait behind the count.
+  const shared = data.sharedTags;
+  const tags = tagsOpen || !shared ? entry.tags : entry.tags.filter((tag) => shared.includes(tag));
   const save = async () => {
     const content = editor.current?.getMarkdown();
     if (content == null || busy || saving.current) return;
@@ -76,24 +88,27 @@ export function MemoryDocument({ id, version }: { id: string; version?: number }
     a.href = url; a.download = fileName; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) { setFailure(memoryError(e)); }
   };
-  return <article className="memory-document" onKeyDown={(event) => {
+  return <article className="kbx-read-col" onKeyDown={(event) => {
     if (version == null && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
       event.preventDefault(); if (dirty) void save();
     }
   }}>
-    {data.location && <nav className="memory-row memory-breadcrumbs" aria-label={t("memory.hierarchy")}>
-      <MemoryLink route="library" values={{ memoryProject: data.location.projectId, memorySession: null, memoryPage: null }}>{data.location.projectName || t(data.location.kind === "manual" ? "memory.manualGroup" : data.location.kind === "legacy" ? "memory.legacyGroup" : "memory.unknownProject")}</MemoryLink>
-      <span aria-hidden="true">/</span>
-      <MemoryLink route="library" values={{ memoryProject: data.location.projectId, memorySession: data.location.sessionId, memoryPage: null }}>{data.location.sessionName || t(data.location.kind === "legacy" ? "memory.legacyGroup" : "memory.manualGroup")}</MemoryLink>
-    </nav>}
-    <div className="memory-row memory-actions">
-      <span className="memory-muted">v{entry.version} · {memoryTime(entry.updatedAt)}</span><span className="memory-spacer" />
-      <button className="btn" onClick={() => void exportMarkdown()}>{t("memory.export")}</button>
-      {version == null && <MemoryLink className="btn" route="notebooks/copy" values={{memoryEntry:id}}>{t("nb.copyTo")}</MemoryLink>}
-      {version == null ? <><button className="btn btn-primary" disabled={!dirty || busy} onClick={() => void save()}>{t(busy ? "common.loading" : "common.save")}{dirty ? " *" : ""}</button><MemoryLink className="btn" route={`edit/${id}`}>{t("common.edit")}</MemoryLink><button className="btn" disabled={busy} onClick={() => setAction("delete")}>{t("common.delete")}</button></> : <>
-        <MemoryLink className="btn" route={`entry/${id}`}>{t("common.cancel")}</MemoryLink><button className="btn" disabled={version === data.entry.version} onClick={() => setAction("restore")}>{t("memory.restore")}</button>
+    <div className="kbx-read-a">
+      <span className="g">{revised ? `v${entry.version} · ${fullDate(entry.updatedAt)}` : t("kb.updatedOn", fullDate(entry.updatedAt))}</span>
+      {version == null ? <>
+        {dirty && <button className="kbx-btn pri" disabled={busy} onClick={() => void save()}>{t(busy ? "common.loading" : "common.save")}</button>}
+        <MemoryLink className="kbx-btn" route={`edit/${id}`}><Icons.rename size={14} aria-hidden="true" />{t("kb.editDetails")}</MemoryLink>
+        <MemoryLink className="kbx-btn" route="notebooks/copy" values={{ memoryEntry: id }}><Icons.copy size={14} aria-hidden="true" />{t("nb.copyTo")}</MemoryLink>
+        <button type="button" className="kbx-ibtn" aria-label={t("kb.moreActions")} title={t("kb.moreActions")} onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); setMenu({ x: rect.right - 180, y: rect.bottom + 4 }); }}><Icons.more size={16} aria-hidden="true" /></button>
+      </> : <>
+        <MemoryLink className="kbx-btn" route={`entry/${id}`}>{t("common.cancel")}</MemoryLink>
+        <button className="kbx-btn" disabled={version === data.entry.version} onClick={() => setAction("restore")}>{t("memory.restore")}</button>
       </>}
     </div>
+    {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
+      { label: t("memory.export"), onClick: () => void exportMarkdown() },
+      { label: t("common.delete"), danger: true, disabled: busy, onClick: () => setAction("delete") },
+    ]} />}
     {action && <div className="memory-confirm" role="alertdialog" aria-label={t(action === "delete" ? "memory.deleteConfirm" : "memory.restoreConfirm")}>
       <p>{t(action === "delete" ? "memory.deleteConfirm" : "memory.restoreConfirm")}</p><div className="memory-row">
         <button className="btn" disabled={busy} onClick={() => setAction(null)}>{t("common.cancel")}</button><button className="btn btn-primary" disabled={busy} onClick={() => void perform()}>{t(busy ? "common.loading" : "common.confirm")}</button>
@@ -101,29 +116,44 @@ export function MemoryDocument({ id, version }: { id: string; version?: number }
     </div>}
     {pending && <div className="memory-confirm" role="alertdialog" aria-label={t("memory.unsaved")}><p>{t("memory.unsaved")}</p><div className="memory-row"><button className="btn" onClick={() => setPending(null)}>{t("common.cancel")}</button><button className="btn" disabled={busy} onClick={() => memoryNavigate(pending.url, pending.replace, true)}>{t("common.confirm")}</button></div></div>}
     {failure && <p className="memory-error" role="alert">{failure}</p>}
-    <h1>{entry.title}</h1><p className="memory-lead">{entry.summary}</p>
-    <div className="memory-tags">{entry.tags.map((tag) => <MemoryLink key={tag} route="library" values={{ memoryTag: tag, memoryPage: null }}>{tag}</MemoryLink>)}</div>
-    {version == null ? <div className="docview memory-inline-editor" aria-label={t("memory.content")}>
-      <WysiwygEditor ref={editor} defaultValue={data.entry.content} docPath="" textOnly onEdited={() => setDirty(true)} />
-    </div> : <MemoryMarkdown content={entry.content} />}
-    {version == null && <KnowledgeReferences entryId={id} />}
-    <div className="memory-references">
-      <ReferenceList label={t("memory.related")} entries={data.catalog.filter((e) => entry.related.includes(e.id))} />
-      <ReferenceList label={t("memory.backlinks")} entries={data.backlinks} />
-      <section><h3>{t("memory.sources")} · {entry.sources.length}</h3>
-        {data.sources.filter((s) => entry.sources.includes(s.id)).map((s) => <MemoryLink className="memory-reference" key={s.id} route={`source/${s.id}`}><strong>{s.sessionName}</strong><small>{kindLabel(s.kind as SessionKind)} · {memoryTime(s.createdAt)}</small></MemoryLink>)}
-      </section>
-      <section><h3>{t("memory.history")}</h3><div className="memory-history">
-        {[...savedVersions, ...data.versions.filter((v) => !savedVersions.some((savedVersion) => savedVersion.version === v.version))].map((v) => <MemoryLink key={v.version} route={`history/${id}/${v.version}`} className={v.version === version ? "active" : ""}>
-          v{v.version} · {memoryTime(v.createdAt)} <small>{v.author.includes(":") ? kindLabel(v.author.split(":")[0] as SessionKind) : t(v.author === "restore" ? "memory.restore" : "common.edit")}</small>
-        </MemoryLink>)}
-      </div></section>
+    <h1>{entry.title}</h1><p className="kbx-lead">{entry.summary}</p>
+    <div className="kbx-tags">{tags.map((tag) => <MemoryLink key={tag} className="kbx-chip" route="library" values={{ memoryTag: tag, memoryPage: null }}>{tag}</MemoryLink>)}{tags.length < entry.tags.length && <button type="button" className="kbx-more" title={t("kb.showAllTags")} aria-label={t("kb.showAllTags")} onClick={() => setTagsOpen(true)}>+{entry.tags.length - tags.length}</button>}</div>
+    <div className={"kbx-prose" + (data.entry.content.trimStart().startsWith(`# ${entry.title}`) ? " kbx-dup-title" : "")}>
+      {version == null ? <div className="docview memory-inline-editor" aria-label={t("memory.content")}>
+        <WysiwygEditor ref={editor} defaultValue={data.entry.content} docPath="" textOnly onEdited={() => setDirty(true)} />
+      </div> : <MemoryMarkdown content={entry.content} />}
     </div>
+    {version == null && <KnowledgeReferences entryId={id} />}
+    {/* These live in the right panel's Info tab; with the panel hidden they follow the body. */}
+    {rightCollapsed && <div className="kbx-facts-inline"><EntryFacts id={id} version={version} data={data} entry={entry} savedVersions={savedVersions} /></div>}
   </article>;
 }
-function ReferenceList({ label, entries }: { label: string; entries: { id: string; title: string }[] }) {
+
+/** Sources, related entries, backlinks and revisions of one entry, as right-panel sections. */
+export function EntryFacts({ id, version, data, entry, savedVersions = [] }: { id: string; version?: number; data: MemoryDetail; entry: MemoryEntry; savedVersions?: MemoryDetail["versions"] }) {
+  const t = useT();
+  const sources = data.sources.filter((source) => entry.sources.includes(source.id));
+  // Links usually run both ways, so entries this one points to and entries pointing here form one list.
+  const related = [...data.catalog.filter((item) => entry.related.includes(item.id)), ...data.backlinks]
+    .filter((item, index, all) => all.findIndex((other) => other.id === item.id) === index);
+  const versions = [...savedVersions, ...data.versions.filter((item) => !savedVersions.some((saved) => saved.version === item.version))];
+  return <>
+    {sources.length > 0 && <section className="kbx-rsec"><h4>{sources.length === 1 ? t("kb.fromSession") : <>{t("memory.sources")}<i>{sources.length}</i></>}</h4>
+      {sources.map((source) => <MemoryLink className="kbx-link" key={source.id} route={`source/${source.id}`}><Icons.archive size={14} aria-hidden="true" /><span>{source.sessionName}<small>{kindLabel(source.kind as SessionKind)} · {runTime(source.createdAt)}</small></span></MemoryLink>)}
+    </section>}
+    <FactLinks label={t("memory.related")} entries={related} />
+    {(version != null || versions.length > 1) && <section className="kbx-rsec"><h4>{t("memory.history")}<i>{versions.length}</i></h4>
+      {versions.map((item) => <MemoryLink key={item.version} route={`history/${id}/${item.version}`} className="kbx-link" aria-current={item.version === version ? "page" : undefined}>
+        {item.author.includes(":") ? <Icons.bot size={14} aria-hidden="true" /> : <Icons.rename size={14} aria-hidden="true" />}
+        <span>v{item.version}<small>{item.author.includes(":") ? kindLabel(item.author.split(":")[0] as SessionKind) : t(item.author === "restore" ? "memory.restore" : "common.edit")} · {runTime(item.createdAt)}</small></span>
+      </MemoryLink>)}
+    </section>}
+  </>;
+}
+
+function FactLinks({ label, entries }: { label: string; entries: { id: string; title: string }[] }) {
   if (!entries.length) return null;
-  return <section><h3>{label}</h3>{entries.map((e) => <MemoryLink className="memory-reference" key={e.id} route={`entry/${e.id}`}>{e.title} ↗</MemoryLink>)}</section>;
+  return <section className="kbx-rsec"><h4>{label}<i>{entries.length}</i></h4>{entries.map((entry) => <MemoryLink className="kbx-link" key={entry.id} route={`entry/${entry.id}`}><Icons.diamond size={14} aria-hidden="true" /><span>{entry.title}</span></MemoryLink>)}</section>;
 }
 
 export function MemoryEditor({ id }: { id?: string }) {

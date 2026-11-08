@@ -39,7 +39,7 @@ vi.mock("../../../ipc/browser", () => ({
   }),
 }));
 vi.mock("../../../platform", () => ({
-  platform: { opener: { openPath: vi.fn(), revealPath: vi.fn(), openExternal: vi.fn() } },
+  platform: { opener: { openPath: vi.fn(), revealPath: vi.fn(), openExternal: vi.fn(() => Promise.resolve()) } },
 }));
 vi.mock("../../../store/termStore", () => ({
   useTermStore: {
@@ -50,6 +50,7 @@ vi.mock("../../../hooks/nativeViewSuspend", () => ({
   useNativeViewSuspended: () => false,
 }));
 
+import { platform } from "../../../platform";
 import { BrowserView } from "./BrowserView";
 
 /** Center-page metadata shared by tests: the standalone root that opened the game. */
@@ -165,6 +166,16 @@ describe("BrowserView quick access integration", () => {
     expect(h.forward).toHaveBeenCalledWith(CENTER.id);
     expect(h.store.closeTab).not.toHaveBeenCalled();
     expect(h.store.setActiveTab).not.toHaveBeenCalled();
+  });
+
+  it("opens Claude artifact popups in the system browser", () => {
+    render(<BrowserView tab={CENTER} hidden={false} />);
+
+    h.popup!({ url: "https://claude.ai/artifact/MFRHaqC6HDcutPKorGdXR2" });
+
+    expect(platform.opener.openExternal).toHaveBeenCalledWith("https://claude.ai/artifact/MFRHaqC6HDcutPKorGdXR2");
+    expect(h.store.openBrowserTab).not.toHaveBeenCalled();
+    expect(h.navigate).not.toHaveBeenCalled();
   });
 
   it("keeps ordinary browser popups in new tabs linked to their opener", () => {

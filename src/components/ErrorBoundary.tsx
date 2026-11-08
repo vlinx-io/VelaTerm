@@ -71,7 +71,7 @@ const containerStyle: React.CSSProperties = {
   placeItems: "center",
   background: "var(--bg-0)",
   color: "var(--text)",
-  fontFamily: "var(--font-mono)",
+  fontFamily: "var(--font-ui)",
   zIndex: 99999,
 };
 
@@ -85,6 +85,7 @@ const cardStyle: React.CSSProperties = {
 };
 
 const msgStyle: React.CSSProperties = {
+  fontFamily: "var(--font-mono)",
   padding: "10px 12px",
   background: "color-mix(in srgb, var(--red, var(--text)) 12%, var(--bg-0))",
   border: "1px solid var(--red, var(--text))",
@@ -97,6 +98,7 @@ const msgStyle: React.CSSProperties = {
 };
 
 const stackStyle: React.CSSProperties = {
+  fontFamily: "var(--font-mono)",
   margin: 0,
   marginBottom: 16,
   padding: "10px 12px",

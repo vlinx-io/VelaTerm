@@ -9,7 +9,7 @@
    hairline rule so the section stays short. */
 .turn-section .turn-context { padding-bottom: 6px; }
 .turn-section .turn-context .kv { padding: 2px 0; }
-.turn-section .turn-pill { margin-left: 8px; font-size: 10px; font-weight: 600; line-height: 1.6; padding: 0 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-variant-numeric: tabular-nums; }
+.turn-section .turn-pill { margin-left: 8px; font-size: 10px; font-weight: 700; line-height: 1.6; padding: 0 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-variant-numeric: tabular-nums; }
 .turn-section .turn-meter { height: 4px; border-radius: 3px; background: var(--border); overflow: hidden; margin-top: 5px; }
 .turn-section .turn-meter i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width 180ms ease; }
 .turn-section .turn-context.warn .turn-pill { background: color-mix(in srgb, var(--yellow) 18%, transparent); color: var(--yellow); }
@@ -20,7 +20,7 @@
 .turn-section .kv { padding: 4px 0; }
 .turn-section .kv .k { color: var(--text-dim); }
 .turn-section .kv .v { font-variant-numeric: tabular-nums; }
-.turn-section .kv .v.turn-strong { color: var(--accent); font-weight: 600; }
+.turn-section .kv .v.turn-strong { color: var(--accent); font-weight: 700; }
 .turn-section .kv .v small { margin-left: 5px; font-size: 10px; color: var(--text-faint); }
 .turn-section .turn-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 16px; }
 .turn-section .turn-metric { display: flex; flex-direction: column; gap: 2px; min-width: 0; }

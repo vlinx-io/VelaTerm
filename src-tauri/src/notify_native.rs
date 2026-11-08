@@ -32,6 +32,17 @@ pub const NOTIFY_CLICK_EVENT: &str = "notification://click";
 /// Store the app handle globally because the Objective-C delegate cannot access setup state.
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 
+/// Waits between checks that the clicked notification's window holds focus, about 1.2 s in total. The system
+/// activates the app and orders its main window forward at a time of its own choosing, which can follow any
+/// single raise, so a window that lost focus during this period is raised again.
+const RAISE_CHECK_WAITS_MS: [u64; 5] = [150, 200, 250, 300, 300];
+
+fn raise(win: &tauri::WebviewWindow) {
+    let _ = win.unminimize();
+    let _ = win.show();
+    let _ = win.set_focus();
+}
+
 /// Route notification clicks using identifier `{window label}\x1f{session ID}`. Raise and emit only
 /// to the source window so multiple main/remote windows do not all navigate. Legacy identifiers with
 /// only a session ID fall back to a global broadcast.
@@ -43,22 +54,24 @@ fn emit_click(identifier: &str) {
         Some((label, session_id)) => {
             // Emit navigation to the source window first so the frontend opens the session.
             let _ = app.emit_to(label, NOTIFY_CLICK_EVENT, session_id);
-            // Raise the window after about 150 ms. During notification activation macOS first orders
-            // the main window forward, overriding a synchronous set_focus despite success. Frontend
-            // setFocus also runs too early, so this delayed call is authoritative.
             if app.get_webview_window(label).is_some() {
                 let app = app.clone();
                 let label = label.to_string();
                 std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(150));
-                    let app_main = app.clone();
-                    let _ = app.run_on_main_thread(move || {
-                        if let Some(win) = app_main.get_webview_window(&label) {
-                            let _ = win.unminimize();
-                            let _ = win.show();
-                            let _ = win.set_focus();
-                        }
-                    });
+                    for (check, wait) in RAISE_CHECK_WAITS_MS.into_iter().enumerate() {
+                        std::thread::sleep(std::time::Duration::from_millis(wait));
+                        let app_main = app.clone();
+                        let label = label.clone();
+                        let _ = app.run_on_main_thread(move || {
+                            let Some(win) = app_main.get_webview_window(&label) else { return };
+                            if check == 0 {
+                                raise(&win);
+                            } else if !win.is_focused().unwrap_or(true) {
+                                crate::diagnostic_warn!("notification click: window {label} lost focus during activation, raising it again");
+                                raise(&win);
+                            }
+                        });
+                    }
                 });
             }
         }

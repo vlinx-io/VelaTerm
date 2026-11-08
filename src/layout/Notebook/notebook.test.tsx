@@ -9,7 +9,7 @@ import { MemoryRoute } from "../Memory/MemoryRoute";
 
 const api=vi.hoisted(()=>({overview:vi.fn(),tree:vi.fn(),list:vi.fn(),collections:vi.fn(),get:vi.fn(),save:vi.fn(),stat:vi.fn(),register:vi.fn(),create:vi.fn(),restore:vi.fn(),pick:vi.fn(),env:{isBrowser:true},move:vi.fn(),trash:vi.fn(),unregister:vi.fn(),vaultRename:vi.fn(),memoryRename:vi.fn(),memoryDelete:vi.fn(),memoryMove:vi.fn(),memoryGroupRename:vi.fn(),memoryGroupMove:vi.fn(),memoryGroupDelete:vi.fn()}));
 vi.mock("../../ipc/notebook",()=>({notebookOverview:api.overview,notebookTree:api.tree,notebookGet:api.get,notebookSave:api.save,notebookStat:api.stat,notebookRegister:api.register,notebookCreate:api.create,notebookRestore:api.restore,notebookMove:api.move,notebookTrash:api.trash,notebookUnregister:api.unregister,notebookVaultRename:api.vaultRename,notebookAsset:vi.fn(),notebookFavorite:vi.fn(),uploadNotebookFiles:vi.fn(),notebookDroppedFiles:vi.fn()}));
-vi.mock("../../ipc/memory",()=>({memoryList:api.list,memoryGet:vi.fn(),memoryCollections:api.collections,memoryRename:api.memoryRename,memoryDelete:api.memoryDelete,memoryMove:api.memoryMove,memoryGroupRename:api.memoryGroupRename,memoryGroupMove:api.memoryGroupMove,memoryGroupDelete:api.memoryGroupDelete}));
+vi.mock("../../ipc/memory",()=>({memoryAttention:()=>Promise.resolve(0),memoryList:api.list,memoryGet:vi.fn(),memoryCollections:api.collections,memoryRename:api.memoryRename,memoryDelete:api.memoryDelete,memoryMove:api.memoryMove,memoryGroupRename:api.memoryGroupRename,memoryGroupMove:api.memoryGroupMove,memoryGroupDelete:api.memoryGroupDelete}));
 vi.mock("../../platform",()=>({platform:{env:api.env,dialog:{pickDirectory:api.pick}}}));
 vi.mock("../../remote/ServerFileBrowser",()=>({cardStyle:{},joinPath:(parent:string,name:string)=>`${parent.replace(/\/$/, "")}/${name}`,useServerBrowser:()=>({selectedDir:"/existing/Markdown"}),ServerBrowserView:()=> <div>Server directory picker</div>}));
 const vault={id:"vault-1",name:"Personal",root:"/notes"};
@@ -31,9 +31,8 @@ it("groups the session knowledge base and local knowledge bases with command but
   render(<KnowledgeNavigation/>);
   const link=await screen.findByRole("link",{name:"Personal"});
   expect(new URL(link.getAttribute("href")!).searchParams.get("memory")).toBe("notebook/vault-1");
-  const local=screen.getByText("Local knowledge bases").closest("li");
-  expect(link.closest("li")?.parentElement?.parentElement).toBe(local);
-  expect(screen.getByRole("link",{name:"Session Knowledge Base"}).closest("li")?.parentElement).toBe(local?.parentElement);
+  expect(screen.getByText("Local knowledge bases").closest(".kbx-lab")).toBeTruthy();
+  expect(screen.getByRole("link",{name:"Session Knowledge Base"}).closest(".kbx-lab")).toBeTruthy();
   expect(screen.getByRole("button",{name:"Open knowledge base"})).toBeTruthy();
   expect(screen.getByRole("button",{name:"Create knowledge base"})).toBeTruthy();
   expect(screen.queryByRole("link",{name:"Open knowledge base"})).toBeNull();
@@ -45,32 +44,29 @@ it("expands multiple root folders inline without navigating away from the curren
   render(<KnowledgeNavigation/>);
   fireEvent.click(await screen.findByRole("button",{name:"Personal"}));
   await screen.findByRole("link",{name:"Projects"});
-  fireEvent.click(screen.getByRole("button",{name:"Session Knowledge Base"}));
-  const project=await screen.findByRole("link",{name:/Conversation project/});
+  expect(await screen.findByRole("link",{name:/Conversation project/})).toBeTruthy();
   expect(new URLSearchParams(location.search).get("memory")).toBeNull();
-  expect(project.closest('li[data-depth="0"]')).toBe(screen.getByRole("link",{name:"Session Knowledge Base"}).closest("li"));
-  expect(screen.getByRole("link",{name:"Projects"}).closest('li[data-depth="0"]')).toBe(screen.getByText("Local knowledge bases").closest("li"));
   expect(screen.getByRole("button",{name:"Personal"}).getAttribute("aria-expanded")).toBe("true");
   expect(document.querySelector(".nb-navigation-content")).toBeNull();
   expect(screen.queryByText("Projects and sessions")).toBeNull();
-  fireEvent.click(screen.getByRole("button",{name:"Session Knowledge Base"}));
-  expect(screen.queryByRole("link",{name:/Conversation project/})).toBeNull();
-  expect(screen.getByRole("link",{name:"Projects"})).toBeTruthy();
+  fireEvent.click(screen.getByRole("button",{name:"Personal"}));
+  expect(screen.queryByRole("link",{name:"Projects"})).toBeNull();
+  expect(screen.getByRole("link",{name:/Conversation project/})).toBeTruthy();
 });
 
 it("restores the home page with all knowledge bases and direct dialog actions",async()=>{
   window.history.replaceState(null,"","/?memory=notebooks");render(<MemoryRoute/>);
   await screen.findByRole("heading",{name:"Knowledge Base"});
-  const home=document.querySelector(".nb-home") as HTMLElement;
+  const home=document.querySelector(".kbx-home") as HTMLElement;
   expect(within(home).getByRole("heading",{name:"Session Knowledge Base"})).toBeTruthy();
   expect(within(home).getByRole("heading",{name:"Local knowledge bases"})).toBeTruthy();
-  expect(within(home).getByRole("link",{name:"Session Knowledge Base"})).toBeTruthy();
-  fireEvent.click(within(home).getByRole("button",{name:"Open knowledge base"}));
+  expect(within(home).getByRole("link",{name:/Session Knowledge Base/})).toBeTruthy();
+  fireEvent.click(screen.getByRole("button",{name:"Open knowledge base"}));
   await screen.findByRole("dialog",{name:"Open knowledge base"});
   expect(new URLSearchParams(location.search).get("memory")).toBe("notebooks");
   fireEvent.keyDown(screen.getByRole("dialog"),{key:"Escape"});
-  fireEvent.click(within(home).getByRole("link",{name:/Personal/}));
-  await screen.findByRole("heading",{name:"Recent notes"});
+  fireEvent.click(within(home).getByRole("link",{name:/Local knowledge bases/}));
+  await screen.findByRole("link",{name:"Recent notes"});
   expect(new URLSearchParams(location.search).get("memory")).toBe("notebook/vault-1");
   expect(screen.queryByRole("link",{name:"Quick open"})).toBeNull();
   expect(screen.getByRole("link",{name:"Import"})).toBeTruthy();
@@ -86,7 +82,7 @@ it("opens a vault file from the directory tree as a document tab",async()=>{
 
 it("opens a note from the list as a document tab and closes the knowledge surface",async()=>{
   window.history.replaceState(null,"","/?memory=notebook/vault-1");render(<MemoryRoute/>);
-  await screen.findByRole("heading",{name:"Recent notes"});
+  await screen.findByRole("link",{name:"Recent notes"});
   fireEvent.click(screen.getByRole("button",{name:/Note/}));
   await waitFor(()=>expect(opened(node.absolutePath)).toBe(true));
   expect(new URLSearchParams(location.search).has("memory")).toBe(false);
@@ -100,7 +96,7 @@ it("redirects a former note URL to a document tab",async()=>{
 
 it("keeps quick open reachable from the keyboard and opens the selected note",async()=>{
   window.history.replaceState(null,"","/?memory=notebook/vault-1");render(<MemoryRoute/>);
-  await screen.findByRole("heading",{name:"Recent notes"});
+  await screen.findByRole("link",{name:"Recent notes"});
   expect(screen.queryByRole("link",{name:"Quick open"})).toBeNull();
   fireEvent.keyDown(window,{key:"o",metaKey:true});
   await screen.findByRole("heading",{name:"Quick open"});
@@ -172,7 +168,6 @@ const memoryTree=()=>api.list.mockImplementation((args:{projectId?:string})=>Pro
   ? {projects:[],selectedSessionId:null,entries:[entry],total:1,pageSize:40,tags:[]}
   : {projects:[{id:"p1",name:"Conversation project",kind:"project",count:1,sessions:[{id:"s1",name:"Design session",kind:"session",count:1},{id:"s2",name:"Other session",kind:"session",count:0}]}],selectedSessionId:null,entries:[],total:0,pageSize:40,tags:[]}));
 const expandMemoryEntry=async()=>{
-  fireEvent.click(await screen.findByRole("button",{name:"Session Knowledge Base"}));
   fireEvent.click(await screen.findByRole("button",{name:/Conversation project/}));
   fireEvent.click(await screen.findByRole("button",{name:"Design session"}));
   await screen.findByText("Entry one");
@@ -226,9 +221,9 @@ it("renames a local knowledge base folder and closes it from the context menu",a
   await waitFor(()=>expect(api.vaultRename).toHaveBeenCalledWith("vault-1","Journal"));
 
   fireEvent.contextMenu(await rowOf("Personal"));
-  fireEvent.click(await screen.findByText("Close notebook"));
+  fireEvent.click(await screen.findByText("Close knowledge base"));
   const dialog=await screen.findByRole("alertdialog");
-  fireEvent.click(within(dialog).getByRole("button",{name:"Close notebook"}));
+  fireEvent.click(within(dialog).getByRole("button",{name:"Close knowledge base"}));
   await waitFor(()=>expect(api.unregister).toHaveBeenCalledWith("vault-1"));
 });
 
@@ -274,4 +269,24 @@ it("deletes a whole session group after confirmation",async()=>{
   expect(within(dialog).getByText("Delete all 1 knowledge entries in this group? The project or session itself is kept.")).toBeTruthy();
   fireEvent.click(within(dialog).getByRole("button",{name:"OK"}));
   await waitFor(()=>expect(api.memoryGroupDelete).toHaveBeenCalledWith("session","s1"));
+});
+
+it("switches the note list between cards and a list and remembers the choice",async()=>{
+  localStorage.removeItem("vlx-notes-layout");
+  window.history.replaceState(null,"","/?memory=notebook/vault-1&memoryFolder=Projects");
+  const first=render(<MemoryRoute/>);
+  const layout=await screen.findByRole("combobox",{name:"Layout"});
+  expect(layout.textContent).toContain("Cards");
+  expect(document.querySelector(".kbx-note-cards")).toBeTruthy();
+  fireEvent.click(layout);
+  fireEvent.click(screen.getByRole("option",{name:"List"}));
+  await waitFor(()=>expect(document.querySelector(".kbx-note-list")).toBeTruthy());
+  expect(document.querySelector(".kbx-note-cards")).toBeNull();
+  expect(new URLSearchParams(location.search).get("memoryLayout")).toBe("list");
+  expect(new URLSearchParams(location.search).get("memoryFolder")).toBe("Projects");
+  first.unmount();
+  window.history.replaceState(null,"","/?memory=notebook/vault-1");
+  render(<MemoryRoute/>);
+  await waitFor(()=>expect(document.querySelector(".kbx-note-list")).toBeTruthy());
+  localStorage.removeItem("vlx-notes-layout");
 });

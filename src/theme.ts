@@ -30,9 +30,10 @@ export type DividerStyle = "subtle" | "visible";
 /** Sidebar layout: tree is standard; compact hides group icons and uses shorter rows. */
 export type NavLayout = "tree" | "compact";
 /** Active tab in the right-side Inspector. */
-export type InspectorTab = "files" | "info" | "git" | "knowledge";
+export type InspectorTab = "files" | "info" | "git";
 
 /** Vlinx visual settings: design tokens beyond the color scheme. */
+
 export interface VisualSettings {
   darkStyle: DarkStyle;
   accent: AccentChoice;
@@ -40,8 +41,6 @@ export interface VisualSettings {
   paneStyle: PaneStyle;
   dividerStyle: DividerStyle;
   navLayout: NavLayout;
-  /** UI monospace font. null uses CSS --font-mono from vlinx.css; a value names the primary font and receives a fallback chain. */
-  uiFontFamily: string | null;
   /** UI font size in pixels. null follows density without an inline --ui-fs; a value overrides the density size inline. */
   uiFontSize: number | null;
   chatFontFamily: string | null;
@@ -136,12 +135,21 @@ function refreshConversationLineHeight() {
   document.documentElement.style.setProperty("--chat-line-height", `${conversationLineHeight(family, size, multiplier)}px`);
 }
 
-function applyConversationTypography(s: VisualSettings) {
+export function applyConversationTypography(s: VisualSettings) {
+  // Line height is measured from this stack. Without a chosen font the text uses Inter from the stylesheet, while
+  // the measurement stays on the monospace default so text and code keep one line rhythm.
   const family = fontStack(s.chatFontFamily);
   const size = normalizeTextSize(s.chatFontSize, DEFAULT_CONVERSATION_FONT_SIZE);
   const next = { family, size, multiplier: normalizeTextLineHeight(s.chatLineHeight) };
   chatTypography = next;
-  document.documentElement.style.setProperty("--chat-font", family);
+  if (s.chatFontFamily?.trim()) {
+    // Tracking is tuned for Inter; a chosen font keeps its own spacing.
+    document.documentElement.style.setProperty("--chat-font", family);
+    document.documentElement.style.setProperty("--chat-tracking", "0px");
+  } else {
+    document.documentElement.style.removeProperty("--chat-font");
+    document.documentElement.style.removeProperty("--chat-tracking");
+  }
   document.documentElement.style.setProperty("--chat-fs", `${size}px`);
   refreshConversationLineHeight();
   // A bundled webfont may finish loading after initial appearance settings have been applied.
@@ -270,11 +278,8 @@ export function applyVisual(s: VisualSettings) {
   root.dataset.divider = s.dividerStyle;
   root.dataset.nav = s.navLayout;
 
-  // Write UI font family/size inline on documentElement to override CSS. Inline priority lets font size supersede
-  // the --ui-fs tier selected by density, while density still controls line height and spacing. Empty values remove
-  // the inline override and fall back to CSS (--font-mono's default stack / density's --ui-fs).
-  if (s.uiFontFamily) root.style.setProperty("--font-mono", fontStack(s.uiFontFamily));
-  else root.style.removeProperty("--font-mono");
+  // Write the UI font size inline on documentElement so it supersedes the --ui-fs tier selected by density, while
+  // density still controls line height and spacing. An empty value removes the override.
   if (s.uiFontSize != null) root.style.setProperty("--ui-fs", `${s.uiFontSize}px`);
   else root.style.removeProperty("--ui-fs");
   applyConversationTypography(s);

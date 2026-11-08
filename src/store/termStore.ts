@@ -63,6 +63,9 @@ import {
   collectSidebarViewIds,
   firstSidebarViewId,
   makeSidebarTreeTab,
+  assignSidebarTabSections,
+  sidebarTabOfView,
+  sidebarTabSection,
   migrateLegacySidebarTabs,
   removeSidebarView,
   setSidebarSplitSizes,
@@ -127,6 +130,7 @@ import {
 } from "./settings";
 import { docKindOf, makeChangesTab, makeDiffTab, makeDocTab, sameComparison, type ChangesTarget, type DocTab } from "./docTab";
 import { traceSplit, type SplitSource } from "./splitTrace";
+import { parseRailSection, sectionStartsExpanded, type RailSection } from "../layout/LeftSidebar/systemCollections";
 
 // Re-export the public API after moving implementations to settings/docTab, preserving existing import paths.
 export { DEFAULT_MAX_LIVE_TABS } from "./settings";
@@ -286,10 +290,22 @@ function defaultSidebarViews(): {
   };
   return {
     views: [view],
-    tabs: [makeSidebarTreeTab(view.id)],
+    tabs: [makeSidebarTreeTab(view.id, "projects")],
     primaryId: MAIN_TREE_VIEW_ID,
     activeId: MAIN_TREE_VIEW_ID,
   };
+}
+
+/** First unused default name for a new sidebar view. */
+function nextSidebarViewName(views: SidebarTreeView[]): string {
+  const usedNames = new Set(views.map((view) => view.name));
+  let index = views.length + 1;
+  let name = t("tree.viewDefaultName", index);
+  while (usedNames.has(name)) {
+    index += 1;
+    name = t("tree.viewDefaultName", index);
+  }
+  return name;
 }
 
 /** Upper bound on persisted per-view ID maps so a corrupted payload cannot grow without limit. */
@@ -398,6 +414,8 @@ function loadSidebarViews() {
     }
     const seen = new Set<string>();
     const views: SidebarTreeView[] = [];
+    // Sections were briefly stored per pane; a group without its own section takes its first pane's.
+    const legacySections = new Map<string, unknown>();
     for (const candidate of saved.views) {
       if (
         !candidate ||
@@ -408,6 +426,7 @@ function loadSidebarViews() {
       const id = candidate.id.slice(0, 100);
       if (!id) continue;
       seen.add(id);
+      legacySections.set(id, (candidate as { section?: unknown }).section);
       // A status filter only means something together with the ID snapshot taken when it was switched on, because
       // live statuses are gone after a restart. Payloads without that snapshot (older versions) start unfiltered.
       const statusFilterIds = loadIdSnapshot(candidate.statusFilterIds);
@@ -492,12 +511,14 @@ function loadSidebarViews() {
           activeViewId: memberIds.includes(candidate.activeViewId)
             ? candidate.activeViewId
             : firstSidebarViewId(root),
+          section: parseRailSection(candidate.section),
         });
       }
       for (const view of views) {
         if (!usedViewIds.has(view.id)) tabs.push(makeSidebarTreeTab(view.id));
       }
     }
+    tabs = assignSidebarTabSections(tabs, primaryId, (viewId) => legacySections.get(viewId));
     tabs = tabs.map((tab) =>
       collectSidebarViewIds(tab.root).includes(activeId)
         ? { ...tab, activeViewId: activeId }
@@ -955,6 +976,11 @@ interface TermStore {
   liveEvictAsk: boolean;
   /** Metadata for `doc-` entries in `openTabs`. */
   docTabs: Record<string, DocTab>;
+  /**
+   * Documents shown in the panel beside a conversation (`vartifact`). They use the same view and actions as
+   * document tabs but are not tabs: never in `openTabs`, not persisted, and closed with the panel.
+   */
+  dockDocs: Record<string, DocTab>;
   /** Metadata for `browser-` entries in `openTabs`. */
   browserTabs: Record<string, BrowserTab>;
   /** Metadata for `task-` entries in `openTabs`. Client-local, see `TaskTab`. */
@@ -994,6 +1020,12 @@ interface TermStore {
 
   // Other UI state.
   leftCollapsed: boolean;
+  /**
+   * Show a section's pane group in the sidebar, creating it with a single pane the first time. Every group keeps its
+   * own splits, sizes and per-pane conditions while hidden. Picking the section already shown hides or shows the
+   * sidebar instead.
+   */
+  pickSidebarSection: (section: RailSection) => void;
   rightCollapsed: boolean;
   leftWidth: number;
   rightWidth: number;
@@ -1095,8 +1127,6 @@ interface TermStore {
   defaultShell: string;
   /** Platform shells discovered once at startup for the inline selector. */
   shells: ShellOption[];
-  /** Interface monospace font, or `null` for the default stack. */
-  uiFontFamily: string | null;
   /** Interface font size in pixels, or `null` to follow density. */
   uiFontSize: number | null;
   /** Terminal monospace font, applied live to all terminals. */
@@ -1260,6 +1290,8 @@ interface TermStore {
   archiveMany: (nodes: SelNode[]) => Promise<void>;
   /** Archives an entire group and keeps a hidden tombstone that returns when any child is restored. */
   archiveGroup: (id: string) => Promise<void>;
+  /** Archives a user collection like a group, releasing member projects and keeping a hidden tombstone. */
+  archiveCollection: (id: string) => Promise<void>;
   /** Restores an archived session to the normal tree. */
   restoreSession: (id: SessionId) => Promise<void>;
   /** Loads archived sessions. */
@@ -1323,6 +1355,10 @@ interface TermStore {
    * Opens a document tab. Reopening an existing path focuses it and forces a disk reload; otherwise creates one.
    */
   openDocTab: (path: string) => void;
+  /** Creates a document shown beside a conversation and returns its ID; see `dockDocs`. */
+  openDockDoc: (path: string) => string;
+  /** Removes a document shown beside a conversation, discarding unsaved edits. */
+  closeDockDoc: (id: string) => void;
   /** Open, or focus and refresh, the diff tab of `path`, whose repository-relative path under `root` is `relative`. */
   openDiffTab: (path: string, root: string, relative: string) => void;
   /** Creates an untitled plain-text draft whose first Save As establishes path and syntax. */
@@ -1587,7 +1623,6 @@ interface TermStore {
   /** Sets the persisted default terminal shell; empty means system default. */
   setDefaultShell: (v: string) => void;
   /** Interface font family; empty or `null` uses the default stack. */
-  setUiFontFamily: (v: string | null) => void;
   /** Interface font size in pixels; `null` follows density. */
   setUiFontSize: (v: number | null) => void;
   /** Terminal font family; empty or `null` uses the default stack. */
@@ -1751,7 +1786,6 @@ function persistAndApplyVisual(getState: () => TermStore) {
     dynamicStatusFilter: s.dynamicStatusFilter,
     maxLiveTabs: s.maxLiveTabs,
     defaultShell: s.defaultShell,
-    uiFontFamily: s.uiFontFamily,
     uiFontSize: s.uiFontSize,
     termFontFamily: s.termFontFamily,
     termFontSize: s.termFontSize,
@@ -2005,6 +2039,20 @@ function stopTabSessions(state: TermStore, tabId: string): void {
   }
 }
 
+type DocMaps = { docTabs: Record<string, DocTab>; dockDocs: Record<string, DocTab> };
+
+/** A document tab or a document shown beside a conversation; both share the document actions. */
+export function findDocTab(state: DocMaps, id: string): DocTab | undefined {
+  return state.docTabs[id] ?? state.dockDocs[id];
+}
+
+/** Store update applying `patch` to document `id`, wherever it is shown; nothing when it is gone. */
+function patchDoc(state: DocMaps, id: string, patch: Partial<DocTab>): Partial<DocMaps> {
+  if (state.docTabs[id]) return { docTabs: { ...state.docTabs, [id]: { ...state.docTabs[id], ...patch } } };
+  if (state.dockDocs[id]) return { dockDocs: { ...state.dockDocs, [id]: { ...state.dockDocs[id], ...patch } } };
+  return {};
+}
+
 export const useTermStore = create<TermStore>((set, get) => ({
   projects: [],
   groups: [],
@@ -2037,6 +2085,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
   liveEvictNotice: null,
   liveEvictAsk: false,
   docTabs: {},
+  dockDocs: {},
   browserTabs: {},
   taskTabs: {},
   newSessionTabs: {},
@@ -2258,7 +2307,14 @@ export const useTermStore = create<TermStore>((set, get) => ({
       inspectTarget: { id: projectId, kind: "project" },
       revealProjectId: projectId,
       leftCollapsed: false,
-      // Reveal requests clear the primary projection's conditions before the one-shot target is consumed.
+      // Reveal requests clear the primary projection's conditions before the one-shot target is consumed, and
+      // bring up its group, Projects, where the project row is.
+      activeSidebarTreeViewId: state.primarySidebarTreeViewId,
+      sidebarTreeTabs: state.sidebarTreeTabs.map((tab) =>
+        collectSidebarViewIds(tab.root).includes(state.primarySidebarTreeViewId)
+          ? { ...tab, activeViewId: state.primarySidebarTreeViewId }
+          : tab,
+      ),
       sidebarTreeViews: state.sidebarTreeViews.map((view) =>
         view.id === state.primarySidebarTreeViewId
           ? {
@@ -2682,6 +2738,14 @@ export const useTermStore = create<TermStore>((set, get) => ({
     saveLayoutTick();
   },
 
+  archiveCollection: async (id) => {
+    // Like archiveGroup: the collection becomes a hidden tombstone; reload, reconcile tabs, and save once.
+    await tree.archiveCollection(id);
+    await get().loadTree();
+    set((state) => reconcileTabs(state));
+    saveLayoutTick();
+  },
+
   restoreSession: async (id) => {
     // Clear the archive marker and refresh both the normal tree and archive list.
     await tree.setSessionArchived(id, false);
@@ -3033,6 +3097,11 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
 
   closeTab: (tabId) => {
+    // A document beside a conversation is not a tab; closing it from its own view just removes it.
+    if (get().dockDocs[tabId]) {
+      get().closeDockDoc(tabId);
+      return;
+    }
     // Explicit tab closure terminates all contained sessions here. Unmount also serves automatic detach-only
     // flows in browser mode, so it cannot express user intent reliably. Repeated stops are idempotent.
     stopTabSessions(get(), tabId);
@@ -3125,6 +3194,20 @@ export const useTermStore = create<TermStore>((set, get) => ({
     });
     saveLayoutTick();
   },
+
+  openDockDoc: (path) => {
+    const tab = makeDocTab(path);
+    set((state) => ({ dockDocs: { ...state.dockDocs, [tab.id]: tab } }));
+    return tab.id;
+  },
+
+  closeDockDoc: (id) =>
+    set((state) => {
+      if (!state.dockDocs[id]) return {};
+      const dockDocs = { ...state.dockDocs };
+      delete dockDocs[id];
+      return { dockDocs };
+    }),
 
   openDiffTab: (path, root, relative) => {
     set((state) => {
@@ -3268,88 +3351,33 @@ export const useTermStore = create<TermStore>((set, get) => ({
 
   setDocTabPath: (id, path) =>
     set((state) => {
-      const tab = state.docTabs[id];
-      if (!tab) return {};
       const title = path.split("/").pop() || path;
-      return {
-        docTabs: {
-          ...state.docTabs,
-          [id]: { ...tab, path, title, kind: docKindOf(path), isNew: false },
-        },
-      };
+      return patchDoc(state, id, { path, title, kind: docKindOf(path), isNew: false });
     }),
 
   refreshDocTab: (id) =>
-    set((state) =>
-      state.docTabs[id]
-        ? {
-            docTabs: {
-              ...state.docTabs,
-              [id]: {
-                ...state.docTabs[id],
-                reloadNonce: state.docTabs[id].reloadNonce + 1,
-              },
-            },
-          }
-        : {},
-    ),
+    set((state) => {
+      const tab = findDocTab(state, id);
+      return tab ? patchDoc(state, id, { reloadNonce: tab.reloadNonce + 1 }) : {};
+    }),
 
-  setDocTabMode: (id, mode) =>
-    set((state) =>
-      state.docTabs[id]
-        ? {
-            docTabs: { ...state.docTabs, [id]: { ...state.docTabs[id], mode } },
-          }
-        : {},
-    ),
+  setDocTabMode: (id, mode) => set((state) => patchDoc(state, id, { mode })),
 
-  setDocTabViewport: (id, viewport) =>
-    set((state) =>
-      state.docTabs[id]
-        ? {
-            docTabs: { ...state.docTabs, [id]: { ...state.docTabs[id], viewport } },
-          }
-        : {},
-    ),
+  setDocTabViewport: (id, viewport) => set((state) => patchDoc(state, id, { viewport })),
 
-  setDocTabDirty: (id, dirty) =>
-    set((state) =>
-      state.docTabs[id]
-        ? {
-            docTabs: {
-              ...state.docTabs,
-              [id]: { ...state.docTabs[id], dirty },
-            },
-          }
-        : {},
-    ),
+  setDocTabDirty: (id, dirty) => set((state) => patchDoc(state, id, { dirty })),
 
   requestCloseDocTab: (id) => {
-    const tab = get().docTabs[id];
+    const tab = findDocTab(get(), id);
     if (!tab) return;
     if (!tab.dirty) {
       get().closeTab(id);
       return;
     }
-    set((state) => ({
-      docTabs: {
-        ...state.docTabs,
-        [id]: { ...state.docTabs[id], pendingClose: true },
-      },
-    }));
+    set((state) => patchDoc(state, id, { pendingClose: true }));
   },
 
-  cancelCloseDocTab: (id) =>
-    set((state) =>
-      state.docTabs[id]
-        ? {
-            docTabs: {
-              ...state.docTabs,
-              [id]: { ...state.docTabs[id], pendingClose: false },
-            },
-          }
-        : {},
-    ),
+  cancelCloseDocTab: (id) => set((state) => patchDoc(state, id, { pendingClose: false })),
 
   // ── Browser tabs, desktop only ──
   openBrowserTab: (url, opts) => {
@@ -4337,6 +4365,38 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
 
   toggleLeft: () => set((s) => ({ leftCollapsed: !s.leftCollapsed })),
+  pickSidebarSection: (section) => {
+    const s = get();
+    const shown =
+      sidebarTabOfView(s.sidebarTreeTabs, s.activeSidebarTreeViewId) ??
+      sidebarTabOfView(s.sidebarTreeTabs, s.primarySidebarTreeViewId);
+    if (sidebarTabSection(shown) === section) {
+      set({ leftCollapsed: !s.leftCollapsed });
+      return;
+    }
+    const target = s.sidebarTreeTabs.find((tab) => sidebarTabSection(tab) === section);
+    if (target) {
+      set({ activeSidebarTreeViewId: target.activeViewId, leftCollapsed: false });
+    } else {
+      // First visit: the section gets a group with one unfiltered pane that follows the shared collapse state.
+      const view: SidebarTreeView = {
+        id: `tree-view-${genId()}`,
+        name: nextSidebarViewName(s.sidebarTreeViews),
+        treeFilter: "",
+        statusFilter: null,
+        statusFilterIds: null,
+        markFilter: null,
+        collapsedOverrides: null,
+      };
+      set({
+        sidebarTreeViews: [...s.sidebarTreeViews, view],
+        sidebarTreeTabs: [...s.sidebarTreeTabs, makeSidebarTreeTab(view.id, section)],
+        activeSidebarTreeViewId: view.id,
+        leftCollapsed: false,
+      });
+    }
+    saveSidebarViewsTick(get);
+  },
   toggleRight: () => set((s) => ({ rightCollapsed: !s.rightCollapsed })),
 
   setMirrorEnabled: (enabled) => set({ mirrorEnabled: enabled }),
@@ -4506,15 +4566,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
         collectSidebarViewIds(candidate.root).includes(source.id),
       );
       if (!tab) return {};
-      const usedNames = new Set(
-        state.sidebarTreeViews.map((view) => view.name),
-      );
-      let index = state.sidebarTreeViews.length + 1;
-      let name = t("tree.viewDefaultName", index);
-      while (usedNames.has(name)) {
-        index += 1;
-        name = t("tree.viewDefaultName", index);
-      }
+      const name = nextSidebarViewName(state.sidebarTreeViews);
       const next: SidebarTreeView = {
         ...source,
         id,
@@ -4522,8 +4574,11 @@ export const useTermStore = create<TermStore>((set, get) => ({
         statusFilterIds: source.statusFilterIds
           ? { ...source.statusFilterIds }
           : null,
-        // Start from what the source pane shows right now, then keep expanding and collapsing to itself.
-        collapsedOverrides: snapshotCollapsed(state, source),
+        // Start from what the source pane shows right now, then keep expanding and collapsing to itself. A section
+        // that starts expanded shows only its own overrides, not the shared state the snapshot would copy.
+        collapsedOverrides: sectionStartsExpanded(sidebarTabSection(tab))
+          ? { ...source.collapsedOverrides }
+          : snapshotCollapsed(state, source),
       };
       return {
         sidebarTreeViews: [...state.sidebarTreeViews, next],
@@ -4924,10 +4979,6 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
   setDefaultShell: (v) => {
     set({ defaultShell: v });
-    persistAndApplyVisual(get);
-  },
-  setUiFontFamily: (v) => {
-    set({ uiFontFamily: v && v.trim() ? v.trim() : null });
     persistAndApplyVisual(get);
   },
   setUiFontSize: (v) => {

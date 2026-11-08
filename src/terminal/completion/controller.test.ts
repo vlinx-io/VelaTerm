@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Terminal } from "@xterm/xterm";
 import { installCompletion } from "./controller";
 
-const mocks = vi.hoisted(() => ({ invoke: vi.fn(), config: { mode: "auto", debounceMs: 350 }, configChanged: () => {} }));
+const mocks = vi.hoisted(() => ({ invoke: vi.fn(), config: { mode: "auto", tabBehavior: "complete", debounceMs: 350 }, configChanged: () => {} }));
 vi.mock("../../ipc/transport", () => ({ invoke: mocks.invoke }));
 vi.mock("../../i18n", () => ({ t: (key: string) => key }));
 vi.mock("./config", () => ({
@@ -12,15 +12,19 @@ vi.mock("./config", () => ({
   watchCompletionConfig: (fn: () => void) => { mocks.configChanged = fn; return () => {}; },
 }));
 
+const tips = vi.hoisted(() => ({ current: null as string | null }));
+vi.mock("./tip", () => ({ setCompletionTip: (_session: string, tip: string | null) => { tips.current = tip; } }));
+
 const state = { configured: true, supported: true, ready: true, pending: false, revision: 5, inputVersion: 1,
   query: "中文", items: [{ index: 0, label: "中文 path", description: "a directory", matches: [[0, 2]] }] };
 let controller: ReturnType<typeof installCompletion>;
 let textarea: HTMLTextAreaElement;
 let write = vi.fn<(data: string) => Promise<unknown>>();
 let terminal: Terminal;
+let reportHint: (data: string) => boolean = () => true;
 
 beforeEach(async () => {
-  vi.useFakeTimers(); mocks.invoke.mockReset(); mocks.config.mode = "auto";
+  vi.useFakeTimers(); mocks.invoke.mockReset(); mocks.config.mode = "auto"; mocks.config.tabBehavior = "complete"; tips.current = null;
   mocks.invoke.mockResolvedValue(state);
   Element.prototype.scrollIntoView = vi.fn();
   const element = document.createElement("div");
@@ -32,6 +36,7 @@ beforeEach(async () => {
     buffer: { active: { type: "normal", cursorX: 5, cursorY: 0, baseY: 0, viewportY: 0 } },
     onCursorMove: () => ({ dispose() {} }), onScroll: () => ({ dispose() {} }),
     onWriteParsed: () => ({ dispose() {} }),
+    parser: { registerOscHandler: (_code: number, handler: (data: string) => boolean) => { reportHint = handler; return { dispose() {} }; } },
     focus: () => textarea.focus(),
   } as unknown as Terminal;
   write = vi.fn<(data: string) => Promise<unknown>>().mockResolvedValue(undefined);
@@ -78,7 +83,15 @@ describe("native completion interaction", () => {
     mocks.config.mode = mode;
     expect(controller.key(tab())).toBe(false);
     await vi.advanceTimersByTimeAsync(0);
-    expect(mocks.invoke).toHaveBeenCalledWith("pty_completion", { sessionId: "session", action: "query" });
+    expect(mocks.invoke).toHaveBeenCalledWith("pty_completion", { sessionId: "session", action: "query", apply: true });
+  });
+
+  it("leaves nothing more to do when the backend already applied Tab", async () => {
+    mocks.invoke.mockResolvedValue({ ...state, items: [], applied: true });
+    controller.key(tab()); await vi.advanceTimersByTimeAsync(0);
+    expect(mocks.invoke).toHaveBeenCalledTimes(1);
+    expect(popup().hidden).toBe(true);
+    expect(write).not.toHaveBeenCalled();
   });
 
   it("applies a single candidate on Tab without opening the list", async () => {
@@ -337,5 +350,106 @@ describe("native completion interaction", () => {
     expect(controller.key(tab())).toBe(true);
     await vi.advanceTimersByTimeAsync(500);
     expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+  describe("Tab and the inline hint", () => {
+    const accepted = { ...state, items: [], hintAccepted: true, revision: 6 };
+    const settle = () => vi.advanceTimersByTime(250);
+
+    it("names the key only while a hint shows and the terminal has focus", () => {
+      mocks.config.tabBehavior = "accept";
+      reportHint("1");
+      settle();
+      expect(tips.current).toBe("accept-tab");
+      textarea.blur();
+      expect(tips.current).toBeNull();
+      textarea.focus();
+      settle();
+      expect(tips.current).toBe("accept-tab");
+      reportHint("0");
+      expect(tips.current).toBeNull();
+    });
+
+    it("leaves the header alone when a hint disappears before the delay ends", () => {
+      reportHint("1");
+      vi.advanceTimersByTime(249);
+      expect(tips.current).toBeNull();
+      reportHint("0");
+      settle();
+      expect(tips.current).toBeNull();
+    });
+
+    it("names the arrow key when Tab stays with completion, and nothing without inline hints", () => {
+      reportHint("1");
+      settle();
+      expect(tips.current).toBe("accept-arrow");
+      reportHint("0");
+      mocks.config.mode = "tab";
+      reportHint("1");
+      settle();
+      expect(tips.current).toBeNull();
+    });
+
+    it("drops the key label once the command runs", () => {
+      reportHint("1");
+      settle();
+      controller.input("\r");
+      expect(tips.current).toBeNull();
+    });
+
+    it("asks the shell to take the hint, then offers the undo", async () => {
+      mocks.config.tabBehavior = "accept";
+      reportHint("1");
+      mocks.invoke.mockResolvedValueOnce(accepted);
+      expect(controller.key(tab())).toBe(false);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(actions()).toEqual(["tab"]);
+      expect(write).not.toHaveBeenCalled();
+      expect(popup().hidden).toBe(true);
+      reportHint("0");
+      settle();
+      expect(tips.current).toBe("undo");
+    });
+
+    it("restores the typed text and opens the list on the second Tab", async () => {
+      mocks.config.tabBehavior = "accept";
+      mocks.invoke.mockResolvedValueOnce(accepted);
+      controller.key(tab());
+      await vi.advanceTimersByTimeAsync(0);
+      mocks.invoke.mockClear();
+      expect(controller.key(tab())).toBe(false);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(mocks.invoke.mock.calls[0][1]).toMatchObject({ action: "undo", revision: 6 });
+      expect(actions()).toEqual(["undo", "query"]);
+      expect(popup().hidden).toBe(false);
+    });
+
+    it("forgets the undo as soon as the user types", async () => {
+      mocks.config.tabBehavior = "accept";
+      mocks.invoke.mockResolvedValueOnce(accepted);
+      controller.key(tab());
+      await vi.advanceTimersByTimeAsync(0);
+      controller.input("x");
+      expect(tips.current).toBeNull();
+      mocks.invoke.mockClear();
+      controller.key(tab());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(actions()[0]).toBe("tab");
+    });
+
+    it("hides the label while the list is open, since Tab then takes the highlighted item", async () => {
+      reportHint("1");
+      settle();
+      await controller.key(ctrlSpace());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(popup().hidden).toBe(false);
+      expect(tips.current).toBeNull();
+    });
+
+    it("keeps Tab on completion when that behavior is chosen", async () => {
+      reportHint("1");
+      controller.key(tab());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(actions()[0]).toBe("query");
+    });
   });
 });

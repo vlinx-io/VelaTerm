@@ -8,12 +8,14 @@ from pathlib import Path
 
 base = Path(__file__).resolve().parent
 kind = Path(sys.argv[0]).stem
-with (base / "calls.jsonl").open("a") as log:
-    log.write(json.dumps({"kind": kind, "cwd": os.getcwd(), "args": sys.argv[1:]}) + "\n")
 
+# The launch path runs `--version` as a background health check; it is not a catalogue call.
 if "--version" in sys.argv:
     print("2.1.200")
     sys.exit(0)
+
+with (base / "calls.jsonl").open("a") as log:
+    log.write(json.dumps({"kind": kind, "cwd": os.getcwd(), "args": sys.argv[1:]}) + "\n")
 
 if "serve" in sys.argv:
     port = int(sys.argv[sys.argv.index("--port") + 1])

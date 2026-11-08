@@ -789,8 +789,16 @@ pub fn detail(app: &AppCtx, id: &str, version: Option<i64>) -> Result<Value, Str
         .collect();
     let mut stmt = conn.prepare("SELECT id,session_name,kind,created_at,digest,session_id FROM memory_sources ORDER BY created_at").map_err(|e| e.to_string())?;
     let sources = stmt.query_map([], |r| Ok(json!({"id":r.get::<_,String>(0)?,"sessionName":r.get::<_,String>(1)?,"kind":r.get::<_,String>(2)?,"createdAt":r.get::<_,i64>(3)?,"digest":r.get::<_,String>(4)?,"sessionId":r.get::<_,String>(5)?}))).map_err(|e| e.to_string())?.collect::<Result<Vec<_>,_>>().map_err(|e| e.to_string())?.into_iter().filter(|s| source_ids.contains(s["id"].as_str().unwrap_or(""))).collect::<Vec<_>>();
+    // Tags on more than one entry connect it to others; the reader leads with those.
+    let shared_tags = conn
+        .prepare("SELECT value FROM memory_entries,json_each(memory_entries.tags) WHERE value IN (SELECT value FROM json_each(?1)) GROUP BY value HAVING count(*)>1 ORDER BY value")
+        .map_err(|e| e.to_string())?
+        .query_map([json!(entry.tags).to_string()], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
     Ok(
-        json!({"location":super::hierarchy::location(&conn,&entry.session_id)?,"entry":entry,"revision":revision,"catalog":catalog,"backlinks":backlinks,"versions":versions,"sources":sources}),
+        json!({"location":super::hierarchy::location(&conn,&entry.session_id)?,"entry":entry,"revision":revision,"catalog":catalog,"backlinks":backlinks,"versions":versions,"sources":sources,"sharedTags":shared_tags}),
     )
 }
 

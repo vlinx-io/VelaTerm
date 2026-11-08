@@ -2,7 +2,7 @@
 
 Created: 2026-07-09 20:41
 
-Updated: 2026-09-25 10:21
+Updated: 2026-11-05 13:19
 
 > This chapter covers VelaTerm's organizational model: the window layout, managing the tree, how tabs and split panes behave, status dots and filtering, archiving, global search, and saving the workspace on quit. The other chapters build on these.
 
@@ -13,7 +13,7 @@ Updated: 2026-09-25 10:21
 | Area | Contents |
 |------|----------|
 | Title bar (right side) | Theme switch (follow system, dark, light), Remote Access (Browser), Connect to Remote Server, Share, Settings, Account, Feedback, and the buttons that show or hide the sidebar and the info panel |
-| Left sidebar | "Workspace": the project tree with a search box and filter; header buttons Create Project, Import Project, Clone from Git, Search All Sessions and Archived Sessions |
+| Left sidebar | "Workspace": the project tree with a search box and filter; header buttons Create Project, Import Project, Clone from Git and Search All Sessions |
 | Center pane | Tab bar and the open sessions, documents, browser pages and background tasks; each session tab can be split into panes |
 | Right panel | Four tabs that follow the current session: Files, Info, Git, and Knowledge Base |
 | Status bar | Session count, current session type, Git branch, permission mode, notification switch, the Working / Pending / Viewed counters, background tabs, and update notices |
@@ -121,7 +121,7 @@ The sidebar has its own tools:
 
 Finished work does not need to be deleted. Right-click a session → "Archive Session" to hide it: the session and its children leave the tree and their processes end, but **all data is kept**. "Archive Group" archives every session in a group, and "Archive Selected Sessions" archives a selection.
 
-Archived sessions are in the knowledge base. Open them with the "Archived Sessions" button in the sidebar header. Archived sessions are grouped by project, and the search box ("Search archived content…") searches their content. For each archived session:
+Archived sessions are in the knowledge base. Open them with the "Archived Sessions" button in the activity bar or the tab bar. Archived sessions are grouped by project, and the search box ("Search archived content…") searches their content. For each archived session:
 
 - The conversation can be read. Agent sessions show their messages; when no conversation is available, the terminal recording is shown if one exists. A second tab lists the knowledge entries generated from the session.
 - "Restore to normal session" returns it to its place in the tree, with its conversation ID intact, so opening it resumes the original conversation.

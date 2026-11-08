@@ -4,12 +4,13 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { setLang } from "../../i18n";
 import { MemoryLibrary } from "./MemoryLibrary";
 import { MemoryDirectory } from "./MemoryDirectory";
-import { MemoryEditor } from "./MemoryDocument";
+import { EntryFacts, MemoryEditor } from "./MemoryDocument";
 import { MemoryCompile } from "./MemoryTasks";
 import { MemoryTab } from "./MemoryTab";
 import { MemoryRoute } from "./MemoryRoute";
 import { MemoryMarkdown } from "./shared";
 import { memoryNavigate, memoryUrl } from "./navigation";
+import type { MemoryDetail, MemoryEntry } from "../../ipc/memory";
 
 const api = vi.hoisted(() => ({ list: vi.fn(), collections: vi.fn(), get: vi.fn(), options: vi.fn(), save: vi.fn(), start: vi.fn(), models: vi.fn() }));
 const launchSpec = (id: string, label: string) => ({ id, label, acceptsTask: true, effortFlag: "--effort", effortLevels: ["low", "high"], supportsPlanExecute: false, supportsReferSummary: false });
@@ -37,6 +38,7 @@ beforeEach(() => {
   setLang("en"); window.history.replaceState(null, "", "/?memory=library");
   store.memoryPrefs = {}; store.setMemoryPrefs.mockReset();
   api.list.mockReset().mockResolvedValue({ projects: [], selectedSessionId: null, entries: [], tags: [], total: 0, pageSize: 40 });
+  api.collections.mockReset().mockResolvedValue({ projects: [], sessions: [] });
   api.get.mockReset(); api.options.mockReset(); api.save.mockReset(); api.start.mockReset(); api.models.mockReset();
   api.models.mockResolvedValue({ models: [{ id: "chosen-model", label: "Chosen model", effortLevels: ["low", "high"] }, { id: "simple-model", label: "Simple model", effortLevels: [] }], effortLevels: ["low", "high"] });
   api.options.mockResolvedValue({ agents: [{ id: "claude", label: "Claude", available: true }, { id: "codex", label: "Codex", available: true }], defaultAgent: "codex", catalog: [] });
@@ -81,6 +83,21 @@ describe("Knowledge Base interactions", () => {
     expect(document.querySelector(".memory-open-tab")).toBeNull();
     expect(location.search).toBe("?session=keep");
     expect(location.hash).toBe("#terminal");
+  });
+
+  it("offers the shared close actions from the library tab's context menu", async () => {
+    window.history.replaceState(null, "", "/?memory=library&session=keep");
+    const onCloseOthers = vi.fn();
+    render(<><MemoryTab otherTabCount={2} onCloseOthers={onCloseOthers} /><MemoryRoute /></>);
+    fireEvent.contextMenu(document.querySelector(".memory-open-tab")!);
+    expect(screen.getByRole("menuitem", { name: "Close Tabs to the Right" }).getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Close Other Tabs" }));
+    expect(onCloseOthers).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".memory-open-tab")).not.toBeNull();
+    fireEvent.contextMenu(document.querySelector(".memory-open-tab")!);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Close Tab" }));
+    await waitFor(() => expect(document.querySelector(".memory-open-tab")).toBeNull());
+    expect(location.search).toBe("?session=keep");
   });
 
   it("uses the backend agent default and submits the user's selected model", async () => {
@@ -206,7 +223,7 @@ it("navigates project and session groups through shareable URLs and loads scoped
   const project = await within(directory).findByRole("link", { name: /Project A/ });
   expect(project.getAttribute("href")).toContain("memoryProject=project");
   expect(within(directory).queryByText("Saved topic")).toBeNull();
-  expect(screen.getByRole("main").contains(screen.getByLabelText("Search entry titles and content…"))).toBe(true);
+  expect(screen.getByRole("main").contains(screen.getByLabelText("Search entries…"))).toBe(true);
   fireEvent.click(project);
   fireEvent.click(await within(directory).findByRole("link", { name: /Session A/ }));
   await within(screen.getByRole("main")).findByText("Saved topic");
@@ -225,6 +242,7 @@ it("shows related entries on a search result and links to them", async () => {
     projects: [], selectedSessionId: null, total: 1, pageSize: 40, tags: [],
     entries: [{ id: "entry", title: "Saved topic", summary: "Snapshot", tags: [], updatedAt: 0, sourceCount: 1, related: [{ id: "neighbor", title: "Neighbor topic" }] }],
   });
+  window.history.replaceState(null, "", "/?memory=library&memoryQuery=topic");
   render(<MemoryLibrary selected="" />);
   const related = await screen.findByRole("link", { name: "Neighbor topic" });
   expect(related.getAttribute("href")).toContain("memory=entry%2Fneighbor");
@@ -239,7 +257,7 @@ it("keeps failure feedback and retry in the main panel", async () => {
   expect(document.querySelector(".memory-workspace .memory-directory")).toBeNull();
   fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
-  expect(screen.getByLabelText("Search entry titles and content…")).toBeTruthy();
+  expect(screen.getByLabelText("Search entries…")).toBeTruthy();
 });
 
 it("keeps later entries reachable and locates a selected entry beyond the first tree page", async () => {
@@ -253,9 +271,26 @@ it("keeps later entries reachable and locates a selected entry beyond the first 
   render(<MemoryDirectory/>);
   const late=await screen.findByRole("link",{name:"Late entry"});
   expect(late.getAttribute("aria-current")).toBe("page");
-  expect(late.closest('li[data-depth="2"]')?.querySelector('.nb-tree-row>a')?.textContent).toContain("Session");
+  expect(late.closest('li[data-depth="1"]')?.querySelector('.nb-tree-row>a')?.textContent).toContain("Session");
   fireEvent.click(screen.getByRole("button",{name:"Load more"}));
   await waitFor(()=>expect(api.list).toHaveBeenCalledWith(expect.objectContaining({projectId:"p",sessionId:"s",page:1})));
   await waitFor(()=>expect(screen.queryByRole("button",{name:"Load more"})).toBeNull());
   expect(screen.getAllByRole("link",{name:"Late entry"})).toHaveLength(1);
+});
+
+it("merges related entries and links back, and hides history until there is a second version", () => {
+  const entry = { id: "e", version: 1, title: "E", summary: "", content: "", tags: [], related: ["a", "b"], sources: ["s"], sessionId: "x", createdAt: 0, updatedAt: 0, author: "manual" } as unknown as MemoryEntry;
+  const data = {
+    entry, revision: null, catalog: [{ id: "a", title: "Alpha" }, { id: "b", title: "Beta" }],
+    backlinks: [{ id: "b", title: "Beta" }, { id: "c", title: "Gamma" }],
+    sources: [{ id: "s", sessionName: "Source session", kind: "claude", createdAt: 0, digest: "d" }],
+    versions: [{ version: 1, author: "manual", createdAt: 0 }],
+  } as unknown as MemoryDetail;
+  const { rerender } = render(<EntryFacts id="e" data={data} entry={entry} />);
+  expect(screen.getByText("From session")).toBeTruthy();
+  expect(screen.getByRole("heading", { name: /Related entries/ }).textContent).toContain("3");
+  expect(screen.getAllByText("Beta")).toHaveLength(1);
+  expect(screen.queryByText("Revision history")).toBeNull();
+  rerender(<EntryFacts id="e" data={{ ...data, versions: [...data.versions, { version: 2, author: "manual", createdAt: 1 }] }} entry={entry} />);
+  expect(screen.getByRole("heading", { name: /Revision history/ })).toBeTruthy();
 });

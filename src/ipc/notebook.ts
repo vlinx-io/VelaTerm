@@ -2,7 +2,7 @@
 import { invoke } from "./transport";
 export interface NotebookVault { id:string; name:string; root:string }
 export interface NotebookNode { path:string; absolutePath:string; name:string; kind:"folder"|"note"|"asset"|"large"; size:number; updatedAt:number; favorite:boolean; tags:string[]; summary:string }
-export interface NotebookOverview { vaults:NotebookVault[]; defaultRoot:string|null; limits:{noteBytes:number;assetBytes:number;files:number;chunkBytes:number} }
+export interface NotebookOverview { vaults:NotebookVault[]; defaultRoot:string|null; home?:string|null; limits:{noteBytes:number;assetBytes:number;files:number;chunkBytes:number} }
 export interface NotebookTree { vault:NotebookVault; nodes:NotebookNode[]; entries:NotebookNode[]; tags:string[]; skipped:number; trash:{id:string;path:string;deletedAt:number}[] }
 export interface NotebookDocument { vaultId:string; path:string; absolutePath:string; content:string; digest:string; favorite:boolean; tags:string[]; outline:{text:string;level:number;line:number}[]; links:{target:string;label:string;embed:boolean;path:string|null}[]; backlinks:{path:string}[] }
 export const notebookOverview=()=>invoke<NotebookOverview>("kb_overview");

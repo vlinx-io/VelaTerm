@@ -27,7 +27,8 @@ export function AgentMissingNotice({
   onInstall?: () => void;
   /** Called once an installation run here has finished; used when there is no terminal view to go to. */
   onInstalled?: () => void;
-  onDismiss: () => void;
+  /** Absent while the conversation cannot send at all: then there is nothing else to do here. */
+  onDismiss?: () => void;
 }) {
   const t = useT();
   const [recipe, setRecipe] = useState<AgentInstallRecipe | null>(null);
@@ -96,9 +97,9 @@ export function AgentMissingNotice({
           {t("agentInstall.docs")}
         </button>
         <span className="sv-agent-missing-spacer" />
-        <button className="sv-agent-missing-link" onClick={onDismiss}>
+        {onDismiss && <button className="sv-agent-missing-link" onClick={onDismiss}>
           {t("agentInstall.dismiss")}
-        </button>
+        </button>}
       </div>
     </div>
   );

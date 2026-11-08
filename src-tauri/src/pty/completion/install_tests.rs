@@ -37,7 +37,15 @@ fn zsh_startup_preserves_profiles_and_restores_zdotdir() {
         .output()
         .unwrap();
     assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let raw = String::from_utf8_lossy(&output.stdout);
+    // The integration announces itself with OSC 6973 sequences, which the PTY reader strips before display.
+    let mut stdout = String::new();
+    let mut rest = raw.as_ref();
+    while let Some(start) = rest.find("\x1b]6973;") {
+        stdout.push_str(&rest[..start]);
+        rest = rest[start..].split_once('\x07').map_or("", |(_, after)| after);
+    }
+    stdout.push_str(rest);
     let (result, histfile) = stdout.rsplit_once('|').unwrap();
     assert_eq!(result, format!("RESULT:EPRL:{}:{}", original.display(), state.nonce));
     // macOS /etc/zshrc sets HISTFILE from ZDOTDIR; it must follow the user's directory, not the startup one.

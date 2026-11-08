@@ -1,3 +1,33 @@
+## v0.3.0 — 2026-11-08
+
+- 🗂️ As sessões agora têm três tipos, “Tarefa”, “Projeto” e “Chat”, escolhidos no topo da página “Nova sessão”, e a barra lateral esquerda passa a ser organizada nas coleções fixas “Projetos”, “Terminais”, “Tarefas” e “Chats”, sendo que “Terminais” lista todos os terminais em execução e os agentes detectados neles.
+- 🧭 Uma nova barra de atividades na borda esquerda alterna entre “Projetos”, “Terminais”, “Tarefas”, “Chats”, “Sessões arquivadas” e “Base de conhecimento”, e reúne na parte inferior “Configurações”, “Conta”, “Feedback”, “Compartilhar” e “Central de jogos”.
+- 📦 Coleções podem ser arquivadas por inteiro com “Arquivar coleção” no menu de contexto, e restaurar qualquer uma de suas sessões traz a coleção de volta.
+- 🆕 Na página “Nova sessão”, o projeto, o agente, o modelo, o esforço de raciocínio e as permissões são escolhidos em um cartão de configurações acima da caixa de entrada, e a lista de projetos permite criar, importar ou clonar um projeto sem sair da página.
+- 🩺 Ao abrir uma conversa, o VelaTerm verifica se o agente dela está instalado e conectado à conta: caso não esteja, aparece um aviso de instalação ou um painel para entrar, e o botão “Enviar” fica desativado até que o agente esteja pronto.
+- 🔧 Um agente só é considerado instalado quando realmente é executado; assim, uma instalação inacabada ou uma atualização com defeito mostra o guia de instalação, as instalações em um clique só são concluídas quando o agente é iniciado, e uma atualização que deixa o agente sem conseguir iniciar é informada como incompleta.
+- 🪟 O novo comando `vartifact <file|URL>` abre um arquivo em um painel ao lado da conversa, com prévia ao vivo para HTML e visualizações editáveis para Markdown, imagens e código, que podem ser salvas com ⌘S, enquanto `vopen` agora sempre abre uma aba.
+- 💤 As sugestões em cinza em linha no terminal agora vêm desativadas por padrão e o preenchimento volta a ser “Apenas Tab”; esta atualização muda uma única vez a configuração “Em linha + Tab” existente para “Apenas Tab”, e você pode reativá-las nas configurações.
+- ⌨️ No modo “Em linha + Tab”, a nova configuração “Tecla Tab” permite aceitar a sugestão em cinza com Tab, e um segundo Tab desfaz a aceitação e lista as correspondências; enquanto houver uma sugestão visível, a barra de título do terminal mostra quais teclas estão disponíveis.
+- 🎨 Editar uma linha de comando do Zsh não deixa mais cinza o texto já digitado, e a descrição de “Sugestões de comandos” em “Configurações” corresponde ao modo selecionado.
+- 📡 O preenchimento com Tab em conexões remotas responde em uma única ida e volta.
+- 💬 As sessões do ZCode permitem adicionar uma instrução durante a resposta com Option/Alt+Enter, e a mensagem entra no turno em andamento depois da próxima chamada de ferramenta.
+- 🔑 No ZCode 3.15 e versões posteriores, é possível entrar com OAuth, e um GLM Coding Plan adquirido não é mais informado como ausente ou esgotado.
+- 📥 É possível importar sessões do Pi, do OMP, do ZCode e do DeepSeek Harness, e a caixa de diálogo “Importar sessões” permite filtrar por agente.
+- 🔤 A interface usa Inter em todos os lugares, enquanto código, saída de ferramentas, caminhos e terminais continuam em JetBrains Mono, e a configuração de fonte da interface foi removida.
+- 📚 A base de conhecimento exibe as entradas em uma coluna centralizada, lista as sessões arquivadas em uma árvore de projetos, grupos e sessões pai, com uma visão “Por data”, e permite alternar a base de conhecimento local entre cartões e lista.
+- 🔔 No macOS e no Windows, clicar em uma notificação traz para a frente a janela de onde ela veio, de modo que uma notificação de uma janela remota não coloca mais a janela principal por cima dela.
+- 📋 No macOS, colar não trava mais o aplicativo quando o aplicativo de origem da área de transferência para de responder: o VelaTerm desiste após 5 segundos e avisa você.
+- 📝 No editor de código-fonte, “Selecionar tudo” no menu do macOS ou no menu de contexto seleciona o arquivo inteiro, e copiar não deixa mais de fora as linhas fora da tela.
+- 📏 A caixa de entrada não aumenta mais e depois volta a diminuir quando você envia uma mensagem.
+- 📂 “Terminais”, “Tarefas” e “Chats” mostram seu conteúdo expandido, independentemente do que estiver recolhido em “Projetos”.
+- 🔄 As novas sessões não falham mais ao sincronizar com `cursor_expired` depois que você abre a conversa de uma subtarefa.
+- 🧯 Reconectar após uma longa desconexão com muito conteúdo acumulado não deixa mais a conversa travada com o botão “Enviar” desativado.
+- 🪞 Conexões remotas com hosts Windows que usam Cygwin ou Git Bash passam a usar o aplicativo de desktop do VelaTerm já em execução lá, e enviar uma mensagem não falha mais enquanto esse aplicativo executa a sessão.
+- ⚡ A indexação de conversas longas do Codex consome cerca da metade do tempo de CPU de antes.
+- 🔗 Os links para artefatos do Claude abrem no seu navegador padrão.
+- 🗄️ O botão “Sessões arquivadas” saiu da barra de abas e foi para a barra de atividades.
+
 ## v0.2.15 — 2026-11-03
 
 - 🆕 A aba “Nova sessão” permite escolher o projeto, o agente, o modelo, o esforço de raciocínio, as permissões, a visão e um worktree isolado em torno de uma caixa de entrada centralizada, e inicia a sessão com a sua primeira tarefa; ela pode ser aberta pelo item “Nova sessão…” dos menus de nova sessão, pelo botão de estrela na barra de abas ou pelo painel central vazio.

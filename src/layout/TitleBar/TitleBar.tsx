@@ -3,22 +3,22 @@
 
 import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties } from "react";
 import Icons from "../../components/Icons";
-import { getLocale, useT } from "../../i18n";
-import { SharingLink, sharingNavigate, useSharingLocation } from "../../sharing/navigation";
-import { sharingText } from "../../sharing/copy";
+import { useT } from "../../i18n";
+import { sharingNavigate, useSharingLocation } from "../../sharing/navigation";
 import { getBackendVersion } from "../../ipc/commands";
-import { apiUrl, isShareSurface } from "../../ipc/shareBase";
+import { apiUrl } from "../../ipc/shareBase";
 import { invoke, isTauri } from "../../ipc/transport";
 import { recordRequestError } from "../../ipc/reqLog";
 import { screenshotShortcutGet, screenshotStart, type ScreenshotShortcutStatus } from "../../ipc/screenshot";
 import { formatAccelerator } from "../../screenshot/accelerator";
 import { webServerStatus, type WebServerStatus } from "../../ipc/webServer";
-import { env, platform } from "../../platform";
+import { env } from "../../platform";
 import { useTermStore } from "../../store/termStore";
 import { runAfterInitialSettings } from "../../store/settingsWatch";
 import { navigateTranslation, translationUrl, useTranslationRoute } from "../../translation/navigation";
 import { resolveTheme } from "../../theme";
 import { AppMenuBar } from "./AppMenuBar";
+import { memoryRouteHidesRightPanel, useMemoryLocation } from "../Memory/navigation";
 
 // The dialogs opened from the title bar load on first use, keeping them out of what the window must load
 // before its first paint.
@@ -26,8 +26,6 @@ const ShareModal = lazy(() => import("../../components/ShareModal").then((m) => 
 const ConnectRemotePanel = lazy(() => import("./ConnectRemotePanel").then((m) => ({ default: m.ConnectRemotePanel })));
 const RemoteAccessPanel = lazy(() => import("./RemoteAccessPanel").then((m) => ({ default: m.RemoteAccessPanel })));
 const SettingsModal = lazy(() => import("./SettingsModal").then((m) => ({ default: m.SettingsModal })));
-
-const FEEDBACK_URL = "https://velaterm.com/feedback";
 
 /**
  * Format MM-DD HH:mm:ss for the development badge's latest hot-update time.
@@ -68,6 +66,7 @@ export function TitleBar() {
   const leftCollapsed = useTermStore((s) => s.leftCollapsed);
   const toggleLeft = useTermStore((s) => s.toggleLeft);
   const rightCollapsed = useTermStore((s) => s.rightCollapsed);
+  const noRightPanel = memoryRouteHidesRightPanel(useMemoryLocation());
   const toggleRight = useTermStore((s) => s.toggleRight);
   // Mirror mode is switched on the host only. Without a marker, a followed client sees its tabs and
   // splits rearrange with no visible cause; the badge names where those changes come from.
@@ -118,7 +117,7 @@ export function TitleBar() {
   }, [translationSessionId, routeSessions, translationDormant]);
   useEffect(() => { setSettingsOpen(!!settingsRoute); }, [settingsRoute, setSettingsOpen]);
   const closeSettings = () => { setSettingsOpen(false); navigateTranslation(translationUrl({ settings: null, settingsSection: null, settingsTranslation: null, translationService: null })); };
-  // Share-dialog visibility is shared by the header action and macOS native Share menu.
+  // Share-dialog visibility is shared by the activity-bar action and macOS native Share menu; the dialog mounts here.
   const shareOpen = useTermStore((s) => s.shareOpen);
   const setShareOpen = useTermStore((s) => s.setShareOpen);
   const [remoteOpen, setRemoteOpen] = useState(false);
@@ -136,9 +135,6 @@ export function TitleBar() {
   // value here and synchronize subsequent changes through the panel callback.
   const [remoteRunning, setRemoteRunning] = useState(false);
   const [remotePort, setRemotePort] = useState<number | null>(null);
-  // Account link state lights the account icon. The relay is authoritative; query it once here and
-  // refresh when the account panel reports a link change in this window.
-  const [accountLinked, setAccountLinked] = useState(false);
   const [screenshotStatus, setScreenshotStatus] = useState<ScreenshotShortcutStatus | null>(null);
   // Frontend/backend versions for the mismatch banner; null when equal or not yet checked.
   const [versionMismatch, setVersionMismatch] = useState<{
@@ -211,27 +207,6 @@ export function TitleBar() {
     setRemoteRunning(s?.running ?? false);
     setRemotePort(s?.port ?? null);
   };
-
-  useEffect(() => {
-    // Browser clients never show the account entry, and the relay status is not part of their session.
-    if (env.isBrowser) return;
-    let alive = true;
-    const refresh = () => {
-      invoke<{ linked: boolean }>("public_account_status")
-        .then((status) => {
-          if (alive) setAccountLinked(status.linked);
-        })
-        .catch(() => {
-          // Keep the last known state while the account service is unreachable; the icon is decoration.
-        });
-    };
-    refresh();
-    window.addEventListener("public-account-changed", refresh);
-    return () => {
-      alive = false;
-      window.removeEventListener("public-account-changed", refresh);
-    };
-  }, []);
 
   const remoteInfo = (window as any).__VLX_REMOTE__ as
     { address: string } | undefined;
@@ -547,54 +522,6 @@ export function TitleBar() {
         </button>
       )}
 
-      {/* Share appears on every platform and shares its dialog with the macOS native menu action. Public
-          share windows serve a single grant, so sharing and settings stay hidden there. */}
-      {!isShareSurface && (
-        <button
-          className="tb-btn"
-          title={t("titlebar.share")}
-          onClick={() => setShareOpen(!shareOpen)}
-        >
-          <Icons.share size={15} />
-        </button>
-      )}
-
-      {!isShareSurface && (
-        <button
-          className="tb-btn"
-          title={t("settings.title")}
-          onClick={(e) => {
-            // Option/Alt reveals the translation category for this opening only.
-            if (settingsOpen && !e.altKey) closeSettings();
-            else navigateTranslation(translationUrl({ settings: "appearance", settingsSection: null, settingsTranslation: e.altKey ? "1" : null, translationService: null }));
-          }}
-        >
-          <Icons.gear size={15} />
-        </button>
-      )}
-
-      {!env.isBrowser && (
-        <SharingLink
-          className={`tb-btn${accountLinked ? " account-on" : ""}`}
-          values={{ publicAccount: "1" }}
-          title={`${sharingText("Account", getLocale())} · ${t("common.experimental")}`}
-          aria-label={`${sharingText("Account", getLocale())} · ${t("common.experimental")}`}
-        >
-          <Icons.account size={15} />
-        </SharingLink>
-      )}
-
-      {/* Feedback opens the feedback page in the system browser on every platform and surface. */}
-      <button
-        className="tb-btn"
-        title={t("titlebar.feedback")}
-        onClick={() => {
-          void platform.opener.openExternal(FEEDBACK_URL).catch(() => {});
-        }}
-      >
-        <Icons.feedback size={15} />
-      </button>
-
       {/* VS Code-style panel toggles sit at the far right and fill their corresponding side when open. */}
       <div className="tb-pair">
         <button
@@ -616,6 +543,7 @@ export function TitleBar() {
           title={
             rightCollapsed ? t("titlebar.showRight") : t("titlebar.hideRight")
           }
+          disabled={noRightPanel}
           onClick={toggleRight}
         >
           {rightCollapsed ? (

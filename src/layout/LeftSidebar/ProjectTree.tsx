@@ -30,7 +30,24 @@ import { DEFAULT_BINDINGS, formatCombo } from "../../hooks/shortcutRegistry";
 import { useGitBranch, useLinkedWorktrees } from "../../hooks/useGitBranch";
 import { stripControlChars, useCtrlCharGuard } from "../../hooks/textInputGuards";
 import { setProjectCollection } from "../../store/projectCollections";
-import { arrangeProjectsInCollections } from "./projectCollectionLayout";
+import { arrangeProjectsInCollections, sectionEntries } from "./projectCollectionLayout";
+import {
+  LIVE_AGENTS,
+  LIVE_TERMINALS,
+  liveAgentIds,
+  liveTerminalIds,
+  type LiveSection,
+  projectDisplayName,
+  sectionCollection,
+  sectionStartsExpanded,
+  type RailSection,
+  SYSTEM_CHAT,
+  SYSTEM_PROJECTS,
+  SYSTEM_TASKS,
+  SystemCollectionIcon,
+  systemHint,
+  systemSection,
+} from "./systemCollections";
 import { collectionDialogUrl } from "./collectionNavigation";
 import { newGroupDialogUrl } from "./groupNavigation";
 import { hasProjectDrag, PROJECT_DRAG_MIME, resolveProjectDrop } from "./projectCollectionDrop";
@@ -66,6 +83,8 @@ export interface TreeHandlers {
   view: SidebarTreeView;
   /** Only the primary projection consumes global reveal requests. */
   isPrimary: boolean;
+  /** Section of the pane group this tree belongs to; absent means Projects. */
+  section?: RailSection;
   onContext: (node: TreeNodeRef, x: number, y: number) => void;
   /** Current context-menu target, highlighted temporarily without changing persistent selection. */
   contextId: string | null;
@@ -96,6 +115,21 @@ type TreeRow =
       depth: number;
       hasKids: boolean;
       expanded: boolean;
+    }
+  | {
+      /** Runtime list (Terminals or Agents) in the Terminals section. It has no database row and cannot be renamed or moved. */
+      kind: "live";
+      id: string;
+      section: LiveSection;
+      count: number;
+      expanded: boolean;
+    }
+  | {
+      /** A running terminal shown in a runtime list; the same session also keeps its row in its project. */
+      kind: "liveSession";
+      id: string;
+      session: Session;
+      section: LiveSection;
     }
   | {
       /** Display-only worktree level gathering sibling groups and sessions that share a worktree; see worktreeNodes.ts. */
@@ -183,6 +217,8 @@ interface SessionRowProps {
   setRenameVal: (v: string) => void;
   commitRename: () => void;
   cancelRename: () => void;
+  /** Rows in the runtime lists create nothing, so they have no hover add button. */
+  hideAdd?: boolean;
 }
 
 /** Session-row states remain independent. `active` means opened in the center pane, while `selected` means membership
@@ -294,7 +330,7 @@ const SessionRow = memo(function SessionRow(p: SessionRowProps) {
       )}
       {/* Browser page nodes have no PTY or agent, so a status dot would be meaningless and is omitted. */}
       {!isBrowser && <StatusIndicator status={status} unread={unread} />}
-      {!isShareSurface && <span className="meta">
+      {!isShareSurface && !p.hideAdd && <span className="meta">
         <span
           className="add"
           title={t("tree.newChildSession")}
@@ -327,10 +363,16 @@ export function ProjectTree(h: TreeHandlers) {
     onNewCollection,
     view,
     isPrimary,
+    section = "projects",
   } = h;
 
   const storeProjects = useTermStore((s) => s.projects);
   const projects = useMemo(() => collectionsFirst(storeProjects), [storeProjects]);
+  // Every pane lists its group's section, picked in the activity bar; the tree shows only the section's contents,
+  // without the section's own row. A backend without the fixed collections keeps the old single tree.
+  const fixedLayout = useMemo(() => projects.some((p) => p.id === SYSTEM_PROJECTS), [projects]);
+  const sectionRoot = !fixedLayout ? null : sectionCollection(section);
+  const liveSection = fixedLayout && section === "terminals";
   const treeLoaded = useTermStore((s) => s.treeLoaded);
   // Delay the loading row so a fast load stays blank instead of flashing a spinner for one frame.
   const [showLoadingHint, setShowLoadingHint] = useState(false);
@@ -348,7 +390,15 @@ export function ProjectTree(h: TreeHandlers) {
   const groups = useTermStore((s) => s.groups);
   const sessions = useTermStore((s) => s.sessions);
   const ephemeralSessions = useTermStore((s) => s.ephemeralSessions);
+  // Runtime lists subscribe to a string of IDs, so agent state changes that keep the same members do not
+  // rebuild the tree. Agents carry the detected kind, which their icon shows.
+  const liveKey = useTermStore((s) => {
+    const terminals = liveTerminalIds(s.sessions, s.ephemeralSessions, s.runtimes);
+    const agents = liveAgentIds(terminals, s.runtimes).map((id) => `${id}=${s.runtimes[id]?.agent}`);
+    return `${terminals.join(",")}|${agents.join(",")}`;
+  });
   const toggleCollapsed = useTermStore((s) => s.toggleCollapsed);
+  const newScratchTab = useTermStore((s) => s.newScratchTab);
   const openSession = useTermStore((s) => s.openSession);
   // activeSessionId changes only on user navigation, so subscribing here for reveal behavior does not compromise
   // per-row isolation of high-frequency runtime updates.
@@ -388,14 +438,15 @@ export function ProjectTree(h: TreeHandlers) {
 
   // The primary pane reads and writes the shared collapse state kept in the database. Every split-off pane keeps its
   // own map instead, so expanding a node here never moves the other panes. Nodes created after the split have no
-  // entry yet and fall back to the shared value.
+  // entry yet and fall back to the shared value, except in sections that start expanded, where they are open.
   const setViewCollapsed = useTermStore((s) => s.setSidebarTreeViewCollapsed);
   const collapsedOverrides = useMemo(
     () => (isPrimary ? null : (view.collapsedOverrides ?? {})),
     [isPrimary, view.collapsedOverrides],
   );
+  const startsExpanded = !isPrimary && fixedLayout && sectionStartsExpanded(section);
   const nodeCollapsed = (id: string, shared: boolean | undefined) =>
-    collapsedOverrides && id in collapsedOverrides ? collapsedOverrides[id] : !!shared;
+    collapsedOverrides && id in collapsedOverrides ? collapsedOverrides[id] : !startsExpanded && !!shared;
   const toggleNodeCollapsed = (kind: NodeKind, id: string, shared: boolean | undefined) => {
     if (!collapsedOverrides) {
       void toggleCollapsed(kind, id);
@@ -588,11 +639,29 @@ export function ProjectTree(h: TreeHandlers) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtering, filter, nameHitIds, statusFiltering, statusFilterIds, markFilter, groups, sessions, projects]);
 
+  // Running terminals and the agents started in them. Each row is the session itself; an agent row shows the
+  // agent's icon in place of the terminal's.
+  const liveLists = useMemo(() => {
+    const [terminalPart, agentPart] = liveKey.split("|");
+    const find = (id: string) => sessionsById.get(id) ?? ephemeralSessions[id];
+    const terminals = terminalPart ? terminalPart.split(",").flatMap((id) => find(id) ?? []) : [];
+    const agents = agentPart ? agentPart.split(",").flatMap((entry) => {
+      const [id, kind] = entry.split("=");
+      const session = find(id);
+      return session ? [{ ...session, kind: kind as Session["kind"] }] : [];
+    }) : [];
+    return { agents, terminals };
+  }, [liveKey, sessionsById, ephemeralSessions]);
+
   const projectEntries = useMemo(() => {
+    if (liveSection) return [];
     const visible =
       filtering && visProjects ? projects.filter((p) => visProjects.has(p.id)) : projects;
-    return arrangeProjectsInCollections(visible, p => filtering || !nodeCollapsed(p.id, p.collapsed));
-  }, [projects, filtering, visProjects, collapsedOverrides]);
+    const entries = arrangeProjectsInCollections(
+      visible, p => p.id === sectionRoot || filtering || !nodeCollapsed(p.id, p.collapsed),
+    );
+    return sectionRoot ? sectionEntries(entries, sectionRoot) : entries;
+  }, [projects, filtering, visProjects, collapsedOverrides, sectionRoot, liveSection]);
 
   // A name match propagates visibility downward so a matching node's complete subtree remains expandable even when
   // descendants lack the term. Marker propagation is added only for projects/groups below: a marked session keeps
@@ -693,6 +762,11 @@ export function ProjectTree(h: TreeHandlers) {
     };
     for (const entry of projectEntries) {
       const p = entry.project;
+      // The section's own collection has no row; its contents start at the top level.
+      if (entry.indent < 0) {
+        walk(p.id, null, false, projectContainerHit(p));
+        continue;
+      }
       out.push({ id: p.id, kind: "project" });
       const expanded = filtering ? true : !nodeCollapsed(p.id, p.collapsed);
       if (expanded) walk(p.id, null, false, projectContainerHit(p));
@@ -775,8 +849,27 @@ export function ProjectTree(h: TreeHandlers) {
       );
     };
 
+    // The Terminals section holds two runtime lists: running terminals, then the agents started in them. The
+    // search text matches session names; status and marker filters do not apply to them.
+    if (liveSection) {
+      for (const [list, id] of [["terminals", LIVE_TERMINALS], ["agents", LIVE_AGENTS]] as const) {
+        const members = liveLists[list].filter((s) => !filter || s.name.toLowerCase().includes(filter));
+        if (filter && !members.length) continue;
+        const expanded = filter ? true : !wtNodeCollapsed(id);
+        out.push({ kind: "live", id, section: list, count: members.length, expanded });
+        if (expanded) {
+          for (const session of members) out.push({ kind: "liveSession", id: `${id}:${session.id}`, session, section: list });
+        }
+      }
+      return out;
+    }
     for (const entry of projectEntries) {
       const p = entry.project;
+      // The section's own collection has no row; its contents start at the top level.
+      if (entry.indent < 0) {
+        walkChildren(p.id, null, false, 0, projectContainerHit(p));
+        continue;
+      }
       const expanded = filtering ? true : !nodeCollapsed(p.id, p.collapsed);
       out.push({ kind: "project", id: p.id, project: p, expanded, indent: entry.indent });
       if (expanded) walkChildren(p.id, null, false, 1 + entry.indent, projectContainerHit(p));
@@ -785,7 +878,7 @@ export function ProjectTree(h: TreeHandlers) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     projects, groups, sessions, filter, nameHitIds, statusFiltering, statusFilterIds, markFilter,
-    visGroups, visProjects, filtering, collapsedOverrides, projectEntries, worktreeCollapsed,
+    visGroups, visProjects, filtering, collapsedOverrides, projectEntries, worktreeCollapsed, liveLists, liveSection,
   ]);
 
   // Exact row heights are compact 24, regular 28, or comfy 32, reduced by 3 in compact navigation. Supplying this
@@ -1380,6 +1473,12 @@ export function ProjectTree(h: TreeHandlers) {
     [],
   );
   const sSetRenameVal = useCallback((v: string) => cbRef.current.h.setRenameVal(v), []);
+  // Rows in the runtime lists open their session and leave the tree selection alone.
+  const sOnLiveClick = useCallback((node: SelNode, e: React.MouseEvent) => {
+    useTermStore.getState().openSession(node.id, e.altKey ? { newTab: true } : undefined);
+  }, []);
+  const sOnNoDrag = useCallback((_id: string, _e: React.DragEvent) => {}, []);
+  const sOnNoDrop = useCallback((_target: Session, e: React.DragEvent) => e.preventDefault(), []);
   const sCommitRename = useCallback(() => cbRef.current.h.commitRename(), []);
   const sCancelRename = useCallback(() => cbRef.current.h.cancelRename(), []);
 
@@ -1439,22 +1538,24 @@ export function ProjectTree(h: TreeHandlers) {
       case "project": {
         const p = row.project;
         const renaming = renamingId === p.id;
+        const fixed = systemSection(p.id);
+        const name = projectDisplayName(t, p);
         const ref: TreeNodeRef = {
           kind: "project",
           id: p.id,
-          name: p.name,
+          name,
           projectId: p.id,
           groupId: null,
         };
         return (
           <div
             className={
-              "row project" + (isVirtualProject(p) ? " collection" : "") +
+              "row project" + (isVirtualProject(p) ? " collection" : "") + (fixed ? " system" : "") +
               (selectedIds.has(p.id) ? " sel" : "") +
               (contextId === p.id ? " context" : "")
             }
             style={{ paddingLeft: 6 + row.indent * 13, ...dragStyle(p.id) }}
-            draggable={!renaming && !isShareSurface}
+            draggable={!renaming && !isShareSurface && !fixed}
             onDragStart={onDragStart({ kind: "project", id: p.id, projectId: p.id })}
             onDragOver={(e) =>
               hasProjectDrag(e.dataTransfer.types) ? allowProjectDrop(e, p.id) : allowDrop(e, p.id, true)
@@ -1478,19 +1579,20 @@ export function ProjectTree(h: TreeHandlers) {
             <span
               className="ic"
               style={{ color: "var(--text-dim)" }}
-              title={isVirtualProject(p) ? t("collection.tag") : p.rootPath}
+              title={fixed ? systemHint(t, fixed) : isVirtualProject(p) ? t("collection.tag") : p.rootPath}
             >
-              {isVirtualProject(p) ? <Icons.collection size={15} /> : <Icons.project size={15} />}
+              {fixed ? <SystemCollectionIcon section={fixed} />
+                : isVirtualProject(p) ? <Icons.collection size={15} /> : <Icons.project size={15} />}
             </span>
             {renaming ? (
               renameInput
             ) : (
               <>
                 <NodeMarkBadge mark={p.mark} />
-                <span className="nm">{p.name}</span>
+                <span className="nm">{name}</span>
               </>
             )}
-            {metaButtons(ref, true, isVirtualProject(p))}
+            {metaButtons(ref, true, isVirtualProject(p) && p.id !== SYSTEM_TASKS && p.id !== SYSTEM_CHAT)}
           </div>
         );
       }
@@ -1547,6 +1649,77 @@ export function ProjectTree(h: TreeHandlers) {
             )}
             {metaButtons(ref, true)}
           </div>
+        );
+      }
+      case "live": {
+        // Fixed runtime list: no selection, menu, rename or drop. Clicking toggles it like a collection.
+        const toggle = () => {
+          if (!filter) setWtNodeCollapsed(row.id, row.expanded);
+        };
+        return (
+          <div
+            className="row project collection system live"
+            style={{ paddingLeft: 6 }}
+            onMouseDown={preventModifierSelect}
+            onClick={toggle}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <span className="tw">
+              <Chevron open={row.expanded} />
+            </span>
+            <span className="ic" title={systemHint(t, row.section)}>
+              <SystemCollectionIcon section={row.section} />
+            </span>
+            <span className="nm">{projectDisplayName(t, { id: row.id, name: "" })}</span>
+            {row.count > 0 && <span className="live-count">{row.count}</span>}
+            {row.section === "terminals" && !isShareSurface && (
+              <span className="meta">
+                <span
+                  className="add"
+                  title={t("tab.newTerminal")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void newScratchTab();
+                  }}
+                >
+                  <Icons.plus size={12} />
+                </span>
+              </span>
+            )}
+          </div>
+        );
+      }
+      case "liveSession": {
+        // A persistent session's own row lives in its project and is renamed there. A draft lives only in
+        // center tabs, so its Terminals row is where it is renamed; the Agents row repeats it without an editor.
+        const s = row.session;
+        const persistent = sessionsById.has(s.id);
+        const renaming = !persistent && row.section === "terminals" && renamingId === s.id;
+        return (
+          <SessionRow
+            session={s}
+            rootPath={projects.find((pr) => pr.id === s.projectId)?.rootPath ?? null}
+            depth={1}
+            hasKids={false}
+            expanded={false}
+            context={contextId === s.id}
+            renaming={renaming}
+            renameVal={renaming ? renameVal : undefined}
+            draggable={false}
+            onRowClick={sOnLiveClick}
+            onRowContext={sOnContext}
+            onToggle={sOnToggleSession}
+            onDragStartRow={sOnDragStart}
+            onDragOverRow={sOnNoDrag}
+            onDragLeaveRow={sOnDragLeave}
+            onDropRow={sOnNoDrop}
+            onMouseDownRow={sOnMouseDown}
+            onAddSession={sOnAddSession}
+            setRenameVal={sSetRenameVal}
+            commitRename={sCommitRename}
+            cancelRename={sCancelRename}
+            hideAdd
+          />
         );
       }
       case "worktree": {
@@ -1636,9 +1809,26 @@ export function ProjectTree(h: TreeHandlers) {
     );
   }
 
-  // Show the three project entry points plus collection creation when the tree is empty; draft terminals
+  // Tasks and Chats hold one session type each; when empty they offer a new session of that type.
+  if (fixedLayout && !filtering && rows.length === 0 && (section === "tasks" || section === "chat")) {
+    const root = section === "tasks" ? SYSTEM_TASKS : SYSTEM_CHAT;
+    return (
+      <div className="sidebar-section-empty">
+        <div>{t(section === "tasks" ? "sidebarSection.noTasks" : "sidebarSection.noChats")}</div>
+        <button
+          className="empty-action"
+          onClick={(e) => onAddSession({ kind: "project", id: root, name: "", projectId: root, groupId: null }, e.clientX, e.clientY)}
+        >
+          <Icons.plus size={14} />
+          {t(section === "tasks" ? "newSession.newTask" : "newSession.newChat")}
+        </button>
+      </div>
+    );
+  }
+
+  // Show the three project entry points plus collection creation when there are no projects; draft terminals
   // appear only in center tabs.
-  if (projects.length === 0) {
+  if (fixedLayout ? section === "projects" && !filtering && rows.length === 0 : projects.length === 0) {
     return (
       <div
         style={{

@@ -299,7 +299,7 @@ fn capture_and_open<R: Runtime>(app: &AppHandle<R>, previous_app_pid: Option<i32
         #[cfg(not(target_os = "macos"))]
         let _ = previous_app_pid;
     }
-    cover_monitor(&win, pos, size);
+    cover_monitor(&win, pos, size, scale);
     // The page loads the frame on this event; a page that is still loading asks with
     // `screenshot_pending` once it is ready, so the event may safely go unheard.
     let _ = app.emit_to(OVERLAY_LABEL, FRAME_EVENT, id);
@@ -313,7 +313,7 @@ fn capture_and_open<R: Runtime>(app: &AppHandle<R>, previous_app_pid: Option<i32
         let _ = win.destroy();
     }
     let win = ensure_overlay(app)?;
-    cover_monitor(&win, pos, size);
+    cover_monitor(&win, pos, size, scale);
     if wait_until_shown(app, id) {
         Ok(())
     } else {
@@ -345,15 +345,27 @@ fn ensure_overlay<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, St
         .map_err(|e| format!("failed to open the screenshot window: {e}"))
 }
 
-/// Place the hidden overlay exactly over one monitor. Physical units on purpose: logical placement
-/// can round differently on mixed-DPI setups.
+/// Place the hidden overlay exactly over one monitor. `scale` is that monitor's scale factor.
+///
+/// macOS sets the whole frame at once in the target monitor's points. Separate `set_position` and
+/// `set_size` calls went wrong there: tao converts both with the scale factor of the screen the window
+/// is on now, not the target's, and `setContentSize` keeps the bottom-left corner fixed, so a hidden
+/// window shorter than the monitor grew upward past the top edge and covered only part of the screen.
+/// Windows uses physical units on purpose: logical placement can round differently on mixed-DPI setups.
 fn cover_monitor<R: Runtime>(
     win: &WebviewWindow<R>,
     pos: tauri::PhysicalPosition<i32>,
     size: tauri::PhysicalSize<u32>,
+    scale: f64,
 ) {
-    let _ = win.set_position(pos);
-    let _ = win.set_size(size);
+    #[cfg(target_os = "macos")]
+    macos::set_frame(win, pos, size, scale);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = scale;
+        let _ = win.set_position(pos);
+        let _ = win.set_size(size);
+    }
 }
 
 /// Wait until screenshot `id` is on screen or has ended; false when the overlay never showed it.
@@ -374,20 +386,34 @@ fn wait_until_shown<R: Runtime>(app: &AppHandle<R>, id: u64) -> bool {
     }
 }
 
-/// The monitor whose physical frame contains `point`, falling back to the primary monitor.
+/// The monitor whose frame contains `point`, falling back to the primary monitor.
 /// `monitor_from_point` is not used: on macOS it expects logical points while `cursor_position`
 /// reports physical pixels, so it misses every monitor and the fallback always won.
+///
+/// On macOS the comparison runs in global points: tao derives the cursor's physical position from the
+/// primary monitor's scale but each monitor's frame from that monitor's own scale, so physical values
+/// of displays with different scales do not share one coordinate space. Windows reports both in the
+/// same physical virtual-screen space.
 fn monitor_containing<R: Runtime>(
     app: &AppHandle<R>,
     point: tauri::PhysicalPosition<f64>,
 ) -> Result<tauri::Monitor, String> {
     let monitors = app.available_monitors().map_err(|e| e.to_string())?;
+    let unit = |m: &tauri::Monitor| if cfg!(target_os = "macos") { m.scale_factor() } else { 1.0 };
+    let cursor_unit = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|m| unit(&m))
+        .unwrap_or(1.0);
+    let (x, y) = (point.x / cursor_unit, point.y / cursor_unit);
     let inside = |m: &&tauri::Monitor| {
-        let (p, s) = (m.position(), m.size());
-        point.x >= p.x as f64
-            && point.x < p.x as f64 + s.width as f64
-            && point.y >= p.y as f64
-            && point.y < p.y as f64 + s.height as f64
+        let (p, s, k) = (m.position(), m.size(), unit(m));
+        let (left, top) = (p.x as f64 / k, p.y as f64 / k);
+        x >= left
+            && x < left + s.width as f64 / k
+            && y >= top
+            && y < top + s.height as f64 / k
     };
     if let Some(m) = monitors.iter().find(inside) {
         return Ok(m.clone());
@@ -648,6 +674,47 @@ mod macos {
             return Err(format!("screencapture exited with {status}"));
         }
         bytes.map_err(|e| format!("failed to read the capture: {e}"))
+    }
+
+    /// Set the overlay's frame to one monitor in a single main-thread step. `pos` and `size` are tao's
+    /// physical values for that monitor (its global points times `scale`). Cocoa frames are in global
+    /// points measured upward from the bottom of the primary screen.
+    pub fn set_frame<R: Runtime>(
+        win: &WebviewWindow<R>,
+        pos: PhysicalPosition<i32>,
+        size: PhysicalSize<u32>,
+        scale: f64,
+    ) {
+        use objc2_foundation::{NSPoint, NSRect, NSSize};
+        let (x, y) = (pos.x as f64 / scale, pos.y as f64 / scale);
+        let (w, h) = (size.width as f64 / scale, size.height as f64 / scale);
+        let target = win.clone();
+        let _ = win.run_on_main_thread(move || {
+            let Ok(ns_window) = target.ns_window() else {
+                return;
+            };
+            let ns_window = ns_window as *mut AnyObject;
+            if ns_window.is_null() {
+                return;
+            }
+            // SAFETY: NSScreen and NSWindow messages on the main thread; nil results are checked.
+            unsafe {
+                let screens: *mut AnyObject = msg_send![class!(NSScreen), screens];
+                if screens.is_null() {
+                    return;
+                }
+                let primary: *mut AnyObject = msg_send![screens, firstObject];
+                if primary.is_null() {
+                    return;
+                }
+                let primary_frame: NSRect = msg_send![primary, frame];
+                let frame = NSRect::new(
+                    NSPoint::new(x, primary_frame.size.height - y - h),
+                    NSSize::new(w, h),
+                );
+                let _: () = msg_send![ns_window, setFrame: frame, display: false];
+            }
+        });
     }
 
     /// Lift the overlay above the menu bar and Dock and let it appear over full-screen apps.

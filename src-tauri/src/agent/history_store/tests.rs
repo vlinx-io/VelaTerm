@@ -317,9 +317,14 @@ fn performance_probe(path:std::path::PathBuf) {
     if kind==SessionKind::Codex {store.scan(kind,&source,&std::sync::atomic::AtomicBool::new(false),true).unwrap();}
     let cold=branch.page(None,None,None).unwrap();
     let cold_ms=began.elapsed().as_millis();
-    let began=std::time::Instant::now();
+    // CPU time of this thread alone, which stays comparable when other work loads the machine.
+    #[cfg(unix)]
+    let cpu=|| unsafe {let mut time=std::mem::zeroed::<libc::timespec>();libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID,&mut time);time.tv_sec as u128*1000+time.tv_nsec as u128/1_000_000};
+    #[cfg(not(unix))]
+    let cpu=||0u128;
+    let began=std::time::Instant::now();let began_cpu=cpu();
     store.scan(kind,&source,&std::sync::atomic::AtomicBool::new(false),false).unwrap();
-    let index_ms=began.elapsed().as_millis();
+    let index_ms=began.elapsed().as_millis();let index_cpu_ms=cpu()-began_cpu;
     let began=std::time::Instant::now();
     let warm=branch.page(None,None,None).unwrap();
     let warm_ms=began.elapsed().as_millis();
@@ -350,7 +355,7 @@ fn performance_probe(path:std::path::PathBuf) {
     };
     #[cfg(not(unix))]
     let rss:Option<u64>=None;
-    eprintln!("history_probe {}",serde_json::json!({"sourceBytes":before.size,"coldMs":cold_ms,"indexMs":index_ms,"warmMs":warm_ms,
+    eprintln!("history_probe {}",serde_json::json!({"sourceBytes":before.size,"coldMs":cold_ms,"indexMs":index_ms,"indexCpuMs":index_cpu_ms,"warmMs":warm_ms,
         "coldRows":cold["rows"].as_array().unwrap().len(),"knownRows":warm["knownRows"],"outline":warm["userMessages"].as_array().map(Vec::len),
         "pagesBack":pages,"pagingBackMs":back_ms,"proseMessages":prose.total,"proseMs":prose_ms,"warmRows":warm["rows"].as_array().unwrap().len(),
         "wireBytes":serde_json::to_vec(&warm).unwrap().len(),"records":records,"gaps":gaps,"coverage":warm["coverage"],
@@ -596,6 +601,26 @@ fn a_compaction_repeating_a_long_history_does_not_make_the_recording_unreadable(
     assert_eq!((status.as_str(),errors),("complete",0));
     let rows=branch.page(None,None,None).unwrap()["rows"].as_array().unwrap().clone();
     assert!(rows.iter().any(|row|row.to_string().contains("After compaction")));
+}
+
+#[test]
+fn reasoning_ciphertext_is_read_past_without_being_indexed() {
+    let temp=Temp::new();
+    // The skipped string spans input buffers, and an escape's backslash is the last byte of the first one.
+    let prefix=r#"{"type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"Planned the change"}],"content":null,"encrypted_content":""#;
+    let cipher=format!(r#"{}\"{}\\"#,"x".repeat(INPUT_BYTES-1-prefix.len()),"y".repeat(INPUT_BYTES));
+    let after=serde_json::json!({"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"After reasoning"}]}});
+    let branch=indexed(&temp,&format!("{prefix}{cipher}\"}}}}\n{after}\n"));
+    let (_,status)=branch.sources[0].progress().unwrap();
+    let errors=branch.sources[0].current().unwrap().records.values().filter(|record|record.error.is_some()).count();
+    assert_eq!((status.as_str(),errors),("complete",0));
+    let rows=branch.page(None,None,None).unwrap()["rows"].to_string();
+    assert!(rows.contains("Planned the change") && rows.contains("After reasoning"),"{rows}");
+}
+
+#[test]
+fn digest_is_lowercase_hex_sha256() {
+    assert_eq!(super::store::digest(b"abc"),"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 }
 
 #[test]

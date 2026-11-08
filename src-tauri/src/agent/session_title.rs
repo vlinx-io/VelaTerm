@@ -537,6 +537,24 @@ mod tests {
         (dir, app, session)
     }
 
+    /// An executable agent stand-in. Resolving a launch path runs `--version` as a background health check, and
+    /// that check must succeed, or a launcher it judges broken makes the agent unavailable partway through a test.
+    fn agent_bin(dir: &WorkDir) -> String {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let path = dir.0.join("title-test-agent");
+            std::fs::write(&path, "#!/bin/sh\necho 1.0.0\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path.to_string_lossy().into_owned()
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = dir;
+            std::env::current_exe().unwrap().to_string_lossy().into_owned()
+        }
+    }
+
     #[test]
     fn prompt_uses_entire_conversation_as_data() {
         let prompt = build_prompt(&[message("user", "First topic"), message("assistant", "A decision"),
@@ -665,8 +683,8 @@ mod tests {
 
     #[test]
     fn current_agent_is_required_until_the_user_explicitly_selects_another() {
-        let (_dir, app, mut session) = fixture();
-        let bin = std::env::current_exe().unwrap().to_string_lossy().to_string();
+        let (dir, app, mut session) = fixture();
+        let bin = agent_bin(&dir);
         let defaults = json!({"agentDefaults":{"codex":{"path":bin,"args":"--model fallback-model -c model_reasoning_effort=high"}}});
         app.db().conn.lock().unwrap().execute("INSERT INTO app_settings(key,value,updated_at) VALUES ('vlx-settings',?1,0)",
             [defaults.to_string()]).unwrap();
@@ -685,9 +703,9 @@ mod tests {
 
     #[test]
     fn confirmation_defaults_and_explicit_overrides_preserve_their_scope() {
-        let (_dir, app, mut session) = fixture();
+        let (dir, app, mut session) = fixture();
         session.agent_args = Some("--model current-model --effort high".into());
-        let bin = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+        let bin = agent_bin(&dir);
         {
             let conn = app.db().conn.lock().unwrap();
             conn.execute("UPDATE sessions SET agent_args=?1, agent_path=?2 WHERE id=?3",

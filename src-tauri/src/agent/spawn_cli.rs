@@ -1,5 +1,5 @@
 //! Installation and discovery of built-in command shims and their companion skills (`vspawn`,
-//! `vspawn-tree`, `vopen`, `vrefer`, `vsearch`, `vask`, `vself`, `vflow`, `vtell`, and `vkb`).
+//! `vspawn-tree`, `vopen`, `vartifact`, `vrefer`, `vsearch`, `vask`, `vself`, `vflow`, `vtell`, and `vkb`).
 //!
 //! At startup VelaTerm installs thin shims under the application data `bin/` directory and prepends it
 //! to each session shell's PATH, allowing `vspawn "task"`, `vopen <file>`, `vrefer <session>`, and
@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 /// Built-in `(command name, main-program subcommand arguments)` shims. `vspawn` creates a child session
 /// without a worktree, `vspawn-tree` forces `--worktree`, `vopen` opens a document or browser tab,
+/// `vartifact` opens a file the same way but in the panel beside the calling conversation,
 /// `vrefer` reads another session's conversation, `vsearch` searches across every session, `vstat` reports which sessions are busy, and `vkb` queries code
 /// and the knowledge base. `vtell` sends session messages and execution reports, and
 /// `vrun` starts a long-running command and waits for it, so its completion reaches whoever started it.
@@ -23,6 +24,7 @@ const SHIMS: &[(&str, &str)] = &[
     ("vspawn", "--spawn"),
     ("vspawn-tree", "--spawn --worktree"),
     ("vopen", "--view"),
+    ("vartifact", "--view --beside"),
     ("vrefer", "--refer"),
     ("vsearch", "--search"),
     ("vstat", "--stat"),
@@ -62,7 +64,7 @@ const SKILLS: &[(&str, &str)] = &[
         include_str!("../../../skills/vspawn-tree/SKILL.md"),
     ),
     ("vopen", include_str!("../../../skills/vopen/SKILL.md")),
-    // Companion of `vopen`, not a command of its own: it tells agents to show visual work as an HTML page.
+    // Pairs with the `vartifact` command: it tells agents to show visual work as an HTML page beside the chat.
     ("vartifact", include_str!("../../../skills/vartifact/SKILL.md")),
     ("vrefer", include_str!("../../../skills/vrefer/SKILL.md")),
     ("vsearch", include_str!("../../../skills/vsearch/SKILL.md")),
@@ -703,6 +705,9 @@ mod tests {
         // vopen invokes the --view subcommand.
         let view = std::fs::read_to_string(shim_path(&bin, "vopen")).unwrap();
         assert!(view.contains("--view"), "vopen should delegate to --view");
+        assert!(!view.contains("--beside"), "vopen always opens a tab");
+        let artifact = std::fs::read_to_string(shim_path(&bin, "vartifact")).unwrap();
+        assert!(artifact.contains("--view --beside"), "vartifact should be a --view --beside wrapper");
 
         // bin_dir matches the path returned by install.
         assert_eq!(bin, bin_dir(&tmp));

@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import Icons from "../components/Icons";
 import { Backdrop } from "../components/Backdrop";
+import Select, { type SelectOption } from "../components/Select";
 import { dateLocale, useT } from "../i18n";
-import { discoverAgentSessions, importAgentSessions, type AgentHistory } from "../ipc/tree";
+import { discoverAgentSessions, importAgentSessions, type AgentHistory, type HistoricalSession } from "../ipc/tree";
 import { useTermStore } from "../store/termStore";
 import { kindIconEl } from "./sessionViewers/sessionMeta";
 import { kindLabel } from "./sessionMenuShared";
@@ -16,6 +17,7 @@ export function importSessionsUrl(projectId: string): string {
   else {
     url.searchParams.delete("importSessions");
     url.searchParams.delete("importSearch");
+    url.searchParams.delete("importAgent");
   }
   // A full URL also clears the query on desktop origins without a pathname.
   return url.href;
@@ -58,8 +60,14 @@ function ImportSessions({ projectId, onClose }: { projectId: string; onClose: ()
   const [revision, setRevision] = useState(0);
   const [notice, setNotice] = useState("");
   const [query, setQuery] = useState(() => new URLSearchParams(window.location.search).get("importSearch") || "");
+  // Agent kind filter; empty means every agent. Kept in the URL with the search so reloads restore both.
+  const [agent, setAgentState] = useState(() => new URLSearchParams(window.location.search).get("importAgent") || "");
   useEffect(() => {
-    const update = () => setQuery(new URLSearchParams(window.location.search).get("importSearch") || "");
+    const update = () => {
+      const params = new URLSearchParams(window.location.search);
+      setQuery(params.get("importSearch") || "");
+      setAgentState(params.get("importAgent") || "");
+    };
     window.addEventListener("popstate", update);
     return () => window.removeEventListener("popstate", update);
   }, []);
@@ -74,7 +82,19 @@ function ImportSessions({ projectId, onClose }: { projectId: string; onClose: ()
     setLoading(true); setHistory(null); setError(""); setSelected(new Set()); setRevision((v) => v + 1);
   };
   const key = (s: { kind: string; agentSessionId: string }) => `${s.kind}:${s.agentSessionId}`;
-  const visible = history?.sessions.filter((s) => `${s.title} ${s.kind} ${s.agentSessionId}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())) || [];
+  const visible = history?.sessions.filter((s) => (!agent || s.kind === agent)
+    && `${s.title} ${s.kind} ${s.agentSessionId}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())) || [];
+  const counts = new Map<string, number>();
+  history?.sessions.forEach((s) => counts.set(s.kind, (counts.get(s.kind) || 0) + 1));
+  // A kind restored from the URL stays listed even when this directory has none of it, so the filter reads true.
+  if (agent && !counts.has(agent)) counts.set(agent, 0);
+  const agentOptions: SelectOption<string>[] = [
+    { value: "", label: t("importSessions.allAgents"), hint: String(history?.sessions.length ?? 0) },
+    ...[...counts.entries()]
+      .map(([kind, count]) => ({ kind: kind as HistoricalSession["kind"], count }))
+      .sort((a, b) => kindLabel(a.kind).localeCompare(kindLabel(b.kind)))
+      .map(({ kind, count }) => ({ value: kind, label: kindLabel(kind), icon: kindIconEl(kind, 14), hint: String(count) })),
+  ];
   const available = visible.filter((s) => !s.imported);
   const allSelected = available.length > 0 && available.every((s) => selected.has(key(s)));
   const partiallySelected = !allSelected && available.some((s) => selected.has(key(s)));
@@ -84,6 +104,13 @@ function ImportSessions({ projectId, onClose }: { projectId: string; onClose: ()
     if (value) url.searchParams.set("importSearch", value); else url.searchParams.delete("importSearch");
     window.history.replaceState(window.history.state, "", url.href);
   };
+  const setAgent = (value: string) => {
+    setAgentState(value);
+    const url = new URL(window.location.href);
+    if (value) url.searchParams.set("importAgent", value); else url.searchParams.delete("importAgent");
+    window.history.replaceState(window.history.state, "", url.href);
+  };
+  const clearFilters = () => { setSearch(""); setAgent(""); };
   const close = () => { if (!busy) onClose(); };
   const submit = async () => {
     if (!history || !selected.size || busy) return;
@@ -132,6 +159,8 @@ function ImportSessions({ projectId, onClose }: { projectId: string; onClose: ()
               placeholder={t("importSessions.search")} value={query} disabled={busy}
               onChange={(e) => setSearch(e.target.value)} />
           </div>
+          <Select value={agent} options={agentOptions} onChange={setAgent} width={190} menuPortal
+            ariaLabel={t("importSessions.agentFilter")} disabled={busy || loading} />
           <button type="button" className="vlx-btn" onClick={() => { setNotice(""); refresh(); }} disabled={busy || loading}>
             <Icons.restart size={14} />{t("common.refresh")}
           </button>
@@ -160,8 +189,8 @@ function ImportSessions({ projectId, onClose }: { projectId: string; onClose: ()
         {loading ? <div className="import-sessions-empty" role="status">{t("common.loading")}</div> : history &&
           (!visible.length ? <div className="import-sessions-empty">
             <Icons.search size={28} />
-            <p>{t(query.trim() ? "importSessions.empty" : "importSessions.noHistory")}</p>
-            {query && <button type="button" className="vlx-btn" onClick={() => setSearch("")}>{t("importSessions.clearSearch")}</button>}
+            <p>{t(query.trim() || agent ? "importSessions.empty" : "importSessions.noHistory")}</p>
+            {(query || agent) && <button type="button" className="vlx-btn" onClick={clearFilters}>{t("importSessions.clearFilters")}</button>}
           </div> : <div className="import-sessions-list">
             {visible.map((s) => <label key={key(s)}
               className={`import-sessions-row${s.imported ? " is-imported" : ""}${selected.has(key(s)) ? " is-selected" : ""}`}>

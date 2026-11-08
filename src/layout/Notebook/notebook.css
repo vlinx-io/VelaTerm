@@ -1,4 +1,4 @@
-.nb-workspace,.nb-dialog,.nb-sidebar { font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:var(--text-primary); }
+.nb-workspace,.nb-dialog,.nb-sidebar { font-family: var(--font-ui); color:var(--text-primary); }
 .nb-eyebrow { font-size:11px; font-weight:650; letter-spacing:.06em; color:var(--text-muted); }
 .nb-inline { display:flex; align-items:center; flex-wrap:wrap; gap:10px; }
 .nb-inline .input { flex:1; min-width:120px; }
@@ -112,7 +112,7 @@
 /* Notebook navigation occupies the shared right inspector, leaving the center for reading and writing. */
 .nb-workspace { grid-template-columns:minmax(0,1fr); }
 .col-right .nb-sidebar { flex:1; margin:12px; display:flex; min-height:0; }
-.col-right .memory-directory { flex:1; max-height:none; border:0; background:transparent; font:12px/1.6 system-ui,sans-serif; }
+.col-right .memory-directory { flex:1; max-height:none; border:0; background:transparent; font:12px/1.6 var(--font-ui); }
 .col-right .insp-tabs { height:auto; min-height:36px; gap:2px; overflow-x:auto; }
 .col-right .insp-tab { flex:0 0 30px; justify-content:center; padding:0 6px; min-height:26px; text-decoration:none; }
 .col-right .insp-tab>span { max-width:100px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -139,7 +139,7 @@
 .col-right .memory-directory { padding:10px 6px; }
 
 /* One scrollable folder tree, with every child directly below its parent. */
-.nb-navigation { display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; font:12px/1.5 system-ui,sans-serif; color:var(--text-primary); }
+.nb-navigation { display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; font:12px/1.5 var(--font-ui); color:var(--text-primary); }
 .nb-navigation-heading { display:flex; align-items:center; gap:8px; padding:4px 8px 4px 12px; min-height:32px; flex:none; }
 .nb-navigation-heading>a { flex:1; min-width:0; font-size:12px; font-weight:650; color:var(--text-primary); text-decoration:none; }
 .nb-navigation-heading>a:hover { color:var(--accent); }
@@ -162,7 +162,7 @@
 .nb-workspace-views>a.active,.nb-workspace-views>a:hover { background:var(--accent-soft); color:var(--accent); text-decoration:none; }
 .nb-workspace-commands { display:flex; align-items:center; gap:1px; }
 .nb-workspace-commands>.nb-icon-button { width:25px; height:25px; }
-.nb-home { --nb-gap:16px; flex:1; min-width:0; overflow:auto; padding:24px; color:var(--text-primary); font:13px/1.6 system-ui,sans-serif; }
+.nb-home { --nb-gap:16px; flex:1; min-width:0; overflow:auto; padding:24px; color:var(--text-primary); font:13px/1.6 var(--font-ui); }
 .nb-home>header { display:flex; align-items:center; justify-content:space-between; gap:var(--nb-gap); flex-wrap:wrap; margin-bottom:24px; }
 .nb-home h1 { margin:0 0 6px; font-size:24px; font-weight:650; }
 .nb-home p { margin:0; color:var(--text-muted); font-size:12px; }
@@ -178,7 +178,7 @@
 .nb-vault-card strong { font-size:14px; font-weight:600; overflow-wrap:anywhere; }
 .nb-vault-card p { margin-top:6px; overflow-wrap:anywhere; }
 .nb-vault-card:hover { border-color:var(--accent); background:var(--bg-elevated); text-decoration:none!important; }
-.nb-vault-modal { font:12px/1.5 system-ui,sans-serif; color:var(--text-primary); outline:none; }
+.nb-vault-modal { font:12px/1.5 var(--font-ui); color:var(--text-primary); outline:none; }
 .nb-vault-modal>header { display:flex; align-items:center; gap:12px; padding:10px 12px 6px 16px; }
 .nb-vault-modal h2 { flex:1; margin:0; font-size:14px; }
 .nb-vault-modal form { display:flex; flex-direction:column; min-height:0; overflow:auto; }
@@ -224,7 +224,7 @@
 .nb-home-results .nb-search-hint { margin:0; padding:2px 4px; color:var(--text-muted); font-size:11px; }
 .nb-search-group>h3 { display:flex; align-items:center; gap:6px; margin:0 0 8px; color:var(--text-secondary); font-size:12px; font-weight:600; }
 .nb-search-group>h3>svg { color:var(--text-muted); }
-.nb-search-group>h3>span { color:var(--text-muted); font-weight:500; }
+.nb-search-group>h3>span { color:var(--text-muted); font-weight: 500; }
 
 /* Import progress entry and import history. */
 .nb-import-chip { display:inline-flex; align-items:center; gap:6px; max-width:260px; padding:3px 8px; border:1px solid var(--border); border-radius:999px; color:var(--accent)!important; font-size:10px; text-decoration:none!important; }
@@ -264,13 +264,13 @@
 .nb-tree-row.drop-over { background:var(--accent-soft); outline:1px dashed var(--accent); outline-offset:-1px; }
 .nb-tree-row.dragging { opacity:.55; }
 .nb-tree-row>.rename-input { flex:1; margin:4px 5px 4px 0; height:22px; font-size:12px; }
-.nb-confirm { display:flex; flex-direction:column; gap:6px; width:min(420px,calc(100% - 32px)); padding:18px; border:1px solid var(--border); border-radius:9px; background:var(--bg-panel); color:var(--text-primary); font:13px/1.6 system-ui,sans-serif; }
+.nb-confirm { display:flex; flex-direction:column; gap:6px; width:min(420px,calc(100% - 32px)); padding:18px; border:1px solid var(--border); border-radius:9px; background:var(--bg-panel); color:var(--text-primary); font:13px/1.6 var(--font-ui); }
 .nb-confirm p { margin:0; color:var(--text-secondary); }
 .nb-confirm strong { overflow-wrap:anywhere; }
 .nb-confirm-actions { display:flex; justify-content:flex-end; gap:8px; padding-top:10px; }
 .nb-confirm-actions .btn { min-height:32px; padding:6px 12px; border:1px solid var(--border); border-radius:6px; background:var(--bg-panel); color:var(--text-primary); font:inherit; font-size:12px; cursor:pointer; }
 .nb-confirm-actions .btn-primary { border-color:var(--accent); background:var(--accent); color:var(--text-on-accent); }
 .nb-confirm-actions .btn:disabled { opacity:.45; cursor:default; }
-.nb-tree-alert { position:fixed; right:14px; bottom:14px; z-index:1200; display:flex; align-items:center; gap:8px; max-width:min(420px,calc(100vw - 28px)); padding:8px 10px; border:1px solid var(--status-error); border-radius:7px; background:var(--bg-panel); color:var(--status-error); font:12px/1.5 system-ui,sans-serif; box-shadow:var(--shadow); }
+.nb-tree-alert { position:fixed; right:14px; bottom:14px; z-index:1200; display:flex; align-items:center; gap:8px; max-width:min(420px,calc(100vw - 28px)); padding:8px 10px; border:1px solid var(--status-error); border-radius:7px; background:var(--bg-panel); color:var(--status-error); font:12px/1.5 var(--font-ui); box-shadow:var(--shadow); }
 .nb-tree-alert>span { overflow-wrap:anywhere; }
 .nb-tree-alert>button { display:inline-flex; flex:none; padding:2px; border:0; background:transparent; color:inherit; cursor:pointer; }

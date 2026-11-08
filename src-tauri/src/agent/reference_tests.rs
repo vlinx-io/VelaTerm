@@ -60,7 +60,7 @@ impl Fixture {
     fn script(&self, name: &str, result: &str) {
         let path = self.dir.join(name);
         std::fs::write(&path, format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" >> \"$0.args\"\nprintf '\\nCALL\\n' >> \"$0.prompts\"\ncat >> \"$0.prompts\"\n{result}\n"
+            "#!/bin/sh\n[ \"$1\" = --version ] && {{ echo 1.0.0; exit 0; }}\nprintf '%s\\n' \"$@\" >> \"$0.args\"\nprintf '\\nCALL\\n' >> \"$0.prompts\"\ncat >> \"$0.prompts\"\n{result}\n"
         )).unwrap();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
     }

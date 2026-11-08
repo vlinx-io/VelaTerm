@@ -6,6 +6,7 @@
 
 import type { MenuAction } from "../../ipc/events";
 import { checkForUpdates } from "../../ipc/updater";
+import { reportClipboardUnresponsive } from "../../platform/clipboardStall";
 import { useTermStore } from "../../store/termStore";
 
 /** Run one application-menu command, whichever menu raised it. */
@@ -23,6 +24,9 @@ export function runMenuAction(action: MenuAction): void {
       break;
     case "clear-badges":
       s.clearAllBadges();
+      break;
+    case "clipboard-unresponsive":
+      reportClipboardUnresponsive();
       break;
     // Split directly instead of replaying a synthetic key event. The native menu's accelerator is
     // fixed while the shortcut itself is rebindable, so a replayed event can match no binding at all.

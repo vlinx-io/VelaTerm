@@ -573,17 +573,17 @@ describe("following a peer", () => {
     alignEnabledEmpty();
     const stop = start();
     await settle();
-    useTermStore.setState({ inspectorTab: "knowledge" });
+    useTermStore.setState({ inspectorTab: "git" });
     vi.advanceTimersByTime(500);
     await settle();
     mirrorPush.mockClear();
     mirrorPush.mockImplementationOnce(() => Promise.resolve({ rev: 11, source: "desktop", state: null }));
 
-    // The user switches to Info; a peer frame that still says knowledge lands inside the 150 ms debounce.
+    // The user switches to Info; a peer frame that still says git lands inside the 150 ms debounce.
     useTermStore.setState({ inspectorTab: "info" });
     vi.advanceTimersByTime(50);
     const frame = peerLayout("A", 10);
-    (frame.state as { right: { inspectorTab: string } }).right.inspectorTab = "knowledge";
+    (frame.state as { right: { inspectorTab: string } }).right.inspectorTab = "git";
     emitLayout(frame);
 
     expect(mirrorPush).toHaveBeenCalledTimes(1);

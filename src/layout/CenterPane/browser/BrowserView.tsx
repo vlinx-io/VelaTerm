@@ -25,6 +25,7 @@ import {
   onBrowserPopup,
   onBrowserState,
 } from "../../../ipc/browser";
+import { isClaudeArtifactUrl } from "../../../ipc/browserUrl";
 import { platform } from "../../../platform";
 import { useTermStore, type BrowserTab } from "../../../store/termStore";
 import { useNativeViewSuspended } from "../../../hooks/nativeViewSuspend";
@@ -123,6 +124,12 @@ export function BrowserView({ tab, hidden }: { tab: BrowserTab; hidden: boolean 
     });
     // Standalone pages keep popup navigation in the current tab; ordinary browser popups open new tabs.
     const unlistenPopup = onBrowserPopup(tab.id, ({ url }) => {
+      if (isClaudeArtifactUrl(url)) {
+        void platform.opener.openExternal(url).catch((e) => {
+          console.warn("browser popup failed to open Claude artifact link:", safeError(e));
+        });
+        return;
+      }
       const parent = useTermStore.getState().browserTabs[tab.id];
       if (parent?.chromeHidden) {
         void browserNavigate(tab.id, url).catch((e) => {

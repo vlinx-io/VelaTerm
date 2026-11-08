@@ -1,19 +1,21 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { ContextMenu } from "../../components/ContextMenu";
 import Icons from "../../components/Icons";
 import Select from "../../components/Select";
 import { useT } from "../../i18n";
 import { notebookOverview, notebookRestore, notebookTree, type NotebookOverview, type NotebookNode } from "../../ipc/notebook";
 import { MemoryLink, memoryNavigate, memoryUrl, useMemoryLocation } from "../Memory/navigation";
-import { memoryTime } from "../Memory/shared";
+import { shortDate } from "../Memory/shared";
 import { CopyKnowledgeDialog, NotebookDialog } from "./NotebookDialogs";
 import { KnowledgeSearchResults, useKnowledgeSearch, useSearchKeys } from "./KnowledgeSearch";
-import { NotebookError, notebookError, notebookRoute, openVaultFile, useNotebookLoad } from "./shared";
+import { homePath, noteFolder, noteTitle, NotebookError, notebookError, notebookRoute, openVaultFile, useNotebookLoad } from "./shared";
 import { KnowledgeHome } from "./KnowledgeHome";
 import { knowledgeSelection } from "./KnowledgeTreeRow";
 import { ImportRecords } from "./ImportRecords";
 import { KnowledgeBackLink } from "./KnowledgeBack";
 import { useNotebookImports, type NotebookImportOutcome } from "./importManager";
 import "./notebook.css";
+import "../Memory/kbx.css";
 
 export function NotebookSurface({route}:{route:string}) {
   const {data,error,reload}=useNotebookLoad(notebookOverview,[]);const [page,id="",action=""]=route.split('/');
@@ -24,11 +26,23 @@ export function NotebookSurface({route}:{route:string}) {
   return <>{error&&<NotebookError error={error} retry={reload}/>}<KnowledgeHome overview={data}/></>;
 }
 
+const NOTE_LAYOUT_KEY="vlx-notes-layout";
+
+/** The note list's layout: the URL when it says, otherwise the one last chosen, otherwise cards. */
+function noteLayout(fromUrl:string|null):"cards"|"list"{
+  let saved:string|null=null;
+  try{saved=localStorage.getItem(NOTE_LAYOUT_KEY);}catch{/* Storage can be unavailable; the default still works. */}
+  return (fromUrl??saved)==="list"?"list":"cards";
+}
+function rememberNoteLayout(layout:string){
+  try{localStorage.setItem(NOTE_LAYOUT_KEY,layout);}catch{/* The choice still applies through the URL. */}
+}
+
 function NotebookWorkspace({id,action,overview,onVaultsChanged}:{id:string;action:string;overview:NotebookOverview;onVaultsChanged:()=>void}) {
   const t=useT();const search=useMemoryLocation();const params=new URLSearchParams(search);const legacyPath=params.get("memoryPath")??"";
-  const query=params.get("memoryQuery")??"";const filter=params.get("memoryFilter")??"";const tag=params.get("memoryTag")??"";const folder=params.get("memoryFolder")??"";const sort=params.get("memorySort")??"updated";
+  const query=params.get("memoryQuery")??"";const filter=params.get("memoryFilter")??"";const tag=params.get("memoryTag")??"";const folder=params.get("memoryFolder")??"";const sort=params.get("memorySort")??"updated";const layout=noteLayout(params.get("memoryLayout"));
   const {data,error,reload}=useNotebookLoad(()=>notebookTree(id,filter,tag,sort),[id,filter,tag,sort]);
-  const [input,setInput]=useState(query);const [failure,setFailure]=useState("");
+  const [input,setInput]=useState(query);const [failure,setFailure]=useState("");const [menu,setMenu]=useState<{x:number;y:number}|null>(null);
   const running=useNotebookImports().get(id);const [notice,setNotice]=useState<NotebookImportOutcome|null>(null);
   useEffect(()=>{
     let timer:ReturnType<typeof setTimeout>|undefined;
@@ -63,39 +77,54 @@ function NotebookWorkspace({id,action,overview,onVaultsChanged}:{id:string;actio
   const navigateList=(values:Record<string,string|null>)=>memoryNavigate(memoryUrl(notebookRoute(id),{memoryPath:null,memoryQuery:null,memoryFolder:null,memoryTag:null,...values}));
   const entries=folder?data.entries.filter(n=>n.path.startsWith(`${folder}/`)):data.entries;
   // A query replaces the note list with hits; the surrounding vault bar and view switch stay in place.
-  const searchPane=<div className="nb-library nb-search-library">
-    <div className="nb-search-head">
-      <strong role="status">{lookup.result?t("nb.searchCount",String(lookup.result.total)):t("common.loading")}</strong>
-      <span className="nb-spacer"/>
-      <Select size="sm" width={150} value={scope} ariaLabel={t("nb.searchScope")} onChange={value=>memoryNavigate(memoryUrl(notebookRoute(id),{memoryQuery:query,memoryFolder:null,memoryScope:value||null}),true)} options={[{ value: "", label: t("nb.searchThisVault") }, { value: "all", label: t("nb.searchAllVaults") }]} />
-    </div>
+  const searchPane=<div className="kbx-list nb-search-library">
+    <div className="nb-search-head"><strong role="status">{lookup.result?t("nb.searchCount",String(lookup.result.total)):t("common.loading")}</strong></div>
     <KnowledgeSearchResults query={query} result={lookup.result} error={lookup.error} active={keys.active} onActive={keys.setActive} onOpen={openHit} onOpenRelated={(related)=>openVaultFile(related.absolutePath)}/>
   </div>;
-  return <div className="nb-workspace">
-    <main className="nb-main">
-      <div className="nb-workspace-bar"><nav><KnowledgeBackLink className="nb-icon-button"/><MemoryLink route={notebookRoute(id)} values={{memoryPath:null,memoryFolder:null}}>{data.vault.name}</MemoryLink>{folder&&<><span>/</span><span>{folder}</span></>}</nav><div className="nb-search"><Icons.search/><input ref={searchInput} aria-label={t("nb.search")} placeholder={t("nb.search")} value={input} onKeyDown={keys.onKeyDown} onChange={e=>setInput(e.target.value)}/></div></div>
-      <nav className="nb-workspace-tools" aria-label={t("nb.vaults")}>
-        <div className="nb-workspace-views">
-          <MemoryLink route={notebookRoute(id)} values={knowledgeSelection} className={!folder&&!filter?"active":""}>{t("nb.recent")}</MemoryLink>
-          <MemoryLink route={notebookRoute(id)} values={{...knowledgeSelection,memoryFilter:"favorites"}} className={filter==="favorites"?"active":""}>{t("nb.favorites")}</MemoryLink>
-          <MemoryLink route={notebookRoute(id)} values={{...knowledgeSelection,memoryFilter:"trash"}} className={filter==="trash"?"active":""}>{t("nb.trash")}</MemoryLink>
-          <MemoryLink route={notebookRoute(id,"imports")} values={knowledgeSelection} className={action==="imports"?"active":""}>{t("nb.imports")}</MemoryLink>
-        </div>
-        <div className="nb-workspace-commands">
-          {running&&<MemoryLink className="nb-import-chip" route={notebookRoute(id,"imports")} title={`${t("nb.importStatusRunning")} · ${running.current}`}><Icons.upload size={12}/><span>{running.done} / {running.files}</span><progress max={1} value={running.bytes?running.sent/running.bytes:1}/></MemoryLink>}
-          <MemoryLink className="nb-icon-button" title={t("nb.newFolder")} aria-label={t("nb.newFolder")} route={notebookRoute(id,"folder")}><Icons.folderPlus/></MemoryLink>
-          <MemoryLink className="nb-icon-button" title={t("nb.import")} aria-label={t("nb.import")} route={notebookRoute(id,"import")}><Icons.upload/></MemoryLink>
-          <MemoryLink className="nb-icon-button" title={t("nb.closeVault")} aria-label={t("nb.closeVault")} route={notebookRoute(id,"close")}><Icons.x/></MemoryLink>
-        </div>
-      </nav>
-      {notice&&<div className={`nb-banner nb-import-notice ${notice.status}`} role="status"><span>{notice.status==="completed"?`${t("nb.imported")}: ${notice.imported} · ${t("nb.skipped")}: ${notice.skipped}`:notebookError(notice.error)}</span><MemoryLink route={notebookRoute(id,"imports")}>{t("nb.imports")}</MemoryLink><button type="button" className="nb-icon-button" title={t("common.close")} aria-label={t("common.close")} onClick={()=>setNotice(null)}><Icons.x size={14}/></button></div>}
-      {(error||failure)&&<NotebookError error={error||failure} retry={()=>{setFailure("");reload();}}/>}
-      {action==="imports"?<ImportRecords id={id}/>:action&&action!=="quick"?<NotebookDialog key={`${action}:${folder}`} action={action} tree={data} overview={overview} onChanged={()=>{reload();onVaultsChanged();}}/>:action==="quick"?<QuickOpen id={id} entries={data.nodes.filter(n=>n.kind==="note")}/>:filter==="trash"?<div className="nb-library"><header><h1>{t("nb.trash")}</h1></header>{data.trash.length?data.trash.map(item=><div className="nb-trash-row" key={item.id}><Icons.archive/><div><strong>{item.path}</strong><small>{memoryTime(item.deletedAt)}</small></div><button className="btn" onClick={()=>{void notebookRestore(id,item.id).then(()=>reload()).catch(e=>setFailure(notebookError(e)));}}>{t("nb.restore")}</button></div>):<p className="nb-empty-hint">{t("nb.emptyTrash")}</p>}</div>:searching?searchPane:<div className="nb-library"><header><div><div className="nb-eyebrow">{t("nb.notes")}</div><h1>{tag?`#${tag}`:folder||t(filter==="favorites"?"nb.favorites":"nb.recent")}</h1></div><MemoryLink className="btn btn-primary" route={notebookRoute(id,"new")}><Icons.plus/>{t("nb.newNote")}</MemoryLink></header>
-        <div className="nb-list-tools"><span>{entries.length} {t("nb.notes")}</span><span className="nb-spacer"/><Select size="sm" width={130} value={tag} ariaLabel={t("nb.tags")} onChange={value=>navigateList({memoryTag:value,memoryFilter:filter})} options={[{ value: "", label: t("memory.allTags") }, ...data.tags.map(value=>({ value, label: value }))]} /><Select size="sm" width={130} value={sort} ariaLabel={t("memory.updated")} onChange={value=>navigateList({memorySort:value,memoryFilter:filter})} options={[{ value: "updated", label: t("memory.updated") }, { value: "title", label: t("memory.titleSort") }]} />{folder&&<MemoryLink route={notebookRoute(id,"move")} values={{memoryPath:folder}}>{t("nb.move")}</MemoryLink>}{folder&&<MemoryLink route={notebookRoute(id,"delete")} values={{memoryPath:folder}}>{t("common.delete")}</MemoryLink>}</div>
-        {entries.length?<div className="nb-note-list">{entries.map(note=><button type="button" key={note.path} className="nb-note-row" onClick={()=>openVaultFile(note.absolutePath)}><Icons.docLines size={20}/><div><strong>{note.name.replace(/\.md$/i,"")}</strong><p>{note.summary}</p><small>{note.path}</small></div><time>{memoryTime(note.updatedAt)}</time></button>)}</div>:<div className="nb-empty-state"><Icons.docLines size={36}/><h2>{t("nb.chooseNote")}</h2><p>{t("nb.emptyNotes")}</p><MemoryLink className="btn btn-primary" route={notebookRoute(id,"new")}><Icons.plus/>{t("nb.newNote")}</MemoryLink></div>}
-        {data.skipped>0&&<p className="nb-empty-hint">{t("nb.skipped")}: {data.skipped}</p>}
+  const openMenu=(event:ReactMouseEvent<HTMLButtonElement>)=>{const rect=event.currentTarget.getBoundingClientRect();setMenu({x:rect.right-180,y:rect.bottom+4});};
+  const viewTab=filter==="favorites"||filter==="trash"?filter:action==="imports"?"imports":"recent";
+  return <div className="nb-workspace kbx-page kbx-narrow">
+    <div className="kbx-bar">
+      <KnowledgeBackLink className="kbx-ibtn"/>
+      <nav className="kbx-crumbs" aria-label={t("nb.vaults")}><MemoryLink route="notebooks" values={knowledgeSelection}>{t("nb.localVaults")}</MemoryLink><Icons.chevR size={12} aria-hidden="true"/><MemoryLink className={folder?"":"cur"} route={notebookRoute(id)} values={{memoryPath:null,memoryFolder:null}}>{data.vault.name}</MemoryLink>{folder&&<><Icons.chevR size={12} aria-hidden="true"/><b>{folder}</b></>}</nav>
+      <div className="kbx-acts">
+        {running&&<MemoryLink className="nb-import-chip" route={notebookRoute(id,"imports")} title={running.current}><Icons.upload size={12}/><span>{t("nb.importProgress",String(running.done),String(running.files))}</span></MemoryLink>}
+        <MemoryLink className="kbx-ibtn" title={t("nb.newFolder")} aria-label={t("nb.newFolder")} route={notebookRoute(id,"folder")}><Icons.folderPlus size={16}/></MemoryLink>
+        <MemoryLink className="kbx-ibtn" title={t("nb.import")} aria-label={t("nb.import")} route={notebookRoute(id,"import")}><Icons.upload size={16}/></MemoryLink>
+        <button type="button" className="kbx-ibtn" title={t("kb.moreActions")} aria-label={t("kb.moreActions")} onClick={openMenu}><Icons.more size={16} aria-hidden="true"/></button>
+        <MemoryLink className="kbx-btn pri" route={notebookRoute(id,"new")}><Icons.plus size={14}/>{t("nb.newNote")}</MemoryLink>
+      </div>
+    </div>
+    {menu&&<ContextMenu x={menu.x} y={menu.y} onClose={()=>setMenu(null)} items={[
+      ...(folder?[{label:t("nb.move"),onClick:()=>memoryNavigate(memoryUrl(notebookRoute(id,"move"),{memoryPath:folder}))},{label:t("common.delete"),danger:true,onClick:()=>memoryNavigate(memoryUrl(notebookRoute(id,"delete"),{memoryPath:folder}))}]:[]),
+      {label:t("nb.closeVault"),onClick:()=>memoryNavigate(memoryUrl(notebookRoute(id,"close")))},
+    ]}/>}
+    <div className="kbx-head"><div className="t">
+      <div className="t1"><Icons.notebook size={16} aria-hidden="true"/><h1>{data.vault.name}</h1></div>
+      <div className="kbx-meta"><span title={data.vault.root}>{homePath(data.vault.root,overview.home)}</span><span><b>{data.entries.length.toLocaleString()}</b> {t("nb.notesWord",String(data.entries.length))}</span>{!!data.entries.length&&<span>{t("kb.updatedOn",shortDate(Math.max(...data.entries.map(note=>note.updatedAt))))}</span>}</div>
+    </div></div>
+    <nav className="kbx-tabs" aria-label={t("nb.vaults")}>
+      <MemoryLink route={notebookRoute(id)} values={knowledgeSelection} className={viewTab==="recent"?"on":""} aria-current={viewTab==="recent"?"page":undefined}>{t("nb.recent")}</MemoryLink>
+      <MemoryLink route={notebookRoute(id)} values={{...knowledgeSelection,memoryFilter:"favorites"}} className={viewTab==="favorites"?"on":""} aria-current={viewTab==="favorites"?"page":undefined}>{t("nb.favorites")}</MemoryLink>
+      <MemoryLink route={notebookRoute(id)} values={{...knowledgeSelection,memoryFilter:"trash"}} className={viewTab==="trash"?"on":""} aria-current={viewTab==="trash"?"page":undefined}>{t("nb.trash")}</MemoryLink>
+      <MemoryLink route={notebookRoute(id,"imports")} values={knowledgeSelection} className={viewTab==="imports"?"on":""} aria-current={viewTab==="imports"?"page":undefined}>{t("nb.imports")}</MemoryLink>
+    </nav>
+    {notice&&<div className={`nb-banner nb-import-notice ${notice.status}`} role="status"><span>{notice.status==="completed"?`${t("nb.imported")}: ${notice.imported} · ${t("nb.skipped")}: ${notice.skipped}`:notebookError(notice.error)}</span><MemoryLink route={notebookRoute(id,"imports")}>{t("nb.imports")}</MemoryLink><button type="button" className="kbx-ibtn" title={t("common.close")} aria-label={t("common.close")} onClick={()=>setNotice(null)}><Icons.x size={14}/></button></div>}
+    {(error||failure)&&<NotebookError error={error||failure} retry={()=>{setFailure("");reload();}}/>}
+    {action==="imports"?<div className="kbx-list kbx-pad"><ImportRecords id={id}/></div>:action&&action!=="quick"?<div className="kbx-scroll"><NotebookDialog key={`${action}:${folder}`} action={action} tree={data} overview={overview} onChanged={()=>{reload();onVaultsChanged();}}/></div>:action==="quick"?<div className="kbx-scroll"><QuickOpen id={id} entries={data.nodes.filter(n=>n.kind==="note")}/></div>:filter==="trash"?<div className="kbx-list kbx-border-top">{data.trash.length?<div>{data.trash.map(item=><div className="kbx-it" key={item.id}><Icons.archive size={14} aria-hidden="true"/><b>{item.path}</b><span className="w kbx-trash-time">{shortDate(item.deletedAt)}</span><button className="kbx-btn" onClick={()=>{void notebookRestore(id,item.id).then(()=>reload()).catch(e=>setFailure(notebookError(e)));}}>{t("nb.restore")}</button></div>)}</div>:<p className="kbx-empty">{t("nb.emptyTrash")}</p>}</div>:<>
+      <div className="kbx-filter">
+        <label className="kbx-input"><Icons.search size={12} aria-hidden="true"/><input ref={searchInput} aria-label={t("nb.search")} placeholder={t("nb.search")} value={input} onKeyDown={keys.onKeyDown} onChange={e=>setInput(e.target.value)}/></label>
+        <Select size="sm" width="auto" menuWidth={200} value={scope} ariaLabel={t("nb.searchScope")} onChange={value=>memoryNavigate(memoryUrl(notebookRoute(id),{memoryQuery:query||null,memoryFolder:null,memoryScope:value||null}),true)} options={[{ value: "", label: t("nb.searchThisVault") }, { value: "all", label: t("nb.searchAllVaults") }]} />
+        <span className="g"/>
+        <Select size="sm" width="auto" menuWidth={180} value={tag} ariaLabel={t("nb.tags")} onChange={value=>navigateList({memoryTag:value,memoryFilter:filter})} options={[{ value: "", label: t("memory.allTags") }, ...data.tags.map(value=>({ value, label: value }))]} />
+        <Select size="sm" width="auto" menuWidth={180} value={sort} ariaLabel={t("memory.updated")} onChange={value=>navigateList({memorySort:value,memoryFilter:filter})} options={[{ value: "updated", label: t("memory.updated") }, { value: "title", label: t("memory.titleSort") }]} />
+        <Select size="sm" width="auto" menuWidth={140} value={layout} ariaLabel={t("nb.layout")} onChange={value=>{rememberNoteLayout(value);memoryNavigate(memoryUrl(notebookRoute(id),{memoryLayout:value}),true);}} options={[{ value: "cards", label: t("nb.layoutCards") }, { value: "list", label: t("nb.layoutList") }]} />
+      </div>
+      {searching?searchPane:<div className="kbx-note-wrap">
+        {entries.length?layout==="list"?<div className="kbx-note-list">{entries.map(note=><button type="button" key={note.path} className="kbx-nr" onClick={()=>openVaultFile(note.absolutePath)}><span className="a"><span className="tt" title={note.name}>{noteTitle(note.name)}</span><span className="sn">{note.summary}</span></span><span className="m" title={note.path}>{noteFolder(note.path)}</span><span className="d">{shortDate(note.updatedAt)}</span></button>)}</div>:<div className="kbx-note-cards">{entries.map(note=><button type="button" key={note.path} className="kbx-nc" onClick={()=>openVaultFile(note.absolutePath)}><span className="tt" title={note.name}>{noteTitle(note.name)}</span><div className="sn">{note.summary}</div><div className="ft"><span title={note.path}>{noteFolder(note.path)}</span><span>{shortDate(note.updatedAt)}</span></div></button>)}</div>:<div className="kbx-empty"><p>{t("nb.emptyNotes")}</p><MemoryLink className="kbx-btn pri" route={notebookRoute(id,"new")}><Icons.plus size={14}/>{t("nb.newNote")}</MemoryLink></div>}
+        {data.skipped>0&&<p className="kbx-empty">{t("nb.skipped")}: {data.skipped}</p>}
       </div>}
-    </main>
+    </>}
   </div>;
 }
 

@@ -2,7 +2,7 @@
 //! home page has no single backend query for that pair, so one debounced handler runs both searches
 //! in parallel and renders them as one keyboard-navigable result list grouped by source.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
 import { memoryList, type MemoryList, type MemorySummary } from "../../ipc/memory";
@@ -17,6 +17,7 @@ import "./notebook.css";
 const SEARCH_LIMIT = 50;
 /** Typing pause before a query runs, matching the other knowledge searches. */
 const SEARCH_DELAY = 250;
+const isMac = /Mac/.test(navigator.platform);
 
 interface HomeSearch {
   notes: NotebookSearchResult | null;
@@ -25,7 +26,7 @@ interface HomeSearch {
 }
 
 /** Debounced lookup across both sources. The previous page stays on screen while the next runs. */
-function useHomeSearch(query: string): HomeSearch {
+export function useHomeSearch(query: string): HomeSearch {
   const [state, setState] = useState<HomeSearch>({ notes: null, entries: null, error: "" });
   useEffect(() => {
     const text = query.trim();
@@ -60,6 +61,19 @@ export function KnowledgeHomeSearch({ children }: { children: ReactNode }) {
   const t = useT();
   const [query, setQuery] = useState("");
   const lookup = useHomeSearch(query);
+  const field = useRef<HTMLInputElement>(null);
+  // The same shortcut that moves to the search box on a knowledge base page.
+  useEffect(() => {
+    const focus = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        field.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", focus, true);
+    return () => window.removeEventListener("keydown", focus, true);
+  }, []);
   const searching = query.trim().length > 0;
   const entries = lookup.entries?.entries ?? [];
   const notes = lookup.notes?.entries ?? [];
@@ -86,10 +100,10 @@ export function KnowledgeHomeSearch({ children }: { children: ReactNode }) {
   const total = (lookup.notes?.total ?? 0) + (lookup.entries?.total ?? 0);
   const loaded = !!lookup.notes || !!lookup.entries;
   return <>
-    <div className="nb-home-search">
+    <div className="kbx-search">
       <Icons.search size={16} aria-hidden="true" />
-      <input value={query} aria-label={t("nb.homeSearch")} placeholder={t("nb.homeSearch")} onKeyDown={keys.onKeyDown} onChange={(event) => setQuery(event.target.value)} />
-      {searching && <strong role="status">{loaded ? t("nb.searchCount", String(total)) : t("common.loading")}</strong>}
+      <input ref={field} value={query} aria-label={t("nb.homeSearch")} placeholder={t("nb.homeSearch")} onKeyDown={keys.onKeyDown} onChange={(event) => setQuery(event.target.value)} />
+      {searching ? <strong className="k" role="status">{loaded ? t("nb.searchCount", String(total)) : t("common.loading")}</strong> : <span className="k" aria-hidden="true">{isMac ? "\u21e7\u2318F" : "Ctrl+Shift+F"}</span>}
     </div>
     {!searching ? children : <div className="nb-home-results">
       {lookup.error && <p className="nb-message" role="alert">{lookup.error}</p>}

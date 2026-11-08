@@ -71,3 +71,20 @@ export function normalizeBrowserUrl(input: string): string {
   search.searchParams.set("q", trimmed);
   return search.toString();
 }
+
+const CLAUDE_ARTIFACT_HOSTS = new Set(["claude.ai", "preview.claude.ai"]);
+const CLAUDE_ARTIFACT_PATH = /^\/(?:code\/)?artifact\/[^/]+/;
+
+/**
+ * Whether a URL is a Claude artifact page. These pages rely on the Claude sign-in held by the user's
+ * own browser, so they open there instead of in a built-in tab, whose cookies are isolated.
+ */
+export function isClaudeArtifactUrl(input: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    return false;
+  }
+  return url.protocol === "https:" && CLAUDE_ARTIFACT_HOSTS.has(url.host) && CLAUDE_ARTIFACT_PATH.test(url.pathname);
+}

@@ -186,7 +186,7 @@ export function ToolBody({
         if (!path && !diff) return;
         sections.push(
           <div className="sv-tool-section" key={`change-${i}`}>
-            {path ? <div className="sv-tool-text">{path}</div> : null}
+            {path ? <div className="sv-tool-text sv-tool-path">{path}</div> : null}
             {diff ? <CodeSection text={diff} /> : null}
           </div>,
         );

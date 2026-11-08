@@ -7,6 +7,8 @@
 //! that ignores the theme, which is why the hand-rolled version appeared in the first place.
 //!
 //! Scope: values chosen from a fixed list, committed on click. Multi-select keeps the menu open.
+//! Long lists can opt into a filter box at the top of the popup (`searchable`); typing narrows the rows
+//! by label, and the arrow keys and Enter keep working from inside the box.
 //! Controls that also accept free text (the model field) or that carry submenus
 //! (right-click menus, which belong to ContextMenu)
 //! are not this component's job.
@@ -149,12 +151,29 @@ type SelectProps<T extends string> = ({
   leading?: string;
   /** Render long lists outside clipping/scrolling parents, anchored to the trigger. */
   menuPortal?: boolean;
+  /** Commands listed under the options, divided by a rule (the New Session project list's "Import Project").
+   * They are reached with the arrow keys like options; choosing one closes the popup and runs it. */
+  actions?: SelectAction[];
+  /** Puts a filter box at the top of the popup. Typing on the closed trigger opens it with that text. */
+  searchable?: boolean;
+  searchPlaceholder?: string;
+  /** Shown in place of the rows when the filter matches nothing. */
+  noMatchLabel?: string;
 };
+
+export type SelectAction = { id: string; label: string; icon?: React.ReactNode; onSelect: () => void };
 
 export default function Select<T extends string>(props: SelectProps<T>) {
   const { value, options, width = 160, menuWidth, size = "md", mono = false, align = "left",
-    placeholder, disabled, title, ariaLabel, leading, menuPortal = false, summary } = props;
+    placeholder, disabled, title, ariaLabel, leading, menuPortal = false, summary, actions = [],
+    searchable = false, searchPlaceholder, noMatchLabel } = props;
   const multiple = props.multiple === true;
+  const [query, setQuery] = useState("");
+  const needle = searchable ? query.trim().toLocaleLowerCase() : "";
+  // Rows on screen. Keyboard indices refer to this list, not to `options`.
+  const shown = needle ? options.filter(o => o.label.toLocaleLowerCase().includes(needle)) : options;
+  // Action rows follow the options in keyboard order, so an index past the options names an action.
+  const total = shown.length + actions.length;
 
   const s = SIZES[size];
   const [open, setOpen] = useState(false);
@@ -162,12 +181,16 @@ export default function Select<T extends string>(props: SelectProps<T>) {
   // only Enter commits, which is how a native select behaves.
   const [active, setActive] = useState(-1);
   const listRef = useRef<HTMLDivElement | null>(null);
+  // With actions the options scroll in their own box so the actions stay pinned under them.
+  const optionsRef = useRef<HTMLDivElement | null>(null);
   const btnRef = useRef<HTMLButtonElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
   const listId = useId();
   const menuPosition = useMenuPosition(btnRef, listRef, open, menuPortal, menuWidth, align);
 
-  const selected = options.findIndex(o => props.multiple ? props.value.includes(o.value) : o.value === props.value);
-  const current = selected >= 0 ? options[selected] : undefined;
+  const isOn = (o: SelectOption<T>) => props.multiple ? props.value.includes(o.value) : o.value === props.value;
+  const current = props.multiple ? undefined : options.find(isOn);
+  const selected = shown.findIndex(isOn);
 
   // Selection changes must not move the cursor while toggling several options.
   const wasOpen = useRef(false);
@@ -175,23 +198,42 @@ export default function Select<T extends string>(props: SelectProps<T>) {
     if (open && (!wasOpen.current || !multiple)) setActive(selected);
     wasOpen.current = open;
   }, [open, selected, multiple]);
+  // A new filter highlights its first match, so Enter picks what the user sees at the top.
+  const lastNeedle = useRef(needle);
+  useEffect(() => {
+    if (lastNeedle.current === needle) return;
+    lastNeedle.current = needle;
+    if (needle) setActive(shown.findIndex(o => !o.disabled));
+    else setActive(selected);
+  }, [needle, shown, selected]);
+  useEffect(() => {
+    if (!open) setQuery("");
+    else if (searchable) searchRef.current?.focus();
+  }, [open, searchable]);
   useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
 
   // Keep the highlighted row in view while arrowing through a list taller than the panel.
   useLayoutEffect(() => {
     if (!open || active < 0) return;
     const row = listRef.current?.querySelector<HTMLElement>(`[data-select-index="${active}"]`);
-    const list = listRef.current;
+    const list = actions.length || searchable ? optionsRef.current : listRef.current;
     if (!row || !list) return;
     // Scroll the list only. scrollIntoView also moves surrounding settings panes under the pointer.
     if (row.offsetTop < list.scrollTop) list.scrollTop = row.offsetTop;
     else if (row.offsetTop + row.offsetHeight > list.scrollTop + list.clientHeight) {
       list.scrollTop = row.offsetTop + row.offsetHeight - list.clientHeight;
     }
-  }, [open, active]);
+  }, [open, active, actions.length, searchable]);
 
   const commit = (i: number) => {
-    const opt = options[i];
+    const action = i >= shown.length ? actions[i - shown.length] : undefined;
+    if (action) {
+      if (disabled) return;
+      setOpen(false);
+      action.onSelect();
+      return;
+    }
+    const opt = shown[i];
     if (!opt || opt.disabled) return;
     if (disabled) return;
     if (props.multiple) {
@@ -205,14 +247,15 @@ export default function Select<T extends string>(props: SelectProps<T>) {
 
   // Skips disabled rows so holding an arrow key never parks the highlight on an unselectable option.
   const step = (from: number, dir: 1 | -1) => {
-    for (let i = from + dir; i >= 0 && i < options.length; i += dir) {
-      if (!options[i].disabled) return i;
+    for (let i = from + dir; i >= 0 && i < total; i += dir) {
+      if (!shown[i]?.disabled) return i;
     }
     return from;
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (open && props.multiple && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+    // Inside the filter box, Cmd/Ctrl+A, Home and End edit the text instead of the selection.
+    if (open && props.multiple && !searchable && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
       e.preventDefault();
       const all = options.filter(o => !o.disabled).every(o => props.value.includes(o.value));
       props.onChange(options.filter(o => o.disabled ? props.value.includes(o.value) : !all).map(o => o.value));
@@ -223,29 +266,41 @@ export default function Select<T extends string>(props: SelectProps<T>) {
       e.preventDefault();
       e.stopPropagation();
       setOpen(false);
+      btnRef.current?.focus();
       return;
     }
-    if (e.key === "Tab") { setOpen(false); return; }
+    if (e.key === "Tab") {
+      if (open && searchable) { e.preventDefault(); btnRef.current?.focus(); }
+      setOpen(false);
+      return;
+    }
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       if (!open) {
         setOpen(true);
         return;
       }
-      const from = active < 0 ? (e.key === "ArrowDown" ? -1 : options.length) : active;
+      const from = active < 0 ? (e.key === "ArrowDown" ? -1 : total) : active;
       setActive(step(from, e.key === "ArrowDown" ? 1 : -1));
       return;
     }
     if (e.key === "Home" || e.key === "End") {
-      if (!open) return;
+      if (!open || searchable) return;
       e.preventDefault();
-      setActive(e.key === "Home" ? step(-1, 1) : step(options.length, -1));
+      setActive(e.key === "Home" ? step(-1, 1) : step(total, -1));
       return;
     }
-    if (e.key === "Enter" || e.key === " ") {
+    if (e.key === "Enter" || (e.key === " " && !(searchable && open))) {
       e.preventDefault();
       if (!open) setOpen(true);
       else if (active >= 0) commit(active);
+      return;
+    }
+    // A printable key on the closed trigger opens the filter already holding that character.
+    if (searchable && !open && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      setQuery(e.key);
+      setOpen(true);
     }
   };
 
@@ -343,7 +398,8 @@ export default function Select<T extends string>(props: SelectProps<T>) {
             id={multiple ? undefined : listId}
             role={multiple ? undefined : "listbox"}
             aria-label={multiple ? undefined : ariaLabel}
-            onMouseDown={e => e.preventDefault()}
+            // The filter box needs the mousedown to take focus and place its caret.
+            onMouseDown={e => { if (e.target !== searchRef.current) e.preventDefault(); }}
             // A wrapping <label> would otherwise forward a row click on to the trigger button as a
             // second activation, reopening the popup the moment a choice closed it. Label activation
             // is a default action, so only preventDefault cancels it; stopPropagation alone does not.
@@ -355,15 +411,51 @@ export default function Select<T extends string>(props: SelectProps<T>) {
               width: menuWidth ?? "100%",
               minWidth: "100%",
               ...(menuPortal ? menuPosition : {}),
+              ...(actions.length || searchable ? { display: "flex", flexDirection: "column", overflowY: "hidden" } : {}),
             }}
           >
+            {searchable && <div role="presentation" style={{ flex: "none", padding: "0 0 4px", marginBottom: 4, borderBottom: "1px solid var(--border)" }}>
+              <input
+                ref={searchRef}
+                type="text"
+                value={query}
+                placeholder={searchPlaceholder}
+                aria-label={searchPlaceholder ?? ariaLabel}
+                aria-controls={listId}
+                aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                onChange={e => setQuery(e.target.value)}
+                onKeyDown={onKeyDown}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  boxSizing: "border-box",
+                  height: s.height - 4,
+                  padding: s.padding,
+                  background: "var(--bg-app)",
+                  color: "var(--text-primary)",
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  outline: "none",
+                  fontFamily: mono ? "var(--font-mono)" : "inherit",
+                  fontSize: s.fontSize,
+                }}
+              />
+            </div>}
             {props.multiple && (props.selectAllLabel || props.clearLabel) && <div role="presentation" style={{ display: "flex", gap: 8, padding: "4px 4px 8px", borderBottom: "1px solid var(--border)", marginBottom: 4 }}>
               {props.selectAllLabel && <button type="button" className="vlx-btn" onClick={() => props.onChange(options.filter(o => !o.disabled || props.value.includes(o.value)).map(o => o.value))}>{props.selectAllLabel}</button>}
               {props.clearLabel && <button type="button" className="vlx-btn" onClick={() => props.onChange(options.filter(o => o.disabled && props.value.includes(o.value)).map(o => o.value))}>{props.clearLabel}</button>}
             </div>}
-            <div id={multiple ? listId : undefined} role={multiple ? "listbox" : undefined} aria-label={multiple ? ariaLabel : undefined} aria-multiselectable={multiple || undefined}>
-            {options.map((opt, i) => {
-              const on = props.multiple ? props.value.includes(opt.value) : i === selected;
+            <div ref={optionsRef} id={multiple ? listId : undefined} role={multiple ? "listbox" : undefined} aria-label={multiple ? ariaLabel : undefined} aria-multiselectable={multiple || undefined}
+              style={actions.length || searchable ? { position: "relative", flex: "1 1 auto", minHeight: 0, overflowY: "auto" } : undefined}>
+            {needle && !shown.length && noMatchLabel && (
+              <div role="presentation" style={{ padding: s.rowPadding, fontSize: s.fontSize, color: "var(--text-muted)" }}>{noMatchLabel}</div>
+            )}
+            {shown.map((opt, i) => {
+              const on = isOn(opt);
               const hot = i === active;
               return (
                 <div
@@ -410,6 +502,26 @@ export default function Select<T extends string>(props: SelectProps<T>) {
               );
             })}
             </div>
+            {actions.length > 0 && <div role="group" style={{ flex: "none", marginTop: 4, paddingTop: 4, borderTop: "1px solid var(--border)" }}>
+              {actions.map((action, k) => {
+                const i = shown.length + k;
+                return (
+                  <div
+                    key={action.id}
+                    role="option"
+                    id={`${listId}-${i}`}
+                    data-select-index={i}
+                    aria-selected={false}
+                    onClick={() => commit(i)}
+                    onMouseEnter={() => setActive(i)}
+                    style={{ ...selectRowStyle(false, i === active, size), color: "var(--text-secondary)" }}
+                  >
+                    {action.icon}
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{action.label}</span>
+                  </div>
+                );
+              })}
+            </div>}
           </div>
         </>
       )}

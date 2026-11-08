@@ -2,7 +2,7 @@
 
 Created: 2026-07-09 20:41
 
-Updated: 2026-09-25 10:21
+Updated: 2026-11-05 19:23
 
 > Settings open from the gear button in the title bar. On macOS the app menu also has "Settings…" (⌘,); on Windows and Linux, press Alt and choose File ▸ Settings…. The settings window has eight categories: General, Appearance, Terminal, Conversation view, Behavior, Advanced, Agents and Shortcuts. This chapter describes each item and ends with the default key bindings. Settings are shared between the desktop app and browser clients connected to it.
 
@@ -27,7 +27,6 @@ Updated: 2026-09-25 10:21
 | Panes | Pane style: "Flush" (default) or "Card" |
 | Divider | "Subtle" (default) or "Visible" |
 | Sidebar | "Tree" (default) or "Compact" |
-| Interface font | Font of the interface |
 | Interface size | Font size of the interface; "Auto" follows the density |
 
 The light and dark themes are switched in the title bar (follow system, dark, light), not here. Running Claude sessions in the terminal view follow the theme change without a restart.
@@ -49,7 +48,7 @@ These settings apply to the conversation view of agent sessions; see [Conversati
 
 | Item | Description |
 |------|-------------|
-| Conversation font, Conversation font size, Conversation line height | Typography of the conversation, independent of the terminal settings (default size 13.5, line height 1.2×) |
+| Conversation font, Conversation font size, Conversation line height | Typography of conversation text, independent of the terminal settings (default Inter, size 13.5, line height 1.2×). Code and tool output always use JetBrains Mono |
 | Composer toolbar | Which controls appear beside the message box, and in which order: Model, Thinking effort, Collaboration mode, Permission mode, Fast mode, Speed, Tone, MCP servers, Background tasks, Account and Codex reset credits. Each has an On/Off switch; the arrows reorder the controls that are on. Model, Thinking effort, Collaboration mode and Permission mode are on by default |
 
 Controls that the current agent or model does not support are not shown. A supported control stays visible when its feature is temporarily unavailable, for example MCP servers and Background tasks while the agent process is stopped.

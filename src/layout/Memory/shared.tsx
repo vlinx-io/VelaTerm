@@ -23,6 +23,22 @@ export function memoryEffortLabel(effort: string) {
   return known.includes(effort) ? t(`chat.effort.${effort}` as I18nKey) : effort;
 }
 export function memoryTime(stamp: number) { return new Date(stamp).toLocaleString(dateLocale()); }
+/** Date for list rows: month and day, with the year only when it is not the current one. */
+export function shortDate(stamp: number) {
+  const date = new Date(stamp);
+  return date.toLocaleDateString(dateLocale(), { year: date.getFullYear() === new Date().getFullYear() ? undefined : "numeric", month: "short", day: "numeric" });
+}
+/** Date and minute for detail lines; seconds add nothing here. */
+export function fullDate(stamp: number) {
+  return new Date(stamp).toLocaleDateString(dateLocale(), { year: "numeric", month: "short", day: "numeric" });
+}
+export function runTime(stamp: number) {
+  const date = new Date(stamp);
+  return date.toLocaleString(dateLocale(), { year: date.getFullYear() === new Date().getFullYear() ? undefined : "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+export function detailTime(stamp: number) {
+  return new Date(stamp).toLocaleString(dateLocale(), { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
 export function StateLabel({ value }: { value: string }) {
   const key = `memory.${value}`;
   const allowed = ["queued", "cancelling", "running", "completed", "failed", "cancelled", "extract", "merge", "commit", "done"];

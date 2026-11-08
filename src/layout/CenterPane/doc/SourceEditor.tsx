@@ -22,6 +22,7 @@ import { Compartment, EditorState, Prec, RangeSetBuilder, StateEffect, StateFiel
 import { Decoration, type DecorationSet, keymap } from "@codemirror/view";
 import { SearchCursor } from "@codemirror/search";
 import { vlxHighlight } from "./docHighlight";
+import { nativeSelectAll } from "./nativeSelectAll";
 import { EMPTY_STATUS, type DocSearchControl, type SearchStatus } from "./docSearch";
 import { uploadDocImage } from "../../../ipc/transport";
 import { env } from "../../../platform";
@@ -277,6 +278,8 @@ export const SourceEditor = forwardRef<
         // CodeMirror leaves Tab unbound for browser focus navigation. Source-editing convention instead
         // indents the line/selection with Tab and outdents with Shift+Tab.
         keymap.of([indentWithTab]),
+        // The macOS menu's Select All and the context menu select only the rendered lines natively.
+        nativeSelectAll(),
         matchField,
         focusCompartment.of([]),
         typewriterCompartment.of([]),

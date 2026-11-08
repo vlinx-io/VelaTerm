@@ -20,7 +20,7 @@ export function useHistorySessionNavigation() {
         const url = new URL(window.location.href);
         const selected = url.searchParams.get("chatSession");
         if (selected && selected !== state.activeSessionId) {
-          for (const key of ["chatSession","chatBefore","chatAfter","chatRow","chatField","chatPart","chatFiles","chatSearch"]) url.searchParams.delete(key);
+          for (const key of ["chatSession","chatBefore","chatAfter","chatRow","chatField","chatPart","chatFiles","chatSearch","chatChild"]) url.searchParams.delete(key);
           if (state.activeSessionId) url.searchParams.set("session",state.activeSessionId);else url.searchParams.delete("session");
           window.history.pushState(null,"",url.href);
         }

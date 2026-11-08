@@ -3,13 +3,18 @@ import { invoke } from "../../ipc/transport";
 import { t } from "../../i18n";
 import { getCompletionConfig, reloadCompletionConfig, watchCompletionConfig } from "./config";
 import "./completion.css";
+import { setCompletionTip, type CompletionTip } from "./tip";
 
 interface Item { index: number; label: string; description: string; matches: [number, number][] }
 interface Snapshot {
   configured: boolean; supported: boolean; ready: boolean; revision: number; inputVersion: number;
-  pending: boolean; query: string; items: Item[]; extendable?: boolean;
+  pending: boolean; query: string; items: Item[]; extendable?: boolean; hintAccepted?: boolean;
+  // The backend already inserted the single match or the shared text (backends that predate this omit it).
+  applied?: boolean;
 }
 const delay = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+// How long a hint must stay on screen before the pane header names its key, so fast typing never touches the header.
+const TIP_DELAY_MS = 250;
 let nextMenuId = 0;
 
 /**
@@ -27,6 +32,10 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
   let canComplete = false, bootstrapping = true, checkingSupport = false;
   let above: boolean | null = null;
   let anchorColumn = 0;
+  // Whether the shell's dimmed history hint is on screen, and the revision Tab can still revert after taking it.
+  let hintVisible = false, undoRevision: number | null = null;
+  let shownTip: CompletionTip | null = null, pendingTip: CompletionTip | null = null;
+  let tipTimer: ReturnType<typeof setTimeout> | undefined;
   const menu = document.createElement("div");
   menu.className = "terminal-completion";
   menu.setAttribute("role", "listbox");
@@ -56,11 +65,31 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
   }
   const focused = () => !disposed && !composing && document.activeElement === term.textarea
     && !!term.element?.getClientRects().length && term.buffer.active.type === "normal";
+  function refreshTip() {
+    let tip: CompletionTip | null = null;
+    if ((hintVisible || undoRevision !== null) && menu.hidden && focused()) {
+      if (undoRevision !== null) tip = "undo";
+      else if (getCompletionConfig()?.mode === "auto") {
+        tip = getCompletionConfig()?.tabBehavior === "accept" ? "accept-tab" : "accept-arrow";
+      }
+    }
+    if (tip && tip === pendingTip) return;
+    clearTimeout(tipTimer); pendingTip = null;
+    if (tip && !shownTip) {
+      pendingTip = tip;
+      tipTimer = setTimeout(() => { pendingTip = null; shownTip = tip; setCompletionTip(sessionId, tip); }, TIP_DELAY_MS);
+      return;
+    }
+    shownTip = tip;
+    setCompletionTip(sessionId, tip);
+  }
   function hide() {
+    const wasOpen = !menu.hidden;
     menu.hidden = true; snapshot = null; displayed = null; queuedSelection = null; above = null; picked = false;
     menu.removeAttribute("aria-busy");
     term.textarea?.removeAttribute("aria-activedescendant");
     term.textarea?.removeAttribute("aria-controls");
+    if (wasOpen) refreshTip();
   }
   function cancel() { generation++; autoDue = false; queuedQuery = null; clearTimeout(timer); timer = undefined; hide(); }
   function position() {
@@ -155,7 +184,7 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
       row.addEventListener("mousedown", e => { e.preventDefault(); void accept(index); });
       list.appendChild(row);
     });
-    menu.hidden = false; term.textarea?.setAttribute("aria-controls", menu.id); highlight();
+    menu.hidden = false; term.textarea?.setAttribute("aria-controls", menu.id); highlight(); refreshTip();
     if (queued?.generation === generation) {
       queuedSelection = null;
       const index = result.items.findIndex(item => item.label === queued.label);
@@ -169,7 +198,11 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
     autoDue = false;
     const version = generation; requesting = true;
     try {
-      let result = await call("query"); support(result);
+      // A Tab on a closed list lets the backend insert a single match or the shared text itself, so over a remote
+      // connection the whole Tab costs one round trip instead of a query, polls and a separate accept.
+      let result = await call(manual && getCompletionConfig()?.tabBehavior === "accept" ? "tab" : "query",
+        manual && menu.hidden ? { apply: true } : {});
+      support(result);
       if (disposed) return;
       if (!result.supported || !result.ready) {
         if (version === generation) { hide(); if (manual) await write("\t"); }
@@ -181,6 +214,8 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
       }
       if (disposed || version !== generation) return;
       if (result.pending) { hide(); return; }
+      if (result.applied) { hide(); return; }
+      if (result.hintAccepted) { hide(); undoRevision = result.revision; refreshTip(); return; }
       if (manual && result.items.length === 0) { hide(); await write("\t"); return; }
       // Tab behaves like the shell's own: a single candidate is applied, and shared text is inserted first.
       if (manual && menu.hidden && result.items.length === 1) { snapshot = result; void accept(0); return; }
@@ -200,7 +235,16 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
       }
     }
   }
+  // Second Tab: restore what was typed before the hint was taken, then list the matches for it.
+  async function undoHint(revision: number) {
+    try { await call("undo", { revision }); } catch { /* The shell rejects changed input. */ }
+    await query(false);
+  }
   function input(data: string) {
+    const hadTip = undoRevision !== null || (hintVisible && /[\r\n\x03]/.test(data));
+    undoRevision = null;
+    if (/[\r\n\x03]/.test(data)) hintVisible = false;
+    if (hadTip) refreshTip();
     generation++; autoDue = false; queuedSelection = null; queuedQuery = null; snapshot = null; picked = false;
     const paste = data.startsWith("\x1b[200~") && data.endsWith("\x1b[201~");
     if (/[\x12\x13]/.test(data) || data === "\x1b") searchMode = true;
@@ -241,6 +285,11 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
       if (event.key === "Tab") { event.preventDefault(); void accept(active); return false; }
       if (event.key === "Escape") { cancel(); event.preventDefault(); return false; }
     }
+    if (event.key === "Tab" && undoRevision !== null && menu.hidden
+      && !event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+      const revision = undoRevision; undoRevision = null;
+      event.preventDefault(); cancel(); refreshTip(); void undoHint(revision); return false;
+    }
     const trigger = (event.key === "Tab" && !event.ctrlKey) || (event.code === "Space" && event.ctrlKey);
     if (trigger && canComplete && !searchMode && !event.altKey && !event.metaKey && !event.shiftKey && getCompletionConfig()) {
       event.preventDefault(); cancel(); void query(event.key === "Tab"); return false;
@@ -249,10 +298,11 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
   }
   const startComposition = () => { composing = true; cancel(); };
   const endComposition = () => { composing = false; };
-  const focus = () => { refreshSupport(); void reloadCompletionConfig(); };
+  const focus = () => { refreshSupport(); void reloadCompletionConfig(); refreshTip(); };
+  const blur = () => { cancel(); refreshTip(); };
   const textarea = term.textarea;
   textarea?.addEventListener("compositionstart", startComposition); textarea?.addEventListener("compositionend", endComposition);
-  textarea?.addEventListener("blur", cancel); textarea?.addEventListener("focus", focus);
+  textarea?.addEventListener("blur", blur); textarea?.addEventListener("focus", focus);
   window.addEventListener("resize", position);
   const cursor = term.onCursorMove(position), scroll = term.onScroll(cancel);
   let checkingOutput = false;
@@ -265,10 +315,16 @@ export function installCompletion(term: Terminal, write: (data: string) => Promi
         || current.inputVersion !== shown.inputVersion || current.revision !== shown.revision)) cancel();
     }).catch(cancel).finally(() => { checkingOutput = false; });
   });
-  const stopConfig = watchCompletionConfig(cancel); refreshSupport();
+  const stopConfig = watchCompletionConfig(() => { cancel(); refreshTip(); }); refreshSupport();
+  const hintReport = term.parser.registerOscHandler(6974, data => {
+    hintVisible = data === "1";
+    refreshTip();
+    return true;
+  });
   return { input, key, dispose() {
-    disposed = true; cancel(); stopConfig(); cursor.dispose(); scroll.dispose(); output.dispose(); menu.remove();
+    disposed = true; cancel(); clearTimeout(tipTimer); stopConfig(); cursor.dispose(); scroll.dispose(); output.dispose(); hintReport.dispose(); menu.remove();
+    setCompletionTip(sessionId, null);
     textarea?.removeEventListener("compositionstart", startComposition); textarea?.removeEventListener("compositionend", endComposition);
-    textarea?.removeEventListener("blur", cancel); textarea?.removeEventListener("focus", focus); window.removeEventListener("resize", position);
+    textarea?.removeEventListener("blur", blur); textarea?.removeEventListener("focus", focus); window.removeEventListener("resize", position);
   } };
 }

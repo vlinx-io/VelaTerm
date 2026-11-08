@@ -8,7 +8,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ContextMenu, type MenuItem } from "../../components/ContextMenu";
 import Icons from "../../components/Icons";
-import { GameCenterLink } from "../../components/GameCenterLink";
 import { StatusIndicator } from "../../components/StatusIndicator";
 import { changesTitle } from "../../components/diff/changesTitle";
 import { useT } from "../../i18n";
@@ -574,7 +573,10 @@ export function TabBar() {
           </div>
         );
       })}
-      <MemoryTab />
+      <MemoryTab
+        otherTabCount={openTabs.length}
+        onCloseOthers={() => { for (const id of openTabs) closeAnyTab(id); }}
+      />
       {!isShareSurface && <button className="tab-add" title={t("tab.newTerminal")} onClick={() => newScratchTab()}>
         <Icons.plus size={14} />
       </button>}
@@ -602,7 +604,6 @@ export function TabBar() {
             <Icons.compass size={14} />
           </button>
         )}
-        <GameCenterLink />
       </div>}
       {tip && (
         // Early tooltip uses fixed positioning, ignores pointer events, and uses theme raised-panel color.

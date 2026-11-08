@@ -1276,8 +1276,22 @@ fn read_file_cmd(sys: &RemoteSystem, path: &str) -> String {
 
 /// Remote command that prints `alive` when `pid` is a running process of the given kind. Windows reuses
 /// PIDs quickly, so there the process name must also match one of `names` (case-insensitive prefixes).
-fn pid_alive_cmd(sys: &RemoteSystem, pid: u32, names: &[&str]) -> String {
+///
+/// `win_pid` says the PID was recorded by a native Windows process (the desktop app's local link), as
+/// opposed to `$!` from the start script (run.json), which under Cygwin or Git Bash is the shell's own PID.
+fn pid_alive_cmd(sys: &RemoteSystem, pid: u32, names: &[&str], win_pid: bool) -> String {
     match sys.shell {
+        // Cygwin and Git Bash on Windows: their `kill` cannot see a Windows PID. `ps -W` lists every
+        // Windows process with its WINPID in the fourth column (fifth when a Cygwin status flag leads the
+        // row) and the executable path last.
+        RemoteShell::Posix if win_pid && sys.os == "windows" => {
+            let pat = names.join("|");
+            format!(
+                "ps -W 2>/dev/null | awk -v p={pid} '{{o=($1~/^[0-9]+$/)?0:1}} $(4+o)==p \
+                 {{c=tolower($0); gsub(/\\\\/,\"/\",c); n=split(c,a,\"/\"); \
+                 if(a[n]~/^({pat})/){{print \"alive\"; exit}}}}'"
+            )
+        }
         RemoteShell::Posix => format!("kill -0 {pid} 2>/dev/null && echo alive"),
         RemoteShell::Powershell => {
             let cond = names
@@ -1303,7 +1317,7 @@ fn read_local_link(t: &dyn SshTransport, sys: &RemoteSystem) -> Option<crate::we
     let path = shell_join(sys, &desktop_data_dir_expr(sys), crate::web::local_link::FILENAME);
     let out = shell_exec(t, sys, &read_file_cmd(sys, &path)).ok()?;
     let link = crate::web::local_link::parse(&out)?;
-    let alive = shell_exec(t, sys, &pid_alive_cmd(sys, link.pid, &["velaterm", "vlx-term"]))
+    let alive = shell_exec(t, sys, &pid_alive_cmd(sys, link.pid, &["velaterm", "vlx-term"], true))
         .map(|o| o.trim() == "alive")
         .unwrap_or(false);
     if alive {
@@ -1499,7 +1513,7 @@ fn detect_running(t: &dyn SshTransport, sys: &RemoteSystem) -> Option<RunState> 
         return None;
     }
     // Windows reuses PIDs quickly, so there the process must actually be vela-server.
-    let alive = shell_exec(t, sys, &pid_alive_cmd(sys, rs.pid, &["vela-server"]))
+    let alive = shell_exec(t, sys, &pid_alive_cmd(sys, rs.pid, &["vela-server"], false))
         .map(|o| o.trim() == "alive")
         .unwrap_or(false);
     if alive {
@@ -2490,18 +2504,29 @@ mod tests {
 
     #[test]
     fn pid_alive_cmd_checks_the_process_name_only_on_windows() {
-        let posix = pid_alive_cmd(&sys_of("linux", "x86_64", RemoteShell::Posix), 77, &["velaterm"]);
+        let posix = pid_alive_cmd(&sys_of("linux", "x86_64", RemoteShell::Posix), 77, &["velaterm"], true);
         assert_eq!(posix, "kill -0 77 2>/dev/null && echo alive");
         // Windows reuses PIDs quickly, so the desktop's two possible names are both accepted and nothing else.
         let win = pid_alive_cmd(
             &sys_of("windows", "x86_64", RemoteShell::Powershell),
             77,
             &["velaterm", "vlx-term"],
+            true,
         );
         assert!(win.contains("Get-Process -Id 77"));
         assert!(win.contains("$q.ProcessName -like 'velaterm*' -or $q.ProcessName -like 'vlx-term*'"));
-        let server = pid_alive_cmd(&sys_of("windows", "x86_64", RemoteShell::Powershell), 9, &["vela-server"]);
+        let server = pid_alive_cmd(&sys_of("windows", "x86_64", RemoteShell::Powershell), 9, &["vela-server"], false);
         assert!(server.contains("($q.ProcessName -like 'vela-server*')"));
+        // Cygwin and Git Bash: a Windows PID is invisible to `kill -0`, so look it up by WINPID instead.
+        let cygwin = pid_alive_cmd(&sys_of("windows", "x86_64", RemoteShell::Posix), 77, &["velaterm", "vlx-term"], true);
+        assert!(!cygwin.contains("kill -0"));
+        assert!(cygwin.starts_with("ps -W 2>/dev/null | awk -v p=77 '"));
+        assert!(cygwin.contains("$(4+o)==p"));
+        assert!(cygwin.contains("gsub(/\\\\/,\"/\",c)"));
+        assert!(cygwin.contains("if(a[n]~/^(velaterm|vlx-term)/){print \"alive\"; exit}}'"));
+        // run.json holds `$!` from the start script, which is the shell's own PID there.
+        let started = pid_alive_cmd(&sys_of("windows", "x86_64", RemoteShell::Posix), 9, &["vela-server"], false);
+        assert_eq!(started, "kill -0 9 2>/dev/null && echo alive");
     }
 
     #[test]

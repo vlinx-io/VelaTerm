@@ -22,3 +22,7 @@
   overflow-wrap: anywhere;
   font-family: var(--font-mono);
 }
+.sv-deferred-prose .sv-deferred-text {
+  font-family: var(--chat-font);
+  letter-spacing: var(--chat-tracking);
+}

@@ -17,6 +17,7 @@ pub mod executable;
 pub mod gitbash;
 pub mod grok;
 pub mod headless;
+pub mod health;
 pub mod history;
 pub mod history_store;
 pub mod hook_bridge;
@@ -56,6 +57,7 @@ pub mod update;
 pub mod version;
 pub mod zcode;
 pub mod zcode_account;
+pub mod zcode_token;
 pub mod zcode_info;
 
 pub mod permission_state;

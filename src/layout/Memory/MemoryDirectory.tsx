@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
-import { memoryGet, memoryList, type MemoryEntry, type MemorySummary } from "../../ipc/memory";
+import { memoryCollections, memoryGet, memoryList, type MemoryEntry, type MemorySummary } from "../../ipc/memory";
+import type { SessionKind } from "../../types";
+import { kindIconEl } from "../sessionViewers/sessionMeta";
 import { KnowledgeTreeRow, knowledgeSelection, treeKey, useKnowledgeTree } from "../Notebook/KnowledgeTreeRow";
 import { useNotebookLoad } from "../Notebook/shared";
 import { useMemoryLocation } from "./navigation";
@@ -40,15 +42,27 @@ export function MemoryDirectory() {
     window.addEventListener("focus", update);
     return () => window.removeEventListener("focus", update);
   }, [reload]);
+  const [agentOf, setAgentOf] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    let alive = true;
+    // Icons only; the tree stays usable with the neutral icon when this fails.
+    void (async () => {
+      try {
+        const all = await memoryCollections();
+        if (alive) setAgentOf(new Map(all.projects.flatMap((project) => project.sessions.map((item) => [item.id, item.kind] as const))));
+      } catch { /* keep the neutral icon */ }
+    })();
+    return () => { alive = false; };
+  }, []);
   const groupName = (group: { name: string; kind: string }) => group.name || t(group.kind === "manual" ? "memory.manualGroup" : group.kind === "legacy" ? "memory.legacyGroup" : "memory.unknownProject");
   return <ul className="nb-tree-branches memory-directory">
     {(!data || error) && <li><LoadState error={error} reload={reload} /></li>}
-    {data?.projects.map(item => <KnowledgeTreeRow key={item.id} name={groupName(item)} route="library" depth={1} icon={<Icons.folder size={15} />} count={item.count}
+    {data?.projects.map(item => <KnowledgeTreeRow key={item.id} name={groupName(item)} route="library" depth={0} icon={<Icons.folder size={14} />} count={item.count}
       target={{ key: treeKey.memoryProject(item.id), kind: "memoryProject", id: item.id, name: groupName(item), count: item.count, special: item.kind !== "project" }}
       values={{ ...knowledgeSelection, memoryProject: item.id }} selected={active && activeProject === item.id && !activeSession && page === "library"}
       expanded={expanded.has(`project:${item.id}`)} onToggle={() => toggle(`project:${item.id}`)} onOpen={() => open(`project:${item.id}`)}>
       <ul className="nb-tree-branches">
-        {item.sessions.map(session => <KnowledgeTreeRow key={session.id} name={groupName(session)} route="library" depth={2} icon={<Icons.bot size={15} />} count={session.count}
+        {item.sessions.map(session => <KnowledgeTreeRow key={session.id} name={groupName(session)} route="library" depth={1} prose icon={agentOf.has(session.id) ? kindIconEl(agentOf.get(session.id) as SessionKind, 14) : <Icons.bot size={14} />} count={session.count}
           target={{ key: treeKey.memorySession(session.id), kind: "memorySession", id: session.id, name: groupName(session), count: session.count, special: session.kind !== "session" }}
           values={{ ...knowledgeSelection, memoryProject: item.id, memorySession: session.id }} selected={active && activeSession === session.id && page === "library"}
           expanded={expanded.has(`session:${session.id}`)} onToggle={() => toggle(`session:${session.id}`)} onOpen={() => open(`session:${session.id}`)}>
@@ -90,9 +104,9 @@ function SessionEntries({ projectId, sessionId, selected, revision }: { projectI
   // Entries know their own stored grouping; the tree id only supplies a fallback. `__manual__` is the
   // tree's name for the empty stored session id, so entries dropped there go back to the manual group.
   const groupSession = sessionId === "__manual__" ? "" : sessionId;
-  const row = (entry: { id: string; title: string; version: number; sessionId?: string }) => <KnowledgeTreeRow key={entry.id} name={entry.title} title={entry.title} route={`entry/${entry.id}`} depth={3}
+  const row = (entry: { id: string; title: string; version: number; sessionId?: string }) => <KnowledgeTreeRow key={entry.id} name={entry.title} title={entry.title} route={`entry/${entry.id}`} depth={2} prose
     target={{ key: treeKey.memoryEntry(entry.id), kind: "memoryEntry", id: entry.id, title: entry.title, version: entry.version, sessionId: entry.sessionId ?? groupSession }}
-    values={{ ...knowledgeSelection, memoryProject: projectId, memorySession: sessionId }} selected={entry.id === selected} icon={<Icons.sparkle size={15} />} />;
+    values={{ ...knowledgeSelection, memoryProject: projectId, memorySession: sessionId }} selected={entry.id === selected} icon={<Icons.diamond size={14} />} />;
   return <ul className="nb-tree-branches">
     {(!data || error) && <li><LoadState error={error} reload={reload} /></li>}
     {entries.map(row)}

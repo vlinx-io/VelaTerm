@@ -150,6 +150,7 @@ else: print(json.dumps({'structured_output':result,'is_error':False,'usage':{'in
             if flaky { "True" } else { "False" },
             r#"
 import sys,json,re,pathlib
+if '--version' in sys.argv: print('1.0.0');sys.exit(0)
 prompt=sys.argv[-1]
 root=pathlib.Path(__file__).parent
 calls=root/('calls-'+AGENT)
@@ -1241,4 +1242,52 @@ fn live_agents_organize_a_real_session() {
         }
     }
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+#[test]
+fn processing_history_reports_each_session_once_by_its_current_state() {
+    let f = Fixture::new();
+    {
+        let conn = f.app.db().conn.lock().unwrap();
+        let run = |id: &str, session: &str, status: &str, at: i64, entries: &str| {
+            conn.execute("INSERT INTO memory_sources(id,session_id,session_name,kind,agent_session_id,digest,content,created_at) VALUES(?1,?2,?2,'claude',?1,?1,'c',?3)", params![id, session, at]).unwrap();
+            conn.execute("INSERT INTO memory_jobs(id,source_id,agent,model,status,stage,owner_pid,entries,created_at,updated_at) VALUES(?1,?1,'claude','',?2,'done',0,?3,?4,?4)", params![id, status, entries, at]).unwrap();
+        };
+        // Recovered: three failures, then a success.
+        run("r1", "recovered", "failed", 10, "[]");
+        run("r2", "recovered", "failed", 11, "[]");
+        run("r3", "recovered", "failed", 12, "[]");
+        run("r4", "recovered", "completed", 13, "[\"e1\"]");
+        // Broken: succeeded once, then failed twice; a later cancel does not hide the failure.
+        run("b1", "broken", "completed", 1, "[\"e2\"]");
+        run("b2", "broken", "failed", 2, "[]");
+        run("b3", "broken", "failed", 3, "[]");
+        run("b4", "broken", "cancelled", 4, "[]");
+        // Abandoned: only ever cancelled.
+        run("a1", "abandoned", "cancelled", 20, "[]");
+    }
+    let page = dispatch(&f.app, "memory_jobs", &json!({"bySession":true})).unwrap();
+    assert_eq!(page["total"], 3);
+    assert_eq!(page["attention"], 1);
+    assert_eq!(page["organized"], 1);
+    let jobs = page["jobs"].as_array().unwrap();
+    let ids: Vec<&str> = jobs.iter().map(|job| job["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["b3", "a1", "r4"]);
+    assert_eq!(jobs[0]["failedAttempts"], 2);
+    assert_eq!(jobs[0]["entries"], json!(["e2"]));
+    assert_eq!(jobs[1]["failedAttempts"], 0);
+    assert_eq!(jobs[2]["failedAttempts"], 3);
+    // Run-level history and single-run lookups stay as they were.
+    assert_eq!(dispatch(&f.app, "memory_jobs", &json!({})).unwrap()["total"], 9);
+    assert_eq!(dispatch(&f.app, "memory_jobs", &json!({"id":"r1"})).unwrap()["jobs"][0]["status"], "failed");
+}
+
+#[test]
+fn entry_details_name_the_tags_shared_with_other_entries() {
+    let f = Fixture::new();
+    let save = |title: &str, tags: Value| serde_json::from_value::<Entry>(dispatch(&f.app, "memory_save", &json!({"id":null,"version":0,"title":title,"summary":"s","content":"c","tags":tags,"related":[]})).unwrap()).unwrap();
+    let first = save("First", json!(["shared", "only-first"]));
+    save("Second", json!(["shared"]));
+    let detail = dispatch(&f.app, "memory_get", &json!({"id":first.id})).unwrap();
+    assert_eq!(detail["sharedTags"], json!(["shared"]));
 }

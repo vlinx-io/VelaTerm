@@ -4,10 +4,14 @@
 //! account holds (`provider/updateAccountConfig`) and answers its request for the plan's API key before each
 //! model call (`interaction/requestProviderRuntimeHeaders`). Until it hears, every plan counts as not
 //! entitled, the model catalogue is empty and a message is refused, however recently `zcode login` saved the
-//! account. VelaTerm plays that part from the store `zcode login` writes, read the way ZCode's own prompt mode
-//! reads it: `~/.zcode/v2/credentials.json`, each value sealed with AES-256-GCM under the SHA-256 of
+//! account. VelaTerm plays that part from the store `zcode login` writes, read the way ZCode's own prompt
+//! mode reads it: `~/.zcode/v2/credentials.json`, each value sealed with AES-256-GCM under the SHA-256 of
 //! `ZCODE_CREDENTIAL_SECRET` or, by default, of the platform, home directory and user name. Keys go only to
-//! the agent's stdin; nothing here logs or keeps them.
+//! the agent's stdin; nothing here logs or saves them.
+//!
+//! A plan signed in to with an API key keeps the key in the store. One signed in to through OAuth (every
+//! `zcode login` since ZCode 3.15) keeps only the platform's access token, which `agent::zcode_token`
+//! exchanges for a short-lived project token before each model call.
 //!
 //! The server applies an account only when it names the provider config revision the server loaded. That
 //! revision is `zcode-builtin:<revision in the file>:<SHA-256 of the file's path>`, so it is known only when
@@ -40,7 +44,7 @@ pub struct Account {
 }
 
 /// A variable as the command will pass it: its own setting, otherwise what this process inherited.
-fn env_of(cmd: &Command, key: &str) -> Option<OsString> {
+pub(crate) fn env_of(cmd: &Command, key: &str) -> Option<OsString> {
     match cmd.get_envs().find(|(k, _)| *k == key) {
         Some((_, value)) => value.map(|v| v.to_os_string()),
         None => std::env::var_os(key),
@@ -119,8 +123,26 @@ fn api_key_key(provider: &str, identity: &str) -> String {
     format!("account-provider:coding-plan:{provider}:account:{}:api-key", encode_component(identity))
 }
 
+/// How a plan was signed in to: `manual` (an API key) or `oauth`.
+fn auth_source_key(provider: &str) -> String {
+    format!("account-provider:{provider}:auth-source")
+}
+
+/// The OAuth access token of a platform's sign-in.
+fn access_token_key(family: &str) -> String {
+    format!("oauth:{family}:access_token")
+}
+
+/// What a plan's model calls authenticate with.
+enum Credential {
+    /// The plan's API key, used as it is.
+    Key(String),
+    /// An OAuth sign-in, exchanged for a project token before each call.
+    OAuth { family: String, identity: String, access_token: String },
+}
+
 /// JavaScript's `encodeURIComponent`, which ZCode applies to the identity inside a store key.
-fn encode_component(value: &str) -> String {
+pub(crate) fn encode_component(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&byte) {
@@ -217,13 +239,37 @@ impl Account {
         self.read(store, "oauth:active_provider").filter(|p| p == "zai" || p == "bigmodel")
     }
 
-    /// The key of a plan on `family`, while that is the platform signed in to.
-    fn plan_key(&self, store: &HashMap<String, String>, provider: &str, family: &str) -> Option<String> {
+    /// What a plan on `family` authenticates with, while that is the platform signed in to. As in ZCode, a
+    /// `manual` plan needs its saved key and any other needs the platform's OAuth token. A store written
+    /// before ZCode recorded the source (3.14 and earlier) saved the key itself, which is used when present.
+    fn credential(&self, store: &HashMap<String, String>, provider: &str, family: &str) -> Option<Credential> {
         if self.platform(store).is_some_and(|platform| platform != family) {
             return None;
         }
         let identity = self.read(store, &identity_key(provider))?;
-        self.read(store, &api_key_key(provider, &identity))
+        let key = || self.read(store, &api_key_key(provider, &identity)).map(Credential::Key);
+        let oauth = || self.read(store, &access_token_key(family)).map(|access_token| Credential::OAuth {
+            family: family.to_string(), identity: identity.clone(), access_token,
+        });
+        match self.read(store, &auth_source_key(provider)).as_deref() {
+            Some("manual") => key(),
+            Some(_) => oauth(),
+            None => key().or_else(oauth),
+        }
+    }
+
+    /// The key a model call or quota query sends: the saved key, or a project token for an OAuth sign-in.
+    fn request_key(&self, store: &HashMap<String, String>, credential: Credential, rejected: Option<&str>)
+        -> Result<(String, Option<String>), crate::agent::zcode_token::TokenError>
+    {
+        match credential {
+            Credential::Key(key) => Ok((key, None)),
+            Credential::OAuth { family, identity, access_token } => {
+                let login = crate::agent::zcode_token::Login { family: &family, identity: &identity, access_token: &access_token };
+                let material = crate::agent::zcode_token::resolve(&login, |key| self.read(store, key), rejected)?;
+                Ok((material.token, Some(material.api_key_id)))
+            }
+        }
     }
 
     /// The platform the account is signed in to (`zai` or `bigmodel`), or `None` when signed out.
@@ -232,15 +278,17 @@ impl Account {
     }
 
     /// The signed-in platform and the key of a plan the account holds there, for the account's quota query.
-    /// `None` when signed out or when no plan on that platform has a saved key.
+    /// `None` when signed out, when no plan on that platform is signed in to, or when no project token could
+    /// be had for it. May call the platform; never call it on the UI thread.
     pub fn plan_api_key(&self) -> Option<(String, String)> {
         let config: Value = serde_json::from_slice(&std::fs::read(&self.builtin).ok()?).ok()?;
         let store = self.store();
         let platform = self.platform(&store)?;
-        plans(&config).iter()
+        let credential = plans(&config).iter()
             .filter(|(_, family)| *family == platform)
-            .find_map(|(id, family)| self.plan_key(&store, id, family))
-            .map(|key| (platform, key))
+            .find_map(|(id, family)| self.credential(&store, id, family))?;
+        let (key, _) = self.request_key(&store, credential, None).ok()?;
+        Some((platform, key))
     }
 
     /// The `provider/updateAccountConfig` parameters for the account as saved now, or `None` when the
@@ -251,22 +299,63 @@ impl Account {
         let plans = plans(&config);
         let store = self.store();
         let entitled: Vec<String> = plans.iter()
-            .filter(|(id, family)| self.plan_key(&store, id, family).is_some())
+            .filter(|(id, family)| self.credential(&store, id, family).is_some())
             .map(|(id, _)| id.clone())
             .collect();
         Some(account_params(&based_on, &plans, &entitled))
     }
 
-    /// The answer to `interaction/requestProviderRuntimeHeaders`: the plan's API key, as ZCode's prompt mode
-    /// supplies it, or a refusal the server reports on the turn.
+    /// Whether answering `params` may call the platform, so the answer has to wait off the reader thread.
+    pub fn runtime_headers_need_network(&self, params: &Value) -> bool {
+        let provider = params.get("providerId").and_then(Value::as_str).unwrap_or("").trim();
+        let family = params.pointer("/accountAccess/accountType").and_then(Value::as_str).unwrap_or("");
+        matches!(self.credential(&self.store(), provider, family), Some(Credential::OAuth { .. }))
+    }
+
+    /// The answer to `interaction/requestProviderRuntimeHeaders`, as ZCode's prompt mode gives it: the plan's
+    /// API key, or for an OAuth sign-in a project token with its key id and the account scope the server
+    /// checks a retry against; otherwise a refusal the server reports on the turn. May call the platform.
     pub fn runtime_headers(&self, params: &Value) -> Value {
+        const SIGN_IN: &str = "Sign in to ZCode again from the ZCode account menu to use this plan.";
+        let refuse = |message: &str| json!({"headersApplied": false, "errorMessage": message});
         let provider = params.get("providerId").and_then(Value::as_str).unwrap_or("").trim();
         let mode = params.pointer("/accountAccess/mode").and_then(Value::as_str);
         let family = params.pointer("/accountAccess/accountType").and_then(Value::as_str).unwrap_or("");
-        let key = (mode == Some(PLAN_MODE)).then(|| self.plan_key(&self.store(), provider, family)).flatten();
-        match key {
-            Some(key) => json!({"headersApplied": true, "requestAuth": {"apiKey": key}}),
-            None => json!({"headersApplied": false, "errorMessage": "Sign in to ZCode to use this plan."}),
+        let store = self.store();
+        let Some(credential) = (mode == Some(PLAN_MODE)).then(|| self.credential(&store, provider, family)).flatten() else {
+            return refuse(SIGN_IN);
+        };
+        let scope = match &credential {
+            Credential::OAuth { identity, access_token, .. } => Some(crate::agent::zcode_token::fingerprint(
+                &json!([provider, family, identity, access_token]).to_string())),
+            Credential::Key(_) => None,
+        };
+        let expected = params.get("expectedAccountScope").and_then(Value::as_str);
+        let rejected = params.get("rejectedProjectTokenFingerprint").and_then(Value::as_str);
+        // A retry after a refused token must stay on the same sign-in; a changed one starts a new turn.
+        if (expected.is_some() || rejected.is_some()) && (expected.is_none() || expected != scope.as_deref()) {
+            return refuse(SIGN_IN);
+        }
+        match self.request_key(&store, credential, rejected) {
+            Ok((key, key_id)) => {
+                let mut auth = json!({"apiKey": key});
+                if let Some(id) = key_id {
+                    auth["apiKeyId"] = json!(id);
+                }
+                if let Some(scope) = scope {
+                    auth["accountScope"] = json!(scope);
+                }
+                json!({"headersApplied": true, "requestAuth": auth})
+            }
+            Err(error) => {
+                use crate::agent::zcode_token::TokenError;
+                crate::diagnostics::record("WARN", "zcode_project_token", json!({"family": family, "error": format!("{error:?}")}));
+                refuse(match error {
+                    TokenError::SignedOut => SIGN_IN,
+                    TokenError::Disabled => "The ZCode API key of this account is disabled. Enable it on the platform, then try again.",
+                    TokenError::Failed(_) => "ZCode could not authorize this plan with the platform. Check the network and try again.",
+                })
+            }
         }
     }
 }
@@ -364,6 +453,32 @@ mod tests {
         std::fs::write(dir.join(".zcode/v2/credentials.json"), "{}").unwrap();
         assert_eq!(account.signed_in(), None);
         assert_eq!(account.config().unwrap()["states"], json!({}));
+
+        // ZCode 3.15+ signs in through OAuth: the identity names the project, no key is saved, and the plan
+        // counts while the platform's access token is there. A manual plan still needs its own key.
+        let oauth = |source: &str, token: bool| {
+            let mut store = json!({
+                "oauth:active_provider": seal("bigmodel", &key, [5; 12]),
+                identity_key(other): seal("key-9e90dd9c36eeef0ae48a6ef0", &key, [3; 12]),
+                auth_source_key(other): seal(source, &key, [6; 12]),
+                api_key_key(other, "44081764743722744"): seal("stale-key", &key, [4; 12]),
+            });
+            if token {
+                store[access_token_key("bigmodel")] = json!(seal("oauth-token", &key, [7; 12]));
+            }
+            std::fs::write(dir.join(".zcode/v2/credentials.json"), store.to_string()).unwrap();
+            account.config().unwrap()["providers"][other]["access"]["entitled"].clone()
+        };
+        assert_eq!(oauth("oauth", true), true);
+        assert_eq!(oauth("oauth", false), false);
+        assert_eq!(oauth("manual", true), false, "a manual plan without its key is not entitled");
+        // A retry after a refused token must come from the same sign-in.
+        oauth("oauth", true);
+        let retry = account.runtime_headers(&json!({"providerId": other, "rejectedProjectTokenFingerprint": "0".repeat(64),
+            "accountAccess": {"mode": PLAN_MODE, "accountType": "bigmodel"}}));
+        assert_eq!(retry["headersApplied"], false);
+        assert!(account.runtime_headers_need_network(&json!({"providerId": other,
+            "accountAccess": {"mode": PLAN_MODE, "accountType": "bigmodel"}})));
 
         // Without both config paths the server reads its own refreshed copy, whose revision is not known.
         let mut partial = Command::new("zcode");

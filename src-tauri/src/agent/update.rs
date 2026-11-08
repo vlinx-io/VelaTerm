@@ -31,21 +31,23 @@ pub struct UpdateStatus {
     pub timed_out: bool,
     /// Version reported by the executable after the command finished.
     pub version: Option<String>,
+    /// The command reported success, but the agent no longer starts: the update stopped partway.
+    pub broken: bool,
 }
 
 struct Job {
     output: Mutex<Vec<u8>>,
-    result: Mutex<Option<(Option<i32>, bool, Option<String>)>>,
+    result: Mutex<Option<(Option<i32>, bool, Option<String>, bool)>>,
 }
 
 impl Job {
     fn status(&self) -> UpdateStatus {
         let output = String::from_utf8_lossy(&self.output.lock().unwrap()).into_owned();
         match self.result.lock().unwrap().clone() {
-            None => UpdateStatus { state: "running", output, exit_code: None, timed_out: false, version: None },
-            Some((exit_code, timed_out, version)) => UpdateStatus {
-                state: if exit_code == Some(0) { "succeeded" } else { "failed" },
-                output, exit_code, timed_out, version,
+            None => UpdateStatus { state: "running", output, exit_code: None, timed_out: false, version: None, broken: false },
+            Some((exit_code, timed_out, version, broken)) => UpdateStatus {
+                state: if exit_code == Some(0) && !broken { "succeeded" } else { "failed" },
+                output, exit_code, timed_out, version, broken,
             },
         }
     }
@@ -128,7 +130,7 @@ pub fn status(app: &AppCtx, id: &str) -> Result<UpdateStatus, String> {
     // Another session may be upgrading the same executable; adopt its job so later polls skip resolution.
     let bin = super::executable::for_session(app, &session(app, id)?);
     let Some(job) = jobs().lock().unwrap().get(&bin).cloned() else {
-        return Ok(UpdateStatus { state: "idle", output: String::new(), exit_code: None, timed_out: false, version: None });
+        return Ok(UpdateStatus { state: "idle", output: String::new(), exit_code: None, timed_out: false, version: None, broken: false });
     };
     session_jobs().lock().unwrap().insert(id.to_string(), job.clone());
     Ok(job.status())
@@ -161,7 +163,7 @@ pub fn start(app: &AppCtx, id: &str) -> Result<UpdateStatus, String> {
         Ok(child) => child,
         Err(error) => {
             job.append(format!("{error}\n").as_bytes());
-            *job.result.lock().unwrap() = Some((None, false, version));
+            *job.result.lock().unwrap() = Some((None, false, version, false));
             return Ok(job.status());
         }
     };
@@ -179,6 +181,7 @@ pub fn start(app: &AppCtx, id: &str) -> Result<UpdateStatus, String> {
         }).collect::<Vec<_>>();
     let waiter = job.clone();
     let before = version.clone();
+    let kind = session.kind;
     std::thread::spawn(move || {
         let deadline = Instant::now() + TIMEOUT;
         let (code, timed_out) = loop {
@@ -208,7 +211,13 @@ pub fn start(app: &AppCtx, id: &str) -> Result<UpdateStatus, String> {
                 code = Some(0);
             }
         }
-        *waiter.result.lock().unwrap() = Some((code, timed_out, version));
+        // The command can report success over a half-replaced package, so the result is the agent starting.
+        super::health::forget(&bin);
+        let broken = code == Some(0) && super::health::check(kind, &bin) == super::health::Health::Broken;
+        if broken {
+            waiter.append(b"\nThe agent does not start after this update.\n");
+        }
+        *waiter.result.lock().unwrap() = Some((code, timed_out, version, broken));
     });
     Ok(job.status())
 }

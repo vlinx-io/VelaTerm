@@ -2,7 +2,8 @@ import { useEffect, useSyncExternalStore } from "react";
 import { invoke } from "../../ipc/transport";
 import { onSettingsChanged } from "../../ipc/events";
 
-export interface CompletionConfig { mode: "auto" | "tab" | "off"; modes: ("auto" | "tab" | "off")[]; debounceMs: number; available: boolean }
+export type TabBehavior = "accept" | "complete";
+export interface CompletionConfig { mode: "auto" | "tab" | "off"; tabBehavior: TabBehavior; modes: ("auto" | "tab" | "off")[]; debounceMs: number; available: boolean }
 const listeners = new Set<() => void>();
 let config: CompletionConfig | null = null;
 let unlisten: (() => void) | undefined;
@@ -25,7 +26,7 @@ export function watchCompletionConfig(fn: () => void): () => void {
   if (listeners.size === 1) {
     void reloadCompletionConfig();
     void onSettingsChanged(keys => {
-      if (keys.includes("terminal-completion-mode")) void reloadCompletionConfig();
+      if (keys.includes("terminal-completion-mode") || keys.includes("terminal-tab-behavior")) void reloadCompletionConfig();
     }).then(stop => { if (listeners.size) unlisten = stop; else stop(); });
   }
   return () => {
@@ -43,5 +44,10 @@ export function useCompletionConfig(): CompletionConfig | null {
 
 export async function setCompletionMode(mode: CompletionConfig["mode"]): Promise<void> {
   await invoke("set_app_settings", { entries: { "terminal-completion-mode": mode } });
+  await reloadCompletionConfig();
+}
+
+export async function setCompletionTabBehavior(behavior: TabBehavior): Promise<void> {
+  await invoke("set_app_settings", { entries: { "terminal-tab-behavior": behavior } });
   await reloadCompletionConfig();
 }

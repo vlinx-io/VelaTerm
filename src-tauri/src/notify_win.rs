@@ -141,23 +141,26 @@ fn show_on_main(app: &AppHandle, id: u64, aumid: &str, xml: &str) -> windows::co
     Ok(())
 }
 
-/// Parse launch, raise the source window, and emit notification://click to it.
+/// Parse launch, raise the source window, and emit notification://click to it. Address the event with
+/// emit_to: `win.emit` is a global broadcast despite its receiver, so the main window would also take it
+/// and raise itself over the remote window.
 fn handle_click(app: &AppHandle, launch: &str) {
     let (label, session_id) = match launch.split_once(SEP) {
         Some((l, s)) => (l, s.to_string()),
         None => ("", launch.to_string()),
     };
-    if !label.is_empty() {
-        if let Some(win) = app.get_webview_window(label) {
-            let _ = win.unminimize();
-            let _ = win.show();
-            let _ = win.set_focus();
-            let _ = win.emit(NOTIFY_CLICK_EVENT, session_id);
-            return;
-        }
+    if let Some(win) = app.get_webview_window(label) {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+        let _ = app.emit_to(label, NOTIFY_CLICK_EVENT, session_id);
+        return;
     }
-    // Without a valid label/window, emit globally and raise the main window as a fallback.
-    let _ = app.emit(NOTIFY_CLICK_EVENT, session_id);
+    // A launch without a label has no addressee, so broadcast it. A closed source window's session belongs
+    // to that window, so in that case only raise the main window.
+    if label.is_empty() {
+        let _ = app.emit(NOTIFY_CLICK_EVENT, session_id);
+    }
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.unminimize();
         let _ = win.show();

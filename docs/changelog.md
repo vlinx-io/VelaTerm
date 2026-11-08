@@ -1,11 +1,41 @@
 # Changelog
 
-> Created: 2026-07-09 16:10 · Updated: 2026-11-03
+> Created: 2026-07-09 16:10 · Updated: 2026-11-08
 
 All notable changes to VelaTerm are documented here, newest first.
 v0.1.91 is the first public release; earlier version numbers were internal iterations and are not covered.
 
 ---
+
+## v0.3.0 — 2026-11-08
+
+- 🗂️ Sessions now come in three types, Task, Project and Chat, chosen at the top of the New Session page, and the left sidebar is organized into fixed Projects, Terminals, Tasks and Chats collections, with Terminals listing every running terminal and the agents detected in them.
+- 🧭 A new activity bar along the left edge switches between Projects, Terminals, Tasks, Chats, Archived Sessions and Knowledge Base, and holds Settings, Account, Feedback, Share and Game Center at the bottom.
+- 📦 Collections can be archived as a whole with Archive Collection in their context menu, and restoring any of their sessions brings the collection back.
+- 🆕 The New Session page picks the project, agent, model, reasoning effort and permissions in a settings card above the input box, and the project list can create, import or clone a project without leaving the page.
+- 🩺 Opening a conversation checks whether its agent is installed and signed in: if not, an install prompt or a sign-in panel appears and Send stays disabled until the agent is ready.
+- 🔧 An agent counts as installed only when it actually runs, so a half-finished install or a broken upgrade shows the install guide, one-click installs finish only once the agent starts, and an update that leaves the agent unable to start is reported as incomplete.
+- 🪟 The new `vartifact <file|URL>` command opens a file in a panel beside the conversation, with live preview for HTML and editable views for Markdown, images and code that ⌘S saves, while `vopen` now always opens a tab.
+- 💤 Dimmed inline suggestions in the terminal are now off by default, so completion is back to Tab only, and this update switches an existing Inline + Tab setting to Tab only once; you can turn suggestions back on in Settings.
+- ⌨️ In Inline + Tab completion mode, a new Tab key setting lets Tab accept the dimmed suggestion, with a second Tab undoing it and listing the matches, and the terminal title bar shows which keys are available while a suggestion is visible.
+- 🎨 Editing a Zsh command line no longer turns already typed text gray, and the completion mode description in Settings matches the selected mode.
+- 📡 Tab completion over remote connections responds in a single round trip.
+- 💬 ZCode sessions support interjecting with Option/Alt+Enter, so the message joins the running turn after its next tool call.
+- 🔑 ZCode 3.15 and later can sign in with OAuth, and a purchased GLM Coding Plan is no longer reported as missing or used up.
+- 📥 Sessions from Pi, OMP, ZCode and DeepSeek Harness can be imported, and the Import Sessions dialog can filter by agent.
+- 🔤 The interface uses Inter throughout, while code, tool output, paths and terminals stay in JetBrains Mono, and the interface font setting has been removed.
+- 📚 The knowledge base reads entries in a centered column, lists archived sessions as a tree of projects, groups and parent sessions with a by-date view, and lets the local knowledge base switch between cards and a list.
+- 🔔 On macOS and Windows, clicking a notification brings its own window to the front, so a notification from a remote window no longer raises the main window over it.
+- 📋 On macOS, pasting no longer freezes the app when the clipboard's source app stops responding: VelaTerm gives up after 5 seconds and tells you.
+- 📝 Select All from the macOS menu or the context menu in the source editor selects the whole file, so copying no longer drops lines that were off screen.
+- 📏 The input box no longer grows and then shrinks again after you send a message.
+- 📂 Terminals, Tasks and Chats show their contents expanded, regardless of what is folded in Projects.
+- 🔄 New sessions no longer fail to synchronize with `cursor_expired` after you have opened a subtask's conversation.
+- 🧯 Reconnecting after a long disconnection with a large backlog no longer leaves the conversation stuck with Send disabled.
+- 🪞 Remote connections to Windows hosts with a Cygwin or Git Bash shell use the VelaTerm desktop app already running there, so sending a message no longer fails while that app is running the session.
+- ⚡ Indexing long Codex conversations takes about half as much CPU time.
+- 🔗 Links to Claude artifacts open in your default browser.
+- 🗄️ The Archived Sessions button has moved from the tab bar to the activity bar.
 
 ## v0.2.15 — 2026-11-03
 

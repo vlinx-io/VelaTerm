@@ -45,6 +45,7 @@ vi.mock("../../sharing/sessionNavigation", () => ({
 
 import { ProjectTree } from "./ProjectTree";
 import { PROJECT_DRAG_MIME } from "./projectCollectionDrop";
+import { LIVE_TERMINALS, SYSTEM_CHAT, SYSTEM_PROJECTS, SYSTEM_TASKS } from "./systemCollections";
 
 const collection = (id: string, name: string, sortOrder: number, collapsed = false): Project => ({
   rootPath: "",
@@ -168,6 +169,66 @@ describe("collection rows", () => {
     fireEvent.click(rowOf("Payments"));
     expect(mocks.state.setSidebarTreeViewCollapsed).toHaveBeenCalledWith("side", "f-pay", true);
     expect(mocks.state.toggleCollapsed).not.toHaveBeenCalled();
+  });
+
+  it.each(["tasks", "chat"] as const)("ignores the shared collapse state in the %s section", (section) => {
+    const root = section === "tasks" ? SYSTEM_TASKS : SYSTEM_CHAT;
+    mocks.state.projects = [collection(SYSTEM_PROJECTS, "Projects", 0), collection(root, "Root", 1)];
+    mocks.state.groups = [
+      { id: "g1", projectId: root, parentGroupId: null, name: "group", sortOrder: 0, collapsed: true, createdAt: 0 },
+    ];
+    mocks.state.sessions = [
+      { id: "s1", projectId: root, groupId: "g1", name: "inner", kind: "terminal", sortOrder: 0, collapsed: false },
+    ];
+    const base = handlers();
+    const view = { ...base.view, id: "side", collapsedOverrides: {} };
+    const { container, rerender } = render(<ProjectTree {...base} isPrimary={false} section={section} view={view} />);
+    expect(names(container)).toEqual(["group", "inner"]);
+
+    // Collapsing in the pane is remembered in the pane's own map and wins over the default.
+    fireEvent.click(rowOf("group"));
+    expect(mocks.state.setSidebarTreeViewCollapsed).toHaveBeenCalledWith("side", "g1", true);
+    rerender(
+      <ProjectTree {...base} isPrimary={false} section={section} view={{ ...view, collapsedOverrides: { g1: true } }} />,
+    );
+    expect(names(container)).toEqual(["group"]);
+  });
+
+  it("expands the Terminals lists by default and saves their collapse in the pane", () => {
+    mocks.state.projects = [collection(SYSTEM_PROJECTS, "Projects", 0)];
+    mocks.state.ephemeralSessions = {
+      t1: { id: "t1", projectId: "", groupId: null, name: "shell", kind: "terminal", sortOrder: 0, collapsed: false },
+    };
+    mocks.state.runtimes = { t1: { status: "running" } };
+    // The Projects pane's stored worktree and list state must not reach this section.
+    localStorage.setItem("vlx-sidebar-worktree-collapsed", JSON.stringify({ [LIVE_TERMINALS]: true }));
+    try {
+      const base = handlers();
+      const view = { ...base.view, id: "side", collapsedOverrides: {} };
+      const { container, rerender } = render(<ProjectTree {...base} isPrimary={false} section="terminals" view={view} />);
+      expect(names(container)).toContain("shell");
+
+      fireEvent.click(rowOf("systemCollection.terminals"));
+      expect(mocks.state.setSidebarTreeViewCollapsed).toHaveBeenCalledWith("side", LIVE_TERMINALS, true);
+      rerender(
+        <ProjectTree {...base} isPrimary={false} section="terminals" view={{ ...view, collapsedOverrides: { [LIVE_TERMINALS]: true } }} />,
+      );
+      expect(names(container)).not.toContain("shell");
+    } finally {
+      localStorage.removeItem("vlx-sidebar-worktree-collapsed");
+    }
+  });
+
+  it("keeps following the shared collapse state in the Projects section", () => {
+    mocks.state.projects = [collection(SYSTEM_PROJECTS, "Projects", 0), project("p1", "web", 1, SYSTEM_PROJECTS, true)];
+    mocks.state.groups = [
+      { id: "g1", projectId: "p1", parentGroupId: null, name: "group", sortOrder: 0, collapsed: false, createdAt: 0 },
+    ];
+    const base = handlers();
+    const { container } = render(
+      <ProjectTree {...base} isPrimary={false} section="projects" view={{ ...base.view, id: "side", collapsedOverrides: {} }} />,
+    );
+    expect(names(container)).toEqual(["web"]);
   });
 
   it("expands a collapsed collection to reveal the active session", () => {

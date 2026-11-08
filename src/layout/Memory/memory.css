@@ -1,6 +1,6 @@
 .memory-shell { width: min(1320px, 94vw); height: 89vh; display: flex; flex-direction: column; background: var(--bg-panel); color: var(--text-primary); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 24px 80px #0005; overflow: hidden; outline: none; font-size: 13px; }
-.memory-shell a { color: var(--accent); text-decoration: none; }
-.memory-shell a:hover { text-decoration: underline; }
+.memory-main a, .kbx-prose a { color: var(--accent); text-decoration: none; }
+.memory-main a:hover, .kbx-prose a:hover { text-decoration: underline; }
 .memory-shell .btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex-shrink: 0; white-space: nowrap; text-decoration: none; }
 .memory-shell .input { min-width: 0; width: 100%; box-sizing: border-box; font: inherit; }
 .memory-header { display: flex; align-items: center; gap: 18px; padding: 19px 24px; border-bottom: 1px solid var(--border); }
@@ -70,7 +70,7 @@
 .memory-compile .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .memory-compile .btn:disabled { opacity: .5; cursor: not-allowed; }
 .memory-editor textarea { resize: vertical; line-height: 1.7; }
-.memory-content-input { min-height: 290px; font-family: monospace !important; }
+.memory-content-input { min-height: 290px; font-family: var(--font-mono) !important; }
 .memory-editor fieldset { border: 1px solid var(--border); border-radius: 6px; padding: 14px; }
 .memory-related-options { max-height: 220px; overflow: auto; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .memory-related-options label { display: flex; gap: 7px; align-items: start; }

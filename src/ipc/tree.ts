@@ -279,6 +279,12 @@ export function archiveGroup(id: string): Promise<void> {
   return invoke("archive_group", { id });
 }
 
+/** Archive a user collection: archive its sessions, return member projects to their default parent, and
+ * retain a hidden collection tombstone that is restored with any member session. */
+export function archiveCollection(id: string): Promise<void> {
+  return invoke("archive_collection", { id });
+}
+
 /** List archived sessions in reverse archive-time order for the archive browser. */
 export function listArchivedSessions(): Promise<Session[]> {
   return invoke<Session[]>("list_archived_sessions");

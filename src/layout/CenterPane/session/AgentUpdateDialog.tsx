@@ -140,7 +140,8 @@ export function AgentUpdateDialog({
   const updated = succeeded && status?.version != null && status.version !== from;
   let outcome: string | null = null;
   if (status && showsRun && !running) {
-    if (status.state === "failed") outcome = t(status.timedOut ? "agentUpdate.timedOut" : "agentUpdate.failed");
+    if (status.state === "failed") outcome = status.broken ? t("agentUpdate.broken", label)
+      : t(status.timedOut ? "agentUpdate.timedOut" : "agentUpdate.failed");
     else if (updated) outcome = t("agentUpdate.succeeded", label, status.version!);
     else if (status.version) outcome = t("agentUpdate.unchanged", status.version);
     else outcome = t("agentUpdate.finished");

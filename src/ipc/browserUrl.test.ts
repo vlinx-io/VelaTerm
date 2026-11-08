@@ -2,7 +2,7 @@
 //! the Electron TypeScript rules match the Tauri Rust rules (architecture document §17 security model).
 
 import { describe, expect, it } from "vitest";
-import { normalizeBrowserUrl } from "./browserUrl";
+import { isClaudeArtifactUrl, normalizeBrowserUrl } from "./browserUrl";
 
 describe("normalizeBrowserUrl", () => {
   it("passes a complete http/https URL through, adding only a trailing slash", () => {
@@ -45,5 +45,22 @@ describe("normalizeBrowserUrl", () => {
   it("rejects empty and whitespace-only input", () => {
     expect(() => normalizeBrowserUrl("")).toThrow();
     expect(() => normalizeBrowserUrl("   ")).toThrow();
+  });
+});
+
+describe("isClaudeArtifactUrl", () => {
+  it("accepts artifact pages, with or without a title, query, or fragment", () => {
+    expect(isClaudeArtifactUrl("https://claude.ai/artifact/MFRHaqC6HDcutPKorGdXR2#artboard-069833286c88")).toBe(true);
+    expect(isClaudeArtifactUrl("https://claude.ai/code/artifact/plan-MFRHaqC6HDcutPKorGdXR2?org=1")).toBe(true);
+    expect(isClaudeArtifactUrl("https://preview.claude.ai/artifact/MFRHaqC6HDcutPKorGdXR2")).toBe(true);
+  });
+
+  it("rejects other Claude pages and lookalike hosts", () => {
+    expect(isClaudeArtifactUrl("https://claude.ai/chat/abc")).toBe(false);
+    expect(isClaudeArtifactUrl("https://claude.ai/artifact/")).toBe(false);
+    expect(isClaudeArtifactUrl("http://claude.ai/artifact/abc")).toBe(false);
+    expect(isClaudeArtifactUrl("https://claude.ai.example.com/artifact/abc")).toBe(false);
+    expect(isClaudeArtifactUrl("https://claude.ai@example.com/artifact/abc")).toBe(false);
+    expect(isClaudeArtifactUrl("not a url")).toBe(false);
   });
 });

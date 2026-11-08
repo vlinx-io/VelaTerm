@@ -2,6 +2,7 @@
 
 pub mod repo;
 pub mod schema;
+pub mod system_collections;
 
 use crate::diagnostics::DatabaseMutex as Mutex;
 
@@ -205,6 +206,20 @@ fn migrate(conn: &Connection) -> Result<(), String> {
     // conversation view, the only one it can open in. Matches nothing once done.
     conn.execute("UPDATE sessions SET engine = 'chat' WHERE kind = 'zcode' AND engine <> 'chat'", [])
         .map_err(|e| format!("Failed to migrate ZCode sessions to the conversation view: {e}"))?;
+    // Inline history hints are no longer the default. Move a saved "auto" back to Tab-only completion once; the marker
+    // keeps a later deliberate choice of "auto" from being undone on the next start.
+    if table_exists(conn, "app_settings") {
+        conn.execute_batch(
+            "BEGIN;
+             UPDATE app_settings SET value = 'tab', updated_at = CAST(strftime('%s','now') AS INTEGER)
+               WHERE key = 'terminal-completion-mode' AND value = 'auto'
+                 AND NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'terminal-completion-tab-default');
+             INSERT OR IGNORE INTO app_settings(key, value, updated_at)
+               VALUES('terminal-completion-tab-default', '1', CAST(strftime('%s','now') AS INTEGER));
+             COMMIT;",
+        )
+        .map_err(|e| format!("Failed to reset the terminal completion mode: {e}"))?;
+    }
     // Add the nullable emoji marker to all three node tables. Unmarked nodes keep NULL, so old databases stay
     // unchanged and the sidebar simply renders no marker for them.
     if !column_exists(conn, "sessions", "mark") {

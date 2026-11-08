@@ -29,13 +29,34 @@ add-zle-hook-widget isearch-exit _vlxc_keymap
 
 # Inline history hint: the most recent history entry extending the line, drawn after the cursor in dim text.
 # The application writes the mode to a file shared by all sessions; it is read once per prompt.
-typeset -g _vlxc_mode=auto _vlxc_mode_file=${_vlxc_selection:h:h}/mode _vlxc_hint='' _vlxc_hint_style=''
+typeset -g _vlxc_mode=auto _vlxc_mode_file=${_vlxc_selection:h:h}/mode _vlxc_hint='' _vlxc_hint_style='' _vlxc_undo_value=''
+typeset -gi _vlxc_hint_reported=0
 typeset -gA _vlxc_hint_fallback
-_vlxc_load_mode() { [[ -r $_vlxc_mode_file ]] && _vlxc_mode=$(<$_vlxc_mode_file) }
+# The last history lookup, so typing on does not rescan the whole history on every key: a line with no match
+# keeps having none as it grows, and the newest match stays the newest while it still extends the line. History only
+# changes between lines, so each new line starts afresh.
+typeset -g _vlxc_hint_miss='' _vlxc_hint_hit='' _vlxc_hint_hit_for=''
+_vlxc_load_mode() {
+  _vlxc_hint_miss='' _vlxc_hint_hit='' _vlxc_hint_hit_for=''
+  [[ -r $_vlxc_mode_file ]] && _vlxc_mode=$(<$_vlxc_mode_file)
+}
+# zsh shifts region_highlight entries as text is inserted or deleted, so an entry cannot be found again by the text
+# it was added with. zsh 5.9 keeps a memo= tag on each entry; older versions fall back to every plain dim range.
+typeset -g _vlxc_hint_memo='' _vlxc_hint_entries='<-> <-> fg=8'
+autoload -Uz is-at-least
+is-at-least 5.9 && _vlxc_hint_memo=' memo=vlxc-hint' _vlxc_hint_entries='* memo=vlxc-hint'
 _vlxc_hint_clear() {
-  [[ -n $_vlxc_hint_style ]] && region_highlight=("${(@)region_highlight:#$_vlxc_hint_style}")
+  [[ -n $_vlxc_hint_style ]] && region_highlight=("${(@)region_highlight:#${~_vlxc_hint_entries}}")
   [[ -n $_vlxc_hint && $POSTDISPLAY == $_vlxc_hint ]] && POSTDISPLAY=''
   _vlxc_hint='' _vlxc_hint_style=''
+}
+# Tells the terminal view whether a hint is on screen so its header can name the key. The sequence has no width and,
+# unlike the nonce protocol, carries nothing a forgery could abuse: it only drives that label.
+_vlxc_hint_report() {
+  local -i shown=$(( ${#_vlxc_hint} > 0 ))
+  (( shown == _vlxc_hint_reported )) && return
+  _vlxc_hint_reported=$shown
+  printf '\e]6974;%d\a' $shown
 }
 _vlxc_hint_update() {
   setopt localoptions extendedglob
@@ -44,19 +65,32 @@ _vlxc_hint_update() {
   if [[ $_vlxc_mode == auto && -n ${BUFFER//[[:space:]]/} && $CURSOR -eq ${#BUFFER} && $KEYMAP != vicmd ]] \
       && (( ! PENDING && ! KEYS_QUEUED_COUNT && ! ${ISEARCHMATCH_ACTIVE:-0} && ! $+functions[_zsh_autosuggest_fetch] )) \
       && [[ -z $POSTDISPLAY || $POSTDISPLAY == $_vlxc_hint ]]; then
-    pattern="${BUFFER//(#m)[\\*?[\]<>()|^~#]/\\$MATCH}?*"
-    match=${history[(r)$pattern]}
-    [[ $match == *$'\n'* ]] && match=''
+    if [[ -n $_vlxc_hint_miss && $BUFFER == ${_vlxc_hint_miss}* ]]; then
+      match=''
+    elif [[ -n $_vlxc_hint_hit && $BUFFER == ${_vlxc_hint_hit_for}* && $_vlxc_hint_hit == ${BUFFER}?* ]]; then
+      match=$_vlxc_hint_hit
+    else
+      pattern="${BUFFER//(#m)[\\*?[\]<>()|^~#]/\\$MATCH}?*"
+      match=${history[(r)$pattern]}
+      if [[ -z $match ]]; then
+        _vlxc_hint_miss=$BUFFER
+      elif [[ $match == *$'\n'* ]]; then
+        # An older single-line entry may still match a longer line, so this is no reason to stop looking.
+        match=''
+      else
+        _vlxc_hint_hit=$match _vlxc_hint_hit_for=$BUFFER
+      fi
+    fi
   fi
   hint=${match#$BUFFER}
-  if [[ -z $match || $hint != $_vlxc_hint || $POSTDISPLAY != $_vlxc_hint ]]; then
-    _vlxc_hint_clear
-    [[ -n $match ]] || return
-    _vlxc_hint=$hint POSTDISPLAY=$hint
-    _vlxc_hint_style="${#BUFFER} $(( ${#BUFFER} + ${#hint} )) fg=8"
-  fi
-  # Highlighters may rebuild region_highlight between redraws.
-  (( ${region_highlight[(Ie)$_vlxc_hint_style]} )) || region_highlight+=("$_vlxc_hint_style")
+  # Rebuild the range on every redraw: an edit may have moved the old one onto typed text, and highlighters may
+  # rebuild region_highlight between redraws.
+  _vlxc_hint_clear
+  [[ -n $match ]] || { _vlxc_hint_report; return }
+  _vlxc_hint=$hint POSTDISPLAY=$hint
+  _vlxc_hint_style="${#BUFFER} $(( ${#BUFFER} + ${#hint} )) fg=8$_vlxc_hint_memo"
+  region_highlight+=("$_vlxc_hint_style")
+  _vlxc_hint_report
 }
 # Right arrow, End and Ctrl+E take the hint at the end of the line and otherwise run the widget they had.
 _vlxc_hint_accept() {
@@ -70,7 +104,7 @@ _vlxc_hint_accept() {
   [[ $keymap == main ]] && keymap=$_vlxc_main_keymap
   zle ${_vlxc_hint_fallback[$keymap:$KEYS]:-forward-char} -w
 }
-_vlxc_finish() { _vlxc_hint_clear; zle -R; _vlxc_busy }
+_vlxc_finish() { _vlxc_hint_clear; _vlxc_hint_report; zle -R; _vlxc_busy }
 zle -N _vlxc_hint_accept
 add-zle-hook-widget line-pre-redraw _vlxc_hint_update
 add-zle-hook-widget line-init _vlxc_load_mode
@@ -153,6 +187,22 @@ zle -C _vlxc_collect complete-word _vlxc_complete_internal
 _vlxc_query() {
   local saved_status=$? label label_hex REPLY
   local -i item=0
+  # Tab with the "accept" behavior: a visible hint wins over completion, and the typed text is kept for the undo.
+  if [[ $WIDGET == _vlxc_query_tab && -n $_vlxc_hint && $POSTDISPLAY == $_vlxc_hint && $CURSOR -eq ${#BUFFER} ]]; then
+    _vlxc_undo_value=$BUFFER
+    local hint=$_vlxc_hint
+    _vlxc_hint_clear
+    BUFFER+=$hint CURSOR=${#BUFFER}
+    _vlxc_buffer=$BUFFER _vlxc_cursor=$CURSOR
+    _vlxc_values=() _vlxc_prefix_value=''
+    (( ++_vlxc_revision ))
+    _vlxc_emit "A;$_vlxc_revision"
+    _vlxc_emit Y
+    _vlxc_emit Z
+    zle -R
+    return $saved_status
+  fi
+  _vlxc_undo_value=''
   _vlxc_buffer=$BUFFER _vlxc_cursor=$CURSOR
   _vlxc_values=() _vlxc_cursors=() _vlxc_labels=() _vlxc_descriptions=()
   (( ++_vlxc_revision ))
@@ -194,8 +244,15 @@ _vlxc_prefix() {
 _vlxc_accept() {
   local revision index
   read -r revision index < "$_vlxc_selection" || return
-  [[ $revision == $_vlxc_revision && ( $index == <-> || $index == p ) ]] || return
+  [[ $revision == $_vlxc_revision && ( $index == <-> || $index == p || $index == u ) ]] || return
   [[ $BUFFER == $_vlxc_buffer && $CURSOR == $_vlxc_cursor ]] || return
+  if [[ $index == u ]]; then
+    [[ -n $_vlxc_undo_value ]] || return
+    BUFFER=$_vlxc_undo_value CURSOR=${#BUFFER}
+    _vlxc_undo_value=''
+    zle -R
+    return
+  fi
   if [[ $index == p ]]; then
     [[ -n $_vlxc_prefix_value ]] || return
     BUFFER=$_vlxc_prefix_value CURSOR=$_vlxc_prefix_cursor
@@ -210,9 +267,13 @@ _vlxc_accept() {
   zle -R
 }
 zle -N _vlxc_query
+zle -N _vlxc_query_tab _vlxc_query
 zle -N _vlxc_accept
 for _vlxc_map in emacs viins; do
   bindkey -M "$_vlxc_map" '^[[24;5~' _vlxc_query
+  bindkey -M "$_vlxc_map" '^[[21;5~' _vlxc_query_tab
   bindkey -M "$_vlxc_map" '^[[23;5~' _vlxc_accept
 done
 unset _vlxc_map
+# Lets the backend send the Tab key that can accept a hint; other shells never declare it.
+_vlxc_emit H

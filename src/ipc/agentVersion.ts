@@ -24,6 +24,8 @@ export interface AgentUpdateStatus {
   timedOut: boolean;
   /** Version the executable reports after the command finished. */
   version: string | null;
+  /** The command reported success, but the agent no longer starts. */
+  broken?: boolean;
 }
 
 export function agentUpdateStatus(sessionId: string): Promise<AgentUpdateStatus> {

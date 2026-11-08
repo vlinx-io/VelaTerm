@@ -21,6 +21,8 @@ pub fn digest(text: &str) -> String {
 pub struct Job {
     pub id: String,
     pub source_id: String,
+    #[serde(default)]
+    pub session_id: String,
     pub session_name: String,
     pub agent: String,
     /// The agent's display name, resolved here so every view spells it the same way.
@@ -41,6 +43,7 @@ fn read_job(r: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
     Ok(Job {
         id: r.get(0)?,
         source_id: r.get(1)?,
+        session_id: r.get(14)?,
         session_name: r.get(2)?,
         agent_label: agent_label(&r.get::<_, String>(3)?),
         agent: r.get(3)?,
@@ -56,7 +59,7 @@ fn read_job(r: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
         updated_at: r.get(12)?,
     })
 }
-const JOB_SQL: &str = "SELECT j.id,j.source_id,s.session_name,j.agent,j.model,j.status,j.stage,j.progress,j.total,j.error,j.entries,j.created_at,j.updated_at,j.effort FROM memory_jobs j JOIN memory_sources s ON s.id=j.source_id";
+const JOB_SQL: &str = "SELECT j.id,j.source_id,s.session_name,j.agent,j.model,j.status,j.stage,j.progress,j.total,j.error,j.entries,j.created_at,j.updated_at,j.effort,s.session_id FROM memory_jobs j JOIN memory_sources s ON s.id=j.source_id";
 
 pub fn recover(conn: &rusqlite::Connection) -> Result<(), String> {
     // Active processes heartbeat while waiting for the CLI. Stale jobs become explicitly retryable.
@@ -74,6 +77,9 @@ pub fn jobs(app: &AppCtx, args: &Value) -> Result<Value, String> {
         .and_then(Value::as_u64)
         .unwrap_or(0)
         .min(100_000);
+    if id.is_empty() && args.get("bySession").and_then(Value::as_bool).unwrap_or(false) {
+        return job_sessions(&conn, page as usize);
+    }
     let mut stmt = conn
         .prepare(&format!(
             "{JOB_SQL} WHERE (?1='' OR j.id=?1) ORDER BY j.created_at DESC LIMIT 40 OFFSET {}",
@@ -92,8 +98,13 @@ pub fn jobs(app: &AppCtx, args: &Value) -> Result<Value, String> {
             |r| r.get(0),
         )
         .map_err(|e| e.to_string())?;
-    // Name the entries each job produced so the history links read as titles; entries deleted
-    // since the job finished are left out instead of linking to a missing page.
+    let jobs = with_entry_links(&conn, rows)?;
+    Ok(json!({"jobs":jobs,"total":total,"pageSize":40}))
+}
+
+/// Name the entries each job produced so the history links read as titles; entries deleted since
+/// the job finished are left out instead of linking to a missing page.
+fn with_entry_links(conn: &rusqlite::Connection, rows: Vec<Job>) -> Result<Vec<Value>, String> {
     let ids: Vec<&str> = rows.iter().flat_map(|job| job.entries.iter().map(String::as_str)).collect();
     let titles: std::collections::HashMap<String, String> = conn
         .prepare("SELECT id,title FROM memory_entries WHERE id IN (SELECT value FROM json_each(?1))")
@@ -102,7 +113,7 @@ pub fn jobs(app: &AppCtx, args: &Value) -> Result<Value, String> {
         .map_err(|e| e.to_string())?
         .collect::<Result<_, _>>()
         .map_err(|e| e.to_string())?;
-    let jobs: Vec<Value> = rows
+    Ok(rows
         .into_iter()
         .map(|job| {
             let links: Vec<Value> = job.entries.iter()
@@ -112,8 +123,75 @@ pub fn jobs(app: &AppCtx, args: &Value) -> Result<Value, String> {
             value["entryLinks"] = json!(links);
             value
         })
+        .collect())
+}
+
+/// One session's row in the processing history.
+struct SessionRow {
+    job: Job,
+    failed_attempts: i64,
+}
+
+/// Reduce runs, newest first, to one row per session. The row shows the newest run that was not
+/// cancelled: a cancelled run was the user's choice and says nothing about the session unless it is
+/// all there is. `failed_attempts` counts the failures leading up to that run since the previous
+/// success, and the entries come from the newest successful run, so a failed retry keeps showing
+/// what the session already produced. Sessions that need attention lead, then newest first.
+fn session_rows(runs: Vec<Job>) -> Vec<SessionRow> {
+    let mut order: Vec<String> = Vec::new();
+    let mut by_session: std::collections::HashMap<String, Vec<Job>> = std::collections::HashMap::new();
+    for run in runs {
+        if !by_session.contains_key(&run.session_id) {
+            order.push(run.session_id.clone());
+        }
+        by_session.entry(run.session_id.clone()).or_default().push(run);
+    }
+    let mut rows: Vec<SessionRow> = order
+        .iter()
+        .filter_map(|session| {
+            let runs = by_session.get(session)?;
+            let current = runs.iter().position(|run| run.status != "cancelled").unwrap_or(0);
+            let mut job = runs[current].clone();
+            let failed_attempts = match job.status.as_str() {
+                "failed" | "completed" => {
+                    let older = runs[current..].iter().skip(usize::from(job.status == "completed"));
+                    older
+                        .take_while(|run| run.status != "completed")
+                        .filter(|run| run.status == "failed")
+                        .count() as i64
+                }
+                _ => 0,
+            };
+            if let Some(done) = runs.iter().find(|run| run.status == "completed") {
+                job.entries = done.entries.clone();
+            }
+            Some(SessionRow { job, failed_attempts })
+        })
         .collect();
-    Ok(json!({"jobs":jobs,"total":total,"pageSize":40}))
+    rows.sort_by_key(|row| (row.job.status != "failed", std::cmp::Reverse(row.job.created_at)));
+    rows
+}
+
+fn job_sessions(conn: &rusqlite::Connection, page: usize) -> Result<Value, String> {
+    const PAGE_SIZE: usize = 40;
+    let mut stmt = conn
+        .prepare(&format!("{JOB_SQL} ORDER BY j.created_at DESC"))
+        .map_err(|e| e.to_string())?;
+    let runs = stmt
+        .query_map([], read_job)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    let rows = session_rows(runs);
+    let count = |status: &str| rows.iter().filter(|row| row.job.status == status).count();
+    let (total, attention, organized) = (rows.len(), count("failed"), count("completed"));
+    let visible: Vec<SessionRow> = rows.into_iter().skip(page.saturating_mul(PAGE_SIZE)).take(PAGE_SIZE).collect();
+    let attempts: Vec<i64> = visible.iter().map(|row| row.failed_attempts).collect();
+    let mut jobs = with_entry_links(conn, visible.into_iter().map(|row| row.job).collect())?;
+    for (job, failed_attempts) in jobs.iter_mut().zip(attempts) {
+        job["failedAttempts"] = json!(failed_attempts);
+    }
+    Ok(json!({"jobs":jobs,"total":total,"pageSize":PAGE_SIZE,"attention":attention,"organized":organized}))
 }
 
 /// Display name for one organizer agent, taken from the launch catalogue so the dialog, the spawn

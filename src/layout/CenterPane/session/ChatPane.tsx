@@ -21,7 +21,7 @@ import { userMessageItems, type UserMessageItem } from "./userMessageRailItems";
 import { useUserMessageJump } from "./useUserMessageJump";
 import { ComposerOptionsButton, useComposerOptions } from "./ComposerOptions";
 import { ComposerToolbar } from "./ComposerToolbar";
-import { setComposerHeight, startComposerResize, useComposerHeight } from "./composerHeight";
+import { COMPOSER_FEEDBACK_HEIGHT, COMPOSER_MIN_HEIGHT, composerHasFeedbackRoom, setComposerHeight, startComposerResize, useComposerHeight, useShortPane } from "./composerHeight";
 import type { ComposerChip } from "./composerLayout";
 import { navigateTranslation, settingsTranslationUrl, useTranslationRoute } from "../../../translation/navigation";
 import { TranslationProvider, useTranslationSession } from "../../../translation/state";
@@ -98,7 +98,8 @@ import { useMentionFiles } from "./fileMentions";
 import { ControlChip, type ChipOption } from "./controls";
 import { EFFORTS, THINKING_OFF, effortChipLabel, effortChipOptions, levelsOf, modelChipOptions } from "./modelChips";
 import { AutoContinueBar, FastModeChip, McpChip, NotificationBar, RetryLine, TasksChip, UsageMeter } from "./extras";
-import { AgentAccountMenu, AgentAuth } from "./AgentAuth";
+import { AgentAccountMenu, AgentAuth, needsAttention } from "./AgentAuth";
+import { useAgentReadiness } from "./useAgentReadiness";
 import { CodexResetCredits } from "./CodexResetCredits";
 import { useEngineSwitch } from "./engineSwitch";
 import { ConversationViewHint } from "./ConversationViewHint";
@@ -131,7 +132,7 @@ import { cachedChat, cacheChat, mergeRows, reconcileChat, chatSyncMetrics, limit
 import { ChatSearch } from "./ChatSearch";
 import { HistorySearch } from "./HistorySearch";
 import { historyLocation, historyPageURL } from "./historyNavigation";
-import type { ChatSearchHit } from "../../../ipc/chat";
+import type { ChatAuthState, ChatSearchHit } from "../../../ipc/chat";
 import { QueuedMessageText } from "./QueuedMessageText";
 import { MessageSender } from "./MessageSender";
 import { parseShellSubmission, shellErrorKey, shellSubmissionFor, acknowledgeShellSubmission } from "./shellMode";
@@ -139,10 +140,12 @@ import { SessionLinkDirectory } from "./links";
 import { Entry, type MessageReplacement } from "./ConversationRows";
 import { Splitter } from "../../../components/Splitter";
 import { ArtifactDock } from "../doc/artifact/ArtifactDock";
+import { DockDocView } from "../doc/DockDocView";
 import { ArtifactHostContext, type ArtifactHost } from "../doc/artifact/ArtifactCard";
 import {
   ARTIFACT_OPEN_BESIDE_EVENT,
   COMPOSER_INSERT_EVENT,
+  isArtifactPath,
   type ArtifactOpenBesideDetail,
   type ComposerInsertDetail,
 } from "../doc/artifact/artifactWriters";
@@ -277,6 +280,7 @@ export function ChatPane({
   const composerInlineChips = useTermStore((s) => s.composerInlineChips);
   const inputLatencyLog = useTermStore((s) => s.inputLatencyLog);
   const composerHeight = useComposerHeight();
+  const [paneRef, shortPane] = useShortPane();
   const status = useTermStore((s) => effectiveStatus(s.runtimes[session.id]));
   const searchOpen = useTermStore((s) => s.searchOpen);
   const closeSearch = useTermStore((s) => s.closeSearch);
@@ -379,6 +383,10 @@ export function ChatPane({
   const [engineRunning, setEngineRunning] = useState(false);
   /** What the Claude process reports about itself: context, cost, rate limits, tasks, switches. */
   const [extras, setExtras] = useState<ChatExtras>({});
+  const { readiness, refresh: refreshReadiness } = useAgentReadiness(session.id, !readOnly && !hidden, extras.auth?.status);
+  const agentMissing = readiness?.installed === false;
+  const signInMissing = readiness?.signedIn === false && extras.auth?.status !== "success";
+  const agentUnavailable = agentMissing || signInMissing;
   // Codex only: how fast it answers and how it speaks. Empty means "as configured", which is also what
   // the chips read before a catalogue says the selected model offers anything else.
   const [serviceTier, setServiceTier] = useState("");
@@ -493,9 +501,11 @@ export function ChatPane({
   const scrollGeometry = useRef({ height: 0, viewport: 0 });
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // The artifact panel: an HTML page this conversation wrote, open beside it. Phones have no room for it,
-  // so cards there open the page as a tab instead.
+  // The panel beside this conversation: an HTML page it wrote, or any file `vartifact` opened. Phones have no
+  // room for it, so cards there open the page as a tab instead.
   const [dockPath, setDockPath] = useState<string | null>(null);
+  // Bumped by each `vartifact`, so opening the file already shown re-reads it, as `vopen` does for a tab.
+  const [dockOpenCount, setDockOpenCount] = useState(0);
   const [dockWidth, setDockWidth] = useState(readDockWidth);
   const artifactHost = useMemo<ArtifactHost>(
     () => ({ sessionId: session.id, openBeside: mobile || readOnly ? null : setDockPath, openPath: dockPath }),
@@ -512,7 +522,7 @@ export function ChatPane({
     window.addEventListener(COMPOSER_INSERT_EVENT, onInsert);
     return () => window.removeEventListener(COMPOSER_INSERT_EVENT, onInsert);
   }, [session.id]);
-  // `vopen page.html` run by this conversation's agent opens the page beside it, when this pane is on screen.
+  // `vartifact <file>` run by this conversation's agent opens the file beside it, when this pane is on screen.
   const canDock = !mobile && !readOnly && !hidden;
   useEffect(() => {
     if (!canDock) return;
@@ -521,6 +531,7 @@ export function ChatPane({
       if (e.defaultPrevented || !detail || detail.sessionId !== session.id) return;
       e.preventDefault();
       setDockPath(detail.path);
+      setDockOpenCount((n) => n + 1);
     };
     window.addEventListener(ARTIFACT_OPEN_BESIDE_EVENT, onOpen);
     return () => window.removeEventListener(ARTIFACT_OPEN_BESIDE_EVENT, onOpen);
@@ -737,6 +748,10 @@ export function ChatPane({
           // again does not mean typing them again.
           if (event.unsent?.length && !latestDraft.current) updateDraft(event.unsent.join("\n\n"));
           break;
+        case "unsent":
+          updateDraft(latestDraft.current ? `${event.text}\n\n${latestDraft.current}` : event.text);
+          if (event.images.length > 0) setAttachments(current => [...event.images.map(restoreAttachment), ...current]);
+          break;
         case "storagePressure":
           setHistoryError(t("chat.history.storagePressure"));
           break;
@@ -792,6 +807,8 @@ export function ChatPane({
         const location = known?.pendingLocation ?? (initialLocation ? { ...historyLocation(session.id), ...(initialRowId ? {anchor:initialRowId} : {
           ...(initialMessageIndex!==undefined ? {messageIndex: initialMessageIndex} : {}), ...(initialRecordOffset!==undefined ? {recordOffset: initialRecordOffset} : {}) }) } : {});
         const hasLocation = Boolean(location.before || location.after || location.anchor || location.messageIndex!==undefined || location.recordOffset!==undefined);
+        // Cleared when the requested location no longer exists and the recent rows are shown instead.
+        let located = hasLocation;
         let response: ChatSnapshot;
         try {
           response = await chatSnapshot(session.id, { historyOnly,
@@ -801,10 +818,21 @@ export function ChatPane({
             ...location,
           });
         } catch (error) {
-          if (known?.protocolVersion !== 2 || !/^(source_changed|cursor_expired):/.test(String(error).replace(/^Error: /, ""))) throw error;
-          if (indexReader.current) void chatReadCancel(session.id, indexReader.current).catch(() => {});
-          indexReader.current = undefined;
-          response = await chatSnapshot(session.id, { historyOnly, protocolVersion: 2 });
+          const failure = String(error).replace(/^Error: /, "");
+          if (known && known.protocolVersion !== 2 && !hasLocation && failure.startsWith("detail_requires_paging:")) {
+            // Repeating this request would fail forever, and sending stays blocked until a sync succeeds.
+            // An older server rejects a backlog too large for one response, so start again from recent rows.
+            response = await chatSnapshot(session.id, { historyOnly });
+          } else {
+            // A location that no longer resolves would fail every retry, so it is dropped as well.
+            if ((known?.protocolVersion !== 2 && !hasLocation) || !/^(source_changed|cursor_expired):/.test(failure)) throw error;
+            if (indexReader.current) void chatReadCancel(session.id, indexReader.current).catch(() => {});
+            indexReader.current = undefined;
+            if (snapshotRef.current?.pendingLocation) snapshotRef.current = { ...snapshotRef.current, pendingLocation: undefined };
+            initialLocation = false;
+            located = false;
+            response = await chatSnapshot(session.id, { historyOnly, protocolVersion: 2 });
+          }
         }
         if (disposed) {
           if (response.readJobId) void chatReadCancel(session.id, response.readJobId).catch(() => {});
@@ -814,7 +842,7 @@ export function ChatPane({
         initialLocation = false;
         const pendingEvents = buffered ?? [];
         const snapshot = reconcileChat(response, rowsRef.current, pendingEvents);
-        if (hasLocation) {
+        if (located) {
           pinnedRef.current = false;setAway(true);
           if (location.anchor || snapshot.locatedRowId) {const anchor=snapshot.locatedRowId ?? location.anchor!;pendingHistoryHit.current = { rowId: anchor, snippet: "", offset: 0 };setSearchTarget(anchor);}
         }
@@ -1350,7 +1378,7 @@ export function ChatPane({
     const url = new URL(window.location.href);
     url.searchParams.set("chatSession", session.id);
     url.searchParams.set("session", session.id);
-    url.searchParams.delete("chatBefore");url.searchParams.delete("chatAfter");
+    url.searchParams.delete("chatBefore");url.searchParams.delete("chatAfter");url.searchParams.delete("chatChild");
     url.searchParams.set("chatRow", hit.rowId);
     if (hit.detailRef) url.searchParams.set("chatField", hit.detailRef); else url.searchParams.delete("chatField");
     url.searchParams.set("chatPart", String(hit.chunkSequence ?? 0));
@@ -1515,6 +1543,13 @@ export function ChatPane({
   const heldForBackground =
     turnStartedAt === undefined && (extras.backgroundTasks ?? []).some((task) => !isTaskFinished(task));
   const busy = status === "working" && !heldForBackground;
+  // The feedback line must not resize the composer: it takes its height from the text box. Where the box has
+  // none to give, the running-turn hint is dropped (the buttons' tooltips say the same) and a short action
+  // message floats above the box instead.
+  const feedbackHasRoom = mobile || composerHasFeedbackRoom(composerHeight, shortPane);
+  const composerHint = busy && feedbackHasRoom;
+  const composerFeedback = composerHint || !!actionFeedback;
+  const composerInset = !mobile && feedbackHasRoom && composerFeedback ? COMPOSER_FEEDBACK_HEIGHT : 0;
   const canRewind =
     !readOnly &&
     engineRunning &&
@@ -1650,7 +1685,7 @@ export function ChatPane({
     && !!translation.value.preferences.outgoing && !!text.trim() && !text.trimStart().startsWith("/");
 
   const send = (behavior: SendBehavior = "queue") => {
-    if (sending || shellSubmission.current?.pending || syncState !== "ready") return;
+    if (agentUnavailable || sending || shellSubmission.current?.pending || syncState !== "ready") return;
     const text = draft.trim();
     // A picture on its own is a message: dropping a screenshot in and pressing send says enough.
     if (rewinding || pendingRewind) return;
@@ -2241,11 +2276,12 @@ export function ChatPane({
     .find((item) => item.status === "failed" && isAgentNotInstalledError(item.error));
   const agentMissingKey =
     agentMissingItem?.id ?? (isAgentNotInstalledError(error) ? "session-error" : null);
-  const showAgentNotice = agentMissingKey !== null && agentNoticeDismissed !== agentMissingKey;
+  const showAgentNotice = agentMissing || (agentMissingKey !== null && agentNoticeDismissed !== agentMissingKey);
   /** An agent without a terminal interface installs from the notice itself; the send that found it missing
    *  then goes again, which starts the agent. */
   const afterInPlaceInstall = () => {
     setError(null);
+    refreshReadiness();
     const item = agentMissingItem;
     if (!item || readOnly) return;
     void retrySubmission(session.id, item, !engineRunning ? item.translation ? startTranslatedAgent : startAgent : undefined, () => translation.refresh(true))
@@ -2413,8 +2449,12 @@ export function ChatPane({
   ) });
   // The account menu disables itself while a sign-in is unresolved; the inline panel handles that flow.
   const authProvider = session.kind === "claude" ? "Claude" : session.kind === "codex" ? "Codex" : session.kind === "zcode" ? "ZCode" : null;
+  // A check at open finds a missing sign-in before any process exists to report it. A sign-in under way wins.
+  const authState: ChatAuthState | undefined = signInMissing && !needsAttention(extras.auth)
+    ? { status: session.kind === "zcode" ? "required" : "signedOut" }
+    : extras.auth;
   if (authProvider) composerChips.push({ id: "account", node: (
-    <AgentAccountMenu provider={authProvider} sessionId={session.id} state={extras.auth} busy={turnStartedAt !== undefined} />
+    <AgentAccountMenu provider={authProvider} sessionId={session.id} state={authState} busy={turnStartedAt !== undefined} />
   ) });
   if (session.kind === "codex") composerChips.push({ id: "codexCredits", node: <CodexResetCredits /> });
 
@@ -2432,7 +2472,7 @@ export function ChatPane({
   ) : (
     <button
       className="sv-send"
-      disabled={sending || clientCommandRunning || syncState !== "ready" || (!draft.trim() && attachments.length === 0)}
+      disabled={agentUnavailable || sending || clientCommandRunning || syncState !== "ready" || (!draft.trim() && attachments.length === 0)}
       onPointerDown={mobile ? (event) => event.preventDefault() : undefined}
       onClick={() => send()}
       title={
@@ -2515,7 +2555,7 @@ export function ChatPane({
 
         <ArtifactHostContext.Provider value={artifactHost}>
         <div style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0 }}>
-        <div className="sv" style={{ position: "relative", flex: 1, minHeight: 0, minWidth: 0 }}>
+        <div ref={paneRef} className={"sv" + (shortPane && !mobile ? " sv-short" : "")} style={{ position: "relative", flex: 1, minHeight: 0, minWidth: 0 }}>
           {searchOpen && focused && !hidden && (snapshotRef.current?.protocolVersion === 2
             ? <HistorySearch key={session.id} sessionId={session.id} onLocate={locateHistorySearch} onClose={closeSearch} />
             : <ChatSearch key={session.id} entries={turnEntries} scrollRef={scrollRef} onLocate={locateSearch} onClose={closeSearch}
@@ -2650,18 +2690,19 @@ export function ChatPane({
               {/* Wrapped like every other row so it sits in the centered column. */}
               {showAgentNotice && !readOnly && <div className="sv-item">
                 <AgentMissingNotice
-                  key={agentMissingKey}
+                  key={agentMissingKey ?? "not-installed"}
                   session={session}
                   onInstall={hasTerminalInterface(session.kind) ? installAgent : undefined}
                   onInstalled={afterInPlaceInstall}
-                  onDismiss={() => setAgentNoticeDismissed(agentMissingKey)}
+                  onDismiss={agentMissing ? undefined : () => setAgentNoticeDismissed(agentMissingKey)}
                 />
               </div>}
               {/* Wrapped like every other row: a bare child of the scroller would lose the centered column,
                   because the row's own left indent replaces the auto margins that center it. */}
               {error && !isAgentNotInstalledError(error) && <div className="sv-item"><ErrorRow message={error} /></div>}
               {catalogueError && <div className="sv-item"><ErrorRow message={catalogueError} /></div>}
-              {authProvider && !readOnly && <AgentAuth provider={authProvider} sessionId={session.id} state={extras.auth} busy={turnStartedAt !== undefined} />}
+              {authProvider && !readOnly && <AgentAuth provider={authProvider} sessionId={session.id} state={authState} busy={turnStartedAt !== undefined} />}
+              {!authProvider && signInMissing && !readOnly && <div className="sv-item"><ErrorRow message={mapBackendError(`agent_sign_in_required:${session.kind}`)} /></div>}
             </div>
             <UserMessageRail key={session.id} items={railItems} order={messageOrder} scrollRef={scrollRef} enabled={syncState === "ready" && !hidden && !(searchOpen && focused)}
               pendingId={railJump.pendingId} error={railJump.error} onCancel={railJump.cancel} onSelect={id => {
@@ -2815,7 +2856,7 @@ export function ChatPane({
                               onChange={(e) => setEditing({ id: item.id, text: e.target.value })}
                               onBlur={commitEdit}
                               onKeyDown={(e) => {
-                                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
                                   e.preventDefault();
                                   commitEdit();
                                 }
@@ -2900,7 +2941,7 @@ export function ChatPane({
               {!mobile && <div
                 className="sv-box-resize"
                 title={t("splitter.dragToResize")}
-                onMouseDown={(e) => startComposerResize(e, inputRef.current)}
+                onMouseDown={(e) => startComposerResize(e, inputRef.current, composerInset)}
                 onDoubleClick={() => setComposerHeight(null)}
               />}
               <textarea
@@ -2909,7 +2950,7 @@ export function ChatPane({
                 disabled={clientCommandRunning}
                 value={draft}
                 rows={1}
-                style={!mobile && composerHeight !== null ? { height: composerHeight, maxHeight: "70vh" } : undefined}
+                style={!mobile && composerHeight !== null ? { height: composerHeight - composerInset, minHeight: COMPOSER_MIN_HEIGHT, maxHeight: "70vh" } : undefined}
                 placeholder={
                   busy
                     ? t("chat.placeholderBusy")
@@ -2965,7 +3006,8 @@ export function ChatPane({
                     complete(chosenSuggestion);
                     return;
                   }
-                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  // WebKit ends composition before the confirming Enter, so that keydown has isComposing false and keyCode 229.
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
                     e.preventDefault();
                     // Exact client commands execute on the first Enter. Otherwise completion would add
                     // its cosmetic trailing space and make `/clear` or `/rewind` need two submissions.
@@ -2993,10 +3035,10 @@ export function ChatPane({
                   {syncState === "failed" && <button className="vlx-btn" onClick={() => void refreshRef.current()}>{t("common.retry")}</button>}
                 </div>
               )}
-              {(busy || actionFeedback) && (
-                <div className="sv-action-feedback" role="status" aria-live="polite">
+              {composerFeedback && (
+                <div className={"sv-action-feedback" + (feedbackHasRoom ? "" : " sv-action-feedback-float")} role="status" aria-live="polite">
                   {actionFeedback && <span>{actionFeedback}</span>}
-                  {busy && <span>{t("chat.interruptTooltip")}{supportsSteering(session.kind) && <> · {t("chat.steerTooltip", steerCombo)}</>}</span>}
+                  {composerHint && <span>{t("chat.interruptTooltip")}{supportsSteering(session.kind) && <> · {t("chat.steerTooltip", steerCombo)}</>}</span>}
                 </div>
               )}
               <ComposerToolbar mobile={mobile} chips={composerChips} inline={["translation", ...composerInlineChips]}
@@ -3037,7 +3079,10 @@ export function ChatPane({
                 })
               }
             />
-            <ArtifactDock path={dockPath} onClose={() => setDockPath(null)} style={{ width: dockWidth, maxWidth: "70%" }} />
+            {isArtifactPath(dockPath)
+              ? <ArtifactDock path={dockPath} onClose={() => setDockPath(null)} style={{ width: dockWidth, maxWidth: "70%" }} />
+              : <DockDocView key={dockPath} path={dockPath} reloadKey={dockOpenCount} onClose={() => setDockPath(null)}
+                  style={{ width: dockWidth, maxWidth: "70%" }} />}
           </>
         )}
         </div>

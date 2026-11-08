@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
+import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
 import AgentSelect from "../../components/AgentSelect";
 import { LaunchLoadState, ModelEffortFields, useLaunchOptions } from "../../components/LaunchFields";
-import { memoryCancel, memoryJobs, memoryOptions, memoryRetry, memoryStart, type MemoryJob, type MemoryOptions } from "../../ipc/memory";
+import { memoryCancel, memoryJobSessions, memoryJobs, memoryOptions, memoryRetry, memoryStart, type MemoryJob, type MemoryJobSessions, type MemoryOptions } from "../../ipc/memory";
 import { useTermStore } from "../../store/termStore";
 import type { SessionKind } from "../../types";
 import { MemoryLink, memoryNavigate, memoryUrl, useMemoryLocation } from "./navigation";
-import { LoadState, StateLabel, memoryError, memoryEffortLabel, memoryTime, useMemoryLoad } from "./shared";
+import { KnowledgeBackLink } from "../Notebook/KnowledgeBack";
+import { kindIconEl } from "../sessionViewers/sessionMeta";
+import { LoadState, StateLabel, memoryError, memoryEffortLabel, runTime, useMemoryLoad } from "./shared";
 
 /** The remembered agent when it is still installed, otherwise the backend's first available one. */
 function rememberedAgent(data: MemoryOptions): string {
@@ -65,14 +68,15 @@ export function MemoryCompile({ sessionId }: { sessionId: string }) {
 export function MemoryJobs({ id }: { id?: string }) {
   const t = useT(); const location = useMemoryLocation();
   const page = Math.max(0, Number(new URLSearchParams(location).get("memoryJobPage")) || 0);
-  const [data, setData] = useState<{ jobs: MemoryJob[]; total: number; pageSize: number } | null>(null);
+  const [data, setData] = useState<MemoryJobSessions | null>(null);
   const [error, setError] = useState(""); const [revision, setRevision] = useState(0); const [busy, setBusy] = useState("");
+  const [open, setOpen] = useState<Set<string>>(new Set());
   useEffect(() => {
     let alive = true; let timer: ReturnType<typeof setTimeout>;
     setData(null); setError("");
     const refresh = async () => {
       try {
-        const result = await memoryJobs(id, id ? 0 : page);
+        const result = id ? await memoryJobs(id, 0) : await memoryJobSessions(page);
         if (alive) { setData(result); setError(""); }
       } catch (e) { if (alive) { setError(memoryError(e)); setData(null); } }
       if (alive) timer = setTimeout(() => void refresh(), 2000);
@@ -87,29 +91,60 @@ export function MemoryJobs({ id }: { id?: string }) {
     } catch (e) { setError(memoryError(e)); }
     finally { setBusy(""); }
   };
-  return <section className="memory-document">
-    <div className="memory-row"><h2>{t("memory.jobs")}</h2><span className="memory-spacer" /><button className="btn" onClick={() => setRevision((v) => v + 1)}>{t("common.refresh")}</button></div>
+  const toggle = (key: string) => setOpen((old) => { const next = new Set(old); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+  const jobs = data?.jobs ?? [];
+  return <div className="kbx-page kbx-narrow">
+    <div className="kbx-bar">
+      <KnowledgeBackLink className="kbx-ibtn" />
+      <nav className="kbx-crumbs" aria-label={t("memory.hierarchy")}><MemoryLink route="library" values={{ memoryProject: null, memorySession: null }}>{t("memory.globalMemory")}</MemoryLink><Icons.chevR size={12} aria-hidden="true" /><b>{t("memory.jobs")}</b></nav>
+      <div className="kbx-acts"><button type="button" className="kbx-ibtn" title={t("common.refresh")} aria-label={t("common.refresh")} onClick={() => setRevision((v) => v + 1)}><Icons.restart size={14} aria-hidden="true" /></button></div>
+    </div>
+    <div className="kbx-head closed"><div className="t">
+      <div className="t1"><Icons.history size={16} aria-hidden="true" /><h1>{t("memory.jobs")}</h1></div>
+      {data && !id && <div className="kbx-meta"><span>{t("archive.sessionsCount", String(data.total))}</span>{!!data.organized && <span>{t("kb.organizedCount", String(data.organized))}</span>}{!!data.attention && <span className="bad">{t("kb.needsAttention", String(data.attention))}</span>}</div>}
+    </div></div>
     {error && <p className="memory-error" role="alert">{error}</p>}
-    {!data ? <LoadState error={error} reload={() => setRevision((v) => v + 1)} /> : <>
-      {!data.jobs.length && <p>{t(id ? "memory.notFound" : "memory.emptyJobs")}</p>}
-      {data.jobs.map((job) => <article className="memory-job" key={job.id}>
-        <div className="memory-row"><MemoryLink route={job.entryLinks.length === 1 ? `entry/${job.entryLinks[0].id}` : `job/${job.id}`}><strong>{job.sessionName}</strong></MemoryLink><span className="memory-spacer" /><span className={`memory-status ${job.status}`}><StateLabel value={job.status} /></span></div>
-        <p className="memory-muted">{job.agentLabel || job.agent}{` · ${job.model || t("chat.modelDefault")}`} · {t("chat.effortTooltip")}: {job.effort ? memoryEffortLabel(job.effort) : t("spawn.modelDefault")} · {memoryTime(job.createdAt)}</p>
-        {job.status === "running" && <><p role="status"><StateLabel value={job.stage} /> · {job.progress} / {job.total || "…"}</p><progress max={job.total || 1} value={job.progress} /></>}
-        {job.status === "queued" && <p className="memory-muted" role="status">{t("memory.waitingHint")}</p>}
-        {job.error && <p className="memory-error">{memoryError(job.error)}</p>}
-        {job.status === "completed" && !job.entries.length && <p>{t("memory.noKnowledge")}</p>}
-        <div className="memory-job-entries">{job.entryLinks.map((entry) => <MemoryLink key={entry.id} className="btn" title={entry.title} route={`entry/${entry.id}`}>{entry.title} ↗</MemoryLink>)}</div>
-        <footer className="memory-row"><MemoryLink route={`source/${job.sourceId}`}>{t("memory.source")}</MemoryLink><span className="memory-spacer" />
-          {["queued", "running"].includes(job.status) && <button className="btn" disabled={busy === job.id} onClick={() => void command(job, true)}>{t("common.cancel")}</button>}
-          {["failed", "cancelled"].includes(job.status) && <button className="btn" disabled={busy === job.id} onClick={() => void command(job, false)}>{t("common.retry")}</button>}
-        </footer>
-      </article>)}
-      {!id && data.total > data.pageSize && <footer className="memory-pagination">
-        {page > 0 ? <MemoryLink route="jobs" values={{ memoryJobPage: page - 1 }}>{t("common.prev")}</MemoryLink> : <span />}
-        <span>{page + 1} / {Math.ceil(data.total / data.pageSize)}</span>
-        {(page + 1) * data.pageSize < data.total && <MemoryLink route="jobs" values={{ memoryJobPage: page + 1 }}>{t("common.next")}</MemoryLink>}
-      </footer>}
-    </>}
-  </section>;
+    <div className="kbx-list">
+      {!data ? <LoadState error={error} reload={() => setRevision((v) => v + 1)} /> : <>
+        {!jobs.length && <p className="kbx-empty">{t(id ? "memory.notFound" : "memory.emptyJobs")}</p>}
+        {jobs.length > 0 && <div>{jobs.map((job, index) => {
+          const links = job.entryLinks;
+          // The newest run opens with its entries listed; older runs keep the log compact until asked.
+          const expanded = open.has(job.id);
+          const bad = job.status === "failed" || job.status === "cancelled";
+          return <article className="kbx-job" key={job.id}>
+            <div className="a">
+              <MemoryLink className="tt" route={links.length === 1 ? `entry/${links[0].id}` : `job/${job.id}`}>{job.sessionName}</MemoryLink>
+              <div className="m">{kindIconEl(job.agent as SessionKind, 14)}<span>{id ? [job.agentLabel || job.agent, job.model || t("chat.modelDefault"), job.effort && memoryEffortLabel(job.effort)].filter(Boolean).join(" · ") : job.model || job.agentLabel || job.agent}</span></div>
+              {job.status === "running" && <><p role="status" className="m"><StateLabel value={job.stage} /> · {job.progress} / {job.total || "…"}</p><progress max={job.total || 1} value={job.progress} /></>}
+              {job.status === "queued" && <p className="m" role="status">{t("memory.waitingHint")}</p>}
+              {(id || job.status === "failed") && job.error && <span className="e">{memoryError(job.error)}</span>}
+              {!id && !!job.failedAttempts && (job.status === "completed" ? <span className="m">{t("kb.succeededAfter", String(job.failedAttempts))}</span> : job.failedAttempts > 1 && <span className="m">{t("kb.failedTimes", String(job.failedAttempts))}</span>)}
+              {job.status === "completed" && !job.entries.length && <span className="m">{t("memory.noKnowledge")}</span>}
+              {links.length > 0 && (index === 0 && !open.has(job.id)
+                ? <div className="outs">
+                  {links.slice(0, 3).map((entry) => <MemoryLink key={entry.id} className="o" title={entry.title} route={`entry/${entry.id}`}><Icons.diamond size={12} aria-hidden="true" />{entry.title}</MemoryLink>)}
+                  {links.length > 3 && <button type="button" className="x" onClick={() => toggle(job.id)}>{t("kb.andMore", String(links.length - 3))}</button>}
+                </div>
+                : <>
+                  <button type="button" className="x" aria-expanded={expanded} onClick={() => toggle(job.id)}>{expanded ? <Icons.chevD size={12} aria-hidden="true" /> : <Icons.chevR size={12} aria-hidden="true" />}{t("kb.entriesCount", String(links.length))}</button>
+                  {expanded && <div className="outs">{links.map((entry) => <MemoryLink key={entry.id} className="o" title={entry.title} route={`entry/${entry.id}`}><Icons.diamond size={12} aria-hidden="true" />{entry.title}</MemoryLink>)}</div>}
+                </>)}
+            </div>
+            <div className="b">
+              {["queued", "running"].includes(job.status) && <button className="kbx-btn" disabled={busy === job.id} onClick={() => void command(job, true)}>{t("common.cancel")}</button>}
+              {bad && <button className="kbx-btn" disabled={busy === job.id} onClick={() => void command(job, false)}><Icons.restart size={14} aria-hidden="true" />{t("common.retry")}</button>}
+              <MemoryLink className="kbx-ibtn" route={`source/${job.sourceId}`} title={t("memory.source")} aria-label={t("memory.source")}><Icons.docLines size={14} aria-hidden="true" /></MemoryLink>
+            </div>
+            <div className="w"><span className={`kbx-st ${job.status === "completed" ? "ok" : bad ? "bad" : "run"}`}><i />{!id && job.status === "completed" ? <span>{t("kb.statusOrganized")}</span> : !id && job.status === "failed" ? <span>{t("kb.statusAttention")}</span> : <StateLabel value={job.status} />}</span><span>{runTime(job.createdAt)}</span></div>
+          </article>;
+        })}</div>}
+        {!id && data.total > data.pageSize && <footer className="memory-pagination">
+          {page > 0 ? <MemoryLink route="jobs" values={{ memoryJobPage: page - 1 }}>{t("common.prev")}</MemoryLink> : <span />}
+          <span>{page + 1} / {Math.ceil(data.total / data.pageSize)}</span>
+          {(page + 1) * data.pageSize < data.total && <MemoryLink route="jobs" values={{ memoryJobPage: page + 1 }}>{t("common.next")}</MemoryLink>}
+        </footer>}
+      </>}
+    </div>
+  </div>;
 }

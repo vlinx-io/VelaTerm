@@ -63,6 +63,8 @@ type RowPath = Vec<String>;
 /// How often dirty rows are swept to the frontend. Short enough to read as live typing.
 const FLUSH_INTERVAL: Duration = Duration::from_millis(60);
 pub(crate) const SNAPSHOT_PAGE_ROWS: usize = 60;
+/// The rows' share of one snapshot response; the rest carries the message outline and control fields.
+const SNAPSHOT_ROW_BYTES: usize = crate::agent::history_store::limits::PAGE_BYTES / 2;
 
 /// How much of stderr to keep. Enough for a stack trace, bounded so a chatty CLI cannot grow without limit.
 const STDERR_LIMIT: usize = 8 * 1024;
@@ -2561,6 +2563,11 @@ impl ChatManager {
         Ok(proc)
     }
 
+    /// Whether the session's agent is installed and signed in. Runs commands, so it stays off the UI thread.
+    pub fn agent_readiness(&self, app: &AppCtx, session_id: &str) -> Result<auth::readiness::AgentReadiness, String> {
+        auth::readiness::check(app, session_id)
+    }
+
     /// `provider` picks ZCode's account provider (`zai` or `bigmodel`); the other agents have one each.
     pub fn auth_start(&self, app: &AppCtx, session_id: &str, provider: Option<&str>) -> Result<(), String> {
         let _change = self.auth_change.lock().unwrap();
@@ -2961,11 +2968,22 @@ impl ChatManager {
                         }
                     }
                 }
-                start = end.saturating_sub(SNAPSHOT_PAGE_ROWS);
+                start = bounded_window_start(&timeline.rows, end);
             }
-            let selected: Vec<ChatRow> = if let Some(since) = delta {
-                start = window.and_then(|w| w.from.as_ref()).and_then(|id| timeline.at.get(id)).copied().unwrap_or(start);
-                timeline.rows[start..].iter().filter(|row| timeline.row_versions.get(row.id()).copied().unwrap_or(0) > since).cloned().collect()
+            // A client away for a long time can owe more rows than one response carries. It gets the
+            // recent window instead, which replaces its stale copy; older rows stay reachable by paging.
+            let changed = delta.and_then(|since| {
+                let from = window.and_then(|w| w.from.as_ref()).and_then(|id| timeline.at.get(id)).copied().unwrap_or(start);
+                let changed: Vec<ChatRow> = timeline.rows[from..].iter()
+                    .filter(|row| timeline.row_versions.get(row.id()).copied().unwrap_or(0) > since)
+                    .take(SNAPSHOT_PAGE_ROWS + 1).cloned().collect();
+                let fits = changed.len() <= SNAPSHOT_PAGE_ROWS && bounded_window_start(&changed, changed.len()) == 0;
+                fits.then_some((from, changed))
+            });
+            if delta.is_some() && changed.is_none() { kind = "recent"; }
+            let selected: Vec<ChatRow> = if let Some((from, changed)) = changed {
+                start = from;
+                changed
             } else { timeline.rows[start..end].to_vec() };
             let positions = selected.iter().filter_map(|row| timeline.at.get(row.id()).map(|index| (row.id().to_owned(), *index))).collect();
             let user_messages = if kind == "history" { None } else { Some(super::user_messages::outline(&timeline.rows)) };
@@ -3636,6 +3654,19 @@ fn slim_tool_input(input: &Value, encoded: &str) -> Value {
         ),
         None => Value::String(encoded.chars().take(1024).collect()),
     }
+}
+
+/// Where a window ending at `end` starts: at most one page of rows within the rows' byte share.
+/// The row next to `end` always counts, so paging moves forward even past an oversized row.
+fn bounded_window_start(rows: &[ChatRow], end: usize) -> usize {
+    let mut start = end;
+    let mut bytes = 0;
+    while start > 0 && end - start < SNAPSHOT_PAGE_ROWS {
+        bytes += serde_json::to_vec(&snapshot_row(&rows[start - 1])).map_or(0, |wire| wire.len());
+        if bytes > SNAPSHOT_ROW_BYTES && start < end { break; }
+        start -= 1;
+    }
+    start
 }
 
 /// Serialize a timeline row for a snapshot without embedding image bytes.
@@ -6175,8 +6206,9 @@ fn dispatch_steer(
         }
         SessionKind::Opencode => opencode::steer(proc, &row_id, text, images)?,
         SessionKind::Pi | SessionKind::Omp => pi::steer(proc, text, images)?,
-        // ZCode queues a message sent mid-turn rather than steering it into the turn.
-        SessionKind::Zcode => return Err("ZCode does not support steering; queue the message instead".into()),
+        // `guide` delivery joins the running turn at its next tool boundary; ZCode queues the message
+        // itself when the turn has no boundary left, so the receipt below stays honest either way.
+        SessionKind::Zcode => zcode::steer(app, session_id, proc, &row_id, text, images)?,
         SessionKind::Claude => write_claude_user_message(app,session_id,proc,&row_id,text,images)?,
         _ => proc.write_source(|writer|outgoing_wire::claude(writer,text,images,None))?,
     }
@@ -7748,6 +7780,39 @@ mod tests {
         assert!(!rows.iter().any(|row| row.id() == "z-1"), "turn headers are not drawn");
     }
 
+    /// A steered message asks ZCode for `guide` delivery, so it joins the turn in flight rather than
+    /// waiting behind it, and the command is claimed so the projected echo is not drawn twice.
+    #[test]
+    fn a_zcode_steer_requests_guide_delivery() {
+        use std::io::BufRead as _;
+        let app = ctx("zcode-steer");
+        let proc = inert_process(SessionKind::Zcode);
+        *proc.agent_session_id.lock().unwrap() = Some("sess_1".into());
+        // A live pipe stands in for the agent: whatever the engine writes comes back out to be read.
+        let mut child = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut stdout = std::io::BufReader::new(child.stdout.take().unwrap());
+        let stdin = child.stdin.take().unwrap();
+        *proc.child.lock().unwrap() = child;
+        *proc.stdin.lock().unwrap() = Some(stdin);
+        zcode::steer(&app, "s", &proc, "u-9", "and this too", &[]).unwrap();
+        assert!(zcode::test_claimed(&proc, "u-9"), "the command is claimed before anything is written");
+        let mut written = String::new();
+        stdout.read_line(&mut written).unwrap();
+        let request: Value = serde_json::from_str(written.trim()).unwrap();
+        assert_eq!(request["method"], "v4/command");
+        assert_eq!(request["params"]["type"], "sendText");
+        assert_eq!(request["params"]["sessionId"], "sess_1");
+        assert_eq!(request["params"]["payload"]["text"], "and this too");
+        assert_eq!(request["params"]["payload"]["requestedDelivery"], "guide");
+        // Acknowledge the command so the sending thread ends instead of waiting out its timeout.
+        zcode::handle_line(&app, "s", &proc, &json!({"id": request["id"], "result": {"status": "accepted"}}).to_string());
+    }
+
     /// An OMP approval dialog becomes a permission card, and the answer travels back as its response.
     #[test]
     fn omp_extension_dialog_becomes_a_permission_card() {
@@ -8088,6 +8153,40 @@ mod tests {
         let reset = manager.snapshot_window("window", Some(&ChatWindow { since: Some(delta.rows_revision), epoch: delta.started_at, ..Default::default() }));
         assert_eq!(reset.page_kind, "recent");
         assert_eq!(reset.rows.len(), 1);
+    }
+
+    /// A client away for a long time owes more than one response carries, by row count or by bytes.
+    /// Either way it gets a bounded recent window, and the rows before it stay reachable by paging.
+    #[test]
+    fn a_backlog_too_large_for_one_response_falls_back_to_the_recent_window() {
+        let limit = crate::agent::history_store::limits::PAGE_BYTES;
+        let proc = inert_process(SessionKind::Claude);
+        let manager = ChatManager::new();
+        manager.sessions.lock().unwrap().insert("away".into(), proc.clone());
+        let user = |i: usize, size: usize| ChatRow::User { id: format!("r{i}"), text: "x".repeat(size), images: vec![], at: None };
+        proc.timeline.lock().unwrap().upsert(user(0, 1));
+        let known = manager.snapshot_window("away", Some(&ChatWindow::default()));
+        let missed = |since: u64| ChatWindow { since: Some(since), from: Some("r0".into()), epoch: known.started_at, ..Default::default() };
+
+        for i in 1..=100 { proc.timeline.lock().unwrap().upsert(user(i, 1)); }
+        let by_count = manager.snapshot_window("away", Some(&missed(known.rows_revision)));
+        assert_eq!(by_count.page_kind, "recent");
+        assert_eq!(by_count.rows.len(), SNAPSHOT_PAGE_ROWS);
+        assert_eq!(by_count.rows[0].id(), "r41");
+        assert!(by_count.has_more);
+
+        for i in 101..=140 { proc.timeline.lock().unwrap().upsert(user(i, 20_000)); }
+        let by_bytes = manager.snapshot_window("away", Some(&missed(by_count.rows_revision)));
+        assert_eq!(by_bytes.page_kind, "recent");
+        assert_eq!(by_bytes.rows.last().unwrap().id(), "r140");
+        assert!(by_bytes.rows.len() < 40 && by_bytes.has_more);
+        assert!(serde_json::to_vec(&by_bytes).unwrap().len() <= limit);
+
+        let first = by_bytes.positions[by_bytes.rows[0].id()];
+        let older = manager.snapshot_window("away", Some(&ChatWindow { before: Some(by_bytes.rows[0].id().into()), epoch: known.started_at, ..Default::default() }));
+        assert_eq!(older.page_kind, "history");
+        assert_eq!(older.positions[older.rows.last().unwrap().id()], first - 1);
+        assert!(serde_json::to_vec(&older).unwrap().len() <= limit);
     }
 
     #[test]

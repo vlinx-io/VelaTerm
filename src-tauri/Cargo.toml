@@ -1,6 +1,6 @@
 [package]
 name = "velaterm"
-version = "0.2.15"
+version = "0.3.0"
 description = "VelaTerm multi-session terminal manager"
 authors = ["vlinx"]
 edition = "2021"
@@ -35,6 +35,7 @@ gui = [
     "dep:russh-sftp",
     # Linux GTK signal access for recovering the paths of files dropped from the file manager.
     "dep:gtk",
+    "dep:zbus",
 ]
 # Backend for the Electron shell on Linux: the headless server plus native font enumeration, with no
 # Tauri/WebKit/GTK, so the packaged app runs on hosts without WebKitGTK. It keeps the desktop release
@@ -199,8 +200,16 @@ libc = { workspace = true }
 
 # The GTK version wry already uses; only the GUI connects to the WebKitGTK drag signal (native_drop.rs), so the
 # headless vela-server build keeps no GTK dependency.
+[target.'cfg(all(target_arch = "aarch64", not(windows)))'.dependencies]
+# sha2 0.10 uses the ARMv8 SHA-256 instructions only with `asm`; without it every history scan hashes the
+# whole recording in software, about a quarter of a long Codex session's indexing time. The feature also
+# builds sha2-asm with the C toolchain, so Windows on ARM keeps the portable backend.
+sha2 = { version = "0.10", features = ["asm"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = { version = "0.18", optional = true }
+# Clickable desktop notifications over the freedesktop D-Bus service; the official plugin reports no clicks.
+zbus = { version = "5", optional = true, default-features = false, features = ["async-io", "blocking-api"] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 # Change notification for the Files and Git tabs (FSEvents on macOS, ReadDirectoryChangesW on Windows). Linux keeps
@@ -247,7 +256,7 @@ windows-registry = "0.6"
 # Catch native exceptions in the spike so unbundled development builds cannot crash the application.
 objc2 = { version = "0.6", features = ["exception"] }
 block2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSString", "NSError"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSError", "NSGeometry", "objc2-core-foundation"] }
 objc2-user-notifications = { version = "0.3", features = [
     "block2",
     "UNUserNotificationCenter",

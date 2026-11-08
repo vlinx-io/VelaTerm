@@ -162,7 +162,15 @@ impl<R: Read> Projector<R> {
             match self.peek()?.ok_or("Incomplete JSON record")? {
                 b'"'=>{
                     self.byte()?;
-                    loop {match self.byte()? {b'\\'=>{self.byte()?;},b'"'=>break,byte if byte<0x20=>return Err("Invalid JSON string".into()),_=>{}}}
+                    loop {
+                        // Pass ordinary bytes a buffer at a time; skipped strings are the largest ones.
+                        if self.capture.is_none() {
+                            let available=&self.buffer[self.at..self.filled];
+                            let plain=available.iter().position(|b|*b<0x20 || matches!(*b,b'"'|b'\\')).unwrap_or(available.len());
+                            self.at+=plain;self.offset+=plain as u64;
+                        }
+                        match self.byte()? {b'\\'=>{self.byte()?;},b'"'=>break,byte if byte<0x20=>return Err("Invalid JSON string".into()),_=>{}}
+                    }
                 },
                 b'{'|b'['=>{
                     self.byte()?;depth+=1;

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // exercised without any xterm instances.
 vi.mock("./terminal/registry", () => ({ setXtermTheme: vi.fn() }));
 
-import { applyTheme, XTERM_THEME, xtermTheme } from "./theme";
+import { applyConversationTypography, applyTheme, DEFAULT_MONO_STACK, XTERM_THEME, xtermTheme, type VisualSettings } from "./theme";
 import { setXtermTheme } from "./terminal/registry";
 
 /** jsdom has no matchMedia; report the OS as the given scheme so 'system' resolves predictably. */
@@ -67,5 +67,24 @@ describe("applyTheme", () => {
     applyTheme("system");
     expect(setXtermTheme).toHaveBeenLastCalledWith(XTERM_THEME.dark);
     expect(localStorage.getItem("vlx-theme")).toBe("system");
+  });
+});
+
+describe("conversation typography", () => {
+  const apply = (chatFontFamily: string | null) => applyConversationTypography({ chatFontFamily, chatFontSize: 13.5, chatLineHeight: 1.2 } as VisualSettings);
+  const style = document.documentElement.style;
+
+  it("leaves Inter and its tracking to the stylesheet by default", () => {
+    apply("Menlo");
+    apply(null);
+    expect(style.getPropertyValue("--chat-font")).toBe("");
+    expect(style.getPropertyValue("--chat-tracking")).toBe("");
+  });
+
+  it("gives a chosen font its own spacing", () => {
+    apply("Menlo");
+    expect(style.getPropertyValue("--chat-font")).toContain("Menlo");
+    expect(style.getPropertyValue("--chat-font")).not.toBe(DEFAULT_MONO_STACK);
+    expect(style.getPropertyValue("--chat-tracking")).toBe("0px");
   });
 });

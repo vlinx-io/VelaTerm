@@ -74,11 +74,24 @@ fn files(root: &Path, extension: &str, recursive: bool) -> Result<Vec<PathBuf>, 
     Ok(out)
 }
 
+/// Last modification of an open history file in milliseconds, or 0 when the platform cannot say.
+fn modified_millis(file: &std::fs::File) -> i64 {
+    file.metadata().ok().and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64).unwrap_or(0)
+}
+
+/// The text blocks of a message's content, which is either a plain string or a list of typed blocks.
+fn content_text(content: &Value) -> String {
+    content.as_str().map(str::to_string).unwrap_or_else(|| {
+        content.as_array().map(|a| a.iter().filter(|b| b["type"] == "text")
+            .filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join(" ")).unwrap_or_default()
+    })
+}
+
 fn jsonl(path: &Path, kind: SessionKind, directory: &Path) -> Result<Option<HistoricalSession>, String> {
     let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let updated_at = file.metadata().ok().and_then(|m| m.modified().ok())
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as i64).unwrap_or(0);
+    let updated_at = modified_millis(&file);
     // Only opening metadata and a title are needed. Large initial context can occupy megabytes;
     // missing titles fall back to the native ID and do not make a session unavailable.
     let mut id = String::new();
@@ -119,11 +132,7 @@ fn jsonl(path: &Path, kind: SessionKind, directory: &Path) -> Result<Option<Hist
             if id.is_empty() { id = v["sessionId"].as_str().unwrap_or_default().to_string(); }
             if cwd.is_empty() { cwd = v["cwd"].as_str().unwrap_or_default().to_string(); }
             if v["type"] == "user" && v["isMeta"] != true {
-                let content = &v["message"]["content"];
-                let text = content.as_str().map(str::to_string).unwrap_or_else(|| {
-                    content.as_array().map(|a| a.iter().filter(|b| b["type"] == "text")
-                        .filter_map(|b| b["text"].as_str()).collect::<Vec<_>>().join(" ")).unwrap_or_default()
-                });
+                let text = content_text(&v["message"]["content"]);
                 if !text.starts_with('<') { name = title(&text); }
             }
         }
@@ -137,9 +146,51 @@ fn jsonl(path: &Path, kind: SessionKind, directory: &Path) -> Result<Option<Hist
     }))
 }
 
+/// One Pi or OMP session file: a `session` header with `id` and `cwd`, then an append-only entry tree.
+///
+/// The name can change at any point (Pi appends `session_info` entries, the latest one wins and an empty name
+/// clears it; OMP keeps a `title` line at the top that it rewrites in place), so a matching file is read to
+/// the end. Both write `type` as the first key, so lines that cannot name the session are skipped unparsed.
+fn pi_jsonl(path: &Path, kind: SessionKind, directory: &Path) -> Result<Option<HistoricalSession>, String> {
+    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let updated_at = modified_millis(&file);
+    let mut header: Option<(String, String)> = None;
+    let mut named: Option<String> = None;
+    let mut titled = String::new();
+    let mut prompt = String::new();
+    for line in std::io::BufReader::new(file).lines() {
+        let line = line.map_err(|e| e.to_string())?;
+        let tag = |t: &str| line.strip_prefix(r#"{"type":""#).and_then(|rest| rest.strip_prefix(t))
+            .is_some_and(|rest| rest.starts_with('"'));
+        let wanted = tag("session") || tag("title") || tag("session_info") || (prompt.is_empty() && tag("message"));
+        if line.starts_with(r#"{"type":""#) && !wanted { continue; }
+        let Ok(v) = serde_json::from_str::<Value>(&line) else { continue; };
+        match v["type"].as_str() {
+            Some("session") if header.is_none() => {
+                let cwd = v["cwd"].as_str().unwrap_or_default();
+                if cwd.is_empty() || !same_dir(Path::new(cwd), directory) { return Ok(None); }
+                header = Some((v["id"].as_str().unwrap_or_default().to_string(), cwd.to_string()));
+                if titled.is_empty() { titled = title(v["title"].as_str().unwrap_or_default()); }
+            }
+            Some("title") => {
+                let t = title(v["title"].as_str().unwrap_or_default());
+                if !t.is_empty() { titled = t; }
+            }
+            Some("session_info") => named = Some(title(v["name"].as_str().unwrap_or_default())),
+            Some("message") if v["message"]["role"] == "user" => prompt = title(&content_text(&v["message"]["content"])),
+            _ => {}
+        }
+    }
+    let Some((id, cwd)) = header else { return Ok(None); };
+    if !valid_id(&id) { return Ok(None); }
+    let name = [named.unwrap_or_default(), titled, prompt].into_iter().find(|t| !t.is_empty()).unwrap_or_else(|| id.clone());
+    Ok(Some(HistoricalSession { kind, agent_session_id: id, title: name, cwd, updated_at, imported: false }))
+}
+
 fn scan_jsonl(root: &Path, kind: SessionKind, directory: &Path, out: &mut Vec<HistoricalSession>) -> Result<(), String> {
-    // Claude's top-level project files are conversations; nested subagents are not resumable roots.
-    let paths = if kind == SessionKind::Claude {
+    // Claude, Pi and OMP keep one conversation per file directly under a per-directory folder; anything deeper
+    // (Claude subagents, OMP's per-session artifacts and subagent logs) is not a resumable root.
+    let paths = if matches!(kind, SessionKind::Claude | SessionKind::Pi | SessionKind::Omp) {
         let mut paths = Vec::new();
         match std::fs::read_dir(root) {
             Ok(entries) => for entry in entries {
@@ -155,7 +206,9 @@ fn scan_jsonl(root: &Path, kind: SessionKind, directory: &Path, out: &mut Vec<Hi
     } else { files(root, "jsonl", true)? };
     let mut failures = 0;
     for path in paths {
-        match jsonl(&path, kind, directory) {
+        let found = if matches!(kind, SessionKind::Pi | SessionKind::Omp) { pi_jsonl(&path, kind, directory) }
+            else { jsonl(&path, kind, directory) };
+        match found {
             Ok(Some(s)) => out.push(s),
             Ok(None) => {},
             Err(_) => failures += 1,
@@ -205,6 +258,49 @@ fn scan_opencode(root: &Path, directory: &Path, out: &mut Vec<HistoricalSession>
     Ok(())
 }
 
+/// ZCode's session table (`~/.zcode/cli/db/db.sqlite`). Only top-level conversations a person started are listed:
+/// soft-deleted rows (`time_deleted`) cannot be resumed, and side chats, workflow children and subagent children
+/// (`task_type`) belong to another conversation. Older databases without those columns list every root row.
+fn scan_zcode(db: Option<PathBuf>, directory: &Path, out: &mut Vec<HistoricalSession>) -> Result<(), String> {
+    let Some(db) = db.filter(|db| db.is_file()) else { return Ok(()); };
+    let conn = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)
+        .map_err(|e| e.to_string())?;
+    // ZCode writes the same WAL database while it runs.
+    conn.busy_timeout(std::time::Duration::from_secs(2)).map_err(|e| e.to_string())?;
+    if !crate::agent::opencode_store::has_table(&conn, "session") { return Ok(()); }
+    let has_column = |name: &str| conn.query_row("SELECT 1 FROM pragma_table_info('session') WHERE name = ?1", [name], |_| Ok(()))
+        .optional().map(|found| found.is_some()).map_err(|e| e.to_string());
+    let mut filter = vec!["parent_id IS NULL"];
+    if has_column("time_deleted")? { filter.push("time_deleted IS NULL"); }
+    if has_column("task_type")? { filter.push("task_type IN ('interactive', 'fork')"); }
+    let mut stmt = conn.prepare(&format!("SELECT id, COALESCE(title, ''), directory, time_updated FROM session WHERE {}",
+        filter.join(" AND "))).map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], |r| Ok(HistoricalSession {
+        kind: SessionKind::Zcode, agent_session_id: r.get(0)?, title: r.get(1)?,
+        cwd: r.get(2)?, updated_at: r.get(3)?, imported: false,
+    })).map_err(|e| e.to_string())?;
+    for row in rows {
+        let mut s = row.map_err(|e| e.to_string())?;
+        if valid_id(&s.agent_session_id) && same_dir(Path::new(&s.cwd), directory) {
+            s.title = title(&s.title);
+            if s.title.is_empty() { s.title = s.agent_session_id.clone(); }
+            out.push(s);
+        }
+    }
+    Ok(())
+}
+
+fn scan_deepseek(directory: &Path, out: &mut Vec<HistoricalSession>) -> Result<(), String> {
+    let Some(root) = crate::agent::chat::deepseek_history::home() else { return Ok(()); };
+    let (found, failures) = crate::agent::chat::deepseek_history::list_in(&root, |cwd| same_dir(Path::new(cwd), directory))?;
+    out.extend(found.into_iter().filter(|s| valid_id(&s.id)).map(|s| HistoricalSession {
+        kind: SessionKind::Deepseek, title: if s.title.is_empty() { s.id.clone() } else { title(&s.title) },
+        agent_session_id: s.id, cwd: s.cwd, updated_at: s.updated_at, imported: false,
+    }));
+    if failures > 0 { return Err(format!("Could not read {failures} history files")); }
+    Ok(())
+}
+
 fn project_directory(conn: &Connection, project_id: &str) -> Result<String, String> {
     let root: String = conn.query_row("SELECT root_path FROM projects WHERE id = ?1", [project_id], |r| r.get(0))
         .optional().map_err(|e| e.to_string())?.ok_or("Project not found")?;
@@ -240,6 +336,12 @@ fn discover_inner(ctx: &AppCtx, project_id: &str) -> Result<History, String> {
         ("Codex", scan_jsonl(&codex.join("sessions"), SessionKind::Codex, Path::new(&directory), &mut sessions)),
         ("Claude", scan_jsonl(&claude.join("projects"), SessionKind::Claude, Path::new(&directory), &mut sessions)),
         ("OpenCode", scan_opencode(&opencode, Path::new(&directory), &mut sessions)),
+        ("Pi", super::resume::pi_agent_home(SessionKind::Pi).map_or(Ok(()), |home|
+            scan_jsonl(&home.join("sessions"), SessionKind::Pi, Path::new(&directory), &mut sessions))),
+        ("OMP", super::resume::pi_agent_home(SessionKind::Omp).map_or(Ok(()), |home|
+            scan_jsonl(&home.join("sessions"), SessionKind::Omp, Path::new(&directory), &mut sessions))),
+        ("ZCode", scan_zcode(crate::agent::zcode::session_db_path(), Path::new(&directory), &mut sessions)),
+        ("DeepSeek", scan_deepseek(Path::new(&directory), &mut sessions)),
     ] {
         if let Err(e) = result { warnings.push(format!("{label}: {e}")); }
     }
@@ -494,5 +596,70 @@ mod tests {
         std::os::unix::fs::symlink(&temp.0, &link).unwrap();
         assert!(same_dir(&temp.0, &link));
         assert!(files(&temp.0, "jsonl", true).unwrap().is_empty());
+    }
+
+    #[test]
+    fn pi_and_omp_files_take_their_latest_name_and_skip_nested_logs() {
+        let temp = Temp::new();
+        let cwd = temp.0.to_string_lossy().to_string();
+        let pi = temp.0.join("pi/--w--/2026-07-16T02-29-48-720Z_pi-1.jsonl");
+        write(&pi, &[
+            serde_json::json!({"type":"session","version":3,"id":"pi-1","cwd":cwd}),
+            serde_json::json!({"type":"message","id":"a","message":{"role":"user","content":[{"type":"text","text":"Fix\n the build"}]}}),
+            serde_json::json!({"type":"session_info","id":"b","name":"Old name"}),
+            serde_json::json!({"type":"session_info","id":"c","name":"Build fix"}),
+        ]);
+        let session = pi_jsonl(&pi, SessionKind::Pi, &temp.0).unwrap().unwrap();
+        assert_eq!((session.agent_session_id.as_str(), session.title.as_str()), ("pi-1", "Build fix"));
+        // An empty name clears it, so the first prompt names the session again.
+        write(&pi, &[
+            serde_json::json!({"type":"session","version":3,"id":"pi-1","cwd":cwd}),
+            serde_json::json!({"type":"message","id":"a","message":{"role":"user","content":"Fix the build"}}),
+            serde_json::json!({"type":"session_info","id":"c","name":""}),
+        ]);
+        assert_eq!(pi_jsonl(&pi, SessionKind::Pi, &temp.0).unwrap().unwrap().title, "Fix the build");
+        assert!(pi_jsonl(&pi, SessionKind::Pi, &temp.0.join("another")).unwrap().is_none());
+        let omp = temp.0.join("omp/-w/2026-09-12T02-12-18-240Z_omp-1.jsonl");
+        write(&omp, &[
+            serde_json::json!({"type":"title","v":1,"title":"Default sessions to TUI","source":"auto"}),
+            serde_json::json!({"type":"session","version":3,"id":"omp-1","cwd":cwd,"title":"Earlier title"}),
+            serde_json::json!({"type":"message","id":"a","message":{"role":"user","content":"Do it"}}),
+        ]);
+        write(&temp.0.join("omp/-w/2026-09-12T02-12-18-240Z_omp-1/Helper.jsonl"), &[
+            serde_json::json!({"type":"session","version":3,"id":"omp-2","cwd":cwd}),
+        ]);
+        let mut found = Vec::new();
+        scan_jsonl(&temp.0.join("omp"), SessionKind::Omp, &temp.0, &mut found).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!((found[0].agent_session_id.as_str(), found[0].title.as_str()), ("omp-1", "Default sessions to TUI"));
+    }
+
+    #[test]
+    fn zcode_lists_live_root_conversations_in_the_directory() {
+        let temp = Temp::new();
+        let cwd = temp.0.to_string_lossy().to_string();
+        let db = temp.0.join("db.sqlite");
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch("CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT NOT NULL,
+            title TEXT NOT NULL, time_updated INTEGER NOT NULL, task_type TEXT NOT NULL DEFAULT 'interactive',
+            time_deleted INTEGER);").unwrap();
+        for (id, parent, dir, task, deleted) in [
+            ("sess_live", None, cwd.as_str(), "interactive", None),
+            ("sess_child", Some("sess_live"), cwd.as_str(), "subagent_child", None),
+            ("sess_side", None, cwd.as_str(), "selection_side_chat", None),
+            ("sess_gone", None, cwd.as_str(), "interactive", Some(5)),
+            ("sess_other", None, "/elsewhere", "interactive", None),
+        ] {
+            conn.execute("INSERT INTO session VALUES (?1, ?2, ?3, 'Fix  the\nlogin', 7, ?4, ?5)",
+                rusqlite::params![id, parent, dir, task, deleted]).unwrap();
+        }
+        drop(conn);
+        let mut found = Vec::new();
+        scan_zcode(Some(db), &temp.0, &mut found).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!((found[0].agent_session_id.as_str(), found[0].title.as_str()), ("sess_live", "Fix the login"));
+        found.clear();
+        scan_zcode(Some(temp.0.join("missing.sqlite")), &temp.0, &mut found).unwrap();
+        assert!(found.is_empty());
     }
 }

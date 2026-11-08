@@ -128,6 +128,38 @@ describe("Select", () => {
     expect(onChange).toHaveBeenCalledWith("high");
   });
 
+  it("filters rows by label when searchable and keeps arrow keys and Enter working", () => {
+    const onChange = vi.fn();
+    const onAction = vi.fn();
+    render(<Select searchable searchPlaceholder="filter" noMatchLabel="none" value="low" onChange={onChange}
+      options={[...OPTIONS, { value: "higher", label: "Higher" }]} ariaLabel="effort"
+      actions={[{ id: "add", label: "Add", onSelect: onAction }]} />);
+    fireEvent.click(screen.getByRole("combobox", { name: "effort" }));
+    const box = screen.getByPlaceholderText("filter");
+    expect(document.activeElement).toBe(box);
+    fireEvent.change(box, { target: { value: "HIG" } });
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["high", "Higher", "Add"]);
+    fireEvent.keyDown(box, { key: "ArrowDown" });
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith("higher");
+    expect(screen.queryByRole("listbox")).toBeNull();
+
+    fireEvent.click(screen.getByRole("combobox", { name: "effort" }));
+    expect((screen.getByPlaceholderText("filter") as HTMLInputElement).value).toBe("");
+    fireEvent.change(screen.getByPlaceholderText("filter"), { target: { value: "zzz" } });
+    expect(screen.getByText("none")).toBeTruthy();
+    fireEvent.keyDown(screen.getByPlaceholderText("filter"), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByPlaceholderText("filter"), { key: "Enter" });
+    expect(onAction).toHaveBeenCalled();
+  });
+
+  it("opens the filter with the character typed on a closed trigger", () => {
+    render(<Select searchable searchPlaceholder="filter" value="low" onChange={() => {}} options={OPTIONS} ariaLabel="effort" />);
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "effort" }), { key: "m" });
+    expect((screen.getByPlaceholderText("filter") as HTMLInputElement).value).toBe("m");
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["medium"]);
+  });
+
   it("shows the placeholder when no option matches the value", () => {
     render(
       <Select value="" onChange={() => {}} options={OPTIONS} placeholder="Select a branch" />,

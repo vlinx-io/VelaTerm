@@ -106,9 +106,20 @@ fn resolve_binary(
         .and_then(|v| v.get(kind.as_str()))
         .and_then(|v| v.get("path"))
         .and_then(|v| v.as_str());
-    match configured_session(session_path, global) {
-        Some(path) => Ok(configured_binary(kind, path)),
-        None => Ok(discover(kind)),
+    let binary = match configured_session(session_path, global) {
+        Some(path) => configured_binary(kind, path),
+        None => discover(kind),
+    };
+    Ok(working(kind, binary))
+}
+
+/// An installation counts only once it starts: an install or update that stopped partway leaves a file
+/// that dies at once, which is reported like a missing agent instead of launched. Resolution never waits for
+/// that check; it uses what is already known and leaves an unknown executable to a background check.
+pub(crate) fn working(kind: SessionKind, binary: LaunchBinary) -> LaunchBinary {
+    match binary {
+        LaunchBinary::Path(path) if super::health::known(kind, &path) == super::health::Health::Broken => LaunchBinary::Broken,
+        other => other,
     }
 }
 
@@ -125,7 +136,7 @@ fn configured_binary(kind: SessionKind, path: String) -> LaunchBinary {
 /// Discovery order: known install locations, then `PATH`, then an interactive login shell (Unix
 /// only), and last a dead command wrapper. Checking the wrapper last keeps a working copy found
 /// anywhere else in the lead.
-fn discover(kind: SessionKind) -> LaunchBinary {
+pub(crate) fn discover(kind: SessionKind) -> LaunchBinary {
     let name = command_name(kind);
     if let Some(path) = super::install::locate_installed_bin(kind.as_str()) {
         return LaunchBinary::Path(path);

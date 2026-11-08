@@ -19,6 +19,7 @@ const storeState = vi.hoisted(() => ({
   clearSelection: vi.fn(),
   archiveMany: vi.fn(),
   archiveGroup: vi.fn(),
+  archiveCollection: vi.fn(),
   clearNodeWorktree: vi.fn(),
   globalSearchOpen: false,
   setGlobalSearchOpen: vi.fn(),
@@ -30,7 +31,7 @@ const storeState = vi.hoisted(() => ({
   browserTabs: {},
   docTabs: {},
   renameScratch: vi.fn(),
-  sessions: [],
+  sessions: [] as { id: string; projectId: string }[],
   runtimes: {},
   statusFilter: null,
   dynamicStatusFilter: true,
@@ -135,6 +136,7 @@ beforeEach(() => {
   storeState.addVirtualProject.mockResolvedValue(undefined);
   storeState.renameNode.mockResolvedValue(undefined);
   storeState.projects = [project("project-1", "payments-web", "/tmp/project"), project("c1", "Payments", "")];
+  storeState.sessions = [];
 });
 
 it("offers Collection creation only in the header toolbar, keeps its draft in the URL, and submits a trimmed name", async () => {
@@ -216,4 +218,18 @@ it("detaches an existing member using the menu", () => {
   fireEvent.contextMenu(screen.getByRole("button", { name: "payments-web" }));
   fireEvent.click(screen.getByRole("button", { name: "collection.none" }));
   expect(mocks.setProjectCollection).toHaveBeenCalledWith("project-1", null);
+});
+
+it("offers Archive Collection only for a collection that holds sessions", () => {
+  render(<LeftSidebar />);
+  fireEvent.contextMenu(screen.getByRole("button", { name: "Payments" }));
+  expect(screen.queryByRole("button", { name: "tree.archiveCollection" })).toBeNull();
+});
+
+it("archives a collection that holds sessions from its menu", () => {
+  storeState.sessions = [{ id: "s1", projectId: "c1" }];
+  render(<LeftSidebar />);
+  fireEvent.contextMenu(screen.getByRole("button", { name: "Payments" }));
+  fireEvent.click(screen.getByRole("button", { name: "tree.archiveCollection" }));
+  expect(storeState.archiveCollection).toHaveBeenCalledWith("c1");
 });

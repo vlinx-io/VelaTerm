@@ -11,8 +11,8 @@ describe("chat capabilities", () => {
   });
 
   it("offers steering only where the protocol can join a running turn", () => {
-    for (const kind of ["claude", "codex", "opencode", "pi", "omp"] as const) expect(supportsSteering(kind)).toBe(true);
-    for (const kind of ["antigravity", "zcode", "copilot", "cursor", "kimi", "grok", "deepseek"] as const) expect(supportsSteering(kind)).toBe(false);
+    for (const kind of ["claude", "codex", "opencode", "pi", "omp", "zcode"] as const) expect(supportsSteering(kind)).toBe(true);
+    for (const kind of ["antigravity", "copilot", "cursor", "kimi", "grok", "deepseek"] as const) expect(supportsSteering(kind)).toBe(false);
   });
 
   it("refuses images for the agents whose protocol declines them", () => {

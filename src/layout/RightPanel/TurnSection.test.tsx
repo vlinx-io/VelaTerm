@@ -51,11 +51,11 @@ describe("This turn", () => {
     expect(within(panel).queryByRole("progressbar")).toBeNull();
     expect(within(panel).getByText("73.0k / —")).toBeTruthy();
   });
-  it("updates the output-rate label and explanation when the language changes", async () => {
+  it("keeps the output-rate label in English like the other metrics in every language", () => {
     render(<TurnStatsView stats={stats} />);
     act(() => setLang("zh-CN"));
-    const label = await screen.findByText("平均输出速度");
-    expect(label.closest(".turn-metric")?.getAttribute("title")).toContain("并非模型的纯解码速度");
+    const label = screen.getByText("average output");
+    expect(label.closest(".turn-metric")?.getAttribute("title")).toContain("not pure model decoding speed");
     expect(screen.getByText("32.0 tok/s")).toBeTruthy();
   });
   it("rejects a late response from a previously selected session", async () => {

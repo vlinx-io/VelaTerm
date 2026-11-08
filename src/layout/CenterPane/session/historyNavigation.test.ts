@@ -20,3 +20,9 @@ it("locates the first parent before opening a copied nested child detail",()=>{
   expect(historyLocation("session").anchor).toBe("parent");
   expect(new URL(historyPageURL("session","after","newer")).searchParams.has("chatChild")).toBe(false);
 });
+
+it("ignores locations that do not name their conversation", () => {
+  // A child path left behind after leaving its conversation must not locate rows in a new one.
+  window.history.replaceState(null, "", "/?session=new&chatChild=parent-row&chatRow=answer&chatBefore=older");
+  expect(historyLocation("new")).toEqual({});
+});

@@ -12,6 +12,7 @@ import { useT } from "../../i18n";
 import { TermScrollbar } from "./TermScrollbar";
 import { RunStrip } from "./RunStrip";
 import { usePtySession } from "../../hooks/usePtySession";
+import { CompletionTipLabel } from "../../terminal/completion/CompletionTipLabel";
 import { useGitBranch } from "../../hooks/useGitBranch";
 import { IS_PLAIN_BROWSER, labelWithCombo } from "../../hooks/shortcutRegistry";
 import { copyText } from "../../ipc/info";
@@ -26,6 +27,7 @@ import {
 import { flushNow as flushSettingsSync } from "../../ipc/settingsSync";
 import { isMac } from "../../ipc/transport";
 import { platform } from "../../platform";
+import { ClipboardUnresponsiveError } from "../../platform/clipboardStall";
 import { env } from "../../platform/env";
 import {
   imagesFromDrop,
@@ -204,8 +206,11 @@ export const TerminalView = memo(function TerminalView({
       ) {
         await injectNativeImagePaste(session.id);
       }
-    } catch {
-      showImageError(t("term.imgClipboardUnavailable"));
+    } catch (error) {
+      // A stalled source already raised the global notice; the image message would be misleading.
+      if (!(error instanceof ClipboardUnresponsiveError)) {
+        showImageError(t("term.imgClipboardUnavailable"));
+      }
     } finally {
       focusTerminal(session.id);
     }
@@ -278,6 +283,7 @@ export const TerminalView = memo(function TerminalView({
             {kindIconEl(session.kind, 13)}
           </span>
           <span className="pt">{session.name}</span>
+          {session.kind === "terminal" && <CompletionTipLabel sessionId={session.id} />}
           {branch && (
             <span className="branch">
               <Icons.branch size={11} />

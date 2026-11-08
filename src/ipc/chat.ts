@@ -405,6 +405,10 @@ export const chatAuthLogout = (sessionId: string) => invoke<void>("chat_auth_log
 export const chatAuthSubmit = (sessionId: string, code: string) => invoke<void>("chat_auth_submit", { sessionId, code });
 export const chatAuthCancel = (sessionId: string) => invoke<void>("chat_auth_cancel", { sessionId });
 
+/** What the session's agent needs before it can take a message. `signedIn` is absent or null when unknown. */
+export interface AgentReadiness { installed: boolean; signedIn?: boolean | null }
+export const chatAgentReadiness = (sessionId: string) => invoke<AgentReadiness>("chat_agent_readiness", { sessionId });
+
 export interface ChatExtras {
   auth?: ChatAuthState;
   contextTokens?: number;
@@ -640,6 +644,8 @@ export type ChatEvent =
    */
   | { type: "exited"; code: number; stderr: string; released?: boolean }
   | { type: "error"; message: string; /** Text of messages that were waiting and will not be sent. */ unsent?: string[] }
+  /** The agent refused this message before keeping it, so it goes back to the composer. */
+  | { type: "unsent"; text: string; images: ChatImage[] }
   | { type: "storagePressure"; message: string }
   | { type: "extras"; extras: ChatExtras }
   /** The wait for a usage limit to reset began, moved, or ended; `reason` says why it ended unsent. */

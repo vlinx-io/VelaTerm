@@ -155,7 +155,13 @@ export function useKeyboardShortcuts() {
       }
 
       if (matchCombo(e, sc("saveDoc"))) {
-        // Intercept save only for an active document tab.
+        // A document beside a conversation saves when focus is inside it; otherwise only an active document tab.
+        const docked = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>("[data-dock-doc-id]")?.dataset.dockDocId;
+        if (docked) {
+          e.preventDefault();
+          window.dispatchEvent(new CustomEvent(DOC_SAVE_EVENT, { detail: docked }));
+          return;
+        }
         const { activeTabId, docTabs } = useTermStore.getState();
         if (activeTabId && docTabs[activeTabId]) {
           e.preventDefault();

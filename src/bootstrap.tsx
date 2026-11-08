@@ -96,7 +96,7 @@ function installGlobalErrorOverlay() {
       zIndex: "99998",
       background: "rgba(0,0,0,0.85)",
       color: "#e0e0e0",
-      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      fontFamily: 'var(--font-ui, -apple-system, system-ui, sans-serif)',
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
@@ -107,8 +107,8 @@ function installGlobalErrorOverlay() {
       <div style="max-width:560px;width:100%;background:#242424;border:1px solid #333;border-radius:12px;padding:28px">
         <div data-overlay-title style="font-size:15px;font-weight:700;margin-bottom:6px"></div>
         <div data-overlay-desc style="font-size:12px;color:#999;margin-bottom:14px"></div>
-        <pre style="margin:0 0 16px;padding:10px 12px;background:#1e1e1e;border:1px solid #333;border-radius:6px;font-size:11px;line-height:1.5;color:#ff8080;overflow:auto;max-height:240px;white-space:pre-wrap;word-break:break-all"></pre>
-        <button style="padding:8px 20px;border:none;border-radius:6px;background:#4a9eff;color:#fff;font-size:13px;font-weight:600;cursor:pointer"></button>
+        <pre style="font-family:var(--font-mono, Menlo, Monaco, monospace);margin:0 0 16px;padding:10px 12px;background:#1e1e1e;border:1px solid #333;border-radius:6px;font-size:11px;line-height:1.5;color:#ff8080;overflow:auto;max-height:240px;white-space:pre-wrap;word-break:break-all"></pre>
+        <button style="font-family:inherit;padding:8px 20px;border:none;border-radius:6px;background:#4a9eff;color:#fff;font-size:13px;font-weight:600;cursor:pointer"></button>
       </div>`;
     overlayEl.querySelector("[data-overlay-title]")!.textContent = t("err.uncaughtTitle");
     overlayEl.querySelector("[data-overlay-desc]")!.textContent = t("err.uncaughtDesc");

@@ -72,6 +72,11 @@ export function mapBackendError(raw: string): string {
       const message = t(platform === "zai" ? "chat.auth.zcode.noPlan.zai" : "chat.auth.zcode.noPlan.bigmodel");
       return said ? `${message} (${said})` : message;
     }
+    // Signed in to ZCode, but ZCode lists no model: no plan of that platform was found in the sign-in
+    // (`zcode_no_models:<zai|bigmodel>`). Unlike the case above, the platform has not refused anything.
+    case "zcode_no_models":
+      if (detail !== "zai" && detail !== "bigmodel") return raw;
+      return t(detail === "zai" ? "chat.auth.zcode.noModels.zai" : "chat.auth.zcode.noModels.bigmodel");
     default:
       return raw;
   }

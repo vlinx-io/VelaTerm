@@ -33,7 +33,7 @@ vi.mock("../../ipc/notebook", () => ({
   uploadNotebookFiles: vi.fn(),
   notebookDroppedFiles: vi.fn(),
 }));
-vi.mock("../../ipc/memory", () => ({ memoryList: api.list, memoryGet: vi.fn(), memoryCollections: api.collections }));
+vi.mock("../../ipc/memory", () => ({ memoryAttention: () => Promise.resolve(0), memoryList: api.list, memoryGet: vi.fn(), memoryCollections: api.collections }));
 vi.mock("../../platform", () => ({ platform: { env: api.env, dialog: { pickDirectory: vi.fn() } } }));
 vi.mock("../../remote/ServerFileBrowser", () => ({
   cardStyle: {},
@@ -107,12 +107,12 @@ it("reports an empty result instead of an empty list", async () => {
 
 it("replaces the inspector tree with hits and opens the highlighted one on Enter", async () => {
   render(<KnowledgeNavigation />);
-  fireEvent.change(await screen.findByRole("textbox", { name: "Search notes…" }), { target: { value: "oolong" } });
+  fireEvent.change(await screen.findByRole("textbox", { name: "Search knowledge and notes…" }), { target: { value: "oolong" } });
 
   const row = await screen.findByRole("option", { name: /Tea note/ }, { timeout: 3000 });
   expect(screen.queryByText("Local knowledge bases")).toBeNull();
   expect(row.getAttribute("aria-selected")).toBe("true");
-  fireEvent.keyDown(screen.getByRole("textbox", { name: "Search notes…" }), { key: "Enter" });
+  fireEvent.keyDown(screen.getByRole("textbox", { name: "Search knowledge and notes…" }), { key: "Enter" });
   expect(opened("/notes/Tea/Tea note.md")).toBe(true);
 });
 

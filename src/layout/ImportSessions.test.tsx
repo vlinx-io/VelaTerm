@@ -94,11 +94,36 @@ describe("导入会话选择与反馈", () => {
     render(<ImportSessionsRoute />);
     await screen.findByText("Alpha");
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "missing" } });
-    fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Select All" }));
     expect(screen.getByText("2 selected")).toBeTruthy();
     expect((screen.getByRole("checkbox", { name: "Codex: Previous" }) as HTMLInputElement).checked).toBe(false);
     expect(location.search).toBe("?importSessions=project");
+  });
+  it("按智能体筛选只显示该类型，筛选写入地址，可与搜索一起清除", async () => {
+    render(<ImportSessionsRoute />);
+    await screen.findByText("Alpha");
+    fireEvent.click(screen.getByRole("combobox", { name: "Filter by agent" }));
+    const options = screen.getAllByRole("option").map((o) => o.textContent);
+    expect(options).toEqual(["All agents3", "Claude1", "Codex2"]);
+    fireEvent.click(screen.getByRole("option", { name: /Claude/ }));
+    expect(screen.queryByText("Alpha")).toBeNull();
+    expect(screen.getByText("Beta")).toBeTruthy();
+    expect(screen.getByText("Results: 1")).toBeTruthy();
+    expect(new URLSearchParams(location.search).get("importAgent")).toBe("claude");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Alpha" } });
+    expect(screen.getByText("No matching sessions found.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByText("Alpha")).toBeTruthy();
+    expect(location.search).toBe("?importSessions=project");
+  });
+  it("地址中的智能体筛选在重新打开时恢复，没有该类型的会话时显示空结果", async () => {
+    window.history.replaceState(null, "", "/?importSessions=project&importAgent=pi");
+    render(<ImportSessionsRoute />);
+    await screen.findByText("No matching sessions found.");
+    expect(screen.getByRole("combobox", { name: "Filter by agent" }).textContent).toContain("Pi");
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(await screen.findByText("Alpha")).toBeTruthy();
   });
   it("Tab 焦点停留在弹窗内", async () => {
     render(<ImportSessionsRoute />);

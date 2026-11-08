@@ -1,3 +1,33 @@
+## v0.3.0 — 2026-11-08
+
+- 🗂️ Phiên giờ được chia thành ba loại “Nhiệm vụ”, “Dự án” và “Trò chuyện”, chọn ở đầu trang “Phiên mới”, còn thanh bên trái được sắp xếp thành các bộ sưu tập cố định “Dự án”, “Terminal”, “Nhiệm vụ” và “Trò chuyện”, trong đó “Terminal” liệt kê mọi terminal đang chạy cùng các tác nhân được phát hiện trong đó.
+- 🧭 Thanh hoạt động mới dọc theo cạnh trái giúp chuyển qua lại giữa “Dự án”, “Terminal”, “Nhiệm vụ”, “Trò chuyện”, “Phiên đã lưu trữ” và “Kho kiến thức”, đồng thời đặt “Cài đặt”, “Tài khoản”, “Phản hồi”, “Chia sẻ” và “Trung tâm trò chơi” ở phía dưới.
+- 📦 Có thể lưu trữ toàn bộ một bộ sưu tập bằng “Lưu trữ bộ sưu tập” trong menu chuột phải, và khôi phục bất kỳ phiên nào trong đó sẽ đưa bộ sưu tập trở lại.
+- 🆕 Trang “Phiên mới” cho phép chọn dự án, tác nhân, mô hình, mức suy luận và quyền trong một khung cài đặt phía trên ô nhập, và danh sách dự án có thể tạo, nhập hoặc sao chép dự án từ Git mà không cần rời khỏi trang.
+- 🩺 Khi mở một cuộc hội thoại, VelaTerm kiểm tra xem tác nhân của cuộc hội thoại đó đã được cài đặt và đăng nhập hay chưa: nếu chưa, lời nhắc cài đặt hoặc bảng đăng nhập sẽ xuất hiện, và nút “Gửi” bị vô hiệu hóa cho đến khi tác nhân sẵn sàng.
+- 🔧 Tác nhân chỉ được coi là đã cài đặt khi thực sự chạy được, nên bản cài đặt dở dang hoặc bản nâng cấp bị lỗi sẽ hiển thị hướng dẫn cài đặt, cài đặt một chạm chỉ hoàn tất khi tác nhân đã khởi động, và bản cập nhật khiến tác nhân không thể khởi động sẽ được báo là chưa hoàn tất.
+- 🪟 Lệnh mới `vartifact <file|URL>` mở tệp trong một bảng bên cạnh cuộc hội thoại, có bản xem trước trực tiếp cho HTML và chế độ xem có thể chỉnh sửa cho Markdown, hình ảnh và mã, lưu bằng ⌘S, còn `vopen` giờ luôn mở một thẻ.
+- 💤 Gợi ý chữ xám trên dòng trong terminal nay mặc định tắt, hoàn thành lệnh trở về “Chỉ Tab”; bản cập nhật này chuyển thiết lập “Trên dòng + Tab” hiện có sang “Chỉ Tab” một lần, và bạn có thể bật lại gợi ý trong phần cài đặt.
+- ⌨️ Ở chế độ “Trên dòng + Tab”, thiết lập mới “Phím Tab” cho phép nhấn Tab để chấp nhận gợi ý chữ xám, nhấn Tab lần nữa để hoàn tác và liệt kê các kết quả khớp, đồng thời thanh tiêu đề terminal cho biết những phím có thể dùng trong lúc gợi ý đang hiển thị.
+- 🎨 Khi chỉnh sửa dòng lệnh Zsh, phần văn bản đã gõ không còn bị chuyển sang màu xám, và phần mô tả của “Gợi ý lệnh” trong “Cài đặt” khớp với chế độ đang chọn.
+- 📡 Hoàn thành lệnh bằng Tab qua kết nối từ xa chỉ cần một lượt khứ hồi.
+- 💬 Các phiên ZCode hỗ trợ bổ sung chỉ dẫn bằng Option/Alt+Enter, và tin nhắn sẽ được thêm vào lượt đang chạy sau lần gọi công cụ tiếp theo.
+- 🔑 ZCode 3.15 trở lên có thể đăng nhập bằng OAuth, và GLM Coding Plan đã mua không còn bị báo là không có hoặc đã dùng hết.
+- 📥 Có thể nhập phiên từ Pi, OMP, ZCode và DeepSeek Harness, và hộp thoại “Nhập phiên” có thể lọc theo tác nhân.
+- 🔤 Toàn bộ giao diện dùng phông Inter, còn mã, đầu ra công cụ, đường dẫn và terminal vẫn dùng JetBrains Mono, và thiết lập phông chữ giao diện đã được gỡ bỏ.
+- 📚 Kho kiến thức hiển thị các mục trong một cột ở giữa, liệt kê các phiên đã lưu trữ dưới dạng cây gồm dự án, nhóm và phiên cha kèm chế độ xem “Theo ngày”, và cho phép cơ sở tri thức cục bộ chuyển đổi giữa dạng thẻ và dạng danh sách.
+- 🔔 Trên macOS và Windows, khi nhấp vào một thông báo, chính cửa sổ đã gửi thông báo đó sẽ được đưa lên trước, nên thông báo từ một cửa sổ từ xa không còn kéo cửa sổ chính lên che mất cửa sổ đó.
+- 📋 Trên macOS, thao tác dán không còn làm ứng dụng bị treo khi ứng dụng nguồn của bộ nhớ tạm ngừng phản hồi: VelaTerm sẽ dừng chờ sau 5 giây và thông báo cho bạn.
+- 📝 Trong trình soạn thảo mã nguồn, “Chọn tất cả” từ menu macOS hoặc menu chuột phải sẽ chọn toàn bộ tệp, nên khi sao chép không còn thiếu các dòng nằm ngoài màn hình.
+- 📏 Ô nhập không còn giãn ra rồi lại co vào sau khi bạn gửi tin nhắn.
+- 📂 “Terminal”, “Nhiệm vụ” và “Trò chuyện” hiển thị nội dung ở dạng mở rộng, bất kể những gì đang được thu gọn trong “Dự án”.
+- 🔄 Các phiên mới không còn đồng bộ thất bại với lỗi `cursor_expired` sau khi bạn mở cuộc hội thoại của một nhiệm vụ con.
+- 🧯 Kết nối lại sau một thời gian dài mất kết nối với lượng dữ liệu tồn đọng lớn không còn khiến cuộc hội thoại bị kẹt với nút “Gửi” bị vô hiệu hóa.
+- 🪞 Kết nối từ xa tới máy Windows dùng Cygwin hoặc Git Bash sẽ dùng ứng dụng VelaTerm cho máy tính đang chạy sẵn ở đó, nên gửi tin nhắn không còn thất bại khi ứng dụng đó đang chạy phiên.
+- ⚡ Việc lập chỉ mục các cuộc hội thoại Codex dài chỉ còn tốn khoảng một nửa thời gian CPU so với trước.
+- 🔗 Liên kết đến artifact của Claude sẽ mở trong trình duyệt mặc định của bạn.
+- 🗄️ Nút “Phiên đã lưu trữ” đã được chuyển từ thanh thẻ sang thanh hoạt động.
+
 ## v0.2.15 — 2026-11-03
 
 - 🆕 Thẻ phiên mới cho phép chọn dự án, tác nhân, mô hình, mức suy luận, quyền, chế độ xem và một worktree riêng ngay quanh ô nhập ở giữa, rồi bắt đầu phiên với nhiệm vụ đầu tiên của bạn; bạn có thể mở thẻ này từ “Phiên mới…” trong các menu tạo phiên mới, từ nút ngôi sao trên thanh thẻ hoặc từ khung giữa đang trống.

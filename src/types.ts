@@ -55,10 +55,11 @@ export function hasTerminalInterface(kind: SessionKind): boolean {
 /** Agents driven over the Agent Client Protocol. ACP has no way to add a message to a running turn. */
 export const ACP_CHAT_KINDS: SessionKind[] = ["copilot", "cursor", "kimi", "grok", "deepseek"];
 
-/** Whether a message can be added to the turn already running, rather than waiting behind it. Antigravity and
- * ZCode queue a message sent mid-turn instead. */
+/** Whether a message can be added to the turn already running, rather than waiting behind it. Antigravity
+ * and the ACP agents queue a message sent mid-turn instead; ZCode steers via `guide` delivery, joining the
+ * turn at its next tool boundary. */
 export function supportsSteering(kind: SessionKind): boolean {
-  return kind !== "antigravity" && kind !== "zcode" && !ACP_CHAT_KINDS.includes(kind);
+  return kind !== "antigravity" && !ACP_CHAT_KINDS.includes(kind);
 }
 
 /** Whether the conversation view can send images to this agent. The ACP servers of Grok and DeepSeek Harness

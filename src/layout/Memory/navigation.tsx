@@ -49,6 +49,14 @@ const subscribe = (fn: () => void) => {
     if (!subscribers.size) window.removeEventListener("popstate", locationChanged, true);
   };
 };
+/** Knowledge pages with nothing for the right panel to describe. Only entries and archived sessions have details. */
+export function memoryRouteHidesRightPanel(search: string) {
+  const route = new URLSearchParams(search).get("memory");
+  return !!route && !/^(entry|history|collection)\//.test(route);
+}
+/** Archive sidebar header actions; the tree is lazily mounted, so they travel as window events. */
+export const COLLECTIONS_CHANGED = "memory:collections";
+export const COLLECTIONS_COLLAPSE = "memory:collections-collapse";
 export function useMemoryLocation() { return useSyncExternalStore(subscribe, () => window.location.search); }
 export function memoryUrl(route = "library", values: Record<string, string | number | null> = {}) {
   const url = new URL(window.location.href);

@@ -1,6 +1,7 @@
 //! Provider-managed authorization. Credentials remain inside the provider process.
 
 pub(super) mod claude;
+pub(super) mod readiness;
 pub(super) mod zcode;
 
 use std::sync::atomic::Ordering;

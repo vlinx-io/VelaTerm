@@ -43,7 +43,7 @@ describe("dark palette preference", () => {
     vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
     try {
       useTermStore.setState({ inspectorTab: "git" });
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...loadSettings(), inspectorTab: "knowledge" }));
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...loadSettings(), inspectorTab: "files" }));
       useTermStore.getState().hydrateSettingsFromCache();
       expect(useTermStore.getState().inspectorTab).toBe("git");
     } finally {

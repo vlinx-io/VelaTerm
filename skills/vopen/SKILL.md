@@ -16,9 +16,9 @@ The user **explicitly invoked `/vopen` (Claude) or `$vopen` (Codex)** to request
 **vlx-term** center pane, with exactly the same effect
 as typing `vopen <file>` in the terminal: it opens a document tab in the center pane, routed automatically by type
 (markdown WYSIWYG / image viewer / code editor with syntax highlighting), while http/https URLs open a built-in
-browser tab. The document tab sits alongside the terminal tabs and won't displace the current session. An HTML
-page (`.html`, `.htm`) opens as a live preview that reloads on every save; opened from a conversation, it appears
-in a panel beside that conversation instead of a tab.
+browser tab and Claude artifact links open in the system browser. The document tab sits alongside the terminal tabs and won't displace the current session. An HTML
+page (`.html`, `.htm`) opens as a live preview tab that reloads on every save. To open a file in the panel beside
+the conversation instead of a tab, use the `vartifact` command, which otherwise behaves the same.
 
 User input:
 

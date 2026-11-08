@@ -3,16 +3,16 @@ name: vartifact
 description: >-
   Show the user a visual result as a live page in VelaTerm. Use when the user asks to see, mock up, sketch or
   prototype a screen, page, form, chart or diagram, rather than to read code: write one self-contained HTML file
-  and open it with `vopen`, which renders it beside this conversation and reloads it on every save. Available only
+  and open it with `vartifact`, which renders it beside this conversation and reloads it on every save. Available only
   inside VelaTerm-hosted local sessions.
 argument-hint: "[what to show]"
-allowed-tools: Bash(vopen:*)
+allowed-tools: Bash(vartifact:*)
 ---
 
 # vartifact
 
-VelaTerm previews HTML pages as artifacts. A page opened with `vopen` from this conversation appears in a panel
-beside it, reloads whenever the file changes, and keeps each saved version so the user can step back through them.
+VelaTerm previews HTML pages as artifacts. A page opened with the `vartifact` command from this conversation
+appears in a panel beside it, reloads whenever the file changes, and keeps each saved version so the user can step back through them.
 Errors the page logs show in the panel's console, and the user can send them back to you.
 
 User input:
@@ -53,10 +53,12 @@ and mark each with `data-vlx-option`:
 ## Step 3: Open it
 
 ```bash
-vopen <absolute path>
+vartifact <absolute path>
 ```
 
-Run it once; later edits reload the preview on their own, so there is no need to run it again.
+Run it once; later edits reload the preview on their own. If the user says the panel is not showing (they may have
+closed it), run `vartifact` again. Do not use `vopen` here: it opens the page as a separate tab instead of beside
+the conversation.
 
 ## Step 4: Report back
 
@@ -71,6 +73,8 @@ the rest of the page as it is, and save the same file.
 
 ## Notes
 
-- `vopen` needs a VelaTerm-hosted local session. If it reports that it is not inside one, tell the user the
+- `vartifact` needs a VelaTerm-hosted local session. If it reports that it is not inside one, tell the user the
   preview is only available in VelaTerm and give the file path instead.
 - If the user reports errors from the preview, fix the page in place.
+- `vartifact` is `vopen` opening beside the conversation instead of in a tab, so it also takes other files:
+  Markdown, images and code open there in the same views `vopen` uses. URLs still open a browser tab.

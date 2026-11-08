@@ -49,3 +49,29 @@
 .terminal-completion-description:empty { display: none; }
 /* Monaco keeps its status bar and expanded documentation closed by default. Full text remains in row titles. */
 .terminal-completion-detail, .terminal-completion-footer { display: none; }
+
+/* Key label in the pane header while an inline history hint is showing. The controller delays it so fast typing never
+   mounts it. No opacity animation: that composites the label, which forces the clipping pane to composite too and
+   repaint the whole DOM-rendered terminal each time the label comes and goes. */
+.pane-head:has(.completion-tip) .pt { flex-basis: 96px; }
+.completion-tip {
+  flex: 0 1000 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.completion-tip > span { overflow: hidden; text-overflow: ellipsis; }
+.completion-tip > span:not(:last-child) { margin-right: 5px; }
+.completion-tip .hint-kbd {
+  flex: none;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 14px;
+  letter-spacing: normal;
+  color: var(--text-mid);
+}

@@ -186,6 +186,8 @@ export interface ViewRequest {
   sessionId: string;
   path: string;
   isUrl?: boolean;
+  /** Set by `vartifact`: open the file beside the calling conversation instead of in a tab. */
+  beside?: boolean;
 }
 
 /** Listen for open-document/browser-tab requests as a global event registered once on mount. */
@@ -348,7 +350,9 @@ export type MenuAction =
   | "share"
   | "clear-badges"
   | "split-right"
-  | "split-down";
+  | "split-down"
+  // Not a menu click: a native paste was abandoned because the clipboard source stopped responding.
+  | "clipboard-unresponsive";
 
 /** Listen for native-menu actions as a global event registered once on mount. */
 export function onMenuAction(

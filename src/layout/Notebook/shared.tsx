@@ -24,3 +24,23 @@ export function NotebookError({error,retry}:{error:string;retry?:()=>void}) {
   return <div className="nb-message" role={error?"alert":"status"}>{error||t("common.loading")}{error&&retry&&<button className="btn" onClick={retry}>{t("common.retry")}</button>}</div>;
 }
 export function sizeLabel(bytes:number) {return bytes<1024?`${bytes} B`:bytes<1024*1024?`${(bytes/1024).toFixed(1)} KB`:`${(bytes/1024/1024).toFixed(1)} MB`;}
+
+/** A note's display title: its file name without the extension or a trailing `_YYYYMMDD_HHmm` stamp. */
+export function noteTitle(name: string): string {
+  const base = name.replace(/\.md$/i, "");
+  return base.replace(/[_ -]\d{8}(?:[_ -]\d{4,6})?$/, "") || base;
+}
+
+/** The folder holding a note, relative to its knowledge base; empty at the root. */
+export function noteFolder(path: string): string {
+  const slash = path.lastIndexOf("/");
+  return slash < 0 ? "" : path.slice(0, slash);
+}
+
+/** A path with the backend's home directory shortened to `~`. */
+export function homePath(path: string, home?: string | null): string {
+  if (!home) return path;
+  const base = home.replace(/[\\/]+$/, "");
+  if (path === base) return "~";
+  return path.startsWith(`${base}/`) || path.startsWith(`${base}\\`) ? `~${path.slice(base.length)}` : path;
+}

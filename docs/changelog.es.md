@@ -1,3 +1,33 @@
+## v0.3.0 — 2026-11-08
+
+- 🗂️ Las sesiones se dividen ahora en tres tipos, Tarea, Proyecto y Chat, que se eligen en la parte superior de la página «Nueva sesión», y la barra lateral izquierda se organiza en las colecciones fijas Proyectos, Terminales, Tareas y Chats, donde Terminales muestra todos los terminales en ejecución y los agentes detectados en ellos.
+- 🧭 Una nueva barra de actividad en el borde izquierdo permite cambiar entre Proyectos, Terminales, Tareas, Chats, Sesiones archivadas y Base de conocimientos, y reúne en la parte inferior Ajustes, Cuenta, Comentarios, Compartir y Centro de juegos.
+- 📦 Las colecciones pueden archivarse por completo con «Archivar colección» en su menú contextual, y al restaurar cualquiera de sus sesiones la colección vuelve a aparecer.
+- 🆕 En la página «Nueva sesión», el proyecto, el agente, el modelo, el esfuerzo de razonamiento y los permisos se eligen en una tarjeta de ajustes situada sobre el cuadro de entrada, y la lista de proyectos permite crear, importar o clonar un proyecto sin salir de la página.
+- 🩺 Al abrir una conversación se comprueba si su agente está instalado y tiene la sesión iniciada: si no es así, aparece un aviso de instalación o un panel de inicio de sesión, y «Enviar» permanece desactivado hasta que el agente esté listo.
+- 🔧 Un agente solo se considera instalado si realmente se ejecuta, de modo que una instalación a medias o una actualización defectuosa muestra la guía de instalación, las instalaciones con un clic solo terminan cuando el agente se inicia, y una actualización tras la cual el agente no puede iniciarse se indica como incompleta.
+- 🪟 El nuevo comando `vartifact <file|URL>` abre un archivo en un panel junto a la conversación, con vista previa en directo para HTML y vistas editables para Markdown, imágenes y código que se guardan con ⌘S, mientras que `vopen` ahora siempre abre una pestaña.
+- 💤 Las sugerencias atenuadas en línea del terminal ahora están desactivadas de forma predeterminada y el autocompletado vuelve a «Solo Tab»; esta actualización cambia una sola vez el ajuste «En línea + Tab» existente a «Solo Tab», y puede volver a activarlas en los ajustes.
+- ⌨️ En el modo «En línea + Tab», el nuevo ajuste «Tecla Tab» permite aceptar con Tab la sugerencia atenuada; un segundo Tab la deshace y muestra las coincidencias, y la barra de título del terminal indica qué teclas están disponibles mientras hay una sugerencia visible.
+- 🎨 Editar una línea de comandos de Zsh ya no pone en gris el texto escrito previamente, y la descripción del modo de sugerencias en Ajustes coincide con el modo seleccionado.
+- 📡 El autocompletado con Tab en conexiones remotas responde en un solo viaje de ida y vuelta.
+- 💬 Las sesiones de ZCode permiten añadir indicaciones con Option/Alt+Enter, de modo que el mensaje se incorpora al turno en curso tras la siguiente llamada a una herramienta.
+- 🔑 ZCode 3.15 y versiones posteriores pueden iniciar sesión con OAuth, y un GLM Coding Plan adquirido ya no aparece como inexistente o agotado.
+- 📥 Se pueden importar sesiones de Pi, OMP, ZCode y DeepSeek Harness, y el cuadro de diálogo «Importar sesiones» permite filtrar por agente.
+- 🔤 La interfaz usa Inter en todas partes, mientras que el código, la salida de las herramientas, las rutas y los terminales siguen en JetBrains Mono, y se ha eliminado el ajuste de fuente de la interfaz.
+- 📚 La base de conocimientos muestra las entradas en una columna centrada, presenta las sesiones archivadas como un árbol de proyectos, grupos y sesiones principales con una vista «Por fecha», y permite alternar la base de conocimientos local entre tarjetas y lista.
+- 🔔 En macOS y Windows, al hacer clic en una notificación se trae al frente su propia ventana, de modo que una notificación de una ventana remota ya no coloca la ventana principal por encima de ella.
+- 📋 En macOS, pegar ya no bloquea la aplicación cuando la aplicación de origen del portapapeles deja de responder: VelaTerm desiste al cabo de 5 segundos y te lo indica.
+- 📝 En el editor de código fuente, «Seleccionar todo» desde el menú de macOS o el menú contextual selecciona el archivo completo, y al copiar ya no se pierden las líneas fuera de la pantalla.
+- 📏 El cuadro de entrada ya no crece y vuelve a encogerse después de enviar un mensaje.
+- 📂 Las colecciones Terminales, Tareas y Chats muestran su contenido desplegado, independientemente de lo que esté contraído en Proyectos.
+- 🔄 Las sesiones nuevas ya no fallan al sincronizarse con `cursor_expired` después de abrir la conversación de una subtarea.
+- 🧯 Reconectarse tras una desconexión prolongada con mucho contenido acumulado ya no deja la conversación bloqueada con «Enviar» desactivado.
+- 🪞 Las conexiones remotas a equipos Windows con Cygwin o Git Bash usan la aplicación de escritorio de VelaTerm que ya se ejecuta allí, por lo que enviar un mensaje ya no falla mientras esa aplicación ejecuta la sesión.
+- ⚡ Indexar conversaciones largas de Codex consume aproximadamente la mitad de tiempo de CPU.
+- 🔗 Los enlaces a artefactos de Claude se abren en tu navegador predeterminado.
+- 🗄️ El botón «Sesiones archivadas» ha pasado de la barra de pestañas a la barra de actividad.
+
 ## v0.2.15 — 2026-11-03
 
 - 🆕 Una pestaña «Nueva sesión» te permite elegir el proyecto, el agente, el modelo, el esfuerzo de razonamiento, los permisos, la vista y un worktree independiente alrededor de un cuadro de entrada centrado, y después inicia la sesión con tu primera tarea; ábrela desde «Nueva sesión…» en los menús de nueva sesión, con el botón de estrella de la barra de pestañas o desde el panel central vacío.

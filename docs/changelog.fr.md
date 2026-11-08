@@ -1,3 +1,33 @@
+## v0.3.0 — 2026-11-08
+
+- 🗂️ Les sessions se répartissent désormais en trois types, Tâche, Projet et Discussion, à choisir en haut de la page Nouvelle session, et la barre latérale gauche s’organise en collections fixes Projets, Terminaux, Tâches et Discussions, la collection Terminaux listant tous les terminaux en cours d’exécution et les agents qui y sont détectés.
+- 🧭 Une nouvelle barre d’activité, le long du bord gauche, permet de basculer entre Projets, Terminaux, Tâches, Discussions, Sessions archivées et Base de connaissances, et regroupe en bas Paramètres, Compte, Votre avis, Partager et Centre de jeux.
+- 📦 Une collection peut être archivée en entier avec « Archiver la collection » dans son menu contextuel, et la restauration de l’une de ses sessions la fait réapparaître.
+- 🆕 Sur la page Nouvelle session, le projet, l’agent, le modèle, l’effort de raisonnement et les autorisations se choisissent dans une carte de réglages placée au-dessus de la zone de saisie, et la liste des projets permet de créer, d’importer ou de cloner un projet sans quitter la page.
+- 🩺 À l’ouverture d’une conversation, l’application vérifie que son agent est installé et connecté : si ce n’est pas le cas, une invite d’installation ou un panneau de connexion s’affiche, et le bouton « Envoyer » reste désactivé tant que l’agent n’est pas prêt.
+- 🔧 Un agent n’est considéré comme installé que s’il s’exécute réellement : une installation inachevée ou une mise à niveau défectueuse affiche donc le guide d’installation, les installations en un clic ne se terminent qu’une fois l’agent démarré, et une mise à jour après laquelle l’agent ne peut plus démarrer est signalée comme incomplète.
+- 🪟 La nouvelle commande `vartifact <file|URL>` ouvre un fichier dans un panneau à côté de la conversation, avec un aperçu en direct pour le HTML et des vues modifiables pour le Markdown, les images et le code, que ⌘S enregistre, tandis que `vopen` ouvre désormais toujours un onglet.
+- 💤 Les suggestions grisées en ligne dans le terminal sont désormais désactivées par défaut et la complétion revient à « Tab uniquement » ; un réglage « En ligne + Tab » existant passe une seule fois à « Tab uniquement » avec cette mise à jour, et vous pouvez les réactiver dans les réglages.
+- ⌨️ En mode « En ligne + Tab », le nouveau réglage « Touche Tab » permet d’accepter la suggestion grisée avec Tab ; un second appui sur Tab l’annule et affiche la liste des correspondances, et la barre de titre du terminal indique les touches disponibles tant qu’une suggestion est visible.
+- 🎨 La modification d’une ligne de commande Zsh ne grise plus le texte déjà saisi, et la description du mode de suggestion dans les paramètres correspond au mode sélectionné.
+- 📡 La complétion par Tab sur une connexion distante répond en un seul aller-retour.
+- 💬 Les sessions ZCode permettent d’ajouter une consigne avec Option/Alt+Enter : le message rejoint le tour en cours après le prochain appel d’outil.
+- 🔑 ZCode 3.15 et les versions ultérieures permettent de se connecter avec OAuth, et un GLM Coding Plan acheté n’est plus signalé comme absent ou épuisé.
+- 📥 Les sessions de Pi, OMP, ZCode et DeepSeek Harness peuvent être importées, et la boîte de dialogue « Importer des sessions » permet de filtrer par agent.
+- 🔤 L’interface utilise Inter partout, tandis que le code, la sortie des outils, les chemins et les terminaux restent en JetBrains Mono, et le réglage de police de l’interface a été supprimé.
+- 📚 La base de connaissances affiche les entrées dans une colonne centrée, présente les sessions archivées sous forme d’arborescence de projets, de groupes et de sessions parentes avec une vue « Par date », et permet d’afficher la base de connaissances locale en cartes ou en liste.
+- 🔔 Sous macOS et Windows, un clic sur une notification met au premier plan la fenêtre dont elle provient : une notification issue d’une fenêtre distante ne fait plus passer la fenêtre principale par-dessus.
+- 📋 Sous macOS, coller ne fige plus l’application lorsque l’application d’origine du presse-papiers cesse de répondre : VelaTerm abandonne au bout de 5 secondes et vous en informe.
+- 📝 Dans l’éditeur de source, « Tout sélectionner » depuis le menu macOS ou le menu contextuel sélectionne tout le fichier, et la copie n’omet plus les lignes hors de l’écran.
+- 📏 La zone de saisie ne s’agrandit plus pour se réduire de nouveau après l’envoi d’un message.
+- 📂 Les collections Terminaux, Tâches et Discussions affichent leur contenu déplié, quels que soient les éléments repliés dans Projets.
+- 🔄 Les nouvelles sessions n’échouent plus à se synchroniser avec `cursor_expired` après l’ouverture de la conversation d’une sous-tâche.
+- 🧯 Une reconnexion après une longue déconnexion, avec beaucoup de contenu accumulé, ne laisse plus la conversation bloquée avec le bouton « Envoyer » désactivé.
+- 🪞 Les connexions distantes vers un hôte Windows utilisant Cygwin ou Git Bash passent par l’application de bureau VelaTerm déjà ouverte sur cet hôte, et l’envoi d’un message n’échoue plus pendant qu’elle exécute la session.
+- ⚡ L’indexation des longues conversations Codex consomme environ deux fois moins de temps processeur.
+- 🔗 Les liens vers des artefacts Claude s’ouvrent dans votre navigateur par défaut.
+- 🗄️ Le bouton « Sessions archivées » est passé de la barre d’onglets à la barre d’activité.
+
 ## v0.2.15 — 2026-11-03
 
 - 🆕 Un onglet Nouvelle session permet de choisir, autour d’une zone de saisie centrée, le projet, l’agent, le modèle, l’effort de raisonnement, les autorisations, la vue et un worktree isolé, puis démarre la session avec votre première tâche ; il s’ouvre depuis « Nouvelle session… » dans les menus de nouvelle session, depuis le bouton en forme d’étoile de la barre d’onglets ou depuis le volet central vide.

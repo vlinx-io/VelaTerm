@@ -3,8 +3,6 @@
 import type en from "./en";
 
 const de: typeof en = {
-  "panel.averageOutput": "mittlere Ausgaberate",
-  "panel.averageOutputHint": "Geschätzte Anzahl der pro Sekunde ausgegebenen Tokens, berechnet aus der gemessenen Antwortzeit und einschließlich gemeldeter Reasoning-Tokens. Werkzeugausführung und Wartezeiten auf Benutzereingaben werden nicht berücksichtigt. Wenn sich Verbrauch und Zeitmessung nicht zuverlässig zuordnen lassen, wird kein Wert angezeigt. Dies ist nicht die reine Dekodiergeschwindigkeit des Modells.",
   "panel.turnStats": "Statistik der Runde",
   "panel.fileCount": (n: number) => n === 1 ? "1 Datei" : `${n} Dateien`,
   "panel.showChangedFiles": "In dieser Runde geänderte Dateien anzeigen",
@@ -202,20 +200,20 @@ const de: typeof en = {
   "nb.attach": "Datei anhängen",
   "nb.browse": "Durchsuchen",
   "nb.chooseNote": "Mit einer Notiz beginnen",
-  "nb.closeHint": "Dieses Notizbuch aus der Liste entfernen. Die Dateien bleiben auf dem Datenträger erhalten.",
-  "nb.closeVault": "Notizbuch schließen",
+  "nb.closeHint": "Diese Wissensbasis aus der Liste entfernen. Die Dateien bleiben auf dem Datenträger erhalten.",
+  "nb.closeVault": "Wissensbasis schließen",
   "nb.conflict": "Die Datei wurde außerhalb dieses Editors geändert. Ihr Entwurf bleibt erhalten. Laden Sie die Datei neu oder speichern Sie den Entwurf als neue Notiz.",
-  "nb.copyTo": "In ein lokales Notizbuch kopieren",
+  "nb.copyTo": "In eine lokale Wissensbasis kopieren",
   "nb.createVault": "Wissensbasis erstellen",
   "nb.destination": "Zielpfad",
   "nb.download": "Herunterladen",
   "nb.downloadHint": "Laden Sie diesen Anhang herunter, um ihn in einer anderen Anwendung zu öffnen.",
-  "nb.empty": "Öffnen Sie einen Ordner oder erstellen Sie ein Notizbuch, um mit dem Schreiben zu beginnen.",
+  "nb.empty": "Öffnen Sie einen Ordner oder erstellen Sie eine Wissensbasis, um mit dem Schreiben zu beginnen.",
   "nb.emptyImport": "Es wurden keine importierbaren Dateien ausgewählt.",
   "nb.emptyNotes": "Notizen werden als Markdown-Dateien gespeichert.",
   "nb.emptyOutline": "Die Überschriften des Dokuments erscheinen hier.",
   "nb.emptyTrash": "Der Papierkorb ist leer.",
-  "nb.error": "Das Notizbuch ist nicht erreichbar. Prüfen Sie die Verbindung und den Ordner und versuchen Sie es erneut.",
+  "nb.error": "Die Wissensbasis ist nicht erreichbar. Prüfen Sie die Verbindung und den Ordner und versuchen Sie es erneut.",
   "nb.exists": "Das Ziel ist bereits vorhanden. Wählen Sie einen anderen Namen oder Ordner.",
   "nb.favorites": "Favoriten",
   "nb.files": "Dateien",
@@ -223,6 +221,9 @@ const de: typeof en = {
   "nb.generatedHint": "Aus Ihren Sitzungen aufbereitetes Wissen mit Quellen und Versionsverlauf.",
   "nb.homeHint": "Durchsuchen Sie die Sitzungswissensdatenbank und lokale Wissensbasen.",
   "nb.homeSearch": "Sitzungswissen und lokale Notizen durchsuchen…",
+  "nb.layout": "Layout",
+  "nb.layoutCards": "Karten",
+  "nb.layoutList": "Liste",
   "nb.loadMore": "Mehr laden",
   "nb.import": "Importieren",
   "nb.importFiles": "Dateien auswählen",
@@ -256,7 +257,7 @@ const de: typeof en = {
   "nb.local": "Lokale Dateien",
   "nb.localVaults": "Lokale Wissensbasen",
   "nb.move": "Umbenennen oder verschieben",
-  "nb.moveHint": "Geben Sie einen Pfad relativ zum Stammordner des Notizbuchs ein. Beim Verschieben werden vorhandene Notizlinks aktualisiert.",
+  "nb.moveHint": "Geben Sie einen Pfad relativ zum Stammordner der Wissensbasis ein. Beim Verschieben werden vorhandene Notizlinks aktualisiert.",
   "nb.name": "Name",
   "nb.newFolder": "Neuer Ordner",
   "nb.newNote": "Neue Notiz",
@@ -290,27 +291,26 @@ const de: typeof en = {
   "nb.searchThisVault": "Diese Wissensbasis",
   "nb.skipped": "Übersprungen",
   "nb.split": "Geteilte Ansicht",
-  "nb.tooLarge": "Die Datei oder Auswahl überschreitet die Grenzen des Notizbuchs.",
+  "nb.tooLarge": "Die Datei oder Auswahl überschreitet die Grenzen der Wissensbasis.",
   "nb.trash": "Papierkorb",
-  "nb.trashHint": "Dieses Element in den Papierkorb des Notizbuchs verschieben. Es kann später wiederhergestellt werden.",
+  "nb.trashHint": "Dieses Element in den Papierkorb der Wissensbasis verschieben. Es kann später wiederhergestellt werden.",
   "nb.unsaved": "Ungespeicherte Änderungen",
   "nb.vaults": "Wissensbasen",
   "nb.view": "Ansichtsmodus",
-  "nb.welcome": "Ihre Notizbücher",
-  "nb.welcomeText": "Schreiben Sie frei, verknüpfen Sie Gedanken und bewahren Sie Ihre Notizen in gewöhnlichen lokalen Dateien auf. Öffnen Sie einen vorhandenen Markdown-Ordner oder importieren Sie Dokumente in ein neues Notizbuch.",
+  "nb.welcome": "Ihre Wissensbasen",
+  "nb.welcomeText": "Schreiben Sie frei, verknüpfen Sie Gedanken und bewahren Sie Ihre Notizen in gewöhnlichen lokalen Dateien auf. Öffnen Sie einen vorhandenen Markdown-Ordner oder importieren Sie Dokumente in eine neue Wissensbasis.",
   "memory.globalMemory": "Sitzungswissensdatenbank",
   "memory.collections": "Archivierte Sitzungen",
   "memory.collectionConversation": "Konversation",
   "memory.collectionEmptyEntries": "Für diese Konversation gibt es noch keine Wissenseinträge.",
   "memory.collapseAllProjects": "Alle Projekte einklappen",
   "memory.expandAllProjects": "Alle Projekte ausklappen",
-  "memory.title": "Wissensdatenbank",
-  "memory.add": "Zur Wissensdatenbank hinzufügen",
+  "memory.title": "Wissensbasis",
+  "memory.add": "Zur Wissensbasis hinzufügen",
   "memory.intro": "Wissen nach Projekt und Sitzung organisieren. Gespeicherte Einträge bleiben unabhängig von ihren Quellen und können manuell bearbeitet werden.",
   "memory.entries": "Wissenseinträge",
   "memory.emptyJobs": "Noch keine Verarbeitungen.",
   "memory.jobs": "Verarbeitungsverlauf",
-  "memory.search": "Titel und Inhalte durchsuchen…",
   "memory.empty": "Keine passenden Einträge. Erstellen Sie Wissenseinträge aus einer Sitzung oder legen Sie einen Eintrag manuell an.",
   "memory.emptyDetail": "Wählen Sie einen Eintrag, um Inhalte, Verknüpfungen und Quellen zu lesen.",
   "memory.new": "Neuer Eintrag",
@@ -319,7 +319,6 @@ const de: typeof en = {
   "memory.content": "Inhalt (Markdown)",
   "memory.tags": "Tags (durch Kommas getrennt)",
   "memory.related": "Verwandte Einträge",
-  "memory.backlinks": "Verweise auf diesen Eintrag",
   "memory.sources": "Quellen",
   "memory.history": "Versionsverlauf",
   "memory.restore": "Diese Version wiederherstellen",
@@ -362,7 +361,7 @@ const de: typeof en = {
   "memory.interrupted": "Die Verarbeitung wurde unterbrochen. Sie können sie mit dem gespeicherten Quellstand erneut starten.",
   "memory.tooLarge": "Quelle, Kontext oder Ausgabe überschreitet die unterstützte Größe. Nichts wurde gekürzt oder gespeichert.",
   "memory.invalidOutput": "Der Agent hat ungültige strukturierte Daten zurückgegeben. Nichts wurde gespeichert. Versuchen Sie es erneut oder wählen Sie einen anderen Agenten.",
-  "memory.loadError": "Die Wissensdatenbank konnte nicht geladen werden. Prüfen Sie die Verbindung und versuchen Sie es erneut.",
+  "memory.loadError": "Die Wissensbasis konnte nicht geladen werden. Prüfen Sie die Verbindung und versuchen Sie es erneut.",
   "memory.unsaved": "Nicht gespeicherte Änderungen verwerfen?",
   "memory.source": "Gespeicherter Quellstand",
 
@@ -378,6 +377,8 @@ const de: typeof en = {
   "chat.imageCopy": "Bild kopieren",
   "chat.imageSave": "Bild speichern",
   "chat.imageActionFailed": "Die Bildaktion konnte nicht ausgeführt werden. Bitte versuchen Sie es erneut.",
+  "clipboard.unresponsive":
+    "Die Quell-App der Zwischenablage reagiert nicht, daher wurde nichts eingefügt. Bitte versuchen Sie es gleich noch einmal.",
   "common.copy": "Kopieren", // Copy
   "common.cut": "Ausschneiden", // Cut
   "common.paste": "Einfügen", // Paste
@@ -823,10 +824,9 @@ const de: typeof en = {
   "settings.recordSessionsHint":
     "Standardmäßig aus. Wenn aktiviert, wird die Terminalausgabe in einer Protokolldatei für Archiv-Wiedergabe und Suche gespeichert. Einfache Terminalsitzungen werden nie aufgezeichnet; Agent-Sitzungen lesen stattdessen ihr eigenes Transkript.", // Record session logs hint
   "settings.fonts": "Fonts", // TODO translate
-  "settings.uiFont": "Interface font", // TODO translate
-  "settings.uiFontSize": "Interface size", // TODO translate
-  "settings.termFont": "Terminal font", // TODO translate
-  "settings.termFontSize": "Terminal size", // TODO translate
+  "settings.uiFontSize": "Schriftgröße der Oberfläche",
+  "settings.termFont": "Schriftart des Terminals",
+  "settings.termFontSize": "Schriftgröße des Terminals",
   "settings.termLineHeight": "Zeilenhöhe im Terminal",
   "settings.chatTypography": "Unterhaltungsansicht",
   "settings.chatTypographyHint": "Diese Schrifteinstellungen sind unabhängig vom Terminal und werden sofort wirksam.",
@@ -849,7 +849,7 @@ const de: typeof en = {
   "settings.composerChip.tasks": "Hintergrundaufgaben",
   "settings.composerChip.account": "Konto",
   "settings.composerChip.codexCredits": "Codex-Reset-Guthaben",
-  "settings.fontDefault": "Default", // TODO translate
+  "settings.fontDefault": "Standard",
   "settings.fontCustom": "Custom…", // TODO translate
   "settings.fontListUnavailable": "Die Liste der Systemschriftarten ist nicht verfügbar. Sie können einen Schriftnamen manuell eingeben.",
   "settings.fontUnconfirmed": "Die Verfügbarkeit dieser Schriftart konnte nicht bestätigt werden.",
@@ -1086,6 +1086,7 @@ const de: typeof en = {
   "tree.killProcessConfirm": (name: string) => `Den Prozess für „${name}“ beenden? Die aktuelle Aufgabe wird unterbrochen. Gespeicherte Gesprächsverläufe und Dateien bleiben erhalten.`,
   "tree.archiveSession": "Sitzung archivieren", // Archive Session
   "tree.archiveGroup": "Gruppe archivieren", // Archive Group
+  "tree.archiveCollection": "Sammlung archivieren", // Archive Collection
   // Temporary (draft) sessions
   "tree.scratchTag": "temp", // scratch
   "tree.persistSession": "In dauerhafte Sitzung umwandeln…", // Make Permanent Session…
@@ -1278,10 +1279,12 @@ const de: typeof en = {
   "importSessions.results": ({ count }: { count: number }) => `Ergebnisse: ${count}`,
   "importSessions.selected": ({ count }: { count: number }) => `Ausgewählt: ${count}`,
   "importSessions.clearSelection": "Auswahl aufheben",
-  "importSessions.clearSearch": "Suche zurücksetzen",
+  "importSessions.clearFilters": "Filter zurücksetzen",
+  "importSessions.agentFilter": "Nach Agent filtern",
+  "importSessions.allAgents": "Alle Agenten",
   "importSessions.noHistory": "Für dieses Projektverzeichnis wurden keine bisherigen Sitzungen gefunden.",
   "importSessions.title": "Sitzungen importieren",
-  "importSessions.description": "Suchen Sie bestehende Codex-, Claude-, OpenCode- und Kiro-Sitzungen mit dem Arbeitsverzeichnis dieses Projekts. Wählen Sie Sitzungen aus, um sie dem Projekt hinzuzufügen, und öffnen Sie anschließend eine Sitzung, um das Gespräch fortzusetzen. Für Kiro können derzeit nur reine Textverläufe angezeigt werden.",
+  "importSessions.description": "Suchen Sie bestehende Codex-, Claude-, OpenCode-, Pi-, OMP-, ZCode-, DeepSeek- und Kiro-Sitzungen mit dem Arbeitsverzeichnis dieses Projekts. Wählen Sie Sitzungen aus, um sie dem Projekt hinzuzufügen, und öffnen Sie anschließend eine Sitzung, um das Gespräch fortzusetzen. Für Kiro können derzeit nur reine Textverläufe angezeigt werden.",
   "importSessions.search": "Nach Titel, Agent oder Sitzungs-ID suchen",
   "importSessions.empty": "Keine passenden Sitzungen gefunden.",
   "importSessions.imported": "Bereits importiert",
@@ -1465,6 +1468,7 @@ const de: typeof en = {
   "agentUpdate.unchanged": (version) => `Der Befehl ist abgeschlossen, die installierte Version ist aber weiterhin v${version}. Prüfen Sie die Ausgabe oben.`,
   "agentUpdate.finished": "Der Update-Befehl ist abgeschlossen. Prüfen Sie die Ausgabe oben.",
   "agentUpdate.failed": "Das Update wurde nicht abgeschlossen. Prüfen Sie die Ausgabe oben, oder kopieren Sie den Befehl und führen Sie ihn in einem Terminal aus.",
+  "agentUpdate.broken": (label) => `${label} startet nach dem Update nicht, das Update ist also unvollständig. Prüfen Sie die Ausgabe oben, oder installieren Sie ${label} neu.`,
   "agentUpdate.timedOut": "Das Update wurde nach 15 Minuten abgebrochen. Kopieren Sie den Befehl und führen Sie ihn in einem Terminal aus.",
   "agentUpdate.restartHint": "Diese Unterhaltung verwendet noch die vorherige Version. Starten Sie den Agenten neu, um zu wechseln: Die Unterhaltung bleibt erhalten, und die neue Version startet mit Ihrer nächsten Nachricht.",
   "agentUpdate.restart": "Agent neu starten",
@@ -2267,6 +2271,8 @@ const de: typeof en = {
   "chat.auth.zcode.bigmodel": "Mit BigModel anmelden",
   "chat.auth.zcode.noPlan.zai": "Sie sind bei ZCode mit Z.ai angemeldet, aber für dieses Z.ai-Konto ist kein GLM Coding Plan verfügbar oder das Kontingent ist aufgebraucht. Wenn Sie Ihren Plan bei BigModel abgeschlossen haben, öffnen Sie das Menü „ZCode-Konto“ und wählen Sie „Mit BigModel anmelden“.",
   "chat.auth.zcode.noPlan.bigmodel": "Sie sind bei ZCode mit BigModel angemeldet, aber für dieses BigModel-Konto ist kein GLM Coding Plan verfügbar oder das Kontingent ist aufgebraucht. Wenn Sie Ihren Plan bei Z.ai abgeschlossen haben, öffnen Sie das Menü „ZCode-Konto“ und wählen Sie „Mit Z.ai anmelden“.",
+  "chat.auth.zcode.noModels.zai": "ZCode hat für Ihre Anmeldung mit Z.ai keinen GLM Coding Plan gefunden, daher sind keine Modelle verfügbar. Öffnen Sie das Menü „ZCode-Konto“ und wählen Sie „Mit Z.ai anmelden“, um sich erneut anzumelden. Wenn Sie Ihren Plan bei BigModel abgeschlossen haben, wählen Sie stattdessen „Mit BigModel anmelden“.",
+  "chat.auth.zcode.noModels.bigmodel": "ZCode hat für Ihre Anmeldung mit BigModel keinen GLM Coding Plan gefunden, daher sind keine Modelle verfügbar. Öffnen Sie das Menü „ZCode-Konto“ und wählen Sie „Mit BigModel anmelden“, um sich erneut anzumelden. Wenn Sie Ihren Plan bei Z.ai abgeschlossen haben, wählen Sie stattdessen „Mit Z.ai anmelden“.",
   "chat.resetCredits.label": (n: string) => `Zurücksetzungsguthaben: ${n}`,
   "chat.resetCredits.title": "Guthaben zum Zurücksetzen der Codex-Nutzungslimits",
   "chat.resetCredits.unknown": "Das Zurücksetzungsguthaben ist nicht verfügbar.",
@@ -2353,6 +2359,15 @@ const de: typeof en = {
   "settings.completionOff": "Aus",
   "settings.completionUnavailable": "Einstellungen konnten nicht geladen oder gespeichert werden.",
   "settings.completionHint": "Beim Tippen in Zsh erscheint der zuletzt verwendete passende Befehl aus dem Verlauf abgeblendet hinter dem Cursor; mit → oder Ende übernimmst du ihn. Tab verhält sich wie in der Shell: Ein einzelner Treffer wird direkt eingefügt, ein gemeinsamer Anfang wird zuerst ergänzt, und bei mehreren verbleibenden Möglichkeiten öffnet sich die Liste. Gilt für neue Zsh-, Bash-4+-, Fish- und PowerShell-Terminals.",
+  "settings.completionTabOnlyHint": "Beim Tippen erscheinen keine Vorschläge. Mit Tab ergänzt du wie in der Shell: Ein einzelner Treffer wird direkt eingefügt, ein gemeinsamer Anfang wird zuerst ergänzt, und bei mehreren verbleibenden Möglichkeiten öffnet sich die Liste. Gilt für neue Zsh-, Bash-4+-, Fish- und PowerShell-Terminals.",
+  "settings.completionTabKey": "Tab-Taste",
+  "settings.completionTabAccept": "Vorschlag übernehmen",
+  "settings.completionTabComplete": "Befehl vervollständigen",
+  "settings.completionTabAcceptHint": "Solange ein abgeblendeter Vorschlag angezeigt wird, übernimmt Tab ihn. Drückst du direkt danach noch einmal Tab, wird das rückgängig gemacht und die Trefferliste geöffnet. Auch mit → oder Ende übernimmst du einen Vorschlag.",
+  "settings.completionTabCompleteHint": "Tab vervollständigt immer den Befehl, auch wenn ein abgeblendeter Vorschlag angezeigt wird. Mit → oder Ende übernimmst du den Vorschlag.",
+  "term.completionTipAccept": "Vorschlag übernehmen",
+  "term.completionTipComplete": "Befehl vervollständigen",
+  "term.completionTipUndo": "Rückgängig und Treffer anzeigen",
 
   // Native texts of the mobile remote plugin (iOS, Android, download bridge). They reach the apps through native-text.json; {name} placeholders are replaced natively.
   "mobile.native.trustTitle": "Remote-Fingerabdruck bestätigen",
@@ -2536,7 +2551,6 @@ const de: typeof en = {
   "artifact.frameTitle": (name: string) => `Vorschau von ${name}`, // Preview of ${name}
   "newSession.menu": "Neue Sitzung…", // New Session…
   "newSession.heading": "Woran möchten Sie arbeiten?", // What should we work on?
-  "newSession.modelsUnavailable": "Die Modellliste ist nicht verfügbar. Das Standardmodell des Agenten wird verwendet.", // Model list unavailable. The agent’s default model will be used.
   "newSession.terminalOnly": "Nur Terminalansicht", // Terminal view only
   "newSession.conversationOnly": "Nur Gesprächsansicht", // Conversation view only
   "newSession.noConversationView": "Dieser Agent hat keine Gesprächsansicht. Die Sitzung wird in der Terminalansicht geöffnet.", // This agent has no conversation view, so the session opens in the terminal view.
@@ -2551,6 +2565,31 @@ const de: typeof en = {
   "newSession.worktreeNotRepo": "Ein separater Worktree erfordert ein Git-Repository.", // A separate worktree needs a Git repository.
   "newSession.worktreeName": "Name des Worktrees (optional)", // Worktree name (optional)
   "newSession.worktreeNameHint": "Benennt den neuen Ordner und Branch. Leer lassen, um den Sitzungsnamen zu verwenden.", // Names the new folder and branch. Leave empty to use the session name.
+  "newSession.typeLabel": "Sitzungstyp",
+  "newSession.typeTask": "Aufgabe",
+  "newSession.typeProject": "Projekt",
+  "newSession.typeChat": "Chat",
+  "newSession.typeTaskHint": "Erledigt etwas ohne Projekt, zum Beispiel den Import eines Projekts.",
+  "newSession.typeProjectHint": "Arbeitet im Ordner eines Projekts.",
+  "newSession.typeChatHint": "Ein reines Gespräch ohne Projekt und Dateien.",
+  "newSession.location": "Projekt oder Sammlung",
+  "newSession.locationSearch": "Projekte und Sammlungen filtern",
+  "newSession.collectionOption": "Sammlung",
+  "newSession.newTask": "Neue Aufgabensitzung",
+  "newSession.newChat": "Neue Chatsitzung",
+  "systemCollection.projects": "Projekte",
+  "systemCollection.agents": "Agenten",
+  "systemCollection.terminals": "Terminals",
+  "systemCollection.tasks": "Aufgaben",
+  "systemCollection.chat": "Chats",
+  "systemCollection.projectsHint": "Alle Projekte. Fest eingebaut und nicht löschbar.",
+  "systemCollection.agentsHint": "Agenten, die in Terminals laufen. Ein Agent verschwindet aus der Liste, sobald er beendet ist.",
+  "systemCollection.terminalsHint": "Terminals, die gerade laufen.",
+  "systemCollection.tasksHint": "Aufgabensitzungen, die zu keinem Projekt gehören.",
+  "systemCollection.chatHint": "Chatsitzungen.",
+  "sidebarSection.nav": "Seitenleistenbereiche",
+  "sidebarSection.noTasks": "Noch keine Aufgabensitzungen.",
+  "sidebarSection.noChats": "Noch keine Chatsitzungen.",
   "artifact.comment": "Kommentieren", // Comment
   "artifact.commentTitle": "Elemente der Seite anklicken und Kommentare für den Agenten hinterlassen", // Click elements in the page to leave comments for the agent
   "artifact.pickHint": "Klicken Sie auf ein Element der Seite, um es zu kommentieren. Esc beendet die Auswahl.", // Click an element in the page to comment on it. Press Esc to stop.
@@ -2566,6 +2605,55 @@ const de: typeof en = {
   "artifact.useOption": (id: string) => `${id} verwenden`, // Use ${id}
   "artifact.useOptionTitle": "Fügt eine Nachricht, diese Variante beizubehalten, in das Eingabefeld der Sitzung ein, die diese Seite geschrieben hat", // Put a message asking to keep this option in the message box of the session that wrote this page
   "artifact.useOptionCopyTitle": "Kopiert eine Nachricht, diese Variante beizubehalten", // Copy a message asking to keep this option
+  // Knowledge base and archived sessions pages.
+  "kb.overview": "Übersicht",
+  "kb.sources": "Quellen",
+  "kb.searchAll": "Wissen und Notizen durchsuchen…",
+  "kb.localHint": "Markdown-Ordner auf diesem Computer. Bearbeiten Sie sie hier oder in einem anderen Editor.",
+  "kb.archiveHint": "Abgeschlossene Unterhaltungen. Was sich zu behalten lohnt, können Sie zur Wissensbasis hinzufügen.",
+  "kb.recent": "Zuletzt aktualisiert",
+  "kb.openArchived": "Archivierte Sitzung öffnen",
+  "kb.editDetails": "Details bearbeiten",
+  "kb.moreActions": "Weitere Aktionen",
+  "archive.allSessions": "Alle Sitzungen",
+  "archive.projects": "Projekte",
+  "archive.allProjects": "Alle Projekte",
+  "archive.allAgents": "Alle Agenten",
+  "archive.anyKnowledge": "Mit oder ohne Wissen",
+  "archive.withKnowledge": "In der Wissensbasis",
+  "archive.withoutKnowledge": "Noch nicht hinzugefügt",
+  "archive.view": "Ansicht",
+  "archive.viewTree": "Baum",
+  "archive.viewTime": "Nach Datum",
+  "archive.newest": "Neueste zuerst",
+  "archive.oldest": "Älteste zuerst",
+  "archive.colSession": "Sitzung",
+  "archive.colProject": "Projekt",
+  "archive.colAgent": "Agent",
+  "archive.colKnowledge": "Wissen",
+  "archive.colArchived": "Archiviert",
+  "archive.restoreShort": "Wiederherstellen",
+  "kb.needsAttention": (count: string) => `${count} ${count === "1" ? "erfordert" : "erfordern"} Aufmerksamkeit`,
+  "kb.statusAttention": "Aktion erforderlich",
+  "kb.statusOrganized": "Aufbereitet",
+  "kb.organizedCount": (count: string) => `${count} aufbereitet`,
+  "kb.failedTimes": (count: string) => `${count}-mal fehlgeschlagen`,
+  "kb.succeededAfter": (count: string) => `Nach ${count} ${count === "1" ? "Fehlversuch" : "Fehlversuchen"} erfolgreich`,
+  "kb.fromSession": "Aus der Sitzung",
+  "kb.showAllTags": "Alle Tags anzeigen",
+  "kb.inKnowledgeBase": (count: string) => `${count} in der Wissensbasis`,
+  "kb.entriesCount": (count: string) => `${count} ${count === "1" ? "Eintrag" : "Einträge"}`,
+  "kb.entriesFrom": (count: string, sessions: string) => `${count === "1" ? "Eintrag" : "Einträge"} aus ${sessions} ${sessions === "1" ? "Sitzung" : "Sitzungen"}`,
+  "kb.notesIn": (count: string, folders: string) => `${count === "1" ? "Notiz" : "Notizen"} in ${folders} ${folders === "1" ? "Ordner" : "Ordnern"}`,
+  "kb.sessionsIn": (count: string, projects: string) => `${count === "1" ? "Sitzung" : "Sitzungen"} in ${projects} ${projects === "1" ? "Projekt" : "Projekten"}`,
+  "kb.lastArchived": "Zuletzt archiviert",
+  "nb.notesWord": (count: string) => count === "1" ? "Notiz" : "Notizen",
+  "archive.sessionsInProjects": (sessions: string, projects: string) => `${sessions} ${sessions === "1" ? "Sitzung" : "Sitzungen"} in ${projects} ${projects === "1" ? "Projekt" : "Projekten"}`,
+  "archive.collapseAll": "Alle einklappen",
+  "kb.andMore": (count: string) => `und ${count} weitere`,
+  "kb.searchEntries": "Einträge suchen…",
+  "kb.updatedOn": (date: string) => `Aktualisiert am ${date}`,
+  "archive.sessionsCount": (count: string) => `${count} ${count === "1" ? "Sitzung" : "Sitzungen"}`,
 };
 
 export default de;

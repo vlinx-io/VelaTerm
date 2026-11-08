@@ -192,8 +192,8 @@ export function TurnStatsView({ stats, state = "ready", cwd }: {
             <span className="m-k">cache hit</span>
             <span className="m-v">{stats?.cacheHitPercent == null ? "—" : `${stats.cacheHitPercent.toFixed(1)}%`}</span>
           </div>
-          <div className="turn-metric" title={t("panel.averageOutputHint")}>
-            <span className="m-k">{t("panel.averageOutput")}</span>
+          <div className="turn-metric" title="Estimated output tokens per second over measured response time, including reported reasoning. Excludes tool execution and user waits. Unavailable when usage and timing cannot be matched reliably. This is not pure model decoding speed.">
+            <span className="m-k">average output</span>
             <span className="m-v">{rate == null ? "—" : `${rate.toFixed(1)} tok/s`}</span>
           </div>
           <div className="turn-metric" title="Distinct paths from successful, explicitly recorded file edits. Shell edits and child-agent changes may not be reported.">

@@ -50,6 +50,7 @@ const COMMANDS: &[&str] = &[
     "agent_set_default_permission",
     "agent_turn_stats",
     "app_version",
+    "archive_collection",
     "archive_group",
     "cancel_clone_project",
     "chat_attach",

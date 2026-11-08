@@ -32,6 +32,22 @@ fn markdown(p: &Path) -> bool {
             || s.to_string_lossy().eq_ignore_ascii_case("markdown")
     })
 }
+/// Labels of the dates some notes open with. Followed by nothing but a date they say nothing about the note.
+const DATE_LABELS: &[&str] = &[
+    "created", "created at", "creation date", "updated", "updated at", "last updated", "modified", "date",
+    "创建时间", "创建日期", "更新时间", "更新日期", "修改时间", "最后更新", "日期",
+    "建立時間", "建立日期", "更新時間", "更新日期", "修改時間", "最後更新",
+];
+
+fn is_date_line(line: &str) -> bool {
+    let line = line.trim_start_matches(['>', '-', '*', ' ']).replace("**", "");
+    let Some((label, value)) = line.split_once([':', '：']) else { return false };
+    let value = value.trim();
+    DATE_LABELS.contains(&label.trim().to_lowercase().as_str())
+        && value.starts_with(|c: char| c.is_ascii_digit())
+        && value.chars().all(|c| c.is_ascii_digit() || " -/.:T年月日时分秒時".contains(c))
+}
+
 fn excerpt(content: &str) -> String {
     let body = content
         .strip_prefix("---\n")
@@ -42,6 +58,7 @@ fn excerpt(content: &str) -> String {
         .filter(|s| {
             !s.is_empty() && !s.starts_with(['#', '|']) && !s.starts_with("```") && *s != "---"
         })
+        .skip_while(|s| is_date_line(s))
         .take(4)
         .map(|s| {
             s.trim_start_matches(['-', '*', ' '])
@@ -775,4 +792,23 @@ fn attach_related(app: &AppCtx, entries: &mut [Hit]) -> Result<()> {
         entry.related = related;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod excerpt_tests {
+    use super::excerpt;
+
+    #[test]
+    fn excerpts_start_at_the_first_sentence_after_leading_dates() {
+        assert_eq!(excerpt("# Title\n\nCreated: 2026-11-01 12:36\n\nUpdated: 2026-11-02 09:00\n\nFirst sentence."), "First sentence.");
+        assert_eq!(excerpt("创建时间：2026-09-04 13:46\n系统负载和 CPU"), "系统负载和 CPU");
+        assert_eq!(excerpt("> **Created:** 2026-11-01\nBody"), "Body");
+    }
+
+    #[test]
+    fn excerpts_keep_lines_that_only_resemble_dates() {
+        assert_eq!(excerpt("Date: to be decided\nBody"), "Date: to be decided Body");
+        assert_eq!(excerpt("Intro\nCreated: 2026-11-01"), "Intro Created: 2026-11-01");
+        assert_eq!(excerpt("Date: 2026-11-01 meeting with the team\nBody"), "Date: 2026-11-01 meeting with the team Body");
+    }
 }

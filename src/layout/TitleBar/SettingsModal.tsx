@@ -62,6 +62,8 @@ const ACCENT_HEX: Record<string, string> = {
 const ACCENTS: AccentChoice[] = ["auto", "green", "blue", "amber", "violet"];
 
 /** Shared style for the font-size stepper's minus/plus buttons. */
+
+
 const STEP_BTN: React.CSSProperties = {
   width: 24,
   height: 26,
@@ -76,7 +78,6 @@ const STEP_BTN: React.CSSProperties = {
   cursor: "pointer",
   flex: "none",
 };
-
 
 /** Language picker. Writing the choice through to the backend as well keeps other shells in sync. */
 function LangSelect() {
@@ -195,7 +196,6 @@ function ComposerChipsSection() {
   );
 }
 
-/** Font-size stepper. Clicking the value resets it; null displays autoLabel for density-derived UI size. */
 function FontSizeStepper({
   value,
   onChange,
@@ -342,7 +342,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const setAutoContinueAtUsageLimit = useTermStore((s) => s.setAutoContinueAtUsageLimit);
   const soundEnabled = useTermStore((s) => s.soundEnabled);
   const toggleSound = useTermStore((s) => s.toggleSound);
-  const uiFontFamily = useTermStore((s) => s.uiFontFamily);
   const uiFontSize = useTermStore((s) => s.uiFontSize);
   const termFontFamily = useTermStore((s) => s.termFontFamily);
   const termFontSize = useTermStore((s) => s.termFontSize);
@@ -350,7 +349,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const chatFontFamily = useTermStore((s) => s.chatFontFamily);
   const chatFontSize = useTermStore((s) => s.chatFontSize);
   const chatLineHeight = useTermStore((s) => s.chatLineHeight);
-  const setUiFontFamily = useTermStore((s) => s.setUiFontFamily);
   const setUiFontSize = useTermStore((s) => s.setUiFontSize);
   const setTermFontFamily = useTermStore((s) => s.setTermFontFamily);
   const setTermFontSize = useTermStore((s) => s.setTermFontSize);
@@ -551,9 +549,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     ]}
                     onChange={setNavLayout}
                   />
-                </Field>
-                <Field label={t("settings.uiFont")}>
-                  <FontSelect fonts={fonts} value={uiFontFamily} onChange={setUiFontFamily} label={t("settings.uiFont")} />
                 </Field>
                 <Field label={t("settings.uiFontSize")}>
                   <FontSizeStepper

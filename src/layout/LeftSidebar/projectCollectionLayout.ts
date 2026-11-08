@@ -1,6 +1,7 @@
 //! Flatten collection membership independently of each project's own groups and sessions.
 
 import { collectionsFirst, isVirtualProject, type Project } from "../../types";
+import { isSystemCollection, SYSTEM_PROJECTS, systemOrder } from "./systemCollections";
 
 export interface ProjectListEntry {
   project: Project;
@@ -16,8 +17,13 @@ export function arrangeProjectsInCollections(
   const byId = new Map(projects.map(p => [p.id, p]));
   const children = new Map<string, Project[]>();
   const roots: Project[] = [];
+  // Only the fixed collections sit at the top level once they exist; anything else found there, such as a
+  // project created by an older client, is shown under Projects.
+  const fallback = byId.get(SYSTEM_PROJECTS);
   for (const project of projects) {
-    const parent = project.collectionId ? byId.get(project.collectionId) : undefined;
+    let parent = project.collectionId ? byId.get(project.collectionId) : undefined;
+    if (!parent && fallback && !isSystemCollection(project.id)) parent = fallback;
+    if (isSystemCollection(project.id)) parent = undefined;
     if (parent && isVirtualProject(parent) && parent.id !== project.id) {
       const members = children.get(parent.id) ?? [];
       members.push(project);
@@ -33,7 +39,8 @@ export function arrangeProjectsInCollections(
     out.push({ project, indent, projectCount: members.length });
     if (isExpanded(project)) for (const member of collectionsFirst(members)) visit(member, indent + 1);
   };
-  for (const project of collectionsFirst(roots)) visit(project, 0);
+  const rootOrder = collectionsFirst(roots).sort((a, b) => systemOrder(a.id) - systemOrder(b.id));
+  for (const project of rootOrder) visit(project, 0);
   // Unreachable cycles are shown as loose only; children of intentionally collapsed parents stay hidden.
   for (const project of projects) {
     let current: Project | undefined = project;
@@ -46,4 +53,16 @@ export function arrangeProjectsInCollections(
     if (current && chain.has(current.id)) visit(project, 0);
   }
   return out;
+}
+
+/**
+ * Entries of one top-level collection, one level shallower. The collection itself stays first with indent -1:
+ * it has no row of its own, but its sessions and groups are still listed, at the top level.
+ */
+export function sectionEntries(entries: ProjectListEntry[], rootId: string): ProjectListEntry[] {
+  const start = entries.findIndex(e => e.indent === 0 && e.project.id === rootId);
+  if (start < 0) return [];
+  let end = start + 1;
+  while (end < entries.length && entries[end].indent > 0) end++;
+  return entries.slice(start, end).map(e => ({ ...e, indent: e.indent - 1 }));
 }
