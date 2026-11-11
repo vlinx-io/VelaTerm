@@ -705,7 +705,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
                 <div>
                   <SectionTitle>{t("settings.catBehavior")}</SectionTitle>
-                  <Field label={t("settings.tabs")}>
+                  <Field label={t("settings.tabs")} hint={t("settings.tabsHint")}>
                     <Seg<"single" | "multi">
                       value={singleTabMode ? "single" : "multi"}
                       options={[
@@ -715,7 +715,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       onChange={(v) => setSingleTabMode(v === "single")}
                     />
                   </Field>
-                  <Field label={t("settings.dynamicStatusFilter")}>
+                  <Field label={t("settings.dynamicStatusFilter")} hint={t("settings.dynamicStatusFilterHint")}>
                     <Seg<"on" | "off">
                       value={dynamicStatusFilter ? "on" : "off"}
                       options={[
@@ -726,7 +726,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     />
                   </Field>
                   {singleTabMode && (
-                    <Field label={t("settings.maxLiveTabs")}>
+                    <Field label={t("settings.maxLiveTabs")} hint={t("settings.maxLiveTabsHint")}>
                       <Seg<string>
                         value={String(maxLiveTabs)}
                         options={[
@@ -739,7 +739,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       />
                     </Field>
                   )}
-                  <Field label={t("settings.spawnConfirm")}>
+                  <Field label={t("settings.spawnConfirm")} hint={t("settings.spawnConfirmHint")}>
                     <Seg<"on" | "off">
                       value={spawnConfirm ? "on" : "off"}
                       options={[
