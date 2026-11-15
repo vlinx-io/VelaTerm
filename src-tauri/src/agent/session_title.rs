@@ -214,11 +214,7 @@ fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: 
     let cwd = session.cwd.clone().or_else(|| app.pty().cwd(id))
         .or(repo::get_project_root(&app.db().conn.lock().unwrap(), &session.project_id)?);
     let cwd = usable_cwd(cwd.as_deref());
-    let env = if kind == session.kind { session.env_json.as_deref() } else { None };
-    let (mut command, stdin) = title_command(&bin, kind, &dir, raw_args.as_deref(), env, cwd)?;
-    // Keep prompt markers after model flags so a value-taking flag cannot consume another option.
-    let flags = super::inject::split_extra_args(extra.as_deref());
-    deliver_prompt(&mut command, kind, &dir, &flags, &prompt, stdin)?;
+    let (command, stdin) = prepared_title_command(&bin, kind, &session, &dir, raw_args.as_deref(), extra.as_deref(), &prompt, cwd)?;
     let count = prompt.chars().count();
     crate::diagnostics::record("INFO", "session_title", json!({
         "sessionId":id,"step":"ai_request","method":"AI",
@@ -231,7 +227,20 @@ fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: 
         "inputCount":messages.len(),"outputCount":0,"status":"started","durationMs":0
     }));
     let started = Instant::now();
-    let output = match headless::run_command_with_cancel(command, stdin.then_some(prompt.as_str()), TIMEOUT, Some(&task.cancelled)) {
+    let mut result = headless::run_command_with_cancel(command, stdin.then_some(prompt.as_str()), TIMEOUT, Some(&task.cancelled));
+    // A model can offer different reasoning levels than the agent default, and the CLI refuses the
+    // flag before any model call. Retry once with the model's own default instead of failing.
+    if effort_retry(kind, &selection, &result) {
+        crate::diagnostics::record("INFO", "session_title", json!({
+            "sessionId":id,"step":"ai_retry","method":"AI","agent":kind.as_str(),
+            "reason":"effort_unsupported","inputCount":messages.len(),"outputCount":0,
+            "durationMs":started.elapsed().as_millis() as u64
+        }));
+        let retry = selection_args(kind, &mut selection, model, Some(""))?;
+        let (command, stdin) = prepared_title_command(&bin, kind, &session, &dir, raw_args.as_deref(), retry.as_deref(), &prompt, cwd)?;
+        result = headless::run_command_with_cancel(command, stdin.then_some(prompt.as_str()), TIMEOUT, Some(&task.cancelled));
+    }
+    let output = match result {
         Ok(output) => output,
         Err(error) => {
             let code = match error { HeadlessError::Timeout(_) => "timeout", HeadlessError::Cancelled => "cancelled", _ => "agent_unavailable" };
@@ -391,6 +400,36 @@ fn deliver_prompt(
         command.arg(prompt);
     }
     Ok(())
+}
+
+/// Build the one-shot command and hand it the conversation.
+fn prepared_title_command(
+    bin: &str,
+    kind: SessionKind,
+    session: &Session,
+    dir: &WorkDir,
+    raw_args: Option<&str>,
+    extra: Option<&str>,
+    prompt: &str,
+    cwd: Option<&std::path::Path>,
+) -> Result<(std::process::Command, bool), String> {
+    let env = if kind == session.kind { session.env_json.as_deref() } else { None };
+    let (mut command, stdin) = title_command(bin, kind, dir, raw_args, env, cwd)?;
+    // Keep prompt markers after model flags so a value-taking flag cannot consume another option.
+    deliver_prompt(&mut command, kind, dir, &super::inject::split_extra_args(extra), prompt, stdin)?;
+    Ok((command, stdin))
+}
+
+/// Whether a refused reasoning level should be retried with the model's own default.
+fn effort_retry(
+    kind: SessionKind,
+    selection: &super::session_settings::Selection,
+    result: &Result<String, HeadlessError>,
+) -> bool {
+    kind == SessionKind::Grok
+        && selection.effort.as_deref().is_some_and(|effort| !effort.is_empty())
+        && matches!(result, Err(HeadlessError::Failed { stderr, .. })
+            if stderr.contains("unknown effort level") || stderr.contains("unknown reasoning effort"))
 }
 
 /// Keep account/provider configuration while replacing interactive transport and tool controls.
@@ -747,6 +786,37 @@ mod tests {
         let path = args.iter().position(|arg| arg == "--prompt-file").unwrap();
         assert_eq!(std::fs::read_to_string(&args[path + 1]).unwrap(), prompt);
         assert!(!args.iter().any(|arg| arg == "-p" || arg.contains("conversation conversation")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refused_reasoning_levels_retry_with_the_model_default() {
+        use std::os::unix::fs::PermissionsExt;
+        let (dir, _app, mut session) = fixture();
+        session.kind = SessionKind::Grok;
+        let path = dir.0.join("title-test-grok");
+        std::fs::write(&path, r#"#!/bin/sh
+case "$*" in
+  *--version*) echo 1.0.0 ;;
+  *--reasoning-effort*) echo "unknown effort level 'medium'" >&2; exit 1 ;;
+  *) echo '{"text":"{\"title\":\"Retried\"}"}' ;;
+esac
+"#).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let bin = path.to_string_lossy().into_owned();
+        session.agent_path = Some(bin.clone());
+        let mut selection = super::super::session_settings::Selection { model: Some("model".into()), effort: Some("medium".into()) };
+        let prompt = "conversation";
+        let timeout = std::time::Duration::from_secs(10);
+        let (command, stdin) = prepared_title_command(&bin, SessionKind::Grok, &session, &dir,
+            None, Some("--reasoning-effort medium"), prompt, None).unwrap();
+        let first = headless::run_command(command, stdin.then_some(prompt), timeout);
+        assert!(matches!(&first, Err(HeadlessError::Failed { stderr, .. }) if stderr.contains("unknown effort level")));
+        assert!(effort_retry(SessionKind::Grok, &selection, &first));
+        selection.effort = None;
+        let (command, stdin) = prepared_title_command(&bin, SessionKind::Grok, &session, &dir, None, None, prompt, None).unwrap();
+        let second = headless::run_command(command, stdin.then_some(prompt), timeout).unwrap();
+        assert_eq!(parse_title(&answer_text(SessionKind::Grok, &second).unwrap().0).unwrap(), "Retried");
     }
 
     #[test]
