@@ -213,19 +213,12 @@ fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: 
     let dir = WorkDir::new(app)?;
     let cwd = session.cwd.clone().or_else(|| app.pty().cwd(id))
         .or(repo::get_project_root(&app.db().conn.lock().unwrap(), &session.project_id)?);
-    let cwd = cwd.as_deref().filter(|path| !path.is_empty()).map(std::path::Path::new);
+    let cwd = usable_cwd(cwd.as_deref());
     let env = if kind == session.kind { session.env_json.as_deref() } else { None };
     let (mut command, stdin) = title_command(&bin, kind, &dir, raw_args.as_deref(), env, cwd)?;
     // Keep prompt markers after model flags so a value-taking flag cannot consume another option.
     let flags = super::inject::split_extra_args(extra.as_deref());
-    if stdin {
-        command.args(&flags);
-        if kind == SessionKind::Codex { command.arg("-"); }
-    } else {
-        command.args(&flags);
-        if kind == SessionKind::Grok { command.arg("-p"); }
-        command.arg(&prompt);
-    }
+    deliver_prompt(&mut command, kind, &dir, &flags, &prompt, stdin)?;
     let count = prompt.chars().count();
     crate::diagnostics::record("INFO", "session_title", json!({
         "sessionId":id,"step":"ai_request","method":"AI",
@@ -356,11 +349,48 @@ pub(crate) fn available_binary(app: &AppCtx, kind: SessionKind, path: Option<&st
 fn pick_agent(app: &AppCtx, session: &Session, bytes: usize, chosen: Option<SessionKind>) -> Result<(SessionKind, String), String> {
     let kind = chosen.unwrap_or(session.kind);
     if !AGENTS.contains(&kind) { return Err("session_title:agent_unavailable".into()); }
-    if bytes > headless::ARG_PROMPT_LIMIT && !headless::spec(kind).unwrap().accepts_long_prompt() {
+    if bytes > headless::ARG_PROMPT_LIMIT && !accepts_long_prompt(kind) {
         return Err("session_title:agent_unavailable".into());
     }
     let path = if kind == session.kind { session.agent_path.as_deref() } else { None };
     available_binary(app, kind, path).map(|bin| (kind, bin)).ok_or("session_title:agent_unavailable".into())
+}
+
+/// Whether the title command can hand this agent a conversation too large for an argument.
+fn accepts_long_prompt(kind: SessionKind) -> bool {
+    // Grok receives the conversation through `--prompt-file`.
+    kind == SessionKind::Grok || headless::spec(kind).is_some_and(|spec| spec.accepts_long_prompt())
+}
+
+/// The session directory is only a working context; a removed project or worktree must not turn
+/// into a spawn failure. An unusable path leaves the private work directory in charge.
+fn usable_cwd(cwd: Option<&str>) -> Option<&std::path::Path> {
+    cwd.filter(|path| !path.is_empty()).map(std::path::Path::new).filter(|path| path.is_dir())
+}
+
+/// Hand the conversation to the one-shot command. Grok reads a prompt file, which keeps long
+/// conversations off the argument list; agents that read stdin get it through the pipe.
+fn deliver_prompt(
+    command: &mut std::process::Command,
+    kind: SessionKind,
+    dir: &WorkDir,
+    flags: &[String],
+    prompt: &str,
+    stdin: bool,
+) -> Result<(), String> {
+    command.args(flags);
+    if stdin {
+        if kind == SessionKind::Codex { command.arg("-"); }
+        return Ok(());
+    }
+    if kind == SessionKind::Grok {
+        let path = dir.0.join("prompt.txt");
+        std::fs::write(&path, prompt).map_err(|_| "session_title:failed")?;
+        command.arg("--prompt-file").arg(path);
+    } else {
+        command.arg(prompt);
+    }
+    Ok(())
 }
 
 /// Keep account/provider configuration while replacing interactive transport and tool controls.
@@ -502,8 +532,19 @@ pub(crate) fn answer_text(kind: SessionKind, output: &str) -> Result<(String, Va
         if value.get("is_error").and_then(Value::as_bool) == Some(true) {
             return Err("session_title:failed".into());
         }
-        let text = value.get("text").and_then(Value::as_str)
-            .ok_or("session_title:invalid")?.to_string();
+        let answer = value.get("structuredOutput").filter(|output| !output.is_null()).cloned()
+            .or_else(|| value.get("text").and_then(Value::as_str).map(|text| Value::String(text.to_string())))
+            .ok_or("session_title:invalid")?;
+        // Some models answer with the title itself rather than the requested object.
+        let text = match answer {
+            Value::Object(_) => answer.to_string(),
+            Value::String(title) => match serde_json::from_str::<Value>(title.trim()) {
+                Ok(Value::Object(_)) => title,
+                Ok(Value::String(inner)) => json!({"title": inner}).to_string(),
+                _ => json!({"title": title}).to_string(),
+            },
+            _ => return Err("session_title:invalid".into()),
+        };
         return Ok((text, value.get("usage").cloned().unwrap_or(Value::Null)));
     }
     if kind == SessionKind::Claude {
@@ -690,6 +731,35 @@ mod tests {
     }
 
     #[test]
+    fn grok_titles_deliver_long_conversations_through_a_prompt_file() {
+        let (dir, app, mut session) = fixture();
+        session.kind = SessionKind::Grok;
+        session.agent_path = Some(agent_bin(&dir));
+        assert_eq!(pick_agent(&app, &session, headless::ARG_PROMPT_LIMIT + 1, None).unwrap().0, SessionKind::Grok);
+        assert!(accepts_long_prompt(SessionKind::Grok));
+        assert!(accepts_long_prompt(SessionKind::Claude));
+        assert!(!accepts_long_prompt(SessionKind::Pi));
+
+        let (mut command, stdin) = title_command(session.agent_path.as_deref().unwrap(), SessionKind::Grok, &dir, None, None, None).unwrap();
+        let prompt = "conversation ".repeat(headless::ARG_PROMPT_LIMIT / 8);
+        deliver_prompt(&mut command, SessionKind::Grok, &dir, &[], &prompt, stdin).unwrap();
+        let args: Vec<_> = command.get_args().map(|arg| arg.to_string_lossy().to_string()).collect();
+        let path = args.iter().position(|arg| arg == "--prompt-file").unwrap();
+        assert_eq!(std::fs::read_to_string(&args[path + 1]).unwrap(), prompt);
+        assert!(!args.iter().any(|arg| arg == "-p" || arg.contains("conversation conversation")));
+    }
+
+    #[test]
+    fn missing_session_directories_leave_the_private_work_directory_in_charge() {
+        let (dir, _, _) = fixture();
+        let existing = dir.0.to_string_lossy().to_string();
+        assert_eq!(usable_cwd(Some(&existing)), Some(dir.0.as_path()));
+        assert_eq!(usable_cwd(Some("/definitely/not/a/project")), None);
+        assert_eq!(usable_cwd(Some("")), None);
+        assert_eq!(usable_cwd(None), None);
+    }
+
+    #[test]
     fn title_validation_preserves_unicode_and_rejects_invalid_answers() {
         assert_eq!(parse_title(r#"{"title":" 修复登录流程 "}"#).unwrap(), "修复登录流程");
         assert_eq!(parse_title("```json\n{\"title\":\"Login flow\"}\n```").unwrap(), "Login flow");
@@ -707,6 +777,12 @@ mod tests {
         let (text, usage) = answer_text(SessionKind::Grok, r#"{"text":"{\"title\":\"Grok title\"}","stopReason":"end_turn","usage":{"inputTokens":42}}"#).unwrap();
         assert_eq!(parse_title(&text).unwrap(), "Grok title");
         assert_eq!(usage["inputTokens"], 42);
+        let (text, _) = answer_text(SessionKind::Grok, r#"{"structuredOutput":{"title":"Structured title"},"text":"ignored"}"#).unwrap();
+        assert_eq!(parse_title(&text).unwrap(), "Structured title");
+        let (text, _) = answer_text(SessionKind::Grok, r#"{"text":"\"Bare title\"","structuredOutput":null}"#).unwrap();
+        assert_eq!(parse_title(&text).unwrap(), "Bare title");
+        let (text, _) = answer_text(SessionKind::Grok, r#"{"text":"Plain title","structuredOutput":null}"#).unwrap();
+        assert_eq!(parse_title(&text).unwrap(), "Plain title");
         assert_eq!(answer_text(SessionKind::Grok, r#"{"text":"{\"title\":\"Grok title\"}","is_error":true}"#).unwrap_err(), "session_title:failed");
         assert_eq!(answer_text(SessionKind::Grok, r#"{"is_error":true}"#).unwrap_err(), "session_title:failed");
         let reply = "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"title\\\":\\\"Flow\\\"}\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"output_tokens\":5}}";
