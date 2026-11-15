@@ -282,6 +282,9 @@ pub struct Catalog {
     pub efforts: Vec<Choice>,
     pub effort: Option<String>,
     pub effort_option: Option<String>,
+    /// Reasoning levels each model reports for itself, by model id. Grok states a different ladder for
+    /// every model under `_meta.reasoningEfforts`; the flat `efforts` above can only name one of them.
+    pub model_efforts: HashMap<String, Vec<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -302,6 +305,16 @@ impl Catalog {
         if let Some(models) = result.get("models").filter(|models| models.is_object()) {
             let listed: Vec<Choice> = distinct(models.get("availableModels").and_then(Value::as_array).into_iter().flatten()
                 .filter_map(|model| choice(model, "modelId")).collect());
+            // Grok names each model's own reasoning ladder under `_meta.reasoningEfforts`. Keep it so the
+            // picker offers the ladder of the model actually chosen instead of one borrowed from another.
+            for model in models.get("availableModels").and_then(Value::as_array).into_iter().flatten() {
+                let Some(id) = model.get("modelId").and_then(Value::as_str) else { continue };
+                let levels: Vec<String> = model.pointer("/_meta/reasoningEfforts").and_then(Value::as_array).into_iter().flatten()
+                    .filter_map(|level| level.get("id").or_else(|| level.get("value")).and_then(Value::as_str))
+                    .filter(|level| !level.is_empty()).map(str::to_string).collect();
+                let levels = distinct_levels(levels);
+                if !levels.is_empty() { self.model_efforts.insert(id.to_string(), levels); }
+            }
             if !listed.is_empty() {
                 self.models = listed;
                 self.models_from_state = true;
@@ -360,6 +373,15 @@ fn distinct(choices: Vec<Choice>) -> Vec<Choice> {
     let mut out: Vec<Choice> = Vec::new();
     for choice in choices {
         if !out.iter().any(|seen| seen.id == choice.id) { out.push(choice); }
+    }
+    out
+}
+
+/// Keep the first of each reasoning level, in the order the model listed them.
+fn distinct_levels(levels: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for level in levels {
+        if !out.contains(&level) { out.push(level); }
     }
     out
 }
@@ -1195,6 +1217,26 @@ mod tests {
         let mut state = Catalog::default();
         state.absorb_session(&json!({"models":{"availableModels":[{"modelId":"g1","name":"G1"},{"modelId":"g2","name":"G2"}],"currentModelId":"g1"}}));
         assert!(state.model_switchable() && state.models_from_state);
+    }
+
+    #[test]
+    fn each_model_keeps_its_own_reasoning_ladder() {
+        let mut catalog = Catalog::default();
+        catalog.absorb_session(&json!({
+            "models":{"currentModelId":"a","availableModels":[
+                {"modelId":"a","name":"A","_meta":{"reasoningEfforts":[{"id":"none"},{"id":"low"},{"id":"high"},{"id":"max"}]}},
+                {"modelId":"b","name":"B","_meta":{"reasoningEfforts":[{"id":"high"},{"id":"medium"},{"id":"low"},{"id":"high"}]}},
+                {"modelId":"c","name":"C"}
+            ]},
+            "configOptions":[{"type":"select","id":"reasoning_effort","category":"thought_level","currentValue":"low",
+                "options":[{"value":"none","name":"None"},{"value":"low","name":"Low"}]}]
+        }));
+        assert_eq!(catalog.model_efforts["a"], ["none", "low", "high", "max"]);
+        // Duplicates are dropped, and the order the model stated is kept.
+        assert_eq!(catalog.model_efforts["b"], ["high", "medium", "low"]);
+        assert!(!catalog.model_efforts.contains_key("c"));
+        // The session-wide ladder still names the current model's levels.
+        assert_eq!(catalog.efforts.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["none", "low"]);
     }
 
     #[test]
