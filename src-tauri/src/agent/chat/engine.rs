@@ -33,7 +33,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 mod acp;
-pub use acp::DEEPSEEK_MODELS_SETTING;
+pub use acp::{DEEPSEEK_MODELS_SETTING, GROK_MODELS_SETTING};
 mod antigravity;
 mod auth;
 mod claude_identity;

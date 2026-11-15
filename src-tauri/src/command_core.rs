@@ -1626,6 +1626,25 @@ fn merge_catalog(live: Vec<serde_json::Value>, ids: Vec<String>, efforts: serde_
     models
 }
 
+/// Grok's picker while its agent is not running: the catalogue the last session reported, which carries
+/// each model's own reasoning ladder, topped up with any model only the installed CLI now lists. The CLI
+/// listing alone has no ladders, so it is only the fallback before Grok has ever reported one.
+fn grok_idle_models(ctx: &AppCtx, bin: &str) -> serde_json::Value {
+    let ids = crate::agent::model_catalog::list_models_at("grok", bin).unwrap_or_default();
+    let saved = ctx.db().conn.lock().ok()
+        .and_then(|conn| crate::db::repo::get_app_settings(&conn).ok())
+        .and_then(|settings| settings.get(crate::agent::chat::engine::GROK_MODELS_SETTING).cloned())
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .filter(|models| models.as_array().is_some_and(|models| !models.is_empty()));
+    let Some(saved) = saved else {
+        return serde_json::Value::Array(merge_catalog(Vec::new(), ids, serde_json::json!([])));
+    };
+    let effort = saved.as_array().and_then(|models| models.first())
+        .and_then(|model| model.get("effortLevels").cloned()).unwrap_or_else(|| serde_json::json!([]));
+    let live = saved.as_array().cloned().unwrap_or_default();
+    serde_json::Value::Array(merge_catalog(live, ids, effort))
+}
+
 pub fn chat_models(ctx: &AppCtx, session_id: &str) -> Result<serde_json::Value, String> {
     let session = {
         let conn = ctx.db().conn.lock().unwrap();
@@ -1719,6 +1738,10 @@ pub fn chat_models(ctx: &AppCtx, session_id: &str) -> Result<serde_json::Value, 
             }
             if kind == SessionKind::Deepseek {
                 return Ok(deepseek_idle_models(ctx));
+            }
+            if kind == SessionKind::Grok {
+                let bin = crate::agent::executable::for_session(ctx, &session);
+                return Ok(grok_idle_models(ctx, &bin));
             }
             let efforts: &[&str] = if kind == SessionKind::Copilot { crate::agent::chat::acp_protocol::COPILOT_EFFORTS } else { &[] };
             let models = if kind == SessionKind::Kimi {
@@ -2368,7 +2391,7 @@ pub fn web_server_autostart(ctx: &AppCtx) -> Result<Option<crate::web::WebServer
 #[cfg(test)]
 mod tests {
     use super::{
-        autostart_config, check_images, get_app_settings, install_id, merge_catalog,
+        autostart_config, check_images, get_app_settings, grok_idle_models, install_id, merge_catalog,
         set_app_settings, web_server_autostart,
         web_server_status, web_server_stop, ChatImage, MAX_IMAGES_PER_MESSAGE, MAX_IMAGE_BYTES,
     };
@@ -2397,6 +2420,49 @@ mod tests {
         assert_eq!(merged[0]["id"], "magpie/workbuddy-ai/deepseek-v4.1-flash-sg");
         assert_eq!(merged[1]["id"], "grok-4.6");
         assert_eq!(merged[1]["effortLevels"], serde_json::json!(["none", "low", "high", "max"]));
+    }
+
+    /// The saved Grok catalogue already carries each model's own ladder; topping it up with a newly listed
+    /// model must leave those ladders untouched.
+    #[test]
+    fn a_saved_grok_catalogue_keeps_each_models_ladder_when_topped_up() {
+        let saved = vec![
+            serde_json::json!({"id":"a","label":"A","description":"","effortLevels":["none","low","high","max"]}),
+            serde_json::json!({"id":"b","label":"B","description":"","effortLevels":["high","medium","low"]}),
+        ];
+        let merged = merge_catalog(saved, vec!["a".into(), "c".into()], serde_json::json!(["high"]));
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[0]["effortLevels"], serde_json::json!(["none", "low", "high", "max"]));
+        assert_eq!(merged[1]["effortLevels"], serde_json::json!(["high", "medium", "low"]));
+        assert_eq!(merged[2]["id"], "c");
+        assert_eq!(merged[2]["effortLevels"], serde_json::json!(["high"]));
+    }
+
+    /// When the Grok agent is not running, the picker reads the catalogue the last session reported, so each
+    /// model keeps its own ladder instead of falling back to the bare CLI list.
+    #[test]
+    fn grok_idle_models_reuse_the_last_catalogue_with_its_ladders() {
+        let dir = std::env::temp_dir().join(format!("vlx-grok-idle-{}", std::process::id()));
+        let ctx = headless_ctx(&dir);
+        let saved = serde_json::json!([
+            {"id":"magpie/auto/deepseek-v4.1-flash","label":"DeepSeek V4.1 Flash","description":"","effortLevels":["none","low","high","max"]},
+            {"id":"grok-4.6","label":"Grok 4.6","description":"","effortLevels":["xhigh","high","medium","low"]}
+        ]);
+        set_app_settings(
+            &ctx,
+            HashMap::from([(
+                crate::agent::chat::engine::GROK_MODELS_SETTING.to_string(),
+                saved.to_string(),
+            )]),
+        )
+        .unwrap();
+        // A missing executable means the CLI top-up yields nothing, so the saved catalogue answers alone.
+        let models = grok_idle_models(&ctx, "vlx-no-such-grok-bin");
+        let models = models.as_array().unwrap();
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0]["effortLevels"], serde_json::json!(["none", "low", "high", "max"]));
+        assert_eq!(models[1]["effortLevels"], serde_json::json!(["xhigh", "high", "medium", "low"]));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The limits exist so one paste cannot be paid for by every client that later opens the
