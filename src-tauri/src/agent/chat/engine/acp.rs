@@ -244,6 +244,10 @@ fn on_open(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, result: &Val
         (presets, state.catalog.mode.clone())
     };
     apply_saved_selection(app, session_id, proc, &presets, current);
+    // The catalogue is complete only now: the session has reported its models and each model's own
+    // reasoning ladder. A picker that read before the agent answered saw the CLI list with no ladders, so
+    // ask it to read again and fill in the thinking levels.
+    emit(app, session_id, json!({"type":"models"}));
     emit(app, session_id, json!({"type":"settingsChanged","model":proc.model.lock().unwrap().clone(),
         "effort":proc.effort.lock().unwrap().clone()}));
     if !proc.ready.swap(true, Ordering::Relaxed) {
@@ -393,6 +397,9 @@ fn handle_update(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, update
             let catalog = proc.acp.lock().unwrap().catalog.clone();
             if catalog.model_switchable() && model.is_some() { *proc.model.lock().unwrap() = model; }
             if catalog.effort_switchable() && effort.is_some() { *proc.effort.lock().unwrap() = effort; }
+            // A model switch can change the ladder: Grok states a different set of reasoning levels per
+            // model, so the picker must re-read them rather than keep the previous model's list.
+            emit(app, session_id, json!({"type":"models"}));
             emit(app, session_id, json!({"type":"settingsChanged","model":proc.model.lock().unwrap().clone(),
                 "effort":proc.effort.lock().unwrap().clone()}));
             return;
@@ -680,28 +687,42 @@ pub(super) fn chat_models(proc: &Arc<ChatProcess>) -> Option<Vec<Value>> {
 }
 
 fn catalog_models(catalog: &Catalog) -> Vec<Value> {
-    let efforts: Vec<&str> = catalog.efforts.iter().map(|choice| choice.id.as_str()).collect();
-    catalog.models.iter().map(|model| json!({
-        "id": model.id, "label": model.name, "description": model.description.clone().unwrap_or_default(),
-        "effortLevels": efforts,
-    })).collect()
+    let shared: Vec<&str> = catalog.efforts.iter().map(|choice| choice.id.as_str()).collect();
+    catalog.models.iter().map(|model| {
+        // Prefer the model's own ladder when the agent stated one; fall back to the session-wide ladder.
+        let efforts: Vec<&str> = match catalog.model_efforts.get(&model.id) {
+            Some(levels) => levels.iter().map(String::as_str).collect(),
+            None => shared.clone(),
+        };
+        json!({
+            "id": model.id, "label": model.name, "description": model.description.clone().unwrap_or_default(),
+            "effortLevels": efforts,
+        })
+    }).collect()
 }
 
-/// Backend setting holding the last model catalogue a DeepSeek session reported.
+/// Backend settings holding the last model catalogue a conversation engine reported, so its picker works
+/// before the agent has been started again.
 pub const DEEPSEEK_MODELS_SETTING: &str = "deepseek.models";
+pub const GROK_MODELS_SETTING: &str = "grok.models";
 
-/// Keep DeepSeek's catalogue for the model picker of a conversation whose agent is not running. Asking a
-/// short-lived dsh instead would leave an empty conversation behind: it records a session as soon as one
-/// is opened, prompt or not.
+/// Keep the catalogue for the model picker of a conversation whose agent is not running. Asking a
+/// short-lived harness instead would leave work behind — dsh records a session as soon as one is opened,
+/// prompt or not — so the last catalogue the agent reported is saved and reused instead.
 fn remember_catalog(app: &AppCtx, kind: SessionKind, catalog: &Catalog) {
-    if kind != SessionKind::Deepseek || !catalog.model_switchable() { return; }
+    let key = match kind {
+        SessionKind::Deepseek => DEEPSEEK_MODELS_SETTING,
+        SessionKind::Grok => GROK_MODELS_SETTING,
+        _ => return,
+    };
+    if !catalog.model_switchable() { return; }
     let Ok(value) = serde_json::to_string(&catalog_models(catalog)) else { return };
     let conn = app.db().conn.lock().unwrap();
-    if crate::db::repo::get_app_settings(&conn).ok().and_then(|settings| settings.get(DEEPSEEK_MODELS_SETTING).cloned()).as_deref() == Some(value.as_str()) {
+    if crate::db::repo::get_app_settings(&conn).ok().and_then(|settings| settings.get(key).cloned()).as_deref() == Some(value.as_str()) {
         return;
     }
-    if let Err(error) = crate::db::repo::set_app_settings(&conn, &HashMap::from([(DEEPSEEK_MODELS_SETTING.to_string(), value)])) {
-        crate::diagnostic_warn!("chat: DeepSeek model catalogue could not be saved: {error}");
+    if let Err(error) = crate::db::repo::set_app_settings(&conn, &HashMap::from([(key.to_string(), value)])) {
+        crate::diagnostic_warn!("chat: {key} catalogue could not be saved: {error}");
     }
 }
 
@@ -735,6 +756,20 @@ mod tests {
 
     fn notify(app: &AppCtx, proc: &Arc<ChatProcess>, update: Value) {
         handle_line(app, "s", proc, &json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":update}}).to_string());
+    }
+
+    #[test]
+    fn catalog_models_report_each_models_own_ladder() {
+        let mut catalog = Catalog::default();
+        catalog.models = vec![
+            wire::Choice { id: "a".into(), name: "A".into(), description: None },
+            wire::Choice { id: "b".into(), name: "B".into(), description: None },
+        ];
+        catalog.efforts = vec![wire::Choice { id: "low".into(), name: "low".into(), description: None }];
+        catalog.model_efforts.insert("a".into(), vec!["none".into(), "high".into()]);
+        let models = catalog_models(&catalog);
+        assert_eq!(models[0]["effortLevels"], json!(["none", "high"]));
+        assert_eq!(models[1]["effortLevels"], json!(["low"]));
     }
 
     #[test]

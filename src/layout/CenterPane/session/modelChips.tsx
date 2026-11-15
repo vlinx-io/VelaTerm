@@ -65,6 +65,8 @@ export function modelChipOptions(t: T, kind: SessionKind, models: readonly Model
 
 /** Display name of an effort level; a level outside the known ladder shows as reported. */
 export function effortChipLabel(t: T, value: string): string {
+  // Grok names "no extended thinking" as `none`; it reads the same as the Claude "off" switch.
+  if (value === "none") return t("chat.effort.off");
   return (EFFORTS as readonly string[]).includes(value) || value === THINKING_OFF || value === ULTRACODE
     ? t(`chat.effort.${value}` as "chat.effort.high")
     : value;
@@ -77,9 +79,21 @@ export function effortChipLabel(t: T, value: string): string {
  * levels a native catalogue reports outside the known ladder, listed after it.
  */
 export function effortChipOptions(t: T, allowed: readonly string[], extraLevels = false): ChipOption<string>[] {
-  const known = new Set<string>([...EFFORTS, ULTRACODE, THINKING_OFF]);
+  const known = new Set<string>([...EFFORTS, ULTRACODE, THINKING_OFF, "none"]);
   return [
     { value: "", label: t("chat.effort.auto"), glyph: <LevelBar level={0} of={EFFORTS.length} /> },
+    // Grok's `none` is a real level ("no extended thinking"), shown below the ladder with an empty bar.
+    ...(allowed.includes("none")
+      ? [{
+          value: "none",
+          label: t("chat.effort.off"),
+          glyph: (
+            <span style={{ color: "var(--text-faint)", display: "inline-flex" }}>
+              <Icons.minus size={14} />
+            </span>
+          ),
+        }]
+      : []),
     ...EFFORTS.filter((value) => allowed.includes(value)).map((value) => ({
       value,
       label: effortChipLabel(t, value),
