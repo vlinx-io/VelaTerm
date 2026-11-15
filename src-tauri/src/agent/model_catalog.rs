@@ -149,9 +149,10 @@ fn parse(agent: &str, text: &str) -> Vec<String> {
                 }
                 format!("{provider}/{model}")
             }
-            // Grok prints prose around a bulleted list: `  * grok-4.5 (default)`.
+            // Grok prints prose around a bulleted list: `  * grok-4.5 (default)` for the default and
+            // `  - grok-4.6` for every other model.
             "grok" => {
-                let Some(rest) = line.strip_prefix("* ") else {
+                let Some(rest) = line.strip_prefix("* ").or_else(|| line.strip_prefix("- ")) else {
                     continue;
                 };
                 rest.split_whitespace().next().unwrap_or_default().to_string()
@@ -312,6 +313,11 @@ mod tests {
     fn grok_prose_and_bullets_yield_only_models() {
         let text = "You are not authenticated.\n\nDefault model: grok-4.5\n\nAvailable models:\n  * grok-4.5 (default)\n  * grok-4.6\n";
         assert_eq!(parse("grok", text), vec!["grok-4.5", "grok-4.6"]);
+        // Current releases mark the default with `*` and list the others with `-`.
+        let text = "默认模型：magpie/workbuddy-ai/deepseek-v4.1-flash-sg\n\n可用模型：\n  - grok-4.6\n  - grok-4.5\n  - magpie/auto/claude-opus-5-5\n  * magpie/workbuddy-ai/deepseek-v4.1-flash-sg （默认）\n";
+        assert_eq!(parse("grok", text), vec![
+            "grok-4.6", "grok-4.5", "magpie/auto/claude-opus-5-5", "magpie/workbuddy-ai/deepseek-v4.1-flash-sg"
+        ]);
     }
 
     #[test]
