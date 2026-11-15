@@ -1615,6 +1615,17 @@ fn deepseek_idle_models(ctx: &AppCtx) -> serde_json::Value {
     })
 }
 
+/// Keep the live choice first and add the models only the CLI catalogue knows, so the picker offers
+/// everything the account can switch to.
+fn merge_catalog(live: Vec<serde_json::Value>, ids: Vec<String>, efforts: serde_json::Value) -> Vec<serde_json::Value> {
+    let mut models = live;
+    for id in ids {
+        if models.iter().any(|model| model["id"] == id.as_str()) { continue; }
+        models.push(serde_json::json!({"label":id,"id":id,"description":"","effortLevels":efforts.clone()}));
+    }
+    models
+}
+
 pub fn chat_models(ctx: &AppCtx, session_id: &str) -> Result<serde_json::Value, String> {
     let session = {
         let conn = ctx.db().conn.lock().unwrap();
@@ -1693,7 +1704,17 @@ pub fn chat_models(ctx: &AppCtx, session_id: &str) -> Result<serde_json::Value, 
         // A running ACP session lists the models it can switch to. Without one, the CLI's own catalogue is
         // what its next launch can be given.
         kind if crate::agent::chat::acp_protocol::supported(kind) => {
-            if let Some(models) = ctx.chat().acp_models(session_id) {
+            if let Some(mut models) = ctx.chat().acp_models(session_id) {
+                // Grok's running session reports only the model it started with, while the CLI lists
+                // every model the account can choose.
+                if kind == SessionKind::Grok {
+                    let bin = crate::agent::executable::for_session(ctx, &session);
+                    if let Ok(ids) = crate::agent::model_catalog::list_models_at("grok", &bin) {
+                        let efforts = models.first().and_then(|model| model.get("effortLevels").cloned())
+                            .unwrap_or_else(|| serde_json::json!([]));
+                        models = merge_catalog(models, ids, efforts);
+                    }
+                }
                 return Ok(serde_json::Value::Array(models));
             }
             if kind == SessionKind::Deepseek {
@@ -2347,7 +2368,7 @@ pub fn web_server_autostart(ctx: &AppCtx) -> Result<Option<crate::web::WebServer
 #[cfg(test)]
 mod tests {
     use super::{
-        autostart_config, check_images, get_app_settings, install_id,
+        autostart_config, check_images, get_app_settings, install_id, merge_catalog,
         set_app_settings, web_server_autostart,
         web_server_status, web_server_stop, ChatImage, MAX_IMAGES_PER_MESSAGE, MAX_IMAGE_BYTES,
     };
@@ -2359,6 +2380,23 @@ mod tests {
             mime_type: "image/png".into(),
             data: "A".repeat(bytes.div_ceil(3) * 4),
         }
+    }
+
+    /// A running Grok session reports one model; the picker must still offer the CLI catalogue.
+    #[test]
+    fn grok_model_picker_keeps_the_live_choice_and_adds_the_cli_catalogue() {
+        let efforts = serde_json::json!(["none", "low", "high", "max"]);
+        let live = vec![serde_json::json!({
+            "id":"magpie/workbuddy-ai/deepseek-v4.1-flash-sg","label":"deepseek",
+            "description":"","effortLevels":efforts.clone(),
+        })];
+        let merged = merge_catalog(live, vec![
+            "grok-4.6".into(), "magpie/workbuddy-ai/deepseek-v4.1-flash-sg".into(),
+        ], efforts);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0]["id"], "magpie/workbuddy-ai/deepseek-v4.1-flash-sg");
+        assert_eq!(merged[1]["id"], "grok-4.6");
+        assert_eq!(merged[1]["effortLevels"], serde_json::json!(["none", "low", "high", "max"]));
     }
 
     /// The limits exist so one paste cannot be paid for by every client that later opens the
