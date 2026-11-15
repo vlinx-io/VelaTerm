@@ -16,8 +16,8 @@ describe("chat capabilities", () => {
   });
 
   it("refuses images for the agents whose protocol declines them", () => {
-    for (const kind of ["claude", "zcode", "copilot", "cursor", "kimi"] as const) expect(acceptsChatImages(kind)).toBe(true);
-    for (const kind of ["antigravity", "grok", "deepseek"] as const) expect(acceptsChatImages(kind)).toBe(false);
+    for (const kind of ["claude", "zcode", "copilot", "cursor", "kimi", "grok"] as const) expect(acceptsChatImages(kind)).toBe(true);
+    for (const kind of ["antigravity", "deepseek"] as const) expect(acceptsChatImages(kind)).toBe(false);
   });
 
   it("keeps DeepSeek Harness, which has no terminal interface, out of the terminal view", () => {

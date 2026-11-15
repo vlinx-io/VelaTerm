@@ -62,10 +62,10 @@ export function supportsSteering(kind: SessionKind): boolean {
   return kind !== "antigravity" && !ACP_CHAT_KINDS.includes(kind);
 }
 
-/** Whether the conversation view can send images to this agent. The ACP servers of Grok and DeepSeek Harness
- * decline image prompts. */
+/** Whether the conversation view can send images to this agent. The DeepSeek Harness ACP server declines
+ * image prompts; Grok's server advertises `image: false` but accepts image blocks. */
 export function acceptsChatImages(kind: SessionKind): boolean {
-  return kind !== "antigravity" && kind !== "grok" && kind !== "deepseek";
+  return kind !== "antigravity" && kind !== "deepseek";
 }
 
 /**
