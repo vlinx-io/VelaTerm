@@ -179,6 +179,29 @@ fn handle_response(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: 
             None => on_initialize(app, session_id, proc, &result.unwrap_or(Value::Null)),
         },
         Some("acp_session_new") | Some("acp_session_load") | Some("acp_session_resume") => match error {
+            // The recorded conversation cannot be reopened: its directory or its own recording is gone.
+            // Start a fresh native conversation rather than leaving the pane unusable; the rows on screen
+            // come from VelaTerm's recording, and a new id has no prior lease to check.
+            Some(error) if kind != Some("acp_session_new")
+                && !wire::auth_required(&error) && !wire::api_key_missing(&error) => {
+                crate::diagnostics::record("WARN", "agent_chat", json!({
+                    "sessionId":session_id,"event":"native_conversation_unavailable",
+                    "agent":proc.kind.as_str(),"reason":wire::error_text(&error)
+                }));
+                proc.identity_checked.store(true, Ordering::Relaxed);
+                let cwd = proc.acp.lock().unwrap().cwd.clone();
+                {
+                    let mut state = proc.acp.lock().unwrap();
+                    state.loading = None;
+                    state.resume = None;
+                    state.mapper = Mapper::for_kind(proc.kind);
+                }
+                let id = proc.request_id("acp_session_new");
+                if proc.write(&wire::session_new(&id, &cwd)).is_err() {
+                    proc.acp.lock().unwrap().loading = None;
+                    fail_start(app, session_id, proc, &error);
+                }
+            }
             Some(error) => {
                 proc.acp.lock().unwrap().loading = None;
                 fail_start(app, session_id, proc, &error);
@@ -196,7 +219,10 @@ fn on_initialize(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, result
         let mut state = proc.acp.lock().unwrap();
         state.load_session = capabilities.get("loadSession").and_then(Value::as_bool).unwrap_or(false);
         state.resume_session = capabilities.pointer("/sessionCapabilities/resume").is_some_and(|resume| !resume.is_null());
-        state.images = capabilities.pointer("/promptCapabilities/image").and_then(Value::as_bool).unwrap_or(false);
+        // Grok's ACP server advertises `promptCapabilities.image: false` yet accepts image blocks and
+        // passes them to the model, so the advertised flag stays authoritative only for the others.
+        state.images = proc.kind == SessionKind::Grok
+            || capabilities.pointer("/promptCapabilities/image").and_then(Value::as_bool).unwrap_or(false);
         (state.resume.clone(), state.cwd.clone())
     };
     match resume {
@@ -579,7 +605,9 @@ pub(super) fn finish(proc: &Arc<ChatProcess>) {
 // ─────────────────────────── Outgoing ───────────────────────────
 
 pub(super) fn validate(proc: &ChatProcess, behavior: &str, image_count: usize) -> Result<(), String> {
-    let images = proc.acp.lock().unwrap().images;
+    // An image sent before the initialize answer arrives would otherwise be refused for an agent that
+    // does accept them, so Grok is allowed by kind rather than by the flag the handshake fills in.
+    let images = proc.acp.lock().unwrap().images || proc.kind == SessionKind::Grok;
     wire::validate(behavior, image_count, images)
 }
 
@@ -741,6 +769,11 @@ mod tests {
         handle_line(app, "s", proc, &json!({"jsonrpc":"2.0","id":request["id"],"result":result}).to_string());
     }
 
+    fn reply_error(app: &AppCtx, proc: &Arc<ChatProcess>, request: &Value, message: &str) {
+        handle_line(app, "s", proc, &json!({"jsonrpc":"2.0","id":request["id"],
+            "error":{"code":-32603,"message":message,"data":{"code":"FS_NOT_FOUND"}}}).to_string());
+    }
+
     fn notify(app: &AppCtx, proc: &Arc<ChatProcess>, update: Value) {
         handle_line(app, "s", proc, &json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":update}}).to_string());
     }
@@ -807,6 +840,49 @@ mod tests {
         assert_eq!(proc.collaboration_mode.lock().unwrap().as_deref(), Some("plan"));
         assert_eq!(proc.collaboration_modes.lock().unwrap().len(), 2);
         assert_eq!(proc.agent_session_id.lock().unwrap().as_deref(), Some("s1"));
+    }
+
+    #[test]
+    fn images_are_accepted_before_the_initialize_answer_arrives() {
+        let app = ctx("acp-image-race");
+        let (grok, _agent) = wired(SessionKind::Grok);
+        assert!(validate(&grok, "queue", 1).is_ok());
+        let (copilot, _agent) = wired(SessionKind::Copilot);
+        assert!(validate(&copilot, "queue", 1).is_err());
+        assert!(validate(&copilot, "queue", 0).is_ok());
+    }
+
+    #[test]
+    fn a_conversation_whose_recording_is_gone_opens_a_fresh_one() {
+        let app = ctx("acp-load-fallback");
+        let (proc, mut agent) = wired(SessionKind::Grok);
+        bootstrap(&app, &proc, Some("native-lost"), Some("/w"), None);
+        let initialize = written(&mut agent);
+        reply(&app, &proc, &initialize, json!({"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":false}}}));
+        let load = written(&mut agent);
+        assert_eq!(load["method"], "session/load");
+        reply_error(&app, &proc, &load, "Path not found.");
+        let fresh = written(&mut agent);
+        assert_eq!(fresh["method"], "session/new");
+        assert_eq!(fresh["params"]["cwd"], "/w");
+    }
+
+    #[test]
+    fn grok_accepts_images_even_though_its_server_reports_them_unsupported() {
+        let app = ctx("acp-grok-images");
+        let (proc, mut agent) = wired(SessionKind::Grok);
+        bootstrap(&app, &proc, None, Some("/w"), None);
+        let initialize = written(&mut agent);
+        reply(&app, &proc, &initialize, json!({"agentCapabilities":{"promptCapabilities":{"image":false}}}));
+        let _new = written(&mut agent);
+        assert!(proc.acp.lock().unwrap().images);
+
+        let (other, mut other_agent) = wired(SessionKind::Deepseek);
+        bootstrap(&app, &other, None, Some("/w"), None);
+        let initialize = written(&mut other_agent);
+        reply(&app, &other, &initialize, json!({"agentCapabilities":{"promptCapabilities":{"image":false}}}));
+        let _new = written(&mut other_agent);
+        assert!(!other.acp.lock().unwrap().images);
     }
 
     #[test]
