@@ -32,6 +32,10 @@ use crate::pty::AgentState;
 /// Journal lines are written in batches; a turn that streams for a long time still lands on disk this often.
 const JOURNAL_BATCH: usize = 64;
 
+fn native_cwd(cwd: &str, windows: bool) -> String {
+    if windows { cwd.replace('/', "\\") } else { cwd.to_string() }
+}
+
 /// Everything the engine keeps about the ACP side of one session.
 #[derive(Default)]
 pub(super) struct AcpState {
@@ -127,11 +131,15 @@ pub(super) fn prefill(app: &AppCtx, proc: &Arc<ChatProcess>, native: &str) {
 
 /// Send `initialize`; the rest of the handshake follows from its answer.
 pub(super) fn bootstrap(app: &AppCtx, proc: &Arc<ChatProcess>, resume: Option<&str>, cwd: Option<&str>, collaboration_mode: Option<&str>) {
+    bootstrap_for_platform(app, proc, resume, cwd, collaboration_mode, cfg!(windows));
+}
+
+fn bootstrap_for_platform(app: &AppCtx, proc: &Arc<ChatProcess>, resume: Option<&str>, cwd: Option<&str>, collaboration_mode: Option<&str>, windows: bool) {
     {
         let mut state = proc.acp.lock().unwrap();
         state.mapper = Mapper::for_kind(proc.kind);
         state.resume = resume.map(str::to_string);
-        state.cwd = cwd.map(str::to_string)
+        state.cwd = cwd.map(|path| native_cwd(path, windows))
             .or_else(|| crate::host::home_dir().map(|home| home.to_string_lossy().into_owned()))
             .unwrap_or_else(|| "/".into());
         state.journal = resume.and_then(|native| journal_path(app, proc.kind, native));
@@ -735,6 +743,33 @@ mod tests {
 
     fn notify(app: &AppCtx, proc: &Arc<ChatProcess>, update: Value) {
         handle_line(app, "s", proc, &json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":update}}).to_string());
+    }
+
+    #[test]
+    fn windows_cwd_is_normalized_and_unix_cwd_is_preserved() {
+        assert_eq!(native_cwd("C:/Users/alice/workspace/demo", true), r"C:\Users\alice\workspace\demo");
+        assert_eq!(native_cwd(r"C:\Users\alice\workspace\demo", true), r"C:\Users\alice\workspace\demo");
+        assert_eq!(native_cwd("/Users/alice/workspace/demo", false), "/Users/alice/workspace/demo");
+    }
+
+    #[test]
+    fn windows_cwd_uses_native_separators_for_new_load_and_resume() {
+        let cwd = "C:/Users/alice/workspace/demo.worktrees/feature-1";
+        let cases = [
+            (Some("load-id"), json!({"loadSession":true}), "session/load"),
+            (Some("resume-id"), json!({"sessionCapabilities":{"resume":{}}}), "session/resume"),
+            (None, json!({}), "session/new"),
+        ];
+        for (resume, capabilities, method) in cases {
+            let app = ctx("acp-windows-cwd");
+            let (proc, mut agent) = wired(SessionKind::Grok);
+            bootstrap_for_platform(&app, &proc, resume, Some(cwd), None, true);
+            let initialize = written(&mut agent);
+            reply(&app, &proc, &initialize, json!({"agentCapabilities":capabilities}));
+            let open = written(&mut agent);
+            assert_eq!(open["method"], method);
+            assert_eq!(open["params"]["cwd"], r"C:\Users\alice\workspace\demo.worktrees\feature-1");
+        }
     }
 
     #[test]
