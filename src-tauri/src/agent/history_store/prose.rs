@@ -294,6 +294,34 @@ impl Write for Characters {
 mod tests {
     use super::*;
     #[test]
+    fn grok_large_recordings_are_read_through_indexed_prose_without_tool_output() {
+        let cancel=AtomicBool::new(false);let temp=super::super::tests::Temp::new();
+        let user="help me investigate this issue".to_string();
+        let assistant="I will inspect the logs and code.".to_string();
+        let mut records=vec![
+            json!({"method":"session/update","params":{"update":{"sessionUpdate":"user_message_chunk","content":{"text":user}}}}),
+            json!({"method":"session/update","params":{"update":{"sessionUpdate":"agent_thought_chunk","content":{"text":"private reasoning"}}}}),
+            json!({"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":assistant}}}}),
+        ];
+        records.extend((0..600).map(|index| {
+            json!({"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update",
+                "toolCallId":format!("tool-{index}"),"content":[{"type":"content","content":{"type":"text","text":"tool output ".repeat(100)}}]}}})
+        }));
+        let raw=records.iter().map(|record|record.to_string()+"\n").collect::<String>();
+        assert!(raw.len()>super::super::limits::PAGE_BYTES);
+        let branch=super::super::tests::indexed_kind(&temp,&raw,SessionKind::Grok);
+        assert_eq!(crate::agent::history_store::compat::read_path(&branch.sources[0].segment.path).unwrap_err(),
+            crate::agent::history_store::compat::UPGRADE);
+        let branch=crate::agent::history_store::event_stream::wait(branch,&cancel).unwrap();
+        let prose=Prose::new(branch,&cancel).unwrap();
+        let messages=prose.collect_bounded(0,prose.total,3*1024*1024,&cancel).unwrap();
+        assert_eq!(messages.len(),2);
+        assert_eq!(messages[0].role,"user");assert_eq!(messages[0].text,user);
+        assert_eq!(messages[1].role,"assistant");assert_eq!(messages[1].text,assistant);
+        assert!(!messages.iter().any(|message|message.text.contains("private reasoning")||message.text.contains("tool output")));
+    }
+
+    #[test]
     fn grok_chunks_and_antigravity_visible_requests_preserve_original_prose_semantics() {
         let cancel=AtomicBool::new(false);let temp=super::super::tests::Temp::new();
         let records=[json!({"method":"session/update","timestamp":1,"params":{"update":{"sessionUpdate":"user_message_chunk","content":{"text":"  "}}}}),

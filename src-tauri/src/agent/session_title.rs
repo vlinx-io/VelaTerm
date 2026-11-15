@@ -202,11 +202,11 @@ fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: 
     }
     let messages = if session.engine == "chat" {
         let live = chat_messages(&app.chat().snapshot(id).rows);
-        if live.is_empty() { recorded_messages(&session)? } else { live }
+        if live.is_empty() { recorded_messages(app, &session)? } else { live }
     } else {
-        recorded_messages(&session)?
+        recorded_messages(app, &session)?
     };
-    let prompt = build_prompt(&messages)?;
+    let prompt = title_prompt(&messages)?;
     let (kind, bin) = pick_agent(app, &session, prompt.len(), agent)?;
     let (raw_args, mut selection) = task_selection(app, &session, kind)?;
     let extra = selection_args(kind, &mut selection, model, effort)?;
@@ -275,9 +275,55 @@ fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: 
     Ok(GeneratedTitle { title, agent: kind })
 }
 
-fn recorded_messages(session: &Session) -> Result<Vec<TranscriptMessage>, String> {
+fn recorded_messages(app: &AppCtx, session: &Session) -> Result<Vec<TranscriptMessage>, String> {
     let id = session.agent_session_id.as_deref().ok_or("session_title:empty")?;
-    super::transcript::read(session.kind, id).map_err(|_| "session_title:unavailable".into())
+    recorded_messages_with(super::transcript::read(session.kind, id), || {
+        // The compatibility reader materializes at most 512 KiB. Stream larger recordings through
+        // the indexed prose reader, which excludes tool output and private reasoning.
+        let cancel = AtomicBool::new(false);
+        let branch = crate::agent::history_store::api::prepare(app, &session.id)
+            .map_err(|_| "session_title:unavailable")?;
+        indexed_messages(branch, &cancel)
+    })
+}
+
+fn recorded_messages_with(
+    legacy: Result<Vec<TranscriptMessage>, String>,
+    indexed: impl FnOnce() -> Result<Vec<TranscriptMessage>, String>,
+) -> Result<Vec<TranscriptMessage>, String> {
+    match legacy {
+        Ok(messages) => Ok(messages),
+        Err(error) if error.starts_with(crate::agent::history_store::compat::UPGRADE) => {
+            let messages = indexed()?;
+            title_prompt(&messages)?;
+            Ok(messages)
+        }
+        Err(_) => Err("session_title:unavailable".into()),
+    }
+}
+
+fn title_prompt(messages: &[TranscriptMessage]) -> Result<String, String> {
+    let prompt = build_prompt(messages)?;
+    if prompt.chars().count() > MAX_CONTEXT_CHARS {
+        return Err("session_title:too_large".into());
+    }
+    Ok(prompt)
+}
+
+fn indexed_messages(
+    branch: crate::agent::history_store::api::Branch,
+    cancel: &AtomicBool,
+) -> Result<Vec<TranscriptMessage>, String> {
+    let branch = crate::agent::history_store::event_stream::wait(branch, cancel)
+        .map_err(|_| "session_title:unavailable")?;
+    let prose = crate::agent::history_store::prose::Prose::new(branch, cancel)
+        .map_err(|_| "session_title:unavailable")?;
+    prose.collect_bounded(0, prose.total, MAX_CONTEXT_CHARS * 6, cancel)
+        .map_err(|error| if error.starts_with(crate::agent::history_store::compat::UPGRADE) {
+            "session_title:too_large".into()
+        } else {
+            "session_title:unavailable".into()
+        })
 }
 
 fn chat_messages(rows: &[ChatRow]) -> Vec<TranscriptMessage> {
@@ -428,8 +474,9 @@ pub(crate) fn isolated_command(bin: &str, kind: SessionKind, dir: &std::path::Pa
             false
         }
         SessionKind::Grok => {
-            command.args(["--permission-mode", "plan", "--tools", "", "--no-memory", "--no-plan",
-                "--no-subagents", "--no-web", "--output-format", "plain"]);
+            command.args(["--permission-mode", "plan", "--tools=", "--no-memory", "--no-plan",
+                "--no-subagents", "--output-format", "json", "--json-schema"])
+                .arg(schema.to_string());
             false
         }
         _ => return Err("session_title:no_agent".into()),
@@ -450,6 +497,15 @@ fn command_env(command: &std::process::Command, key: &str) -> Option<String> {
 }
 
 pub(crate) fn answer_text(kind: SessionKind, output: &str) -> Result<(String, Value), String> {
+    if kind == SessionKind::Grok {
+        let value: Value = serde_json::from_str(output.trim()).map_err(|_| "session_title:invalid")?;
+        if value.get("is_error").and_then(Value::as_bool) == Some(true) {
+            return Err("session_title:failed".into());
+        }
+        let text = value.get("text").and_then(Value::as_str)
+            .ok_or("session_title:invalid")?.to_string();
+        return Ok((text, value.get("usage").cloned().unwrap_or(Value::Null)));
+    }
     if kind == SessionKind::Claude {
         let value: Value = serde_json::from_str(output).map_err(|_| "session_title:invalid")?;
         if value["is_error"] == true { return Err("session_title:failed".into()); }
@@ -592,6 +648,48 @@ mod tests {
     }
 
     #[test]
+    fn large_grok_recordings_load_title_context_from_indexed_history() {
+        let (dir, _app, _) = fixture();
+        let updates = dir.0.join("updates.jsonl");
+        let user = "help me investigate this issue".to_string();
+        let assistant = "I will inspect the logs and code.".to_string();
+        let mut records = vec![
+            json!({"method":"session/update","params":{"update":{"sessionUpdate":"user_message_chunk","content":{"text":user}}}}),
+            json!({"method":"session/update","params":{"update":{"sessionUpdate":"agent_thought_chunk","content":{"text":"private reasoning"}}}}),
+            json!({"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"text":assistant}}}}),
+        ];
+        records.extend((0..600).map(|index| {
+            json!({"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update",
+                "toolCallId":format!("tool-{index}"),"content":[{"type":"content","content":{"type":"text","text":"tool output ".repeat(100)}}]}}})
+        }));
+        records.push(json!({"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update",
+            "toolCallId":"tool-large-output","content":[{"type":"content","content":{"type":"text","text":"large tool output"}}],
+            "rawOutput":{"type":"Bash","output":vec![120;20_100],"output_for_prompt":"large tool output"}}}}));
+        let raw = records.iter().map(|record| record.to_string() + "\n").collect::<String>();
+        assert!(raw.len() > crate::agent::history_store::limits::PAGE_BYTES);
+        std::fs::write(&updates, raw).unwrap();
+        let legacy = crate::agent::transcript::read_at(SessionKind::Grok, &updates);
+        assert!(legacy.as_ref().unwrap_err().starts_with(crate::agent::history_store::compat::UPGRADE));
+
+        let store = crate::agent::history_store::store::Store::at(&dir.0).unwrap();
+        let source = store.register(SessionKind::Grok, crate::agent::history_store::source::Segment {
+            path: updates, native_id: "large-grok-history".into(), end_byte: None, end_ordinal: None,
+        }).unwrap();
+        store.scan(SessionKind::Grok, &source, &AtomicBool::new(false), false).unwrap();
+        let branch = crate::agent::history_store::api::bind(store, vec![source], SessionKind::Grok,
+            "large-grok-history".into(), None, "title-test").unwrap();
+        let cancel = AtomicBool::new(false);
+        let branch = crate::agent::history_store::event_stream::wait(branch, &cancel).unwrap();
+        let messages = recorded_messages_with(legacy, || indexed_messages(branch, &cancel)).unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].text, user);
+        assert_eq!(messages[1].role, "assistant");
+        assert_eq!(messages[1].text, assistant);
+        assert!(title_prompt(&messages).is_ok());
+    }
+
+    #[test]
     fn title_validation_preserves_unicode_and_rejects_invalid_answers() {
         assert_eq!(parse_title(r#"{"title":" 修复登录流程 "}"#).unwrap(), "修复登录流程");
         assert_eq!(parse_title("```json\n{\"title\":\"Login flow\"}\n```").unwrap(), "Login flow");
@@ -606,6 +704,11 @@ mod tests {
         let (text, usage) = answer_text(SessionKind::Claude, r#"{"structured_output":{"title":"Flow"},"usage":{"input_tokens":42}}"#).unwrap();
         assert_eq!(parse_title(&text).unwrap(), "Flow");
         assert_eq!(usage["input_tokens"], 42);
+        let (text, usage) = answer_text(SessionKind::Grok, r#"{"text":"{\"title\":\"Grok title\"}","stopReason":"end_turn","usage":{"inputTokens":42}}"#).unwrap();
+        assert_eq!(parse_title(&text).unwrap(), "Grok title");
+        assert_eq!(usage["inputTokens"], 42);
+        assert_eq!(answer_text(SessionKind::Grok, r#"{"text":"{\"title\":\"Grok title\"}","is_error":true}"#).unwrap_err(), "session_title:failed");
+        assert_eq!(answer_text(SessionKind::Grok, r#"{"is_error":true}"#).unwrap_err(), "session_title:failed");
         let reply = "{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"title\\\":\\\"Flow\\\"}\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"output_tokens\":5}}";
         assert_eq!(parse_title(&answer_text(SessionKind::Codex, reply).unwrap().0).unwrap(), "Flow");
         assert!(answer_text(SessionKind::Codex, reply.lines().next().unwrap()).is_err());
@@ -750,6 +853,16 @@ mod tests {
         assert_eq!(settings["disableAllHooks"], true);
         assert!(command.get_envs().any(|(key, value)| key == "PROVIDER_TEST" && value == Some(std::ffi::OsStr::new("session-config"))));
         assert!(command.get_envs().any(|(key, value)| key == "VLX_SESSION_ID" && value.is_none()));
+
+        let (command, stdin) = title_command("grok", SessionKind::Grok, &dir, Some("--model legacy --no-web"), None, None).unwrap();
+        let args: Vec<_> = command.get_args().map(|arg| arg.to_string_lossy().to_string()).collect();
+        assert!(!stdin);
+        assert!(args.windows(2).any(|pair| pair == ["--output-format", "json"]));
+        assert!(!args.iter().any(|arg| arg == "--no-web" || arg == "legacy" || arg == "-p"));
+        assert!(args.iter().any(|arg| arg == "--permission-mode"));
+        assert!(args.iter().any(|arg| arg == "--tools="));
+        assert!(args.windows(2).any(|pair| pair[0] == "--output-format" && pair[1] == "json"));
+        assert!(args.windows(2).any(|pair| pair[0] == "--json-schema" && pair[1].contains("title")));
         let args = task_args(SessionKind::Codex, Some("--profile fixture -c model_provider=fixture -c model_reasoning_effort=high --sandbox danger --json"));
         assert_eq!(args, ["--profile", "fixture", "-c", "model_provider=fixture"]);
         let env = json!({"OPENCODE_CONFIG_CONTENT":json!({"provider":{"fixture":{"name":"Fixture"}},

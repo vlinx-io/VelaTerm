@@ -111,6 +111,14 @@ pub fn preview(text:&str,bytes:usize) -> String {
 const UNADDRESSED_SUBTREES:[&str;2]=["/payload/replacement_history","/payload/encrypted_content"];
 pub(super) fn addressed(path:&str) -> bool {!UNADDRESSED_SUBTREES.iter().any(|subtree|path.starts_with(subtree))}
 
+/// Fields whose values are needed to identify and classify a record even when its payload is not addressed.
+pub(super) fn classify(path:&str) -> bool {
+    path.is_empty() || path.starts_with("/params/update/content/") || matches!(path,"/method"|"/timestamp"|
+        "/params"|"/params/update"|"/params/update/content"|"/params/update/sessionUpdate"|
+        "/params/update/toolCallId"|"/params/update/_meta"|"/params/update/_meta/x.ai~1tool"|
+        "/params/update/_meta/x.ai~1tool/name")
+}
+
 /// Codex records that only carry usage, settings or lifecycle state. Readers take them from the
 /// record projection and never address their strings, so they get no field references.
 fn metadata_only(value:&Value) -> bool {
