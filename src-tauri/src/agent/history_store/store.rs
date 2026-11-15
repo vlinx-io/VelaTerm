@@ -458,7 +458,8 @@ impl Store {
         file.seek(SeekFrom::Start(start)).map_err(|e|e.to_string())?;
         let validation=file.try_clone().map_err(|e|e.to_string())?;
         let reader=Hashing {file:&mut file,hasher:hasher.clone(),cancel};
-        let mut parser=Projector::new(reader.take(limit-start),start).long_checkpoints_only();
+        let parser=Projector::new(reader.take(limit-start),start).long_checkpoints_only();
+        let mut parser=if kind==SessionKind::Grok {parser.kind(kind)} else {parser};
         let mut gaps=false;let mut checkpoints=Vec::new();let mut published=start;
         loop {
             if cancel.load(Ordering::Relaxed) {return Err("read_canceled".into());}
@@ -703,7 +704,8 @@ fn remember_block(key:BlockKey,file:&File,bytes:Vec<u8>) -> Result<Arc<Vec<u8>>,
 pub(super) fn reproject(source:&RegisteredSource,start:u64,sink:&mut impl FnMut(Checkpoint)->Result<(),String>) -> Result<Record,String> {
     let end=source.current()?.records.get(&start).map(|record|record.end).ok_or("index_incomplete: history record is unavailable")?;
     let reader=RecordReader {source,at:start,end,buffer:Vec::new(),offset:0};
-    let mut parser=Projector::new(reader,start).long_checkpoints_only();
+    let parser=Projector::new(reader,start).long_checkpoints_only();
+    let mut parser=if source.index.kind==SessionKind::Grok {parser.kind(source.index.kind)} else {parser};
     let mut record=parser.next(sink)?.ok_or_else(||changed(source))?;
     if record.end!=end && !(record.end+1==end && !record.complete) {return Err(changed(source));}
     record.end=end;record.complete=true;

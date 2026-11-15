@@ -107,13 +107,14 @@ pub struct Projector<R> {
     document: bool,
     /// Skip the checkpoint of a string that fits in one piece; readers decode its raw range directly.
     long_only: bool,
+    kind: Option<crate::models::SessionKind>,
 }
 
 impl<R: Read> Projector<R> {
     pub fn new(reader: R, offset: u64) -> Self {
         Self {
             reader, buffer: vec![0; INPUT_BYTES].into_boxed_slice(), at: 0, filled: 0, offset,
-            record_start: offset, fields: Vec::new(), nodes: 0, preview_bytes: 0, metadata_bytes: 0, semantic_bytes: 0, classification_bytes: 0, key_bytes: 0, capture: None, document:false, long_only:false,
+            record_start: offset, fields: Vec::new(), nodes: 0, preview_bytes: 0, metadata_bytes: 0, semantic_bytes: 0, classification_bytes: 0, key_bytes: 0, capture: None, document:false, long_only:false, kind:None,
         }
     }
 
@@ -121,6 +122,7 @@ impl<R: Read> Projector<R> {
     /// and verified against the source blocks when it is needed, so storing its hash would only
     /// duplicate what the index already guarantees.
     pub fn long_checkpoints_only(mut self) -> Self {self.long_only=true;self}
+    pub fn kind(mut self,kind:crate::models::SessionKind) -> Self {self.kind=Some(kind);self}
 
     pub fn document(reader:R,offset:u64) -> Self {
         let mut parser=Self::new(reader,offset);parser.document=true;parser
@@ -235,6 +237,7 @@ impl<R: Read> Projector<R> {
         self.space()?;
         // A scan never stores these subtrees; read past them without building or counting them.
         if self.long_only && !super::adapter::addressed(path) {self.skip()?;return Ok(Value::Null);}
+        if self.long_only && self.kind==Some(crate::models::SessionKind::Grok) && !super::adapter::classify(path) {self.skip()?;return Ok(Value::Null);}
         self.nodes += 1;
         let start=self.offset;
         let container=matches!(self.peek()?,Some(b'{'|b'['));

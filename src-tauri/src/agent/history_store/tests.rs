@@ -113,6 +113,23 @@ pub(super) fn indexed_kind(temp:&Temp,raw:&str,kind:crate::models::SessionKind) 
 }
 
 #[test]
+fn grok_large_tool_update_skips_unaddressed_raw_output_arrays() {
+    use crate::models::SessionKind;
+    let temp=Temp::new();
+    let raw=serde_json::json!({"method":"session/update","params":{"update":{"sessionUpdate":"tool_call_update",
+        "toolCallId":"large","content":[{"type":"content","content":{"type":"text","text":"visible tool text"}}],
+        "rawOutput":{"type":"Bash","output":vec![120;20_100],"output_for_prompt":"visible tool text"}}}}).to_string()+"\n";
+    let branch=indexed_kind(&temp,&raw,SessionKind::Grok);
+    let branch=super::event_stream::wait(branch,&std::sync::atomic::AtomicBool::new(false)).unwrap();
+    let prose=super::prose::Prose::new(branch.clone(),&std::sync::atomic::AtomicBool::new(false)).unwrap();
+    assert_eq!(prose.total,0);
+    assert!(prose.collect_bounded(0,prose.total,1024,&std::sync::atomic::AtomicBool::new(false)).unwrap().is_empty());
+    let (projected,_) = super::event_stream::read_record(&branch.sources[0],0).unwrap();
+    assert_eq!(projected.value["params"]["update"]["sessionUpdate"],"tool_call_update");
+    assert!(projected.value["params"]["update"]["rawOutput"].is_null());
+}
+
+#[test]
 fn sqlite_pages_and_tool_results_are_addressable_without_replay() {
     let temp=Temp::new();
     let mut raw=String::new();
