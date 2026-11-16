@@ -1,3 +1,8 @@
+## v0.3.2 — 2026-11-16
+
+- 🤖 OpenCode-v2-Sitzungen können KI-Umbenennung und Übersetzung wieder nutzen, und eine fehlgeschlagene KI-Umbenennung meldet jetzt den Fehler, statt den Agenten als nicht verfügbar zu bezeichnen.
+- 🪐 In Antigravity-Gesprächen funktioniert „Ältere Nachrichten laden“ auch nach dem Aufwachen des Agenten weiter, statt wirkungslos zu bleiben.
+
 ## v0.3.1 — 2026-11-16
 
 - 🪐 Die Antigravity-Gesprächsansicht unterstützt jetzt den Wechsel von Modell und Denkaufwand, die Verfolgung von Unteragenten und Hintergrundaufgaben, interaktive `ask_question`-Abfragen, fünf Berechtigungsstufen, KI-Umbenennung sowie Rundenstatistiken, Ausgabegeschwindigkeit und Kontingentverbrauch im Info-Bereich.

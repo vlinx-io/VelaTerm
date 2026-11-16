@@ -1,3 +1,8 @@
+## v0.3.2 — 2026-11-16
+
+- 🤖 Las sesiones de OpenCode v2 vuelven a admitir el renombrado con IA y la traducción, y un renombrado con IA fallido ahora informa del fallo en lugar de indicar que el agente no está disponible.
+- 🪐 En las conversaciones de Antigravity, Cargar mensajes anteriores sigue funcionando cuando el agente se activa, en lugar de no hacer nada.
+
 ## v0.3.1 — 2026-11-16
 
 - 🪐 La vista de conversación de Antigravity ahora admite cambio de modelo y esfuerzo de razonamiento, seguimiento de subagentes y tareas en segundo plano, preguntas interactivas con `ask_question`, permisos de cinco niveles, renombrado con IA y estadísticas de turno, velocidad de salida y uso de cuota en el panel Info.

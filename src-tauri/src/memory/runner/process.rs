@@ -144,7 +144,10 @@ pub fn command<'a>(
     dir: &WorkDir,
     prompt: &'a str,
 ) -> Result<(Command, Option<&'a str>), String> {
-    let spec = spec(&job.agent).ok_or("memory_invalid:agent")?;
+    let mut spec = spec(&job.agent).ok_or("memory_invalid:agent")?;
+    if spec.kind == SessionKind::Opencode && crate::agent::opencode::is_v2(bin) {
+        spec.delivery = Delivery::Stdin;
+    }
     if spec.delivery == Delivery::Arg && prompt.len() > ARG_PROMPT_LIMIT {
         return Err("memory_context_too_large".into());
     }
@@ -228,16 +231,18 @@ fn build(
             cmd.args(["--reasoning-effort", &job.effort]);
         }
     } else if spec.kind == SessionKind::Opencode {
-        // OpenCode 1.18.5: `run` is the one-shot subcommand and `--format json` gives the event
-        // stream `decode` reads. `--pure` keeps external plugins out of the run.
-        cmd.args(["run", "--format", "json", "--pure"]);
-        if !job.model.is_empty() {
-            cmd.args(["-m", &job.model]);
+        // OpenCode v1 isolates with `--pure` and passes the prompt as an argument; v2 uses
+        // `--standalone`, folds the variant into `--model <model>#<effort>`, and reads stdin.
+        let v2 = spec.delivery == Delivery::Stdin;
+        cmd.args(crate::agent::opencode::run_args(v2));
+        cmd.args(crate::agent::opencode::run_selection_args(
+            v2,
+            Some(job.model.as_str()),
+            Some(job.effort.as_str()),
+        ));
+        if !v2 {
+            cmd.arg(prompt);
         }
-        if !job.effort.is_empty() {
-            cmd.args(["--variant", &job.effort]);
-        }
-        cmd.arg(prompt);
     } else if matches!(spec.kind, SessionKind::Pi | SessionKind::Omp) {
         // Pi v0.24 and OMP v18: `-p` is print mode and `--mode json` gives the event stream `decode`
         // reads. `--no-tools` leaves the model nothing to call, so the run cannot reach the filesystem

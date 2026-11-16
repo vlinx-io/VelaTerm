@@ -903,6 +903,9 @@ export function ChatPane({
           if (response.readJobId) void chatReadCancel(session.id, response.readJobId).catch(() => {});
           return;
         }
+        if (indexReader.current && indexReader.current !== response.readJobId) {
+          void chatReadCancel(session.id, indexReader.current).catch(() => {});
+        }
         indexReader.current = response.readJobId;
         initialLocation = false;
         const pendingEvents = buffered ?? [];
@@ -1094,13 +1097,30 @@ export function ChatPane({
     setHistoryLoading(true);
     setHistoryError(null);
     const generation = historyGeneration.current;
+    let needRefresh = false;
     const request = (async () => {
       try {
-        const page = await chatSnapshot(session.id, { historyOnly, before, epoch: snapshotRef.current?.startedAt ?? (liveVersions.current.epoch || undefined),
+        const epoch = Math.max(snapshotRef.current?.startedAt ?? 0, liveVersions.current.epoch) || undefined;
+        const page = await chatSnapshot(session.id, { historyOnly, before, epoch,
           ...(snapshotRef.current?.protocolVersion === 2 ? { protocolVersion: 2 as const, historyGeneration: snapshotRef.current.historyGeneration, readJobId: indexReader.current } : {}) });
         if (generation !== historyGeneration.current) return;
-        if (page.pageKind !== "history") { await refreshRef.current(); return; }
+        if (page.pageKind !== "history") { needRefresh = true; return; }
         rememberPosition();
+        if (page.protocolVersion !== 2 && snapshotRef.current?.protocolVersion === 2) {
+          // A live session without paged history serves its entire timeline under v1; drop the stale
+          // idle v2 reader and metadata so subsequent paging and search stay on the live timeline.
+          dropHistoryReader();
+          setHasNewer(false);
+          setHistoryCoverage(page.coverage);
+          snapshotRef.current = {
+            ...snapshotRef.current,
+            ...page,
+            protocolVersion: page.protocolVersion,
+            historyGeneration: undefined,
+            readJobId: undefined,
+            hasNewer: false,
+          };
+        }
         setRows(current => {
           const merged = mergeRows(page.rows, current);
           if (page.protocolVersion !== 2) return merged;
@@ -1123,6 +1143,7 @@ export function ChatPane({
       finally {
         historyBusy.current = false; historyRequest.current = null; setHistoryLoading(false);
         if (coldSync.current) { coldSync.current = false; void refreshRef.current(true); }
+        else if (needRefresh) { void refreshRef.current(); }
       }
     })();
     historyRequest.current = request;
@@ -1500,6 +1521,7 @@ export function ChatPane({
     let active = true;
     let revision = 0;
     const restore = async () => {
+      if (snapshotRef.current?.protocolVersion !== 2) return;
       const location = historyLocation(session.id);
       const current = ++revision;
       if (location.anchor && rowsRef.current.some(row => row.id === location.anchor)) {

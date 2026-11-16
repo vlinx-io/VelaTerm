@@ -7,6 +7,11 @@ v0.1.91 is the first public release; earlier version numbers were internal itera
 
 ---
 
+## v0.3.2 — 2026-11-16
+
+- 🤖 OpenCode v2 sessions can use AI rename and translation again, and a failed AI rename now reports the failure instead of saying the agent is unavailable.
+- 🪐 In Antigravity conversations, Load earlier messages now keeps working after an agent wakes up, instead of doing nothing.
+
 ## v0.3.1 — 2026-11-16
 
 - 🪐 Antigravity conversation view now supports model and reasoning effort switching, subagent and background task tracking, interactive `ask_question` prompts, five-level permissions, AI rename, and turn stats, output speed, and quota usage in the Info panel.

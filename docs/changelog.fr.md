@@ -1,3 +1,8 @@
+## v0.3.2 — 2026-11-16
+
+- 🤖 Les sessions OpenCode v2 peuvent de nouveau utiliser le renommage par IA et la traduction, et un échec du renommage par IA signale désormais l'échec au lieu d'indiquer que l'agent est indisponible.
+- 🪐 Dans les conversations Antigravity, Charger les messages précédents continue de fonctionner une fois l'agent réveillé, au lieu de rester sans effet.
+
 ## v0.3.1 — 2026-11-16
 
 - 🪐 La vue conversation d'Antigravity prend désormais en charge le changement de modèle et d'effort de raisonnement, le suivi des sous-agents et tâches en arrière-plan, les invites interactives `ask_question`, les permissions à cinq niveaux, le renommage par IA ainsi que les statistiques de tour, la vitesse de sortie et les quotas dans le panneau Info.

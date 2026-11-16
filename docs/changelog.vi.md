@@ -1,3 +1,8 @@
+## v0.3.2 — 2026-11-16
+
+- 🤖 Các phiên OpenCode v2 có thể dùng lại đổi tên bằng AI và dịch, và khi đổi tên bằng AI thất bại, thông báo sẽ nêu rõ lỗi thay vì báo agent không khả dụng.
+- 🪐 Trong hội thoại Antigravity, Tải tin nhắn trước đó vẫn hoạt động sau khi agent thức dậy, thay vì không phản hồi khi bấm.
+
 ## v0.3.1 — 2026-11-16
 
 - 🪐 Chế độ xem hội thoại của Antigravity nay hỗ trợ chuyển đổi mô hình và mức suy luận, theo dõi tác nhân phụ và tác vụ nền, lời nhắc tương tác `ask_question`, năm mức quyền, đổi tên bằng AI cùng thống kê lượt, tốc độ xuất và hạn mức sử dụng trong bảng Info.

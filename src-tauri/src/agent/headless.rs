@@ -238,12 +238,38 @@ pub fn pick(
     prompt_len: usize,
 ) -> Option<Summarizer> {
     for kind in candidates(want, caller, prompt_len) {
-        let spec = spec(kind)?;
-        if let Some(bin) = resolve_bin(app, kind, &spec) {
-            return Some(Summarizer { kind, spec, bin });
+        if let Some(summarizer) = resolve_summarizer(app, kind, prompt_len) {
+            return Some(summarizer);
         }
     }
+    // OpenCode v2 reads stdin so it remains eligible beyond ARG_PROMPT_LIMIT even though `candidates`
+    // reflects the static v1 spec.
+    if prompt_len > ARG_PROMPT_LIMIT
+        && (want == Some(SessionKind::Opencode)
+            || (want.is_none()
+                && (caller == Some(SessionKind::Opencode)
+                    || PREFERENCE.contains(&SessionKind::Opencode))))
+    {
+        return resolve_summarizer(app, SessionKind::Opencode, prompt_len);
+    }
     None
+}
+
+fn resolve_summarizer(
+    app: &crate::host::AppCtx,
+    kind: SessionKind,
+    prompt_len: usize,
+) -> Option<Summarizer> {
+    let mut spec = spec(kind)?;
+    let bin = resolve_bin(app, kind, &spec)?;
+    if kind == SessionKind::Opencode && super::opencode::is_v2(&bin) {
+        spec.args = super::opencode::run_args(true);
+        spec.prompt = PromptDelivery::Stdin { marker: None };
+    }
+    if prompt_len > ARG_PROMPT_LIMIT && !spec.accepts_long_prompt() {
+        return None;
+    }
+    Some(Summarizer { kind, spec, bin })
 }
 
 /// Locate this agent's executable: the path configured in settings, then the known install locations,
@@ -519,6 +545,29 @@ fn capture_output(reader:&mut impl Read,limit:usize) -> Result<String,HeadlessEr
     String::from_utf8(bytes).map_err(|e|HeadlessError::Start(e.to_string()))
 }
 
+fn selection_flags(
+    summarizer: &Summarizer,
+    selection: Option<&super::launch_options::AgentSelection>,
+) -> Result<Option<String>, HeadlessError> {
+    if selection.is_some_and(|choice| choice.agent != summarizer.kind) {
+        return Err(HeadlessError::InvalidSelection(
+            "agent does not match the resolved one-shot runner".to_string(),
+        ));
+    }
+    let opencode_v2 = summarizer.kind.uses_opencode() && super::opencode::is_v2(&summarizer.bin);
+    match selection {
+        Some(choice) if opencode_v2 => super::opencode::run_selection_flags(
+            choice.agent,
+            true,
+            Some(choice.model.as_str()),
+            Some(choice.effort.as_str()),
+        ),
+        Some(choice) => super::launch_options::apply_selection(None, choice),
+        None => super::launch_options::apply(summarizer.kind, None, None, None),
+    }
+    .map_err(HeadlessError::InvalidSelection)
+}
+
 pub(crate) fn run_selected_stream(
     summarizer:&Summarizer,
     source:PromptSource,
@@ -527,13 +576,9 @@ pub(crate) fn run_selected_stream(
     timeout:Duration,
     cancelled:&AtomicBool,
 ) -> Result<String,HeadlessError> {
-    if selection.is_some_and(|choice|choice.agent!=summarizer.kind) {return Err(HeadlessError::InvalidSelection("agent does not match the resolved one-shot runner".into()));}
+    let flags=selection_flags(summarizer,selection)?;
     let mut command=crate::host::command(&summarizer.bin);
     command.args(summarizer.spec.args);
-    let flags=match selection {
-        Some(choice)=>super::launch_options::apply_selection(None,choice),
-        None=>super::launch_options::apply(summarizer.kind,None,None,None),
-    }.map_err(HeadlessError::InvalidSelection)?;
     command.args(super::inject::split_extra_args(flags.as_deref()));
     let source=match summarizer.spec.prompt {
         PromptDelivery::Stdin {marker}=>{if let Some(marker)=marker {command.arg(marker);}Some(source)},
@@ -577,16 +622,7 @@ pub fn run_selected(
     cwd: Option<&Path>,
     timeout: Duration,
 ) -> Result<String, HeadlessError> {
-    if selection.is_some_and(|choice| choice.agent != summarizer.kind) {
-        return Err(HeadlessError::InvalidSelection(
-            "agent does not match the resolved one-shot runner".to_string(),
-        ));
-    }
-    let args = match selection {
-        Some(choice) => super::launch_options::apply_selection(None, choice),
-        None => super::launch_options::apply(summarizer.kind, None, None, None),
-    }
-    .map_err(HeadlessError::InvalidSelection)?;
+    let args = selection_flags(summarizer, selection)?;
     let selection = super::inject::split_extra_args(args.as_deref());
     let mut args: Vec<&str> = summarizer.spec.args.to_vec();
     args.extend(selection.iter().map(String::as_str));
@@ -1064,6 +1100,50 @@ mod tests {
         assert_eq!(got, "…fghij");
         // Counting characters rather than bytes keeps multi-byte text from being cut mid-character.
         assert_eq!(tail("一二三四五", 2), "…四五");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opencode_v2_uses_standalone_stdin_and_hash_variant_in_selected_runs() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("vlx-headless-oc2-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("opencode");
+        let script = concat!(
+            "#!/bin/sh\n",
+            "if [ \"$1\" = \"--version\" ]; then echo 'opencode v2.0.32'; exit 0; fi\n",
+            "body=$(cat)\n",
+            "args=\"$*\"\n",
+            "printf '{\"type\":\"text\",\"part\":{\"type\":\"text\",\"text\":\"%s|%s\"}}\\n' \"$args\" \"$body\"\n",
+        );
+        std::fs::write(&bin, script).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let db = crate::db::Db::open(&dir.join("test.db")).unwrap();
+        let app = crate::host::AppCtx::Headless(std::sync::Arc::new(
+            crate::host::HeadlessHost::new(dir.clone(), db),
+        ));
+        let defaults = serde_json::json!({"agentDefaults":{"opencode":{"path":bin}}});
+        crate::db::repo::set_app_settings(
+            &app.db().conn.lock().unwrap(),
+            &std::collections::HashMap::from([("vlx-settings".into(), defaults.to_string())]),
+        )
+        .unwrap();
+
+        let picked = pick(&app, Some(SessionKind::Opencode), None, ARG_PROMPT_LIMIT + 1).unwrap();
+        assert_eq!(picked.spec.args, super::super::opencode::run_args(true));
+        assert_eq!(picked.spec.prompt, PromptDelivery::Stdin { marker: None });
+        let selection = super::super::launch_options::AgentSelection {
+            agent: SessionKind::Opencode,
+            model: "deepseek/deepseek-flash".to_string(),
+            effort: "high".to_string(),
+        };
+        let got = run_selected(&picked, "via stdin", Some(&selection), None, Duration::from_secs(5)).unwrap();
+        assert_eq!(
+            got,
+            "run --standalone --format json --model deepseek/deepseek-flash#high|via stdin"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

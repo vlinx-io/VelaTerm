@@ -219,6 +219,51 @@ it("keeps the recent edge complete when an earlier v2 page is added to the retai
   expect(cachedChat("s")?.hasNewer).toBe(false);expect(screen.queryByText("Load newer messages")).toBeNull();
 });
 
+it("downgrades off idle v2 paging and loads earlier live ACP messages after reset and replaceRows", async () => {
+  snapshotOverrides = { protocolVersion: 2, historyGeneration: "generation", readJobId: "index:stale", coverage: "complete", hasMore: true, hasNewer: false,
+    rows: [{ kind: "user", id: "native:old", text: "Idle indexed message" }] };
+  const previous = vi.mocked(invoke).getMockImplementation()!;
+  const historyCalls: Array<Record<string, unknown>> = [];
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    const record = (args ?? {}) as Record<string, unknown>;
+    const before = (record.window as { before?: string } | undefined)?.before;
+    if (command === "chat_snapshot" && before) {
+      historyCalls.push(record);
+      return Promise.resolve({
+        submissionReceipts: true, running: true, model: "old-model", mode: "default", queue: [], permissions: [], commands: [], configKeys: [],
+        pageKind: "history", startedAt: 7, hasNewer: false,
+        hasMore: before === "acp-u61",
+        rows: [before === "acp-u61"
+          ? { kind: "user", id: "acp-u1", text: "Earlier live message" }
+          : { kind: "user", id: "acp-u0", text: "First live message" }],
+      }) as Promise<never>;
+    }
+    return previous(command, args);
+  });
+  const view = await mountPane();
+  expect(view.container.querySelector(".sv-history-more")?.tagName).toBe("A");
+  act(() => {
+    eventCallback({ type: "reset", epoch: 7, revision: 1, hasMore: false, rows: [] });
+    eventCallback({ type: "replaceRows", epoch: 7, revision: 2, hasMore: true, rows: [{ kind: "user", id: "acp-u61", text: "Recent live message" }] });
+  });
+  await screen.findByText("Recent live message");
+  fireEvent.click(view.container.querySelector(".sv-history-more")!);
+  await screen.findByText("Earlier live message");
+  expect(cachedChat("s")?.rows.map(row => row.id)).toEqual(["acp-u1", "acp-u61"]);
+  expect(invoke).toHaveBeenCalledWith("chat_read_cancel", { sessionId: "s", jobId: "index:stale" });
+  expect(view.container.querySelector(".sv-history-more")?.tagName).toBe("BUTTON");
+  fireEvent.click(view.container.querySelector(".sv-history-more")!);
+  await screen.findByText("First live message");
+  expect(cachedChat("s")?.rows.map(row => row.id)).toEqual(["acp-u0", "acp-u1", "acp-u61"]);
+  expect(historyCalls).toHaveLength(2);
+  expect(historyCalls[0]?.protocolVersion).toBe(2);
+  expect(historyCalls[0]?.historyGeneration).toBe("generation");
+  expect(historyCalls[0]?.window).toMatchObject({ before: "acp-u61", epoch: 7, protocolVersion: 2, historyGeneration: "generation", readJobId: "index:stale" });
+  expect(historyCalls[1]?.protocolVersion).toBeUndefined();
+  expect(historyCalls[1]?.historyGeneration).toBeUndefined();
+  expect(historyCalls[1]?.window).toEqual({ before: "acp-u1", epoch: 7, historyOnly: false });
+});
+
 it("keeps the running model visible on discovery failure and restores choices after retry", async () => {
   const previous = vi.mocked(invoke).getMockImplementation()!;
   let failModels = true;

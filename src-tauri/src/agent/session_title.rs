@@ -243,7 +243,12 @@ fn antigravity_model_without_effort(model: &str) -> &str {
     model
 }
 
+#[cfg(test)]
 fn selection_args(kind: SessionKind, selection: &mut super::session_settings::Selection, model: Option<&str>, effort: Option<&str>) -> Result<Option<String>, String> {
+    selection_args_with(kind, false, selection, model, effort)
+}
+
+fn selection_args_with(kind: SessionKind, opencode_v2: bool, selection: &mut super::session_settings::Selection, model: Option<&str>, effort: Option<&str>) -> Result<Option<String>, String> {
     if kind == SessionKind::Zcode {
         // ZCode has no per-run model switch and uses its own configured model.
         if let Some(model) = model { selection.model = super::session_settings::clean(Some(model)); }
@@ -258,8 +263,12 @@ fn selection_args(kind: SessionKind, selection: &mut super::session_settings::Se
     } else {
         selection.model.as_deref()
     };
-    super::launch_options::apply(kind, None, cli_model, selection.effort.as_deref())
-        .map_err(|_| "session_title:invalid_selection".into())
+    if kind.uses_opencode() {
+        super::opencode::run_selection_flags(kind, opencode_v2, cli_model, selection.effort.as_deref())
+    } else {
+        super::launch_options::apply(kind, None, cli_model, selection.effort.as_deref())
+    }
+    .map_err(|_| "session_title:invalid_selection".into())
 }
 
 fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: Option<&str>, effort: Option<&str>, task: &Task) -> Result<GeneratedTitle, String> {
@@ -277,8 +286,9 @@ fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: 
     };
     let prompt = build_prompt(&messages)?;
     let (kind, bin) = pick_agent(app, &session, prompt.len(), agent)?;
+    let opencode_v2 = kind.uses_opencode() && super::opencode::is_v2(&bin);
     let (raw_args, mut selection) = task_selection(app, &session, kind)?;
-    let extra = selection_args(kind, &mut selection, model, effort)?;
+    let extra = selection_args_with(kind, opencode_v2, &mut selection, model, effort)?;
     let dir = WorkDir::new(app)?;
     let cwd = session.cwd.clone().or_else(|| app.pty().cwd(id))
         .or(repo::get_project_root(&app.db().conn.lock().unwrap(), &session.project_id)?);
@@ -297,6 +307,13 @@ fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: 
             .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
             .filter(Value::is_object)
             .unwrap_or_else(|| json!({}));
+        if !config.get("small_model").and_then(Value::as_str).is_some_and(|m| !m.is_empty()) {
+            config["small_model"] = json!(format!(
+                "{}/{}",
+                super::chat::deepseek_models::PROVIDER,
+                super::chat::deepseek_models::DEFAULT_MODEL
+            ));
+        }
         super::chat::deepseek_models::apply_provider(&mut config, base_url.as_deref(), api_key.as_deref());
         vars.insert(crate::agent::inject::OPENCODE_CONFIG_ENV.to_string(), config.to_string());
         Some(serde_json::to_string(&vars).map_err(|_| "session_title:agent_unavailable")?)
@@ -333,7 +350,7 @@ fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: 
     let output = match headless::run_command_with_cancel(command, stdin_payload.as_deref(), TIMEOUT, Some(&task.cancelled)) {
         Ok(output) => output,
         Err(error) => {
-            let code = match error { HeadlessError::Timeout(_) => "timeout", HeadlessError::Cancelled => "cancelled", _ => "agent_unavailable" };
+            let code = title_error_code(&error);
             crate::diagnostics::record(if code == "cancelled" { "INFO" } else { "ERROR" }, "session_title", json!({
                 "sessionId":id,"step":"ai_failed","method":"AI",
                 "agent":kind.as_str(),"status":if code=="cancelled"{"cancelled"}else{"failed"},"errorCode":if code=="timeout"{"timeout"}else{"operation_failed"},"inputCount":messages.len(),
@@ -342,9 +359,7 @@ fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: 
             return Err(format!("session_title:{code}"));
         }
     };
-    let answer = answer_text(kind, &output).map_err(|error| {
-        if error == "session_title:failed" { "session_title:agent_unavailable".into() } else { error }
-    });
+    let answer = answer_text(kind, &output);
     crate::diagnostics::record("INFO", "session_title", json!({
         "sessionId":id,"step":"ai_response","method":"AI",
         "agent":kind.as_str(),"responseBytes":output.len(),"sha256":digest(&output),
@@ -425,24 +440,42 @@ fn available_binary_with_settings(kind: SessionKind, path: Option<&str>, setting
         .filter(|bin| super::executable::is_executable_file(std::path::Path::new(bin)))
 }
 
+fn title_error_code(error: &HeadlessError) -> &'static str {
+    match error {
+        HeadlessError::InvalidSelection(_) => "invalid_selection",
+        HeadlessError::Timeout(_) => "timeout",
+        HeadlessError::Cancelled => "cancelled",
+        HeadlessError::Start(_) => "agent_unavailable",
+        HeadlessError::PromptTooLarge { .. } => "too_large",
+        HeadlessError::Failed { .. }
+        | HeadlessError::Empty
+        | HeadlessError::Input(_)
+        | HeadlessError::OutputTooLarge => "failed",
+    }
+}
+
 fn pick_agent(app: &AppCtx, session: &Session, bytes: usize, chosen: Option<SessionKind>) -> Result<(SessionKind, String), String> {
     let kind = chosen.unwrap_or(session.kind);
     if !AGENTS.contains(&kind) { return Err("session_title:agent_unavailable".into()); }
-    if bytes > headless::ARG_PROMPT_LIMIT && !accepts_long_prompt(kind) {
-        return Err("session_title:agent_unavailable".into());
-    }
     let path = if kind == session.kind { session.agent_path.as_deref() } else { None };
-    available_binary(app, kind, path)
+    let bin = available_binary(app, kind, path)
         .or_else(|| super::executable::resolve(app, kind, path)
             .filter(|bin| super::executable::is_executable_file(std::path::Path::new(bin))))
-        .map(|bin| (kind, bin))
-        .ok_or("session_title:agent_unavailable".into())
+        .ok_or("session_title:agent_unavailable")?;
+    if bytes > headless::ARG_PROMPT_LIMIT && !accepts_long_prompt_for(kind, &bin) {
+        return Err("session_title:agent_unavailable".into());
+    }
+    Ok((kind, bin))
 }
 
 /// Whether this one-shot adapter can read a prompt too large for an argument.
 fn accepts_long_prompt(kind: SessionKind) -> bool {
     kind == SessionKind::Antigravity
         || headless::spec(kind).is_some_and(|spec| spec.accepts_long_prompt())
+}
+
+fn accepts_long_prompt_for(kind: SessionKind, bin: &str) -> bool {
+    accepts_long_prompt(kind) || (kind.uses_opencode() && super::opencode::is_v2(bin))
 }
 
 fn stdin_input(kind: SessionKind, prompt: &str) -> String {
@@ -470,7 +503,8 @@ fn task_args(kind: SessionKind, raw: Option<&str>) -> Vec<String> {
             | "--output-schema" | "--permission-mode" | "--approval-mode" | "--tools" | "--allowedTools"
             | "--allowed-tools" | "--disallowedTools" | "--disallowed-tools" | "--resume" | "-r"
             | "--session-id" | "--session" | "-s" | "--mode" | "--prompt-file" | "--mcp-config" | "--color")
-            || (kind != SessionKind::Antigravity && flag == "--sandbox");
+            || (kind != SessionKind::Antigravity && flag == "--sandbox")
+            || (kind.uses_opencode() && flag == "--server");
         let switch = antigravity_switch || matches!(flag, "--continue" | "--fork-session" | "--fork"
             | "--json" | "--dangerously-skip-permissions" | "--allow-dangerously-skip-permissions"
             | "--dangerously-bypass-approvals-and-sandbox" | "--yolo" | "--always-approve"
@@ -478,6 +512,7 @@ fn task_args(kind: SessionKind, raw: Option<&str>) -> Vec<String> {
             | "--no-rules" | "--no-title" | "--no-session-persistence" | "--strict-mcp-config"
             | "--disable-slash-commands" | "--no-memory" | "--no-plan" | "--no-subagents" | "--no-web"
             | "--ephemeral" | "--skip-git-repo-check" | "--pure")
+            || (kind.uses_opencode() && matches!(flag, "--standalone" | "--auto"))
             || (matches!(kind, SessionKind::Pi | SessionKind::Omp) && flag == "-c")
             || (kind != SessionKind::Antigravity && matches!(flag, "--print" | "-p"));
         if value { i += if args[i].contains('=') { 1 } else { 2 }; }
@@ -563,15 +598,27 @@ pub(crate) fn isolated_command(bin: &str, kind: SessionKind, dir: &std::path::Pa
                 true
             }
             kind if kind.uses_opencode() => {
+                let opencode_v2 = super::opencode::is_v2(bin);
                 let mut config = match command_env(&command, "OPENCODE_CONFIG_CONTENT") {
                     Some(raw) => serde_json::from_str::<Value>(&raw).map_err(|_| "session_title:agent_unavailable")?,
                     None => json!({}),
                 };
                 if !config.is_object() { return Err("session_title:agent_unavailable".into()); }
                 config["permission"] = json!({"*":"deny"});
-                command.args(["--format", "json", "--pure"])
+                if opencode_v2 {
+                    // Disable OpenCode's automatic session-title call so one-shot runs do not send the
+                    // full prompt twice to the provider.
+                    let agents = config.as_object_mut().unwrap()
+                        .entry("agent").or_insert_with(|| json!({}));
+                    if !agents.is_object() { *agents = json!({}); }
+                    let title = agents.as_object_mut().unwrap()
+                        .entry("title").or_insert_with(|| json!({}));
+                    if !title.is_object() { *title = json!({}); }
+                    title["disable"] = json!(true);
+                }
+                command.args(super::opencode::run_flags(opencode_v2))
                     .env("OPENCODE_CONFIG_CONTENT", config.to_string());
-                false
+                opencode_v2
             }
             SessionKind::Pi | SessionKind::Omp => {
                 command.args(["--no-session", "--no-tools", "--no-skills", "--no-extensions"]);
@@ -1042,12 +1089,26 @@ mod tests {
 
     #[test]
     fn deepseek_one_shot_runs_opencode_with_the_selected_model() {
-        let (_root, app, _) = fixture();
+        let (_root, app, session) = fixture();
         let dir = WorkDir::new(&app).unwrap();
-        let (command, stdin) = title_command("opencode", SessionKind::Deepseek, &dir,
+        let v1_bin = {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let path = dir.0.join("opencode-v1");
+                std::fs::write(&path, "#!/bin/sh\necho 1.19.0\n").unwrap();
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+                path.to_string_lossy().into_owned()
+            }
+            #[cfg(not(unix))]
+            {
+                "opencode".to_string()
+            }
+        };
+        let (command, stdin) = title_command(&v1_bin, SessionKind::Deepseek, &dir,
             Some("--model ignored --variant low"), None,
             Some(std::path::Path::new("/project")), Some("deepseek/deepseek-v4-pro"), Some("max")).unwrap();
-        assert!(!stdin, "OpenCode's one-shot run takes the prompt as an argument");
+        assert!(!stdin, "OpenCode v1 one-shot run takes the prompt as an argument");
         let args: Vec<_> = command.get_args().map(|arg| arg.to_string_lossy().to_string()).collect();
         assert_eq!(args.first().map(String::as_str), Some("run"));
         assert!(args.iter().any(|arg| arg == "--format"));
@@ -1061,6 +1122,40 @@ mod tests {
         assert_eq!(flags, "--model 'deepseek/deepseek-v4-pro' --variant low");
         assert!(selection_args(SessionKind::Deepseek, &mut selection,
             Some("bad\nmodel"), None).is_err());
+
+        let (v2_cmd, v2_stdin) = title_command("opencode2", SessionKind::Deepseek, &dir,
+            Some("--standalone --auto --server http://127.0.0.1:4096 --model ignored --variant low"), None,
+            Some(std::path::Path::new("/project")), Some("deepseek/deepseek-flash"), Some("high")).unwrap();
+        assert!(v2_stdin, "OpenCode v2 reads the prompt on stdin");
+        let v2_args: Vec<_> = v2_cmd.get_args().map(|arg| arg.to_string_lossy().to_string()).collect();
+        assert_eq!(v2_args, ["run", "--standalone", "--format", "json"]);
+        assert!(!v2_args.iter().any(|arg| arg == "--pure" || arg == "--auto" || arg == "--server"));
+        let v2_config: Value = serde_json::from_str(&command_env(&v2_cmd, "OPENCODE_CONFIG_CONTENT").unwrap()).unwrap();
+        assert_eq!(v2_config["permission"], json!({"*":"deny"}));
+        assert_eq!(v2_config["agent"]["title"]["disable"], json!(true));
+        let v2_flags = selection_args_with(SessionKind::Deepseek, true, &mut selection,
+            Some("deepseek/deepseek-flash"), Some("high")).unwrap().unwrap();
+        assert_eq!(v2_flags, "--model 'deepseek/deepseek-flash#high'");
+        assert!(selection_args_with(SessionKind::Deepseek, true, &mut selection,
+            Some(""), Some("high")).unwrap().is_none());
+        assert!(accepts_long_prompt_for(SessionKind::Deepseek, "opencode2"));
+        assert!(!accepts_long_prompt_for(SessionKind::Deepseek, &v1_bin));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let v2_bin = dir.0.join("opencode-v2");
+            std::fs::write(&v2_bin, "#!/bin/sh\necho opencode v2.0.32\n").unwrap();
+            std::fs::set_permissions(&v2_bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let v2_path = v2_bin.to_string_lossy().into_owned();
+            assert!(accepts_long_prompt_for(SessionKind::Deepseek, &v2_path));
+            let defaults = json!({"agentDefaults":{"deepseek":{"path":v2_path}}});
+            app.db().conn.lock().unwrap().execute("INSERT OR REPLACE INTO app_settings(key,value,updated_at) VALUES ('vlx-settings',?1,0)",
+                [defaults.to_string()]).unwrap();
+            assert_eq!(
+                pick_agent(&app, &session, headless::ARG_PROMPT_LIMIT + 1, Some(SessionKind::Deepseek)).unwrap(),
+                (SessionKind::Deepseek, v2_path)
+            );
+        }
     }
 
     #[test]
@@ -1177,5 +1272,16 @@ mod tests {
         assert_eq!(answer_text(SessionKind::Antigravity, err_ndjson).unwrap_err(), "session_title:failed");
 
         assert_eq!(answer_text(SessionKind::Antigravity, "{\"event\":\"assistant\"}\n").unwrap_err(), "session_title:invalid");
+    }
+
+    #[test]
+    fn process_failures_report_failed_instead_of_agent_unavailable() {
+        assert_eq!(title_error_code(&HeadlessError::Start("missing".into())), "agent_unavailable");
+        assert_eq!(title_error_code(&HeadlessError::Failed { code: Some(1), stderr: "bad flag".into() }), "failed");
+        assert_eq!(title_error_code(&HeadlessError::Empty), "failed");
+        assert_eq!(title_error_code(&HeadlessError::Timeout(Duration::from_secs(1))), "timeout");
+        assert_eq!(title_error_code(&HeadlessError::Cancelled), "cancelled");
+        assert_eq!(title_error_code(&HeadlessError::PromptTooLarge { limit: 10, actual: 20 }), "too_large");
+        assert_eq!(title_error_code(&HeadlessError::InvalidSelection("bad".into())), "invalid_selection");
     }
 }

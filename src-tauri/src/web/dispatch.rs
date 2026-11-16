@@ -1042,7 +1042,9 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             let prefer=args.get("preferBounded").and_then(Value::as_bool)==Some(true);
             let history_only=args.get("historyOnly").and_then(Value::as_bool)==Some(true);
             let located=args.get("messageIndex").is_some() || args.get("recordOffset").is_some();
-            if !history_only && !located && crate::agent::history_store::children::path(args)?.is_empty() {
+            let child_path=crate::agent::history_store::children::path(args)?;
+            let child_empty=child_path.is_empty();
+            if !history_only && !located && child_empty {
                 if let Some(live)=app.chat().paged_history(&sid) {
                     // Earlier rows are history pages in front of this process's timeline. The timeline part
                     // is a whole window rather than a delta, so the merged rows replace the client's copy.
@@ -1054,18 +1056,32 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
                     return Ok(value);
                 }
             }
+            let has_pid=!history_only && child_empty
+                && app.chat().snapshot_window(&sid,Some(&crate::agent::chat::engine::ChatWindow {control_only:true,..Default::default()})).pid.is_some();
             let idle_bounded=if prefer {
                 let kind=crate::db::repo::get_session_kind(&app.db().conn.lock().unwrap(),&sid)?;
                 // A Grok conversation view draws its native stream through the ACP mapper, which keeps tool
                 // cards; the paged reader serves its read-only history views.
                 (matches!(kind,Some(SessionKind::Codex|SessionKind::Claude|SessionKind::Pi|SessionKind::Omp|SessionKind::Antigravity|SessionKind::Opencode|SessionKind::Deepseek|SessionKind::Kiro))
                     || kind==Some(SessionKind::Grok) && history_only)
-                    && (history_only || app.chat().snapshot_window(&sid,Some(&crate::agent::chat::engine::ChatWindow {control_only:true,..Default::default()})).pid.is_none())
+                    && !has_pid
             } else {false};
-            if args.get("protocolVersion").and_then(Value::as_u64)==Some(2) || idle_bounded {
+            let finish_runtime=|mut value:Value| -> Result<Value,String> {
+                app.chat().decorate_runtime_snapshot(&sid,&mut value);
+                crate::agent::tell::decorate(app,&sid,&mut value);
+                if serde_json::to_vec(&value).map_err(|e|e.to_string())?.len()>crate::agent::history_store::limits::PAGE_BYTES {
+                    return Err("detail_requires_paging: this conversation requires the bounded snapshot contract".into());
+                }
+                Ok(value)
+            };
+            // A running process without `paged_history` keeps its entire timeline in memory under v1.
+            // Clients that opened while idle may still pass `protocolVersion: 2` and a stale `historyGeneration`
+            // alongside live row ids such as `acp-*`, so never route them through `history_store`.
+            if (args.get("protocolVersion").and_then(Value::as_u64)==Some(2) && !has_pid) || idle_bounded {
                 let mut value=to_value(core::chat_snapshot_control(app,&sid,Some(window.as_ref().unwrap_or(&Default::default())))?)?;
-                let child_path=crate::agent::history_store::children::path(args)?;
-                let child_empty=child_path.is_empty();
+                if value.get("pid").is_some() && !history_only && child_empty {
+                    return finish_runtime(value);
+                }
                 match crate::agent::history_store::children::prepare(app,&sid,&child_path) {
                     Ok(branch)=>{
                         if args.get("historyGeneration").and_then(Value::as_str).is_some_and(|g|g!=branch.generation) {
@@ -1096,45 +1112,16 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
                         } else {branch.page(window.as_ref().and_then(|w|w.before.as_deref()),opt_str(args,"after").as_deref(),opt_str(args,"anchor").as_deref())?};
                         let read_job=branch.store.subscribe(&sid,&branch.sources,opt_str(args,"readJobId").as_deref())?;
                         page["readJobId"]=serde_json::json!(read_job);
-                        if value.get("pid").is_none() || history_only || !child_empty {
-                            value.as_object_mut().unwrap().extend(page.as_object().unwrap().clone());
-                            if history_only || !child_empty {
-                                for key in ["pid","startedAt","turnStartedAt","auth"] {value.as_object_mut().unwrap().remove(key);}
-                                value["permissions"]=serde_json::json!([]);value["queue"]=serde_json::json!([]);value["running"]=serde_json::json!(false);
-                            }
-                        } else {
-                            app.chat().decorate_runtime_snapshot(&sid,&mut value);
-                            // Live and historical row identity mapping is introduced at the receive boundary.
-                            // Until that mapping is available, publish control facts without guessing a merge.
-                            for key in ["protocolVersion","historyGeneration","coverage","indexing","pendingLocation","indexedBytes","sourceBytes","knownRows","snapshotRevision","readJobId"] {
-                                value[key]=page[key].clone();
-                            }
-                            if let Some(rows)=value.get_mut("rows").and_then(Value::as_array_mut) {
-                                for row in rows.iter_mut() {
-                                    if let Some(obj)=row.as_object_mut() {
-                                        obj.entry("detailProtocol").or_insert_with(||serde_json::json!(1));
-                                    }
-                                }
-                            }
+                        value.as_object_mut().unwrap().extend(page.as_object().unwrap().clone());
+                        if history_only || !child_empty {
+                            for key in ["pid","startedAt","turnStartedAt","auth"] {value.as_object_mut().unwrap().remove(key);}
+                            value["permissions"]=serde_json::json!([]);value["queue"]=serde_json::json!([]);value["running"]=serde_json::json!(false);
                         }
                     }
                     Err(error)=>{
-                        if value.get("pid").is_some() && !history_only && child_empty && error.starts_with("source_missing:") {
-                            app.chat().decorate_runtime_snapshot(&sid,&mut value);
-                            if let Some(rows)=value.get_mut("rows").and_then(Value::as_array_mut) {
-                                for row in rows.iter_mut() {
-                                    if let Some(obj)=row.as_object_mut() {
-                                        obj.entry("detailProtocol").or_insert_with(||serde_json::json!(1));
-                                    }
-                                }
-                            }
-                            value["protocolVersion"]=serde_json::json!(2);
-                            value["coverage"]=serde_json::json!("complete");
-                        } else {
-                            value["protocolVersion"]=serde_json::json!(2);
-                            value["coverage"]=serde_json::json!("error");
-                            value["historyError"]=serde_json::json!(error);
-                        }
+                        value["protocolVersion"]=serde_json::json!(2);
+                        value["coverage"]=serde_json::json!("error");
+                        value["historyError"]=serde_json::json!(error);
                     }
                 }
                 crate::agent::tell::decorate(app,&sid,&mut value);
@@ -1143,13 +1130,7 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
                 }
                 return Ok(value);
             }
-            let mut value = to_value(core::chat_snapshot_window(app, &sid, window.as_ref())?)?;
-            app.chat().decorate_runtime_snapshot(&sid,&mut value);
-            crate::agent::tell::decorate(app,&sid,&mut value);
-            if serde_json::to_vec(&value).map_err(|e|e.to_string())?.len()>crate::agent::history_store::limits::PAGE_BYTES {
-                return Err("detail_requires_paging: this conversation requires the bounded snapshot contract".into());
-            }
-            Ok(value)
+            finish_runtime(to_value(core::chat_snapshot_window(app, &sid, window.as_ref())?)?)
         }
         "chat_row" => {
             let sid=req_str(args,"sessionId")?;

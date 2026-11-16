@@ -73,7 +73,12 @@ fn agent_command(app: &AppCtx,cfg: &config::Config,bin: &str,dir: &std::path::Pa
     let defaults=super::spawn_requests::default_selection(&app.db().conn.lock().unwrap(),kind,raw)?;
     let model=if cfg.model.is_empty() {defaults.model.unwrap_or_default()} else {cfg.model.clone()};
     let effort=if cfg.effort.is_empty() {defaults.effort.unwrap_or_default()} else {cfg.effort.clone()};
-    let flags=super::launch_options::apply(kind,None,(!model.is_empty()).then_some(model.as_str()),(!effort.is_empty()).then_some(effort.as_str())).map_err(|_|"translation:configuration")?;
+    let flags=if kind.uses_opencode() {
+        let v2=super::opencode::is_v2(bin);
+        super::opencode::run_selection_flags(kind,v2,(!model.is_empty()).then_some(model.as_str()),(!effort.is_empty()).then_some(effort.as_str()))
+    } else {
+        super::launch_options::apply(kind,None,(!model.is_empty()).then_some(model.as_str()),(!effort.is_empty()).then_some(effort.as_str()))
+    }.map_err(|_|"translation:configuration")?;
     let (mut command,stdin)=super::session_title::isolated_command(bin,kind,dir,raw,None,None,&schema(),None,None).map_err(|_|"translation:agent")?;
     if kind==SessionKind::Codex {
         // This task transforms text; coding instructions and skill discovery only add unrelated context.

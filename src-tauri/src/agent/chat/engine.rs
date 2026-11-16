@@ -8448,6 +8448,61 @@ mod tests {
         assert_eq!(reset.rows.len(), 1);
     }
 
+    #[test]
+    fn running_acp_process_ignores_stale_v2_snapshot_requests() {
+        let app = ctx("dispatch-acp-v2-to-v1-fallback");
+        let session = {
+            let conn = app.db().conn.lock().unwrap();
+            let project = crate::db::repo::create_virtual_project(&conn, "test").unwrap();
+            crate::db::repo::create_session(&conn, &project.id, None, "Antigravity 1", SessionKind::Antigravity, None, None, None, None, None).unwrap()
+        };
+        let proc = inert_process(SessionKind::Antigravity);
+        let user = |i: usize| ChatRow::User { id: format!("acp-u{i}"), text: format!("message {i}"), images: vec![], at: None };
+        for i in 0..150 { proc.timeline.lock().unwrap().upsert(user(i)); }
+        app.chat().sessions.lock().unwrap().insert(session.id.clone(), proc.clone());
+
+        // Live ACP processes keep their timeline under v1 even if the client still holds an idle v2 generation.
+        let recent = crate::web::dispatch::dispatch(
+            &app,
+            "chat_snapshot",
+            &json!({
+                "sessionId": session.id,
+                "preferBounded": true,
+                "protocolVersion": 2,
+                "historyGeneration": "stale-gen",
+                "window": { "protocolVersion": 2, "historyGeneration": "stale-gen" },
+            }),
+            crate::pty::manager::DESKTOP_SOURCE,
+            crate::web::dispatch::CallOrigin::Local,
+        ).unwrap();
+        assert_eq!(recent["pageKind"], "recent");
+        assert_eq!(recent["rows"].as_array().unwrap().len(), 60);
+        assert_eq!(recent["rows"][0]["id"], "acp-u90");
+        assert_eq!(recent["hasMore"], true);
+        assert_ne!(recent.get("protocolVersion").and_then(|v| v.as_u64()), Some(2));
+
+        let history = crate::web::dispatch::dispatch(
+            &app,
+            "chat_snapshot",
+            &json!({
+                "sessionId": session.id,
+                "preferBounded": true,
+                "protocolVersion": 2,
+                "historyGeneration": "stale-gen",
+                "window": { "before": "acp-u90", "epoch": proc.started_at },
+            }),
+            crate::pty::manager::DESKTOP_SOURCE,
+            crate::web::dispatch::CallOrigin::Local,
+        ).unwrap();
+        assert_eq!(history["pageKind"], "history");
+        let rows = history["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), 60);
+        assert_eq!(rows[0]["id"], "acp-u30");
+        assert_eq!(rows.last().unwrap()["id"], "acp-u89");
+        assert_eq!(history["hasMore"], true);
+        assert_ne!(history.get("protocolVersion").and_then(|v| v.as_u64()), Some(2));
+    }
+
     /// A client away for a long time owes more than one response carries, by row count or by bytes.
     /// Either way it gets a bounded recent window, and the rows before it stay reachable by paging.
     #[test]

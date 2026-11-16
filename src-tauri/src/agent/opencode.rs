@@ -44,6 +44,83 @@ pub fn is_v2_version(version: Option<&str>) -> bool {
         .is_some_and(|v|v.major>=2 || (v.major==0 && v.pre.as_str().starts_with("beta")))
 }
 
+/// Flags passed after `run` for one-shot `opencode run` invocations across v1 and v2.
+///
+/// v1 isolates with `--pure`; v2 removed `--pure` and isolates with `--standalone`.
+pub fn run_flags(v2: bool) -> &'static [&'static str] {
+    if v2 {
+        &["--standalone", "--format", "json"]
+    } else {
+        &["--format", "json", "--pure"]
+    }
+}
+
+/// Complete subcommand and flags for one-shot `opencode run` across v1 and v2.
+pub fn run_args(v2: bool) -> &'static [&'static str] {
+    if v2 {
+        &["run", "--standalone", "--format", "json"]
+    } else {
+        &["run", "--format", "json", "--pure"]
+    }
+}
+
+/// Format `--model` and `--variant` arguments for one-shot `opencode run`.
+///
+/// OpenCode v2 removed `--variant` and appends the variant as `<model>#<effort>` inside `--model`.
+pub fn run_selection_args(v2: bool, model: Option<&str>, effort: Option<&str>) -> Vec<String> {
+    let model = model.map(str::trim).filter(|m| !m.is_empty());
+    let effort = effort.map(str::trim).filter(|e| !e.is_empty());
+    let Some(model) = model else {
+        return if !v2 {
+            effort.map(|e| vec!["--variant".into(), e.to_string()]).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+    };
+    if v2 {
+        let base = model.split('#').next().unwrap_or(model);
+        let value = match effort {
+            Some(effort) if !base.is_empty() => format!("{base}#{effort}"),
+            _ => model.to_string(),
+        };
+        vec!["--model".into(), value]
+    } else {
+        let mut args = vec!["--model".into(), model.to_string()];
+        if let Some(effort) = effort {
+            args.push("--variant".into());
+            args.push(effort.to_string());
+        }
+        args
+    }
+}
+
+/// Validate and format model and variant flags for callers expecting shell-tokenized strings.
+pub fn run_selection_flags(
+    kind: crate::models::SessionKind,
+    v2: bool,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Result<Option<String>, String> {
+    if !v2 {
+        return super::launch_options::apply(kind, None, model, effort);
+    }
+    super::launch_options::apply(kind, None, model, effort)?;
+    let args = run_selection_args(true, model, effort);
+    if args.is_empty() {
+        return Ok(None);
+    }
+    let mut parts = Vec::with_capacity(args.len());
+    let mut iter = args.into_iter();
+    while let Some(flag) = iter.next() {
+        if let Some(value) = iter.next() {
+            parts.push(format!("{flag} '{value}'"));
+        } else {
+            parts.push(flag);
+        }
+    }
+    Ok(Some(parts.join(" ")))
+}
+
 /// v2's full TUI has no model flag or v1 plugin hooks. Prepare its native session through its own
 /// authenticated API so even a fresh terminal has a durable identity before it starts.
 pub fn prepare_v2_terminal(app: &crate::host::AppCtx, session: &str, bin: &str, cwd: Option<&str>,
@@ -111,5 +188,46 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn run_helpers_adapt_flags_and_model_variant_for_v1_and_v2() {
+        assert_eq!(run_args(false), ["run", "--format", "json", "--pure"]);
+        assert_eq!(run_args(true), ["run", "--standalone", "--format", "json"]);
+        assert_eq!(run_flags(false), ["--format", "json", "--pure"]);
+        assert_eq!(run_flags(true), ["--standalone", "--format", "json"]);
+
+        assert_eq!(
+            run_selection_args(false, Some("deepseek/deepseek-flash"), Some("high")),
+            ["--model", "deepseek/deepseek-flash", "--variant", "high"]
+        );
+        assert_eq!(
+            run_selection_args(true, Some("deepseek/deepseek-flash"), Some("high")),
+            ["--model", "deepseek/deepseek-flash#high"]
+        );
+        assert_eq!(
+            run_selection_args(true, Some("deepseek/deepseek-flash"), None),
+            ["--model", "deepseek/deepseek-flash"]
+        );
+        assert!(run_selection_args(true, None, Some("high")).is_empty());
+
+        assert_eq!(
+            run_selection_flags(
+                crate::models::SessionKind::Deepseek,
+                true,
+                Some("deepseek/deepseek-flash"),
+                Some("max")
+            )
+            .unwrap()
+            .as_deref(),
+            Some("--model 'deepseek/deepseek-flash#max'")
+        );
+        assert!(run_selection_flags(
+            crate::models::SessionKind::Deepseek,
+            true,
+            Some("bad model"),
+            None
+        )
+        .is_err());
     }
 }
