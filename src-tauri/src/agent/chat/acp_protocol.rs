@@ -464,6 +464,92 @@ fn option_of(options: Option<&Value>, kinds: &[&str]) -> Option<String> {
         .and_then(|option| option.get("optionId").and_then(Value::as_str)).map(str::to_string)
 }
 
+// Grok's own requests for a dialog, which its terminal draws and an error answer cancels. Each is kept
+// with its method under `GROK_METHOD`, so the answer can take that method's shape.
+
+/// The plan Grok wants approved before it leaves plan mode.
+pub const EXIT_PLAN_MODE: &str = "_x.ai/exit_plan_mode";
+/// Questions the model asked through its `ask_user_question` tool.
+pub const ASK_USER_QUESTION: &str = "_x.ai/ask_user_question";
+/// An MCP server asking for input while one of its tools runs.
+pub const MCP_ELICIT: &str = "_x.ai/mcp/elicit";
+/// Where a stored request records which of these it is.
+const GROK_METHOD: &str = "_grokMethod";
+
+/// The view's card for one of Grok's dialog requests, and the parameters to keep for answering it.
+/// `None` when the method is not one of them.
+pub fn grok_dialog(kind: SessionKind, card: &str, method: &str, params: &Value) -> Option<(Value, Value)> {
+    let payload = match method {
+        EXIT_PLAN_MODE => {
+            let plan = params.get("planContent").and_then(Value::as_str).unwrap_or("");
+            json!({"id": card, "tool_name": "ExitPlanMode", "display_name": label(kind), "input": {"plan": plan}})
+        }
+        ASK_USER_QUESTION => {
+            // The question card wants a header per question, which Grok's questions do not always carry.
+            let questions: Vec<Value> = params.get("questions").and_then(Value::as_array).into_iter().flatten()
+                .enumerate().map(|(i, question)| {
+                    let mut question = question.clone();
+                    if question.get("header").and_then(Value::as_str).is_none_or(str::is_empty) {
+                        question["header"] = json!(format!("Q{}", i + 1));
+                    }
+                    if !question.get("options").is_some_and(Value::is_array) { question["options"] = json!([]); }
+                    question
+                }).collect();
+            json!({"id": card, "tool_name": "AskUserQuestion", "display_name": label(kind), "input": {"questions": questions}})
+        }
+        MCP_ELICIT => json!({
+            "id": card,
+            "subtype": "elicitation",
+            "tool_name": "MCP",
+            "display_name": label(kind),
+            "mcp_server_name": params.get("serverName").cloned().unwrap_or(Value::Null),
+            "message": params.get("message").cloned().unwrap_or(Value::Null),
+            "mode": if params.get("mode").and_then(Value::as_str) == Some("url") { "url" } else { "form" },
+            "url": params.get("url").cloned().unwrap_or(Value::Null),
+            "requested_schema": params.get("requestedSchema").cloned().unwrap_or(Value::Null),
+            "input": {"server": params.get("serverName").cloned().unwrap_or(Value::Null)},
+        }),
+        _ => return None,
+    };
+    let mut stored = params.clone();
+    stored[GROK_METHOD] = json!(method);
+    Some((payload, stored))
+}
+
+/// Which of Grok's dialog requests stored parameters belong to, if any.
+pub fn grok_method(params: &Value) -> Option<&str> {
+    params.get(GROK_METHOD).and_then(Value::as_str)
+}
+
+/// The person's answer to one of Grok's dialog requests.
+///
+/// A plan is `approved` (Grok leaves plan mode) or `rejected` (it keeps planning). Questions are
+/// `accepted` with answers keyed by question text, taken from the card's `answers`; dismissing them is
+/// `skip_interview`. An MCP form is `accept` with its content, `decline`, or `cancel`.
+pub fn grok_dialog_answer(id: &Value, method: &str, allow: bool, updated_input: Option<&Value>, message: Option<&str>) -> Value {
+    response(id, match method {
+        EXIT_PLAN_MODE => json!({"outcome": if allow { "approved" } else { "rejected" }}),
+        ASK_USER_QUESTION if allow => json!({"outcome": "accepted",
+            "answers": updated_input.and_then(|input| input.get("answers")).cloned().unwrap_or_else(|| json!({}))}),
+        ASK_USER_QUESTION => json!({"outcome": "skip_interview"}),
+        _ if allow => match updated_input {
+            Some(content) => json!({"outcome": "accept", "content": content}),
+            None => json!({"outcome": "accept"}),
+        },
+        _ => json!({"outcome": if message == Some("cancel") { "cancel" } else { "decline" }}),
+    })
+}
+
+/// The answer to a request left open when its turn is cancelled: nothing approved or answered.
+pub fn cancelled_outcome(id: &Value, params: &Value) -> Value {
+    match grok_method(params) {
+        Some(EXIT_PLAN_MODE) => response(id, json!({"outcome": "rejected"})),
+        Some(ASK_USER_QUESTION) => response(id, json!({"outcome": "skip_interview"})),
+        Some(_) => response(id, json!({"outcome": "cancel"})),
+        None => permission_outcome(id, None),
+    }
+}
+
 pub fn permission_outcome(id: &Value, option: Option<&str>) -> Value {
     response(id, match option {
         Some(option) => json!({"outcome":{"outcome":"selected","optionId":option}}),

@@ -1964,7 +1964,9 @@ export function ChatPane({
         // The mode goes first: approving a plan is what ends plan mode, and the agent has to be out of it
         // before the tool it was asking about runs. It is also how a mode the answer adopts reaches the
         // chip and the stored session setting, which the protocol's own `updatedPermissions` never sees.
-        if (reply.mode) await applyMode(reply.mode);
+        // An agent without the mode, such as Grok, leaves plan mode on its own side when the plan is approved.
+        const modes = permissionCatalog?.catalog?.modes;
+        if (reply.mode && (!modes || modes.includes(reply.mode))) await applyMode(reply.mode);
         await chatPermission(session.id, request.id, reply.allow, {
           updatedInput: reply.updatedInput,
           message: reply.message,

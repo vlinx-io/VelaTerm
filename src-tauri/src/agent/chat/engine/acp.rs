@@ -448,6 +448,16 @@ fn adopt_mode(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, mode: &st
 }
 
 fn handle_request(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: Value, method: &str, params: Value) {
+    let card = format!("acp-{}", wire::id_key(&id));
+    if let Some((payload, stored)) = wire::grok_dialog(proc.kind, &card, method, &params) {
+        // These wait for the person even in bypass, as in Grok's own terminal. An error answer cancels
+        // them: a plan stays unapproved in plan mode, and questions and MCP forms go unanswered.
+        proc.acp.lock().unwrap().requests.insert(card.clone(), (id, stored));
+        proc.permissions.lock().unwrap().insert(card, payload.clone());
+        emit(app, session_id, json!({"type":"permission","request":payload}));
+        emit_state(app, session_id, AgentState::Asking);
+        return;
+    }
     if method != "session/request_permission" {
         // Neither file system nor terminal access was offered; anything else is unknown to this client.
         let _ = proc.write(&wire::error_response(&id, -32601, &format!("{method} is not supported by this client")));
@@ -458,7 +468,6 @@ fn handle_request(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: V
         let _ = proc.write(&wire::permission_outcome(&id, option.as_deref()));
         return;
     }
-    let card = format!("acp-{}", wire::id_key(&id));
     let payload = wire::permission_payload(proc.kind, &card, &params, Some(&proc.acp.lock().unwrap().mapper));
     proc.acp.lock().unwrap().requests.insert(card.clone(), (id, params));
     proc.permissions.lock().unwrap().insert(card, payload.clone());
@@ -466,10 +475,17 @@ fn handle_request(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: V
     emit_state(app, session_id, AgentState::Asking);
 }
 
-/// Answer a permission card. A standing rule the card offered travels in `updated_permissions`.
-pub(super) fn respond(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, card: &str, allow: bool, updated_permissions: Option<&Value>) -> Result<(), String> {
+/// Answer a permission card. A standing rule the card offered travels in `updated_permissions`; a
+/// question's answers or a form's content in `updated_input`, and a form's plain cancel as `message`.
+pub(super) fn respond(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, card: &str, allow: bool,
+    updated_input: Option<&Value>, message: Option<&str>, updated_permissions: Option<&Value>) -> Result<(), String> {
     let (id, params) = proc.acp.lock().unwrap().requests.get(card).cloned()
         .ok_or("That permission request is no longer waiting for an answer")?;
+    if let Some(method) = wire::grok_method(&params) {
+        proc.write(&wire::grok_dialog_answer(&id, method, allow, updated_input, message))?;
+        resolve(app, session_id, proc, card);
+        return Ok(());
+    }
     let always = updated_permissions.and_then(Value::as_array).into_iter().flatten()
         .find(|value| value.get("type").and_then(Value::as_str) == Some("acpAllowAlways"))
         .and_then(|value| value.get("optionId").and_then(Value::as_str));
@@ -490,6 +506,7 @@ fn resolve(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, card: &str) 
 /// Let every waiting request through, used when the session switches to bypass.
 pub(super) fn approve_pending(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
     let requests: Vec<(String, Value, Value)> = proc.acp.lock().unwrap().requests.iter()
+        .filter(|(_, (_, params))| wire::grok_method(params).is_none())
         .map(|(card, (id, params))| (card.clone(), id.clone(), params.clone())).collect();
     for (card, id, params) in requests {
         let option = wire::choose_option(params.get("options"), true, None);
@@ -500,8 +517,8 @@ pub(super) fn approve_pending(app: &AppCtx, session_id: &str, proc: &Arc<ChatPro
 /// A finished turn leaves no question open: any request still waiting is answered as cancelled, and every
 /// card is cleared, including those whose answer `cancel` already sent.
 fn cancel_pending(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
-    let requests: Vec<Value> = proc.acp.lock().unwrap().requests.drain().map(|(_, (id, _))| id).collect();
-    for id in requests { let _ = proc.write(&wire::permission_outcome(&id, None)); }
+    let requests: Vec<(Value, Value)> = proc.acp.lock().unwrap().requests.drain().map(|(_, request)| request).collect();
+    for (id, params) in requests { let _ = proc.write(&wire::cancelled_outcome(&id, &params)); }
     let cards: Vec<String> = proc.permissions.lock().unwrap().keys().cloned().collect();
     for card in cards { resolve(app, session_id, proc, &card); }
 }
@@ -600,8 +617,8 @@ pub(super) fn dispatch(proc: &Arc<ChatProcess>, text: &str, images: &[ChatImage]
 pub(super) fn cancel(proc: &Arc<ChatProcess>) -> Result<(), String> {
     let session = proc.agent_session_id.lock().unwrap().clone().ok_or("The agent has not opened its conversation yet")?;
     proc.write(&wire::cancel(&session))?;
-    let requests: Vec<Value> = proc.acp.lock().unwrap().requests.drain().map(|(_, (id, _))| id).collect();
-    for id in requests { let _ = proc.write(&wire::permission_outcome(&id, None)); }
+    let requests: Vec<(Value, Value)> = proc.acp.lock().unwrap().requests.drain().map(|(_, request)| request).collect();
+    for (id, params) in requests { let _ = proc.write(&wire::cancelled_outcome(&id, &params)); }
     Ok(())
 }
 
@@ -803,7 +820,7 @@ mod tests {
                 {"optionId":"no","name":"Reject","kind":"reject_once"}]}}).to_string());
         let card = proc.permissions.lock().unwrap().get("acp-7").cloned().expect("the request is a permission card");
         assert_eq!(card["tool_name"], "Bash");
-        respond(&app, "s", &proc, "acp-7", true, Some(&json!([{"type":"acpAllowAlways","optionId":"always"}]))).unwrap();
+        respond(&app, "s", &proc, "acp-7", true, None, None, Some(&json!([{"type":"acpAllowAlways","optionId":"always"}]))).unwrap();
         let outcome = written(&mut agent);
         assert_eq!(outcome, json!({"jsonrpc":"2.0","id":7,"result":{"outcome":{"outcome":"selected","optionId":"always"}}}));
         assert!(proc.permissions.lock().unwrap().is_empty());
@@ -816,6 +833,55 @@ mod tests {
         assert!(rows.iter().any(|row| matches!(row, ChatRow::Tool { name, output: Some(output), status: "completed", .. } if name == "Bash" && output == "ok")));
         assert!(rows.iter().any(|row| matches!(row, ChatRow::Assistant { text, streaming: false, .. } if text == "All passed")));
         assert!(!rows.iter().any(|row| matches!(row, ChatRow::Error { .. })));
+    }
+
+    #[test]
+    fn grok_plan_approval_is_a_plan_card_answered_with_its_outcome() {
+        let app = ctx("acp-plan");
+        let (proc, mut agent) = wired(SessionKind::Grok);
+        *proc.agent_session_id.lock().unwrap() = Some("s1".into());
+        *proc.mode.lock().unwrap() = "bypassPermissions".into();
+        let ask = |id: i64| json!({"jsonrpc":"2.0","id":id,"method":"_x.ai/exit_plan_mode",
+            "params":{"sessionId":"s1","toolCallId":"t1","planContent":"1. Do it"}}).to_string();
+        handle_line(&app, "s", &proc, &ask(0));
+        let card = proc.permissions.lock().unwrap().get("acp-0").cloned().expect("the plan waits for the person");
+        assert_eq!((card["tool_name"].as_str(), card["input"]["plan"].as_str()), (Some("ExitPlanMode"), Some("1. Do it")));
+        approve_pending(&app, "s", &proc);
+        assert!(proc.permissions.lock().unwrap().contains_key("acp-0"));
+        respond(&app, "s", &proc, "acp-0", true, None, None, None).unwrap();
+        assert_eq!(written(&mut agent), json!({"jsonrpc":"2.0","id":0,"result":{"outcome":"approved"}}));
+        handle_line(&app, "s", &proc, &ask(1));
+        respond(&app, "s", &proc, "acp-1", false, None, None, None).unwrap();
+        assert_eq!(written(&mut agent), json!({"jsonrpc":"2.0","id":1,"result":{"outcome":"rejected"}}));
+        assert!(proc.permissions.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn grok_questions_and_mcp_forms_are_cards_answered_in_grok_shape() {
+        let app = ctx("acp-grok-dialogs");
+        let (proc, mut agent) = wired(SessionKind::Grok);
+        *proc.agent_session_id.lock().unwrap() = Some("s1".into());
+        handle_line(&app, "s", &proc, &json!({"jsonrpc":"2.0","id":2,"method":"_x.ai/ask_user_question","params":{"sessionId":"s1",
+            "toolCallId":"t1","questions":[{"question":"Pick a color?","options":[{"label":"Red"},{"label":"Blue"}],"multiSelect":null}],
+            "mode":"default"}}).to_string());
+        let card = proc.permissions.lock().unwrap().get("acp-2").cloned().expect("the question waits for the person");
+        assert_eq!((card["tool_name"].as_str(), card["input"]["questions"][0]["header"].as_str()), (Some("AskUserQuestion"), Some("Q1")));
+        let answered = json!({"questions":card["input"]["questions"],"answers":{"Pick a color?":"Red"}});
+        respond(&app, "s", &proc, "acp-2", true, Some(&answered), None, None).unwrap();
+        assert_eq!(written(&mut agent), json!({"jsonrpc":"2.0","id":2,"result":{"outcome":"accepted","answers":{"Pick a color?":"Red"}}}));
+        let elicit = |id: i64| json!({"jsonrpc":"2.0","id":id,"method":"_x.ai/mcp/elicit","params":{"sessionId":"s1","toolCallId":"m1",
+            "serverName":"srv","message":"Name?","mode":"form","requestedSchema":{"type":"object","properties":{"name":{"type":"string"}}}}}).to_string();
+        handle_line(&app, "s", &proc, &elicit(3));
+        let card = proc.permissions.lock().unwrap().get("acp-3").cloned().expect("the form waits for the person");
+        assert_eq!((card["subtype"].as_str(), card["mcp_server_name"].as_str()), (Some("elicitation"), Some("srv")));
+        respond(&app, "s", &proc, "acp-3", true, Some(&json!({"name":"Kai"})), None, None).unwrap();
+        assert_eq!(written(&mut agent), json!({"jsonrpc":"2.0","id":3,"result":{"outcome":"accept","content":{"name":"Kai"}}}));
+        handle_line(&app, "s", &proc, &elicit(4));
+        respond(&app, "s", &proc, "acp-4", false, None, Some("cancel"), None).unwrap();
+        assert_eq!(written(&mut agent), json!({"jsonrpc":"2.0","id":4,"result":{"outcome":"cancel"}}));
+        handle_line(&app, "s", &proc, &elicit(5));
+        cancel_pending(&app, "s", &proc);
+        assert_eq!(written(&mut agent), json!({"jsonrpc":"2.0","id":5,"result":{"outcome":"cancel"}}));
     }
 
     #[test]
