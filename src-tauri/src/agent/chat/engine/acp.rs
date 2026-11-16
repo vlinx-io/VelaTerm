@@ -411,7 +411,16 @@ fn handle_update(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, update
             }
             return;
         }
-        "session_info_update" => return,
+        "session_info_update" => {
+            // Grok names its own conversation and refreshes that title as it develops. Adopt it on the
+            // sidebar while the session still carries an automatic/provisional name.
+            if proc.kind == SessionKind::Grok {
+                if let Some(title) = update.get("title").and_then(Value::as_str) {
+                    crate::agent::server::rename_from_agent_title(app, session_id, title);
+                }
+            }
+            return;
+        }
         _ => {}
     }
     let mut state = proc.acp.lock().unwrap();
@@ -548,6 +557,11 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
         proc.timeline.lock().unwrap().upsert(ChatRow::Error { id: format!("e-acp-{turn}"), message });
     }
     handle_turn_end(app, session_id, proc, "success", None);
+    if proc.kind == SessionKind::Grok {
+        // Grok may not re-emit `session_info_update` for a resumed conversation, so also read the title
+        // it persisted to summary.json and let an automatic/provisional name follow it.
+        crate::agent::server::sync_grok_title_from_disk(app, session_id);
+    }
 }
 
 fn flush_journal_locked(state: &mut AcpState) {

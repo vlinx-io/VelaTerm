@@ -163,6 +163,26 @@ fn grok_context_info(agent_session_id: &str) -> Result<AgentContextInfo, String>
     })
 }
 
+/// Grok's own conversation title, read from the `summary.json` beside its `updates.jsonl`.
+///
+/// Grok refreshes this as the conversation develops: `generated_title` is the current title and
+/// `session_summary` the fallback for partial/older recordings. None means Grok has not written a
+/// title yet, so the caller keeps the session's provisional name rather than clearing it.
+pub fn grok_generated_title(agent_session_id: &str) -> Option<String> {
+    let updates = resume::find_grok_updates(agent_session_id)?;
+    let dir = updates.parent()?;
+    let summary = read_json_file(&dir.join("summary.json"))?;
+    let field = |name: &str| {
+        summary
+            .get(name)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+    };
+    let title = field("generated_title").or_else(|| field("session_summary"))?;
+    Some(title.chars().take(80).collect())
+}
+
 /// Reads the model and current context from OpenCode's own store.
 ///
 /// OpenCode does not record the model's context window, so the limit comes from the catalogue the CLI
