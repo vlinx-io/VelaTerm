@@ -400,6 +400,22 @@ fn serve_loop(server: tiny_http::Server, app: AppCtx, token: String) {
     );
 }
 
+/// Names this backend wrote from a session's first prompt, keyed by VelaTerm session id.
+///
+/// They let a later agent-authored title (Grok's own) replace that provisional name while it still
+/// needs to follow the conversation, without ever overwriting a name the user typed. A manual rename
+/// calls [`forget_provisional`] so its choice sticks.
+fn provisional() -> &'static std::sync::Mutex<HashMap<String, String>> {
+    static PROVISIONAL: std::sync::OnceLock<std::sync::Mutex<HashMap<String, String>>> =
+        std::sync::OnceLock::new();
+    PROVISIONAL.get_or_init(Default::default)
+}
+
+/// Drop the provisional marker for a session once the user names it, so agent titles stop overriding it.
+pub(crate) fn forget_provisional(sid: &str) {
+    provisional().lock().unwrap().remove(sid);
+}
+
 /// Rename an automatically numbered placeholder once from the first user message.
 ///
 /// Hooks and Codex rollout capture share this atomic check. User names are preserved, and if both
@@ -414,6 +430,14 @@ pub(crate) fn try_auto_rename(app: &AppCtx, sid: &str, prompt: &str) -> bool {
         let Ok(conn) = db.conn.lock() else {
             return false;
         };
+        // Grok names its own conversations. Leaving the numbered placeholder in place until that title
+        // arrives makes the sidebar change once instead of first taking a condensed first-prompt name
+        // and then being overwritten by Grok's title.
+        if crate::db::repo::get_session_kind(&conn, sid).ok().flatten()
+            == Some(crate::models::SessionKind::Grok)
+        {
+            return false;
+        }
         match crate::db::repo::get_session_name(&conn, sid) {
             Ok(Some(name)) if is_auto_name(&name) => {
                 crate::db::repo::rename_node(&conn, crate::models::NodeKind::Session, sid, &title)
@@ -423,9 +447,75 @@ pub(crate) fn try_auto_rename(app: &AppCtx, sid: &str, prompt: &str) -> bool {
         }
     };
     if renamed {
+        provisional().lock().unwrap().insert(sid.to_string(), title);
         app.emit(crate::host::TREE_CHANGED, ());
     }
     renamed
+}
+
+/// Adopt a title the agent chose for itself (Grok's `generated_title` / `session_info_update`).
+///
+/// Applies only while the session still carries an automatic placeholder or the provisional name this
+/// backend wrote from the first prompt; a name the user typed is left untouched. The provisional entry
+/// is kept current so successive agent title refreshes keep following the conversation until the user
+/// renames the session.
+pub(crate) fn rename_from_agent_title(app: &AppCtx, sid: &str, title: &str) -> bool {
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let clean: String = trimmed.chars().take(80).collect();
+    let renamed = {
+        let db = app.db();
+        let Ok(conn) = db.conn.lock() else {
+            return false;
+        };
+        let current = match crate::db::repo::get_session_name(&conn, sid) {
+            Ok(Some(name)) => name,
+            _ => return false,
+        };
+        if current == clean {
+            provisional().lock().unwrap().insert(sid.to_string(), clean);
+            return false;
+        }
+        let provisional_current = provisional().lock().unwrap().get(sid).cloned();
+        let follow = is_auto_name(&current) || provisional_current.as_deref() == Some(current.as_str());
+        if !follow {
+            return false;
+        }
+        crate::db::repo::rename_node(&conn, crate::models::NodeKind::Session, sid, &clean).is_ok()
+    };
+    if renamed {
+        provisional().lock().unwrap().insert(sid.to_string(), clean);
+        app.emit(crate::host::TREE_CHANGED, ());
+    }
+    renamed
+}
+
+/// Mirror Grok's on-disk conversation title into the sidebar.
+///
+/// Grok persists `generated_title` to `summary.json`; reading it covers terminal turns and resumed
+/// chat conversations that no longer push `session_info_update`. Needs the session's native id, which
+/// both its `SessionStart` hook and the ACP `session/new` reply store.
+pub(crate) fn sync_grok_title_from_disk(app: &AppCtx, sid: &str) {
+    let native = {
+        let db = app.db();
+        let Ok(conn) = db.conn.lock() else {
+            return;
+        };
+        if crate::db::repo::get_session_kind(&conn, sid).ok().flatten()
+            != Some(crate::models::SessionKind::Grok)
+        {
+            return;
+        }
+        match crate::db::repo::get_agent_session_id(&conn, sid) {
+            Ok(Some(id)) if !id.is_empty() => id,
+            _ => return,
+        }
+    };
+    if let Some(title) = crate::agent::transcript::grok_generated_title(&native) {
+        rename_from_agent_title(app, sid, &title);
+    }
 }
 
 /// Suppresses Codex mid-turn callbacks that arrive after their turn already ended.
@@ -671,6 +761,13 @@ fn serve_with_app(
             if let Some(tool_signal) = parse_tool_signal(&body) {
                 on_signal(sid.clone(), tool_signal);
             }
+            // Grok writes its conversation title to summary.json; mirror it once a terminal turn ends.
+            // Chat hooks already returned above, so this only covers terminal (tui) Grok sessions.
+            if let Some(app) = &app {
+                if parse_url(&url).is_some_and(|(_, _, event)| event == "waiting") {
+                    sync_grok_title_from_disk(app, &sid);
+                }
+            }
             // A valid event may have no status signal, such as Copilot `boot`, which only captures its ID.
             if let Some(signal) = signal {
                 // Codex callbacks can arrive out of order; drop mid-turn working that lost the race
@@ -834,7 +931,7 @@ fn non_empty_trimmed(s: Option<&str>) -> Option<String> {
 /// dependency-free equivalent of the frontend AUTO_NAME regex. Prefixes include localized and
 /// legacy defaults for old data. `Pi` still requires whitespace plus digits, so `Pilot 3` is safe.
 pub(crate) fn is_auto_name(name: &str) -> bool {
-    let rest = [
+    [
         "Claude",
         "Codex",
         "OpenCode",
@@ -848,8 +945,10 @@ pub(crate) fn is_auto_name(name: &str) -> bool {
         "Kimi Code",
         "Kimi",
         "Kiro",
-        "Grok",
+        // `Grok Build` must be tried as well as `Grok`: matching `Grok` first would leave `Build 2`,
+        // which is not digits, so a longer prefix still gets its own attempt below.
         "Grok Build",
+        "Grok",
         "ZCode",
         "DeepSeek",
         // Localized common.session values used as default terminal-session name prefixes.
@@ -865,14 +964,11 @@ pub(crate) fn is_auto_name(name: &str) -> bool {
                       // French “Session” is identical to English and needs no separate entry.
     ]
     .iter()
-    .find_map(|p| name.strip_prefix(p));
-    match rest {
-        Some(rest) => {
-            let digits = rest.trim_start();
-            !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
-        }
-        None => false,
-    }
+    .any(|prefix| {
+        name.strip_prefix(prefix)
+            .map(str::trim_start)
+            .is_some_and(|rest| !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()))
+    })
 }
 
 /// Condense the first user message into a title: take the first nonempty line, remove leading
@@ -2377,6 +2473,8 @@ mod tests {
             "Cline1",
             "Pi 6",
             "Pi7",
+            "Grok 1",
+            "Grok Build 2",
             "Session 4",
             "会话 4",
             "Claude1",
