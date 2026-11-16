@@ -190,20 +190,7 @@ fn on_state(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, data: &Valu
 }
 
 fn set_commands(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, commands: Vec<Value>) {
-    let normalized: Vec<Value> = commands
-        .iter()
-        .filter_map(|command| {
-            let name = command.get("name").and_then(Value::as_str)?;
-            if name.is_empty() {
-                return None;
-            }
-            Some(json!({
-                "name": name,
-                "description": command.get("description").cloned().unwrap_or(Value::Null),
-                "invocation": "/",
-            }))
-        })
-        .collect();
+    let normalized = wire::to_chat_commands(&commands);
     *proc.commands.lock().unwrap() = normalized.clone();
     emit(app, session_id, json!({"type":"commands","commands":normalized}));
 }

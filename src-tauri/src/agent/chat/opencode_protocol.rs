@@ -177,24 +177,35 @@ impl Server {
     }
 
     /// Negotiate using health or server-info JSON, never the frontend's unknown-route HTML fallback.
+    ///
+    /// A v1 server's only health endpoint is `/global/health`; 1.19.0 happens to answer `/api/health`
+    /// too, without a version field. Trusting that alias would flip a v1 server onto the v2 `/api`
+    /// routes the moment a single `/global/health` probe is slow enough to time out, and every later
+    /// request would then be answered by the frontend's HTML fallback. So v2 is decided by
+    /// `/api/info`, or by an `/api/health` answer that names a version, and never by health alone.
     pub fn healthy(&self) -> bool {
-        for (version,path) in [(1,"/global/health"),(2,"/api/health")] {
-            let response = ureq::get(&format!("{}{path}", self.base))
-                .set("Authorization", &self.authorization).timeout(Duration::from_secs(2)).call();
-            if let Ok(value) = Self::read_response(response) {
-                if value.get("healthy").and_then(Value::as_bool) == Some(true) {
-                    self.version.store(version,Ordering::Relaxed);
-                    return true;
-                }
+        let probe = |path: &str| ureq::get(&format!("{}{path}", self.base))
+            .set("Authorization", &self.authorization).timeout(Duration::from_secs(2)).call();
+        if let Ok(value) = Self::read_response(probe("/global/health")) {
+            if value.get("healthy").and_then(Value::as_bool) == Some(true) {
+                self.version.store(1,Ordering::Relaxed);
+                return true;
             }
         }
-        let response = ureq::get(&format!("{}/api/info", self.base))
-            .set("Authorization", &self.authorization).timeout(Duration::from_secs(2)).call();
-        if let Ok(value) = Self::read_response(response) {
+        if let Ok(value) = Self::read_response(probe("/api/info")) {
             if value.get("version").and_then(Value::as_str).is_some_and(|v| !v.is_empty())
                 && value.get("pid").and_then(Value::as_u64).is_some_and(|pid| pid > 0)
                 && value.get("capabilities").is_some_and(Value::is_object) {
                 self.version.store(2,Ordering::Relaxed);
+                return true;
+            }
+        }
+        if let Ok(value) = Self::read_response(probe("/api/health")) {
+            if value.get("healthy").and_then(Value::as_bool) == Some(true) {
+                // Only a preview's numbered answer says v2; a bare one is the v1 alias, and so is a
+                // stable 1.x version in case a later v1 build starts naming itself here.
+                let v2 = crate::agent::opencode::is_v2_version(value.get("version").and_then(Value::as_str));
+                self.version.store(if v2 {2} else {1},Ordering::Relaxed);
                 return true;
             }
         }
@@ -290,6 +301,89 @@ impl Server {
         let path = if self.is_v2() {format!("/api/session/{}/permission/{}/reply",encode_query(session),encode_query(request))}
             else {format!("/permission/{}/reply",encode_query(request))};
         self.post(&path,Some(&json!({"reply":reply})))
+    }
+
+    /// Background jobs this conversation and its subagents own. v2 only; older servers have no job list.
+    pub fn jobs(&self, session: &str) -> Result<Vec<Value>, String> {
+        if !self.is_v2() {
+            return Err("This OpenCode server does not report background jobs".into());
+        }
+        let value = self.get(&format!(
+            "/api/experimental/job?sessionID={}&descendants=true",
+            encode_query(session)
+        ))?;
+        let list = value
+            .as_array()
+            .cloned()
+            .or_else(|| value.get("jobs").and_then(Value::as_array).cloned())
+            .or_else(|| value.get("items").and_then(Value::as_array).cloned())
+            .or_else(|| value.get("data").and_then(Value::as_array).cloned())
+            .or_else(|| value.pointer("/data/jobs").and_then(Value::as_array).cloned())
+            .or_else(|| value.pointer("/data/items").and_then(Value::as_array).cloned())
+            .ok_or("OpenCode returned an invalid background job list")?;
+        Ok(list)
+    }
+
+    /// The sessions OpenCode is running right now. v2 lists active drains; v1 lists every busy session.
+    pub fn active_sessions(&self) -> Result<std::collections::HashSet<String>, String> {
+        let value = if self.is_v2() {
+            self.get("/api/session/active")?
+        } else {
+            self.get("/session/status")?
+        };
+        if let Some(ids) = value.as_array() {
+            return Ok(ids.iter().filter_map(Value::as_str).map(str::to_string).collect());
+        }
+        let map = value.as_object().ok_or("OpenCode returned an invalid session status list")?;
+        let active = if self.is_v2() {
+            map.keys().cloned().collect()
+        } else {
+            map.iter()
+                .filter(|(_, status)| match status {
+                    Value::String(kind) => kind != "idle",
+                    _ => status.get("type").and_then(Value::as_str) != Some("idle"),
+                })
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
+        Ok(active)
+    }
+
+    /// Move the foreground work OpenCode is waiting on into the background.
+    pub fn background(&self, session: &str) -> Result<Value, String> {
+        let path = if self.is_v2() {
+            format!("/api/session/{}/background", encode_query(session))
+        } else {
+            format!("/experimental/session/{}/background", encode_query(session))
+        };
+        self.post(&path, None)
+    }
+
+    /// Stop one session: a subagent task ends, or a whole turn when the root session is named.
+    pub fn interrupt_session(&self, session: &str) -> Result<Value, String> {
+        self.post(&format!("/session/{}/abort", encode_query(session)), None)
+    }
+
+    /// Terminate one shell command OpenCode owns. v2 keeps the command id the job reports.
+    pub fn delete_shell(&self, shell: &str) -> Result<Value, String> {
+        if !self.is_v2() {
+            return Err("This OpenCode server cannot stop a background shell command".into());
+        }
+        self.delete(&format!("/api/shell/{}", encode_query(shell)))
+    }
+
+    /// The output one shell command has written so far, as plain text.
+    pub fn shell_output(&self, shell: &str) -> Result<String, String> {
+        if !self.is_v2() {
+            return Err("This OpenCode server cannot read background shell output".into());
+        }
+        let value = self.get(&format!("/api/shell/{}/output", encode_query(shell)))?;
+        let text = value.as_str().map(str::to_string)
+            .or_else(|| value.get("output").and_then(Value::as_str).map(str::to_string))
+            .or_else(|| value.get("text").and_then(Value::as_str).map(str::to_string))
+            .or_else(|| value.pointer("/data/output").and_then(Value::as_str).map(str::to_string))
+            .or_else(|| value.pointer("/data/text").and_then(Value::as_str).map(str::to_string));
+        text.ok_or_else(|| "OpenCode returned an invalid shell output page".to_string())
     }
 }
 
@@ -669,7 +763,7 @@ fn provider_connected(value: &Value, id: &str) -> bool {
 /// `tool_input` is what the tool call itself proposed, when the engine can find its row; the card draws
 /// a command or a file path from it. The `always` patterns become the card's one standing rule: "always
 /// allow this", which OpenCode honours for the rest of the session.
-pub fn permission_payload(props: &Value, tool_input: Option<Value>) -> Value {
+pub fn permission_payload(props: &Value, tool_input: Option<Value>, display_name: &str) -> Value {
     let id = props.get("id").and_then(Value::as_str).unwrap_or("");
     let permission = props.get("permission").and_then(Value::as_str).unwrap_or("tool");
     let patterns: Vec<&str> = props
@@ -698,7 +792,7 @@ pub fn permission_payload(props: &Value, tool_input: Option<Value>) -> Value {
     let mut payload = json!({
         "id":id,
         "tool_name":super::opencode_timeline::tool_name(permission),
-        "display_name":"OpenCode",
+        "display_name":display_name,
         "input":input,
         "_opencodeKind":"permission"
     });
@@ -715,7 +809,7 @@ pub fn permission_payload(props: &Value, tool_input: Option<Value>) -> Value {
 }
 
 /// A question the agent asked, as the same form card Claude's AskUserQuestion uses.
-pub fn question_payload(props: &Value) -> Option<Value> {
+pub fn question_payload(props: &Value, display_name: &str) -> Option<Value> {
     let id = props.get("id").and_then(Value::as_str)?;
     let questions: Vec<Value> = props
         .get("questions")
@@ -755,7 +849,7 @@ pub fn question_payload(props: &Value) -> Option<Value> {
     Some(json!({
         "id":id,
         "tool_name":"AskUserQuestion",
-        "display_name":"OpenCode",
+        "display_name":display_name,
         "input":{"questions":questions},
         "_opencodeKind":"question"
     }))
@@ -858,7 +952,6 @@ mod tests {
     fn current_v2_uses_server_info_and_retries_the_starting_model_catalogue() {
         let (server,worker)=mock(vec![
             ("GET","/global/health",Value::Null,"<!DOCTYPE html><html>OpenCode</html>"),
-            ("GET","/api/health",Value::Null,"{\"error\":\"Not Found\"}"),
             ("GET","/api/info",Value::Null,"{\"version\":\"2.0.26\",\"pid\":123,\"capabilities\":{}}"),
             ("GET","/openapi.json",Value::Null,"{\"paths\":{\"/api/model/default\":{\"get\":{}}}}"),
             ("GET","/api/model/default?location%5Bdirectory%5D=",Value::Null,"{\"data\":{\"id\":\"test\",\"providerID\":\"fixture\"}}"),
@@ -882,12 +975,32 @@ mod tests {
     }
 
     #[test]
+    fn a_missed_global_health_answer_does_not_flip_a_v1_server_onto_v2_routes() {
+        // 1.19.0 answers /api/health too, while /api/info and /openapi.json are frontend HTML. One
+        // slow /global/health must not be read as proof of v2: every later request would then be
+        // answered by the HTML fallback and fail the conversation before it starts. A stable 1.x
+        // version in the same answer must not change that, however a later v1 build spells it.
+        for health in ["{\"healthy\":true}","{\"healthy\":true,\"version\":\"1.19.5\"}"] {
+            let (server,worker)=mock(vec![
+                ("GET","/global/health",Value::Null,"<!DOCTYPE html><html>OpenCode</html>"),
+                ("GET","/api/info",Value::Null,"<!DOCTYPE html><html>OpenCode</html>"),
+                ("GET","/api/health",Value::Null,health),
+                ("GET","/session/status",Value::Null,"{}"),
+            ]);
+            assert!(server.healthy());
+            assert!(!server.is_v2());
+            assert_eq!(server.get("/session/status").unwrap(),json!({}));
+            worker.join().unwrap();
+        }
+    }
+
+    #[test]
     fn server_info_requires_a_real_server_response() {
         for info in ["<!DOCTYPE html><html>OpenCode</html>","{\"version\":\"2.0.26\"}","{\"version\":\"2.0.26\",\"pid\":0,\"capabilities\":{}}"] {
             let (server,worker)=mock(vec![
                 ("GET","/global/health",Value::Null,"{}"),
-                ("GET","/api/health",Value::Null,"{}"),
                 ("GET","/api/info",Value::Null,info),
+                ("GET","/api/health",Value::Null,"{}"),
             ]);
             assert!(!server.healthy());assert!(!server.is_v2());
             worker.join().unwrap();
@@ -898,6 +1011,7 @@ mod tests {
     fn v2_health_rejects_the_html_fallback_and_adapts_native_requests() {
         let (server,worker)=mock(vec![
             ("GET","/global/health",Value::Null,"<!DOCTYPE html><html>OpenCode</html>"),
+            ("GET","/api/info",Value::Null,"<!DOCTYPE html><html>OpenCode</html>"),
             ("GET","/api/health",Value::Null,"{\"healthy\":true,\"version\":\"0.0.0-beta-17823\"}"),
             ("GET","/openapi.json",Value::Null,"{\"paths\":{}}"),
             ("POST","/api/session?location%5Bdirectory%5D=",json!({"location":{"directory":"/tmp/my project"}}),"{\"data\":{\"id\":\"ses_1\"}}"),
@@ -935,6 +1049,30 @@ mod tests {
         let messages=v2.get("/session/ses_1/message").unwrap();
         assert_eq!(messages.as_array().unwrap().len(),2);
         assert_eq!(messages[1].pointer("/parts/0/text"),Some(&json!("last")));
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn v2_background_jobs_use_the_native_routes() {
+        let (server,worker)=mock(vec![
+            ("GET","/api/experimental/job?sessionID=ses_1&descendants=true&location%5Bdirectory%5D=",Value::Null,
+                "{\"data\":[{\"id\":\"job-1\",\"kind\":\"shell\",\"status\":\"running\",\"shellID\":\"sh_1\",\"command\":\"npm test\",\"time\":{\"started\":1000}}]}"),
+            ("GET","/api/session/active?location%5Bdirectory%5D=",Value::Null,"{\"data\":{\"ses_1\":{},\"ses_child\":{}}}"),
+            ("POST","/api/session/ses_1/background",json!({}),"null"),
+            ("POST","/api/session/ses_child/interrupt",json!({}),"null"),
+            ("DELETE","/api/shell/sh_1",Value::Null,""),
+            ("GET","/api/shell/sh_1/output?location%5Bdirectory%5D=",Value::Null,"{\"data\":{\"output\":\"running tests\\n\"}}"),
+        ]);
+        server.version.store(2,Ordering::Relaxed);
+        server.initialized.store(true,Ordering::Relaxed);
+        let jobs=server.jobs("ses_1").unwrap();
+        assert_eq!(jobs[0]["shellID"],json!("sh_1"));
+        let active=server.active_sessions().unwrap();
+        assert!(active.contains("ses_child"));
+        server.background("ses_1").unwrap();
+        server.interrupt_session("ses_child").unwrap();
+        server.delete_shell("sh_1").unwrap();
+        assert_eq!(server.shell_output("sh_1").unwrap(),"running tests\n");
         worker.join().unwrap();
     }
 
@@ -1129,7 +1267,7 @@ mod tests {
             "id":"per_1","sessionID":"ses_1","permission":"bash",
             "patterns":["git status"],"always":["git *"],"metadata":{}
         });
-        let payload = permission_payload(&props, None);
+        let payload = permission_payload(&props, None, "OpenCode");
         assert_eq!(payload["tool_name"], "Bash");
         assert_eq!(payload["input"]["command"], "git status");
         assert_eq!(payload["description"], "git status");
@@ -1142,7 +1280,7 @@ mod tests {
         let props = json!({"id":"que_1","sessionID":"ses_1","questions":[
             {"question":"Which?","header":"Pick","options":[{"label":"A","description":"a"},{"label":"B, C","description":"bc"}],"multiple":true}
         ]});
-        let payload = question_payload(&props).unwrap();
+        let payload = question_payload(&props, "OpenCode").unwrap();
         assert_eq!(payload["tool_name"], "AskUserQuestion");
         assert_eq!(payload["input"]["questions"][0]["multiSelect"], true);
         let answered = json!({"answers":{"Which?":"A, B, C"}});

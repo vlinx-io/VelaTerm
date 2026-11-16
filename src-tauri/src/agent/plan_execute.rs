@@ -381,7 +381,7 @@ pub fn start(app: &AppCtx, request: &super::server::SpawnRequest) -> Result<Valu
     let root = repo::get_project_root(&app.db().conn.lock().unwrap(), &parent.project_id)?;
     let cwd = request.cwd.clone().or(parent.cwd.clone()).or(root);
     let planner = create_role_bound(app, &role_id(&id, "planner"), &parent.project_id,
-        parent.group_id.as_deref(), Some(&parent), "Plan · Execute", &config.plan, cwd.as_deref(),
+        parent.group_id.as_deref(), Some(&parent), request.title.as_deref().map_or("Plan · Execute", str::trim), &config.plan, cwd.as_deref(),
         config.worktree_mode(request.worktree == Some(true)) != WorktreeMode::None, None, None,
         |tx, planner| {
             let task = format!("{}\n\nWorkflow ID: {id}\nRole: planner\nWorking directory: {}\n\nUser task:\n{}",

@@ -90,6 +90,9 @@ pub fn resolve(ctx: &AppCtx, session: &Session) -> Result<Selection, String> {
         if previous.as_deref() != Some(native.to_string().as_str()) {
             apply_native(&mut selection, &native);
         }
+        if session.kind == SessionKind::Antigravity {
+            super::antigravity_models::normalize_selection_with_conn(&conn, &mut selection);
+        }
         return Ok(selection);
     }
     let mut selection = from_args(session.kind, session.agent_args.as_deref());
@@ -122,6 +125,9 @@ pub fn resolve(ctx: &AppCtx, session: &Session) -> Result<Selection, String> {
                     }),
             );
         }
+    }
+    if session.kind == SessionKind::Antigravity {
+        super::antigravity_models::normalize_selection_with_conn(&conn, &mut selection);
     }
     Ok(selection)
 }
@@ -187,6 +193,48 @@ fn plain_command_output(text: &str) -> String {
     out
 }
 
+const RECORDING_CACHE_LIMIT: usize = 256;
+
+type RecordingStamp = (SessionKind, u64, Option<std::time::SystemTime>);
+type RecordingCache = std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, (RecordingStamp, Value)>>;
+
+static RECORDING_CACHE: std::sync::OnceLock<RecordingCache> = std::sync::OnceLock::new();
+
+fn recording_cache() -> &'static RecordingCache {
+    RECORDING_CACHE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+fn cached_recording_state(
+    cache: &RecordingCache,
+    kind: SessionKind,
+    path: &std::path::Path,
+    parse: impl FnOnce() -> Result<Value, String>,
+) -> Result<Value, String> {
+    let meta =
+        std::fs::metadata(path).map_err(|e| format!("Failed to read session settings: {e}"))?;
+    let stamp = (kind, meta.len(), meta.modified().ok());
+    if let Some((cached_stamp, value)) = cache.lock().unwrap().get(path) {
+        if *cached_stamp == stamp {
+            return Ok(value.clone());
+        }
+    }
+    let parsed = parse()?;
+    let mut guard = cache.lock().unwrap();
+    if guard.len() >= RECORDING_CACHE_LIMIT && !guard.contains_key(path) {
+        guard.clear();
+    }
+    guard.insert(path.to_path_buf(), (stamp, parsed.clone()));
+    Ok(parsed)
+}
+
+fn native_state_from_recording(kind: SessionKind, path: &std::path::Path) -> Result<Value, String> {
+    cached_recording_state(recording_cache(), kind, path, || {
+        let file =
+            std::fs::File::open(path).map_err(|e| format!("Failed to read session settings: {e}"))?;
+        parse_recording_lines(kind, std::io::BufReader::new(file).lines())
+    })
+}
+
 pub fn native_state(session: &Session) -> Result<Value, String> {
     let Some(id) = session.agent_session_id.as_deref() else {
         return Ok(json!({}));
@@ -196,9 +244,14 @@ pub fn native_state(session: &Session) -> Result<Value, String> {
             return Ok(state);
         }
     }
-    if session.kind == SessionKind::Opencode {
-        let Some(model) = super::opencode_store::session_model(id)? else {
-            return Ok(json!({}));
+    if session.kind.uses_opencode() {
+        // A DeepSeek conversation saved by the old harness still carries an id OpenCode does not know.
+        // Treat that as "no native state" so opening or renaming it can start a fresh conversation.
+        let model = match super::opencode_store::session_model(id) {
+            Ok(Some(model)) => model,
+            Ok(None) => return Ok(json!({})),
+            Err(error) if error.starts_with("OpenCode has no session") => return Ok(json!({})),
+            Err(error) => return Err(error),
         };
         let Some(provider) = model["providerID"].as_str() else {
             return Ok(json!({}));
@@ -209,12 +262,13 @@ pub fn native_state(session: &Session) -> Result<Value, String> {
         let effort = model["variant"].as_str().filter(|v| *v != "default");
         return Ok(json!({"model":format!("{provider}/{name}"),"effort":effort}));
     }
+    if !matches!(session.kind, SessionKind::Claude | SessionKind::Codex) {
+        return Ok(json!({}));
+    }
     let Some(path) = super::transcript::source_path(session.kind, id) else {
         return Ok(json!({}));
     };
-    let file =
-        std::fs::File::open(path).map_err(|e| format!("Failed to read session settings: {e}"))?;
-    parse_recording_lines(session.kind, std::io::BufReader::new(file).lines())
+    native_state_from_recording(session.kind, &path)
 }
 
 /// Recent Codex releases also keep the thread's settings in their local state database.
@@ -414,7 +468,7 @@ pub fn from_args(kind: SessionKind, text: Option<&str>) -> Selection {
                 state.effort = clean(value).filter(|v| v != "auto");
                 true
             }
-            "--variant" if kind == SessionKind::Opencode => {
+            "--variant" if kind.uses_opencode() => {
                 state.effort = clean(value).filter(|v| v != "default");
                 true
             }
@@ -457,7 +511,7 @@ pub fn without_selection_args(kind: SessionKind, text: Option<&str>) -> String {
         let value = inline.or_else(|| next.as_ref().and_then(|v| v.first()).map(String::as_str));
         let remove = matches!(flag, "--model" | "-m")
             || (matches!(kind, SessionKind::Claude | SessionKind::Antigravity) && flag == "--effort")
-            || (kind == SessionKind::Opencode && flag == "--variant")
+            || (kind.uses_opencode() && flag == "--variant")
             || (matches!(kind, SessionKind::Pi | SessionKind::Omp) && flag == "--thinking")
             || (kind == SessionKind::Codex
                 && matches!(flag, "-c" | "--config")
@@ -838,5 +892,42 @@ mod native_tests {
         })();
         let _ = ctx.chat().stop(&ctx, &source.id);
         result.unwrap();
+    }
+
+    #[test]
+    fn recording_cache_reuses_unchanged_file_and_refreshes_on_append() {
+        use std::io::Write;
+        let dir = std::env::temp_dir().join(format!("vlx-recording-cache-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("claude.jsonl");
+        std::fs::write(&path, "{\"type\":\"assistant\",\"message\":{\"model\":\"claude-sonnet-4-5\"}}\n")
+            .unwrap();
+
+        let cache = RecordingCache::new(std::collections::HashMap::new());
+        let parses = std::cell::Cell::new(0usize);
+        let parse_file = || {
+            parses.set(parses.get() + 1);
+            let file = std::fs::File::open(&path).unwrap();
+            parse_recording_lines(SessionKind::Claude, std::io::BufReader::new(file).lines())
+        };
+
+        let first = cached_recording_state(&cache, SessionKind::Claude, &path, parse_file).unwrap();
+        assert_eq!(first["model"], "claude-sonnet-4-5");
+        assert_eq!(parses.get(), 1);
+
+        let second = cached_recording_state(&cache, SessionKind::Claude, &path, parse_file).unwrap();
+        assert_eq!(second["model"], "claude-sonnet-4-5");
+        assert_eq!(parses.get(), 1);
+
+        let mut file = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        writeln!(file, "{{\"type\":\"assistant\",\"message\":{{\"model\":\"claude-opus-4-6\"}}}}")
+            .unwrap();
+        drop(file);
+
+        let updated = cached_recording_state(&cache, SessionKind::Claude, &path, parse_file).unwrap();
+        assert_eq!(updated["model"], "claude-opus-4-6");
+        assert_eq!(parses.get(), 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -38,8 +38,9 @@ export interface ArtifactOpenBesideDetail {
 }
 
 /**
- * Ask the visible conversation of `sessionId` to show `path` beside it. Returns false when none took it (a
- * terminal session, a hidden pane, a phone), and the caller opens a tab instead.
+ * Ask the mounted conversation of `sessionId` to show `path` beside it. Returns false when none took it (a
+ * terminal session, a closed tab, a phone), and the caller opens a tab instead. A conversation in a
+ * background tab still takes it and shows the panel when the reader switches back.
  */
 export function openBesideSession(sessionId: string, path: string): boolean {
   const event = new CustomEvent<ArtifactOpenBesideDetail>(ARTIFACT_OPEN_BESIDE_EVENT, { detail: { sessionId, path }, cancelable: true });

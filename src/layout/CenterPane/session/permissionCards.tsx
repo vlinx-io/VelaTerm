@@ -270,6 +270,7 @@ function QuestionCard({
   const { onContextMenu, copyMenu } = useMessageCopyMenu();
   const [selections, setSelections] = useState<Selections>({});
   const [otherTexts, setOtherTexts] = useState<Record<number, string>>({});
+  const [skipped, setSkipped] = useState<Set<number>>(() => new Set());
   const [active, setActive] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -280,12 +281,28 @@ function QuestionCard({
   const selected = selections[index] ?? new Set<number>();
   const otherText = otherTexts[index] ?? "";
   const isLast = index === questions.length - 1;
-  const answered = isQuestionAnswered(question, index, selections, otherTexts);
-  const allAnswered = areQuestionsAnswered(questions, selections, otherTexts);
+  const answered = isQuestionAnswered(question, index, selections, otherTexts, skipped);
+  const allAnswered = areQuestionsAnswered(questions, selections, otherTexts, skipped);
+  const canSkipQuestion = questions.length > 1 || (question.allowEmpty && question.options.length > 0);
+  const promptMessage = useMemo(() => {
+    if (typeof request.input !== "object" || request.input === null) return null;
+    const raw = (request.input as Record<string, unknown>).prompt;
+    if (typeof raw !== "string") return null;
+    const trimmed = raw.trim();
+    if (!trimmed || /^The agent has (\d+ questions|a question)\.?$/i.test(trimmed)) return null;
+    if (trimmed === questions[0]?.question) return null;
+    return trimmed;
+  }, [request.input, questions]);
 
-  // Picking clears anything typed for the same question, and typing clears the picks: an answer is one or
-  // the other, and leaving both would make the submitted value depend on a rule nobody can see.
+  // Single-select keeps picks and typed text mutually exclusive, while multi-select allows combining
+  // chosen options with custom free-form input.
   const toggle = (option: number) => {
+    setSkipped((prev) => {
+      if (!prev.has(index)) return prev;
+      const next = new Set(prev);
+      next.delete(index);
+      return next;
+    });
     setSelections((prev) => {
       const next = new Set(prev[index] ?? []);
       if (question.multiSelect) {
@@ -299,40 +316,76 @@ function QuestionCard({
       }
       return { ...prev, [index]: next };
     });
-    setOtherTexts((prev) => (prev[index] ? { ...prev, [index]: "" } : prev));
-    // A single-choice answer is final the moment it is picked, so move on rather than making someone
-    // press Next for a decision they have already made.
-    if (!question.multiSelect) setActive(Math.min(index + 1, questions.length - 1));
+    if (!question.multiSelect) {
+      setOtherTexts((prev) => (prev[index] ? { ...prev, [index]: "" } : prev));
+      // A single-choice answer is final the moment it is picked, so move on rather than making someone
+      // press Next for a decision they have already made.
+      setActive(Math.min(index + 1, questions.length - 1));
+    }
   };
 
   const type = (text: string) => {
     setOtherTexts((prev) => ({ ...prev, [index]: text }));
-    if (text.length > 0) {
+    if (text.trim().length > 0) {
+      setSkipped((prev) => {
+        if (!prev.has(index)) return prev;
+        const next = new Set(prev);
+        next.delete(index);
+        return next;
+      });
+    }
+    if (!question.multiSelect && text.length > 0) {
       setSelections((prev) => (prev[index]?.size ? { ...prev, [index]: new Set<number>() } : prev));
     }
   };
 
-  const submit = async (sendOriginal = false) => {
-    if (!allAnswered || submitting.current) return;
+  const submit = async (
+    sendOriginal = false,
+    override?: { selections: Selections; otherTexts: Record<number, string>; skipped: Set<number> },
+  ) => {
+    const sel = override?.selections ?? selections;
+    const oth = override?.otherTexts ?? otherTexts;
+    const skp = override?.skipped ?? skipped;
+    if (!areQuestionsAnswered(questions, sel, oth, skp) || submitting.current) return;
     submitting.current = true; setBusy(true); setError("");
     try {
       await onAnswer(request, {
         allow: true,
-        questionAnswers: questions.map((_, i) => ({ selected: [...(selections[i] ?? [])], text: otherTexts[i] ?? "" })),
+        questionAnswers: questions.map((_, i) => ({
+          selected: [...(sel[i] ?? [])],
+          text: oth[i] ?? "",
+          ...(skp.has(i) ? { skipped: true } : {}),
+        })),
         sendOriginal,
       });
     } catch (error) { setError(translationError(error, t)); }
     finally { submitting.current = false; setBusy(false); }
   };
 
+  const skipQuestion = () => {
+    if (submitting.current || busy) return;
+    const nextSelections = { ...selections, [index]: new Set<number>() };
+    const nextOtherTexts = { ...otherTexts, [index]: "" };
+    const nextSkipped = new Set(skipped);
+    nextSkipped.add(index);
+    setSelections(nextSelections);
+    setOtherTexts(nextOtherTexts);
+    setSkipped(nextSkipped);
+    if (!isLast) {
+      setActive(index + 1);
+    } else if (areQuestionsAnswered(questions, nextSelections, nextOtherTexts, nextSkipped)) {
+      void submit(false, { selections: nextSelections, otherTexts: nextOtherTexts, skipped: nextSkipped });
+    }
+  };
+
   const dismiss = () => {
     if (submitting.current) return;
     // Closing a question that asked for nothing in particular is an empty answer, not a refusal: the
-    // agent should carry on rather than record a tool it was not allowed to run.
+    // agent should carry on rather than record a denied tool call.
     if (shouldSubmitEmptyOnDismiss(questions)) {
       onAnswer(request, {
         allow: true,
-        updatedInput: buildAnsweredInput(request.input, questions, selections, otherTexts),
+        updatedInput: buildAnsweredInput(request.input, questions, selections, otherTexts, skipped),
       });
       return;
     }
@@ -354,17 +407,19 @@ function QuestionCard({
 
       {translation.control}
 
+      {promptMessage && <div className="sv-elicit-message">{promptMessage}</div>}
+
       {questions.length > 1 && (
         <div className="sv-question-tabs" role="tablist">
           {questions.map((q, i) => (
             <button
-              key={q.header}
+              key={`${q.header}-${i}`}
               role="tab"
               aria-selected={i === index}
               className={"sv-question-tab" + (i === index ? " sv-question-tab-on" : "")}
               onClick={() => setActive(i)}
             >
-              {isQuestionAnswered(q, i, selections, otherTexts) ? <Icons.check size={11} /> : null}
+              {isQuestionAnswered(q, i, selections, otherTexts, skipped) ? <Icons.check size={11} /> : null}
               <QuestionText original={q.header} translated={translation.questions?.[i]?.header} mode={translation.mode} target={translation.target} />
             </button>
           ))}
@@ -428,7 +483,8 @@ function QuestionCard({
           }
           onChange={(e) => type(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+            // WebKit reports the Enter that confirms a composition with isComposing false and keyCode 229.
+            if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) {
               e.preventDefault();
               primary();
             }
@@ -446,6 +502,11 @@ function QuestionCard({
         <button className="sv-deny" disabled={busy} onClick={dismiss}>
           {t("chat.question.dismiss")}
         </button>
+        {canSkipQuestion && (
+          <button className="sv-deny" disabled={busy} onClick={skipQuestion}>
+            {t("chat.question.skip")}
+          </button>
+        )}
         <button
           className="sv-allow"
           disabled={busy || (isLast ? !allAnswered : !answered)}

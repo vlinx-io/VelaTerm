@@ -21,6 +21,7 @@ vi.mock("../ipc/commands", () => ({
 vi.mock("../ipc/sessionState", () => ({
   markSessionRead: vi.fn().mockResolvedValue(undefined),
   markSessionUnread: vi.fn().mockResolvedValue(undefined),
+  markSessionPending: vi.fn().mockResolvedValue(undefined),
   sessionStates: vi.fn().mockResolvedValue({}),
 }));
 vi.mock("../ipc/tree", () => ({

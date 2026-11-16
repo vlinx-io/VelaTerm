@@ -47,8 +47,8 @@ pub enum SessionKind {
     Zcode,
     /// charmbracelet/crush (`crush`), with only a PreToolUse hook injected through shadow configuration.
     Crush,
-    /// DeepSeek Harness (`dsh`). It ships no terminal interface, so it runs only in the conversation view,
-    /// driven over ACP by `dsh --profile acp`; its own session log under `~/.dsh/sessions` is the history.
+    /// DeepSeek, driven through OpenCode's local server and shown with its session view. It remains a
+    /// separate kind for its icon, settings and model catalogue, and keeps the conversation view only.
     Deepseek,
     /// Built-in browser page with no PTY or agent. Opening creates a center-pane tab at `browser_url`.
     /// Its name and latest URL are persisted, and it is available only on desktop clients.
@@ -58,18 +58,27 @@ pub enum SessionKind {
 impl SessionKind {
     /// Verified protocol drivers accepted by the conversation engine.
     pub fn supports_chat(self) -> bool {
-        matches!(self, Self::Claude | Self::Codex | Self::Opencode | Self::Pi | Self::Omp | Self::Antigravity | Self::Zcode)
+        matches!(self, Self::Claude | Self::Codex | Self::Opencode | Self::Pi | Self::Omp | Self::Antigravity | Self::Zcode | Self::Deepseek)
             || self.uses_acp()
     }
 
     /// Agents whose conversation view runs over ACP (see `agent::chat::acp_protocol` in the app crate).
+    ///
+    /// Antigravity's print-mode `stream-json` driver only accepts text blocks, so the conversation view
+    /// uses `agy acp` instead: it carries images, interactive approvals, modes and `session/load`.
     pub fn uses_acp(self) -> bool {
-        matches!(self, Self::Copilot | Self::Cursor | Self::Kimi | Self::Grok | Self::Deepseek)
+        matches!(self, Self::Antigravity | Self::Copilot | Self::Cursor | Self::Kimi | Self::Grok)
     }
 
-    /// Whether the agent has a terminal interface the PTY engine can run. DeepSeek Harness has none: its
-    /// shipped profiles are a web UI, one-shot headless runs and protocol servers. ZCode's agent is reached
-    /// through the desktop release it ships in, and VelaTerm drives only its protocol server.
+    /// Agents the chat engine drives through OpenCode's local server. DeepSeek is a separate session kind
+    /// with its own icon and model catalogue, but it speaks exactly the same protocol as OpenCode.
+    pub fn uses_opencode(self) -> bool {
+        matches!(self, Self::Opencode | Self::Deepseek)
+    }
+
+    /// Whether the agent has a terminal interface the PTY engine can run. DeepSeek keeps the conversation
+    /// view only even though OpenCode can run in a terminal, and ZCode's agent is reached through the
+    /// desktop release it ships in, so VelaTerm drives only its protocol server.
     pub fn has_terminal_interface(self) -> bool {
         !matches!(self, Self::Deepseek | Self::Zcode)
     }
@@ -240,6 +249,12 @@ pub struct Session {
     /// Last recorded native agent session ID, or None before a resumable conversation exists. Reopening
     /// passes it unchanged to Claude `--resume`, Codex `resume`, or the corresponding agent mechanism.
     pub agent_session_id: Option<String>,
+    /// A native conversation the current engine cannot resume, kept so its recording stays readable.
+    ///
+    /// DeepSeek conversations recorded by the retired DeepSeek Harness keep their dsh id here when the
+    /// first OpenCode conversation replaces it. The history view shows both recordings in order.
+    #[serde(default)]
+    pub legacy_agent_session_id: Option<String>,
     /// Parent session ID. None means top-level; a child belongs through this field rather than `group_id`.
     pub parent_session_id: Option<String>,
     /// Collapsed state for expanding or hiding child sessions in the sidebar.

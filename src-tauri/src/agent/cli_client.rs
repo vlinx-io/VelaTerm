@@ -3,7 +3,8 @@
 //!
 //! Thin PATH shims (`vspawn`, `vspawn-tree`, `vopen`, `vrefer`, and `vsearch`; see spawn_cli.rs) invoke
 //! these commands through sh on Unix or .cmd on Windows. They read injected `VLX_SPAWN_URL`,
-//! `VLX_SESSION_ID`, and `VLX_TOKEN`, build JSON, and POST to the local hook service.
+//! `VLX_SESSION_ID`, and the session token (`VLX_TOKEN`, or its `VLX_AUTH` alias), build JSON, and
+//! POST to the local hook service.
 //!
 //! `--spawn` and `--view` only need to know whether the request succeeded. `--refer` and `--search` are
 //! reads: they consume the response body and render it, either as text for a model or as raw JSON.
@@ -16,7 +17,6 @@ use std::net::TcpStream;
 /// Session environment variables injected at launch; see pty/manager.rs.
 const ENV_URL: &str = "VLX_SPAWN_URL";
 const ENV_SID: &str = "VLX_SESSION_ID";
-const ENV_TOKEN: &str = "VLX_TOKEN";
 
 /// `vlx-term --spawn [...]` entry point: parse arguments, POST `/spawn`, and return an exit code.
 /// `args` is the full argv; the vspawn-tree shim also passes `--worktree`.
@@ -77,6 +77,9 @@ pub fn run_spawn(args: &[String]) -> ! {
             let kind = parsed.kind.as_deref().unwrap_or("inherit current");
             // Echo the model and effort when given, so a typo in either is visible right away.
             let mut about = format!("{kind}, {wt}");
+            if let Some(t) = parsed.title.as_deref() {
+                about.push_str(&format!(", title {t}"));
+            }
             if let Some(m) = parsed.model.as_deref() {
                 about.push_str(&format!(", model {m}"));
             }
@@ -159,7 +162,7 @@ pub fn run_view(args: &[String]) -> ! {
 }
 
 const SPAWN_USAGE: &str =
-    "usage: vspawn [--worktree] [--cwd <path>] [--yes] [--agent <agent>|--claude|--codex|--copilot|--kiro|--pi] [--model <name>] [--effort <level>] <task description...>\n\
+    "usage: vspawn [--worktree] [--cwd <path>] [--title <text>] [--yes] [--agent <agent>|--claude|--codex|--copilot|--kiro|--pi] [--model <name>] [--effort <level>] <task description...>\n\
     --plan-execute    create planning, execution and optional independent review chat sessions\n\
     --split-tasks     let the planner propose multiple tasks for user confirmation (requires --plan-execute)\n\
     --worktree-mode <none|shared|each>   directory mode for all workflow roles; overrides --worktree (requires --plan-execute)\n\
@@ -170,6 +173,7 @@ const SPAWN_USAGE: &str =
     --agent <agent>   child agent: claude, codex, opencode, copilot, cursor, antigravity, cline, pi, omp, crush, kimi, kiro, grok, zoo, zcode or deepseek\n\
     --claude / --codex / --copilot / --kiro / --pi   shortcuts for --agent with that agent\n\
     --cwd <path>      child working directory and repository used to create a worktree\n\
+    --title <text>    session title, up to 80 characters; with --plan-execute it names the planner\n\
     --request-id <uuid> reuse the same request identity after a lost acknowledgement\n\
     --yes             skip initial launch confirmation; split-task proposals still require review\n\
     --model <name>    model for the child session, such as opus or gpt-5.5; names are agent specific\n\
@@ -188,7 +192,9 @@ fn session_env() -> Result<(String, String, String), String> {
     Ok((
         require_env(ENV_URL)?,
         require_env(ENV_SID)?,
-        require_env(ENV_TOKEN)?,
+        // Not `require_env`: a harness may strip `VLX_TOKEN` while keeping the alias.
+        super::session_env::token()
+            .ok_or_else(|| "not inside a VelaTerm session (missing VLX_TOKEN)".to_string())?,
     ))
 }
 
@@ -209,6 +215,8 @@ struct SpawnArgs {
     kind: Option<String>,
     /// Skip initial launch confirmation, but never split-task proposal review.
     no_confirm: bool,
+    /// Session title, already trimmed and validated; absent derives the name from the prompt.
+    title: Option<String>,
     /// Model for the child session; the frontend turns it into the agent's own model flag.
     model: Option<String>,
     /// Reasoning effort for the child session; ignored for agents whose CLI has no effort flag.
@@ -224,7 +232,7 @@ enum SpawnParse {
 
 /// Parse arguments after `--spawn`. `--worktree/--wt` enables a worktree, `--no-worktree/--nowt`
 /// disables it, `--yes/-y/--no-confirm` skips the confirmation dialog, `--agent` or a shortcut flag selects
-/// kind, `--cwd`/`--model`/`--effort`/`--agent` take a value in either `--cwd x` or `--cwd=x` form, help
+/// kind, `--cwd`/`--title`/`--model`/`--effort`/`--agent` take a value in either `--cwd x` or `--cwd=x` form, help
 /// flags show usage, and everything after `--` is prompt text even when prefixed by `-`. Other options are errors;
 /// remaining words join into a required prompt.
 fn parse_spawn_args(rest: &[String]) -> SpawnParse {
@@ -236,6 +244,7 @@ fn parse_spawn_args(rest: &[String]) -> SpawnParse {
     let mut cwd: Option<String> = None;
     let mut kind: Option<String> = None;
     let mut no_confirm = false;
+    let mut title: Option<String> = None;
     let mut model: Option<String> = None;
     let mut effort: Option<String> = None;
     let mut words: Vec<&str> = Vec::new();
@@ -331,7 +340,7 @@ fn parse_spawn_args(rest: &[String]) -> SpawnParse {
                 break;
             }
             // Value options. Both spellings are accepted because agents write one and people the other.
-            "--cwd" | "--model" | "--effort" | "--agent" => {
+            "--cwd" | "--title" | "--model" | "--effort" | "--agent" => {
                 let Some(v) = rest
                     .get(i + 1)
                     .map(|s| s.as_str())
@@ -341,6 +350,7 @@ fn parse_spawn_args(rest: &[String]) -> SpawnParse {
                 };
                 match a {
                     "--cwd" => cwd = Some(v.to_string()),
+                    "--title" => title = Some(v.to_string()),
                     "--model" => model = Some(v.to_string()),
                     "--agent" => match task_agent(v) {
                         Ok(k) => kind = Some(k),
@@ -351,6 +361,7 @@ fn parse_spawn_args(rest: &[String]) -> SpawnParse {
                 i += 1;
             }
             _ if a.starts_with("--cwd=")
+                || a.starts_with("--title=")
                 || a.starts_with("--model=")
                 || a.starts_with("--effort=")
                 || a.starts_with("--agent=") =>
@@ -362,6 +373,7 @@ fn parse_spawn_args(rest: &[String]) -> SpawnParse {
                 }
                 match flag {
                     "--cwd" => cwd = Some(v.to_string()),
+                    "--title" => title = Some(v.to_string()),
                     "--model" => model = Some(v.to_string()),
                     "--agent" => match task_agent(v) {
                         Ok(k) => kind = Some(k),
@@ -380,6 +392,10 @@ fn parse_spawn_args(rest: &[String]) -> SpawnParse {
     let prompt = words.join(" ");
     if prompt.trim().is_empty() {
         return SpawnParse::Err("vspawn: missing task description".to_string());
+    }
+    let title = title.map(|t| t.trim().to_string());
+    if title.as_deref().is_some_and(|t| !super::session_title::is_valid_title(t)) {
+        return SpawnParse::Err(format!("vspawn: --title must be 1 to {} characters without control characters", super::session_title::MAX_TITLE_CHARS));
     }
     if flow_options && !workflow {
         return SpawnParse::Err("vspawn: role options, review options, --split-tasks and --worktree-mode require --plan-execute".into());
@@ -408,6 +424,7 @@ fn parse_spawn_args(rest: &[String]) -> SpawnParse {
         cwd,
         kind,
         no_confirm,
+        title,
         model,
         effort,
         prompt,
@@ -430,7 +447,7 @@ fn task_agent(value: &str) -> Result<String, String> {
 
 /// Build the `/spawn` JSON body, omitting kind so the backend can inherit it when absent. serde_json
 /// safely escapes quotes, newlines, and backslashes. The supplied cwd is the resolved invocation
-/// directory. `noConfirm`, `model`, and `effort` are only
+/// directory. `noConfirm`, `title`, `model`, and `effort` are only
 /// written when set. Every task has a request ID, including ordinary spawns.
 fn build_spawn_body(sid: &str, args: &SpawnArgs, cwd: &str) -> String {
     let mut obj = serde_json::Map::new();
@@ -449,6 +466,9 @@ fn build_spawn_body(sid: &str, args: &SpawnArgs, cwd: &str) -> String {
     }
     if let Some(k) = args.kind.as_deref() {
         obj.insert("kind".into(), serde_json::json!(k));
+    }
+    if let Some(t) = args.title.as_deref() {
+        obj.insert("title".into(), serde_json::json!(t));
     }
     if let Some(m) = args.model.as_deref() {
         obj.insert("model".into(), serde_json::json!(m));
@@ -1744,10 +1764,36 @@ mod tests {
             cwd: None,
             kind: None,
             no_confirm: false,
+            title: None,
             model: None,
             effort: None,
             prompt: prompt.to_string(),
         }
+    }
+
+    #[test]
+    fn title_accepts_both_spellings_and_reaches_the_request_trimmed() {
+        for input in [args(&["--title", "  Parser audit ", "Task"]), args(&["--title=  Parser audit ", "Task"])] {
+            let SpawnParse::Ok(parsed) = parse_spawn_args(&input) else { panic!("valid title") };
+            assert_eq!(parsed.prompt, "Task");
+            let body: serde_json::Value = serde_json::from_str(&build_spawn_body("owner", &parsed, "/repo")).unwrap();
+            assert_eq!(body["title"], "Parser audit");
+            let request: super::super::server::SpawnRequest = serde_json::from_value(body).unwrap();
+            assert_eq!(request.title.as_deref(), Some("Parser audit"));
+        }
+        let body: serde_json::Value = serde_json::from_str(&build_spawn_body("owner", &spawn_args("Task"), "/repo")).unwrap();
+        assert!(body.get("title").is_none(), "an untitled request must not carry the field");
+    }
+
+    #[test]
+    fn title_rejects_missing_blank_oversized_and_multiline_values() {
+        let long = "x".repeat(81);
+        for input in [args(&["Task", "--title"]), args(&["--title=", "Task"]), args(&["--title", "   ", "Task"]),
+            args(&["--title", "two\nlines", "Task"]), args(&["--title", &long, "Task"])] {
+            assert!(matches!(parse_spawn_args(&input), SpawnParse::Err(_)), "{input:?}");
+        }
+        let longest = "题".repeat(80);
+        assert!(matches!(parse_spawn_args(&args(&["--title", &longest, "Task"])), SpawnParse::Ok(_)), "the limit counts characters");
     }
 
     #[test]

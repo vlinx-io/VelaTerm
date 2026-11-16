@@ -353,6 +353,7 @@ pub fn run(
     command.env_remove("VLX_SPAWN_URL");
     command.env_remove("VLX_SESSION_ID");
     command.env_remove("VLX_TOKEN");
+    command.env_remove("VLX_AUTH");
     run_command(command, matches!(delivery, PromptDelivery::Stdin { .. }).then_some(prompt), timeout)
 }
 
@@ -545,7 +546,7 @@ pub(crate) fn run_selected_stream(
     if let Some(cwd)=cwd {command.current_dir(cwd);}
     crate::login_env::refresh_command(&mut command);
     super::executable::prepare_command(&mut command,&summarizer.bin);
-    command.env_remove("VLX_SPAWN_URL").env_remove("VLX_SESSION_ID").env_remove("VLX_TOKEN");
+    command.env_remove("VLX_SPAWN_URL").env_remove("VLX_SESSION_ID").env_remove("VLX_TOKEN").env_remove("VLX_AUTH");
     decode_output(summarizer.spec.output,&run_command_source(command,source,timeout,Some(cancelled))?)
 }
 
@@ -974,19 +975,21 @@ mod tests {
         std::env::set_var("VLX_SPAWN_URL", "http://127.0.0.1:1");
         std::env::set_var("VLX_SESSION_ID", "parent-session");
         std::env::set_var("VLX_TOKEN", "secret");
+        std::env::set_var("VLX_AUTH", "secret");
         let got = run(
             "sh",
-            &["-c", "echo \"[$VLX_SPAWN_URL|$VLX_SESSION_ID|$VLX_TOKEN]\""],
+            &["-c", "echo \"[$VLX_SPAWN_URL|$VLX_SESSION_ID|$VLX_TOKEN|$VLX_AUTH]\""],
             "",
             PromptDelivery::Arg { marker: None },
             None,
             Duration::from_secs(10),
         )
         .expect("the probe should run");
-        assert_eq!(got, "[||]", "no session variable may reach the summarizer");
+        assert_eq!(got, "[|||]", "no session variable may reach the summarizer");
         std::env::remove_var("VLX_SPAWN_URL");
         std::env::remove_var("VLX_SESSION_ID");
         std::env::remove_var("VLX_TOKEN");
+        std::env::remove_var("VLX_AUTH");
     }
 
     #[test]

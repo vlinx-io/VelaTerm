@@ -1,3 +1,22 @@
+## v0.3.1 — 2026-11-16
+
+- 🪐 A visualização de conversa do Antigravity agora oferece troca de modelo e nível de raciocínio, acompanhamento de subagentes e tarefas em segundo plano, prompts interativos `ask_question`, permissões em cinco níveis, renomeação por IA e estatísticas de turno, velocidade de saída e uso de cota no painel Info.
+- 🐋 As sessões do DeepSeek agora oferecem tarefas em segundo plano, entrada de imagens por modelo, uso de contexto, renomeação por IA, configuração de URL e chave de API ao lado da caixa de entrada e visualização somente leitura do histórico anterior do `dsh`.
+- 🤖 Os agentes agora podem propor ações do aplicativo VelaTerm com `vapp` (incluindo organizar árvores da barra lateral com referências `$name`), exibindo cada ação ou lote como um cartão de confirmação na visualização de conversa.
+- 📁 Tarefas e Chats na barra lateral esquerda permitem criar grupos, adicionar itens pelo menu de contexto da área vazia e arrastar itens para o nível superior.
+- 📦 Os lançamentos do Windows agora incluem pacotes zip portáteis para as compilações completa e mínima, e as cópias portáteis são atualizadas pela página de download.
+- 🇨🇳 As Configurações permitem alternar o servidor de atualização e download para o espelho da China continental `velaterm.cn`.
+- 🔍 A barra de status adiciona controles de zoom da interface com entrada direta de porcentagem, e as Configurações permitem escolher fontes pesquisáveis separadas para a interface e para as conversas.
+- 📎 Arquivos arrastados do Finder ou do Explorador de Arquivos agora podem ser soltos diretamente em terminais, conversas e na árvore de arquivos do projeto.
+- 🍴 As sessões do ZCode permitem ramificar a partir da última resposta sem modificar o espaço de trabalho, reverter a partir da última mensagem e renomear por IA, enquanto as sessões do Pi e do OMP oferecem autocompletar para comandos com barra.
+- 📋 As mensagens de conversa têm «Copiar mensagem completa» no menu de contexto, a caixa de entrada conta com um menu de contexto Cortar/Copiar/Colar/Selecionar tudo com indicação dos atalhos, e a busca na conversa verifica primeiro a transcrição completa.
+- 📊 A seção Usage do painel Info exibe barras de cota agrupadas por janela de redefinição com escala de 20 divisões e horários de redefinição separados, recolhendo por padrão as cotas do Antigravity que não são Gemini.
+- 🏷️ As sessões contam com «Definir status» (Visualizada / Pendente) no menu de contexto, sessões recém-criadas permanecem visíveis sob filtros de status e `vspawn --title` define títulos personalizados para sessões derivadas e de planejamento.
+- 🪟 O `vartifact` ancora arquivos mesmo quando aberto a partir de abas em segundo plano, o seletor de limite de abas em segundo plano vai até 512 e visitantes de links públicos compartilhados podem expandir ou recolher a árvore esquerda localmente.
+- ⌨️ Confirmar uma composição IME com Enter no macOS não envia mais respostas ou buscas antes da hora, a entrada em terminais remotos oculta sugestões em linha do histórico do Zsh e atualizações sincronizadas do terminal não piscam mais a área visível.
+- 🔔 Clicar em uma notificação de janela remota no macOS traz essa janela diretamente para a frente sem piscar a janela principal antes, e reabrir o aplicativo restaura a janela principal mesmo quando apenas janelas remotas estão abertas.
+- 🔧 Trocar de projeto limpa o filtro da árvore de arquivos, os seletores de permissão salvam padrões imediatamente com Set as default, a renomeação por IA funciona em sessões muito longas e a primeira mensagem de uma nova sessão não pisca mais antes do início da sessão.
+
 ## v0.3.0 — 2026-11-08
 
 - 🔏 A versão para macOS agora é assinada com o certificado da Vlinx Software, Inc. em vez do anterior; após a atualização, talvez seja preciso conceder novamente algumas permissões do macOS, e os itens salvos nas Chaves, como senhas de conexões remotas, precisam ser autorizados de novo: quando solicitado, digite sua senha de login e escolha “Sempre Permitir”.

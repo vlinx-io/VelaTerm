@@ -92,7 +92,7 @@ fn concurrent_update(output: &[u8]) -> bool {
 fn subcommand(kind: SessionKind) -> Option<&'static [&'static str]> {
     match kind {
         SessionKind::Claude | SessionKind::Codex | SessionKind::Omp | SessionKind::Antigravity => Some(&["update"]),
-        SessionKind::Opencode => Some(&["upgrade"]),
+        SessionKind::Opencode | SessionKind::Deepseek => Some(&["upgrade"]),
         // Without a flag `pi update` may also touch extensions; only the agent itself is meant here.
         SessionKind::Pi => Some(&["update", "--self"]),
         _ => None,
@@ -101,7 +101,7 @@ fn subcommand(kind: SessionKind) -> Option<&'static [&'static str]> {
 
 /// The OpenCode 2 previews track a separate beta channel that `opencode upgrade` does not follow.
 fn supported(kind: SessionKind, version: Option<&str>) -> Option<&'static [&'static str]> {
-    if kind == SessionKind::Opencode && super::opencode::is_v2_version(version) { return None; }
+    if kind.uses_opencode() && super::opencode::is_v2_version(version) { return None; }
     subcommand(kind)
 }
 

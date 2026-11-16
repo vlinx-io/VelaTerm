@@ -26,6 +26,7 @@ import {
 } from "../notify";
 import { ClipboardUnresponsiveError, reportClipboardUnresponsive } from "./clipboardStall";
 import { env } from "./env";
+import { getUiZoom } from "./uiZoom";
 import type {
   BadgeCapability,
   BrowserCapability,
@@ -46,6 +47,7 @@ import type {
   UpdaterCapability,
   VelaCommandCapability,
   WindowCapability,
+  DroppedPath,
 } from "./types";
 
 const transport: TransportCapability = {
@@ -80,7 +82,7 @@ const dialog: DialogCapability = {
   },
   pickDirectory: transportPickDirectory,
   pickFile: transportPickFile,
-  droppedFolders(transfer) {
+  droppedPaths(transfer) {
     if (!env.isTauri) return Promise.resolve([]);
     // WebView2 hands posted File objects to the host together with their paths. The host listens only for
     // this marker, and macOS/Linux read the paths from their own drag channel instead.
@@ -91,7 +93,7 @@ const dialog: DialogCapability = {
     if (files.length && webview?.postMessageWithAdditionalObjects) {
       webview.postMessageWithAdditionalObjects({ vlxDroppedFiles: true }, files);
     }
-    return transportInvoke<string[]>("take_dropped_paths");
+    return transportInvoke<DroppedPath[]>("take_dropped_paths");
   },
 };
 
@@ -280,13 +282,11 @@ const notify: NotifyCapability = {
  *
  * Plain browsers and remote clients never call this because the UI requires isTauri || isElectron.
  */
-const withViewport = (rect: BrowserRect) => ({
-  x: rect.x,
-  y: rect.y,
-  w: rect.w,
-  h: rect.h,
-  cssViewportH: window.innerHeight,
-});
+const withViewport = (rect: BrowserRect) => {
+  // Native page zoom scales CSS pixels, while child webviews are placed in logical window pixels.
+  const z = getUiZoom();
+  return { x: rect.x * z, y: rect.y * z, w: rect.w * z, h: rect.h * z, cssViewportH: window.innerHeight * z };
+};
 const browser: BrowserCapability = {
   open: (tabId, url, rect) => transportInvoke("browser_open", { tabId, url, ...withViewport(rect) }),
   navigate: (tabId, input) => transportInvoke("browser_navigate", { tabId, input }),
@@ -318,14 +318,34 @@ async function installWindowsUpdate(rid: number, onEvent?: (event: UpdateDownloa
   await invoke("updater_install_windows", { rid, onEvent: channel });
 }
 
+/** Whether this Windows copy runs from the portable zip; checked once, it cannot change while running. */
+let windowsPortable: Promise<boolean> | null = null;
+function isWindowsPortable(): Promise<boolean> {
+  windowsPortable ??= import("@tauri-apps/api/core")
+    .then(({ invoke }) => invoke<boolean>("updater_windows_portable"))
+    .catch(() => false);
+  return windowsPortable;
+}
+
 /** Updater plugin on the desktop; browsers and remote windows do not self-update. */
 const updater: UpdaterCapability = {
   supported: env.isTauri,
   async check(headers) {
-    const { check } = await import("@tauri-apps/plugin-updater");
-    const update = await check(headers ? { headers } : undefined);
+    // The plugin's own check() only knows the tauri.conf.json endpoint (velaterm.com). updater_check runs the
+    // same check against the selected server region (see src-tauri/src/updater_check.rs) and returns the
+    // plugin's metadata, so the plugin's Update class still drives download, verification and install.
+    const [{ Update }, { invoke }] = await Promise.all([
+      import("@tauri-apps/plugin-updater"),
+      import("@tauri-apps/api/core"),
+    ]);
+    const metadata = await invoke<ConstructorParameters<typeof Update>[0] | null>("updater_check", {
+      headers: headers ? Object.entries(headers) : undefined,
+    });
+    const update = metadata ? new Update(metadata) : null;
     if (update && isWindows) {
       update.downloadAndInstall = (onEvent) => installWindowsUpdate(update.rid, onEvent);
+      // The installer would put a second copy elsewhere rather than update a portable folder.
+      if (await isWindowsPortable()) return Object.assign(update, { manualOnly: true });
     }
     return update;
   },

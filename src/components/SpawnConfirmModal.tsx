@@ -18,7 +18,8 @@ import {
   useLaunchOptions,
   WorktreeChoices,
 } from "./LaunchFields";
-import Combo from "./Combo";
+import type { SessionKind } from "../types";
+import AgentSelect from "./AgentSelect";
 import { useTaskImages } from "./useTaskImages";
 import { dataUrl } from "../layout/CenterPane/session/attachments";
 import { Icons } from "./Icons";
@@ -287,16 +288,15 @@ export function SpawnConfirmModal() {
           {catalog.state === "ready" && (
             <>
               <LaunchField label={t("spawn.agentLabel")}>
-                <Combo
+                <AgentSelect
                   key={String(submitting || accepted)}
-                  value={kind}
+                  value={kind as SessionKind | ""}
                   disabled={submitting || accepted}
-                  onChange={(value) => { if (!accepted) setKind(value); }}
+                  onChange={(value) => { if (!accepted && value) setKind(value); }}
                   width="100%"
-                  menuPortal
                   ariaLabel={t("spawn.agentLabel")}
                   options={catalog.options.map((o) => ({
-                    value: o.id,
+                    id: o.id as SessionKind,
                     label: o.id === "terminal" ? t("kind.terminal") : o.label,
                   }))}
                 />

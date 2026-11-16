@@ -25,6 +25,15 @@ pub struct Branch {
     pub(super) parent:Option<Arc<super::children::Parent>>,
 }
 
+#[cfg(test)]
+impl Branch {
+    /// A single-source branch over a test recording, without a session database lookup.
+    pub(crate) fn test_branch(store:Arc<Store>,source:RegisteredSource,kind:SessionKind) -> Self {
+        Self {store,sources:vec![source],generation:"test".into(),kind,native_id:"test".into(),
+            error:None,scope:"test".into(),parent:None}
+    }
+}
+
 /// Native recording sizes captured before an agent process starts. Rows that process appends belong
 /// to its live timeline, so history pages for the running conversation end at these offsets.
 #[derive(Clone,Debug)]
@@ -34,7 +43,7 @@ impl ProcessCut {
     /// Reads file metadata only; no recording byte is read before the agent starts. Database
     /// providers have no byte offset that separates earlier rows from rows the process will add.
     pub fn capture(kind:SessionKind,native_id:&str) -> Option<ProcessCut> {
-        if matches!(kind,SessionKind::Opencode|SessionKind::Kiro) {return None;}
+        if kind.uses_opencode() || kind==SessionKind::Kiro {return None;}
         let resolved=source::resolve(kind,native_id).ok()?;
         let sizes=resolved.segments.into_iter().map(|segment| {
             let size=std::fs::metadata(&segment.path).map(|meta|meta.len()).unwrap_or(0);(segment.path,size)
@@ -47,14 +56,32 @@ impl ProcessCut {
 pub fn prepare(app:&AppCtx,session_id:&str) -> Result<Branch,String> {
     let session=repo::get_session(&app.db().conn.lock().unwrap(),session_id).map_err(|e|e.to_string())?
         .ok_or("Session not found")?;
-    let id=session.agent_session_id.unwrap_or_default();
+    let id=session.agent_session_id.clone().unwrap_or_default();
     let store=Store::at(&app.data_dir()?)?;
-    let resolved=if id.is_empty() {source::Resolved {segments:Vec::new(),error:None}} else {source::resolve(session.kind,&id)?};
+    // Between parking a retired harness id and OpenCode writing its first session row there is no
+    // current recording to read. The legacy source below is the whole conversation then; a missing or
+    // not-yet-written OpenCode store must not hide it behind an error.
+    let current_ready = session.kind != SessionKind::Deepseek
+        || id.is_empty()
+        || crate::agent::opencode_store::session_exists(&id).unwrap_or(false)
+        || session.legacy_agent_session_id.is_none();
+    let resolved=if !current_ready {source::Resolved {segments:Vec::new(),error:None}} else if id.is_empty() {source::Resolved {segments:Vec::new(),error:None}} else {source::resolve(session.kind,&id)?};
     let mut sources=Vec::new();
+    // A DeepSeek conversation first recorded by the retired harness stays in front of the OpenCode one
+    // that replaced it, so continuing a conversation never hides what was said before the switch.
+    if session.kind==SessionKind::Deepseek {
+        if let Some(legacy)=session.legacy_agent_session_id.as_deref().filter(|legacy|*legacy!=id) {
+            if let Some(path)=super::deepseek_legacy::log(legacy) {
+                let native=format!("{}{legacy}",super::deepseek_legacy::NATIVE_PREFIX);
+                sources.push(super::deepseek_legacy::register(&store,session.kind,path,&native)?);
+            }
+        }
+    }
     for segment in resolved.segments {
         sources.push(match session.kind {
             SessionKind::Kiro=>super::kiro::register(&store,segment.path,&segment.native_id)?,
-            SessionKind::Opencode=>super::opencode::register(&store,segment.path,&segment.native_id)?,
+            SessionKind::Deepseek if segment.native_id.starts_with(super::deepseek_legacy::NATIVE_PREFIX)=>super::deepseek_legacy::register(&store,session.kind,segment.path,&segment.native_id)?,
+            SessionKind::Opencode|SessionKind::Deepseek=>super::opencode::register(&store,session.kind,segment.path,&segment.native_id)?,
             kind=>store.register(kind,segment)?,
         });
     }
@@ -81,6 +108,11 @@ fn field_view(reference:&str,label:&str,path:&str,size:u64,encoding:&str,append:
     let mut field=json!({"detailRef":reference,"label":label,"path":path,"sizeBytes":size,
         "kind":if encoding=="json" {"json"} else if path.ends_with("diff") {"diff"} else {"text"},"append":append,"contentRevision":revision});
     if let Some(label)=label.strip_prefix("attachment:") {field["kind"]=json!("image");field["label"]=json!("attachment");field["mimeType"]=json!(label.rsplit_once(':').map(|(mime,_)|mime));}
+    else if let Some(rest)=label.strip_prefix("attachment_file:") {
+        let (mime,len)=rest.rsplit_once(':').unwrap_or((rest,""));
+        field["kind"]=json!("image");field["label"]=json!("attachment");field["mimeType"]=json!(mime);
+        if let Ok(file_len)=len.parse::<u64>() {field["sizeBytes"]=json!(file_len);}
+    }
     match label {
         "body_shell"=>{field["label"]=json!("body");field["prefix"]=json!("!");},
         "body_file"=>{field["label"]=json!("body");field["prefix"]=json!("[file: ");field["suffix"]=json!("]");},
@@ -199,7 +231,7 @@ impl Branch {
     pub(super) fn render_row(&self,state:&State,source:&RegisteredSource,id:&str) -> Result<Value,String> {
         let summary=state.summary(id).ok_or("detail_unavailable: history row is unavailable")?;
         let row:Value=serde_json::from_str(summary).map_err(|e|e.to_string())?;
-        if self.kind==SessionKind::Opencode {return Ok(super::children::public_row(super::attachments::decorate(state,source,row)));}
+        if self.kind.uses_opencode() {return Ok(super::children::public_row(super::attachments::decorate(state,source,row)));}
         let mut result:Option<Value>=None;
         for (start,part) in state.parts.get(id).into_iter().flatten() {
             if !state.active(*start) || source.segment.end_byte.is_some_and(|end|part.record_end>end)
@@ -417,7 +449,7 @@ impl Branch {
                 if &*state.rows[&*id].kind!="user" {continue;}
                 let Some(summary)=state.summary(&id).and_then(|summary|serde_json::from_str::<Value>(summary).ok()) else {continue;};
                 let text=summary["text"].as_str().unwrap_or_default().split_whitespace().collect::<Vec<_>>().join(" ");
-                let images=state.row_fields.get(&*id).is_some_and(|fields|fields.iter().any(|field|field.label.starts_with("attachment:")));
+                let images=state.row_fields.get(&*id).is_some_and(|fields|fields.iter().any(|field|field.label.starts_with("attachment:")||field.label.starts_with("attachment_file:")));
                 messages.push((id.to_string(),text,images));
             }
         }

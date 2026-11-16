@@ -21,9 +21,13 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { isDeferredResizeNotification } from "./platform/resizeObserverError";
 import { installTauriLinkHandler } from "./platform/tauriLinkHandler";
 import { platform } from "./platform";
+import { applyStoredUiZoom } from "./platform/uiZoom";
 
 // The phone layout is a separate interface the desktop never shows, so it loads only when selected.
 const MobileApp = lazy(() => import("./mobile/MobileApp"));
+
+// Restore this device's interface zoom before the first paint; the native zoom does not survive a relaunch.
+applyStoredUiZoom();
 
 // Scope automatic system-browser links to application pages. The opener plugin's global injection
 // would also intercept links in unprivileged browser tabs before their native new-window handler.
@@ -34,6 +38,21 @@ if (import.meta.hot) import.meta.hot.dispose(removeTauriLinkHandler);
 // items in uncovered areas, mixing unrelated actions and styles. Cancel only the browser default in
 // capture phase; propagation continues to terminal, tab, file-tree, and editor React handlers.
 document.addEventListener("contextmenu", (event) => event.preventDefault(), { capture: true });
+
+// A file dragged from the OS onto an area that does not take it would otherwise get the WebView's default
+// action: the whole window navigates to the file and the interface is gone. Drop targets that accept files
+// (file tree, sidebar, image paste) cancel the event themselves, so this bubble-phase fallback only claims
+// what nobody handled and marks it "none", which shows the no-drop cursor and keeps the drop from firing.
+const unhandledFileDrag = (event: DragEvent) =>
+  !event.defaultPrevented && !!event.dataTransfer?.types.includes("Files");
+window.addEventListener("dragover", (event) => {
+  if (!unhandledFileDrag(event)) return;
+  event.preventDefault();
+  event.dataTransfer!.dropEffect = "none";
+});
+window.addEventListener("drop", (event) => {
+  if (unhandledFileDrag(event)) event.preventDefault();
+});
 
 // macOS text services (auto-capitalization, autocorrect, spell-check marking) apply to every
 // editable element in WKWebView unless the page opts out per element. Project names, paths, and

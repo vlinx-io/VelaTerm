@@ -133,6 +133,8 @@ fn map_session(row: &Row) -> rusqlite::Result<Session> {
         engine: row.get(24)?,
         // Append the Codex collaboration style at index 25.
         collaboration_mode: row.get(25)?,
+        // Append the recording the current engine cannot resume at index 26.
+        legacy_agent_session_id: row.get(26)?,
     })
 }
 
@@ -140,7 +142,7 @@ fn map_session(row: &Row) -> rusqlite::Result<Session> {
 const SESSION_COLUMNS: &str = "id, project_id, group_id, name, shell, cwd, env_json, init_cmd, \
      hotkey, sort_order, created_at, kind, agent_session_id, \
      parent_session_id, collapsed, worktree_path, archived_at, browser_url, agent_args, \
-     permission_mode, worktree_base_ref, mark, agent_preset_id, agent_path, engine, collaboration_mode";
+     permission_mode, worktree_base_ref, mark, agent_preset_id, agent_path, engine, collaboration_mode, legacy_agent_session_id";
 
 /// Import an existing directory as a project, using its directory name.
 pub fn import_project(conn: &Connection, root_path: &str) -> Result<Project, String> {
@@ -437,6 +439,7 @@ pub fn create_session_identified(
         collaboration_mode: None,
         hotkey: None,
         agent_session_id: None,
+        legacy_agent_session_id: None,
         parent_session_id: parent_session_id
             .map(|s| s.to_string())
             .filter(|s| !s.is_empty()),
@@ -532,6 +535,7 @@ pub fn create_fresh_chat_session(
         hotkey: source.hotkey.clone(),
         engine: "chat".to_string(),
         agent_session_id: None,
+        legacy_agent_session_id: None,
         parent_session_id: source.parent_session_id.clone(),
         collapsed: false,
         worktree_path: source.worktree_path.clone(),
@@ -619,6 +623,7 @@ pub fn persist_session(
         engine: "tui".to_string(),
         hotkey: None,
         agent_session_id: None,
+        legacy_agent_session_id: None,
         parent_session_id: parent_session_id
             .map(|s| s.to_string())
             .filter(|s| !s.is_empty()),
@@ -1183,6 +1188,27 @@ pub fn forget_agent_session_id(
     Ok(n > 0)
 }
 
+/// Move a DeepSeek conversation's retired dsh id aside before the first OpenCode conversation starts.
+///
+/// `agent_session_id` has to be empty so the new OpenCode session can claim it, but the dsh recording must
+/// stay readable, so the old id is kept in `legacy_agent_session_id`. Returns false when the row no longer
+/// carries the id (another client already parked it).
+pub fn park_legacy_agent_session_id(
+    conn: &Connection,
+    id: &str,
+    legacy_agent_session_id: &str,
+    kind: SessionKind,
+) -> Result<bool, String> {
+    let n = conn
+        .execute(
+            "UPDATE sessions SET legacy_agent_session_id = ?1, agent_session_id = NULL, fork_pending = 0
+             WHERE id = ?2 AND kind = ?3 AND agent_session_id = ?1",
+            params![legacy_agent_session_id, id, kind.as_str()],
+        )
+        .map_err(|e| format!("Failed to archive the previous agent conversation id: {e}"))?;
+    Ok(n > 0)
+}
+
 /// Atomically claim a newly created agent session ID for a PTY session.
 ///
 /// Disk scanning narrows only by start time/cwd, so concurrent agents may see the same newest file.
@@ -1250,9 +1276,9 @@ pub fn fork_session(conn: &Connection, source_id: &str) -> Result<Session, Strin
 
     if !matches!(
         source.kind,
-        SessionKind::Claude | SessionKind::Codex | SessionKind::Pi | SessionKind::Omp
+        SessionKind::Claude | SessionKind::Codex | SessionKind::Pi | SessionKind::Omp | SessionKind::Zcode
     ) {
-        return Err("Only claude / codex / pi / omp sessions support fork".to_string());
+        return Err("Only claude / codex / pi / omp / zcode sessions support fork".to_string());
     }
     let anchor = source
         .agent_session_id
@@ -1285,6 +1311,7 @@ pub fn fork_session(conn: &Connection, source_id: &str) -> Result<Session, Strin
         engine: source.engine.clone(),
         hotkey: None,
         agent_session_id: Some(anchor.clone()),
+        legacy_agent_session_id: None,
         parent_session_id: source.parent_session_id.clone(),
         collapsed: false,
         worktree_path: None,
@@ -3413,6 +3440,17 @@ mod tests {
 
     /// Fork guards reject terminal sessions and missing sources.
     #[test]
+    fn fork_session_accepts_zcode() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        let source = create_session(&conn, &project.id, None, "z", SessionKind::Zcode, None, Some("/tmp/proj"), None, None, None).unwrap();
+        set_agent_session_id(&conn, &source.id, "sess_1", SessionKind::Zcode).unwrap();
+        let fork = fork_session(&conn, &source.id).unwrap();
+        assert_eq!(fork.kind, SessionKind::Zcode);
+        assert!(get_fork_pending(&conn, &fork.id).unwrap());
+    }
+
+    #[test]
     fn fork_session_rejects_non_agent_kinds() {
         let conn = mem_conn();
         let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
@@ -3485,10 +3523,40 @@ mod tests {
         assert_eq!(get_agent_session_id(&conn, "nope").unwrap(), None);
     }
 
+    /// A retired DeepSeek Harness id moves aside instead of being overwritten by OpenCode.
+    #[test]
+    fn parking_a_legacy_deepseek_id_keeps_the_recording_readable() {
+        let conn = mem_conn();
+        let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
+        let deepseek = create_session(
+            &conn,
+            &project.id,
+            None,
+            "d",
+            SessionKind::Deepseek,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        set_agent_session_id(&conn, &deepseek.id, "dsh-1", SessionKind::Deepseek).unwrap();
+        assert!(park_legacy_agent_session_id(&conn, &deepseek.id, "dsh-1", SessionKind::Deepseek).unwrap());
+        let stored = get_session(&conn, &deepseek.id).unwrap().unwrap();
+        assert_eq!(stored.agent_session_id, None);
+        assert_eq!(stored.legacy_agent_session_id.as_deref(), Some("dsh-1"));
+        assert!(set_agent_session_id(&conn, &deepseek.id, "ses_new", SessionKind::Deepseek).unwrap());
+        let stored = get_session(&conn, &deepseek.id).unwrap().unwrap();
+        assert_eq!(stored.agent_session_id.as_deref(), Some("ses_new"));
+        assert_eq!(stored.legacy_agent_session_id.as_deref(), Some("dsh-1"));
+        // Another client that already parked the id reports no change instead of clearing the new one.
+        assert!(!park_legacy_agent_session_id(&conn, &deepseek.id, "dsh-1", SessionKind::Deepseek).unwrap());
+    }
+
     /// A terminal `/clear` unbinds only the conversation it cleared, and always releases a pending fork.
     #[test]
-    fn forget_agent_session_id_unbinds_only_the_cleared_conversation() {
-        let conn = mem_conn();
+    fn forget_agent_session_id_unbinds_only_the_cleared_conversation() {        let conn = mem_conn();
         let project = import_project(&conn, std::env::temp_dir().to_str().unwrap()).unwrap();
         let claude = create_session(
             &conn,

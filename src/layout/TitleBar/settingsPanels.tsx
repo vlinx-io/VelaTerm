@@ -270,7 +270,7 @@ const AGENT_DEFAULT_KINDS: {
   { kind: "opencode", label: "OpenCode", yolo: "", permVia: "env" },
   { kind: "copilot", label: "Copilot", yolo: "--allow-all-tools", permVia: "flag" },
   { kind: "cursor", label: "Cursor", yolo: "--force", permVia: "flag" },
-  // Antigravity (agy) shares Claude's flag name and injects it only in skip mode.
+  // Antigravity (agy) uses `--mode <plan|accept-edits|auto>` natively and `--dangerously-skip-permissions` in skip mode.
   { kind: "antigravity", label: "Antigravity", yolo: "--dangerously-skip-permissions", permVia: "flag" },
   // Cline is inverted because its native default is fully automatic. Both modes inject an explicit
   // flag: `--auto-approve false` by default and `--auto-approve true` in skip mode (see backend
@@ -286,7 +286,7 @@ const AGENT_DEFAULT_KINDS: {
   { kind: "grok", label: "Grok Build", yolo: "--always-approve", permVia: "flag" },
   // Zoo auto-approves natively; VelaTerm injects --require-approval in default mode and no skip flag.
   { kind: "zoo", label: "Zoo Code", yolo: "", permVia: "inverse" },
-  // DeepSeek Harness and ZCode run only in the conversation view, where YOLO means the view approves their
+  // DeepSeek and ZCode run only in the conversation view, where YOLO means the view approves their
   // requests (ZCode is also sent its own yolo mode with every message).
   { kind: "zcode", label: "ZCode", yolo: "", permVia: "answer" },
   { kind: "deepseek", label: "DeepSeek", yolo: "", permVia: "answer" },
@@ -524,7 +524,7 @@ export function AgentsPanel() {
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", gap: "var(--space-4, 16px)" }}>
           <div style={{ flex: "1 1 160px", minWidth: 0, color: "var(--text-dim)", fontSize: 12, lineHeight: 1.5 }}>{t("permission.defaultHint")}</div>
           <div style={{ flex: "none", maxWidth: "100%" }}>
-            {["claude", "codex", "opencode"].includes(selKind) ? (
+            {["claude", "codex", "opencode", "antigravity"].includes(selKind) ? (
               <AgentPermissionSelect key={selKind} kind={selKind} value={cfg.permissionMode}
                 onChange={mode => savePermissionDefault(selKind, mode)} />
             ) : supportsYolo ? (

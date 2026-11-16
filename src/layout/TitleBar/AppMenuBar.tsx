@@ -15,13 +15,12 @@ import {
   type ShortcutAction,
 } from "../../hooks/shortcutRegistry";
 import { useT } from "../../i18n";
+import { siteOrigin, siteUrl } from "../../ipc/serverRegion";
 import { env, platform } from "../../platform";
 import { useTermStore } from "../../store/termStore";
 import { focusTerminal } from "../../terminal/registry";
 import { runMenuAction } from "./appMenuActions";
 
-const WEBSITE_URL = "https://velaterm.com";
-const FEEDBACK_URL = "https://velaterm.com/feedback";
 
 interface MenuItemDef {
   label: string;
@@ -102,11 +101,11 @@ export function AppMenuBar() {
         entries: [
           {
             label: t("menubar.visitWebsite"),
-            run: () => void platform.opener.openExternal(WEBSITE_URL),
+            run: () => void platform.opener.openExternal(siteOrigin()),
           },
           {
             label: `${t("menubar.sendFeedback")}…`,
-            run: () => void platform.opener.openExternal(FEEDBACK_URL),
+            run: () => void platform.opener.openExternal(siteUrl("/feedback")),
           },
           "separator",
           {

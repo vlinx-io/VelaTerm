@@ -137,7 +137,7 @@ export function ChatSearch({ entries, onLocate, onClose, scrollRef, loadingHisto
   return <div ref={panel} className="sv-search" role="search" onKeyDown={event => {
     event.stopPropagation();
     if (event.key === "Escape") { event.preventDefault(); onClose(); }
-    if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); move(event.shiftKey ? 1 : -1); }
+    if (event.key === "Enter" && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); move(event.shiftKey ? 1 : -1); }
   }}>
     <style>{`::highlight(${highlightName}) { background: #f5ce58; color: #171717; }`}</style>
     {(loadingHistory || loadingDetails) && <div role="status">{t("common.loading")}</div>}

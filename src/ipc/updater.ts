@@ -30,6 +30,7 @@ import { useSyncExternalStore } from "react";
 
 import { getLocale, LOCALES, t, type Locale } from "../i18n";
 import { platform, type UpdateHandle } from "../platform";
+import { siteUrl } from "./serverRegion";
 import { invoke } from "./transport";
 import { compareVersions, localizeReleaseNotes, sliceReleaseNotes } from "./updateNotes";
 
@@ -75,10 +76,13 @@ export interface UpdatePrompt {
   localizedNotes: Partial<Record<Locale, string>>;
 }
 
-/** Website download page, offered when automatic updating fails. The endpoint's own `url` is not used
- * here: it points at an updater payload (a `.app.tar.gz` on macOS) that the plugin unpacks in place,
- * not at something a user can install by hand. The page hands out the real installers. */
-export const DOWNLOAD_PAGE_URL = "https://velaterm.com/download";
+/** Website download page on the selected server region, offered when automatic updating fails. The
+ * endpoint's own `url` is not used here: it points at an updater payload (a `.app.tar.gz` on macOS) that the
+ * plugin unpacks in place, not at something a user can install by hand. The page hands out the real
+ * installers, and on velaterm.cn it links them from the dl.velaterm.cn mirror. */
+export function downloadPageUrl(): string {
+  return siteUrl("/download");
+}
 
 /** Current update phase, used by both the status bar and modal to select their presentation. */
 export type UpdateStage =
@@ -156,7 +160,8 @@ export function dismissUpdate({ skip = false }: { skip?: boolean } = {}) {
 /** Download and install in the background, publishing progress to the status bar through the store. */
 export async function startInstall(): Promise<void> {
   const current = state.prompt;
-  if (!current || isBusy()) return;
+  // A portable Windows copy is updated from the download page; running the installer would add a second copy.
+  if (!current || isBusy() || current.update.manualOnly) return;
   setState({ stage: { kind: "downloading", received: 0, total: 0 } });
   try {
     let received = 0;

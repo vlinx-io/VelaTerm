@@ -10,7 +10,7 @@ export interface ComposerChip {
   id: ComposerItemId;
   node: ReactNode;
 }
-export type ComposerItemId = ComposerChipId | "translation";
+export type ComposerItemId = ComposerChipId | "translation" | "deepseekApi";
 
 /**
  * Splits the chips that exist for this session by the user's preference. `enabled` follows the order of

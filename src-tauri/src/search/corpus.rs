@@ -163,8 +163,10 @@ pub(super) struct Session {pub id:String,pub name:String,pub kind:SessionKind,pu
 /// Sessions in id order after `after`, 64 at a time, with every text field bounded before it is read.
 pub(super) fn sessions(app:&AppCtx,after:Option<&str>) -> Result<Vec<Session>,String> {
     let conn=app.db().conn.lock().unwrap();
-    let mut statement=conn.prepare("SELECT substr(id,1,128),substr(name,1,4096),kind,substr(agent_session_id,1,4096),archived_at IS NOT NULL,
-        length(CAST(id AS BLOB))>128 OR length(CAST(name AS BLOB))>4096 OR length(CAST(agent_session_id AS BLOB))>4096
+    let mut statement=conn.prepare("SELECT substr(id,1,128),substr(name,1,4096),kind,
+        substr(COALESCE(agent_session_id,legacy_agent_session_id),1,4096),archived_at IS NOT NULL,
+        length(CAST(id AS BLOB))>128 OR length(CAST(name AS BLOB))>4096
+            OR length(CAST(COALESCE(agent_session_id,legacy_agent_session_id) AS BLOB))>4096
         FROM sessions WHERE (?1 IS NULL OR id>?1) ORDER BY id LIMIT 64").map_err(sql)?;
     let rows=statement.query_map([after],|r|Ok((Session {id:r.get(0)?,name:r.get(1)?,kind:SessionKind::from_db(&r.get::<_,String>(2)?),native:r.get(3)?,archived:r.get(4)?},r.get::<_,Option<bool>>(5)?.unwrap_or(false)))).map_err(sql)?;
     rows.map(|row|row.map_err(sql).and_then(|(session,large)|if large {Err("unsupported_record: session metadata exceeds its byte budget".into())} else {Ok(session)})).collect()

@@ -21,6 +21,7 @@ import { useT } from "../../i18n";
 import { readRecording } from "../../ipc/commands";
 import { useTermStore } from "../../store/termStore";
 import { terminalLinkHandler, webLinkActivate } from "../../terminal/openLink";
+import { installSyncOutputFix } from "../../terminal/syncOutputFix";
 import { xtermTheme } from "../../theme";
 
 const SEARCH_OPTS = {
@@ -80,6 +81,7 @@ export function RecordingViewer({
     term.loadAddon(searchAddon);
     term.loadAddon(new WebLinksAddon(webLinkActivate));
     term.open(container);
+    const disposeSyncOutputFix = installSyncOutputFix(term);
     searchRef.current = searchAddon;
     readyRef.current = false;
     currentOrdinalRef.current = 0;
@@ -147,6 +149,7 @@ export function RecordingViewer({
       disposed = true;
       readyRef.current = false;
       resizeObserver.disconnect();
+      disposeSyncOutputFix();
       searchRef.current = null;
       try {
         webgl?.dispose();

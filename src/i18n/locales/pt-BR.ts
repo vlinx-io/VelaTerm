@@ -1,6 +1,7 @@
 //! Brazilian Portuguese dictionary. Each entry includes its English source in a trailing review comment; en.ts enforces the complete key set.
 
 import type en from "./en";
+import assist from "../assist/pt-BR";
 
 const ptBR: typeof en = {
   "panel.turnStats": "Estatísticas do turno",
@@ -8,6 +9,8 @@ const ptBR: typeof en = {
   "panel.showChangedFiles": "Mostrar os arquivos alterados neste turno",
   "panel.noFilesChanged": "Nenhum arquivo foi editado neste turno.",
   "panel.shellEditsNotListed": "Alterações feitas por comandos de shell não são listadas.",
+  "panel.usageShowScope": (scope: string) => `Mostrar ${scope}`,
+  "panel.usageHideScope": (scope: string) => `Ocultar ${scope}`,
   "translation.swap": "Trocar idiomas",
   "translation.openai": "Compatível com OpenAI",
   "translation.bing": "Bing Tradutor (sem chave de API)",
@@ -373,6 +376,7 @@ const ptBR: typeof en = {
   "common.create": "Criar", // Create
   "common.close": "Fechar", // Close
   "chat.copyAsMarkdown": "Copiar como Markdown",
+  "chat.copyEntireMessage": "Copiar a mensagem inteira",
   "chat.imageViewOriginal": "Ver imagem original",
   "chat.imageCopy": "Copiar imagem",
   "chat.imageSave": "Salvar imagem",
@@ -524,6 +528,19 @@ const ptBR: typeof en = {
   "settings.agentDefaultView": "Visão padrão", // Default view
   "settings.agentDefaultViewHint":
     "Visão em que as novas sessões deste agente são abertas. As sessões existentes mantêm a visão com que foram criadas.", // Agent default view hint
+  "settings.deepseekApiTitle": "DeepSeek API",
+  "settings.deepseekApiDesc":
+    "As conversas do DeepSeek são executadas pelo OpenCode. Informe aqui o endereço e a chave da API para usar o mesmo login em todas as conversas.",
+  "settings.deepseekBaseUrl": "Endereço da API",
+  "settings.deepseekEndpointHint":
+    "Deixe o endereço em branco para usar o endpoint oficial. As alterações passam a valer a partir da próxima mensagem.",
+  "settings.deepseekApiKey": "Chave de API",
+  "settings.deepseekKeySaved": "Salva (deixe em branco para manter)",
+  "settings.deepseekKeyPlaceholder": "Digite sua chave de API do DeepSeek",
+  "settings.deepseekRemoveKey": "Remover chave",
+  "settings.deepseekSaved": "Salvo.",
+  "settings.deepseekInvalid": "Informe um endereço de API http(s) válido e uma chave de API de uma única linha.",
+  "settings.deepseekLocalOnly": "Essas credenciais ficam no dispositivo host, por isso só podem ser alteradas nele.",
   "settings.appearance": "Aparência", // Appearance
   "settings.accent": "Destaque", // Accent
   "settings.accentAuto": "Seguir o tema", // Follow theme
@@ -824,16 +841,26 @@ const ptBR: typeof en = {
   "settings.recordSessions": "Gravar registros de sessão", // Record session logs
   "settings.recordSessionsHint":
     "Desativado por padrão. Quando ativado, a saída do terminal é salva em um arquivo de log para reprodução de arquivo e busca. Sessões de terminal comuns nunca são gravadas; sessões de agente leem sua própria transcrição.", // Record session logs hint
-  "settings.fonts": "Fonts", // TODO translate
+  "settings.fonts": "Fontes",
   "settings.uiFontSize": "Tamanho da fonte da interface",
   "settings.termFont": "Fonte do terminal",
   "settings.termFontSize": "Tamanho da fonte do terminal",
   "settings.termLineHeight": "Altura da linha do terminal",
   "settings.chatTypography": "Visualização da conversa",
-  "settings.chatTypographyHint": "Estas configurações de fonte são independentes do terminal e entram em vigor imediatamente.",
+  "settings.chatTypographyHint": "Estas configurações são independentes do terminal e entram em vigor imediatamente. Por padrão, o texto usa a fonte da interface e o código usa a fonte monoespaçada da interface.",
   "settings.chatFont": "Fonte da conversa",
   "settings.chatFontSize": "Tamanho da fonte da conversa",
   "settings.chatLineHeight": "Altura da linha da conversa",
+  "settings.chatCodeFont": "Fonte do código na conversa",
+  "settings.chatLetterSpacing": "Espaçamento entre letras da conversa",
+  "settings.uiTypography": "Fontes da interface",
+  "settings.uiTypographyHint": "Aplica-se a menus, listas, caixas de diálogo e documentos. A fonte monoespaçada é usada em código, caminhos e comparações; o terminal tem configurações de fonte próprias.",
+  "settings.uiFont": "Fonte da interface",
+  "settings.uiMonoFont": "Fonte monoespaçada",
+  "settings.fontPreview": "Pré-visualização",
+  "settings.fontPreviewText": "Um pequeno jabuti xereta viu dez cegonhas felizes. 0123456789",
+  "settings.fontPreviewChat": "Atualizei a página de configurações. Cada configuração de fonte entra em vigor imediatamente, e você pode restaurar os padrões a qualquer momento.",
+  "settings.fontResetGroup": "Restaurar as fontes padrão",
   "settings.composerChips": "Barra de ferramentas de mensagens",
   "settings.composerChipsHint": "Os itens ativados aparecem ao lado da mensagem na ordem indicada. Se um recurso estiver temporariamente indisponível (o agente não está em execução, não há tarefas em segundo plano ou o login está pendente), seu item continua visível, mas vazio ou desabilitado. Os recursos não compatíveis com o agente atual são omitidos. Os itens que não couberem vão para o menu Mais. Os itens desativados aqui aparecem apenas nesse menu e continuam podendo ser configurados aqui.",
   "settings.composerChipUp": (chip: string) => `Mover ${chip} para cima`,
@@ -851,15 +878,21 @@ const ptBR: typeof en = {
   "settings.composerChip.account": "Conta",
   "settings.composerChip.codexCredits": "Créditos de redefinição do Codex",
   "settings.fontDefault": "Padrão",
-  "settings.fontCustom": "Custom…", // TODO translate
+  "settings.fontSearch": "Pesquisar fontes…",
+  "settings.fontUseCustom": (query: string) => `Usar “${query}”`,
   "settings.fontListUnavailable": "Não foi possível obter a lista de fontes do sistema. Você pode digitar o nome de uma fonte manualmente.",
   "settings.fontUnconfirmed": "Não foi possível confirmar se esta fonte está disponível.",
-  "settings.fontAuto": "Auto", // TODO translate
-  "settings.fontSmaller": "Smaller", // TODO translate
-  "settings.fontLarger": "Larger", // TODO translate
-  "settings.fontReset": "Reset", // TODO translate
+  "settings.fontAuto": "Auto",
+  "settings.fontSmaller": "Menor",
+  "settings.fontLarger": "Maior",
+  "settings.fontReset": "Redefinir",
   "settings.sound": "Som de notificação", // Notification sound
   "settings.language": "Idioma", // Language
+  "settings.serverRegion": "Servidor", // Server
+  "settings.serverRegionGlobal": "Internacional", // International
+  "settings.serverRegionChina": "China continental", // Mainland China
+  "settings.serverRegionHint":
+    "Usado para verificar atualizações, fazer downloads e abrir o site. Com “China continental”, o VelaTerm usa velaterm.cn, que é mais rápido a partir da China e oferece as mesmas versões. Os recursos da conta sempre usam velaterm.com.",
   "settings.langAuto": "Auto (sistema)", // Auto (system)
   "settings.skillLabel": "Vela Skills",
   "settings.skillInstall": "Install", // Install
@@ -1049,6 +1082,7 @@ const ptBR: typeof en = {
   "tree.deleteGroup": "Excluir grupo", // Delete Group
   "tree.deleteSession": "Excluir sessão", // Delete Session
   "tree.projectRoot": "Raiz do projeto (sem grupo)", // Project root (no group)
+  "tree.collectionRoot": (name: string) => `${name} (sem grupo)`,
   "tree.moveToSession": "Mover para baixo de uma sessão (como filha)", // Move under a session (as child)
   "tree.moveTo": "Mover para…", // Move to…
   "tree.openNewTab": "Abrir em nova aba", // Open in New Tab
@@ -1152,6 +1186,7 @@ const ptBR: typeof en = {
   "tree.filterStatus": "Filtrar por status", // Filter by status
   "tree.refreshStatusFilter": "Atualizar filtro de status",
   "tree.refreshStatusMatch": "Atualizar status",
+  "tree.setStatus": "Definir status", // Set Status
   "tree.filterStatusSection": "Status", // Status
   "tree.filterMarkSection": "Marca", // Mark
   "tree.viewMainName": "Principal",
@@ -1374,11 +1409,9 @@ const ptBR: typeof en = {
 
   // ── Center pane ──
   "center.noSession": "Sem sessão", // No session
-  "center.noSessionHintPre":
-    "Escolha uma sessão na barra lateral ou pressione ", // Pick a session from the sidebar, or press
-  "center.noSessionHintPost": " para criar um terminal", // to create a terminal
   "center.createTerminal": "Criar terminal", // Create Terminal
-  "center.splitHint": "Abra uma sessão para dividi-la com estes atalhos:",
+  "center.startTitle": "Iniciar uma sessão", // Start a session
+  "center.startHint": "Escolha uma sessão na barra lateral ou comece uma nova.", // Pick one from the sidebar, or start something new.
   "tab.unsavedDot": "Alterações não salvas", // Unsaved changes
   "tab.newTerminal": "Novo terminal", // New terminal
   "tab.newDocument": "Novo documento", // New document
@@ -1608,6 +1641,8 @@ const ptBR: typeof en = {
   "transfer.downloading": "Baixando…", // Downloading…
   "transfer.savedToDownloads": "Salvo em Downloads", // Saved to Downloads
   "transfer.foldersUnsupported": "Não é possível enviar pastas.", // Folders can't be uploaded.
+  "drop.browserFilesHint": "No navegador, só é possível soltar imagens aqui. Para usar outros arquivos, envie-os primeiro para o projeto.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
+  "files.copyFailed": "Não foi possível copiar alguns arquivos. Verifique se eles ainda existem e se você tem permissão de gravação nesta pasta.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => (n === 1 ? "1 sessão" : `${n} sessões`), // {n} sessions
@@ -1624,6 +1659,11 @@ const ptBR: typeof en = {
   "statusbar.permSkip": "Permissões: Ignorar", // Perms: Skip
   "statusbar.notifyOn": "Notify: On", // TODO translate
   "statusbar.notifyOff": "Notify: Off", // TODO translate
+  "statusbar.zoomGroup": "Zoom da interface",
+  "statusbar.zoomOut": "Diminuir zoom",
+  "statusbar.zoomIn": "Aumentar zoom",
+  "statusbar.zoomEdit": "Zoom da interface · Clique para digitar uma porcentagem (80–200%)",
+  "statusbar.zoomInput": "Porcentagem de zoom da interface, de 80 a 200",
   "statusbar.permTooltip":
     "Modo de permissão desta sessão · clique para alterar (somente esta sessão)", // This session's permission mode · click to change (this session only)
   "statusbar.permMenuTitle": "Permissões desta sessão", // This session's permissions
@@ -1982,10 +2022,12 @@ const ptBR: typeof en = {
   "updater.hide": "Hide", // TODO translate
   "updater.hideHint":
     "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
-  "updater.downloadManually": "Download manually", // TODO translate
-  "updater.downloadManuallyHint": "Open the download page in your browser.", // TODO translate
+  "updater.downloadManually": "Baixar manualmente",
+  "updater.downloadManuallyHint": "Abre a página de download no navegador.",
   "updater.windowsNotice":
     "VelaTerm will close while the installer runs, then reopen on its own.", // TODO translate
+  "updater.portableNotice":
+    "Esta versão portátil não se atualiza automaticamente. Baixe a nova versão e substitua esta pasta por ela; suas configurações e sessões são mantidas.",
   "updater.installingWindows":
     "Installing… VelaTerm is about to close. The installer will finish the update and reopen it.", // TODO translate
   "statusbar.updateAvailable": (version) => `Update ${version}`, // TODO translate
@@ -2007,6 +2049,7 @@ const ptBR: typeof en = {
   "skills.vstat": "Mostra quais sessões estão trabalhando ou aguardando uma entrada.",
   "skills.vtell": "Envia uma mensagem para outra sessão.",
   "skills.vkb": "Consulta o CodeGraph e a base de conhecimento do projeto.",
+  "skills.vapp": "Permite que o agente opere o VelaTerm; você confirma cada ação.",
   "skills.settingsHint": "Você também pode instalá-las depois em Configurações > Avançado.",
   "skills.installFailed": (err) => `Falha na instalação: ${err}`,
   "skills.dontRemind": "Não lembrar novamente",
@@ -2126,6 +2169,7 @@ const ptBR: typeof en = {
   "chat.question.submit": "Enviar",
   "chat.question.next": "Próxima",
   "chat.question.dismiss": "Dispensar",
+  "chat.question.skip": "Pular",
   "chat.question.answerPlaceholder": "Digite sua resposta",
   "chat.question.otherPlaceholder": "Outra resposta",
   "chat.question.answeredHeading": (n: number) =>
@@ -2180,6 +2224,8 @@ const ptBR: typeof en = {
   "chat.rewind.editWarning": "A mensagem original e todas as mensagens posteriores serão excluídas permanentemente. A mensagem editada será enviada a partir deste ponto. As alterações nos arquivos não serão desfeitas.",
   "chat.rewind.inactive": "O processo da conversa não está em execução. Estas ações estarão disponíveis após a inicialização.",
   "chat.rewind.unsupported": "O agente conectado não oferece esta ação no momento.",
+  "chat.rewind.latestOnly": "O agente conectado só pode reverter a partir da última mensagem.",
+  "chat.rewind.appliesOnSend": "O agente só aplica a reversão quando você enviar a próxima mensagem. Até lá, a conversa e os arquivos permanecem inalterados.",
   "chat.rewind.title": "Voltar para este ponto",
   "chat.rewind.warning": "Esta ação não pode ser desfeita.",
   "chat.rewind.conversation": "Reverter conversa",
@@ -2363,7 +2409,7 @@ const ptBR: typeof en = {
   "settings.completionTab": "Apenas Tab",
   "settings.completionOff": "Desativadas",
   "settings.completionUnavailable": "Não foi possível carregar ou salvar as configurações.",
-  "settings.completionHint": "Ao digitar no Zsh, o comando mais recente do histórico que corresponde aparece esmaecido depois do cursor; pressione → ou End para aceitá-lo. O Tab funciona como no shell: insere diretamente uma correspondência única, completa primeiro a parte em comum e mostra a lista quando restam várias opções. Aplica-se a novos terminais Zsh, Bash 4+, Fish e PowerShell.",
+  "settings.completionHint": "Ao digitar no Zsh, o comando mais recente do histórico que corresponde aparece esmaecido depois do cursor; pressione → ou End para aceitá-lo. Ele não aparece ao digitar por uma conexão remota. O Tab funciona como no shell: insere diretamente uma correspondência única, completa primeiro a parte em comum e mostra a lista quando restam várias opções. Aplica-se a novos terminais Zsh, Bash 4+, Fish e PowerShell.",
   "settings.completionTabOnlyHint": "Nenhuma sugestão aparece enquanto você digita. Pressione Tab para completar como no shell: insere diretamente uma correspondência única, completa primeiro a parte em comum e mostra a lista quando restam várias opções. Aplica-se a novos terminais Zsh, Bash 4+, Fish e PowerShell.",
   "settings.completionTabKey": "Tecla Tab",
   "settings.completionTabAccept": "Aceitar sugestão",
@@ -2480,10 +2526,16 @@ const ptBR: typeof en = {
   "chat.antigravity.placeholder": "Escreva para o Antigravity ou use @arquivos para fazer referência a arquivos",
   "chat.antigravity.textOnly": "A visualização de conversa do Antigravity atualmente aceita apenas mensagens de texto.",
   "chat.textOnly": (agent: string) => `A visualização de conversa do ${agent} aceita apenas mensagens de texto.`,
+  "chat.attach.modelTextOnly": "O modelo selecionado não aceita imagens.",
   "chat.signInRequired": (agent: string) => `Entre no ${agent} para usar a visualização de conversa. Mude para a visualização de terminal para entrar e depois envie sua mensagem novamente.`,
-  "chat.apiKeyRequired": "O DeepSeek Harness precisa de uma chave de API. Defina a variável de ambiente DEEPSEEK_API_KEY ou execute `dsh web` e salve a chave na página Models; depois, envie sua mensagem novamente.",
+  "chat.apiKeyRequired": "O DeepSeek precisa de uma chave de API. Abra «API» ao lado da caixa de mensagem e informe a chave, ou defina a variável de ambiente `DEEPSEEK_API_KEY`; depois, envie sua mensagem novamente.",
   "chat.antigravity.permissionsHint": "Ferramentas que exigem aprovação devem ser autorizadas nas configurações do Antigravity ou usadas na visualização de terminal.",
   "chat.antigravity.settingsHint": "Altere o modelo, o nível de raciocínio ou as permissões entre os turnos.",
+  "chat.antigravity.rewindTitle": "Reverter na visão de terminal",
+  "chat.antigravity.rewindHint": "Ainda não é possível reverter nem editar mensagens enviadas na visão de conversa do Antigravity. Troque para a visão de terminal e execute /rewind; o estado será sincronizado ao voltar.",
+  "chat.antigravity.rewindGuide": "Ainda não é possível reverter diretamente nem editar mensagens enviadas na visão de conversa do Antigravity. Troque para a visão de terminal e execute /rewind para reverter a conversa ou restaurar arquivos; o estado atualizado será carregado automaticamente ao voltar.",
+  "chat.antigravity.rewindCommandDescription": "Trocar para a visão de terminal e reverter com /rewind",
+  "chat.antigravity.switchToTerminal": "Trocar para a visão de terminal",
   "chat.history.imageDownloadRequired": "Não é possível abrir esta imagem aqui. Baixe o original para visualizá-la.",
   "chat.history.readBody": "Ler o conteúdo completo",
   "chat.history.selectDetail": "Selecionar um arquivo ou campo",
@@ -2659,6 +2711,8 @@ const ptBR: typeof en = {
   "kb.searchEntries": "Buscar artigos…",
   "kb.updatedOn": (date: string) => `Atualizado em ${date}`,
   "archive.sessionsCount": (count: string) => `${count} ${count === "1" ? "sessão" : "sessões"}`,
+
+  ...assist,
 };
 
 export default ptBR;

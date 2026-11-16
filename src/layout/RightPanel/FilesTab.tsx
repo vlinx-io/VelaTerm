@@ -12,6 +12,7 @@ import { ContextMenu, type MenuItem } from "../../components/ContextMenu";
 import { FormModal } from "../../components/FormModal";
 import { useT } from "../../i18n";
 import {
+  copyIntoDir,
   copyText,
   createDir,
   createFile,
@@ -32,7 +33,8 @@ import {
   subscribeTransfers,
   type Transfer,
 } from "../../ipc/transfer";
-import { env } from "../../platform";
+import { env, platform } from "../../platform";
+import { safeError } from "../../ipc/diagnosticSafety";
 import { useTermStore } from "../../store/termStore";
 import { onFsChanged } from "../../ipc/events";
 /* ===================== Files: real tree, preview, and one-level lazy loading ===================== */
@@ -84,6 +86,27 @@ function renderFileIcon(name: string, isDir: boolean, open = false) {
   return <Cmp size={isDir ? 14 : 13} style={{ color }} />;
 }
 
+/**
+ * Files of a drop for upload. Uploading a folder would mean walking its entries recursively, which the transfer
+ * path does not do, so folders are separated out and reported rather than failing later as unreadable files.
+ */
+function filesFromDrop(transfer: DataTransfer): { files: File[]; skippedFolders: boolean } {
+  const items = Array.from(transfer.items ?? []);
+  const files: File[] = [];
+  let skippedFolders = false;
+  for (const item of items) {
+    if (item.webkitGetAsEntry?.()?.isDirectory) {
+      skippedFolders = true;
+      continue;
+    }
+    const f = item.getAsFile();
+    if (f) files.push(f);
+  }
+  // Fall back to the flat list where DataTransferItem is unavailable; folders then fail per file.
+  if (!items.length) files.push(...Array.from(transfer.files));
+  return { files, skippedFolders };
+}
+
 function FileRow({
   node,
   depth,
@@ -108,13 +131,13 @@ function FileRow({
   onOpen: (n: FileNodeT) => void;
   onDir: (n: FileNodeT) => void;
   onContext: (e: React.MouseEvent, n: FileNodeT) => void;
-  /** Files dropped onto this row; null when transfer is unavailable, which also disables the drop target. */
-  onDropFiles: ((n: FileNodeT, files: File[], skippedFolders: boolean) => void) | null;
+  /** An external file drop onto this row; null disables the drop target. */
+  onDropFiles: ((n: FileNodeT, transfer: DataTransfer) => void) | null;
 }) {
   const t = useT();
   // Highlight the row under an external file drag. Tracked per row so nested directories do not all light up.
   const [dropOver, setDropOver] = useState(false);
-  // A drag carrying files is an upload; internal drags (tab and session reordering) carry other types only.
+  // A drag carrying files comes from the OS; internal drags (tab and session reordering) carry other types only.
   const dragProps = onDropFiles
     ? {
         onDragOver: (e: React.DragEvent) => {
@@ -130,22 +153,7 @@ function FileRow({
           e.preventDefault();
           e.stopPropagation();
           setDropOver(false);
-          // Uploading a folder would mean walking its entries recursively, which this transfer path does not
-          // do, so folders are separated out here and reported rather than failing later as unreadable files.
-          const items = Array.from(e.dataTransfer.items ?? []);
-          const files: File[] = [];
-          let skippedFolders = false;
-          for (const item of items) {
-            if (item.webkitGetAsEntry?.()?.isDirectory) {
-              skippedFolders = true;
-              continue;
-            }
-            const f = item.getAsFile();
-            if (f) files.push(f);
-          }
-          // Fall back to the flat list where DataTransferItem is unavailable; folders then fail per file.
-          if (!items.length) files.push(...Array.from(e.dataTransfer.files));
-          if (files.length || skippedFolders) onDropFiles(node, files, skippedFolders);
+          onDropFiles(node, e.dataTransfer);
         },
       }
     : {};
@@ -278,6 +286,8 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
   // File transfer is only meaningful when the server is a different machine from the browser: on the desktop
   // the "server" is this machine, where Show in File Manager already does the job.
   const canTransfer = env.isBrowser;
+  // Dropping files in works everywhere: browsers upload them, desktop windows copy them from this machine.
+  const canDropFiles = canTransfer || env.isTauri || env.isElectron;
   const transfers = useSyncExternalStore(subscribeTransfers, getTransfers);
   // Hidden picker for the upload button, plus the directory the pending pick targets.
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -295,6 +305,10 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
     setPreviewNode(null);
     setErr(null);
     setRefreshErr(null);
+    // A filter belongs to the tree it was typed for; don't carry it into another project's root.
+    setFilter("");
+    setFilterOn(false);
+    setFocusPath(null);
     if (!rootPath) {
       setRoot(null);
       return;
@@ -520,10 +534,37 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
     if (node) await reloadDir(node);
   };
 
+  // Copy files and folders dropped from the OS file manager on this machine; the backend never overwrites.
+  const copyInto = async (dirPath: string, sources: string[]) => {
+    setErr(null);
+    try {
+      await copyIntoDir(sources, dirPath);
+    } catch (e) {
+      // The backend error names paths and OS codes; the log keeps it, the user gets plain wording.
+      console.error("copy into folder failed", safeError(e));
+      setErr(t("files.copyFailed"));
+    }
+    const node = findNodeByPath(root, dirPath);
+    if (node) await reloadDir(node);
+  };
+
   // Dropping onto a file targets its containing directory, matching how the create actions resolve a target.
-  const onDropFiles = (node: FileNodeT, files: File[], skippedFolders: boolean) => {
+  // Remote clients upload the dropped files; on the desktop the files are on this machine and are copied.
+  const onDropFiles = (node: FileNodeT, transfer: DataTransfer) => {
     const dir = node.isDir ? node.path : parentPathOf(node.path);
-    void uploadInto(dir, files, skippedFolders);
+    if (canTransfer) {
+      const { files, skippedFolders } = filesFromDrop(transfer);
+      if (files.length || skippedFolders) void uploadInto(dir, files, skippedFolders);
+      return;
+    }
+    // The paths must be requested inside the drop handler, while the drop's data still exists.
+    void platform.dialog
+      .droppedPaths(transfer)
+      .then((dropped) => (dropped.length ? copyInto(dir, dropped.map((d) => d.path)) : undefined))
+      .catch((e) => {
+        console.error("reading dropped paths failed", safeError(e));
+        setErr(t("files.copyFailed"));
+      });
   };
 
   // Open the system file picker for a directory; the chosen files arrive in the input's change handler.
@@ -859,6 +900,17 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
         className="files-tree"
         style={{ flex: "1 1 0", overflowY: "auto", minHeight: 0, outline: "none" }}
         onKeyDown={onTreeKeyDown}
+        // Rows take drops themselves; a drop on the empty space below them goes to the root directory.
+        onDragOver={(e) => {
+          if (!canDropFiles || !e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+        }}
+        onDrop={(e) => {
+          if (!canDropFiles || !root || !e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          onDropFiles(root, e.dataTransfer);
+        }}
         onContextMenu={(e) => {
           // Right-clicking empty tree space creates in the root directory.
           e.preventDefault();
@@ -877,7 +929,7 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
           onOpen={onOpen}
           onDir={onDir}
           onContext={onContext}
-          onDropFiles={canTransfer ? onDropFiles : null}
+          onDropFiles={canDropFiles ? onDropFiles : null}
         />
       </div>
       {canTransfer && (

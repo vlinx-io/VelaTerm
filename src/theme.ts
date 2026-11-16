@@ -43,9 +43,17 @@ export interface VisualSettings {
   navLayout: NavLayout;
   /** UI font size in pixels. null follows density without an inline --ui-fs; a value overrides the density size inline. */
   uiFontSize: number | null;
+  /** Interface face for menus, labels and lists; null keeps the stylesheet's --font-ui stack. */
+  uiFontFamily: string | null;
+  /** Monospace face for code, paths and diffs outside the terminal; null keeps --font-mono. */
+  uiMonoFontFamily: string | null;
   chatFontFamily: string | null;
+  /** Code blocks and tool output in conversations; null follows the interface monospace font. */
+  chatCodeFontFamily: string | null;
   chatFontSize: number;
   chatLineHeight: number;
+  /** Conversation letter spacing in pixels; null picks the spacing tuned for the active face. */
+  chatLetterSpacing: number | null;
 }
 
 /** Initial typography; terminal and conversation preferences are saved independently. */
@@ -55,6 +63,22 @@ export const DEFAULT_TERMINAL_LINE_HEIGHT = 1.2;
 
 export function normalizeTextSize(value: number, defaultValue = DEFAULT_TERMINAL_FONT_SIZE): number {
   return Number.isFinite(value) ? Math.max(10, Math.min(24, Math.round(value * 2) / 2)) : defaultValue;
+}
+
+/** Letter spacing used when the conversation shows the bundled Inter face, which reads cramped at small sizes. */
+export const DEFAULT_CHAT_TRACKING = 0.2;
+export const MIN_CHAT_TRACKING = -1;
+export const MAX_CHAT_TRACKING = 2;
+
+/** Clamp a saved letter spacing to the supported range in 0.1 px steps; anything unusable means automatic. */
+export function normalizeLetterSpacing(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(MIN_CHAT_TRACKING, Math.min(MAX_CHAT_TRACKING, Math.round(value * 10) / 10));
+}
+
+/** Trim a saved font family; blank or non-string values mean the default face. */
+export function normalizeFontFamily(value: unknown): string | null {
+  return typeof value === "string" ? value.trim() || null : null;
 }
 
 export function normalizeTextLineHeight(value: number): number {
@@ -102,6 +126,24 @@ export function fontStack(family: string | null | undefined): string {
   return `${quoted}, ${SYS_MONO_FALLBACK}, "VlxSymbols", "Symbola", ${CJK_FALLBACK}, monospace`;
 }
 
+/** Proportional fallbacks after a chosen interface face, matching --font-ui in vlinx.css minus Inter. */
+const UI_FALLBACK =
+  '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", "Segoe UI", system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji"';
+
+/**
+ * Build the interface font-family string. Same rules as fontStack, but a single name falls back to proportional
+ * system and CJK faces, so an interface font without Chinese glyphs never drops to a monospace or bitmap face.
+ * Returns null for the default so callers can remove the override and keep the stylesheet value.
+ */
+export function uiFontStack(family: string | null | undefined): string | null {
+  const f = family?.trim();
+  if (!f) return null;
+  if (f.includes(",")) return f;
+  const alreadyQuoted = (f.startsWith('"') && f.endsWith('"')) || (f.startsWith("'") && f.endsWith("'"));
+  const quoted = alreadyQuoted ? f : /\s/.test(f) ? JSON.stringify(f) : f;
+  return `${quoted}, ${UI_FALLBACK}`;
+}
+
 /** Match xterm's measured font height and device-pixel rounding, rather than CSS's em-based multiplier. */
 function conversationLineHeight(family: string, size: number, multiplier: number): number {
   let height = 0;
@@ -142,15 +184,20 @@ export function applyConversationTypography(s: VisualSettings) {
   const size = normalizeTextSize(s.chatFontSize, DEFAULT_CONVERSATION_FONT_SIZE);
   const next = { family, size, multiplier: normalizeTextLineHeight(s.chatLineHeight) };
   chatTypography = next;
-  if (s.chatFontFamily?.trim()) {
-    // Tracking is tuned for Inter; a chosen font keeps its own spacing.
-    document.documentElement.style.setProperty("--chat-font", family);
-    document.documentElement.style.setProperty("--chat-tracking", "0px");
-  } else {
-    document.documentElement.style.removeProperty("--chat-font");
-    document.documentElement.style.removeProperty("--chat-tracking");
-  }
-  document.documentElement.style.setProperty("--chat-fs", `${size}px`);
+  const root = document.documentElement.style;
+  const customText = !!s.chatFontFamily?.trim();
+  if (customText) root.setProperty("--chat-font", family);
+  else root.removeProperty("--chat-font");
+  // Without a chosen code face, --chat-code-font follows --font-mono, which the interface monospace setting drives.
+  if (s.chatCodeFontFamily?.trim()) root.setProperty("--chat-code-font", fontStack(s.chatCodeFontFamily));
+  else root.removeProperty("--chat-code-font");
+  // Automatic spacing is tuned for Inter. The default text face follows the interface font, so a chosen
+  // interface or conversation face keeps its own spacing.
+  const tracking = normalizeLetterSpacing(s.chatLetterSpacing);
+  if (tracking != null) root.setProperty("--chat-tracking", `${tracking}px`);
+  else if (customText || s.uiFontFamily?.trim()) root.setProperty("--chat-tracking", "0px");
+  else root.removeProperty("--chat-tracking");
+  root.setProperty("--chat-fs", `${size}px`);
   refreshConversationLineHeight();
   // A bundled webfont may finish loading after initial appearance settings have been applied.
   document.fonts?.load(`${size}px ${family}`, "W").then(() => {
@@ -282,6 +329,13 @@ export function applyVisual(s: VisualSettings) {
   // density still controls line height and spacing. An empty value removes the override.
   if (s.uiFontSize != null) root.style.setProperty("--ui-fs", `${s.uiFontSize}px`);
   else root.style.removeProperty("--ui-fs");
+  // Overriding the two base stacks inline also moves everything derived from them on :root (--font-prose,
+  // the default --chat-font and --chat-code-font). The terminal keeps its own font setting.
+  const uiStack = uiFontStack(s.uiFontFamily);
+  if (uiStack) root.style.setProperty("--font-ui", uiStack);
+  else root.style.removeProperty("--font-ui");
+  if (s.uiMonoFontFamily?.trim()) root.style.setProperty("--font-mono", fontStack(s.uiMonoFontFamily));
+  else root.style.removeProperty("--font-mono");
   applyConversationTypography(s);
 }
 

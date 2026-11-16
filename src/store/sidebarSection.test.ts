@@ -139,6 +139,32 @@ describe("sidebar section groups", () => {
     expect(useTermStore.getState().leftCollapsed).toBe(false);
   });
 
+  it("shows the section a revealed session belongs to and never hides the sidebar", () => {
+    const project = (id: string, collectionId: string | null) =>
+      ({ id, name: id, rootPath: "", collapsed: false, collectionId }) as never;
+    const session = (id: string, projectId: string) => ({ id, name: id, projectId, groupId: null }) as never;
+    useTermStore.setState({
+      projects: [
+        project("vlx-system-projects", null), project("vlx-system-tasks", null), project("vlx-system-chat", null),
+        project("app", "vlx-system-projects"), project("inbox", "vlx-system-tasks"),
+      ],
+      sessions: [session("s-chat", "vlx-system-chat"), session("s-task", "inbox"), session("s-app", "app")],
+    });
+    useTermStore.getState().revealSession("s-chat");
+    expect(shown()).toBe("chat");
+    expect(useTermStore.getState().revealSessionId).toBe("s-chat");
+    // A task session inside a nested collection still opens Tasks.
+    useTermStore.getState().revealSession("s-task");
+    expect(shown()).toBe("tasks");
+    // Revealing into the section already shown keeps the sidebar open, and reopens it when hidden.
+    useTermStore.getState().revealSession("s-task");
+    expect(useTermStore.getState().leftCollapsed).toBe(false);
+    useTermStore.setState({ leftCollapsed: true });
+    useTermStore.getState().revealSession("s-app");
+    expect(shown()).toBe("projects");
+    expect(useTermStore.getState().leftCollapsed).toBe(false);
+  });
+
   it("keeps an existing split in the primary view's group when migrating per-pane sections", () => {
     const tabs = assignSidebarTabSections(
       [{

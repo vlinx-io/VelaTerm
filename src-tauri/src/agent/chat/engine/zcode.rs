@@ -12,6 +12,11 @@
 //! become permission cards and are answered with `resolveInteraction`. The legacy reverse requests the server
 //! raises for the same prompts in parallel are left unanswered: the first answer to arrive wins, and ours
 //! travels the V4 path.
+//!
+//! A fork opens on its source conversation only to learn which reply to branch from. None of the source's rows
+//! are drawn; the server copies the conversation, `forkAssistant` names the copy, and the process then follows
+//! it as an ordinary resumed conversation. The workspace is left alone: ZCode's `session/fork` would restore
+//! files to a checkpoint, in the directory the source is still using.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
@@ -28,6 +33,18 @@ use crate::pty::AgentState;
 
 /// Rows older than the subscription's tail are paged in after it, at most this many.
 const HISTORY_ROW_LIMIT: usize = 5000;
+
+/// How far a forked session's process has come in branching off its source.
+#[derive(Clone, Copy, Default, PartialEq)]
+enum Fork {
+    /// Not a fork, or the branch exists and the process follows it.
+    #[default]
+    None,
+    /// Subscribed to the source; its snapshot names the reply to branch from.
+    AwaitingSource,
+    /// The command has gone out. Whatever else the source sends is not this conversation's.
+    Requested,
+}
 
 /// Everything the engine keeps about the ZCode side of one session.
 #[derive(Default)]
@@ -59,10 +76,34 @@ pub(super) struct ZcodeState {
     /// A resumed conversation becomes ready with its first snapshot, not with the subscription's answer:
     /// the answer arrives before the history it opens, and a message drawn in between would sit above it.
     ready_on_snapshot: bool,
+    fork: Fork,
     /// A `zcode login` the account panel started and is waiting on.
     pub(in crate::agent::chat::engine) login: Option<Arc<std::sync::Mutex<std::process::Child>>>,
     /// The saved account, which the server hears from this client; see `agent::zcode_account`.
     account: Option<Arc<crate::agent::zcode_account::Account>>,
+    /// The conversation state the last frame left it in. Row actions are compare-and-set against both.
+    revision: Option<u64>,
+    log_epoch: Option<String>,
+    /// A rewind the view has shown and ZCode has not yet applied; see `rewind`.
+    pending_edit: Option<PendingEdit>,
+    /// The permission mode the session last reported. An edit carries no mode of its own.
+    mode: Option<String>,
+}
+
+/// A rewind of the latest message, waiting for the message that replaces it. ZCode moves a conversation back
+/// only by editing its latest query (`editUserQuery`), which removes that turn and runs the new text in one
+/// command; there is no rewind on its own. The view drops the turn at once and puts the text back in the
+/// composer, and the next message sent becomes the edit.
+#[derive(Clone)]
+struct PendingEdit {
+    /// The query row, as `editUserQuery` names it.
+    target: Value,
+    /// The first server row the edit removes (the turn header). Rows from here on stay out of the view.
+    from: i64,
+    /// Restore the turn's file changes as well.
+    files: bool,
+    /// The view rows the rewind dropped. ZCode still holds the turn, so a refused edit puts them back.
+    rows: Vec<ChatRow>,
 }
 
 /// The view's code for a signed-in account the platform says has no usable plan (1113):
@@ -95,12 +136,13 @@ fn workspace(proc: &ChatProcess) -> Result<String, String> {
 /// Send the opening requests: the saved account, without which the server holds no plan and lists no model;
 /// a capability probe that also waits out ZCode's storage start; and a draft session whose answer carries the
 /// model catalogue and slash commands without persisting anything. The server answers them in order.
-pub(super) fn bootstrap(proc: &Arc<ChatProcess>, account: Option<crate::agent::zcode_account::Account>) {
+pub(super) fn bootstrap(proc: &Arc<ChatProcess>, account: Option<crate::agent::zcode_account::Account>, fork: bool) {
     let account = account.map(Arc::new);
     {
         let mut state = proc.zcode.lock().unwrap();
         state.connection_id = format!("velaterm-{}", uuid::Uuid::new_v4());
         state.account = account.clone();
+        state.fork = if fork { Fork::AwaitingSource } else { Fork::None };
     }
     if let Some(params) = account.and_then(|account| account.config()) {
         let id = proc.request_id("zcode_account");
@@ -264,6 +306,9 @@ fn on_subscribed(proc: &Arc<ChatProcess>, result: &Value) {
         .pointer("/ack/subscriptionId")
         .and_then(Value::as_str)
         .map(str::to_string);
+    if let Some(epoch) = result.pointer("/ack/logEpoch").and_then(Value::as_str) {
+        state.log_epoch = Some(epoch.to_string());
+    }
     if proc.ready.load(Ordering::Relaxed) {
         return;
     }
@@ -292,6 +337,91 @@ fn adopt_session(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
     true
 }
 
+// ─────────────────────────── Fork ───────────────────────────
+
+/// The source's snapshot arrived: branch from its latest reply. The command waits on the reader thread that
+/// delivers its answer, so it runs on its own.
+fn begin_fork(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, snapshot: &Value) {
+    {
+        let mut state = proc.zcode.lock().unwrap();
+        if state.fork != Fork::AwaitingSource {
+            return;
+        }
+        state.fork = Fork::Requested;
+    }
+    let Some(target) = wire::fork_target(snapshot) else {
+        fail_fork(app, session_id, proc, wire::FORK_NOT_READY, "noForkableReply");
+        return;
+    };
+    let (app, session_id, proc) = (app.clone(), session_id.to_string(), proc.clone());
+    std::thread::spawn(move || {
+        if let Err((message, reason)) = run_fork(&app, &session_id, &proc, target) {
+            fail_fork(&app, &session_id, &proc, message, &reason);
+        }
+    });
+}
+
+fn request_fork(proc: &Arc<ChatProcess>, source: &str, target: &wire::ForkTarget) -> Result<Value, (&'static str, String)> {
+    let command_id = uuid::Uuid::new_v4().to_string();
+    proc.request_and_wait("zcode_send", |id| wire::fork_command(id, &command_id, source, target, super::now_ms()))
+        .map_err(|error| (wire::FORK_FAILED, error))
+}
+
+/// Create the branch and move this process onto it. An `Err` carries the user's message and the logged reason.
+fn run_fork(
+    app: &AppCtx,
+    session_id: &str,
+    proc: &Arc<ChatProcess>,
+    mut target: wire::ForkTarget,
+) -> Result<(), (&'static str, String)> {
+    let source = proc.agent_session_id.lock().unwrap().clone()
+        .ok_or((wire::FORK_FAILED, "noSource".to_string()))?;
+    let mut answer = request_fork(proc, &source, &target)?;
+    // Opening the source can move its revision after the snapshot was taken; the reply is still the same one.
+    if let Some(revision) = wire::stale_revision(&answer) {
+        target.revision = revision;
+        answer = request_fork(proc, &source, &target)?;
+    }
+    if !wire::ack_ok(&answer) {
+        return Err((wire::fork_refusal(&answer), wire::ack_error(&answer)));
+    }
+    let child = answer
+        .pointer("/result/sessionId")
+        .and_then(Value::as_str)
+        .ok_or((wire::FORK_FAILED, "noChildSession".to_string()))?
+        .to_string();
+    // Adopting also clears the pending fork, so the next launch resumes the branch. A refusal has already
+    // been reported and the process stopped.
+    if !adopt_session(app, session_id, proc, &child) {
+        return Ok(());
+    }
+    {
+        let mut state = proc.zcode.lock().unwrap();
+        state.fork = Fork::None;
+        state.last_seq = None;
+        state.subscription_id = None;
+        state.subscribed = false;
+    }
+    let id = proc.request_id("zcode_close_source");
+    let _ = proc.write(&wire::request(&id, "session/close", json!({"sessionId": source})));
+    subscribe(proc, &child);
+    Ok(())
+}
+
+/// Stop rather than become ready. This process still points at the source, and a message sent now would land
+/// in it. The session stays a pending fork, so opening it again tries again.
+fn fail_fork(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, message: &str, reason: &str) {
+    crate::diagnostics::record("WARN", "zcode_fork_failed", json!({"sessionId": session_id, "reason": reason}));
+    emit(app, session_id, json!({"type":"error","message":message}));
+    super::fail_codex_start(app, session_id, proc);
+}
+
+/// Whether this process is in the middle of a turn, its own or one ZCode started from its queue.
+pub(super) fn busy(proc: &ChatProcess) -> bool {
+    let running = proc.turn.lock().unwrap().running;
+    running || proc.zcode.lock().unwrap().foreign_turn.is_some()
+}
+
 // ─────────────────────────── Frames ───────────────────────────
 
 fn handle_frame(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, frame: &Value) {
@@ -301,6 +431,12 @@ fn handle_frame(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, frame: 
         return;
     }
     let Some(payload) = frame.get("payload") else { return };
+    if proc.zcode.lock().unwrap().fork != Fork::None {
+        if let Some(snapshot) = payload.get("snapshot").filter(|_| payload.get("kind").and_then(Value::as_str) == Some("snapshot")) {
+            begin_fork(app, session_id, proc, snapshot);
+        }
+        return;
+    }
     let from = frame.get("fromSeq").and_then(Value::as_u64);
     let to = frame.get("toSeq").and_then(Value::as_u64);
     let snapshot = payload.get("kind").and_then(Value::as_str) == Some("snapshot");
@@ -340,6 +476,13 @@ fn apply_snapshot(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, snaps
 }
 
 fn apply_snapshot_rows(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, snapshot: &Value) {
+    {
+        let mut state = proc.zcode.lock().unwrap();
+        state.revision = snapshot.get("revision").and_then(Value::as_u64).or(state.revision);
+        if let Some(epoch) = snapshot.get("logEpoch").and_then(Value::as_str) {
+            state.log_epoch = Some(epoch.to_string());
+        }
+    }
     for key in ["config", "control", "usage", "pendingInteractions"] {
         if let Some(value) = snapshot.get(key) {
             apply_state(app, session_id, proc, key, value);
@@ -416,6 +559,11 @@ fn apply_state(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, key: &st
         }
         "pendingInteractions" => sync_interactions(app, session_id, proc, value),
         "usage" => apply_usage(app, session_id, proc, value),
+        "revision" => {
+            if let Some(revision) = value.as_u64() {
+                proc.zcode.lock().unwrap().revision = Some(revision);
+            }
+        }
         _ => {}
     }
 }
@@ -456,6 +604,9 @@ fn apply_config(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, config:
             changed = true;
         }
     }
+    if let Some(mode) = config.get("mode").and_then(Value::as_str).filter(|m| !m.is_empty()) {
+        proc.zcode.lock().unwrap().mode = Some(mode.to_string());
+    }
     if changed {
         let model = proc.model.lock().unwrap().clone();
         let effort = proc.effort.lock().unwrap().clone();
@@ -476,11 +627,18 @@ fn upsert_raw(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, row: Valu
 
 fn render(proc: &Arc<ChatProcess>, row: &Value) {
     let Some(raw_id) = row.get("rowId").and_then(Value::as_i64) else { return };
-    if row.get("kind").and_then(Value::as_str) == Some("userInput") {
-        let source = row.get("sourceCommandId").and_then(Value::as_str).unwrap_or("");
-        // The bubble the engine drew when it sent this message is the one to keep: it holds the images.
-        if proc.zcode.lock().unwrap().own_inputs.contains_key(source) {
+    {
+        let state = proc.zcode.lock().unwrap();
+        // The view already dropped the turn a pending rewind replaces; ZCode still holds it until the edit.
+        if state.pending_edit.as_ref().is_some_and(|edit| raw_id >= edit.from) {
             return;
+        }
+        if row.get("kind").and_then(Value::as_str) == Some("userInput") {
+            let source = row.get("sourceCommandId").and_then(Value::as_str).unwrap_or("");
+            // The bubble the engine drew when it sent this message is the one to keep: it holds the images.
+            if state.own_inputs.contains_key(source) {
+                return;
+            }
         }
     }
     if let Some(view) = wire::convert_row(row, wire::row_id(raw_id)) {
@@ -759,6 +917,124 @@ fn send_command(proc: &Arc<ChatProcess>, session: Option<&str>, kind: &str, payl
     Err(wire::ack_error(&answer))
 }
 
+/// Send a compare-and-set command against the state the last frame left the conversation in. A refusal that
+/// only names a newer revision is retried once at that revision under the same command id: a stale command
+/// is not remembered, and the target is still checked by its entity id.
+fn send_cas(proc: &Arc<ChatProcess>, native: &str, kind: &str, payload: Value, command_id: &str) -> Result<Value, String> {
+    let (revision, epoch) = {
+        let state = proc.zcode.lock().unwrap();
+        (state.revision.unwrap_or(0), state.log_epoch.clone())
+    };
+    let epoch = epoch.ok_or("ZCode has not opened this conversation yet")?;
+    let send = |revision: u64| {
+        proc.request_and_wait("zcode_send", |id| {
+            wire::cas_command(id, command_id, native, kind, payload.clone(), revision, &epoch, super::now_ms())
+        })
+    };
+    let mut answer = send(revision)?;
+    if let Some(current) = wire::stale_revision(&answer) {
+        answer = send(current)?;
+    }
+    if wire::ack_ok(&answer) { Ok(answer) } else { Err(wire::ack_error(&answer)) }
+}
+
+/// Shown when a rewind names anything but the latest message, which is the only one ZCode can rewind.
+const LATEST_ONLY: &str = "ZCode can rewind only its latest message.";
+/// Shown for any other refused rewind; the reason itself goes to the diagnostics log.
+const REWIND_FAILED: &str = "ZCode could not rewind this message. Please try again.";
+
+fn rewind_failed(session_id: &str, step: &str, reason: String) -> String {
+    crate::diagnostics::record("WARN", "zcode_rewind_failed", json!({"sessionId": session_id, "step": step, "reason": reason}));
+    // ZCode's own reason codes (`guard.*`, `proto.*`) mean nothing to the user; a sentence from it does.
+    if reason.starts_with("guard.") || reason.starts_with("proto.") || reason.starts_with("fault.") || reason.is_empty() {
+        REWIND_FAILED.to_string()
+    } else {
+        reason
+    }
+}
+
+/// ZCode's latest query and the header of the turn it opened, provided `row_id` is the view's bubble for
+/// that query and the view shows no later message.
+fn rewind_query(proc: &ChatProcess, row_id: &str) -> Result<(Value, Option<Value>), String> {
+    let latest = proc.timeline.lock().unwrap().user_messages().last().map(|(id, _)| id.clone());
+    if latest.as_deref() != Some(row_id) {
+        return Err(LATEST_ONLY.to_string());
+    }
+    let state = proc.zcode.lock().unwrap();
+    let (query, header) = wire::latest_query(state.rows.values()).ok_or(LATEST_ONLY)?;
+    let raw = query.get("rowId").and_then(Value::as_i64).ok_or(LATEST_ONLY)?;
+    let source = query.get("sourceCommandId").and_then(Value::as_str).unwrap_or("");
+    let drawn = wire::row_id(raw) == row_id || state.own_inputs.get(source).is_some_and(|row| row == row_id);
+    if !drawn {
+        return Err(LATEST_ONLY.to_string());
+    }
+    Ok((query.clone(), header.cloned()))
+}
+
+/// What restoring the latest turn's files would do. A turn with nothing ZCode can restore previews as a
+/// conversation-only rewind.
+pub(super) fn rewind_preview(proc: &Arc<ChatProcess>, session_id: &str, row_id: &str) -> Result<Value, String> {
+    let (_, header) = rewind_query(proc, row_id)?;
+    let Some(header) = header.filter(|header| wire::can_restore_files(Some(header))) else {
+        return Ok(json!({"canRewind": true}));
+    };
+    let native = proc.agent_session_id.lock().unwrap().clone().ok_or("ZCode has not opened this conversation yet")?;
+    let target = wire::row_target(&header).ok_or(REWIND_FAILED)?;
+    let (revision, epoch) = {
+        let state = proc.zcode.lock().unwrap();
+        (state.revision, state.log_epoch.clone())
+    };
+    let preview = proc
+        .request_and_wait("zcode_send", |id| {
+            wire::request(id, "v4/conversation/fileRewindPreview", json!({
+                "sessionId": native, "target": target, "baseRevision": revision, "baseLogEpoch": epoch,
+            }))
+        })
+        .map_err(|reason| rewind_failed(session_id, "fileRewindPreview", reason))?;
+    Ok(wire::rewind_preview(&preview, &header, &workspace(proc)?))
+}
+
+/// Rewind from the latest message. Files alone are restored at once (`applyFileRewind`). A rewind of the
+/// conversation is held as a `PendingEdit` until the next message, because ZCode can only replace that
+/// query with another; the caller drops the turn from the view and hands its text back to the composer.
+/// Returns the file restore's result, if one ran.
+pub(super) fn rewind(proc: &Arc<ChatProcess>, session_id: &str, row_id: &str, scope: &str) -> Result<Option<Value>, String> {
+    let (query, header) = rewind_query(proc, row_id)?;
+    let files = matches!(scope, "files" | "both") && wire::can_restore_files(header.as_ref());
+    if scope == "files" {
+        let header = header.filter(|_| files).ok_or(wire::NO_FILE_CHANGES)?;
+        let native = proc.agent_session_id.lock().unwrap().clone().ok_or("ZCode has not opened this conversation yet")?;
+        let target = wire::row_target(&header).ok_or(REWIND_FAILED)?;
+        let answer = send_cas(proc, &native, "applyFileRewind", json!({"target": target}), &uuid::Uuid::new_v4().to_string())
+            .map_err(|reason| rewind_failed(session_id, "applyFileRewind", reason))?;
+        let result = answer.get("result").cloned().unwrap_or(Value::Null);
+        if result.get("applied").and_then(Value::as_bool) != Some(true) {
+            let reason = result.get("response").and_then(Value::as_str).unwrap_or("notApplied").to_string();
+            crate::diagnostics::record("WARN", "zcode_rewind_failed", json!({"sessionId": session_id, "step": "applyFileRewind", "reason": reason}));
+            return Err(wire::NO_FILE_CHANGES.to_string());
+        }
+        let preview = result.get("preview").cloned().unwrap_or(Value::Null);
+        return Ok(Some(wire::rewind_preview(&preview, &header, &workspace(proc)?)));
+    }
+    // ZCode withholds the edit while the turn cannot be replaced, such as during a compaction.
+    if !wire::can_edit(&query) {
+        return Err(REWIND_FAILED.to_string());
+    }
+    let target = wire::row_target(&query).ok_or(REWIND_FAILED)?;
+    let from = header.as_ref().unwrap_or(&query).get("rowId").and_then(Value::as_i64).ok_or(REWIND_FAILED)?;
+    let rows = {
+        let timeline = proc.timeline.lock().unwrap();
+        timeline.at.get(row_id).map(|&index| timeline.rows[index..].to_vec()).unwrap_or_default()
+    };
+    proc.zcode.lock().unwrap().pending_edit = Some(PendingEdit { target, from, files, rows });
+    Ok(None)
+}
+
+/// Drop a rewind the view could not show after all.
+pub(super) fn cancel_rewind(proc: &ChatProcess) {
+    proc.zcode.lock().unwrap().pending_edit = None;
+}
+
 fn upload(proc: &Arc<ChatProcess>, native: &str, index: usize, image: &ChatImage) -> Result<Value, String> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(image.data.as_bytes())
@@ -810,16 +1086,18 @@ pub(super) fn dispatch(
 ) -> Result<(), String> {
     let cwd = workspace(proc)?;
     let command_id = uuid::Uuid::new_v4().to_string();
-    {
+    // A rewind waiting for its replacement turns this message into the edit; see `PendingEdit`.
+    let edit = {
         let mut state = proc.zcode.lock().unwrap();
         state.own_inputs.insert(command_id.clone(), row_id.to_string());
         state.awaiting = Some(command_id.clone());
         state.awaited_turn = None;
-    }
+        state.pending_edit.take()
+    };
     let (app, session_id, proc) = (app.clone(), session_id.to_string(), proc.clone());
     let (row_id, text, images) = (row_id.to_string(), text.to_string(), images.to_vec());
     std::thread::spawn(move || {
-        if let Err(message) = send_turn(&app, &session_id, &proc, &cwd, &command_id, &text, &images) {
+        if let Err(message) = send_turn(&app, &session_id, &proc, &cwd, &command_id, &text, &images, edit.as_ref()) {
             let no_plan = {
                 let mut state = proc.zcode.lock().unwrap();
                 if state.awaiting.as_deref() == Some(command_id.as_str()) {
@@ -827,6 +1105,28 @@ pub(super) fn dispatch(
                 }
                 state.models.is_empty()
             } && selection(&proc).is_none();
+            if let Some(edit) = edit {
+                // ZCode applies an edit whole or not at all, so its conversation still holds the turn the view
+                // dropped. Show it again and return the edited text to the composer; the user can rewind anew.
+                {
+                    let mut timeline = proc.timeline.lock().unwrap();
+                    for row in edit.rows {
+                        timeline.upsert(row);
+                    }
+                }
+                hand_back(&app, &session_id, &proc, &row_id, &text, &images);
+                // Signed out, the account panel explains the refusal, as it does for an ordinary message.
+                let prompted = no_plan && proc.zcode.lock().unwrap().account.as_ref().and_then(|a| a.signed_in()).is_none();
+                if prompted {
+                    super::auth::zcode::require(&app, &session_id, &proc);
+                } else {
+                    emit(&app, &session_id, json!({"type":"error","message":rewind_failed(&session_id, "editUserQuery", message)}));
+                }
+                if proc.turn.lock().unwrap().running {
+                    handle_turn_end(&app, &session_id, &proc, if prompted { "success" } else { "request_failed" }, None);
+                }
+                return;
+            }
             // No plan, ZCode lists no models, and its refusal only says the message named none ("Session model
             // must be provider-qualified"). Signed out, the account panel takes its place and signs the user
             // in; signed in, no plan of that platform was found in the sign-in, which a sign-in prompt would
@@ -863,6 +1163,7 @@ fn hand_back(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, row_id: &s
     emit(app, session_id, json!({"type":"unsent","text":text,"images":images}));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn send_turn(
     app: &AppCtx,
     session_id: &str,
@@ -871,6 +1172,7 @@ fn send_turn(
     command_id: &str,
     text: &str,
     images: &[ChatImage],
+    edit: Option<&PendingEdit>,
 ) -> Result<(), String> {
     let mode = wire::native_mode(proc.mode.lock().unwrap().as_str());
     let selection = selection(proc);
@@ -914,6 +1216,28 @@ fn send_turn(
         .enumerate()
         .map(|(index, image)| upload(proc, &native, index, image))
         .collect::<Result<Vec<_>, _>>()?;
+    if let Some(edit) = edit {
+        // An edit names no permission mode; the rerun takes the session's. Bring it in line with the composer
+        // first. A refusal here leaves the session's mode, which is no reason to drop the edit.
+        if proc.zcode.lock().unwrap().mode.as_deref() != Some(mode) {
+            if let Err(reason) = send_cas(proc, &native, "switchCollaborationMode", json!({"mode": mode}), &uuid::Uuid::new_v4().to_string()) {
+                crate::diagnostics::record("WARN", "zcode_mode_switch_failed", json!({"sessionId": session_id, "reason": reason}));
+            }
+        }
+        let mut payload = json!({
+            "target": edit.target,
+            "newText": text,
+            "workspaceMode": if edit.files { "rewind" } else { "preserve" },
+        });
+        if let Some(selection) = selection {
+            payload["modelSelection"] = selection;
+        }
+        if !attachments.is_empty() {
+            payload["attachments"] = json!(attachments);
+        }
+        send_cas(proc, &native, "editUserQuery", payload, command_id)?;
+        return Ok(());
+    }
     let mut payload = json!({"text": text, "mode": mode, "requestedDelivery": "startNow"});
     if let Some(selection) = selection {
         payload["modelSelection"] = selection;
@@ -988,6 +1312,12 @@ pub(super) fn test_await(proc: &ChatProcess, command_id: &str, row_id: &str) {
     let mut state = proc.zcode.lock().unwrap();
     state.own_inputs.insert(command_id.to_string(), row_id.to_string());
     state.awaiting = Some(command_id.to_string());
+}
+
+/// Put a process in the state a pending fork opens it in, for tests driving frames by hand.
+#[cfg(test)]
+pub(super) fn test_fork(proc: &ChatProcess) {
+    proc.zcode.lock().unwrap().fork = Fork::AwaitingSource;
 }
 
 /// Whether any command was claimed for a row, for tests checking sends without waiting for frames.

@@ -2,7 +2,7 @@
 
 Created: 2026-07-09 20:41
 
-Updated: 2026-09-25 10:21
+Updated: 2026-11-13 21:19
 
 > This guide takes you from installation to your first terminal and your first AI agent session. It is enough to start working; each feature is described in detail in the other manuals (see the [Manuals Overview](manuals-overview_20260709_2041.md)).
 
@@ -17,7 +17,7 @@ Download the package for your platform:
 | Platform | Package | Notes |
 |----------|---------|-------|
 | macOS | `.dmg` (separate Apple Silicon and Intel builds) | Open it and drag VelaTerm into Applications. The app is notarized by Apple |
-| Windows | `-setup.exe` installer, in min and full variants | full (about 360 MB) includes a complete Git Bash; min (about 25 MB) downloads missing commands when needed. Both install to the same location, so choose one |
+| Windows | `-setup.exe` installer or `-portable.zip`, each in min and full variants | full (about 360 MB) includes a complete Git Bash; min (about 25 MB) downloads missing commands when needed. Both installers install to the same location, so choose one. The portable zip needs no installation: extract it and run `VelaTerm\velaterm.exe`. It does not update itself; download the new zip when an update is available |
 | Linux | `.AppImage` (x86_64 and aarch64) | Make it executable and run it; no installation is needed |
 
 VelaTerm checks for updates automatically; "Check for Updates…" in the app menu checks immediately.

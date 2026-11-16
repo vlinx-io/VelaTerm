@@ -175,11 +175,13 @@ pub(crate) fn tail_lines(path: &Path, max_bytes: u64, max_lines: usize) -> Strin
 /// Best effort and brief: the service also polls, so a lost announcement only delays what the session
 /// shows by a few seconds, and a slow one must never hold up the work or its result.
 fn announce() {
-    let (Ok(url), Ok(session_id), Ok(token)) = (
+    let (Ok(url), Ok(session_id)) = (
         std::env::var("VLX_SPAWN_URL"),
         std::env::var("VLX_SESSION_ID"),
-        std::env::var("VLX_TOKEN"),
     ) else {
+        return;
+    };
+    let Some(token) = super::session_env::token() else {
         return;
     };
     let body = serde_json::json!({ "sessionId": session_id }).to_string();
@@ -318,7 +320,41 @@ fn status(label: &str) -> ! {
     std::process::exit(0);
 }
 
+/// Close any descriptors inherited past stderr before spawning a detached supervisor or waiting on
+/// a long-running command, so the task never retains a caller's locks or pipes.
+#[cfg(unix)]
+fn close_extra_fds() {
+    for dir in ["/proc/self/fd", "/dev/fd"] {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        // Collect first so the directory stream closes before we close the listed descriptors.
+        let fds: Vec<i32> = entries
+            .flatten()
+            .filter_map(|entry| entry.file_name().to_str()?.parse::<i32>().ok())
+            .filter(|&fd| fd >= 3)
+            .collect();
+        for fd in fds {
+            unsafe { libc::close(fd); }
+        }
+        return;
+    }
+    let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    let max = if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } == 0 {
+        (limit.rlim_cur as u64).min(65_536) as i32
+    } else {
+        1024
+    };
+    for fd in 3..max {
+        unsafe { libc::close(fd); }
+    }
+}
+
+#[cfg(not(unix))]
+fn close_extra_fds() {}
+
 pub fn run(args: &[String]) -> ! {
+    close_extra_fds();
     let args = &args[args.len().min(2)..];
     if args.first().map(String::as_str) == Some(SUPERVISE) {
         supervise(&args[1..]);
@@ -608,6 +644,87 @@ mod tests {
         assert_eq!(read_meta(&dir).unwrap().pid, meta.pid);
         write_atomic(&dir.join("exit"), "0");
         drop(claim_start(&dir).unwrap());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "invoked in an isolated process by inherited_descriptors_above_stderr_are_closed_on_entry"]
+    fn close_extra_fds_helper() {
+        use std::io::{BufRead, Write};
+        close_extra_fds();
+        println!("VLX_EXTRA_FDS_CLOSED");
+        let _ = std::io::stdout().flush();
+        let mut line = String::new();
+        let _ = std::io::stdin().lock().read_line(&mut line);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn inherited_descriptors_above_stderr_are_closed_on_entry() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::fd::AsRawFd;
+        use std::os::unix::process::CommandExt;
+
+        let dir = std::env::temp_dir().join(format!("vlx-vrun-fds-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let lock_path = dir.join("inherited.lock");
+        let locked = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .unwrap();
+        locked.try_lock().unwrap();
+        let raw_fd = locked.as_raw_fd();
+
+        let mut cmd = std::process::Command::new(std::env::current_exe().unwrap());
+        cmd.args([
+            "--exact",
+            "agent::run_wait::tests::close_extra_fds_helper",
+            "--ignored",
+            "--test-threads=1",
+            "--nocapture",
+        ])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped());
+        unsafe {
+            cmd.pre_exec(move || {
+                if libc::fcntl(raw_fd, libc::F_SETFD, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = cmd.spawn().unwrap();
+        drop(locked);
+
+        let mut reader = BufReader::new(child.stdout.take().unwrap());
+        let mut line = String::new();
+        let mut ready = false;
+        while reader.read_line(&mut line).unwrap() > 0 {
+            if line.contains("VLX_EXTRA_FDS_CLOSED") {
+                ready = true;
+                break;
+            }
+            line.clear();
+        }
+        assert!(ready, "helper did not report extra descriptors closed");
+        assert!(child.try_wait().unwrap().is_none(), "helper should still be alive while verifying lock");
+
+        let reopened = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .unwrap();
+        assert!(reopened.try_lock().is_ok(), "child should not still hold inherited lock descriptor");
+        drop(reopened);
+
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(b"\n");
+        }
+        assert!(child.wait().unwrap().success());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

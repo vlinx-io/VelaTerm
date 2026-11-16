@@ -252,7 +252,7 @@ export default function Combo<T extends string>({
         minHeight: HEIGHT,
         background: "var(--bg-app)",
         border: `1px solid ${open ? "var(--accent)" : "var(--border)"}`,
-        borderRadius: 5,
+        borderRadius: 6,
         opacity: disabled ? 0.6 : 1,
       }}
     >

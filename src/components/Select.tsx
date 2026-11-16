@@ -8,7 +8,9 @@
 //!
 //! Scope: values chosen from a fixed list, committed on click. Multi-select keeps the menu open.
 //! Long lists can opt into a filter box at the top of the popup (`searchable`); typing narrows the rows
-//! by label, and the arrow keys and Enter keep working from inside the box.
+//! by label, and the arrow keys and Enter keep working from inside the box. A list that also accepts a
+//! value outside `options` (a font family the OS enumeration missed) passes `customEntry`, which turns
+//! the typed filter text into a row of its own instead of a separate "Custom…" mode.
 //! Controls that also accept free text (the model field) or that carry submenus
 //! (right-click menus, which belong to ContextMenu)
 //! are not this component's job.
@@ -24,6 +26,10 @@ export type SelectOption<T extends string> = {
   icon?: React.ReactNode;
   /** Dimmed trailing text, e.g. a shell's path next to its name. */
   hint?: string;
+  /** Secondary line drawn beneath the label, e.g. a model description. */
+  description?: string;
+  /** Compact trailing status badge on the main row line, e.g. "Default". */
+  tag?: string;
   disabled?: boolean;
   /** Draws a rule above this row, for lists that fall into groups (built-in kinds vs saved presets). */
   separatorBefore?: boolean;
@@ -123,6 +129,9 @@ type SelectProps<T extends string> = ({
   multiple?: false;
   value: T;
   onChange: (value: T) => void;
+  /** Optional checkbox at the bottom of the popup to save the chosen value as default. */
+  keepLabel?: string;
+  onKeep?: (value: T) => void;
 } | {
   multiple: true;
   value: T[];
@@ -154,11 +163,25 @@ type SelectProps<T extends string> = ({
   /** Commands listed under the options, divided by a rule (the New Session project list's "Import Project").
    * They are reached with the arrow keys like options; choosing one closes the popup and runs it. */
   actions?: SelectAction[];
+  /** Optional footer below the option list (e.g. loading/error status and retry action). */
+  footer?: React.ReactNode;
   /** Puts a filter box at the top of the popup. Typing on the closed trigger opens it with that text. */
   searchable?: boolean;
   searchPlaceholder?: string;
   /** Shown in place of the rows when the filter matches nothing. */
   noMatchLabel?: string;
+  /** A row after the matches that commits the trimmed filter text itself, for lists that also accept
+   * values outside `options`. Only meaningful together with `searchable`. */
+  customEntry?: SelectCustomEntry;
+};
+
+export type SelectCustomEntry = {
+  /** Row label built from the trimmed filter text. */
+  label: (query: string) => string;
+  /** Optional predicate restricting when the custom row is offered for the trimmed query. */
+  when?: (query: string) => boolean;
+  /** Commit that text. Called only when this row is chosen. */
+  onSelect: (query: string) => void;
 };
 
 export type SelectAction = { id: string; label: string; icon?: React.ReactNode; onSelect: () => void };
@@ -166,14 +189,32 @@ export type SelectAction = { id: string; label: string; icon?: React.ReactNode; 
 export default function Select<T extends string>(props: SelectProps<T>) {
   const { value, options, width = 160, menuWidth, size = "md", mono = false, align = "left",
     placeholder, disabled, title, ariaLabel, leading, menuPortal = false, summary, actions = [],
-    searchable = false, searchPlaceholder, noMatchLabel } = props;
+    footer, searchable = false, searchPlaceholder, noMatchLabel, customEntry } = props;
   const multiple = props.multiple === true;
+  const keepLabel = !props.multiple ? props.keepLabel : undefined;
+  const onKeep = !props.multiple ? props.onKeep : undefined;
   const [query, setQuery] = useState("");
-  const needle = searchable ? query.trim().toLocaleLowerCase() : "";
+  const [keep, setKeep] = useState(false);
+  const trimmedQuery = searchable ? query.trim() : "";
+  const needles = trimmedQuery ? trimmedQuery.toLocaleLowerCase().split(/\s+/).filter(Boolean) : [];
+  const needle = needles.join(" ");
   // Rows on screen. Keyboard indices refer to this list, not to `options`.
-  const shown = needle ? options.filter(o => o.label.toLocaleLowerCase().includes(needle)) : options;
-  // Action rows follow the options in keyboard order, so an index past the options names an action.
-  const total = shown.length + actions.length;
+  const shown = needles.length
+    ? options.filter(o => {
+        const row = `${o.label} ${o.hint ?? ""} ${o.description ?? ""} ${o.value}`.toLocaleLowerCase();
+        return needles.every(n => row.includes(n));
+      })
+    : options;
+  // The typed text becomes its own row when it is not already an exact option, so a family missing from
+  // the enumeration can still be chosen without a separate editing mode.
+  const customShown = !!customEntry && !!trimmedQuery && (!customEntry.when || customEntry.when(trimmedQuery)) && !shown.some(o =>
+    o.label.toLocaleLowerCase() === trimmedQuery.toLocaleLowerCase() ||
+    o.value.toLocaleLowerCase() === trimmedQuery.toLocaleLowerCase());
+  const customIndex = shown.length;
+  // Option rows come first, then the custom row, then the actions.
+  const actionOffset = shown.length + (customShown ? 1 : 0);
+  const total = actionOffset + actions.length;
+  const hasScrollBox = actions.length > 0 || searchable || !!footer || !!keepLabel;
 
   const s = SIZES[size];
   const [open, setOpen] = useState(false);
@@ -198,17 +239,24 @@ export default function Select<T extends string>(props: SelectProps<T>) {
     if (open && (!wasOpen.current || !multiple)) setActive(selected);
     wasOpen.current = open;
   }, [open, selected, multiple]);
-  // A new filter highlights its first match, so Enter picks what the user sees at the top.
+  // A new filter highlights its first match, or the custom row when nothing matches, so Enter picks
+  // what the user sees at the top.
   const lastNeedle = useRef(needle);
   useEffect(() => {
     if (lastNeedle.current === needle) return;
     lastNeedle.current = needle;
-    if (needle) setActive(shown.findIndex(o => !o.disabled));
+    if (needle) {
+      const first = shown.findIndex(o => !o.disabled);
+      setActive(first >= 0 ? first : customShown ? customIndex : -1);
+    }
     else setActive(selected);
-  }, [needle, shown, selected]);
+  }, [needle, shown, selected, customShown, customIndex]);
   useEffect(() => {
     if (!open) setQuery("");
-    else if (searchable) searchRef.current?.focus();
+    else {
+      setKeep(false);
+      if (searchable) searchRef.current?.focus();
+    }
   }, [open, searchable]);
   useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
 
@@ -216,30 +264,38 @@ export default function Select<T extends string>(props: SelectProps<T>) {
   useLayoutEffect(() => {
     if (!open || active < 0) return;
     const row = listRef.current?.querySelector<HTMLElement>(`[data-select-index="${active}"]`);
-    const list = actions.length || searchable ? optionsRef.current : listRef.current;
+    const list = hasScrollBox ? optionsRef.current : listRef.current;
     if (!row || !list) return;
     // Scroll the list only. scrollIntoView also moves surrounding settings panes under the pointer.
     if (row.offsetTop < list.scrollTop) list.scrollTop = row.offsetTop;
     else if (row.offsetTop + row.offsetHeight > list.scrollTop + list.clientHeight) {
       list.scrollTop = row.offsetTop + row.offsetHeight - list.clientHeight;
     }
-  }, [open, active, actions.length, searchable]);
+  }, [open, active, hasScrollBox]);
 
   const commit = (i: number) => {
-    const action = i >= shown.length ? actions[i - shown.length] : undefined;
+    if (disabled || !btnRef.current?.isConnected) return;
+    if (customShown && i === customIndex) {
+      customEntry!.onSelect(trimmedQuery);
+      if (!props.multiple && keep) onKeep?.(trimmedQuery as T);
+      setOpen(false);
+      setQuery("");
+      btnRef.current?.focus();
+      return;
+    }
+    const action = i >= actionOffset ? actions[i - actionOffset] : undefined;
     if (action) {
-      if (disabled) return;
       setOpen(false);
       action.onSelect();
       return;
     }
     const opt = shown[i];
     if (!opt || opt.disabled) return;
-    if (disabled) return;
     if (props.multiple) {
       props.onChange(props.value.includes(opt.value) ? props.value.filter(value => value !== opt.value) : [...props.value, opt.value]);
     } else {
       props.onChange(opt.value);
+      if (keep) onKeep?.(opt.value);
       setOpen(false);
     }
     btnRef.current?.focus();
@@ -388,22 +444,33 @@ export default function Select<T extends string>(props: SelectProps<T>) {
       {open && renderMenu(
         <>
           {/* Transparent backdrop closes the popup on any outside click. mousedown rather than click so
-              the popup is gone before the click lands on whatever is underneath. */}
+              the popup is gone before the click lands on whatever is underneath; onClick also cancels
+              default/bubbling because React portals inside a wrapping <label> would otherwise forward
+              label activation to the trigger button and reopen the popup. */}
           <div
             style={{ position: "fixed", inset: 0, zIndex: 1240 }}
-            onMouseDown={() => setOpen(false)}
+            onMouseDown={(e) => { e.preventDefault(); setOpen(false); }}
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(false); }}
           />
           <div
             ref={listRef}
             id={multiple ? undefined : listId}
             role={multiple ? undefined : "listbox"}
             aria-label={multiple ? undefined : ariaLabel}
-            // The filter box needs the mousedown to take focus and place its caret.
-            onMouseDown={e => { if (e.target !== searchRef.current) e.preventDefault(); }}
+            // The filter box and footer controls need mousedown to focus inputs or press buttons.
+            onMouseDown={e => {
+              const target = e.target as HTMLElement | null;
+              if (target !== searchRef.current && !target?.closest(".vlx-select-keep, .vlx-select-footer")) e.preventDefault();
+            }}
             // A wrapping <label> would otherwise forward a row click on to the trigger button as a
             // second activation, reopening the popup the moment a choice closed it. Label activation
             // is a default action, so only preventDefault cancels it; stopPropagation alone does not.
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+            // Inner checkboxes and footer buttons opt out of preventDefault so they still activate.
+            onClick={(e) => {
+              e.stopPropagation();
+              const target = e.target as HTMLElement | null;
+              if (!target?.closest(".vlx-select-keep, .vlx-select-footer")) e.preventDefault();
+            }}
             style={{
               ...SELECT_PANEL,
               left: align === "left" ? 0 : undefined,
@@ -411,7 +478,7 @@ export default function Select<T extends string>(props: SelectProps<T>) {
               width: menuWidth ?? "100%",
               minWidth: "100%",
               ...(menuPortal ? menuPosition : {}),
-              ...(actions.length || searchable ? { display: "flex", flexDirection: "column", overflowY: "hidden" } : {}),
+              ...(hasScrollBox ? { display: "flex", flexDirection: "column", overflowY: "hidden" } : {}),
             }}
           >
             {searchable && <div role="presentation" style={{ flex: "none", padding: "0 0 4px", marginBottom: 4, borderBottom: "1px solid var(--border)" }}>
@@ -450,13 +517,60 @@ export default function Select<T extends string>(props: SelectProps<T>) {
               {props.clearLabel && <button type="button" className="vlx-btn" onClick={() => props.onChange(options.filter(o => o.disabled && props.value.includes(o.value)).map(o => o.value))}>{props.clearLabel}</button>}
             </div>}
             <div ref={optionsRef} id={multiple ? listId : undefined} role={multiple ? "listbox" : undefined} aria-label={multiple ? ariaLabel : undefined} aria-multiselectable={multiple || undefined}
-              style={actions.length || searchable ? { position: "relative", flex: "1 1 auto", minHeight: 0, overflowY: "auto" } : undefined}>
-            {needle && !shown.length && noMatchLabel && (
+              style={hasScrollBox ? { position: "relative", flex: "1 1 auto", minHeight: 0, overflowY: "auto" } : undefined}>
+            {needle && !shown.length && noMatchLabel && !customShown && (
               <div role="presentation" style={{ padding: s.rowPadding, fontSize: s.fontSize, color: "var(--text-muted)" }}>{noMatchLabel}</div>
             )}
             {shown.map((opt, i) => {
               const on = isOn(opt);
               const hot = i === active;
+              const tagEl = opt.tag ? (
+                <span
+                  style={{
+                    flexShrink: 0,
+                    padding: "1px 5px",
+                    border: "1px solid var(--border)",
+                    borderRadius: 4,
+                    color: "var(--text-muted)",
+                    fontSize: 10,
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {opt.tag}
+                </span>
+              ) : null;
+              const mainRow = (
+                <>
+                  {multiple && <span aria-hidden="true" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "none", width: 16, height: 16, border: `1px solid ${on ? "var(--accent)" : "var(--border-strong)"}`, borderRadius: 3, background: on ? "var(--accent)" : "transparent", color: "var(--text-on-accent)", boxSizing: "border-box" }}>{on && <Icons.check size={12} />}</span>}
+                  {opt.description && opt.icon ? (
+                    <span style={{ flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18 }}>
+                      {opt.icon}
+                    </span>
+                  ) : opt.icon}
+                  <span
+                    style={{
+                      flex: 1,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {opt.label}
+                  </span>
+                  {tagEl}
+                  {opt.hint && (
+                    <span
+                      style={{
+                        flex: "none",
+                        color: "var(--text-muted)",
+                        fontSize: s.fontSize - 1,
+                      }}
+                    >
+                      {opt.hint}
+                    </span>
+                  )}
+                </>
+              );
               return (
                 <div
                   key={opt.value || `_${i}`}
@@ -469,42 +583,58 @@ export default function Select<T extends string>(props: SelectProps<T>) {
                   onMouseEnter={() => !opt.disabled && setActive(i)}
                   style={{
                     ...selectRowStyle(on, hot && !opt.disabled, size, mono),
+                    ...(opt.description ? { flexDirection: "column", alignItems: "stretch", gap: 2 } : {}),
                     borderTop: opt.separatorBefore ? "1px solid var(--border)" : undefined,
                     marginTop: opt.separatorBefore ? 4 : undefined,
                     cursor: opt.disabled ? "default" : "pointer",
                     opacity: opt.disabled ? 0.45 : 1,
                   }}
                 >
-                  {multiple && <span aria-hidden="true" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "none", width: 16, height: 16, border: `1px solid ${on ? "var(--accent)" : "var(--border-strong)"}`, borderRadius: 3, background: on ? "var(--accent)" : "transparent", color: "var(--text-on-accent)", boxSizing: "border-box" }}>{on && <Icons.check size={12} />}</span>}
-                  {opt.icon}
-                  <span
-                    style={{
-                      flex: 1,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {opt.label}
-                  </span>
-                  {opt.hint && (
-                    <span
-                      style={{
-                        flex: "none",
-                        color: "var(--text-muted)",
-                        fontSize: s.fontSize - 1,
-                      }}
-                    >
-                      {opt.hint}
-                    </span>
-                  )}
+                  {opt.description ? (
+                    <>
+                      <span style={{ display: "flex", alignItems: "center", gap: 6, width: "100%" }}>
+                        {mainRow}
+                      </span>
+                      <span
+                        style={{
+                          color: "var(--text-muted)",
+                          fontSize: s.fontSize - 1.5,
+                          lineHeight: 1.4,
+                          overflowWrap: "anywhere",
+                          paddingLeft: (opt.icon ? 24 : 0) + (multiple ? 22 : 0),
+                        }}
+                      >
+                        {opt.description}
+                      </span>
+                    </>
+                  ) : mainRow}
                 </div>
               );
             })}
+            {customShown && (
+              <div
+                role="option"
+                id={`${listId}-${customIndex}`}
+                data-select-index={customIndex}
+                aria-selected={false}
+                onClick={() => commit(customIndex)}
+                onMouseEnter={() => setActive(customIndex)}
+                style={{
+                  ...selectRowStyle(false, active === customIndex, size, mono),
+                  borderTop: "1px solid var(--border)",
+                  marginTop: 4,
+                  color: "var(--text-secondary)",
+                }}
+              >
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {customEntry!.label(trimmedQuery)}
+                </span>
+              </div>
+            )}
             </div>
             {actions.length > 0 && <div role="group" style={{ flex: "none", marginTop: 4, paddingTop: 4, borderTop: "1px solid var(--border)" }}>
               {actions.map((action, k) => {
-                const i = shown.length + k;
+                const i = actionOffset + k;
                 return (
                   <div
                     key={action.id}
@@ -522,6 +652,42 @@ export default function Select<T extends string>(props: SelectProps<T>) {
                 );
               })}
             </div>}
+            {footer && (
+              <div className="vlx-select-footer" style={{ flex: "none", marginTop: 4, paddingTop: 4, borderTop: "1px solid var(--border)" }}>
+                {footer}
+              </div>
+            )}
+            {keepLabel && (
+              <label
+                className="vlx-select-keep"
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                style={{
+                  flex: "none",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  marginTop: 4,
+                  padding: "6px 8px",
+                  borderTop: "1px solid var(--border)",
+                  color: "var(--text-muted)",
+                  fontSize: s.fontSize - 1,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={keep}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setKeep(checked);
+                    if (checked && !props.multiple) onKeep?.(props.value);
+                  }}
+                  style={{ margin: 0, accentColor: "var(--accent)" }}
+                />
+                {keepLabel}
+              </label>
+            )}
           </div>
         </>
       )}

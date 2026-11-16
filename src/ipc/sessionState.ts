@@ -17,6 +17,8 @@ import type { BackgroundRun } from "./runs";
 export interface SessionStateRecord {
   /** A result is waiting for someone to look at it. */
   unread?: boolean;
+  /** The marker was set by hand from the session menu; clients show it but pop no system notification. */
+  unreadManual?: boolean;
   /** Which agent is running here; null or absent for a plain terminal. */
   agent?: AgentKind | null;
   /** What that agent is doing. Meaningless without an agent. */
@@ -70,6 +72,16 @@ export function markSessionRead(sessionId: string): Promise<void> {
  */
 export function markSessionUnread(sessionId: string): Promise<void> {
   return invoke<void>("session_mark_unread", { sessionId });
+}
+
+/**
+ * Mark this session Pending by hand, raising its unread marker on every client.
+ *
+ * Unlike `markSessionUnread`, the marker is flagged as manual, so no client pops a system notification
+ * for it: marking a batch from the menu must not fire one notification per session elsewhere.
+ */
+export function markSessionPending(sessionId: string): Promise<void> {
+  return invoke<void>("session_mark_pending", { sessionId });
 }
 
 /** What a client saw on a session's rendered terminal screen. Mirrors the backend's `ScreenReport`. */

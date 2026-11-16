@@ -5,7 +5,7 @@ description: >-
   Only use when the user explicitly invokes /vspawn-tree or $vspawn-tree; never auto-trigger. This is a real session run by its
   own process in the vlx-term left-panel tree — not an in-process sub-agent, and not a background Task. Available only
   inside vlx-term-hosted sessions.
-argument-hint: "[--plan-execute] [--review|--no-review] [--review-agent <agent>] [--review-model <model>] [--review-effort <level>] [--split-tasks] [--worktree-mode <shared|each>] [--plan-agent <agent>] [--plan-model <model>] [--plan-effort <level>] [--exec-agent <agent>] [--exec-model <model>] [--exec-effort <level>] [--cwd <path>] [--yes] [--agent <agent>] [--model <name>] [--effort <level>] <task>"
+argument-hint: "[--plan-execute] [--review|--no-review] [--review-agent <agent>] [--review-model <model>] [--review-effort <level>] [--split-tasks] [--worktree-mode <shared|each>] [--plan-agent <agent>] [--plan-model <model>] [--plan-effort <level>] [--exec-agent <agent>] [--exec-model <model>] [--exec-effort <level>] [--cwd <path>] [--title <text>] [--yes] [--agent <agent>] [--model <name>] [--effort <level>] <task>"
 disable-model-invocation: true
 allowed-tools: Bash(vspawn-tree:*)
 ---
@@ -80,6 +80,9 @@ Also detect "no dialog / don't ask me / just start it" (or a leading `--yes` / `
 the child session immediately with the default settings instead of showing the initial confirmation card.
 This never skips split-task review; split-task skill invocations add it automatically as described above.
 
+Detect a requested session name ("call it X / title it X", or a leading `--title`) → add `--title "<text>"`, up to
+80 characters on one line. With `--plan-execute` it names the planner. Without it, the name comes from the start of the task.
+
 Detect a named model ("run it on opus / sonnet / gpt-5.5", or a leading `--model`) → add `--model <name>`, passing
 the name through as the user wrote it; vlx-term turns it into the running agent's own model flag. Detect a named
 reasoning effort ("think harder / low effort", or a leading `--effort`) → add `--effort <level>`, typically `low`,
@@ -95,7 +98,7 @@ Pass the prompt you expanded in Step 1 **as a single argument** (escaping any qu
 `vspawn-tree` from PATH:
 
 ```bash
-vspawn-tree [--cwd <absolute-path>] [--yes] [--agent <agent>] [--model <name>] [--effort <level>] "<expanded self-contained prompt>"
+vspawn-tree [--cwd <absolute-path>] [--title <text>] [--yes] [--agent <agent>] [--model <name>] [--effort <level>] "<expanded self-contained prompt>"
 ```
 
 For a split-task workflow, use this form, adding explicit role settings when supplied:

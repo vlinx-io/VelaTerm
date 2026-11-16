@@ -70,6 +70,8 @@ pub fn child_session_of(part: &Value) -> Option<String> {
     }
     part.pointer("/state/metadata/sessionId")
         .or_else(|| part.pointer("/state/metadata/sessionID"))
+        .or_else(|| part.pointer("/state/metadata/childSessionId"))
+        .or_else(|| part.pointer("/state/metadata/childSessionID"))
         .and_then(Value::as_str)
         .map(str::to_string)
 }

@@ -18,6 +18,8 @@ pub mod auto_continue;
 pub mod config_schema;
 pub mod codex_protocol;
 pub mod deepseek_history;
+pub mod deepseek_models;
+pub mod deepseek_stats;
 pub mod engine;
 pub mod history;
 pub mod user_messages;

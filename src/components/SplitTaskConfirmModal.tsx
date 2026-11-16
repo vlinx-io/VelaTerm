@@ -6,8 +6,9 @@ import { isTauri, listen } from "../ipc/transport";
 import { wsClient } from "../ipc/wsClient";
 import { useTermStore } from "../store/termStore";
 import { useSuspendNativeViews } from "../hooks/nativeViewSuspend";
+import type { SessionKind } from "../types";
+import AgentSelect from "./AgentSelect";
 import { Backdrop } from "./Backdrop";
-import Combo from "./Combo";
 import { LaunchCloseButton, LaunchField, LaunchLoadState, ModelEffortFields, launchErrorText, useLaunchOptions } from "./LaunchFields";
 import { navigatePlanExecute, usePlanExecuteMenuRoute } from "./planExecuteNavigation";
 
@@ -138,9 +139,16 @@ export function SplitTaskConfirmModal() {
             {current && <section className="launch-panel">
               <LaunchField label={t("orch.nameLabel")}><input className="vlx-input" value={current.name} disabled={busy} maxLength={80} onChange={event => patch({ name: event.target.value })} /></LaunchField>
               <LaunchField label={t("orch.promptLabel")}><textarea className="vlx-input launch-task" value={current.prompt} disabled={busy} onChange={event => patch({ prompt: event.target.value })} /></LaunchField>
-              <LaunchField label={t("spawn.agentLabel")}><Combo value={current.config.agent ?? ""} width="100%" menuPortal ariaLabel={t("spawn.agentLabel")}
-                options={options.map(option => ({ value: option.id, label: option.label }))}
-                onChange={agent => { if (!busy) patch({ config: { agent: agent as SplitTask["config"]["agent"], model: "", effort: "" } }); }} /></LaunchField>
+              <LaunchField label={t("spawn.agentLabel")}>
+                <AgentSelect
+                  value={(current.config.agent ?? "") as SessionKind | ""}
+                  disabled={busy}
+                  width="100%"
+                  ariaLabel={t("spawn.agentLabel")}
+                  options={options.map(option => ({ id: option.id as SessionKind, label: option.label }))}
+                  onChange={agent => { if (!busy && agent) patch({ config: { agent: agent as SplitTask["config"]["agent"], model: "", effort: "" } }); }}
+                />
+              </LaunchField>
               {spec && <div className="launch-model-grid"><ModelEffortFields spec={spec} model={current.config.model ?? ""} effort={current.config.effort ?? ""}
                 context={{ parentSessionId: proposal.plannerId, cwd: proposal.cwd, inheritArgs: false }}
                 onChange={(model, effort) => { if (!busy) patch({ config: { ...current.config, model, effort } }); }} /></div>}

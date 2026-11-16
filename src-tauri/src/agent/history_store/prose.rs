@@ -33,7 +33,7 @@ pub struct Prose {
     pub(super) tools:Vec<Vec<String>>,
 }
 
-pub fn supported(kind:SessionKind) -> bool {matches!(kind,SessionKind::Claude|SessionKind::Codex|SessionKind::Pi|SessionKind::Omp|SessionKind::Opencode|SessionKind::Kiro|SessionKind::Grok|SessionKind::Antigravity)}
+pub fn supported(kind:SessionKind) -> bool {matches!(kind,SessionKind::Claude|SessionKind::Codex|SessionKind::Pi|SessionKind::Omp|SessionKind::Opencode|SessionKind::Deepseek|SessionKind::Kiro|SessionKind::Grok|SessionKind::Antigravity)}
 
 impl Prose {
     pub fn new(branch:Branch,cancel:&AtomicBool) -> Result<Self,String> {
@@ -45,7 +45,7 @@ impl Prose {
     fn index(&self,number:u64) -> Option<usize> {(number<self.total).then_some(number as usize)}
 
     fn build(mut cursor:Cursor,cancel:&AtomicBool) -> Result<Self,String> {
-        if matches!(cursor.branch.kind,SessionKind::Opencode|SessionKind::Kiro) {return Self::native(cursor,cancel);}
+        if cursor.branch.kind.uses_opencode()||cursor.branch.kind==SessionKind::Kiro {return Self::native(cursor,cancel);}
         let kind=cursor.branch.kind;
         let mut total=0;let mut role="";let mut workflow=false;let mut last_tool=None;
         let mut messages:Vec<Message>=Vec::new();let mut fragments:Vec<Vec<Fragment>>=Vec::new();let mut tools:Vec<Vec<String>>=Vec::new();

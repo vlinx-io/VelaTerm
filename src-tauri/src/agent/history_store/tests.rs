@@ -658,3 +658,15 @@ fn recent_pages_carry_the_whole_user_message_outline() {
     let located=branch.page(None,None,outline[0]["id"].as_str()).unwrap();assert_eq!(located["rows"].as_array().unwrap().last().unwrap()["text"],"Question   0\n with  space");
     assert!(branch.page(Some(page["rows"][0]["id"].as_str().unwrap()),None,None).unwrap().get("userMessages").is_none());
 }
+
+#[test]
+fn a_reclaimed_history_reader_is_reissued_instead_of_failing_the_request() {
+    let temp=Temp::new();
+    let branch=indexed(&temp,"{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"kept\"}]}}\n");
+    // The client kept a reader id whose idle entry the backend has already reclaimed.
+    let reader=branch.store.subscribe(&branch.scope,&branch.sources,Some("index:reclaimed")).unwrap();
+    assert_ne!(reader,"index:reclaimed");
+    assert_eq!(branch.store.subscribe(&branch.scope,&branch.sources,Some(&reader)).unwrap(),reader);
+    // A reader issued for another conversation is still refused.
+    assert!(branch.store.subscribe("another",&branch.sources,Some(&reader)).is_err());
+}

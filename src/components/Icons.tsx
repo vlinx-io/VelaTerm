@@ -142,6 +142,10 @@ const Icons: Record<string, IconComponent> = {
     r("rect", { key: 1, x: 3.5, y: 7, width: 9, height: 6, rx: 1.2 }),
     r("path", { key: 2, d: "M5.5 7V5.3a2.5 2.5 0 015 0V7" }),
   ]),
+  key: I([
+    r("circle", { key: 1, cx: 5, cy: 8, r: 2.3 }),
+    r("path", { key: 2, d: "M7.3 8h6.2M11.4 8v2.1M13.5 8v2.9" }),
+  ]),
   database: I([
     r("ellipse", { key: 1, cx: 8, cy: 4, rx: 4.5, ry: 1.8 }),
     r("path", { key: 2, d: "M3.5 4v8c0 1 2 1.8 4.5 1.8s4.5-.8 4.5-1.8V4" }),

@@ -2,6 +2,7 @@
 //! model reads the same before a session exists as inside it.
 
 import Icons from "../../../components/Icons";
+import type { SelectOption } from "../../../components/Select";
 import type { useT } from "../../../i18n";
 import type { SessionKind } from "../../../types";
 import { kindIconEl } from "../../sessionViewers/sessionMeta";
@@ -74,11 +75,31 @@ export function effortChipLabel(t: T, value: string): string {
  * The effort menu from "auto" up: each level drawn as a bar filled to its place on the full ladder, so a
  * model that stops at high still shows high at its stable place. Auto gets an empty bar because it names
  * no level, and ultracode a full one because it runs at the top of the ladder. `extraLevels` keeps
- * levels a native catalogue reports outside the known ladder, listed after it.
+ * levels a native catalogue reports outside the known ladder, listed after it. `includeOff` prepends the
+ * Claude-style "no extended thinking" option above Auto.
  */
-export function effortChipOptions(t: T, allowed: readonly string[], extraLevels = false): ChipOption<string>[] {
+export function effortChipOptions(
+  t: T,
+  allowed: readonly string[],
+  extraLevels = false,
+  includeOff = allowed.includes(THINKING_OFF),
+): ChipOption<string>[] {
   const known = new Set<string>([...EFFORTS, ULTRACODE, THINKING_OFF]);
   return [
+    ...(includeOff
+      ? [
+          {
+            value: THINKING_OFF,
+            label: t("chat.effort.off"),
+            hint: t("chat.effort.offHint"),
+            glyph: (
+              <span style={{ color: "var(--text-faint)", display: "inline-flex" }}>
+                <Icons.minus size={14} />
+              </span>
+            ),
+          },
+        ]
+      : []),
     { value: "", label: t("chat.effort.auto"), glyph: <LevelBar level={0} of={EFFORTS.length} /> },
     ...EFFORTS.filter((value) => allowed.includes(value)).map((value) => ({
       value,
@@ -90,4 +111,20 @@ export function effortChipOptions(t: T, allowed: readonly string[], extraLevels 
       : []),
     ...(extraLevels ? allowed.filter((value) => !known.has(value)).map((value) => ({ value, label: value })) : []),
   ];
+}
+
+/** Adapt a composer chip option to a shared `Select` option, keeping icon, subtitle description, and default tag. */
+export function chipToSelectOption<V extends string>(
+  option: ChipOption<V>,
+  defaultValue?: string,
+  defaultLabel?: string,
+): SelectOption<V> {
+  const isDefault = defaultValue !== undefined && defaultValue !== "" && option.value === defaultValue;
+  return {
+    value: option.value,
+    label: option.label,
+    icon: option.glyph,
+    description: option.hint,
+    tag: [option.tag, isDefault ? defaultLabel : undefined].filter(Boolean).join(" · ") || undefined,
+  };
 }

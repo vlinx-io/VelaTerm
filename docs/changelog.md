@@ -1,11 +1,30 @@
 # Changelog
 
-> Created: 2026-07-09 16:10 · Updated: 2026-11-08
+> Created: 2026-07-09 16:10 · Updated: 2026-11-16
 
 All notable changes to VelaTerm are documented here, newest first.
 v0.1.91 is the first public release; earlier version numbers were internal iterations and are not covered.
 
 ---
+
+## v0.3.1 — 2026-11-16
+
+- 🪐 Antigravity conversation view now supports model and reasoning effort switching, subagent and background task tracking, interactive `ask_question` prompts, five-level permissions, AI rename, and turn stats, output speed, and quota usage in the Info panel.
+- 🐋 DeepSeek sessions now support background tasks, model-level image input, context usage, AI rename, API URL and key configuration next to the input box, and read-only viewing of earlier `dsh` history.
+- 🤖 Agents can now propose VelaTerm app actions with `vapp` (including organizing sidebar trees with `$name` references), with each action or batch shown as a confirmation card in conversation view.
+- 📁 Tasks and Chats in the left sidebar support creating groups, adding items from the empty-area context menu, and dragging items out to the top level.
+- 📦 Windows releases now include portable zip packages for both full and minimal builds, and portable copies update from the download page.
+- 🇨🇳 Settings can switch the update and download server to the China mainland mirror `velaterm.cn`.
+- 🔍 Status bar adds interface zoom controls with direct percentage input, and Settings lets you pick separate searchable fonts for the interface and conversations.
+- 📎 Files dragged from Finder or File Explorer can now be dropped directly into terminals, conversations, and the project file tree.
+- 🍴 ZCode sessions support forking from the latest reply without modifying the workspace, reverting from the latest message, and AI rename, while Pi and OMP sessions support slash-command completion.
+- 📋 Conversation messages have Copy full message in their context menu, the input box has a native Cut/Copy/Paste/Select All context menu with shortcut labels, and in-conversation search scans full transcripts first.
+- 📊 The Info panel Usage section displays quota bars grouped by reset window with a 20-tick scale and separate reset times, and collapses non-Gemini Antigravity quotas by default.
+- 🏷️ Sessions have Set Status (Viewed / Pending) in their context menu, newly created sessions stay visible under status filters, and `vspawn --title` sets custom titles for spawned and planning sessions.
+- 🪟 `vartifact` docks files even when opened from background tabs, the background tab limit dropdown goes up to 512, and public share viewers can expand or collapse the left tree locally.
+- ⌨️ Confirming an IME composition with Enter on macOS no longer submits answers or searches prematurely, remote terminal input hides Zsh inline history suggestions, and synchronized terminal updates no longer flash the viewport.
+- 🔔 Clicking a remote window notification on macOS raises that window directly without flashing the main window first, and reopening the app restores the main window even when only remote windows are open.
+- 🔧 Switching projects clears the file tree filter, permission selectors save defaults immediately with Set as default, AI rename works on very long sessions, and the first message in a new session no longer flashes before the session starts.
 
 ## v0.3.0 — 2026-11-08
 

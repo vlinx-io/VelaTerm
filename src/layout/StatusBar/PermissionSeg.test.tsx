@@ -42,7 +42,7 @@ it.each(PERMISSION_TOGGLE_KINDS)("%s prompts, retains the deferred notice, and c
   // The launch mode names the button until the agent confirms a permission.
   fireEvent.click(await screen.findByText("Always Ask"));
   expect(container.querySelector(".seg.on")).toBeNull();
-  const name = kind === "codex" ? "Full Access" : ["claude", "opencode"].includes(kind) ? "Bypass" : "Skip all permission confirmations";
+  const name = kind === "codex" ? "Full Access" : ["claude", "opencode", "antigravity"].includes(kind) ? "Bypass" : "Skip all permission confirmations";
   fireEvent.click(await screen.findByRole("button", { name }));
   expect(await screen.findByRole("button", { name: "Restart now" })).toBeTruthy();
   expect(restart).not.toHaveBeenCalled();

@@ -1,6 +1,6 @@
 [package]
 name = "velaterm"
-version = "0.3.0"
+version = "0.3.1"
 description = "VelaTerm multi-session terminal manager"
 authors = ["vlinx"]
 edition = "2021"
@@ -121,7 +121,7 @@ keyring = { version = "3", features = ["apple-native", "windows-native"] }
 portable-pty = "0.8"
 rusqlite = { version = "0.32", features = ["bundled", "blob", "functions"] }
 uuid = { workspace = true }
-# DeepSeek Harness writes its session logs as zstd-compressed JSONL; already in the tree through dependencies.
+# The retired DeepSeek Harness wrote its session logs as zstd-compressed JSONL.
 zstd = "0.13"
 # Server audit-log timestamps use local `yyyy-MM-dd HH:mm:ss` date and time.
 time = { workspace = true }

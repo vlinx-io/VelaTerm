@@ -10,6 +10,7 @@
 //! sent starts it again where the conversation left off.
 
 import { useAgentPermissions, savePermissionDefault } from "../../../hooks/useAgentPermissions";
+import { permissionLabelKeyFor } from "../../../components/AgentPermissionSelect";
 import { useSessionPermissionState } from "../../../hooks/useSessionPermissionState";
 import { currentPermissionLabel, PermissionStateDetails } from "../../../components/PermissionStateDetails";
 import { type SetStateAction, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -89,15 +90,19 @@ import {
 } from "../../../ipc/chat";
 import { attachImages, restoreAttachment, MAX_IMAGE_BYTES, MAX_IMAGES, type Attachment } from "./attachments";
 import { attachChatInputGuard } from "./inputGuard";
+import { useTextFieldMenu } from "./useTextFieldMenu";
 import { attachInputLatencyLog } from "./inputLatency";
 import { buildSuggestions, findFileMention, mentionDir, type Suggestion } from "./completion";
 import { env } from "../../../platform/env";
+import { platform } from "../../../platform";
+import { chatDropText, pathsExcept } from "../../../terminal/dropPaths";
 import { imageFromNativeClipboard, imagesFromClipboard, imagesFromDrop } from "../../../terminal/imageInput";
 import { IS_MAC, IS_PLAIN_BROWSER, labelWithCombo } from "../../../hooks/shortcutRegistry";
 import { useMentionFiles } from "./fileMentions";
 import { ControlChip, type ChipOption } from "./controls";
 import { EFFORTS, THINKING_OFF, effortChipLabel, effortChipOptions, levelsOf, modelChipOptions } from "./modelChips";
 import { AutoContinueBar, FastModeChip, McpChip, NotificationBar, RetryLine, TasksChip, UsageMeter } from "./extras";
+import { DeepSeekApiChip } from "./DeepSeekApiChip";
 import { AgentAccountMenu, AgentAuth, needsAttention } from "./AgentAuth";
 import { useAgentReadiness } from "./useAgentReadiness";
 import { CodexResetCredits } from "./CodexResetCredits";
@@ -109,13 +114,14 @@ import { isShareSurface } from "../../../ipc/shareBase";
 import { isAgentNotInstalledError, mapBackendError } from "../../../ipc/backendError";
 import { usePermissionRestart } from "./permissionRestart";
 import { PermissionCard, type PermissionAnswer } from "./permissionCards";
+import { AssistRequests } from "../../Assist/AssistRequests";
 import { isMode, type Mode } from "./permissions";
 import { useTermStore } from "../../../store/termStore";
 import { effectivePermissionMode } from "../../../store/settings";
-import { acceptsChatImages, effectiveStatus, hasTerminalInterface, supportsPermissionToggle, supportsSteering, type Session } from "../../../types";
+import { acceptsChatImages, effectiveStatus, hasTerminalInterface, opensSessionBeforeFirstMessage, rewindsLatestByEditing, supportsPermissionToggle, supportsSteering, type Session } from "../../../types";
 import { kindIconEl } from "../../sessionViewers/sessionMeta";
 import { assistantLabel } from "../../sessionViewers/TranscriptViewer";
-import { ChatImageView, ErrorRow, WorkingRow } from "./rows";
+import { ChatImageView, ErrorRow, WorkingRow, type RewindGuide } from "./rows";
 import {
   estimateRowHeight,
   foldAgentTurns,
@@ -127,11 +133,12 @@ import {
 import "./session-view.css";
 import { onTransportReconnect, onTransportDisconnect } from "../../../ipc/transport";
 import { TranslationTime } from "../../../translation/Time";
-import { useOutbox, emptySubmissions, acknowledgeSubmissions, createSubmission, deliverSubmission, retrySubmission, submissionsFor, ChatVersions, unconfirmedSubmissionRows } from "./outbox";
+import { useOutbox, emptySubmissions, acknowledgeSubmissions, createSubmission, deliverSubmission, discardSubmission, retrySubmission, submissionsFor, ChatVersions, unconfirmedSubmissionRows } from "./outbox";
 import { cachedChat, cacheChat, mergeRows, reconcileChat, chatSyncMetrics, limitHistoryWindow } from "./chatCache";
 import { ChatSearch } from "./ChatSearch";
 import { HistorySearch } from "./HistorySearch";
 import { historyLocation, historyPageURL } from "./historyNavigation";
+import { STALE_CURSOR, failureText } from "./historyCursor";
 import type { ChatAuthState, ChatSearchHit } from "../../../ipc/chat";
 import { QueuedMessageText } from "./QueuedMessageText";
 import { MessageSender } from "./MessageSender";
@@ -191,6 +198,7 @@ function storedMode(session: Pick<Session, "kind" | "permissionMode">): Mode {
   if (session.kind === "opencode") {
     return stored === "skip" || stored === "bypassPermissions" ? "bypassPermissions" : "default";
   }
+  if (session.kind === "antigravity" && stored === "accept-edits") return "acceptEdits";
   if (stored === "skip") return "bypassPermissions";
   return stored && isMode(stored) ? stored : "default";
 }
@@ -199,15 +207,9 @@ function effortKey(kind: Session["kind"], model: string): string {
   return `${kind}:${model}`;
 }
 
-function modeLabelKey(mode: Mode): I18nKey {
-  if (mode === "read-only") return "chat.mode.readOnly";
-  if (mode === "full-access") return "chat.mode.fullAccess";
-  return `chat.mode.${mode}` as I18nKey;
-}
-
 /** OMP and Antigravity defer to their own approval settings in `default` mode. */
 function modeLabelKeyFor(kind: Session["kind"], mode: Mode): I18nKey {
-  return (kind === "omp" || kind === "antigravity") && mode === "default" ? "chat.mode.agentDefault" : modeLabelKey(mode);
+  return permissionLabelKeyFor(kind, mode);
 }
 
 /** A Codex mode (`default`, `plan`) or an OpenCode agent name; the backend validates it against the catalogue. */
@@ -315,7 +317,16 @@ export function ChatPane({
   const refreshing = useRef(false);
   const historyRequest = useRef<Promise<ChatSnapshot | undefined> | null>(null);
   const historyGeneration = useRef(0);
-  const refreshRef = useRef<() => Promise<void>>(async () => {});
+  // A sync that hit a stale cursor: the next one starts over without the reader id or the row anchor
+  // remembered from an index the server has since rebuilt.
+  const coldSync = useRef(false);
+  const refreshRef = useRef<(cold?: boolean) => Promise<void>>(async () => {});
+  // The reader only keeps the server's index alive and lets it cancel a scan; page cursors are row ids.
+  // A reader the server has already reclaimed is therefore dropped rather than reused.
+  const dropHistoryReader = useCallback(() => {
+    if (indexReader.current) void chatReadCancel(session.id, indexReader.current).catch(() => {});
+    indexReader.current = undefined;
+  }, [session.id]);
   const prependScroll = useRef<{ height: number; top: number; anchor?: { id: string; offset: number } } | null>(null);
   const readingRestore = useRef<(() => void) | undefined>(undefined);
   const [submissionReceipts, setSubmissionReceipts] = useState<boolean | null>(null);
@@ -381,6 +392,14 @@ export function ChatPane({
   const [collaborationModes, setCollaborationModes] = useState<ChatCollaborationMode[]>([]);
   const [effort, setEffort] = useState<EffortChoice>("");
   const [engineRunning, setEngineRunning] = useState(false);
+  /** Whether the running agent accepts images; null until it reports. */
+  const [imageSupport, setImageSupport] = useState<boolean | null>(null);
+  // Images may have been picked before the agent started; say why they cannot go once it reports text only.
+  useEffect(() => {
+    const text = t("chat.attach.modelTextOnly");
+    if (imageSupport === false && attachments.length > 0) setAttachNote(text);
+    else if (imageSupport === true) setAttachNote(note => note === text ? null : note);
+  }, [imageSupport, attachments.length, t]);
   /** What the Claude process reports about itself: context, cost, rate limits, tasks, switches. */
   const [extras, setExtras] = useState<ChatExtras>({});
   const { readiness, refresh: refreshReadiness } = useAgentReadiness(session.id, !readOnly && !hidden, extras.auth?.status);
@@ -394,9 +413,10 @@ export function ChatPane({
   /** Claude: whether Claude in Chrome is attached to this conversation. The backend owns the value. */
   const [chrome, setChrome] = useState(false);
   // Callers waiting for the agent to open its native session, which the `session` event announces.
-  // `/compact` and `/review` need the thread before they can be asked, unlike a message, which waits
-  // in the backend queue on its own.
-  const sessionWaiters = useRef<Array<() => void>>([]);
+  // Callers waiting for the agent to open its native session. `/compact` and `/review` need the thread
+  // before they can be asked; a first message to an agent that reports its session before reading input
+  // waits here too, so it can go out as an ordinary turn instead of through the backend's startup queue.
+  const sessionWaiters = useRef<Array<{ resolve: () => void; reject: (error: Error) => void }>>([]);
   /** A notification from the agent's loop, shown until dismissed or timed out. */
   const [notice, setNotice] = useState<{ text: string; priority: string } | null>(null);
   /** A usage limit stopped the conversation and it continues on its own at the given time. */
@@ -491,6 +511,16 @@ export function ChatPane({
   } | null>(null);
   const [rewinding, setRewinding] = useState(false);
   const [rewindScopes, setRewindScopes] = useState<ChatRewindScope[]>([]);
+  const [rewindGuideOpen, setRewindGuideOpen] = useState(false);
+  useEffect(() => { setRewindGuideOpen(false); }, [session.id]);
+  useEffect(() => {
+    if (!rewindGuideOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setRewindGuideOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [rewindGuideOpen]);
   /** Prevents a second submit while `/clear` is replacing this mounted session. */
   const [clientCommandRunning, setClientCommandRunning] = useState(false);
   /** A changing token opens the latest user's existing rewind menu, including after virtualization mounts it. */
@@ -507,6 +537,24 @@ export function ChatPane({
   // Bumped by each `vartifact`, so opening the file already shown re-reads it, as `vopen` does for a tab.
   const [dockOpenCount, setDockOpenCount] = useState(0);
   const [dockWidth, setDockWidth] = useState(readDockWidth);
+  // Dragging the divider writes the width straight to the row's `--dock-w`. Committing it to state on
+  // every mousemove re-renders this whole conversation and rewrites localStorage for each pixel
+  // travelled, which is what made the divider lag far behind the pointer; state takes the final value.
+  const dockRowRef = useRef<HTMLDivElement>(null);
+  const liveDockWidth = useRef(dockWidth);
+  const clampDockWidth = (width: number) => {
+    const row = dockRowRef.current?.clientWidth ?? DOCK_MAX_W;
+    return Math.round(Math.min(DOCK_MAX_W, row * 0.7, Math.max(DOCK_MIN_W, width)));
+  };
+  const previewDockWidth = (width: number) => {
+    liveDockWidth.current = width;
+    dockRowRef.current?.style.setProperty("--dock-w", `${width}px`);
+  };
+  // The variable is applied outside the style prop so a render mid-drag, such as a streaming turn,
+  // does not snap the panel back to the width the last committed state still holds.
+  useLayoutEffect(() => {
+    dockRowRef.current?.style.setProperty("--dock-w", `${dockWidth}px`);
+  }, [dockWidth]);
   const artifactHost = useMemo<ArtifactHost>(
     () => ({ sessionId: session.id, openBeside: mobile || readOnly ? null : setDockPath, openPath: dockPath }),
     [session.id, mobile, readOnly, dockPath],
@@ -522,10 +570,12 @@ export function ChatPane({
     window.addEventListener(COMPOSER_INSERT_EVENT, onInsert);
     return () => window.removeEventListener(COMPOSER_INSERT_EVENT, onInsert);
   }, [session.id]);
-  // `vartifact <file>` run by this conversation's agent opens the file beside it, when this pane is on screen.
-  const canDock = !mobile && !readOnly && !hidden;
+  // `vartifact <file>` run by this conversation's agent opens the file beside it. A conversation in a
+  // background tab stays mounted, so accept the page even while hidden and show it when the reader comes
+  // back: docking must not depend on which tab happened to be in front when the command reached the app.
+  const canHostDock = !mobile && !readOnly;
   useEffect(() => {
-    if (!canDock) return;
+    if (!canHostDock) return;
     const onOpen = (e: Event) => {
       const detail = (e as CustomEvent<ArtifactOpenBesideDetail>).detail;
       if (e.defaultPrevented || !detail || detail.sessionId !== session.id) return;
@@ -535,7 +585,7 @@ export function ChatPane({
     };
     window.addEventListener(ARTIFACT_OPEN_BESIDE_EVENT, onOpen);
     return () => window.removeEventListener(ARTIFACT_OPEN_BESIDE_EVENT, onOpen);
-  }, [canDock, session.id]);
+  }, [canHostDock, session.id]);
 
   useEffect(() => {
     if (!inputLatencyLog) return;
@@ -643,6 +693,7 @@ export function ChatPane({
           setPermissions([]);
           setPendingPermissionMode(null);
           setCollaborationModes([]);
+          setImageSupport(null);
           setError(null);
           setTurnStartedAt(undefined);
           setExtras((prev) => ({ fastMode: prev.fastMode }));
@@ -667,7 +718,7 @@ export function ChatPane({
           break;
         case "session":
           setCatalogueVersion(v => v + 1);
-          sessionWaiters.current.splice(0).forEach((resolve) => resolve());
+          sessionWaiters.current.splice(0).forEach((waiter) => waiter.resolve());
           if (event.model) setModel(event.model);
           if (event.effort && isEffort(event.effort)) setEffort(event.effort);
           if (isCollaborationMode(event.collaborationMode)) {
@@ -681,8 +732,12 @@ export function ChatPane({
         case "settingsChanged":
           if ("effort" in event) setEffort(event.effort ?? "");
           if ("model" in event) setModel(event.model ?? undefined);
+          if ("images" in event) setImageSupport(event.images ?? null);
           if (event.mode) setMode(event.mode);
           if ("pendingPermissionMode" in event) setPendingPermissionMode(event.pendingPermissionMode ?? null);
+          break;
+        case "capabilities":
+          setImageSupport(event.images);
           break;
         case "codexSettingsChanged":
           if ("serviceTier" in event) setServiceTier(event.serviceTier ?? "");
@@ -699,6 +754,7 @@ export function ChatPane({
         // in this pane: without them it shows "—" for started, uptime, and this session's CPU.
         case "process":
           setEngineRunning(true);
+          setImageSupport(null);
           setRewindScopes(event.rewindScopes ?? []);
           useTermStore.getState().setRuntime(session.id, {
             // A session that has never run has no runtime record at all, and `status` is the one field
@@ -727,6 +783,7 @@ export function ChatPane({
           stopping.current = false;
           setActionFeedback("");
           setEngineRunning(false);
+          setImageSupport(null);
           setTurnStartedAt(undefined);
           // A process the application let go — its view closed here or on another device — is not
           // the agent failing; the next message simply starts it again. An agent that failed its
@@ -735,6 +792,8 @@ export function ChatPane({
           if (!event.released) {
             setError((prev) => prev ?? (event.stderr.trim() || t("chat.exited", event.code)));
           }
+          // No session will open now, so stop waiting for one instead of stalling until the timeout.
+          sessionWaiters.current.splice(0).forEach((waiter) => waiter.reject(new Error(event.stderr.trim() || t("chat.exited", event.code))));
           break;
         case "error":
           if (stopping.current) {
@@ -749,6 +808,7 @@ export function ChatPane({
           if (event.unsent?.length && !latestDraft.current) updateDraft(event.unsent.join("\n\n"));
           break;
         case "unsent":
+          if (event.id) discardSubmission(session.id, event.id);
           updateDraft(latestDraft.current ? `${event.text}\n\n${latestDraft.current}` : event.text);
           if (event.images.length > 0) setAttachments(current => [...event.images.map(restoreAttachment), ...current]);
           break;
@@ -788,9 +848,9 @@ export function ChatPane({
     // in place instead of covering it with the synchronizing notice again.
     let synced = false;
     let receiptsAvailable = false;
-    const refresh = async () => {
+    const refresh = async (cold = false) => {
       if (loading || disposed) return;
-      if (historyBusy.current) {progressTimer = setTimeout(() => void refresh(), 1000);return;}
+      if (historyBusy.current) {progressTimer = setTimeout(() => void refresh(cold), 1000);return;}
       clearTimeout(retryTimer);
       let failed = false;
       loading = true;
@@ -803,7 +863,12 @@ export function ChatPane({
       try {
         await subscribe();
         if (disposed) return;
-        const known = snapshotRef.current;
+        // A cold sync forgets the reader id and the row this window ended on: either may belong to an
+        // index the server has rebuilt, and repeating it would fail the same way every time. The wire
+        // protocol this pane already speaks is kept.
+        const protocol = snapshotRef.current?.protocolVersion;
+        const known = cold ? undefined : snapshotRef.current;
+        if (cold) initialLocation = false;
         const location = known?.pendingLocation ?? (initialLocation ? { ...historyLocation(session.id), ...(initialRowId ? {anchor:initialRowId} : {
           ...(initialMessageIndex!==undefined ? {messageIndex: initialMessageIndex} : {}), ...(initialRecordOffset!==undefined ? {recordOffset: initialRecordOffset} : {}) }) } : {});
         const hasLocation = Boolean(location.before || location.after || location.anchor || location.messageIndex!==undefined || location.recordOffset!==undefined);
@@ -813,7 +878,7 @@ export function ChatPane({
         try {
           response = await chatSnapshot(session.id, { historyOnly,
             ...(known ? { since: known.rowsRevision, epoch: known.startedAt, from: known.rows[0]?.id } : {}),
-            ...(known?.protocolVersion === 2 || hasLocation ? { protocolVersion: 2 as const, readJobId: indexReader.current,
+            ...(protocol === 2 || known?.protocolVersion === 2 || hasLocation ? { protocolVersion: 2 as const, readJobId: indexReader.current,
               anchor: pinnedRef.current ? undefined : known?.rows.at(-1)?.id } : {}),
             ...location,
           });
@@ -865,7 +930,14 @@ export function ChatPane({
         syncFailures = 0;
         setSyncInterrupted(false);
         if (syncError) { const shown = syncError; setError(prev => (prev === shown ? null : prev)); syncError = null; }
-        setHistoryError(snapshot.historyError ?? null);
+        const historyFailure = snapshot.historyError ?? null;
+        setHistoryError(historyFailure);
+        if (historyFailure && STALE_CURSOR.test(historyFailure) && !cold) {
+          // The index was rebuilt under this window, so the row it ends on no longer resolves. One clean
+          // sync without the old cursors replaces the window instead of leaving an error that retries it.
+          dropHistoryReader();
+          coldSync.current = true;
+        }
         const metric = { requestMs: performance.now() - requestStarted, commitMs: 0, rows: snapshot.rows.length, mode: snapshot.pageKind ?? "full" };
         chatSyncMetrics.push(metric);
         if (chatSyncMetrics.length > 30) chatSyncMetrics.shift();
@@ -878,6 +950,7 @@ export function ChatPane({
         setConfigKeys(snapshot.configKeys);
         setModel(snapshot.model);
         setEngineRunning(snapshot.running);
+        setImageSupport(snapshot.images ?? null);
         setExtras(
           snapshot.running
             ? extrasOf(snapshot)
@@ -955,6 +1028,10 @@ export function ChatPane({
         if (!disposed && snapshotRef.current?.protocolVersion === 2 && (historyOnly || snapshotRef.current.coverage === "partial" || snapshotRef.current.indexing)) {
           progressTimer = setTimeout(() => void refresh(), snapshotRef.current.coverage === "complete" && !snapshotRef.current.indexing ? 5000 : 1000);
         }
+        if (coldSync.current && !disposed && !failed) {
+          coldSync.current = false;
+          void refresh(true);
+        }
         // Events were rendered as they arrived, including when the snapshot failed.
         void events;
       }
@@ -986,7 +1063,7 @@ export function ChatPane({
       disconnect();
       void un?.then((f) => f()).catch(() => {});
     };
-  }, [session.id, session.kind, applyRows, t, cacheId, historyOnly, initialMessageIndex,initialRecordOffset,initialRowId]);
+  }, [session.id, session.kind, applyRows, t, cacheId, historyOnly, initialMessageIndex,initialRecordOffset,initialRowId,dropHistoryReader]);
 
   useEffect(() => {
     if (snapshotRef.current) {
@@ -1036,9 +1113,17 @@ export function ChatPane({
         setHasMore(page.hasMore ?? false);
         return page;
       } catch (error) {
-        if (generation === historyGeneration.current) { rememberPosition(); setHistoryError(String(error)); }
+        if (generation === historyGeneration.current) {
+          const failure = failureText(error);
+          // Paging from a row the rebuilt index no longer has would fail on every retry.
+          if (STALE_CURSOR.test(failure)) { dropHistoryReader(); coldSync.current = true; }
+          else { rememberPosition(); setHistoryError(failure); }
+        }
       }
-      finally { historyBusy.current = false; historyRequest.current = null; setHistoryLoading(false); }
+      finally {
+        historyBusy.current = false; historyRequest.current = null; setHistoryLoading(false);
+        if (coldSync.current) { coldSync.current = false; void refreshRef.current(true); }
+      }
     })();
     historyRequest.current = request;
     return request;
@@ -1062,8 +1147,18 @@ export function ChatPane({
       setHasNewer(page.hasNewer ?? false);
       if (snapshotRef.current) snapshotRef.current = { ...snapshotRef.current, hasNewer: page.hasNewer };
       return page;
-    } catch (error) {if (generation === historyGeneration.current) setHistoryError(String(error));}
-    finally {historyBusy.current = false;setHistoryLoading(false);}
+    } catch (error) {
+      if (generation === historyGeneration.current) {
+        const failure = failureText(error);
+        // The row this window ends on may belong to an index that has since been rebuilt.
+        if (STALE_CURSOR.test(failure)) { dropHistoryReader(); coldSync.current = true; }
+        else setHistoryError(failure);
+      }
+    }
+    finally {
+      historyBusy.current = false;setHistoryLoading(false);
+      if (coldSync.current) { coldSync.current = false; void refreshRef.current(true); }
+    }
   };
 
   const recallInput = (direction: "ArrowUp" | "ArrowDown") => {
@@ -1370,7 +1465,16 @@ export function ChatPane({
     railJump.cancel();
     pinnedRef.current = false; setAway(true);
     if (!rowsRef.current.some(row => row.id === hit.rowId)) {
-      const page = await chatSnapshot(session.id, { historyOnly, protocolVersion: 2, anchor: hit.rowId, historyGeneration: snapshotRef.current?.historyGeneration, readJobId: indexReader.current });
+      let page: ChatSnapshot;
+      try {
+        page = await chatSnapshot(session.id, { historyOnly, protocolVersion: 2, anchor: hit.rowId, historyGeneration: snapshotRef.current?.historyGeneration, readJobId: indexReader.current });
+      } catch (error) {
+        // The generation and reader may belong to an index that has since been rebuilt; the search
+        // hit's row is the only cursor that matters, so ask once more with just that.
+        if (!STALE_CURSOR.test(failureText(error))) throw error;
+        dropHistoryReader();
+        page = await chatSnapshot(session.id, { historyOnly, protocolVersion: 2, anchor: hit.rowId });
+      }
       setRows(page.rows); setHasMore(page.hasMore ?? false);setHasNewer(page.hasNewer ?? false);
       if (snapshotRef.current) snapshotRef.current = { ...snapshotRef.current, ...page, pendingLocation: page.pendingLocation };
     }
@@ -1384,7 +1488,7 @@ export function ChatPane({
     url.searchParams.set("chatPart", String(hit.chunkSequence ?? 0));
     window.history.pushState(null, "", url.href); window.dispatchEvent(new PopStateEvent("popstate"));
     setSearchTarget(hit.rowId);
-  }, [session.id, railJump.cancel]);
+  }, [session.id, railJump.cancel, dropHistoryReader]);
   useEffect(() => {
     const hit = pendingHistoryHit.current; if (!hit) return;
     const index = turnEntries.findIndex(entry => entry.kind === "row" ? entry.row.id === hit.rowId : entry.kind === "run" && entry.calls.some(row => row.id === hit.rowId));
@@ -1402,20 +1506,41 @@ export function ChatPane({
         pendingHistoryHit.current = { rowId: location.anchor, snippet: "", offset: 0 };
         setSearchTarget(location.anchor);return;
       }
-      try {
-        const page = await chatSnapshot(session.id, { historyOnly, protocolVersion: 2, ...location, readJobId: indexReader.current });
-        if (!active || current !== revision) return;
+      const apply = (page: ChatSnapshot) => {
         indexReader.current = page.readJobId;
         pinnedRef.current = !location.before && !location.after && !location.anchor;
         setAway(!pinnedRef.current);setRows(page.rows);setHasMore(page.hasMore ?? false);setHasNewer(page.hasNewer ?? false);
-        setHistoryCoverage(page.coverage);setHistoryError(page.historyError ?? null);
+        setHistoryCoverage(page.coverage);
+        const failure = page.historyError ?? null;
+        setHistoryError(failure);
+        if (failure && STALE_CURSOR.test(failure)) dropHistoryReader();
         snapshotRef.current = { ...snapshotRef.current!, ...page, pendingLocation: page.pendingLocation };
         if (location.anchor) {pendingHistoryHit.current = { rowId: location.anchor, snippet: "", offset: 0 };setSearchTarget(location.anchor);}
-      } catch (error) {if (active && current === revision) setHistoryError(String(error));}
+      };
+      try {
+        const page = await chatSnapshot(session.id, { historyOnly, protocolVersion: 2, ...location, readJobId: indexReader.current });
+        if (!active || current !== revision) return;
+        apply(page);
+      } catch (error) {
+        if (!active || current !== revision) return;
+        if (!STALE_CURSOR.test(failureText(error))) { setHistoryError(failureText(error)); return; }
+        // The reader or the row comes from an index that has since been rebuilt: ask again without the
+        // reader, and let a cold sync replace the window if the location itself is gone.
+        dropHistoryReader();
+        try {
+          const page = await chatSnapshot(session.id, { historyOnly, protocolVersion: 2, ...location });
+          if (!active || current !== revision) return;
+          apply(page);
+        } catch (retry) {
+          if (!active || current !== revision) return;
+          setHistoryError(failureText(retry));
+          void refreshRef.current(true);
+        }
+      }
     };
     window.addEventListener("popstate", restore);
     return () => {active = false;revision++;window.removeEventListener("popstate", restore);};
-  }, [session.id, syncState]);
+  }, [session.id, syncState, dropHistoryReader]);
   useEffect(() => {
     const id = pendingLocate.current;
     if (id && scrollToEntry(id)) pendingLocate.current = null;
@@ -1538,8 +1663,8 @@ export function ChatPane({
     };
   }, [hidden, session.id]);
 
-  // Claude's session stays working between turns while its background tasks run. That hold is not a turn, so
-  // the composer's stop control and queueing do not follow it.
+  // A session stays working between turns while its background tasks run. That hold is not a turn, so the
+  // composer's stop control and queueing do not follow it.
   const heldForBackground =
     turnStartedAt === undefined && (extras.backgroundTasks ?? []).some((task) => !isTaskFinished(task));
   const busy = status === "working" && !heldForBackground;
@@ -1562,6 +1687,30 @@ export function ChatPane({
   const rewindDisabledReason = !engineRunning
     ? t("chat.rewind.inactive")
     : !canRewind ? t("chat.command.rewindUnavailable") : undefined;
+  // Some agents rewind only their latest message; every earlier one says so instead of offering a choice.
+  const latestUserId = useMemo(() => {
+    for (let index = rows.length - 1; index >= 0; index--) if (rows[index].kind === "user") return rows[index].id;
+    return undefined;
+  }, [rows]);
+  const latestOnly = rewindsLatestByEditing(session.kind);
+  const entryRewindReason = (id: string) =>
+    latestOnly && id !== latestUserId ? t("chat.rewind.latestOnly") : rewindDisabledReason;
+  const canSwitchToTerminal =
+    !readOnly && !historyOnly && !mobile && !isShareSurface && hasTerminalInterface(session.kind);
+  const switchToRef = useRef(switchTo);
+  switchToRef.current = switchTo;
+  const switchToTerminal = useCallback(() => switchToRef.current("tui"), []);
+  const rewindGuide = useMemo<RewindGuide | undefined>(() => {
+    if (readOnly || session.kind !== "antigravity") return undefined;
+    return {
+      title: t("chat.antigravity.rewindTitle"),
+      tooltip: t("chat.antigravity.rewindHint"),
+      description: t("chat.antigravity.rewindGuide"),
+      ...(canSwitchToTerminal
+        ? { actionLabel: t("chat.antigravity.switchToTerminal"), onAction: switchToTerminal }
+        : {}),
+    };
+  }, [readOnly, session.kind, t, canSwitchToTerminal, switchToTerminal]);
   const finishRewindRequest = useCallback((token: number) => {
     setRewindRequest((request) => request?.token === token ? null : request);
   }, []);
@@ -1656,18 +1805,29 @@ export function ChatPane({
     if (engineRunning) return;
     const opened = new Promise<void>((resolve, reject) => {
       const timer = window.setTimeout(() => reject(new Error(t("chat.command.startTimeout"))), 30_000);
-      sessionWaiters.current.push(() => {
-        window.clearTimeout(timer);
-        resolve();
+      sessionWaiters.current.push({
+        resolve: () => {
+          window.clearTimeout(timer);
+          resolve();
+        },
+        reject: (error) => {
+          window.clearTimeout(timer);
+          reject(error);
+        },
       });
     });
+    // Observe the rejection before it is awaited: the process can exit while `startAgent` is still
+    // pending, and a start that fails never reaches the await at all.
+    opened.catch(() => {});
     await startAgent();
     await opened;
   };
 
-  // Codex opens its thread before receiving input. Claude reports its native session only after the
-  // first message, so translated submissions must use the ordinary process startup for other agents.
-  const startTranslatedAgent = session.kind === "codex" ? ensureStarted : startAgent;
+  // A first message sent to an agent that opens its session on startup waits for that session instead of
+  // entering the backend queue: the message then stays one row in the conversation, from the optimistic
+  // bubble to the real one, rather than moving into the pending queue and back out. Agents that report
+  // their session only after the first message use the ordinary startup, which would deadlock here.
+  const startSubmissionAgent = opensSessionBeforeFirstMessage(session.kind) ? ensureStarted : startAgent;
 
   /**
    * Send what is typed, or decide what happens to it when the agent is busy.
@@ -1768,6 +1928,14 @@ export function ChatPane({
       return;
     }
     if (localCommand === "rewind") {
+      if (session.kind === "antigravity") {
+        setError(null);
+        updateDraft("");
+        setCaret(0);
+        setDismissed(null);
+        setRewindGuideOpen(true);
+        return;
+      }
       const latestUser = [...rows].reverse().find((row) => row.kind === "user");
       if (!canRewind || !latestUser) {
         setError(t("chat.command.rewindUnavailable"));
@@ -1826,7 +1994,7 @@ export function ChatPane({
     setAttachments([]);
     setAttachNote(null);
     toEnd();
-    void deliverSubmission(session.id, item, engineRunning ? undefined : translate ? startTranslatedAgent : startAgent, () => translation.refresh(true))
+    void deliverSubmission(session.id, item, engineRunning ? undefined : startSubmissionAgent, () => translation.refresh(true))
       .then(receipt => finishSubmission(item, receipt))
       .finally(() => setSending(false));
   };
@@ -1838,8 +2006,12 @@ export function ChatPane({
    * a screenshot silently disappearing is worse than one that says why it did.
    */
   const addFiles = async (files: File[]) => {
-    if (!acceptsChatImages(session.kind)) {
-      setAttachNote(session.kind === "antigravity" ? t("chat.antigravity.textOnly") : t("chat.textOnly", assistantLabel(session.kind)));
+    if (!acceptsChatImages(session.kind) || imageSupport === false) {
+      setAttachNote(
+        imageSupport === false
+          ? t("chat.attach.modelTextOnly")
+          : t("chat.textOnly", assistantLabel(session.kind)),
+      );
       return;
     }
     const { attachments: next, rejected } = await attachImages(attachments, files);
@@ -1854,6 +2026,48 @@ export function ChatPane({
             ? t("chat.attach.tooLarge", first.name, MAX_IMAGE_BYTES / (1024 * 1024))
             : t("chat.attach.unreadable", first.name),
     );
+  };
+
+  /** Put dropped file paths into the draft at the caret, spaced off from the text around them. */
+  const insertDroppedPaths = (paths: string[]) => {
+    const el = inputRef.current;
+    const current = latestDraft.current;
+    const start = Math.min(el?.selectionStart ?? current.length, current.length);
+    const end = Math.min(el?.selectionEnd ?? start, current.length);
+    const before = current.slice(0, start);
+    const after = current.slice(end);
+    const text = (before && !/\s$/.test(before) ? " " : "") + chatDropText(paths) + (/^\s/.test(after) ? "" : " ");
+    const at = before.length + text.length;
+    updateDraft(before + text + after);
+    setCaret(at);
+    placeCaret.current = at;
+    el?.focus();
+  };
+
+  /**
+   * A drop from the OS file manager. Images become attachments where the agent takes them; every other file
+   * and folder, and images for agents that only read text, go into the draft as paths. The paths must be
+   * requested inside the drop handler because the drop's data is gone once it returns.
+   */
+  const onComposerDrop = (transfer: DataTransfer) => {
+    const allImages = imagesFromDrop(transfer);
+    const onlyImages = allImages.length === transfer.files.length;
+    const accepts = acceptsChatImages(session.kind) && imageSupport !== false;
+    // addFiles also explains the refusal to agents that only read text.
+    if (allImages.length && (accepts || (onlyImages && env.isBrowser))) void addFiles(allImages);
+    if (onlyImages && (accepts || env.isBrowser)) return;
+    // Browsers and remote windows never learn local paths, and the files are not on the server anyway.
+    if (env.isBrowser) {
+      setAttachNote(t("drop.browserFilesHint"));
+      return;
+    }
+    void platform.dialog
+      .droppedPaths(transfer)
+      .then((dropped) => {
+        const paths = pathsExcept(dropped.map((d) => d.path), accepts ? allImages : []);
+        if (paths.length) insertDroppedPaths(paths);
+      })
+      .catch(() => {});
   };
 
   const dropAttachment = (id: string) => {
@@ -1882,6 +2096,10 @@ export function ChatPane({
       // Nothing to say: an empty clipboard is not an error, it is a keystroke that did nothing.
       .catch(() => {});
   };
+
+  // The composer also takes images; every other field in the pane (queue edits, questions, search) is text only.
+  const composerMenu = useTextFieldMenu({ onImage: (file) => void addFiles([file]), onCopyFailed: setError });
+  const paneFieldMenu = useTextFieldMenu({ onCopyFailed: setError });
 
   const steerQueued = async (id: string) => {
     if (steeringQueueRef.current) return;
@@ -1996,7 +2214,7 @@ export function ChatPane({
         "";
       const ladder = catalogue.find((m) => m.id === value)?.effortLevels ?? (EFFORTS as readonly string[]);
       const carried: EffortChoice = isEffort(entry) && levelsOf(ladder, session.kind).includes(entry) ? entry : "";
-      if (carried !== effort) {
+      if (carried !== effort || (session.kind === "antigravity" && carried !== "")) {
         await chatSetEffort(session.id, carried || undefined);
         setEffort(carried);
       }
@@ -2092,7 +2310,7 @@ export function ChatPane({
 
   const wantsCatalogue = /^[/\$][^\s]*$/.test(draft) || /(?:^|\s)\$[^\s$]*$/.test(draft.slice(0, caret));
   useEffect(() => {
-    if (!wantsCatalogue || hidden || !["codex", "claude"].includes(session.kind)) return;
+    if (!wantsCatalogue || hidden || !["codex", "claude", "pi", "omp"].includes(session.kind)) return;
     let disposed = false;
     setCatalogueLoading(true);
     void chatCommands(session.id).then((catalogue) => {
@@ -2114,6 +2332,9 @@ export function ChatPane({
     const local: ChatCommand[] = [
       { name: "clear", description: t("chat.command.clearDescription") },
     ];
+    if (session.kind === "antigravity") {
+      local.push({ name: "rewind", description: t("chat.antigravity.rewindCommandDescription") });
+    }
     // What Codex's own interface offers as commands and this pane asks for through requests of its own.
     if (session.kind === "codex") {
       local.push(
@@ -2206,7 +2427,11 @@ export function ChatPane({
   // Offering a level the selected model rejects would let someone set it and see it silently ignored, so
   // the list narrows to the ladder reported for that model.
   const allowed = levelsOf(
-    selected ? selected.effortLevels : (EFFORTS as readonly string[]),
+    selected
+      ? selected.effortLevels
+      : session.kind === "antigravity" && catalogue.length > 0
+        ? [...new Set(catalogue.flatMap((m) => m.effortLevels))]
+        : (EFFORTS as readonly string[]),
     session.kind,
   );
   const defaultEffort = isEffort(rememberedDefaultEffort) && allowed.includes(rememberedDefaultEffort)
@@ -2216,24 +2441,12 @@ export function ChatPane({
   // because it names no level, and ultracode a full one because it runs at the top of the ladder.
   const effortLabel = (value: string) => effortChipLabel(t, value);
 
-  const effortOptions: ChipOption<EffortChoice>[] = [
-    // Below auto for Claude: no thinking at all, marked by an empty bar with nothing lit.
-    ...(session.kind === "claude"
-      ? [
-          {
-            value: THINKING_OFF,
-            label: t("chat.effort.off"),
-            hint: t("chat.effort.offHint"),
-            glyph: (
-              <span style={{ color: "var(--text-faint)", display: "inline-flex" }}>
-                <Icons.minus size={14} />
-              </span>
-            ),
-          },
-        ]
-      : []),
-    ...effortChipOptions(t, allowed),
-  ];
+  const effortOptions: ChipOption<EffortChoice>[] = effortChipOptions(
+    t,
+    allowed,
+    false,
+    session.kind === "claude" || allowed.includes(THINKING_OFF),
+  );
   // The permission chip shows the mode that was chosen; whether that choice is already the running
   // mode is carried by the chip's mark and by the menu's row notes. Only Codex defers the change to
   // the next turn, so the two facts differ during that window and nothing else has to say so in words.
@@ -2284,7 +2497,7 @@ export function ChatPane({
     refreshReadiness();
     const item = agentMissingItem;
     if (!item || readOnly) return;
-    void retrySubmission(session.id, item, !engineRunning ? item.translation ? startTranslatedAgent : startAgent : undefined, () => translation.refresh(true))
+    void retrySubmission(session.id, item, !engineRunning ? startSubmissionAgent : undefined, () => translation.refresh(true))
       .then(receipt => finishSubmission(item, receipt));
   };
 
@@ -2296,10 +2509,10 @@ export function ChatPane({
       {item.translation && ["translating", "translationFailed", "canceled"].includes(item.status) && <TranslationTime timing={translation.value?.pending.find(value => value.id === id) ?? item} serverTime={translation.value?.serverTime} running={item.status === "translating"} compact />}
       {!readOnly && translation.settings?.config.enabled && item.status === "translating" && <button className="vlx-btn" onClick={() => void cancelSubmissionTranslation(session.id, item).catch(err => setError(translationError(err, t)))}>{t("translation.cancel")}</button>}
       {!readOnly && translation.settings?.config.enabled && (item.status === "translationFailed" || item.status === "canceled") && <>
-        <button className="vlx-btn" disabled={!translation.value?.enabled} onClick={() => void retrySubmission(session.id, item, !engineRunning ? item.translation ? startTranslatedAgent : startAgent : undefined, () => translation.refresh(true)).then(receipt => finishSubmission(item, receipt))}>{t("translation.retry")}</button>
-        <button className="vlx-btn" onClick={() => void sendOriginalSubmission(session.id, item, !engineRunning ? startAgent : undefined).then(receipt => finishSubmission(item, receipt)).catch(err => setError(translationError(err, t)))}>{t("translation.sendOriginal")}</button>
+        <button className="vlx-btn" disabled={!translation.value?.enabled} onClick={() => void retrySubmission(session.id, item, !engineRunning ? startSubmissionAgent : undefined, () => translation.refresh(true)).then(receipt => finishSubmission(item, receipt))}>{t("translation.retry")}</button>
+        <button className="vlx-btn" onClick={() => void sendOriginalSubmission(session.id, item, !engineRunning ? startSubmissionAgent : undefined).then(receipt => finishSubmission(item, receipt)).catch(err => setError(translationError(err, t)))}>{t("translation.sendOriginal")}</button>
       </>}
-      {!readOnly && (item.status === "failed" || item.status === "unknown") && <button className="vlx-btn" disabled={submissionReceipts !== true} onClick={() => void retrySubmission(session.id, item, item.status === "failed" && !engineRunning ? item.translation ? startTranslatedAgent : startAgent : undefined, () => translation.refresh(true)).then(receipt => finishSubmission(item, receipt))}>
+      {!readOnly && (item.status === "failed" || item.status === "unknown") && <button className="vlx-btn" disabled={submissionReceipts !== true} onClick={() => void retrySubmission(session.id, item, item.status === "failed" && !engineRunning ? startSubmissionAgent : undefined, () => translation.refresh(true)).then(receipt => finishSubmission(item, receipt))}>
         {t(item.status === "unknown" ? "chat.submission.check" : "common.retry")}
       </button>}
       {item.error && item.status !== "canceled" && !isAgentNotInstalledError(item.error) && <ErrorRow message={item.translation ? translationError(item.error, t) : item.error} />}
@@ -2314,8 +2527,7 @@ export function ChatPane({
     <ControlChip
       glyph={kindIconEl(session.kind, 14)}
       label={modelLabel}
-      title={session.kind === "antigravity" ? t("chat.antigravity.settingsHint") : t("chat.modelTooltip")}
-      disabled={session.kind === "antigravity" && busy}
+      title={t("chat.modelTooltip")}
       value={model ?? ""}
       options={modelsFailed || catalogue.length === 0 ? [] : modelOptions}
       defaultValue={defaultModel || undefined}
@@ -2339,8 +2551,7 @@ export function ChatPane({
     <ControlChip
       glyph={<Icons.cpu size={14} />}
       label={effort ? effortLabel(effort) : t("chat.effortDefault")}
-      title={session.kind === "antigravity" ? t("chat.antigravity.settingsHint") : t("chat.effortTooltip")}
-      disabled={session.kind === "antigravity" && busy}
+      title={t("chat.effortTooltip")}
       value={effort}
       options={effortOptions}
       defaultValue={defaultEffort}
@@ -2351,7 +2562,7 @@ export function ChatPane({
       menuWidth={230}
     />
   ) });
-  if (collaborationModeOptions.length > 0) composerChips.push({ id: "collaboration", node: (
+  if (session.kind !== "antigravity" && collaborationModeOptions.length > 0) composerChips.push({ id: "collaboration", node: (
     <ControlChip
       glyph={session.kind === "opencode" ? <Icons.bot size={14} /> : <Icons.compass size={14} />}
       label={collaborationLabel(session.kind, selectedCollaboration, collaborationMode, t)}
@@ -2378,10 +2589,14 @@ export function ChatPane({
               : t("chat.modeTooltip")}
         value={mode}
         options={modeOptions}
-        disabled={!permissionCatalog?.catalog || (session.kind === "antigravity" && busy)}
+        disabled={!permissionCatalog?.catalog}
         defaultValue={defaultMode}
         onPick={(next, keep) => { if (isMode(next)) pickMode(next, keep); }}
         keepLabel={t("chat.keepChoice")}
+        // Ticking the box on the mode already in use saves it as is; no second pick is needed.
+        onKeepCurrent={(value) => {
+          if (isMode(value)) void savePermissionDefault(session.kind, value).catch((err) => setError(String(err)));
+        }}
         menuWidth={240}
       />
     </div>
@@ -2436,7 +2651,7 @@ export function ChatPane({
       menuWidth={240}
     />
   ) });
-  if (session.kind === "claude") composerChips.push({ id: "tasks", node: (
+  if (session.kind === "claude" || session.kind === "opencode" || session.kind === "deepseek" || session.kind === "antigravity") composerChips.push({ id: "tasks", node: (
     <TasksChip
       sessionId={session.id}
       tasks={extras.backgroundTasks ?? []}
@@ -2444,9 +2659,12 @@ export function ChatPane({
       disabled={!engineRunning}
       onStop={(taskId) => void chatStopTask(session.id, taskId).catch((err) => setError(String(err)))}
       onOpen={(task) => openTaskTab(session.id, task)}
-      onBackgroundAll={() => void chatBackgroundTasks(session.id).catch((err) => setError(String(err)))}
+      onBackgroundAll={session.kind === "antigravity" ? undefined : () => void chatBackgroundTasks(session.id).catch((err) => setError(String(err)))}
     />
   ) });
+  // DeepSeek's credentials belong to the conversation that uses them; the chip keeps the endpoint and
+  // key one click away from the message box rather than in the app's Settings.
+  if (session.kind === "deepseek") composerChips.push({ id: "deepseekApi", node: <DeepSeekApiChip /> });
   // The account menu disables itself while a sign-in is unresolved; the inline panel handles that flow.
   const authProvider = session.kind === "claude" ? "Claude" : session.kind === "codex" ? "Codex" : session.kind === "zcode" ? "ZCode" : null;
   // A check at open finds a missing sign-in before any process exists to report it. A sign-in under way wins.
@@ -2490,6 +2708,7 @@ export function ChatPane({
     <div
       className="term-mount"
       ref={attachChatInputGuard}
+      onContextMenu={paneFieldMenu.onContextMenu}
       onMouseDown={() => {
         if (paneId) onActivate(paneId, session.id);
       }}
@@ -2511,6 +2730,8 @@ export function ChatPane({
         padding: paneStyle === "card" ? "calc(var(--pane-gap) / 2)" : 0,
       }}
     >
+      {composerMenu.textFieldMenu}
+      {paneFieldMenu.textFieldMenu}
       <div
         className={"pane" + (focused ? " focus" : "")}
         style={{ width: "100%", height: "100%", contain: "layout" }}
@@ -2554,7 +2775,7 @@ export function ChatPane({
         </div>
 
         <ArtifactHostContext.Provider value={artifactHost}>
-        <div style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0 }}>
+        <div ref={dockRowRef} style={{ display: "flex", flex: 1, minHeight: 0, minWidth: 0 }}>
         <div ref={paneRef} className={"sv" + (shortPane && !mobile ? " sv-short" : "")} style={{ position: "relative", flex: 1, minHeight: 0, minWidth: 0 }}>
           {searchOpen && focused && !hidden && (snapshotRef.current?.protocolVersion === 2
             ? <HistorySearch key={session.id} sessionId={session.id} onLocate={locateHistorySearch} onClose={closeSearch} />
@@ -2643,8 +2864,9 @@ export function ChatPane({
                           onToggleRun={toggleRun}
                           onToggleFold={toggleTurn}
                           onRewind={!readOnly && rows.some(row => row.id === entry.id) ? askRewind : undefined}
-                          rewindDisabledReason={rewindDisabledReason}
+                          rewindDisabledReason={entryRewindReason(entry.id)}
                           rewindScopes={rewindScopes}
+                          rewindGuide={!readOnly && rows.some(row => row.id === entry.id) ? rewindGuide : undefined}
                           rewindRequest={rewindRequest}
                           onRewindRequestHandled={finishRewindRequest}
                           onCancelShell={readOnly ? undefined : cancelShell}
@@ -2666,8 +2888,9 @@ export function ChatPane({
                     onToggleRun={toggleRun}
                     onToggleFold={toggleTurn}
                     onRewind={!readOnly && rows.some(row => row.id === entry.id) ? askRewind : undefined}
-                    rewindDisabledReason={rewindDisabledReason}
+                    rewindDisabledReason={entryRewindReason(entry.id)}
                     rewindScopes={rewindScopes}
+                    rewindGuide={!readOnly && rows.some(row => row.id === entry.id) ? rewindGuide : undefined}
                     rewindRequest={rewindRequest}
                     onRewindRequestHandled={finishRewindRequest}
                     onCancelShell={readOnly ? undefined : cancelShell}
@@ -2740,6 +2963,8 @@ export function ChatPane({
               ))}
             </div>
           )}
+          {/* App actions the agent asked for with vapp wait here for the user, like permission requests. */}
+          {!readOnly && !isShareSurface && <AssistRequests sessionId={session.id} className="sv-permissions" />}
 
           {pendingRewind ? (
             <div className="sv-rewind-confirm-wrap">
@@ -2770,6 +2995,8 @@ export function ChatPane({
                     ? t("chat.rewind.previewing")
                     : pendingRewind.preview?.canRewind === false
                       ? pendingRewind.preview.error || t("chat.rewind.unavailable")
+                      : latestOnly && pendingRewind.scope !== "files" && pendingRewind.replacement === undefined
+                        ? t("chat.rewind.appliesOnSend")
                       : pendingRewind.scope === "conversation" || !pendingRewind.preview?.filesChanged
                         ? t("chat.rewind.warning")
                         : t(
@@ -2798,6 +3025,38 @@ export function ChatPane({
             </div>
           ) : null}
 
+          {rewindGuideOpen && !readOnly && session.kind === "antigravity" ? (
+            <div className="sv-rewind-confirm-wrap">
+              <div className="sv-rewind-guide-card sv-popover" role="region" aria-label={t("chat.antigravity.rewindTitle")}>
+                <div className="sv-rewind-confirm-head">
+                  <Icons.restart size={13} />
+                  <strong>{t("chat.antigravity.rewindTitle")}</strong>
+                </div>
+                <div className="sv-rewind-confirm-detail">
+                  {t("chat.antigravity.rewindGuide")}
+                </div>
+                <div className="sv-rewind-actions">
+                  <button type="button" className="sv-deny" onClick={() => setRewindGuideOpen(false)}>
+                    {t("common.close")}
+                  </button>
+                  {canSwitchToTerminal ? (
+                    <button
+                      type="button"
+                      className="sv-allow sv-rewind-guide-btn"
+                      onClick={() => {
+                        setRewindGuideOpen(false);
+                        switchToTerminal();
+                      }}
+                    >
+                      <Icons.terminal size={13} />
+                      <span>{t("chat.antigravity.switchToTerminal")}</span>
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {/* The whole composer is the drop target, not just the text box: aiming at a one-line input to
               attach a picture is a needlessly small target. */}
           {!readOnly && <div
@@ -2808,10 +3067,9 @@ export function ChatPane({
               if (e.dataTransfer?.types?.includes("Files")) e.preventDefault();
             }}
             onDrop={(e) => {
-              const files = imagesFromDrop(e.dataTransfer);
-              if (files.length === 0) return;
+              if (!e.dataTransfer?.files?.length) return;
               e.preventDefault();
-              void addFiles(files);
+              onComposerDrop(e.dataTransfer);
             }}
           >
             {(completion || (wantsCatalogue && catalogueLoading && draft !== dismissed)) && (
@@ -2915,9 +3173,6 @@ export function ChatPane({
                 </div>
               </div>
             )}
-            {session.kind === "antigravity" && mode !== "bypassPermissions" && (
-              <div className="sv-attach-note" role="note">{t("chat.antigravity.permissionsHint")}</div>
-            )}
             {attachNote && <div className="sv-attach-note">{attachNote}</div>}
             {attachments.length > 0 && (
               <div className="sv-attach">
@@ -2947,6 +3202,7 @@ export function ChatPane({
               <textarea
                 ref={inputRef}
                 onPaste={onPaste}
+                onContextMenu={composerMenu.onContextMenu}
                 disabled={clientCommandRunning}
                 value={draft}
                 rows={1}
@@ -3041,9 +3297,9 @@ export function ChatPane({
                   {composerHint && <span>{t("chat.interruptTooltip")}{supportsSteering(session.kind) && <> · {t("chat.steerTooltip", steerCombo)}</>}</span>}
                 </div>
               )}
-              <ComposerToolbar mobile={mobile} chips={composerChips} inline={["translation", ...composerInlineChips]}
+              <ComposerToolbar mobile={mobile} chips={composerChips} inline={["translation", ...composerInlineChips, "deepseekApi"]}
                 actions={<>
-                  {(session.kind === "claude" || session.kind === "codex" || session.kind === "deepseek" || session.kind === "zcode") && <UsageMeter extras={extras} />}
+                  {(session.kind === "claude" || session.kind === "codex" || session.kind === "zcode") && <UsageMeter extras={extras} />}
                   {busy && supportsSteering(session.kind) && (
                     <button
                       className="sv-steer"
@@ -3071,18 +3327,18 @@ export function ChatPane({
         {dockPath && artifactHost.openBeside && (
           <>
             <Splitter
-              onDrag={(dx) =>
-                setDockWidth((w) => {
-                  const next = Math.min(DOCK_MAX_W, Math.max(DOCK_MIN_W, w - dx));
-                  try { localStorage.setItem(DOCK_WIDTH_KEY, String(Math.round(next))); } catch { /* Keep it for this session. */ }
-                  return next;
-                })
-              }
+              onDragStart={() => { liveDockWidth.current = clampDockWidth(dockWidth); }}
+              onDrag={(dx) => previewDockWidth(clampDockWidth(liveDockWidth.current - dx))}
+              onDragEnd={() => {
+                const width = liveDockWidth.current;
+                setDockWidth(width);
+                try { localStorage.setItem(DOCK_WIDTH_KEY, String(width)); } catch { /* Keep it for this session. */ }
+              }}
             />
             {isArtifactPath(dockPath)
-              ? <ArtifactDock path={dockPath} onClose={() => setDockPath(null)} style={{ width: dockWidth, maxWidth: "70%" }} />
+              ? <ArtifactDock path={dockPath} onClose={() => setDockPath(null)} style={{ width: "var(--dock-w)", maxWidth: "70%" }} />
               : <DockDocView key={dockPath} path={dockPath} reloadKey={dockOpenCount} onClose={() => setDockPath(null)}
-                  style={{ width: dockWidth, maxWidth: "70%" }} />}
+                  style={{ width: "var(--dock-w)", maxWidth: "70%" }} />}
           </>
         )}
         </div>

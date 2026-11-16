@@ -129,7 +129,7 @@ function MenuPanel(props: PanelProps) {
         },
         onFocus: (e: React.FocusEvent<HTMLElement>) => { setAnchor(e.currentTarget.getBoundingClientRect()); },
       };
-      const content = <>{aligned && <span aria-hidden style={{ width: 16, flex: "0 0 16px", display: "grid", placeItems: "center", color: item.checked ? "var(--accent)" : "inherit" }}>{item.checked ? "✓" : item.icon}</span>}<span style={{ flex: 1, overflowWrap: "anywhere" }}>{item.label}</span>{item.shortcut && <span aria-hidden style={{ color: "var(--text-muted)", fontSize: 10, whiteSpace: "nowrap", paddingLeft: 16 }}>{item.shortcut}</span>}{item.submenu && <span aria-hidden style={{ color: "var(--text-muted)" }}>›</span>}</>;
+      const content = <>{aligned && <span aria-hidden style={{ width: 16, flex: "0 0 16px", display: "grid", placeItems: "center", color: item.checked ? "var(--accent)" : "inherit" }}>{item.checked ? "✓" : item.icon}</span>}<span style={{ flex: 1, overflowWrap: "anywhere" }}>{item.label}</span>{item.shortcut && <span aria-hidden style={{ color: "var(--text-muted)", whiteSpace: "nowrap", paddingLeft: 24 }}>{item.shortcut}</span>}{item.submenu && <span aria-hidden style={{ color: "var(--text-muted)" }}>›</span>}</>;
       return <div key={i} onMouseLeave={() => { if (expanded) { setOpen(path); setActive(itemPath); } }}>
         {item.href && !item.submenu ? <a {...attrs} href={item.disabled ? undefined : item.href}>{content}</a> : <div {...attrs}>{content}</div>}
         {expanded && anchor && <Submenu {...props} panelRef={undefined} path={itemPath} items={item.submenu!} anchor={anchor} />}

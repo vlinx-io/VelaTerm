@@ -6,7 +6,7 @@
 //   2. window.vlxNative: a controlled wrapper around native capabilities that delegates to individual IPC
 //      handlers in the main process (see main.cjs).
 
-const { contextBridge, ipcRenderer, webUtils } = require("electron");
+const { contextBridge, ipcRenderer, webFrame, webUtils } = require("electron");
 
 // Development detection: the main process injects this through webPreferences.additionalArguments as the
 // inverse of app.isPackaged. Unpackaged `pnpm electron:dev` runs are development builds; electron-builder
@@ -87,7 +87,7 @@ contextBridge.exposeInMainWorld("vlxNative", {
    */
   updater: {
     supported: process.argv.includes("--vlx-updater=1"),
-    check: (headers) => ipcRenderer.invoke("vlx:updater:check", headers),
+    check: (headers, region) => ipcRenderer.invoke("vlx:updater:check", headers, region),
     downloadAndInstall: async (onEvent) => {
       const handler = (_e, ev) => onEvent?.(ev);
       ipcRenderer.on("vlx:updater:progress", handler);
@@ -98,6 +98,10 @@ contextBridge.exposeInMainWorld("vlxNative", {
       }
     },
     relaunch: () => ipcRenderer.invoke("vlx:updater:relaunch"),
+  },
+  /** Whole-interface page zoom (src/platform/uiZoom.ts); the factor is clamped by the page before it gets here. */
+  setZoomFactor: (factor) => {
+    if (Number.isFinite(factor) && factor >= 0.5 && factor <= 3) webFrame.setZoomFactor(factor);
   },
   /** Native message box, used where the page has no dialog of its own (update results). */
   message: (opts) => ipcRenderer.invoke("vlx:dialog:message", opts),

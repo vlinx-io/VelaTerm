@@ -130,4 +130,49 @@ describe("elicitation form", () => {
     values.enabled = true;
     expect(buildElicitationContent(fields, values)).toEqual({ enabled: true, count: 2, detail: "hidden answer" });
   });
+
+  it("supports anyOf multiselect items, propertyOrdering, and numeric qN sorting", () => {
+    const unordered = parseElicitationFields({
+      type: "object",
+      properties: {
+        q10: { type: "string", title: "Tenth" },
+        q2: {
+          type: "array",
+          title: "Pick many",
+          items: {
+            anyOf: [
+              { const: "1", title: "Alpha" },
+              { const: "2", title: "Beta" },
+            ],
+          },
+        },
+        q2_other: { type: "string", title: "Other" },
+        q1: {
+          type: "string",
+          title: "First",
+          oneOf: [{ const: "1", title: "Only" }],
+        },
+      },
+    });
+    expect(unordered.map((f) => [f.name, f.kind])).toEqual([
+      ["q1", "enum"],
+      ["q2", "multiselect"],
+      ["q2_other", "text"],
+      ["q10", "text"],
+    ]);
+    expect(unordered[1].options).toEqual([
+      { value: "1", label: "Alpha" },
+      { value: "2", label: "Beta" },
+    ]);
+
+    const ordered = parseElicitationFields({
+      type: "object",
+      propertyOrdering: ["second", "first"],
+      properties: {
+        first: { type: "string" },
+        second: { type: "string" },
+      },
+    });
+    expect(ordered.map((f) => f.name)).toEqual(["second", "first"]);
+  });
 });

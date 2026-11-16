@@ -83,6 +83,8 @@ export interface TreeHandlers {
   view: SidebarTreeView;
   /** Only the primary projection consumes global reveal requests. */
   isPrimary: boolean;
+  /** Active pane of the shown section; it takes explicit session reveal requests. Absent means the primary one. */
+  active?: boolean;
   /** Section of the pane group this tree belongs to; absent means Projects. */
   section?: RailSection;
   onContext: (node: TreeNodeRef, x: number, y: number) => void;
@@ -363,6 +365,7 @@ export function ProjectTree(h: TreeHandlers) {
     onNewCollection,
     view,
     isPrimary,
+    active = isPrimary,
     section = "projects",
   } = h;
 
@@ -501,6 +504,25 @@ export function ProjectTree(h: TreeHandlers) {
   }, [filter, projects, groups, sessions]);
   const nameMatch = (id: string) => filter.length > 0 && nameHitIds.has(id);
 
+  // Collections, projects and groups that appear while the filter conditions stay the same were just created (or
+  // restored) by the user, so they stay visible even though nothing inside them matches yet. Changing any condition
+  // starts over and judges every node by the conditions alone. Nodes present when the tree loads are never fresh.
+  const filterKey = filtering && treeLoaded ? JSON.stringify([filter, statusFilter, markFilter]) : "";
+  const freshRef = useRef<{ key: string; known: Set<string>; fresh: Set<string> }>({
+    key: "", known: new Set(), fresh: new Set(),
+  });
+  const freshIds = useMemo(() => {
+    const ids = [...projects.map((p) => p.id), ...groups.map((g) => g.id)];
+    const prev = freshRef.current;
+    const fresh = new Set<string>();
+    if (filterKey && prev.key === filterKey) {
+      for (const id of prev.fresh) fresh.add(id);
+      for (const id of ids) if (!prev.known.has(id)) fresh.add(id);
+    }
+    freshRef.current = { key: filterKey, known: new Set(ids), fresh };
+    return fresh;
+  }, [filterKey, projects, groups]);
+
   const groupsById = useMemo(
     () => new Map(groups.map((g) => [g.id, g])),
     [groups],
@@ -594,6 +616,7 @@ export function ProjectTree(h: TreeHandlers) {
       const vis =
         nodeSelfMatch(g.id, g.mark) ||
         keptGroup(g) ||
+        freshIds.has(g.id) ||
         sessions.some(
           (s) => !s.parentSessionId && s.groupId === g.id && subtreeVisible(s),
         ) ||
@@ -607,6 +630,7 @@ export function ProjectTree(h: TreeHandlers) {
     for (const p of projects) {
       const vis =
         nodeSelfMatch(p.id, p.mark) ||
+        freshIds.has(p.id) ||
         sessions.some(
           (s) =>
             !s.parentSessionId &&
@@ -637,7 +661,9 @@ export function ProjectTree(h: TreeHandlers) {
     }
     return { visGroups: visG, visProjects: visP };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtering, filter, nameHitIds, statusFiltering, statusFilterIds, markFilter, groups, sessions, projects]);
+  }, [
+    filtering, filter, nameHitIds, statusFiltering, statusFilterIds, markFilter, freshIds, groups, sessions, projects,
+  ]);
 
   // Running terminals and the agents started in them. Each row is the session itself; an agent row shows the
   // agent's icon in place of the terminal's.
@@ -1004,6 +1030,15 @@ export function ProjectTree(h: TreeHandlers) {
     if (st.revealSuppressId) st.setRevealSuppress(null);
     revealPendingRef.current = suppressed ? null : activeSessionId;
   }, [activeSessionId, isPrimary]);
+  // An explicit request, such as starting a session from the New Session tab, goes to the active pane of the shown
+  // section, which need not be the primary one. Declared after the effect above so a pane mounting with the
+  // section switch keeps the target.
+  const revealSessionId = useTermStore((s) => s.revealSessionId);
+  useEffect(() => {
+    if (!revealSessionId || !active) return;
+    revealPendingRef.current = revealSessionId;
+    useTermStore.getState().setRevealSession(null);
+  }, [revealSessionId, active]);
   useEffect(() => {
     const id = revealPendingRef.current;
     if (!id) return;
@@ -1032,25 +1067,26 @@ export function ProjectTree(h: TreeHandlers) {
       setWtNodeCollapsed(wtId, false);
       changed = true;
     }
+    // Expand through this pane's collapse state: the shared one in the primary pane, its own map in the others.
     let ps = s.parentSessionId ? sessionsById.get(s.parentSessionId) : undefined;
     while (ps) {
-      if (ps.collapsed) {
-        void toggleCollapsed("session", ps.id);
+      if (nodeCollapsed(ps.id, ps.collapsed)) {
+        toggleNodeCollapsed("session", ps.id, ps.collapsed);
         changed = true;
       }
       ps = ps.parentSessionId ? sessionsById.get(ps.parentSessionId) : undefined;
     }
     let g = s.groupId ? groupsById.get(s.groupId) : undefined;
     while (g) {
-      if (g.collapsed) {
-        void toggleCollapsed("group", g.id);
+      if (nodeCollapsed(g.id, g.collapsed)) {
+        toggleNodeCollapsed("group", g.id, g.collapsed);
         changed = true;
       }
       g = g.parentGroupId ? groupsById.get(g.parentGroupId) : undefined;
     }
     const proj = projects.find((p) => p.id === s.projectId);
-    if (proj?.collapsed) {
-      void toggleCollapsed("project", proj.id);
+    if (proj && nodeCollapsed(proj.id, proj.collapsed)) {
+      toggleNodeCollapsed("project", proj.id, proj.collapsed);
       changed = true;
     }
     let parentId = proj?.collectionId;
@@ -1058,13 +1094,16 @@ export function ProjectTree(h: TreeHandlers) {
     while (parentId && !seen.has(parentId)) {
       seen.add(parentId);
       const parent = projects.find(p => p.id === parentId);
-      if (parent?.collapsed) { void toggleCollapsed("project", parent.id); changed = true; }
+      if (parent && nodeCollapsed(parent.id, parent.collapsed)) {
+        toggleNodeCollapsed("project", parent.id, parent.collapsed);
+        changed = true;
+      }
       parentId = parent?.collectionId;
     }
     // If all ancestors are expanded and the row is still absent, clear pending state defensively.
     if (!changed) revealPendingRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSessionId, rows]);
+  }, [activeSessionId, revealSessionId, rows]);
 
   const rangeSelect = (targetId: string) => {
     const anchor = selectionAnchor ?? targetId;
@@ -1814,14 +1853,27 @@ export function ProjectTree(h: TreeHandlers) {
     const root = section === "tasks" ? SYSTEM_TASKS : SYSTEM_CHAT;
     return (
       <div className="sidebar-section-empty">
-        <div>{t(section === "tasks" ? "sidebarSection.noTasks" : "sidebarSection.noChats")}</div>
+        <div className="sidebar-section-empty-title">{t(section === "tasks" ? "sidebarSection.noTasks" : "sidebarSection.noChats")}</div>
+        <div className="sidebar-section-empty-desc">{t(section === "tasks" ? "newSession.typeTaskHint" : "newSession.typeChatHint")}</div>
         <button
-          className="empty-action"
+          className="empty-action primary sm block"
           onClick={(e) => onAddSession({ kind: "project", id: root, name: "", projectId: root, groupId: null }, e.clientX, e.clientY)}
         >
           <Icons.plus size={14} />
           {t(section === "tasks" ? "newSession.newTask" : "newSession.newChat")}
         </button>
+        <a
+          className="empty-action ghost"
+          href={newGroupDialogUrl(root)}
+          onClick={(event) => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            onAddGroup({ kind: "project", id: root, name: "", projectId: root, groupId: null });
+          }}
+        >
+          <Icons.newGroup size={14} />
+          {t("tree.newGroup")}
+        </a>
       </div>
     );
   }
@@ -1846,13 +1898,13 @@ export function ProjectTree(h: TreeHandlers) {
           {t("tree.noProjectsPost")}
         </div>
         <div className="project-empty-actions">
+          <button className="empty-action primary" onClick={() => void importProject()}>
+            <Icons.projectOpen size={14} />
+            {t("tree.openProject")}
+          </button>
           <button className="empty-action" onClick={() => setCreateProjectModalOpen(true)}>
             <Icons.projectPlus size={14} />
             {t("tree.createProject")}
-          </button>
-          <button className="empty-action" onClick={() => void importProject()}>
-            <Icons.projectOpen size={14} />
-            {t("tree.openProject")}
           </button>
           <button className="empty-action" onClick={() => setCloneModalOpen(true)}>
             <Icons.projectClone size={14} />
@@ -1873,8 +1925,38 @@ export function ProjectTree(h: TreeHandlers) {
   // Under filtering, empty rows means no visible project because temporary groups are excluded; show an empty hint.
   const showEmptyHint = filtering && rows.length === 0;
 
+  // Tasks and Chats hide their own collection row, so the blank space below the rows stands in for it: right-click
+  // opens the collection's menu and dropping a session or group there takes it out of its group.
+  const typedRoot = sectionRoot === SYSTEM_TASKS || sectionRoot === SYSTEM_CHAT ? sectionRoot : null;
+  const blankTarget = (e: React.SyntheticEvent) => !!typedRoot && e.target === e.currentTarget;
+  const blankProps = typedRoot ? {
+    onContextMenu: (e: React.MouseEvent) => {
+      if (!blankTarget(e)) return;
+      ctx({ kind: "project", id: typedRoot, name: "", projectId: typedRoot, groupId: null })(e);
+    },
+    onDragOver: (e: React.DragEvent) => {
+      if (!blankTarget(e) || hasProjectDrag(e.dataTransfer.types)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      setDragOver((prev) => (prev?.id === typedRoot ? prev : { id: typedRoot, zone: "center" }));
+    },
+    onDragLeave: (e: React.DragEvent) => {
+      if (blankTarget(e)) setDragOver((d) => (d?.id === typedRoot ? null : d));
+    },
+    onDrop: (e: React.DragEvent) => {
+      if (!blankTarget(e)) return;
+      e.preventDefault();
+      setDragOver(null);
+      const p = readPayload(e);
+      // Only items already in this section move here; sessions of another type keep their own collection.
+      if (!p || p.kind === "project" || p.projectId !== typedRoot) return;
+      if (p.ids && p.ids.length >= 2) void moveMany(p.ids, typedRoot, null, null);
+      else void moveNode(p.kind, p.id, typedRoot, null, null, Date.now());
+    },
+  } : {};
+
   return (
-    <div ref={setParent} className="tree">
+    <div ref={setParent} className={typedRoot && dragOver?.id === typedRoot ? "tree drop-root" : "tree"} {...blankProps}>
       {showEmptyHint ? (
         <div style={{ padding: "12px", fontSize: 12, color: "var(--text-faint)" }}>
           {statusFiltering && !filter ? t("tree.noAttention") : t("tree.noMatch")}

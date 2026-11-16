@@ -66,7 +66,7 @@ pub fn write_markdown(branch:Branch,name:&str,exported_at:Option<&str>,cancel:&A
             write(writer,&format!("## {label}{}\n\n",at.filter(|at|!at.is_empty()).map(|at|format!(" · {at}")).unwrap_or_default()))?;role=next;
         }
         match item.event {
-            Event::User {..}|Event::AssistantText {..}=>item.body.write(&branch,cancel,writer,!matches!(branch.kind,crate::models::SessionKind::Opencode|crate::models::SessionKind::Kiro))?,
+            Event::User {..}|Event::AssistantText {..}=>item.body.write(&branch,cancel,writer,!branch.kind.uses_opencode()&&branch.kind!=crate::models::SessionKind::Kiro)?,
             Event::Thinking {..}=> {
                 write(writer,"**💭 Thinking**\n\n")?;let mut line=true;
                 item.body.walk(&branch,cancel,&mut |text| {

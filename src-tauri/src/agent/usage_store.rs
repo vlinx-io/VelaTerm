@@ -19,7 +19,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::transcript::CodexUsage;
-use crate::agent::usage::{ClaudeUsage, FetchError, GrokUsage, ZcodeUsage};
+use crate::agent::usage::{AntigravityUsage, ClaudeUsage, FetchError, GrokUsage, ZcodeUsage};
 use crate::host::AppCtx;
 use crate::models::SessionKind;
 
@@ -90,6 +90,9 @@ pub struct UsageSnapshot {
     /// Defaults so snapshots persisted before ZCode had a quota still load.
     #[serde(default)]
     pub zcode: UsageEntry<ZcodeUsage>,
+    /// Defaults so snapshots persisted before Antigravity had a quota still load.
+    #[serde(default)]
+    pub antigravity: UsageEntry<AntigravityUsage>,
     /// True while automatic polling is enabled in settings; the panel hides its countdown when off.
     pub auto: bool,
     /// Effective poll interval in seconds, so the panel can count down to the next refresh.
@@ -103,11 +106,13 @@ pub enum Provider {
     Codex,
     Grok,
     Zcode,
+    Antigravity,
 }
 
 impl Provider {
     /// All providers, in the order the poller visits them.
-    const ALL: [Provider; 4] = [Provider::Claude, Provider::Codex, Provider::Grok, Provider::Zcode];
+    const ALL: [Provider; 5] =
+        [Provider::Claude, Provider::Codex, Provider::Grok, Provider::Zcode, Provider::Antigravity];
 
     /// Parse the frontend's session-kind string; unknown names have no quota source.
     pub fn parse(s: &str) -> Option<Provider> {
@@ -116,6 +121,7 @@ impl Provider {
             "codex" => Some(Provider::Codex),
             "grok" => Some(Provider::Grok),
             "zcode" => Some(Provider::Zcode),
+            "antigravity" => Some(Provider::Antigravity),
             _ => None,
         }
     }
@@ -133,6 +139,10 @@ impl Provider {
             // The store `zcode login` writes; the platform and key inside are read only when fetching.
             Provider::Zcode => crate::host::home_dir()
                 .is_some_and(|h| h.join(".zcode").join("v2").join("credentials.json").is_file()),
+            // The CLI's app data directory, created on first sign-in; the account itself is checked by
+            // the CLI when it answers `/usage`.
+            Provider::Antigravity => crate::host::home_dir()
+                .is_some_and(|h| h.join(".gemini").join("antigravity-cli").is_dir()),
         }
     }
 }
@@ -182,6 +192,7 @@ fn key(p: Provider) -> &'static str {
         Provider::Codex => "codex",
         Provider::Grok => "grok",
         Provider::Zcode => "zcode",
+        Provider::Antigravity => "antigravity",
     }
 }
 
@@ -328,6 +339,7 @@ fn fetch_one(ctx: &AppCtx, p: Provider, force: bool) -> bool {
             .map_err(FetchError::from),
         Provider::Grok => crate::agent::usage::grok_usage(force).map(StoredValue::Grok),
         Provider::Zcode => zcode_account_usage(ctx).map(StoredValue::Zcode),
+        Provider::Antigravity => antigravity_account_usage(ctx).map(StoredValue::Antigravity),
     };
 
     let mut guard = STATE.lock().unwrap();
@@ -356,12 +368,14 @@ fn fetch_one(ctx: &AppCtx, p: Provider, force: bool) -> bool {
         Ok(StoredValue::Codex(u)) => mark_ok(&mut st.snapshot.codex, u, now),
         Ok(StoredValue::Grok(u)) => mark_ok(&mut st.snapshot.grok, u, now),
         Ok(StoredValue::Zcode(u)) => mark_ok(&mut st.snapshot.zcode, u, now),
+        Ok(StoredValue::Antigravity(u)) => mark_ok(&mut st.snapshot.antigravity, u, now),
         // Keep the previous reading on failure: a stale number with a stale marker beats an empty panel.
         Err(e) => match p {
             Provider::Claude => mark_err(&mut st.snapshot.claude, e, now),
             Provider::Codex => mark_err(&mut st.snapshot.codex, e, now),
             Provider::Grok => mark_err(&mut st.snapshot.grok, e, now),
             Provider::Zcode => mark_err(&mut st.snapshot.zcode, e, now),
+            Provider::Antigravity => mark_err(&mut st.snapshot.antigravity, e, now),
         },
     }
     st.snapshot != before
@@ -387,6 +401,7 @@ enum StoredValue {
     Codex(CodexUsage),
     Grok(GrokUsage),
     Zcode(ZcodeUsage),
+    Antigravity(AntigravityUsage),
 }
 
 /// The ZCode plan quota, with the key of the plan the signed-in account holds. The key is read the way a
@@ -400,6 +415,16 @@ fn zcode_account_usage(ctx: &AppCtx) -> Result<ZcodeUsage, FetchError> {
         .plan_api_key()
         .ok_or_else(|| FetchError::from("Sign in to ZCode with a GLM Coding Plan to see its quota".to_string()))?;
     crate::agent::usage::zcode_usage(&platform, &key)
+}
+
+/// The Antigravity plan quota, read by asking the installed `agy` for `/usage`. It runs from VelaTerm's
+/// data directory so no user project becomes a CLI workspace, and logs to a file there that each run
+/// overwrites.
+fn antigravity_account_usage(ctx: &AppCtx) -> Result<AntigravityUsage, FetchError> {
+    let bin = crate::agent::executable::resolve(ctx, SessionKind::Antigravity, None)
+        .ok_or_else(|| FetchError::from("Antigravity (agy) is not installed".to_string()))?;
+    let dir = ctx.data_dir().map_err(FetchError::from)?;
+    crate::agent::usage::antigravity_usage(&bin, &dir, &dir.join("agy-usage.log"))
 }
 
 /// Account-level Codex limits without any session context.
@@ -477,6 +502,9 @@ fn restore_once(ctx: &AppCtx) {
     if st.snapshot.zcode.data.is_none() {
         st.snapshot.zcode = snap.zcode;
     }
+    if st.snapshot.antigravity.data.is_none() {
+        st.snapshot.antigravity = snap.antigravity;
+    }
 }
 
 /// Persist the snapshot so the next launch paints immediately. Failures are logged, never fatal.
@@ -504,6 +532,7 @@ mod tests {
         assert_eq!(Provider::parse(" codex "), Some(Provider::Codex));
         assert_eq!(Provider::parse("grok"), Some(Provider::Grok));
         assert_eq!(Provider::parse("zcode"), Some(Provider::Zcode));
+        assert_eq!(Provider::parse("antigravity"), Some(Provider::Antigravity));
         assert_eq!(Provider::parse("terminal"), None);
     }
 

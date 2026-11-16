@@ -1,6 +1,7 @@
 //! Korean dictionary. Each entry includes its English source in a trailing review comment; en.ts enforces the complete key set.
 
 import type en from "./en";
+import assist from "../assist/ko";
 
 const ko: typeof en = {
   "panel.turnStats": "턴 통계",
@@ -8,6 +9,8 @@ const ko: typeof en = {
   "panel.showChangedFiles": "이번 턴에서 변경된 파일 보기",
   "panel.noFilesChanged": "이번 턴에서 편집된 파일이 없습니다.",
   "panel.shellEditsNotListed": "셸 명령으로 변경한 내용은 목록에 표시되지 않습니다.",
+  "panel.usageShowScope": (scope: string) => `${scope} 표시`,
+  "panel.usageHideScope": (scope: string) => `${scope} 숨기기`,
   "translation.swap": "언어 바꾸기",
   "translation.openai": "OpenAI 호환",
   "translation.bing": "Bing 번역(API 키 불필요)",
@@ -373,6 +376,7 @@ const ko: typeof en = {
   "common.create": "생성", // Create
   "common.close": "닫기", // Close
   "chat.copyAsMarkdown": "Markdown 형식으로 복사",
+  "chat.copyEntireMessage": "메시지 전체 복사",
   "chat.imageViewOriginal": "원본 이미지 보기",
   "chat.imageCopy": "이미지 복사",
   "chat.imageSave": "이미지 저장",
@@ -523,6 +527,19 @@ const ko: typeof en = {
   "settings.agentDefaultView": "기본 보기", // Default view
   "settings.agentDefaultViewHint":
     "이 에이전트의 새 세션이 열리는 보기입니다. 기존 세션은 만들 때의 보기를 유지합니다.", // Agent default view hint
+  "settings.deepseekApiTitle": "DeepSeek API",
+  "settings.deepseekApiDesc":
+    "DeepSeek 대화는 OpenCode를 통해 실행됩니다. 여기에 API 주소와 키를 입력하면 모든 대화에서 동일한 로그인 정보를 사용합니다.",
+  "settings.deepseekBaseUrl": "API 주소",
+  "settings.deepseekEndpointHint":
+    "주소를 비워 두면 공식 엔드포인트를 사용합니다. 변경 사항은 다음 메시지부터 적용됩니다.",
+  "settings.deepseekApiKey": "API 키",
+  "settings.deepseekKeySaved": "저장됨(비워 두면 유지)",
+  "settings.deepseekKeyPlaceholder": "DeepSeek API 키 입력",
+  "settings.deepseekRemoveKey": "키 삭제",
+  "settings.deepseekSaved": "저장했습니다.",
+  "settings.deepseekInvalid": "유효한 http(s) API 주소와 한 줄짜리 API 키를 입력하세요.",
+  "settings.deepseekLocalOnly": "이 자격 증명은 실행 호스트에 저장되므로 호스트에서만 변경할 수 있습니다.",
   "settings.appearance": "외관", // Appearance
   "settings.accent": "강조색", // Accent
   "settings.accentAuto": "테마 따름", // Follow theme
@@ -822,16 +839,26 @@ const ko: typeof en = {
   "settings.recordSessions": "세션 로그 기록", // Record session logs
   "settings.recordSessionsHint":
     "기본값은 끔. 켜면 터미널 출력을 로그 파일로 저장해 보관 재생과 검색에 사용합니다. 일반 터미널 세션은 기록하지 않으며, 에이전트 세션은 자체 대화 기록을 읽습니다.", // Record session logs hint
-  "settings.fonts": "Fonts", // TODO translate
+  "settings.fonts": "글꼴",
   "settings.uiFontSize": "인터페이스 글꼴 크기",
   "settings.termFont": "터미널 글꼴",
   "settings.termFontSize": "터미널 글꼴 크기",
   "settings.termLineHeight": "터미널 줄 높이",
   "settings.chatTypography": "대화 보기",
-  "settings.chatTypographyHint": "글꼴 설정은 터미널과 별도로 저장되며 변경 사항은 즉시 적용됩니다.",
+  "settings.chatTypographyHint": "이 설정은 터미널과 별도로 저장되며 변경 사항은 즉시 적용됩니다. 기본적으로 본문에는 인터페이스 글꼴이, 코드에는 인터페이스 고정폭 글꼴이 사용됩니다.",
   "settings.chatFont": "대화 글꼴",
   "settings.chatFontSize": "대화 글꼴 크기",
   "settings.chatLineHeight": "대화 줄 높이",
+  "settings.chatCodeFont": "대화 코드 글꼴",
+  "settings.chatLetterSpacing": "대화 자간",
+  "settings.uiTypography": "인터페이스 글꼴",
+  "settings.uiTypographyHint": "메뉴, 목록, 대화상자, 문서에 적용됩니다. 고정폭 글꼴은 코드, 경로, 변경 비교에 사용되며 터미널 글꼴은 따로 설정합니다.",
+  "settings.uiFont": "일반 글꼴",
+  "settings.uiMonoFont": "고정폭 글꼴",
+  "settings.fontPreview": "미리 보기",
+  "settings.fontPreviewText": "다람쥐 헌 쳇바퀴에 타고파. The quick brown fox 0123456789",
+  "settings.fontPreviewChat": "설정 화면을 업데이트했습니다. 각 글꼴 설정은 즉시 적용되며 언제든지 기본값으로 되돌릴 수 있습니다.",
+  "settings.fontResetGroup": "글꼴 기본값 복원",
   "settings.composerChips": "메시지 입력 도구 모음",
   "settings.composerChipsHint": "켜진 항목은 여기에 표시된 순서대로 메시지 옆에 나타납니다. 에이전트가 실행 중이 아니거나, 백그라운드 작업이 없거나, 로그인이 완료되지 않아 기능을 일시적으로 사용할 수 없을 때도 해당 항목은 비어 있거나 비활성화된 상태로 표시됩니다. 현재 에이전트가 지원하지 않는 기능은 표시하지 않습니다. 공간이 부족한 항목은 더 보기 메뉴로 이동합니다. 여기서 끈 항목은 해당 메뉴에만 표시되며, 설정은 계속 여기서 변경할 수 있습니다.",
   "settings.composerChipUp": (chip: string) => `${chip} 위로 이동`,
@@ -849,15 +876,21 @@ const ko: typeof en = {
   "settings.composerChip.account": "계정",
   "settings.composerChip.codexCredits": "Codex 초기화 이용권",
   "settings.fontDefault": "기본값",
-  "settings.fontCustom": "Custom…", // TODO translate
+  "settings.fontSearch": "글꼴 검색…",
+  "settings.fontUseCustom": (query: string) => `${query} 사용`,
   "settings.fontListUnavailable": "시스템 글꼴 목록을 가져올 수 없습니다. 글꼴 이름을 직접 입력할 수 있습니다.",
   "settings.fontUnconfirmed": "이 글꼴을 사용할 수 있는지 확인할 수 없습니다.",
-  "settings.fontAuto": "Auto", // TODO translate
-  "settings.fontSmaller": "Smaller", // TODO translate
-  "settings.fontLarger": "Larger", // TODO translate
-  "settings.fontReset": "Reset", // TODO translate
+  "settings.fontAuto": "자동",
+  "settings.fontSmaller": "작게",
+  "settings.fontLarger": "크게",
+  "settings.fontReset": "초기화",
   "settings.sound": "알림음", // Notification sound
   "settings.language": "언어", // Language
+  "settings.serverRegion": "서버", // Server
+  "settings.serverRegionGlobal": "국제", // International
+  "settings.serverRegionChina": "중국 본토", // Mainland China
+  "settings.serverRegionHint":
+    "업데이트 확인, 다운로드, 웹사이트 링크에 사용됩니다. ‘중국 본토’를 선택하면 velaterm.cn을 사용하며, 중국 내에서 더 빠르게 접속할 수 있고 제공되는 버전은 동일합니다. 계정 관련 기능은 항상 velaterm.com을 사용합니다.",
   "settings.langAuto": "자동 (시스템)", // Auto (system)
   "settings.skillLabel": "Vela Skills",
   "settings.skillInstall": "Install", // Install
@@ -1044,6 +1077,7 @@ const ko: typeof en = {
   "tree.deleteGroup": "그룹 삭제", // Delete Group
   "tree.deleteSession": "세션 삭제", // Delete Session
   "tree.projectRoot": "프로젝트 루트 (그룹 없음)", // Project root (no group)
+  "tree.collectionRoot": (name: string) => `${name} (그룹 없음)`,
   "tree.moveToSession": "세션 아래로 이동 (하위로)", // Move under a session (as child)
   "tree.moveTo": "이동…", // Move to…
   "tree.openNewTab": "새 탭에서 열기", // Open in New Tab
@@ -1147,6 +1181,7 @@ const ko: typeof en = {
   "tree.filterStatus": "상태로 필터", // Filter by status
   "tree.refreshStatusFilter": "상태 필터 새로 고침",
   "tree.refreshStatusMatch": "상태 새로 고침",
+  "tree.setStatus": "상태 설정", // Set Status
   "tree.filterStatusSection": "상태", // Status
   "tree.filterMarkSection": "표시", // Mark
   "tree.viewMainName": "기본",
@@ -1360,10 +1395,9 @@ const ko: typeof en = {
 
   // ── Center pane ──
   "center.noSession": "세션 없음", // No session
-  "center.noSessionHintPre": "사이드바에서 세션을 선택하거나 ", // Pick a session from the sidebar, or press
-  "center.noSessionHintPost": " 로 터미널을 만드세요", // to create a terminal
   "center.createTerminal": "터미널 만들기", // Create Terminal
-  "center.splitHint": "세션을 연 후 다음 단축키로 화면을 분할할 수 있습니다:",
+  "center.startTitle": "세션 시작", // Start a session
+  "center.startHint": "사이드바에서 세션을 선택하거나 새로 시작하세요.", // Pick one from the sidebar, or start something new.
   "tab.unsavedDot": "저장되지 않은 변경", // Unsaved changes
   "tab.newTerminal": "새 터미널", // New terminal
   "tab.newDocument": "새 문서", // New document
@@ -1587,6 +1621,8 @@ const ko: typeof en = {
   "transfer.downloading": "다운로드 중…", // Downloading…
   "transfer.savedToDownloads": "다운로드 폴더에 저장됨", // Saved to Downloads
   "transfer.foldersUnsupported": "폴더는 업로드할 수 없습니다.", // Folders can't be uploaded.
+  "drop.browserFilesHint": "브라우저에서는 여기에 이미지만 놓을 수 있습니다. 다른 파일은 먼저 프로젝트에 업로드하세요.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
+  "files.copyFailed": "일부 파일을 복사하지 못했습니다. 파일이 아직 있는지, 이 폴더에 쓰기 권한이 있는지 확인하세요.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => `세션 ${n}개`, // {n} sessions
@@ -1602,6 +1638,11 @@ const ko: typeof en = {
   "statusbar.permSkip": "권한: 건너뛰기", // Perms: Skip
   "statusbar.notifyOn": "Notify: On", // TODO translate
   "statusbar.notifyOff": "Notify: Off", // TODO translate
+  "statusbar.zoomGroup": "화면 배율",
+  "statusbar.zoomOut": "축소",
+  "statusbar.zoomIn": "확대",
+  "statusbar.zoomEdit": "화면 배율 · 클릭하여 배율 입력(80~200%)",
+  "statusbar.zoomInput": "화면 배율(80~200)",
   "statusbar.permTooltip": "이 세션의 권한 모드 · 클릭하여 변경 (이 세션만)", // This session's permission mode · click to change (this session only)
   "statusbar.permMenuTitle": "이 세션의 권한", // This session's permissions
   "statusbar.permOptAsk": "매번 확인 (기본값)", // Ask each time (default)
@@ -1957,10 +1998,12 @@ const ko: typeof en = {
   "updater.hide": "Hide", // TODO translate
   "updater.hideHint":
     "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
-  "updater.downloadManually": "Download manually", // TODO translate
-  "updater.downloadManuallyHint": "Open the download page in your browser.", // TODO translate
+  "updater.downloadManually": "직접 다운로드",
+  "updater.downloadManuallyHint": "브라우저에서 다운로드 페이지를 엽니다.",
   "updater.windowsNotice":
     "VelaTerm will close while the installer runs, then reopen on its own.", // TODO translate
+  "updater.portableNotice":
+    "이 포터블 버전은 자동으로 업데이트되지 않습니다. 새 버전을 다운로드한 후 현재 폴더를 교체하세요. 설정과 세션은 그대로 유지됩니다.",
   "updater.installingWindows":
     "Installing… VelaTerm is about to close. The installer will finish the update and reopen it.", // TODO translate
   "statusbar.updateAvailable": (version) => `Update ${version}`, // TODO translate
@@ -1982,6 +2025,7 @@ const ko: typeof en = {
   "skills.vstat": "작업 중이거나 입력을 기다리는 세션을 확인합니다.",
   "skills.vtell": "다른 세션에 메시지를 보냅니다.",
   "skills.vkb": "프로젝트의 CodeGraph와 지식 베이스를 조회합니다.",
+  "skills.vapp": "에이전트가 VelaTerm을 조작하게 합니다. 각 작업은 사용자가 확인해야 실행됩니다.",
   "skills.settingsHint": "나중에 설정 > 고급에서도 설치할 수 있습니다.",
   "skills.installFailed": (err) => `설치하지 못했습니다: ${err}`,
   "skills.dontRemind": "다시 알리지 않음",
@@ -2099,6 +2143,7 @@ const ko: typeof en = {
   "chat.question.submit": "제출",
   "chat.question.next": "다음",
   "chat.question.dismiss": "닫기",
+  "chat.question.skip": "건너뛰기",
   "chat.question.answerPlaceholder": "답변을 입력하세요",
   "chat.question.otherPlaceholder": "다른 답변",
   "chat.question.answeredHeading": (n: number) => `질문 ${n}개에 답변함`,
@@ -2152,6 +2197,8 @@ const ko: typeof en = {
   "chat.rewind.editWarning": "원본 메시지와 이후의 모든 메시지가 영구적으로 삭제되고, 수정한 내용이 이 지점에서 전송됩니다. 변경된 파일은 복원되지 않습니다.",
   "chat.rewind.inactive": "대화 프로세스가 실행 중이 아닙니다. 시작된 후 이 작업을 사용할 수 있습니다.",
   "chat.rewind.unsupported": "현재 연결된 에이전트는 이 작업을 제공하지 않습니다.",
+  "chat.rewind.latestOnly": "현재 연결된 에이전트는 최신 메시지에서만 되돌릴 수 있습니다.",
+  "chat.rewind.appliesOnSend": "되돌리기는 다음 메시지를 전송할 때 적용됩니다. 그전까지 대화와 파일은 변경되지 않습니다.",
   "chat.rewind.title": "여기서부터 되돌리기",
   "chat.rewind.warning": "이 작업은 실행 후 되돌릴 수 없습니다.",
   "chat.rewind.conversation": "대화 되돌리기",
@@ -2334,7 +2381,7 @@ const ko: typeof en = {
   "settings.completionTab": "Tab만",
   "settings.completionOff": "끄기",
   "settings.completionUnavailable": "설정을 불러오거나 저장할 수 없습니다.",
-  "settings.completionHint": "Zsh에서 입력하는 동안 기록에서 가장 최근에 일치한 명령이 커서 뒤에 흐리게 표시되며, → 또는 End 키로 적용할 수 있습니다. Tab은 셸 기본 동작과 같습니다. 후보가 하나면 바로 입력하고, 후보에 공통된 부분이 있으면 먼저 채우며, 후보가 여러 개 남으면 목록을 표시합니다. 새로 연 Zsh, Bash 4+, Fish 및 PowerShell 터미널에 적용됩니다.",
+  "settings.completionHint": "Zsh에서 입력하는 동안 기록에서 가장 최근에 일치한 명령이 커서 뒤에 흐리게 표시되며, → 또는 End 키로 적용할 수 있습니다. 원격 연결에서 입력할 때는 표시되지 않습니다. Tab은 셸 기본 동작과 같습니다. 후보가 하나면 바로 입력하고, 후보에 공통된 부분이 있으면 먼저 채우며, 후보가 여러 개 남으면 목록을 표시합니다. 새로 연 Zsh, Bash 4+, Fish 및 PowerShell 터미널에 적용됩니다.",
   "settings.completionTabOnlyHint": "입력하는 동안에는 제안이 표시되지 않습니다. Tab을 누르면 셸 기본 동작과 같이 완성합니다. 후보가 하나면 바로 입력하고, 후보에 공통된 부분이 있으면 먼저 채우며, 후보가 여러 개 남으면 목록을 표시합니다. 새로 연 Zsh, Bash 4+, Fish 및 PowerShell 터미널에 적용됩니다.",
   "settings.completionTabKey": "Tab 키",
   "settings.completionTabAccept": "제안 적용",
@@ -2451,10 +2498,16 @@ const ko: typeof en = {
   "chat.antigravity.placeholder": "Antigravity에 메시지를 보내세요. @파일로 파일을 참조할 수 있습니다",
   "chat.antigravity.textOnly": "Antigravity 대화 보기는 현재 텍스트 메시지만 지원합니다.",
   "chat.textOnly": (agent: string) => `${agent} 대화 보기는 텍스트 메시지만 지원합니다.`,
+  "chat.attach.modelTextOnly": "선택한 모델은 이미지를 지원하지 않습니다.",
   "chat.signInRequired": (agent: string) => `대화 보기를 사용하려면 ${agent}에 로그인해야 합니다. 터미널 보기로 전환해 로그인한 다음 메시지를 다시 보내세요.`,
-  "chat.apiKeyRequired": "DeepSeek Harness를 사용하려면 API 키가 필요합니다. DEEPSEEK_API_KEY 환경 변수를 설정하거나 `dsh web`을 실행해 Models 페이지에서 키를 저장한 다음 메시지를 다시 보내세요.",
+  "chat.apiKeyRequired": "DeepSeek에는 API 키가 필요합니다. 입력란 옆의 'API'를 열어 입력하거나 `DEEPSEEK_API_KEY` 환경 변수를 설정한 다음 메시지를 다시 보내세요.",
   "chat.antigravity.permissionsHint": "승인이 필요한 도구는 Antigravity 설정에서 미리 허용하거나 터미널 보기에서 사용해야 합니다.",
   "chat.antigravity.settingsHint": "모델, 추론 강도 또는 권한은 턴 사이에 변경하세요.",
+  "chat.antigravity.rewindTitle": "터미널 보기에서 되돌리기",
+  "chat.antigravity.rewindHint": "Antigravity 대화 보기에서는 아직 전송된 메시지를 직접 되돌리거나 편집할 수 없습니다. 터미널 보기로 전환해 /rewind를 실행하면 돌아왔을 때 자동으로 반영됩니다.",
+  "chat.antigravity.rewindGuide": "Antigravity 대화 보기에서는 아직 전송된 메시지를 직접 되돌리거나 편집할 수 없습니다. 터미널 보기로 전환하여 /rewind로 대화를 되돌리거나 파일을 복원하세요. 대화 보기로 돌아오면 최신 상태가 자동으로 반영됩니다.",
+  "chat.antigravity.rewindCommandDescription": "터미널 보기로 전환하여 /rewind로 되돌리기",
+  "chat.antigravity.switchToTerminal": "터미널 보기로 전환",
   "chat.history.imageDownloadRequired": "이 이미지는 여기에서 열 수 없습니다. 원본을 다운로드하여 확인하세요.",
   "chat.history.readBody": "전체 내용 읽기",
   "chat.history.selectDetail": "파일 또는 필드 선택",
@@ -2630,6 +2683,8 @@ const ko: typeof en = {
   "kb.searchEntries": "항목 검색…",
   "kb.updatedOn": (date: string) => `${date} 업데이트`,
   "archive.sessionsCount": (count: string) => `세션 ${count}개`,
+
+  ...assist,
 };
 
 export default ko;

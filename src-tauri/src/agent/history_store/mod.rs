@@ -11,6 +11,7 @@ pub mod live_view;
 pub mod search;
 pub mod sqlite_source;
 mod opencode;
+pub mod deepseek_legacy;
 mod kiro;
 pub mod attachments;
 pub mod children;

@@ -32,9 +32,13 @@ export function ptySpawn(
   return spawnPty({ ...args, dark }, onOutput);
 }
 
+// Zsh draws the inline history hint into output every client shares, so the host turns it off by who is typing.
+// Only the client can say which it is: SSH windows and the local Electron shell both arrive over loopback WebSocket.
+const REMOTE_INPUT = !isTauri && !isElectronShell;
+
 /** Writes keyboard data. */
 export function ptyWrite(sessionId: string, data: string): Promise<void> {
-  return invoke("pty_write", { sessionId, data });
+  return invoke("pty_write", REMOTE_INPUT ? { sessionId, data, remote: true } : { sessionId, data });
 }
 
 /**
@@ -525,8 +529,23 @@ export interface ZcodeUsage {
   windows: ZcodeWindow[];
 }
 
+/** One Antigravity quota bucket as `agy -p /usage` reports it. */
+export interface AntigravityWindow {
+  /** Row label such as `5h · gemini` or `7d · claude/gpt`. */
+  label: string;
+  /** Used percentage, 0-100. */
+  usedPercent: number;
+  /** RFC 3339 time of the next reset. */
+  resetsAt: string | null;
+}
+
+/** The Antigravity plan quota, in the CLI's model-group order. */
+export interface AntigravityUsage {
+  windows: AntigravityWindow[];
+}
+
 /** Which account a usage row comes from; matches the session kinds that publish a quota. */
-export type UsageProvider = "claude" | "codex" | "grok" | "zcode";
+export type UsageProvider = "claude" | "codex" | "grok" | "zcode" | "antigravity";
 
 /** One provider's stored reading, kept with the reason the last attempt failed. */
 export interface UsageEntry<T> {
@@ -552,6 +571,8 @@ export interface UsageSnapshot {
   grok: UsageEntry<GrokUsage>;
   /** Absent in snapshots from a backend that predates the ZCode quota. */
   zcode?: UsageEntry<ZcodeUsage>;
+  /** Absent in snapshots from a backend that predates the Antigravity quota. */
+  antigravity?: UsageEntry<AntigravityUsage>;
   /** Whether automatic polling is on; the panel hides its countdown when it is off. */
   auto: boolean;
   /** Effective poll interval in seconds, used for the countdown to the next refresh. */
@@ -936,6 +957,31 @@ export function gitCommitFiles(cwd: string, hash: string): Promise<ChangedFile[]
 /** Both sides of one file's diff inside a commit: the parent's content versus the commit's. */
 export function gitCommitFileDiff(cwd: string, hash: string, path: string): Promise<FileDiff> {
   return invoke<FileDiff>("git_commit_file_diff", { cwd, hash, path });
+}
+
+// DeepSeek API credentials, set from the conversation's composer.
+
+/** DeepSeek endpoint and whether a key is stored; the key itself is never returned. */
+export interface DeepSeekApiStatus {
+  /** Configured endpoint, or null for the provider's official address. */
+  baseUrl: string | null;
+  hasKey: boolean;
+  /** Whether this client may change the configuration; remote clients can only read it. */
+  editable: boolean;
+}
+
+/** Reads the DeepSeek endpoint and key status for the conversation's API panel. */
+export function deepseekGetStatus(): Promise<DeepSeekApiStatus> {
+  return invoke<DeepSeekApiStatus>("deepseek_get_status");
+}
+
+/** Saves the DeepSeek endpoint and key. An empty key keeps the stored one unless `clearKey` is set. */
+export function deepseekSetConfig(
+  baseUrl: string,
+  apiKey: string,
+  clearKey = false,
+): Promise<DeepSeekApiStatus> {
+  return invoke<DeepSeekApiStatus>("deepseek_set_config", { baseUrl, apiKey, clearKey });
 }
 
 // Gitea integration, phase two.

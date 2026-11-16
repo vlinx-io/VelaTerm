@@ -33,6 +33,7 @@ const SHIMS: &[(&str, &str)] = &[
     ("vflow", "--flow"),
     ("vtell", "--tell"),
     ("vrun", "--run"),
+    ("vapp", "--app"),
 ];
 
 #[cfg(feature = "gui")]
@@ -74,6 +75,7 @@ const SKILLS: &[(&str, &str)] = &[
     ("vflow", include_str!("../../../skills/vflow/SKILL.md")),
     ("vtell", include_str!("../../../skills/vtell/SKILL.md")),
     ("vkb", include_str!("../../../skills/vkb/SKILL.md")),
+    ("vapp", include_str!("../../../skills/vapp/SKILL.md")),
 ];
 
 /// Bin directory prepended to session PATH: `<data_dir>/bin`.
@@ -474,8 +476,8 @@ fn claude_skills_dir() -> std::io::Result<PathBuf> {
     Ok(home.join(".claude").join("skills"))
 }
 
-/// Agent Skills' shared user directory. Codex, Pi, ZCode, DeepSeek Harness and OpenCode all read it; Pi, ZCode
-/// and DeepSeek Harness read no Claude or Codex directory, so without this copy they never see the bundle.
+/// Agent Skills' shared user directory. Codex, Pi, ZCode, DeepSeek and OpenCode all read it; Pi and ZCode
+/// read no Claude or Codex directory, so without this copy they never see the bundle.
 fn agents_skills_dir() -> std::io::Result<PathBuf> {
     let home = crate::host::home_dir().ok_or_else(|| {
         std::io::Error::new(

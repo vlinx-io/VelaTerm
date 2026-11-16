@@ -53,6 +53,20 @@ describe("dark palette preference", () => {
   });
 });
 
+describe("interface font migration", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("drops the retired monospace interface face saved before the current font settings", () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ uiFontFamily: "JetBrains Mono" }));
+    expect(loadSettings().uiFontFamily).toBeNull();
+  });
+
+  it("keeps an interface font chosen with the current settings", () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ uiFontFamily: "Georgia", uiMonoFontFamily: null }));
+    expect(loadSettings().uiFontFamily).toBe("Georgia");
+  });
+});
+
 describe("terminal renderer migration", () => {
   beforeEach(() => localStorage.clear());
 
@@ -91,7 +105,7 @@ describe("defaultEngineFor", () => {
     expect(defaultEngineFor("pi", { pi: { engine: "chat" } })).toBe("chat");
   });
 
-  it("always opens DeepSeek Harness in the conversation view, which is the only view it has", () => {
+  it("always opens DeepSeek in the conversation view, which is the only view it has", () => {
     expect(defaultEngineFor("deepseek", {})).toBe("chat");
     expect(defaultEngineFor("deepseek", { deepseek: { engine: "tui" } })).toBe("chat");
   });
@@ -142,6 +156,13 @@ describe("sessionTitlePrefs sanitization", () => {
 
   it("defaults to no remembered choices", () => {
     expect(loadSettings().sessionTitlePrefs).toEqual({});
+  });
+
+  it("keeps a string remembered agent and ignores a malformed one", () => {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ sessionTitleAgent: "codex" }));
+    expect(loadSettings().sessionTitleAgent).toBe("codex");
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ sessionTitleAgent: 7 }));
+    expect(loadSettings().sessionTitleAgent).toBe("");
   });
 });
 
@@ -244,5 +265,28 @@ describe("composer inline chips", () => {
     useTermStore.setState({ composerInlineChips: [] });
     useTermStore.getState().hydrateSettingsFromCache();
     expect(useTermStore.getState().composerInlineChips).toEqual(["permission", "model", "mcp"]);
+  });
+});
+
+describe("Antigravity other-scope disclosure preference", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("defaults to false, sanitizes malformed values, and round-trips through store hydration", () => {
+    expect(loadSettings().usageAntigravityShowOther).toBe(false);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ usageAntigravityShowOther: "yes" }));
+    expect(loadSettings().usageAntigravityShowOther).toBe(false);
+
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    const prev = useTermStore.getState().usageAntigravityShowOther;
+    try {
+      useTermStore.getState().setUsageAntigravityShowOther(true);
+      expect(loadSettings().usageAntigravityShowOther).toBe(true);
+      useTermStore.setState({ usageAntigravityShowOther: false });
+      useTermStore.getState().hydrateSettingsFromCache();
+      expect(useTermStore.getState().usageAntigravityShowOther).toBe(true);
+    } finally {
+      useTermStore.setState({ usageAntigravityShowOther: prev });
+      vi.unstubAllGlobals();
+    }
   });
 });

@@ -70,6 +70,11 @@ export function renamePath(from: string, to: string): Promise<void> {
   return invoke<void>("rename_path", { from, to });
 }
 
+/** Copy files and folders into a directory, keeping both on a name clash; returns the paths created. */
+export function copyIntoDir(sources: string[], dir: string): Promise<string[]> {
+  return invoke<string[]>("copy_into_dir", { sources, dir });
+}
+
 /** Delete a file or recursively delete a directory. */
 export function deletePath(path: string): Promise<void> {
   return invoke<void>("delete_path", { path });

@@ -65,7 +65,7 @@
 .fp-pathwrap { position: relative; flex: 1 1 auto; min-width: 0; display: flex; }
 .fp-path-input {
   flex: 1 1 auto; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--border);
-  border-radius: var(--r-sm); background: var(--bg-0); color: var(--text); font-family: var(--font-mono);
+  border-radius: var(--r-sm); background: var(--bg-0); color: var(--text); font-family: inherit;
   font-size: var(--ui-fs); outline: none;
 }
 .fp-path-input:focus { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
@@ -93,7 +93,7 @@
 .fp-filter:focus-within { border-color: var(--accent-line); }
 .fp-filter input {
   flex: 1; min-width: 0; border: none; background: transparent; color: var(--text); outline: none;
-  font-family: var(--font-mono); font-size: var(--ui-fs); padding: 0;
+  font-family: inherit; font-size: var(--ui-fs); padding: 0;
 }
 
 /* ---- Body: places + current folder ---- */
@@ -149,7 +149,7 @@
 .fp-row.fp-new { background: var(--bg-hover); }
 .fp-row.fp-new input {
   flex: 1; min-width: 0; max-width: 280px; height: 22px; padding: 0 6px; border: 1px solid var(--accent-line);
-  border-radius: 4px; background: var(--bg-0); color: var(--text); font-family: var(--font-mono);
+  border-radius: 4px; background: var(--bg-0); color: var(--text); font-family: inherit;
   font-size: var(--ui-fs); outline: none;
 }
 .fp-empty {
@@ -165,7 +165,7 @@
 .fp-target { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 auto; }
 .fp-target-label { color: var(--text-dim); font-size: 11.5px; }
 /* rtl truncates from the start so the final segments stay visible; bdi keeps the path itself in LTR order. */
-.fp-target-value { max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; color: var(--text); font-family: var(--font-mono); }
+.fp-target-value { max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; color: var(--text); }
 .fp-target-value bdi { direction: ltr; unicode-bidi: isolate; }
 .fp-target-value.none { color: var(--text-faint); }
 .fp-target .vlx-input { flex: 1; min-width: 0; height: 30px; padding: 0 9px; }
@@ -202,7 +202,7 @@
 .fp-dest > svg { flex: none; color: var(--text-dim); }
 .fp-dest-text { display: flex; flex-direction: column; gap: 3px; flex: 1 1 200px; min-width: 0; }
 .fp-dest-label { color: var(--text-dim); font-size: 11.5px; }
-.fp-dest-path { color: var(--text); word-break: break-all; font-family: var(--font-mono); }
+.fp-dest-path { color: var(--text); word-break: break-all; }
 .fp-dest-path .fp-leaf { color: var(--accent); font-weight: 600; }
 .fp-dest-status { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; max-width: 100%; font-size: 11.5px; color: var(--text-dim); }
 .fp-dest-status > svg { flex: none; }

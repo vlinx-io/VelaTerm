@@ -19,12 +19,38 @@ use super::headless::{self, HeadlessError};
 use super::transcript::TranscriptMessage;
 
 const MAX_CONTEXT_CHARS: usize = 350_000;
-const MAX_TITLE_CHARS: usize = 80;
+/// Byte budget for the paged reader. UTF-8 never needs more than four bytes per character, so this
+/// always admits a conversation the character limit accepts and never truncates it early.
+const MAX_CONTEXT_BYTES: usize = MAX_CONTEXT_CHARS * 4;
+pub(super) const MAX_TITLE_CHARS: usize = 80;
 const TIMEOUT: Duration = Duration::from_secs(90);
 const AGENTS: &[SessionKind] = &[
     SessionKind::Claude, SessionKind::Codex, SessionKind::Opencode,
-    SessionKind::Pi, SessionKind::Omp, SessionKind::Grok,
+    SessionKind::Pi, SessionKind::Omp, SessionKind::Grok, SessionKind::Deepseek,
+    SessionKind::Zcode, SessionKind::Antigravity,
 ];
+
+/// Tools ZCode must not use for a title task. Unknown names are ignored, so one list covers several
+/// ZCode releases; `--mode build` still refuses writes outside the private task directory.
+const ZCODE_TITLE_TOOLS: &[&str] = &[
+    "Bash", "Edit", "Write", "Read", "Glob", "Grep", "TodoWrite", "TodoRead",
+    "Skill", "Memory", "Agent", "WebFetch", "WebSearch",
+];
+
+/// Tools Antigravity must not use for a one-shot title task. Keep the internal `finish` tool allowed
+/// so `--json-schema` can still return `structured_output`.
+const ANTIGRAVITY_TITLE_TOOLS: &[&str] = &[
+    "run_command", "view_file", "write_to_file", "replace_file_content",
+    "multi_replace_file_content", "sed_file", "list_dir", "find_by_name",
+    "grep_search", "read_url_content", "search_web", "call_mcp_tool",
+    "invoke_subagent",
+];
+
+/// Whether the confirmation's model and reasoning choice reaches this agent. ZCode's CLI has no per-run
+/// model switch, so the dialog hides those fields and ZCode uses its own configured model.
+fn model_selectable(kind: SessionKind) -> bool {
+    kind != SessionKind::Zcode
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -151,16 +177,23 @@ pub fn rename(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: Option<
 
 /// Return the confirmation defaults without starting a title generation task.
 pub fn options(app: &AppCtx, id: &str) -> Result<Value, String> {
-    let session = repo::get_session(&app.db().conn.lock().unwrap(), id)?.ok_or("session_title:unavailable")?;
+    let (session, defaults) = {
+        let conn = app.db().conn.lock().unwrap();
+        let session = repo::get_session(&conn, id)?.ok_or("session_title:unavailable")?;
+        let defaults = repo::get_app_settings(&conn)?.remove("vlx-settings")
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok()).unwrap_or_default();
+        (session, defaults)
+    };
     let agents: Vec<_> = super::launch_options::catalog().into_iter()
         .filter(|spec| AGENTS.contains(&spec.id)).map(|spec| {
             let path = (spec.id == session.kind).then_some(session.agent_path.as_deref()).flatten();
-            let available = available_binary(app, spec.id, path).is_some();
-            let (_, selection) = task_selection(app, &session, spec.id)?;
+            let available = available_binary_with_settings(spec.id, path, &defaults).is_some();
+            let (_, selection) = task_selection_with_defaults(app, &session, spec.id, &defaults)?;
             let mut value = json!(spec);
             value["available"] = json!(available);
             value["model"] = json!(selection.model.unwrap_or_default());
             value["effort"] = json!(selection.effort.unwrap_or_default());
+            value["modelSelectable"] = json!(model_selectable(spec.id));
             Ok(value)
         }).collect::<Result<_, String>>()?;
     Ok(json!({"agents":agents,"agent":if AGENTS.contains(&session.kind){session.kind.as_str()}else{""},
@@ -173,23 +206,59 @@ fn task_selection(app: &AppCtx, session: &Session, kind: SessionKind) -> Result<
         repo::get_app_settings(&conn)?.remove("vlx-settings")
             .and_then(|raw| serde_json::from_str::<Value>(&raw).ok()).unwrap_or_default()
     };
+    task_selection_with_defaults(app, session, kind, &defaults)
+}
+
+fn task_selection_with_defaults(
+    app: &AppCtx,
+    session: &Session,
+    kind: SessionKind,
+    defaults: &Value,
+) -> Result<(Option<String>, super::session_settings::Selection), String> {
     let raw_args = (kind == session.kind).then_some(session.agent_args.as_deref()).flatten()
         .or_else(|| defaults["agentDefaults"][kind.as_str()]["args"].as_str());
-    let selection = if kind == session.kind {
+    let mut selection = if kind == session.kind {
         let mut effective = session.clone();
         effective.agent_args = raw_args.map(str::to_owned);
         super::session_settings::resolve(app, &effective)?
     } else {
         super::spawn_requests::default_selection(&app.db().conn.lock().unwrap(), kind, raw_args)?
     };
+    if kind == SessionKind::Deepseek {
+        selection.model = Some(super::chat::deepseek_models::normalize_model(selection.model.as_deref()));
+        selection.effort = super::chat::deepseek_models::normalize_effort(selection.effort.as_deref());
+    }
     Ok((raw_args.map(str::to_owned), selection))
 }
 
+/// Strip an effort suffix from an Antigravity model slug when paired with an explicit `--effort`.
+fn antigravity_model_without_effort(model: &str) -> &str {
+    for suffix in ["-xhigh", "-medium", "-high", "-low", "-max"] {
+        if let Some(base) = model.strip_suffix(suffix) {
+            if !base.is_empty() {
+                return base;
+            }
+        }
+    }
+    model
+}
+
 fn selection_args(kind: SessionKind, selection: &mut super::session_settings::Selection, model: Option<&str>, effort: Option<&str>) -> Result<Option<String>, String> {
+    if kind == SessionKind::Zcode {
+        // ZCode has no per-run model switch and uses its own configured model.
+        if let Some(model) = model { selection.model = super::session_settings::clean(Some(model)); }
+        if let Some(effort) = effort { selection.effort = super::session_settings::clean(Some(effort)); }
+        return Ok(None);
+    }
     if let Some(model) = model { selection.model = super::session_settings::clean(Some(model)); }
     if let Some(effort) = effort { selection.effort = super::session_settings::clean(Some(effort)); }
     // Explicit empty values select native defaults; omitted values retain the backend's resolved pair.
-    super::launch_options::apply(kind, None, selection.model.as_deref(), selection.effort.as_deref())
+    let cli_model = if kind == SessionKind::Antigravity && selection.effort.is_some() {
+        selection.model.as_deref().map(antigravity_model_without_effort)
+    } else {
+        selection.model.as_deref()
+    };
+    super::launch_options::apply(kind, None, cli_model, selection.effort.as_deref())
         .map_err(|_| "session_title:invalid_selection".into())
 }
 
@@ -202,9 +271,9 @@ fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: 
     }
     let messages = if session.engine == "chat" {
         let live = chat_messages(&app.chat().snapshot(id).rows);
-        if live.is_empty() { recorded_messages(&session)? } else { live }
+        if live.is_empty() { recorded_messages(app, &session, &task.cancelled)? } else { live }
     } else {
-        recorded_messages(&session)?
+        recorded_messages(app, &session, &task.cancelled)?
     };
     let prompt = build_prompt(&messages)?;
     let (kind, bin) = pick_agent(app, &session, prompt.len(), agent)?;
@@ -214,8 +283,30 @@ fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: 
     let cwd = session.cwd.clone().or_else(|| app.pty().cwd(id))
         .or(repo::get_project_root(&app.db().conn.lock().unwrap(), &session.project_id)?);
     let cwd = cwd.as_deref().filter(|path| !path.is_empty()).map(std::path::Path::new);
-    let env = if kind == session.kind { session.env_json.as_deref() } else { None };
-    let (mut command, stdin) = title_command(&bin, kind, &dir, raw_args.as_deref(), env, cwd)?;
+    let env = if kind == SessionKind::Deepseek {
+        // OpenCode only reaches the DeepSeek API when the endpoint and key entered in Settings travel
+        // with this one-shot run too; otherwise a configured key would fix conversations but not titles.
+        let (base_url, api_key) = super::deepseek_config::load(app.db(), &crate::command_core::app_identifier(app));
+        let mut vars: std::collections::HashMap<String, String> = if kind == session.kind {
+            session.env_json.as_deref().and_then(|raw| serde_json::from_str(raw).ok()).unwrap_or_default()
+        } else {
+            Default::default()
+        };
+        let mut config = vars
+            .get(crate::agent::inject::OPENCODE_CONFIG_ENV)
+            .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+            .filter(Value::is_object)
+            .unwrap_or_else(|| json!({}));
+        super::chat::deepseek_models::apply_provider(&mut config, base_url.as_deref(), api_key.as_deref());
+        vars.insert(crate::agent::inject::OPENCODE_CONFIG_ENV.to_string(), config.to_string());
+        Some(serde_json::to_string(&vars).map_err(|_| "session_title:agent_unavailable")?)
+    } else if kind == session.kind {
+        session.env_json.as_deref().map(str::to_owned)
+    } else {
+        None
+    };
+    let (mut command, stdin) = title_command(&bin, kind, &dir, raw_args.as_deref(), env.as_deref(), cwd,
+        selection.model.as_deref(), selection.effort.as_deref())?;
     // Keep prompt markers after model flags so a value-taking flag cannot consume another option.
     let flags = super::inject::split_extra_args(extra.as_deref());
     if stdin {
@@ -238,7 +329,8 @@ fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: 
         "inputCount":messages.len(),"outputCount":0,"status":"started","durationMs":0
     }));
     let started = Instant::now();
-    let output = match headless::run_command_with_cancel(command, stdin.then_some(prompt.as_str()), TIMEOUT, Some(&task.cancelled)) {
+    let stdin_payload = stdin.then(|| stdin_input(kind, &prompt));
+    let output = match headless::run_command_with_cancel(command, stdin_payload.as_deref(), TIMEOUT, Some(&task.cancelled)) {
         Ok(output) => output,
         Err(error) => {
             let code = match error { HeadlessError::Timeout(_) => "timeout", HeadlessError::Cancelled => "cancelled", _ => "agent_unavailable" };
@@ -275,9 +367,30 @@ fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: 
     Ok(GeneratedTitle { title, agent: kind })
 }
 
-fn recorded_messages(session: &Session) -> Result<Vec<TranscriptMessage>, String> {
+/// Read a terminal session's conversation. The paged reader indexes the native recording instead of
+/// materializing it, so long TUI conversations stay readable; the legacy reader remains the fallback
+/// for kinds the paged reader does not cover.
+fn recorded_messages(app: &AppCtx, session: &Session, cancelled: &AtomicBool) -> Result<Vec<TranscriptMessage>, String> {
     let id = session.agent_session_id.as_deref().ok_or("session_title:empty")?;
+    if super::history_store::prose::supported(session.kind) {
+        let paged = super::history_store::event_stream::complete(app, &session.id, cancelled)
+            .and_then(|branch| indexed_messages(branch, cancelled));
+        match paged {
+            Ok(messages) => return Ok(messages),
+            Err(error) if error == super::history_store::compat::UPGRADE => return Err("session_title:too_large".into()),
+            Err(error) if error == "read_canceled" || cancelled.load(Ordering::Acquire) =>
+                return Err("session_title:cancelled".into()),
+            // A changed or missing index source may still be readable directly, which the legacy
+            // reader below tries before reporting the conversation as unavailable.
+            Err(_) => {}
+        }
+    }
     super::transcript::read(session.kind, id).map_err(|_| "session_title:unavailable".into())
+}
+
+pub(crate) fn indexed_messages(branch: super::history_store::api::Branch, cancelled: &AtomicBool) -> Result<Vec<TranscriptMessage>, String> {
+    let prose = super::history_store::prose::Prose::new(branch, cancelled)?;
+    prose.collect_bounded(0, prose.total, MAX_CONTEXT_BYTES, cancelled)
 }
 
 fn chat_messages(rows: &[ChatRow]) -> Vec<TranscriptMessage> {
@@ -303,18 +416,41 @@ fn build_prompt(messages: &[TranscriptMessage]) -> Result<String, String> {
 }
 
 pub(crate) fn available_binary(app: &AppCtx, kind: SessionKind, path: Option<&str>) -> Option<String> {
-    super::executable::resolve(app, kind, path)
+    super::executable::resolve_cached(app, kind, path)
+        .filter(|bin| super::executable::is_executable_file(std::path::Path::new(bin)))
+}
+
+fn available_binary_with_settings(kind: SessionKind, path: Option<&str>, settings: &Value) -> Option<String> {
+    super::executable::resolve_cached_with_settings(kind, path, settings)
         .filter(|bin| super::executable::is_executable_file(std::path::Path::new(bin)))
 }
 
 fn pick_agent(app: &AppCtx, session: &Session, bytes: usize, chosen: Option<SessionKind>) -> Result<(SessionKind, String), String> {
     let kind = chosen.unwrap_or(session.kind);
     if !AGENTS.contains(&kind) { return Err("session_title:agent_unavailable".into()); }
-    if bytes > headless::ARG_PROMPT_LIMIT && !headless::spec(kind).unwrap().accepts_long_prompt() {
+    if bytes > headless::ARG_PROMPT_LIMIT && !accepts_long_prompt(kind) {
         return Err("session_title:agent_unavailable".into());
     }
     let path = if kind == session.kind { session.agent_path.as_deref() } else { None };
-    available_binary(app, kind, path).map(|bin| (kind, bin)).ok_or("session_title:agent_unavailable".into())
+    available_binary(app, kind, path)
+        .or_else(|| super::executable::resolve(app, kind, path)
+            .filter(|bin| super::executable::is_executable_file(std::path::Path::new(bin))))
+        .map(|bin| (kind, bin))
+        .ok_or("session_title:agent_unavailable".into())
+}
+
+/// Whether this one-shot adapter can read a prompt too large for an argument.
+fn accepts_long_prompt(kind: SessionKind) -> bool {
+    kind == SessionKind::Antigravity
+        || headless::spec(kind).is_some_and(|spec| spec.accepts_long_prompt())
+}
+
+fn stdin_input(kind: SessionKind, prompt: &str) -> String {
+    if kind == SessionKind::Antigravity {
+        format!("{}\n", super::chat::antigravity_protocol::user_message(prompt))
+    } else {
+        prompt.to_string()
+    }
 }
 
 /// Keep account/provider configuration while replacing interactive transport and tool controls.
@@ -325,18 +461,25 @@ fn task_args(kind: SessionKind, raw: Option<&str>) -> Vec<String> {
     let mut i = 0;
     while i < args.len() {
         let flag = args[i].split('=').next().unwrap_or_default();
-        let value = matches!(flag, "--output-format" | "--format" | "--json-schema" | "--output-schema"
-            | "--permission-mode" | "--approval-mode" | "--sandbox" | "--tools" | "--allowedTools"
+        let antigravity_value = kind == SessionKind::Antigravity && matches!(flag,
+            "--print" | "-p" | "--prompt" | "--prompt-interactive" | "-i" | "--conversation"
+            | "--input-format" | "--log-file" | "--settings" | "--print-timeout");
+        let antigravity_switch = kind == SessionKind::Antigravity && matches!(flag,
+            "--sandbox" | "-c" | "--remote-control");
+        let value = antigravity_value || matches!(flag, "--output-format" | "--format" | "--json-schema"
+            | "--output-schema" | "--permission-mode" | "--approval-mode" | "--tools" | "--allowedTools"
             | "--allowed-tools" | "--disallowedTools" | "--disallowed-tools" | "--resume" | "-r"
-            | "--session-id" | "--session" | "-s" | "--mode" | "--prompt-file" | "--mcp-config" | "--color");
-        let switch = matches!(flag, "--print" | "-p" | "--continue" | "--fork-session" | "--fork"
+            | "--session-id" | "--session" | "-s" | "--mode" | "--prompt-file" | "--mcp-config" | "--color")
+            || (kind != SessionKind::Antigravity && flag == "--sandbox");
+        let switch = antigravity_switch || matches!(flag, "--continue" | "--fork-session" | "--fork"
             | "--json" | "--dangerously-skip-permissions" | "--allow-dangerously-skip-permissions"
             | "--dangerously-bypass-approvals-and-sandbox" | "--yolo" | "--always-approve"
             | "--no-session" | "--no-tools" | "--no-skills" | "--no-extensions" | "--no-context-files"
             | "--no-rules" | "--no-title" | "--no-session-persistence" | "--strict-mcp-config"
             | "--disable-slash-commands" | "--no-memory" | "--no-plan" | "--no-subagents" | "--no-web"
             | "--ephemeral" | "--skip-git-repo-check" | "--pure")
-            || (matches!(kind, SessionKind::Pi | SessionKind::Omp) && flag == "-c");
+            || (matches!(kind, SessionKind::Pi | SessionKind::Omp) && flag == "-c")
+            || (kind != SessionKind::Antigravity && matches!(flag, "--print" | "-p"));
         if value { i += if args[i].contains('=') { 1 } else { 2 }; }
         else if switch { i += 1; }
         else { kept.push(args[i].clone()); i += 1; }
@@ -344,14 +487,15 @@ fn task_args(kind: SessionKind, raw: Option<&str>) -> Vec<String> {
     kept
 }
 
-fn title_command(bin: &str, kind: SessionKind, dir: &WorkDir, args: Option<&str>, env: Option<&str>, cwd: Option<&std::path::Path>) -> Result<(std::process::Command, bool), String> {
+fn title_command(bin: &str, kind: SessionKind, dir: &WorkDir, args: Option<&str>, env: Option<&str>, cwd: Option<&std::path::Path>, model: Option<&str>, effort: Option<&str>) -> Result<(std::process::Command, bool), String> {
     let schema = json!({"type":"object","additionalProperties":false,"properties":{"title":{"type":"string","minLength":1,"maxLength":MAX_TITLE_CHARS}},"required":["title"]});
-    isolated_command(bin, kind, &dir.0, args, env, cwd, &schema)
+    isolated_command(bin, kind, &dir.0, args, env, cwd, &schema, model, effort)
 }
 
 /// Shared one-shot text adapter. The caller supplies a schema and a private temporary directory.
-pub(crate) fn isolated_command(bin: &str, kind: SessionKind, dir: &std::path::Path, args: Option<&str>, env: Option<&str>, cwd: Option<&std::path::Path>, schema: &Value) -> Result<(std::process::Command, bool), String> {
-    let mut command = crate::host::command(bin);
+pub(crate) fn isolated_command(bin: &str, kind: SessionKind, dir: &std::path::Path, args: Option<&str>, env: Option<&str>, cwd: Option<&std::path::Path>, schema: &Value, _model: Option<&str>, _effort: Option<&str>) -> Result<(std::process::Command, bool), String> {
+    // A ZCode install may be the desktop release, whose binary needs its bundle argument and environment.
+    let mut command = if kind == SessionKind::Zcode { super::zcode::command(bin) } else { crate::host::command(bin) };
     if let Some(env) = env {
         let vars: std::collections::HashMap<String, String> = serde_json::from_str(env).map_err(|_| "session_title:agent_unavailable")?;
         command.envs(vars);
@@ -378,61 +522,83 @@ pub(crate) fn isolated_command(bin: &str, kind: SessionKind, dir: &std::path::Pa
         }
         settings["disableAllHooks"] = json!(true);
     }
-    if kind == SessionKind::Codex { command.arg("exec"); }
-    if kind == SessionKind::Opencode { command.arg("run"); }
-    command.args(inherited);
-    let stdin = match kind {
-        SessionKind::Claude => {
-            command.args(["--print", "--output-format", "json", "--tools", "", "--strict-mcp-config",
-                "--disable-slash-commands", "--no-session-persistence", "--settings"])
-                .arg(settings.to_string()).arg("--json-schema")
-                .arg(schema.to_string()).env_remove("CLAUDECODE");
-            true
-        }
-        SessionKind::Codex => {
-            let schema_path = dir.join("schema.json");
-            std::fs::write(&schema_path, schema.to_string()).map_err(|_| "session_title:failed")?;
-            command.args(["--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--color", "never", "--json",
-                "--disable", "shell_tool", "--disable", "apps", "--disable", "multi_agent", "-c", "project_doc_max_bytes=0",
-                "-c", "approval_policy=\"never\"", "-c", "web_search=\"disabled\"", "--output-schema"]).arg(schema_path);
-            // Local MCP/plugin registrations are unrelated to this text transformation.
-            let home = command_env(&command, "CODEX_HOME").map(PathBuf::from)
-                .or_else(|| crate::host::home_dir().map(|p| p.join(".codex")));
-            if let Some(config) = home.and_then(|p| std::fs::read_to_string(p.join("config.toml")).ok()) {
-                if let Ok(doc) = config.parse::<toml_edit::DocumentMut>() {
-                    for section in ["mcp_servers", "plugins"] {
-                        if let Some(table) = doc.get(section).and_then(toml_edit::Item::as_table_like) {
-                            for (name, _) in table.iter() { command.arg("-c").arg(format!("{section}.{name}.enabled=false")); }
+    let (stdin, cwd) = if kind == SessionKind::Zcode {
+        // ZCode takes the prompt as an argument and always uses the model configured in ZCode itself.
+        // Removing its tools keeps a title task from touching the machine; the private directory below
+        // keeps its workspace discovery away from the project.
+        command.args(["--mode", "build", "--no-color", "--disallowed-tools"]);
+        command.args(ZCODE_TITLE_TOOLS);
+        command.arg("-p");
+        (false, None)
+    } else {
+        if kind == SessionKind::Codex { command.arg("exec"); }
+        if kind.uses_opencode() { command.arg("run"); }
+        command.args(inherited);
+        let stdin = match kind {
+            SessionKind::Claude => {
+                command.args(["--print", "--output-format", "json", "--tools", "", "--strict-mcp-config",
+                    "--disable-slash-commands", "--no-session-persistence", "--settings"])
+                    .arg(settings.to_string()).arg("--json-schema")
+                    .arg(schema.to_string()).env_remove("CLAUDECODE");
+                true
+            }
+            SessionKind::Codex => {
+                let schema_path = dir.join("schema.json");
+                std::fs::write(&schema_path, schema.to_string()).map_err(|_| "session_title:failed")?;
+                command.args(["--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--color", "never", "--json",
+                    "--disable", "shell_tool", "--disable", "apps", "--disable", "multi_agent", "-c", "project_doc_max_bytes=0",
+                    "-c", "approval_policy=\"never\"", "-c", "web_search=\"disabled\"", "--output-schema"]).arg(schema_path);
+                // Local MCP/plugin registrations are unrelated to this text transformation.
+                let home = command_env(&command, "CODEX_HOME").map(PathBuf::from)
+                    .or_else(|| crate::host::home_dir().map(|p| p.join(".codex")));
+                if let Some(config) = home.and_then(|p| std::fs::read_to_string(p.join("config.toml")).ok()) {
+                    if let Ok(doc) = config.parse::<toml_edit::DocumentMut>() {
+                        for section in ["mcp_servers", "plugins"] {
+                            if let Some(table) = doc.get(section).and_then(toml_edit::Item::as_table_like) {
+                                for (name, _) in table.iter() { command.arg("-c").arg(format!("{section}.{name}.enabled=false")); }
+                            }
                         }
                     }
                 }
+                true
             }
-            true
-        }
-        SessionKind::Opencode => {
-            let mut config = match command_env(&command, "OPENCODE_CONFIG_CONTENT") {
-                Some(raw) => serde_json::from_str::<Value>(&raw).map_err(|_| "session_title:agent_unavailable")?,
-                None => json!({}),
-            };
-            if !config.is_object() { return Err("session_title:agent_unavailable".into()); }
-            config["permission"] = json!({"*":"deny"});
-            command.args(["--format", "json", "--pure"])
-                .env("OPENCODE_CONFIG_CONTENT", config.to_string());
-            false
-        }
-        SessionKind::Pi | SessionKind::Omp => {
-            command.args(["--no-session", "--no-tools", "--no-skills", "--no-extensions"]);
-            if kind == SessionKind::Pi { command.arg("--no-context-files"); }
-            else { command.args(["--no-rules", "--no-title"]); }
-            command.arg("-p");
-            false
-        }
-        SessionKind::Grok => {
-            command.args(["--permission-mode", "plan", "--tools", "", "--no-memory", "--no-plan",
-                "--no-subagents", "--no-web", "--output-format", "plain"]);
-            false
-        }
-        _ => return Err("session_title:no_agent".into()),
+            kind if kind.uses_opencode() => {
+                let mut config = match command_env(&command, "OPENCODE_CONFIG_CONTENT") {
+                    Some(raw) => serde_json::from_str::<Value>(&raw).map_err(|_| "session_title:agent_unavailable")?,
+                    None => json!({}),
+                };
+                if !config.is_object() { return Err("session_title:agent_unavailable".into()); }
+                config["permission"] = json!({"*":"deny"});
+                command.args(["--format", "json", "--pure"])
+                    .env("OPENCODE_CONFIG_CONTENT", config.to_string());
+                false
+            }
+            SessionKind::Pi | SessionKind::Omp => {
+                command.args(["--no-session", "--no-tools", "--no-skills", "--no-extensions"]);
+                if kind == SessionKind::Pi { command.arg("--no-context-files"); }
+                else { command.args(["--no-rules", "--no-title"]); }
+                command.arg("-p");
+                false
+            }
+            SessionKind::Grok => {
+                command.args(["--permission-mode", "plan", "--tools", "", "--no-memory", "--no-plan",
+                    "--no-subagents", "--no-web", "--output-format", "plain"]);
+                false
+            }
+            SessionKind::Antigravity => {
+                // Keep generated logs inside the private task directory, disable slash commands and workspace
+                // tools while keeping the internal schema finish tool enabled, and run outside the project.
+                let deny = json!({ "permissions": { "deny": ANTIGRAVITY_TITLE_TOOLS } });
+                command.args(["--input-format", "stream-json", "--output-format", "stream-json",
+                    "--disable-slash-commands", "--sandbox", "--log-file"])
+                    .arg(dir.join("agy.log"))
+                    .arg("--json-schema").arg(schema.to_string())
+                    .arg("--settings").arg(deny.to_string());
+                true
+            }
+            _ => return Err("session_title:no_agent".into()),
+        };
+        (stdin, if kind == SessionKind::Antigravity { None } else { cwd })
     };
     let keys: Vec<_> = command.get_envs().map(|(key, _)| key.to_os_string()).chain(std::env::vars_os().map(|(key, _)| key)).collect();
     for key in keys {
@@ -457,10 +623,24 @@ pub(crate) fn answer_text(kind: SessionKind, output: &str) -> Result<(String, Va
             .or_else(|| value["result"].as_str().map(str::to_string)).ok_or("session_title:invalid")?;
         return Ok((text, value["usage"].clone()));
     }
-    if matches!(kind, SessionKind::Codex | SessionKind::Opencode) {
+    if kind == SessionKind::Antigravity {
+        let mut answer = None;
+        for line in output.lines() {
+            let Ok(value) = serde_json::from_str::<Value>(line) else { continue };
+            if value["event"] != "result" { continue; }
+            let result = &value["result"];
+            if result["status"] != "SUCCESS" { return Err("session_title:failed".into()); }
+            let text = result.get("structured_output").filter(|value| !value.is_null()).map(Value::to_string)
+                .or_else(|| result["response"].as_str().map(str::to_string))
+                .ok_or("session_title:invalid")?;
+            answer = Some((text, result["usage"].clone()));
+        }
+        return answer.ok_or_else(|| "session_title:invalid".into());
+    }
+    if matches!(kind, SessionKind::Codex) || kind.uses_opencode() {
         let mut text = String::new();
         let mut usage = Value::Null;
-        let mut complete = kind == SessionKind::Opencode;
+        let mut complete = kind.uses_opencode();
         for line in output.lines() {
             let Ok(value) = serde_json::from_str::<Value>(line) else { continue };
             match value["type"].as_str() {
@@ -469,8 +649,8 @@ pub(crate) fn answer_text(kind: SessionKind, output: &str) -> Result<(String, Va
                 Some("item.completed") if value["item"]["type"] == "agent_message" => {
                     text = value["item"]["text"].as_str().unwrap_or_default().to_string();
                 }
-                Some("text") if kind == SessionKind::Opencode => text.push_str(value["part"]["text"].as_str().unwrap_or_default()),
-                Some("step_finish") if kind == SessionKind::Opencode => {
+                Some("text") if kind.uses_opencode() => text.push_str(value["part"]["text"].as_str().unwrap_or_default()),
+                Some("step_finish") if kind.uses_opencode() => {
                     let tokens = &value["part"]["tokens"];
                     usage = json!({"input_tokens":tokens["input"],"output_tokens":tokens["output"],
                         "cached_input_tokens":tokens["cache"]["read"]});
@@ -494,10 +674,13 @@ fn parse_title(text: &str) -> Result<String, String> {
     } else { text };
     let answer: Answer = serde_json::from_str(text).map_err(|_| "session_title:invalid")?;
     let title = answer.title.trim();
-    if title.is_empty() || title.chars().count() > MAX_TITLE_CHARS || title.chars().any(char::is_control) {
-        return Err("session_title:invalid".into());
-    }
+    if !is_valid_title(title) { return Err("session_title:invalid".into()); }
     Ok(title.to_string())
+}
+
+/// Shared rule for a trimmed session title, whether generated here or supplied through `vspawn --title`.
+pub(super) fn is_valid_title(title: &str) -> bool {
+    !title.is_empty() && title.chars().count() <= MAX_TITLE_CHARS && !title.chars().any(char::is_control)
 }
 
 fn save_title(conn: &rusqlite::Connection, session: &Session, title: &str) -> Result<(), String> {
@@ -577,6 +760,32 @@ mod tests {
     }
 
     #[test]
+    fn long_recordings_are_read_past_the_legacy_bridge_limit() {
+        let dir = std::env::temp_dir().join(format!("vlx-title-prose-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let request = "<USER_REQUEST>\nWhere is the login flow?\n</USER_REQUEST>";
+        let answer = "x".repeat(600_000);
+        let content = format!("{}\n{}\n",
+            json!({"step_index":0,"type":"USER_INPUT","status":"DONE","content":request}),
+            json!({"step_index":1,"type":"PLANNER_RESPONSE","status":"DONE","content":answer}));
+        let path = dir.join("transcript_full.jsonl");
+        std::fs::write(&path, &content).unwrap();
+        // The legacy materializing reader refuses this recording, which is the failure this guards.
+        assert_eq!(super::super::history_store::compat::read_path(&path).unwrap_err(),
+            super::super::history_store::compat::UPGRADE);
+        let store = super::super::history_store::store::Store::at(&dir).unwrap();
+        let source = store.register(SessionKind::Antigravity, super::super::history_store::source::Segment {
+            path, native_id:"test".into(), end_byte:None, end_ordinal:None }).unwrap();
+        store.scan(SessionKind::Antigravity, &source, &AtomicBool::new(false), false).unwrap();
+        let branch = super::super::history_store::api::Branch::test_branch(store, source, SessionKind::Antigravity);
+        let messages = indexed_messages(branch, &AtomicBool::new(false)).unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!((messages[0].role.as_str(), messages[0].text.as_str()), ("user", "Where is the login flow?"));
+        assert_eq!(messages[1].text, answer);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn live_snapshot_uses_only_top_level_conversation_text() {
         let rows = vec![
             ChatRow::User { id:"u".into(), text:"Current request".into(), images:Vec::new(), at:None },
@@ -638,7 +847,7 @@ mod tests {
         let _next = Claim::acquire(&app, &session.id).unwrap();
         let dir = WorkDir::new(&app).unwrap();
         let path = dir.0.clone();
-        let (command, stdin) = title_command("claude", SessionKind::Claude, &dir, None, None, None).unwrap();
+        let (command, stdin) = title_command("claude", SessionKind::Claude, &dir, None, None, None, None, None).unwrap();
         let args: Vec<_> = command.get_args().map(|arg| arg.to_string_lossy().to_string()).collect();
         assert!(stdin);
         assert!(args.windows(2).any(|a| a == ["--tools", ""]));
@@ -741,7 +950,7 @@ mod tests {
         let dir = WorkDir::new(&app).unwrap();
         let raw = r#"--model old --effort low --settings '{"env":{"PROVIDER_TEST":"fixture"}}' --tools Bash --resume original --output-format stream-json"#;
         let env = r#"{"PROVIDER_TEST":"session-config","VLX_SESSION_ID":"original"}"#;
-        let (command, _) = title_command("claude", SessionKind::Claude, &dir, Some(raw), Some(env), Some(&dir.0)).unwrap();
+        let (command, _) = title_command("claude", SessionKind::Claude, &dir, Some(raw), Some(env), Some(&dir.0), None, None).unwrap();
         let args: Vec<_> = command.get_args().map(|arg| arg.to_string_lossy().to_string()).collect();
         assert!(!args.iter().any(|arg| arg == "old" || arg == "original" || arg == "--resume"));
         assert_eq!(args.iter().filter(|arg| *arg == "--output-format").count(), 1);
@@ -754,9 +963,219 @@ mod tests {
         assert_eq!(args, ["--profile", "fixture", "-c", "model_provider=fixture"]);
         let env = json!({"OPENCODE_CONFIG_CONTENT":json!({"provider":{"fixture":{"name":"Fixture"}},
             "permission":{"bash":"allow"}}).to_string()}).to_string();
-        let (command, _) = title_command("opencode", SessionKind::Opencode, &dir, None, Some(&env), None).unwrap();
+        let (command, _) = title_command("opencode", SessionKind::Opencode, &dir, None, Some(&env), None, None, None).unwrap();
         let config: Value = serde_json::from_str(&command_env(&command, "OPENCODE_CONFIG_CONTENT").unwrap()).unwrap();
         assert_eq!(config["provider"]["fixture"]["name"], "Fixture");
         assert_eq!(config["permission"], json!({"*":"deny"}));
+    }
+
+    #[test]
+    fn deepseek_sessions_open_on_their_own_agent_and_normalized_route() {
+        let (_root, app, _) = fixture();
+        let session = {
+            let conn = app.db().conn.lock().unwrap();
+            let project = repo::create_virtual_project(&conn, "DeepSeek title tests").unwrap();
+            let session = repo::create_session(&conn, &project.id, None, "Original", SessionKind::Deepseek,
+                None, None, None, None, None).unwrap();
+            // A conversation saved before the move to OpenCode still carries Harness's route pair.
+            let route = r#"["deepseek-official","deepseek-flash"]"#;
+            let settings = json!({"chatModelByKind":{"deepseek":route},
+                "chatEffortByModel":{format!("deepseek:{route}"):"high"}});
+            repo::set_app_settings(&conn, &std::collections::HashMap::from([("vlx-settings".into(), settings.to_string())])).unwrap();
+            session
+        };
+        let choices = options(&app, &session.id).unwrap();
+        // DeepSeek is the option the dialog opens on instead of the empty placeholder it used to show.
+        assert_eq!(choices["agent"], "deepseek");
+        let deepseek = choices["agents"].as_array().unwrap().iter().find(|s| s["id"] == "deepseek").unwrap();
+        assert_eq!(deepseek["model"], "deepseek/deepseek-flash");
+        assert_eq!(deepseek["effort"], "high");
+        let (_, selection) = task_selection(&app, &session, SessionKind::Deepseek).unwrap();
+        assert_eq!(selection.model.as_deref(), Some("deepseek/deepseek-flash"));
+        assert_eq!(selection.effort.as_deref(), Some("high"));
+        assert!(!accepts_long_prompt(SessionKind::Deepseek),
+            "OpenCode's one-shot run takes its prompt as an argument");
+    }
+
+    #[test]
+    fn zcode_one_shot_takes_its_prompt_as_an_argument_without_tools() {
+        let (_root, app, _) = fixture();
+        let dir = WorkDir::new(&app).unwrap();
+        let (command, stdin) = title_command("zcode", SessionKind::Zcode, &dir, Some("--model ignored"), None,
+            Some(std::path::Path::new("/project")), Some("provider/model"), Some("max")).unwrap();
+        assert!(!stdin, "ZCode takes its prompt as an argument");
+        let args: Vec<_> = command.get_args().map(|arg| arg.to_string_lossy().to_string()).collect();
+        assert_eq!(&args[..2], ["--mode", "build"]);
+        assert!(args.iter().any(|arg| arg == "--no-color"));
+        let tools = args.iter().position(|arg| arg == "--disallowed-tools").unwrap();
+        for tool in ["Bash", "Edit", "Write", "Read"] {
+            assert!(args[tools..].iter().any(|arg| arg == tool), "{tool}");
+        }
+        assert_eq!(args.last().unwrap(), "-p", "the caller appends the prompt after it");
+        // ZCode has no per-run model or reasoning switch, so neither can leak into the command line.
+        assert!(!args.iter().any(|arg| arg == "--model" || arg == "--effort" || arg == "provider/model"));
+        // Its own model selection stays authoritative, and the task runs outside the project.
+        assert!(selection_args(SessionKind::Zcode, &mut super::super::session_settings::Selection::default(),
+            Some("provider/model"), Some("max")).unwrap().is_none());
+        assert_eq!(command.get_current_dir(), Some(dir.0.as_path()));
+    }
+
+    #[test]
+    fn zcode_sessions_open_on_their_own_agent_without_model_fields() {
+        let (_root, app, _) = fixture();
+        let session = {
+            let conn = app.db().conn.lock().unwrap();
+            let project = repo::create_virtual_project(&conn, "ZCode title tests").unwrap();
+            repo::create_session(&conn, &project.id, None, "Original", SessionKind::Zcode,
+                None, None, None, None, None).unwrap()
+        };
+        let choices = options(&app, &session.id).unwrap();
+        assert_eq!(choices["agent"], "zcode");
+        let zcode = choices["agents"].as_array().unwrap().iter().find(|s| s["id"] == "zcode").unwrap();
+        assert_eq!(zcode["modelSelectable"], false);
+        // Every other agent still offers the model fields.
+        for id in ["claude", "deepseek"] {
+            let option = choices["agents"].as_array().unwrap().iter().find(|s| s["id"] == id).unwrap();
+            assert_eq!(option["modelSelectable"], true, "{id}");
+        }
+    }
+
+    #[test]
+    fn deepseek_one_shot_runs_opencode_with_the_selected_model() {
+        let (_root, app, _) = fixture();
+        let dir = WorkDir::new(&app).unwrap();
+        let (command, stdin) = title_command("opencode", SessionKind::Deepseek, &dir,
+            Some("--model ignored --variant low"), None,
+            Some(std::path::Path::new("/project")), Some("deepseek/deepseek-v4-pro"), Some("max")).unwrap();
+        assert!(!stdin, "OpenCode's one-shot run takes the prompt as an argument");
+        let args: Vec<_> = command.get_args().map(|arg| arg.to_string_lossy().to_string()).collect();
+        assert_eq!(args.first().map(String::as_str), Some("run"));
+        assert!(args.iter().any(|arg| arg == "--format"));
+        assert!(args.iter().any(|arg| arg == "--pure"));
+        // The task's own selection flags are rendered by the shared launch mapping, not by the session's
+        // terminal arguments.
+        assert!(!args.iter().any(|arg| arg == "acp" || arg == "--profile"));
+        let mut selection = super::super::session_settings::Selection::default();
+        let flags = selection_args(SessionKind::Deepseek, &mut selection,
+            Some("deepseek/deepseek-v4-pro"), Some("low")).unwrap().unwrap();
+        assert_eq!(flags, "--model 'deepseek/deepseek-v4-pro' --variant low");
+        assert!(selection_args(SessionKind::Deepseek, &mut selection,
+            Some("bad\nmodel"), None).is_err());
+    }
+
+    #[test]
+    fn antigravity_sessions_open_on_their_own_agent_with_model_fields() {
+        let (_root, app, _) = fixture();
+        let (session, other) = {
+            let conn = app.db().conn.lock().unwrap();
+            let project = repo::create_virtual_project(&conn, "Antigravity title tests").unwrap();
+            let session = repo::create_session(&conn, &project.id, None, "Original", SessionKind::Antigravity,
+                None, None, None, None, None).unwrap();
+            let other = repo::create_session(&conn, &project.id, None, "Claude", SessionKind::Claude,
+                None, None, None, None, None).unwrap();
+            let settings = json!({
+                "chatModelByKind": {"antigravity": "gemini-4-hydrogen-xhigh"},
+                "chatEffortByModel": {"antigravity:gemini-4-hydrogen-xhigh": "low"}
+            });
+            repo::set_app_settings(&conn, &std::collections::HashMap::from([("vlx-settings".into(), settings.to_string())])).unwrap();
+            (session, other)
+        };
+        let choices = options(&app, &session.id).unwrap();
+        assert_eq!(choices["agent"], "antigravity");
+        let antigravity = choices["agents"].as_array().unwrap().iter().find(|s| s["id"] == "antigravity").unwrap();
+        assert_eq!(antigravity["modelSelectable"], true);
+        assert_eq!(antigravity["model"], "gemini-4-hydrogen");
+        assert_eq!(antigravity["effort"], "low");
+
+        let cross = options(&app, &other.id).unwrap();
+        let cross_agy = cross["agents"].as_array().unwrap().iter().find(|s| s["id"] == "antigravity").unwrap();
+        assert_eq!(cross_agy["model"], "gemini-4-hydrogen");
+        assert_eq!(cross_agy["effort"], "low");
+        assert!(accepts_long_prompt(SessionKind::Antigravity));
+    }
+
+    #[test]
+    fn antigravity_one_shot_uses_stream_json_stdin_and_private_log() {
+        let (_root, app, _) = fixture();
+        let dir = WorkDir::new(&app).unwrap();
+        let (command, stdin) = title_command(
+            "agy",
+            SessionKind::Antigravity,
+            &dir,
+            Some("--sandbox -c -p ignored --conversation old --input-format text --settings '{\"a\":1}' --remote-control --log-file /tmp/bad.log"),
+            None,
+            Some(std::path::Path::new("/project")),
+            None,
+            None,
+        ).unwrap();
+        assert!(stdin, "Antigravity receives its prompt as stream-json on stdin");
+        assert_eq!(command.get_current_dir(), Some(dir.0.as_path()));
+        let args: Vec<_> = command.get_args().map(|arg| arg.to_string_lossy().to_string()).collect();
+        for forbidden in ["-c", "ignored", "old", "/tmp/bad.log", "--remote-control"] {
+            assert!(!args.iter().any(|arg| arg == forbidden), "unexpected inherited arg: {forbidden}");
+        }
+        assert!(args.windows(2).any(|w| w == ["--input-format", "stream-json"]));
+        assert!(args.windows(2).any(|w| w == ["--output-format", "stream-json"]));
+        assert!(args.iter().any(|arg| arg == "--disable-slash-commands"));
+        assert!(args.iter().any(|arg| arg == "--sandbox"));
+        let log_idx = args.iter().position(|arg| arg == "--log-file").unwrap();
+        assert_eq!(args[log_idx + 1], dir.0.join("agy.log").to_string_lossy());
+        let settings_idx = args.iter().position(|arg| arg == "--settings").unwrap();
+        let settings: Value = serde_json::from_str(&args[settings_idx + 1]).unwrap();
+        let deny = settings["permissions"]["deny"].as_array().unwrap();
+        assert!(deny.iter().any(|item| item == "run_command"));
+        assert!(deny.iter().any(|item| item == "call_mcp_tool"));
+        assert!(!deny.iter().any(|item| item == "finish"));
+
+        let payload = stdin_input(SessionKind::Antigravity, "Summarize\nthis");
+        assert!(payload.ends_with('\n'));
+        let event: Value = serde_json::from_str(payload.trim_end()).unwrap();
+        assert_eq!(event, json!({"event": "user", "message": {"content": "Summarize\nthis"}}));
+    }
+
+    #[test]
+    fn antigravity_selection_args_strips_effort_suffix_when_effort_is_present() {
+        let mut selection = super::super::session_settings::Selection::default();
+        assert_eq!(
+            selection_args(SessionKind::Antigravity, &mut selection, Some("gemini-4-hydrogen-xhigh"), Some("")).unwrap().as_deref(),
+            Some("--model 'gemini-4-hydrogen-xhigh'")
+        );
+        assert_eq!(
+            selection_args(SessionKind::Antigravity, &mut selection, Some("gemini-4-hydrogen-xhigh"), Some("low")).unwrap().as_deref(),
+            Some("--model 'gemini-4-hydrogen' --effort low")
+        );
+        assert_eq!(
+            selection_args(SessionKind::Antigravity, &mut selection, Some("claude-opus-5-5-medium"), Some("high")).unwrap().as_deref(),
+            Some("--model 'claude-opus-5-5' --effort high")
+        );
+        assert_eq!(
+            selection_args(SessionKind::Antigravity, &mut selection, Some("gemini-4-carbon"), Some("medium")).unwrap().as_deref(),
+            Some("--model 'gemini-4-carbon' --effort medium")
+        );
+        assert_eq!(
+            selection_args(SessionKind::Antigravity, &mut selection, Some("bad model"), None).unwrap_err(),
+            "session_title:invalid_selection"
+        );
+    }
+
+    #[test]
+    fn antigravity_answer_text_reads_result_event_and_errors() {
+        let ok_ndjson = concat!(
+            "warning: ignored non-json line\n",
+            "{\"event\":\"assistant\",\"message\":{\"content\":\"thinking\"}}\n",
+            "{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"{\\\"title\\\":\\\"One\\\"}\\n{\\\"title\\\":\\\"Two\\\"}\",\"structured_output\":{\"title\":\"Fix agy support\"},\"usage\":{\"input_tokens\":12,\"output_tokens\":4}}}\n"
+        );
+        let (text, usage) = answer_text(SessionKind::Antigravity, ok_ndjson).unwrap();
+        assert_eq!(parse_title(&text).unwrap(), "Fix agy support");
+        assert_eq!(usage["input_tokens"], 12);
+
+        let fallback_ndjson = "{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"structured_output\":null,\"response\":\"{\\\"title\\\":\\\"Fallback\\\"}\",\"usage\":{}}}\n";
+        let (fallback_text, _) = answer_text(SessionKind::Antigravity, fallback_ndjson).unwrap();
+        assert_eq!(parse_title(&fallback_text).unwrap(), "Fallback");
+
+        let err_ndjson = "{\"event\":\"result\",\"result\":{\"status\":\"ERROR\",\"error\":\"quota\"}}\n";
+        assert_eq!(answer_text(SessionKind::Antigravity, err_ndjson).unwrap_err(), "session_title:failed");
+
+        assert_eq!(answer_text(SessionKind::Antigravity, "{\"event\":\"assistant\"}\n").unwrap_err(), "session_title:invalid");
     }
 }

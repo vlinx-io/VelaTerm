@@ -142,6 +142,8 @@ export interface SpawnRequest {
   } | null;
   parentSessionId: string;
   prompt: string;
+  /** Session name from `vspawn --title`; absent derives the name from the prompt. */
+  title?: string | null;
   kind?: AgentKind | "terminal" | null;
   worktree?: boolean | null;
   /** Directory from which vspawn was invoked; used as the child cwd and worktree repository context. */
@@ -195,6 +197,20 @@ export function onViewRequest(
   cb: (req: ViewRequest) => void,
 ): Promise<UnlistenFn> {
   return listen<ViewRequest>("view://request", (payload) => cb(payload));
+}
+
+/** A session's agent submitted actions with `vapp do`; that session's view shows them for confirmation. */
+export function onAssistRequest(cb: (request: { id: string; sessionId: string }) => void): Promise<UnlistenFn> {
+  return listen<{ id: string; sessionId: string }>("assist://request", (payload) => {
+    if (typeof payload?.id === "string" && typeof payload.sessionId === "string") cb({ id: payload.id, sessionId: payload.sessionId });
+  });
+}
+
+/** Actions of a request were decided in some client; every view of that session reads its list again. */
+export function onAssistChanged(cb: (change: { id: string; sessionId: string }) => void): Promise<UnlistenFn> {
+  return listen<{ id: string; sessionId: string }>("assist://changed", (payload) => {
+    if (typeof payload?.id === "string" && typeof payload.sessionId === "string") cb({ id: payload.id, sessionId: payload.sessionId });
+  });
 }
 
 /**

@@ -1,26 +1,20 @@
-//! Right-side Info tab: basic session details and uptime, Claude/Codex/Grok/ZCode quotas,
-//! current-turn statistics, and a Resources section at the bottom holding this session's process-tree
-//! CPU/memory alongside whole-machine CPU, memory, and saturation. Extracted from RightPanel;
-//! usage helpers are private to this tab, while the shared KV row lives in parts.
+//! Right-side Info tab: basic session details and uptime, the provider quota section, current-turn
+//! statistics, and a Resources section at the bottom holding this session's process-tree CPU/memory
+//! alongside whole-machine CPU, memory, and saturation. Extracted from RightPanel; the shared KV row
+//! lives in parts, and the quota rows with their own layout live in UsageSection.
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import Icons from "../../components/Icons";
+import { useEffect, useState } from "react";
 import { fmtBytes } from "../../format";
 import { dateLocale } from "../../i18n";
 import { useGitBranch } from "../../hooks/useGitBranch";
-import {
-  usageRefresh,
-  type UsageProvider,
-  type UsageSnapshot,
-} from "../../ipc/commands";
+import { type UsageProvider } from "../../ipc/commands";
 import { processStats, systemStats, type ProcStats, type SystemStats } from "../../ipc/info";
-import { type Session, type SessionKind } from "../../types";
+import { type Session } from "../../types";
 import { useTermStore } from "../../store/termStore";
-import { usageBrandIconEl } from "../../components/brandIcons";
-import { kindIconEl } from "../sessionViewers/sessionMeta";
 import { KV, Section } from "./parts";
 import { TurnSection } from "./TurnSection";
 import { KiroHistoryLink } from "../KiroHistory/navigation";
+import { UsagePanel } from "./UsageSection";
 
 /** Format uptime as 12s, 4m 12s, 1h 3m, or 2d 5h. */
 function fmtUptime(ms: number): string {
@@ -243,338 +237,6 @@ function ResourcesSection({ pid }: { pid: number | undefined }) {
   );
 }
 
-/** Normalize Claude ISO strings and Codex Unix seconds to Date, returning null for invalid values. */
-function toResetDate(at: string | number | null | undefined): Date | null {
-  if (at == null || at === "") return null;
-  const d = typeof at === "number" ? new Date(at * 1000) : new Date(at);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-/** Format quota reset time as local 24-hour HH:mm, adding M/D when it falls on another day. */
-function fmtAbsTime(d: Date): string {
-  const hm = d.toLocaleTimeString(dateLocale(), {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  const now = new Date();
-  if (d.toDateString() === now.toDateString()) return hm;
-  const md = d.toLocaleDateString(dateLocale(), { month: "numeric", day: "numeric" });
-  return `${md} ${hm}`;
-}
-
-/** Countdown to automatic refresh as mm:ss or h:mm:ss, clamped to 0:00 and driven by `now`. */
-function fmtRefreshLeft(ms: number): string {
-  let s = Math.max(0, Math.ceil(ms / 1000));
-  const h = Math.floor(s / 3600);
-  s -= h * 3600;
-  const m = Math.floor(s / 60);
-  const ss = String(s % 60).padStart(2, "0");
-  const mm = String(m).padStart(h > 0 ? 2 : 1, "0");
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
-}
-
-/** Format the "updated at" time as HH:mm:ss. */
-function fmtUpdatedAt(ts: number): string {
-  return new Date(ts).toLocaleTimeString(dateLocale(), {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
-}
-
-/** Convert a Codex window length in minutes to labels such as 5h, 7d, or 30d. */
-function codexWindowLabel(min: number): string {
-  if (min <= 360) return "5h";
-  if (min < 1440) return `${Math.round(min / 60)}h`;
-  if (min <= 10080) return "7d";
-  if (min <= 44640) return "30d";
-  return `${Math.round(min / 1440)}d`;
-}
-
-/** Color usage percentages by severity: red at 90%, orange at 70%, otherwise normal. */
-function usageColor(pct: number): string {
-  if (pct >= 90) return "var(--red)";
-  if (pct >= 70) return "var(--orange, #d8954a)";
-  return "var(--text-primary)";
-}
-
-/** Quota row with a label and the used percentage plus the window's reset time. */
-function UsageRow({
-  label,
-  pct,
-  reset,
-}: {
-  label: string;
-  pct: number;
-  reset?: string | number | null;
-}) {
-  const target = toResetDate(reset);
-  return (
-    <div className="kv">
-      <span className="k">{label}</span>
-      <span className="v">
-        <span style={{ color: usageColor(pct), fontVariantNumeric: "tabular-nums" }}>
-          {Math.round(pct)}% used
-        </span>
-        {target && (
-          <span
-            style={{
-              color: "var(--text-faint)",
-              marginLeft: 8,
-              fontSize: 11,
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
-            · ↻ {fmtAbsTime(target)}
-          </span>
-        )}
-      </span>
-    </div>
-  );
-}
-
-/** Placeholder for a quota the backend has not read yet or could not read, with the full error on hover. */
-function UsageHint({ busy, err }: { busy: boolean; err: string | null }) {
-  return (
-    <div className="kv">
-      <span className="k" style={{ color: "var(--text-faint)" }}>
-        {busy ? "loading…" : err ? "unavailable" : "—"}
-      </span>
-      {!busy && err && (
-        <span
-          className="v"
-          title={err}
-          style={{
-            color: "var(--text-faint)",
-            fontSize: 10,
-            maxWidth: 190,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {err}
-        </span>
-      )}
-    </div>
-  );
-}
-
-/**
- * "Fable 5" / "Claude Opus 4.8" -> "fable" / "opus": the family name only, matching the existing
- * "7d · opus" row label. The API sends display names with or without the "Claude " prefix, so drop it
- * before taking the first word, or every model would come out labelled "claude".
- */
-function modelShortName(display: string): string {
-  const name = display.trim().replace(/^claude\s+/i, "");
-  return name.split(/\s+/)[0]?.toLowerCase() || display.trim().toLowerCase();
-}
-
-/** Rows for one provider's stored reading, or null when it holds no window worth showing yet. */
-function usageRows(provider: UsageProvider, snap: UsageSnapshot | null): React.ReactNode {
-  if (!snap) return null;
-  if (provider === "claude") {
-    const u = snap.claude.data;
-    if (!u || (!u.fiveHour && !u.sevenDay)) return null;
-    return (
-      <>
-        {u.fiveHour && <UsageRow label="5h" pct={u.fiveHour.utilization} reset={u.fiveHour.resetsAt} />}
-        {u.sevenDay && <UsageRow label="7d" pct={u.sevenDay.utilization} reset={u.sevenDay.resetsAt} />}
-        {u.sevenDayOpus && (
-          <UsageRow label="7d · opus" pct={u.sevenDayOpus.utilization} reset={u.sevenDayOpus.resetsAt} />
-        )}
-        {(u.modelWeekly ?? [])
-          .filter((w) => !(u.sevenDayOpus && modelShortName(w.model) === "opus"))
-          .map((w) => (
-            <UsageRow
-              key={w.model}
-              label={`7d · ${modelShortName(w.model)}`}
-              pct={w.utilization}
-              reset={w.resetsAt}
-            />
-          ))}
-      </>
-    );
-  }
-  if (provider === "codex") {
-    const u = snap.codex.data;
-    if (!u || (!u.primary && !u.secondary)) return null;
-    return (
-      <>
-        {u.primary && (
-          <UsageRow
-            label={codexWindowLabel(u.primary.windowMinutes)}
-            pct={u.primary.usedPercent}
-            reset={u.primary.resetsAt}
-          />
-        )}
-        {u.secondary && (
-          <UsageRow
-            label={codexWindowLabel(u.secondary.windowMinutes)}
-            pct={u.secondary.usedPercent}
-            reset={u.secondary.resetsAt}
-          />
-        )}
-      </>
-    );
-  }
-  if (provider === "zcode") {
-    const u = snap.zcode?.data;
-    if (!u || u.windows.length === 0) return null;
-    return (
-      <>
-        {u.windows.map((w) => (
-          <UsageRow key={w.label} label={w.label} pct={w.usedPercent} reset={w.resetsAt} />
-        ))}
-      </>
-    );
-  }
-  const u = snap.grok.data;
-  if (!u) return null;
-  return (
-    <>
-      <UsageRow label={u.windowLabel || "7d"} pct={u.usedPercent} reset={u.periodEnd} />
-      {u.buildPercent != null && <UsageRow label="build" pct={u.buildPercent} />}
-    </>
-  );
-}
-
-/** Display label for each quota source. */
-function providerLabel(kind: SessionKind): string {
-  if (kind === "codex") return "Codex";
-  if (kind === "grok") return "Grok";
-  if (kind === "zcode") return "ZCode";
-  return "Claude";
-}
-
-/** Quota section with a Usage title, branded source matching sidebar colors, refresh countdown, and
- * refresh button. Keep the last-updated time in a tooltip to preserve a compact layout.
- *
- * `error` set while rows are showing means the latest poll failed and the numbers are from `usageAt`;
- * a stale marker says so, with the reason on hover, instead of letting old numbers pass as current. */
-function UsageSection({
-  kind,
-  usageAt,
-  usageBusy,
-  error,
-  errorAt,
-  refreshSec,
-  spinTick,
-  onRefresh,
-  children,
-}: {
-  kind: SessionKind;
-  usageAt: number | null;
-  usageBusy: boolean;
-  error: string | null;
-  errorAt: number | null;
-  refreshSec: number;
-  spinTick: number;
-  onRefresh: () => void;
-  children: React.ReactNode;
-}) {
-  // Keep the one-second countdown tick local so only this section rerenders.
-  const now = useNowTick();
-  // Count down from the last attempt, not the last success: a failing poller still retries on schedule.
-  const lastAttempt = Math.max(usageAt ?? 0, errorAt ?? 0) || null;
-  const nextLeft =
-    lastAttempt != null && refreshSec > 0 ? Math.max(0, lastAttempt + refreshSec * 1000 - now) : null;
-  const tip = usageAt != null ? `Updated ${fmtUpdatedAt(usageAt)}` : "Refresh";
-  const stale = error != null && usageAt != null;
-  const staleTip = stale
-    ? `Refresh failed${errorAt != null ? ` at ${fmtUpdatedAt(errorAt)}` : ""}: ${error}\nShowing reading from ${fmtUpdatedAt(usageAt)}`
-    : "";
-  return (
-    <Section
-      id="usage"
-      title="Usage"
-      actions={
-        <>
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              fontWeight: 600,
-              letterSpacing: 0.3,
-              textTransform: "none",
-              fontSize: 9,
-              lineHeight: 1.5,
-              padding: "1px 7px 1px 5px",
-              borderRadius: 999,
-              background: "var(--bg-active)",
-              color: "var(--text-dim)",
-            }}
-          >
-            {usageBrandIconEl(kind, 11) ?? kindIconEl(kind, 11)}
-            {providerLabel(kind)}
-          </span>
-          {stale && (
-            <span
-              title={staleTip}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 3,
-                fontWeight: 600,
-                letterSpacing: 0.3,
-                textTransform: "none",
-                fontSize: 9,
-                lineHeight: 1.5,
-                padding: "1px 6px",
-                borderRadius: 999,
-                background: "color-mix(in srgb, var(--orange, #d8954a) 18%, transparent)",
-                color: "var(--orange, #d8954a)",
-                cursor: "help",
-              }}
-            >
-              <Icons.info size={10} />
-              stale
-            </span>
-          )}
-          {nextLeft != null && (
-            <span
-              title={tip}
-              style={{
-                fontWeight: 400,
-                letterSpacing: 0,
-                textTransform: "none",
-                color: "var(--text-faint)",
-                fontSize: 10,
-                fontVariantNumeric: "tabular-nums",
-              }}
-            >
-              ↻ {fmtRefreshLeft(nextLeft)}
-            </span>
-          )}
-          <button
-            title={tip}
-            onClick={onRefresh}
-            disabled={usageBusy}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              background: "transparent",
-              border: "none",
-              padding: 2,
-              color: usageBusy ? "var(--accent)" : "var(--text-faint)",
-              cursor: usageBusy ? "default" : "pointer",
-              opacity: 1,
-            }}
-          >
-            <span key={spinTick} className={usageBusy ? "spin" : undefined} style={{ display: "inline-flex" }}>
-              <Icons.restart size={11} />
-            </span>
-          </button>
-        </>
-      }
-    >
-      {children}
-    </Section>
-  );
-}
 
 export function InfoTab({ session, cwd }: { session: Session; cwd: string | null }) {
   const runtime = useTermStore((s) => s.runtimes[session.id]);
@@ -585,14 +247,19 @@ export function InfoTab({ session, cwd }: { session: Session; cwd: string | null
   const isGrok = session.kind === "grok";
   const isOpencode = session.kind === "opencode";
   const isPi = session.kind === "pi" || session.kind === "omp";
-  const hasContext = isClaude || isCodex || isGrok || isOpencode || isPi || session.kind === "kiro" || session.kind === "zcode";
+  // Every agent whose backend records turn usage belongs here; DeepSeek and Antigravity read their
+  // own native recordings and have no quota row to reveal the gate.
+  const hasContext = isClaude || isCodex || isGrok || isOpencode || isPi
+    || session.kind === "kiro" || session.kind === "zcode" || session.kind === "deepseek"
+    || session.kind === "antigravity";
 
   const agentState = runtime?.agentState;
   const currentTool = runtime?.currentTool;
 
   // Account-level quotas come from the backend's single stored snapshot: one poller per machine keeps it
   // fresh and broadcasts changes, so this panel only reads it. Which entry to show follows the session kind.
-  const usage = useTermStore((s) => s.usage);
+  // UsagePanel reads the machine-wide snapshot itself: which provider to show still follows the session
+  // kind, but the polling, refresh state, and Codex reconciliation live with the section.
   const provider: UsageProvider | null = isClaude
     ? "claude"
     : isCodex
@@ -601,59 +268,9 @@ export function InfoTab({ session, cwd }: { session: Session; cwd: string | null
         ? "grok"
         : session.kind === "zcode"
           ? "zcode"
-          : null;
-  const entry = provider && usage ? usage[provider] : null;
-  const rows = provider ? usageRows(provider, usage) : null;
-  const [usageBusy, setUsageBusy] = useState(false);
-  // Increment on refresh to remount the spinner and reliably restart its animation.
-  const [spinTick, setSpinTick] = useState(0);
-  const previousAgentStateRef = useRef(agentState);
-  const spinHoldRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Manual refresh: ask the backend to refetch this one provider now and bypass its short TTL cache. The
-  // updated snapshot reaches every client through `usage://changed`, this one included.
-  const refreshUsage = useCallback(() => {
-    if (!provider) return;
-    setSpinTick((n) => n + 1);
-    setUsageBusy(true);
-    // Keep the spinner visible for at least two rotations: a cached answer can return in milliseconds,
-    // which would otherwise look like nothing happened.
-    const start = Date.now();
-    void usageRefresh(provider, true)
-      .then((snap) => useTermStore.getState().setUsage(snap))
-      .catch(() => {})
-      .finally(() => {
-        if (spinHoldRef.current) clearTimeout(spinHoldRef.current);
-        spinHoldRef.current = setTimeout(
-          () => setUsageBusy(false),
-          Math.max(0, 1100 - (Date.now() - start)),
-        );
-      });
-  }, [provider]);
-
-  // The spinner hold above outlives a fast refresh, so drop it when the panel goes away rather than
-  // letting it set state on an unmounted component.
-  useEffect(
-    () => () => {
-      if (spinHoldRef.current) clearTimeout(spinHoldRef.current);
-    },
-    [],
-  );
-
-  // Codex writes its final rate-limit snapshot just after the turn-end event, and a finished turn is
-  // exactly when the numbers moved. Reconcile once after that short write window instead of leaving the
-  // panel stale until the next poll, which is five minutes away by default.
-  useEffect(() => {
-    const previous = previousAgentStateRef.current;
-    previousAgentStateRef.current = agentState;
-    if (!isCodex || previous !== "working" || agentState === "working") return;
-    const t = setTimeout(() => {
-      void usageRefresh("codex")
-        .then((snap) => useTermStore.getState().setUsage(snap))
-        .catch(() => {});
-    }, 750);
-    return () => clearTimeout(t);
-  }, [agentState, isCodex]);
+          : session.kind === "antigravity"
+            ? "antigravity"
+            : null;
 
   // `started` is the process start time. Leaf components own their one-second ticks so InfoTab does
   // not rerender as a whole every second.
@@ -675,20 +292,7 @@ export function InfoTab({ session, cwd }: { session: Session; cwd: string | null
         {session.kind === "kiro" && <KiroHistoryLink sessionId={session.id} />}
       </Section>
 
-      {provider && (
-        <UsageSection
-          kind={session.kind}
-          usageAt={entry?.fetchedAt ?? null}
-          usageBusy={usageBusy}
-          error={entry?.error ?? null}
-          errorAt={entry?.errorAt ?? null}
-          refreshSec={usage?.auto ? usage.intervalSec : 0}
-          spinTick={spinTick}
-          onRefresh={refreshUsage}
-        >
-          {rows ?? <UsageHint busy={usageBusy} err={entry?.error ?? null} />}
-        </UsageSection>
-      )}
+      {provider && <UsagePanel sessionId={session.id} kind={session.kind} provider={provider} />}
 
       {hasContext && <TurnSection key={session.id} session={session} cwd={cwd} agentState={agentState} currentTool={currentTool} />}
 

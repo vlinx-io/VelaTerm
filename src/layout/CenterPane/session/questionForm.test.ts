@@ -102,9 +102,35 @@ describe("buildQuestionFormAnswers", () => {
     });
   });
 
-  it("prefers what was typed over what was picked", () => {
+  it("combines selected options and custom typed text on multi-select questions", () => {
+    const answers = buildQuestionFormAnswers(
+      parsed(),
+      { 0: pick(0), 1: pick(0, 1) },
+      { 1: "  Audit  " },
+    );
+    expect(answers["Which features?"]).toBe("Search, Export, Audit");
+  });
+
+  it("prefers what was typed over what was picked on single-select questions", () => {
     const answers = buildQuestionFormAnswers(parsed(), { 0: pick(0), 1: pick(0) }, { 0: " MySQL " });
     expect(answers["Which database?"]).toBe("MySQL");
+  });
+
+  it("records empty strings for skipped questions and preserves indexed answers across duplicates", () => {
+    const dup = parseQuestionFormQuestions({
+      questions: [
+        { header: "Q1", question: "Pick one?", options: [{ label: "A" }, { label: "B" }], multiSelect: false },
+        { header: "Q2", question: "Pick one?", options: [{ label: "A" }, { label: "B" }], multiSelect: false },
+      ],
+    })!;
+    const updated = buildAnsweredInput({ questions: dup }, dup, { 0: pick(0) }, {}, new Set([1]));
+    expect(updated._answerList).toEqual(["A", ""]);
+    expect(isQuestionAnswered(dup[1], 1, {}, {}, new Set([1]))).toBe(true);
+    expect(areQuestionsAnswered(dup, { 0: pick(0) }, {}, new Set([1]))).toBe(true);
+    expect(parseAnsweredQuestions(updated, undefined)).toEqual([
+      { header: "Q1", question: "Pick one?", answer: "A" },
+      { header: "Q2", question: "Pick one?", answer: "" },
+    ]);
   });
 
   it("leaves an unanswered question out rather than answering it blank", () => {
@@ -183,5 +209,17 @@ describe("parseAnsweredQuestions", () => {
     expect(parseAnsweredQuestions(input, undefined)).toBeNull();
     expect(parseAnsweredQuestions(input, "Dismissed by user")).toBeNull();
     expect(parseAnsweredQuestions({ plan: "not a question" }, result('"x"="y".'))).toBeNull();
+    expect(parseAnsweredQuestions(input, "Created At: 2026-11-16T10:00:00+08:00\nCompleted At: 2026-11-16T10:00:05+08:00\nStep was canceled")).toBeNull();
+  });
+
+  it("reads Antigravity A1/A2 outputs and skipped markers", () => {
+    const answered = parseAnsweredQuestions(
+      input,
+      "Created At: 2026-11-16T10:00:00+08:00\nCompleted At: 2026-11-16T10:00:05+08:00\nA1: Postgres\nA2: User Skipped",
+    );
+    expect(answered).toEqual([
+      { header: "Database", question: "Which database?", answer: "Postgres" },
+      { header: "Features", question: "Which features?", answer: "" },
+    ]);
   });
 });

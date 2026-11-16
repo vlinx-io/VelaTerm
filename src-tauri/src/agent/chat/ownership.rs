@@ -84,7 +84,7 @@ fn lock(app: &AppCtx, key: &str, drain_grace: bool) -> Result<File, String> {
     loop {
         if file.try_lock().is_ok() { break; }
         if attempts==0 { return Err("Another process still owns this conversation. Wait for it to exit before continuing.".into()); }
-        // A killed descendant may retain the inherited descriptor briefly after its root is reaped.
+        // A retiring owner may still be closing its descriptor briefly after the agent exits.
         attempts-=1; std::thread::sleep(std::time::Duration::from_millis(10));
     }
     Ok(file)
@@ -207,20 +207,6 @@ impl Owner {
 
     fn evidence(&self, retired: bool) -> Result<NativeEvidence,String> {
         Ok(NativeEvidence { token:self.token.clone(),host:std::process::id(),host_birth:birth(std::process::id()).ok_or("Cannot verify application process identity")?,child:self.child,retired })
-    }
-
-    /// Descendants retain the lease if the host is killed between spawn and PID persistence.
-    #[cfg(unix)]
-    pub fn inherit(&self, command: &mut std::process::Command) {
-        use std::os::fd::AsRawFd;
-        use std::os::unix::process::CommandExt;
-        let fds: Vec<_> = self.files.iter().map(AsRawFd::as_raw_fd).collect();
-        unsafe { command.pre_exec(move || {
-            for fd in &fds {
-                if libc::fcntl(*fd,libc::F_SETFD,0) == -1 { return Err(std::io::Error::last_os_error()); }
-            }
-            Ok(())
-        }); }
     }
 
     pub fn launched(&mut self, app: &AppCtx, session: &str, pid: u32) -> Result<(), String> {

@@ -160,11 +160,117 @@ describe("Select", () => {
     expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["medium"]);
   });
 
+  it("offers typed text as its own row unless it names an option", () => {
+    const onChange = vi.fn();
+    const onSelect = vi.fn();
+    render(<Select searchable searchPlaceholder="filter" value="low" onChange={onChange} options={OPTIONS}
+      ariaLabel="font" customEntry={{ label: (query) => `Use ${query}`, onSelect }} />);
+    fireEvent.click(screen.getByRole("combobox", { name: "font" }));
+    const box = screen.getByPlaceholderText("filter");
+    fireEvent.change(box, { target: { value: "high" } });
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["high"]);
+    fireEvent.change(box, { target: { value: "  Fira Code  " } });
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Use Fira Code"]);
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledWith("Fira Code");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
   it("shows the placeholder when no option matches the value", () => {
     render(
       <Select value="" onChange={() => {}} options={OPTIONS} placeholder="Select a branch" />,
     );
     expect(screen.getByRole("combobox").textContent).toContain("Select a branch");
+  });
+
+  it("matches multiple words across label, description and value, and respects customEntry.when", () => {
+    const onChange = vi.fn();
+    const onCustom = vi.fn();
+    render(
+      <Select
+        searchable
+        searchPlaceholder="filter"
+        value=""
+        onChange={onChange}
+        ariaLabel="model"
+        options={[
+          { value: "gemini-4-carbon", label: "Gemini 4 Carbon", description: "Flagship reasoning · 1M context", tag: "Default" },
+          { value: "gemini-3.8-flash", label: "Gemini 3.8 Flash", description: "Fast everyday model" },
+        ]}
+        customEntry={{ label: (q) => `Use ${q}`, when: (q) => !/\s/.test(q), onSelect: onCustom }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: "model" }));
+    expect(screen.getByText("Default")).toBeTruthy();
+    const box = screen.getByPlaceholderText("filter");
+    fireEvent.change(box, { target: { value: "carbon 1m" } });
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Gemini 4 CarbonDefaultFlagship reasoning · 1M context",
+    ]);
+    // Raw slug is also matched, and single-token unknown text offers customEntry while space-separated does not.
+    fireEvent.change(box, { target: { value: "3.8-flash" } });
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
+      "Gemini 3.8 FlashFast everyday model",
+      "Use 3.8-flash",
+    ]);
+    fireEvent.change(box, { target: { value: "two words" } });
+    expect(screen.queryByRole("option", { name: /Use two words/ })).toBeNull();
+  });
+
+  it("renders footer actions without closing and invokes onKeep on check or next pick", () => {
+    const onChange = vi.fn();
+    const onKeep = vi.fn();
+    const onRetry = vi.fn();
+    function Wrapped() {
+      const [val, setVal] = useState("low");
+      return (
+        <label>
+          Wrapper
+          <Select
+            value={val}
+            onChange={(next) => { setVal(next); onChange(next); }}
+            options={OPTIONS}
+            ariaLabel="effort"
+            keepLabel="Keep for new conversations"
+            onKeep={onKeep}
+            footer={<button type="button" onClick={onRetry}>Retry</button>}
+          />
+        </label>
+      );
+    }
+    render(<Wrapped />);
+    const trigger = screen.getByRole("combobox", { name: "effort" });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetry).toHaveBeenCalledOnce();
+    expect(screen.getByRole("listbox")).toBeTruthy();
+
+    const checkbox = screen.getByRole("checkbox", { name: "Keep for new conversations" }) as HTMLInputElement;
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(true);
+    expect(onKeep).toHaveBeenCalledWith("low");
+    fireEvent.click(screen.getByRole("option", { name: "high" }));
+    expect(onChange).toHaveBeenCalledWith("high");
+    expect(onKeep).toHaveBeenCalledWith("high");
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("stays closed when clicking the portaled backdrop inside a wrapping label", () => {
+    function LabeledPortal() {
+      const [v, setV] = useState("low");
+      return <label>Model<Select menuPortal width="100%" value={v} onChange={setV} options={OPTIONS} ariaLabel="model" /></label>;
+    }
+    render(<LabeledPortal />);
+    const trigger = screen.getByRole("combobox", { name: "model" });
+    fireEvent.click(trigger);
+    expect(screen.getByRole("listbox")).toBeTruthy();
+    const backdrop = document.body.querySelector('div[style*="z-index: 1240"]') as HTMLElement;
+    expect(backdrop).toBeTruthy();
+    fireEvent.mouseDown(backdrop);
+    fireEvent.click(backdrop);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("listbox")).toBeNull();
   });
 });
 

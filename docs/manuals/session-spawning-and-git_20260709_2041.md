@@ -2,7 +2,7 @@
 
 Created: 2026-07-09 20:41
 
-Updated: 2026-09-25 10:21
+Updated: 2026-11-09 21:17
 
 > Two features that work as a pair: spawning subtasks into independent child sessions (optionally in isolated git worktrees), and a graphical merge that brings parallel branches back together. Together they let several agents work on the same repository in parallel.
 
@@ -30,6 +30,7 @@ A new session does not see the conversation it came from. When you use the skill
 ## 3. Directory, agent and model
 
 - **Directory.** The child starts in the directory where the command runs, which is also the repository used for a worktree. Pass `--cwd <path>` to use another project, for example `vspawn-tree --cwd /work/project "fix the parser"`. This matters in a collection, which has no project folder of its own. The skills add `--cwd` when the conversation clearly identifies one repository.
+- **Title.** The child is named after the start of the task. Pass `--title <text>` to choose the name yourself, for example `vspawn --title "Parser audit" "review the parser"`. A title can have up to 80 characters on one line.
 - **Agent.** The child uses the same agent as the current session; a plain terminal spawns Claude Code. `--claude`, `--codex`, `--copilot` or `--kiro` choose another agent, and the confirmation card offers every agent type.
 - **Model and effort.** `--model <name>` and `--effort <level>` set the child's model and reasoning effort, for example `vspawn --model opus --effort high "port the parser"`. Model names belong to the agent that will run. A setting the agent does not support is rejected before the session is created. Without these options, a child of the same agent type inherits the parent's launch arguments and permission setting; a child of another type uses that agent's defaults from Settings ▸ Agents.
 - **View.** A child that supports the conversation view opens in the same view as a parent that supports it, and otherwise in the agent's default view.

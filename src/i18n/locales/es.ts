@@ -1,6 +1,7 @@
 //! Spanish dictionary. Each entry includes its English source in a trailing review comment; en.ts enforces the complete key set.
 
 import type en from "./en";
+import assist from "../assist/es";
 
 const es: typeof en = {
   "panel.turnStats": "Estadísticas del turno",
@@ -8,6 +9,8 @@ const es: typeof en = {
   "panel.showChangedFiles": "Mostrar los archivos modificados en este turno",
   "panel.noFilesChanged": "No se editó ningún archivo en este turno.",
   "panel.shellEditsNotListed": "Las modificaciones realizadas con comandos de shell no se incluyen.",
+  "panel.usageShowScope": (scope: string) => `Mostrar ${scope}`,
+  "panel.usageHideScope": (scope: string) => `Ocultar ${scope}`,
   "translation.swap": "Intercambiar idiomas",
   "translation.openai": "Compatible con OpenAI",
   "translation.bing": "Traductor de Bing (sin clave de API)",
@@ -373,6 +376,7 @@ const es: typeof en = {
   "common.create": "Crear", // Create
   "common.close": "Cerrar", // Close
   "chat.copyAsMarkdown": "Copiar como Markdown",
+  "chat.copyEntireMessage": "Copiar todo el mensaje",
   "chat.imageViewOriginal": "Ver imagen original",
   "chat.imageCopy": "Copiar imagen",
   "chat.imageSave": "Guardar imagen",
@@ -524,6 +528,19 @@ const es: typeof en = {
   "settings.agentDefaultView": "Vista predeterminada", // Default view
   "settings.agentDefaultViewHint":
     "Vista en la que se abren las sesiones nuevas de este agente. Las sesiones existentes conservan la vista con la que se crearon.", // Agent default view hint
+  "settings.deepseekApiTitle": "DeepSeek API",
+  "settings.deepseekApiDesc":
+    "Las conversaciones de DeepSeek se ejecutan mediante OpenCode. Introduce aquí la dirección y la clave de la API para usar el mismo inicio de sesión en todas las conversaciones.",
+  "settings.deepseekBaseUrl": "Dirección de la API",
+  "settings.deepseekEndpointHint":
+    "Si dejas la dirección vacía, se usa el endpoint oficial. Los cambios se aplican desde el siguiente mensaje.",
+  "settings.deepseekApiKey": "Clave de API",
+  "settings.deepseekKeySaved": "Guardada (déjala vacía para conservarla)",
+  "settings.deepseekKeyPlaceholder": "Introduce tu clave de API de DeepSeek",
+  "settings.deepseekRemoveKey": "Eliminar clave",
+  "settings.deepseekSaved": "Guardado.",
+  "settings.deepseekInvalid": "Introduce una dirección de API http(s) válida y una clave de API de una sola línea.",
+  "settings.deepseekLocalOnly": "Estas credenciales se guardan en el equipo anfitrión, por lo que solo se pueden cambiar allí.",
   "settings.appearance": "Apariencia", // Appearance
   "settings.accent": "Acento", // Accent
   "settings.accentAuto": "Seguir al tema", // Follow theme
@@ -824,16 +841,26 @@ const es: typeof en = {
   "settings.recordSessions": "Registrar registros de sesión", // Record session logs
   "settings.recordSessionsHint":
     "Desactivado por defecto. Si se activa, la salida del terminal se guarda en un archivo de registro para reproducción de archivo y búsqueda. Las sesiones de terminal normales nunca se graban; las sesiones de agente leen su propia transcripción.", // Record session logs hint
-  "settings.fonts": "Fonts", // TODO translate
+  "settings.fonts": "Fuentes",
   "settings.uiFontSize": "Tamaño de fuente de la interfaz",
   "settings.termFont": "Fuente del terminal",
   "settings.termFontSize": "Tamaño de fuente del terminal",
   "settings.termLineHeight": "Interlineado del terminal",
   "settings.chatTypography": "Vista de conversación",
-  "settings.chatTypographyHint": "Estos ajustes de fuente son independientes del terminal y se aplican de inmediato.",
+  "settings.chatTypographyHint": "Estos ajustes son independientes del terminal y se aplican de inmediato. De forma predeterminada, el texto usa la fuente de la interfaz y el código, su fuente monoespaciada.",
   "settings.chatFont": "Fuente de la conversación",
   "settings.chatFontSize": "Tamaño de fuente de la conversación",
   "settings.chatLineHeight": "Interlineado de la conversación",
+  "settings.chatCodeFont": "Fuente del código en la conversación",
+  "settings.chatLetterSpacing": "Espaciado entre letras de la conversación",
+  "settings.uiTypography": "Fuentes de la interfaz",
+  "settings.uiTypographyHint": "Se aplica a menús, listas, cuadros de diálogo y documentos. La fuente monoespaciada se usa para código, rutas y comparaciones; el terminal tiene sus propios ajustes de fuente.",
+  "settings.uiFont": "Fuente de la interfaz",
+  "settings.uiMonoFont": "Fuente monoespaciada",
+  "settings.fontPreview": "Vista previa",
+  "settings.fontPreviewText": "El veloz murciélago hindú comía feliz cardillo y kiwi. 0123456789",
+  "settings.fontPreviewChat": "He actualizado la página de ajustes. Cada ajuste de fuente se aplica de inmediato y puede restablecer los valores predeterminados en cualquier momento.",
+  "settings.fontResetGroup": "Restablecer las fuentes predeterminadas",
   "settings.composerChips": "Barra de herramientas del editor",
   "settings.composerChipsHint": "Los elementos activados aparecen junto al mensaje en el orden indicado. Si una función no está disponible temporalmente (el agente no se está ejecutando, no hay tareas en segundo plano o el inicio de sesión está pendiente), su elemento sigue visible, pero vacío o desactivado. Se omiten las funciones que el agente actual no admite. Los elementos que no caben pasan al menú Más. Los elementos desactivados aquí solo aparecen en ese menú y se pueden seguir configurando aquí.",
   "settings.composerChipUp": (chip: string) => `Subir ${chip}`,
@@ -851,15 +878,21 @@ const es: typeof en = {
   "settings.composerChip.account": "Cuenta",
   "settings.composerChip.codexCredits": "Créditos de restablecimiento de Codex",
   "settings.fontDefault": "Predeterminada",
-  "settings.fontCustom": "Custom…", // TODO translate
+  "settings.fontSearch": "Buscar fuentes…",
+  "settings.fontUseCustom": (query: string) => `Usar «${query}»`,
   "settings.fontListUnavailable": "No se puede obtener la lista de fuentes del sistema. Puede introducir un nombre de fuente manualmente.",
   "settings.fontUnconfirmed": "No se puede confirmar si esta fuente está disponible.",
-  "settings.fontAuto": "Auto", // TODO translate
-  "settings.fontSmaller": "Smaller", // TODO translate
-  "settings.fontLarger": "Larger", // TODO translate
-  "settings.fontReset": "Reset", // TODO translate
+  "settings.fontAuto": "Auto",
+  "settings.fontSmaller": "Más pequeño",
+  "settings.fontLarger": "Más grande",
+  "settings.fontReset": "Restablecer",
   "settings.sound": "Sonido de notificación", // Notification sound
   "settings.language": "Idioma", // Language
+  "settings.serverRegion": "Servidor", // Server
+  "settings.serverRegionGlobal": "Internacional", // International
+  "settings.serverRegionChina": "China continental", // Mainland China
+  "settings.serverRegionHint":
+    "Se usa para buscar actualizaciones, descargar versiones y abrir el sitio web. Con «China continental», VelaTerm usa velaterm.cn, que es más rápido desde China y ofrece las mismas versiones. Las funciones de la cuenta siempre usan velaterm.com.",
   "settings.langAuto": "Auto (sistema)", // Auto (system)
   "settings.skillLabel": "Vela Skills",
   "settings.skillInstall": "Install", // Install
@@ -1051,6 +1084,7 @@ const es: typeof en = {
   "tree.deleteGroup": "Eliminar grupo", // Delete Group
   "tree.deleteSession": "Eliminar sesión", // Delete Session
   "tree.projectRoot": "Raíz del proyecto (sin grupo)", // Project root (no group)
+  "tree.collectionRoot": (name: string) => `${name} (sin grupo)`,
   "tree.moveToSession": "Mover bajo una sesión (como hija)", // Move under a session (as child)
   "tree.moveTo": "Mover a…", // Move to…
   "tree.openNewTab": "Abrir en pestaña nueva", // Open in New Tab
@@ -1155,6 +1189,7 @@ const es: typeof en = {
   "tree.filterStatus": "Filtrar por estado", // Filter by status
   "tree.refreshStatusFilter": "Actualizar filtro de estado",
   "tree.refreshStatusMatch": "Actualizar estado",
+  "tree.setStatus": "Establecer estado", // Set Status
   "tree.filterStatusSection": "Estado", // Status
   "tree.filterMarkSection": "Marca", // Mark
   "tree.viewMainName": "Principal",
@@ -1377,10 +1412,9 @@ const es: typeof en = {
 
   // ── Center pane ──
   "center.noSession": "Sin sesión", // No session
-  "center.noSessionHintPre": "Elige una sesión en la barra lateral, o pulsa ", // Pick a session from the sidebar, or press
-  "center.noSessionHintPost": " para crear un terminal", // to create a terminal
   "center.createTerminal": "Crear terminal", // Create Terminal
-  "center.splitHint": "Abre una sesión para dividirla con estos atajos:",
+  "center.startTitle": "Iniciar una sesión", // Start a session
+  "center.startHint": "Elige una sesión en la barra lateral o empieza una nueva.", // Pick one from the sidebar, or start something new.
   "tab.unsavedDot": "Cambios sin guardar", // Unsaved changes
   "tab.newTerminal": "Nuevo terminal", // New terminal
   "tab.newDocument": "Nuevo documento", // New document
@@ -1610,6 +1644,8 @@ const es: typeof en = {
   "transfer.downloading": "Descargando…", // Downloading…
   "transfer.savedToDownloads": "Guardado en Descargas", // Saved to Downloads
   "transfer.foldersUnsupported": "No se pueden subir carpetas.", // Folders can't be uploaded.
+  "drop.browserFilesHint": "En el navegador, aquí solo se pueden soltar imágenes. Para usar otros archivos, súbalos primero al proyecto.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
+  "files.copyFailed": "No se pudieron copiar algunos archivos. Compruebe que todavía existen y que tiene permiso de escritura en esta carpeta.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => (n === 1 ? "1 sesión" : `${n} sesiones`), // {n} sessions
@@ -1626,6 +1662,11 @@ const es: typeof en = {
   "statusbar.permSkip": "Permisos: Omitir", // Perms: Skip
   "statusbar.notifyOn": "Notify: On", // TODO translate
   "statusbar.notifyOff": "Notify: Off", // TODO translate
+  "statusbar.zoomGroup": "Zoom de la interfaz",
+  "statusbar.zoomOut": "Alejar",
+  "statusbar.zoomIn": "Acercar",
+  "statusbar.zoomEdit": "Zoom de la interfaz · Haz clic para escribir un porcentaje (80–200 %)",
+  "statusbar.zoomInput": "Porcentaje de zoom de la interfaz, de 80 a 200",
   "statusbar.permTooltip":
     "Modo de permisos de esta sesión · haz clic para cambiar (solo esta sesión)", // This session's permission mode · click to change (this session only)
   "statusbar.permMenuTitle": "Permisos de esta sesión", // This session's permissions
@@ -1985,10 +2026,12 @@ const es: typeof en = {
   "updater.hide": "Hide", // TODO translate
   "updater.hideHint":
     "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
-  "updater.downloadManually": "Download manually", // TODO translate
-  "updater.downloadManuallyHint": "Open the download page in your browser.", // TODO translate
+  "updater.downloadManually": "Descargar manualmente",
+  "updater.downloadManuallyHint": "Abre la página de descargas en el navegador.",
   "updater.windowsNotice":
     "VelaTerm will close while the installer runs, then reopen on its own.", // TODO translate
+  "updater.portableNotice":
+    "Esta versión portátil no se actualiza automáticamente. Descargue la nueva versión y sustituya esta carpeta por ella; se conservan su configuración y sus sesiones.",
   "updater.installingWindows":
     "Installing… VelaTerm is about to close. The installer will finish the update and reopen it.", // TODO translate
   "statusbar.updateAvailable": (version) => `Update ${version}`, // TODO translate
@@ -2010,6 +2053,7 @@ const es: typeof en = {
   "skills.vstat": "Muestra qué sesiones están trabajando o esperando una entrada.",
   "skills.vtell": "Envía un mensaje a otra sesión.",
   "skills.vkb": "Consulta CodeGraph y la base de conocimientos del proyecto.",
+  "skills.vapp": "Permite que el agente maneje VelaTerm; tú confirmas cada acción.",
   "skills.settingsHint": "También puede instalarlas más adelante en Ajustes > Avanzado.",
   "skills.installFailed": (err) => `No se pudo completar la instalación: ${err}`,
   "skills.dontRemind": "No volver a recordar",
@@ -2129,6 +2173,7 @@ const es: typeof en = {
   "chat.question.submit": "Enviar",
   "chat.question.next": "Siguiente",
   "chat.question.dismiss": "Descartar",
+  "chat.question.skip": "Omitir",
   "chat.question.answerPlaceholder": "Escribe tu respuesta",
   "chat.question.otherPlaceholder": "Otra respuesta",
   "chat.question.answeredHeading": (n: number) =>
@@ -2183,6 +2228,8 @@ const es: typeof en = {
   "chat.rewind.editWarning": "El mensaje original y todos los mensajes posteriores se eliminarán permanentemente. El mensaje editado se enviará desde este punto. Los cambios en los archivos no se desharán.",
   "chat.rewind.inactive": "El proceso de conversación no está en ejecución. Estas acciones estarán disponibles cuando se inicie.",
   "chat.rewind.unsupported": "El agente conectado no ofrece esta acción actualmente.",
+  "chat.rewind.latestOnly": "El agente conectado solo puede retroceder desde el último mensaje.",
+  "chat.rewind.appliesOnSend": "El agente aplicará el retroceso cuando envíe el siguiente mensaje. Hasta entonces, la conversación y los archivos no cambian.",
   "chat.rewind.title": "Volver a este punto",
   "chat.rewind.warning": "Esta acción no se puede deshacer.",
   "chat.rewind.conversation": "Retroceder la conversación",
@@ -2366,7 +2413,7 @@ const es: typeof en = {
   "settings.completionTab": "Solo Tab",
   "settings.completionOff": "Desactivadas",
   "settings.completionUnavailable": "No se pudo cargar o guardar la configuración.",
-  "settings.completionHint": "Al escribir en Zsh, el comando más reciente del historial que coincide aparece atenuado después del cursor; pulsa → o Fin para aceptarlo. Tab funciona como en la shell: inserta directamente una coincidencia única, completa primero la parte común y muestra la lista cuando quedan varias opciones. Se aplica a terminales nuevas de Zsh, Bash 4+, Fish y PowerShell.",
+  "settings.completionHint": "Al escribir en Zsh, el comando más reciente del historial que coincide aparece atenuado después del cursor; pulsa → o Fin para aceptarlo. No aparece al escribir desde una conexión remota. Tab funciona como en la shell: inserta directamente una coincidencia única, completa primero la parte común y muestra la lista cuando quedan varias opciones. Se aplica a terminales nuevas de Zsh, Bash 4+, Fish y PowerShell.",
   "settings.completionTabOnlyHint": "No aparecen sugerencias mientras escribes. Pulsa Tab para completar como en la shell: inserta directamente una coincidencia única, completa primero la parte común y muestra la lista cuando quedan varias opciones. Se aplica a terminales nuevas de Zsh, Bash 4+, Fish y PowerShell.",
   "settings.completionTabKey": "Tecla Tab",
   "settings.completionTabAccept": "Aceptar sugerencia",
@@ -2483,10 +2530,16 @@ const es: typeof en = {
   "chat.antigravity.placeholder": "Escribe a Antigravity o usa @archivos para hacer referencia a archivos",
   "chat.antigravity.textOnly": "La vista de conversación de Antigravity actualmente solo admite mensajes de texto.",
   "chat.textOnly": (agent: string) => `La vista de conversación de ${agent} solo admite mensajes de texto.`,
+  "chat.attach.modelTextOnly": "El modelo seleccionado no admite imágenes.",
   "chat.signInRequired": (agent: string) => `Inicia sesión en ${agent} para usar la vista de conversación. Cambia a la vista de terminal para iniciar sesión y luego vuelve a enviar tu mensaje.`,
-  "chat.apiKeyRequired": "DeepSeek Harness necesita una clave de API. Define la variable de entorno DEEPSEEK_API_KEY o ejecuta `dsh web` y guarda la clave en su página Models; después, vuelve a enviar tu mensaje.",
+  "chat.apiKeyRequired": "DeepSeek necesita una clave de API. Abre «API» junto al cuadro de mensaje e introdúcela, o define la variable de entorno `DEEPSEEK_API_KEY`; después, vuelve a enviar tu mensaje.",
   "chat.antigravity.permissionsHint": "Las herramientas que requieren aprobación deben autorizarse previamente en la configuración de Antigravity o utilizarse en la vista de terminal.",
   "chat.antigravity.settingsHint": "Cambie el modelo, el nivel de razonamiento o los permisos entre turnos.",
+  "chat.antigravity.rewindTitle": "Retroceder en la vista de terminal",
+  "chat.antigravity.rewindHint": "La vista de conversación de Antigravity aún no permite retroceder ni editar mensajes enviados. Cambie a la vista de terminal y ejecute /rewind; los cambios se sincronizarán al volver.",
+  "chat.antigravity.rewindGuide": "La vista de conversación de Antigravity aún no permite retroceder directamente ni editar mensajes enviados. Cambie a la vista de terminal y ejecute /rewind para retroceder la conversación o restaurar archivos; el estado actualizado se cargará automáticamente al volver.",
+  "chat.antigravity.rewindCommandDescription": "Cambiar a la vista de terminal para retroceder con /rewind",
+  "chat.antigravity.switchToTerminal": "Cambiar a la vista de terminal",
   "chat.history.imageDownloadRequired": "Esta imagen no se puede abrir aquí. Descargue el original para verla.",
   "chat.history.readBody": "Leer el contenido completo",
   "chat.history.selectDetail": "Seleccionar un archivo o campo",
@@ -2662,6 +2715,8 @@ const es: typeof en = {
   "kb.searchEntries": "Buscar artículos…",
   "kb.updatedOn": (date: string) => `Actualizado el ${date}`,
   "archive.sessionsCount": (count: string) => `${count} ${count === "1" ? "sesión" : "sesiones"}`,
+
+  ...assist,
 };
 
 export default es;

@@ -33,8 +33,8 @@ fn queue() -> &'static std::sync::mpsc::SyncSender<Task> {
 
 pub fn start(app:&AppCtx,session:&str,destination:Option<&str>,at:Option<&str>) -> Result<Value,String> {
     let native=repo::get_session(&app.db().conn.lock().unwrap(),session)?.ok_or("Session not found")?;
-    if native.agent_session_id.is_none() {return Err("No agent session id captured for this session yet; nothing to export".into());}
-    if !matches!(native.kind,crate::models::SessionKind::Claude|crate::models::SessionKind::Codex|crate::models::SessionKind::Pi|crate::models::SessionKind::Omp|crate::models::SessionKind::Opencode) {
+    if native.agent_session_id.is_none() && native.legacy_agent_session_id.is_none() {return Err("No agent session id captured for this session yet; nothing to export".into());}
+    if !matches!(native.kind,crate::models::SessionKind::Claude|crate::models::SessionKind::Codex|crate::models::SessionKind::Pi|crate::models::SessionKind::Omp|crate::models::SessionKind::Opencode|crate::models::SessionKind::Deepseek) {
         return Err("Streamed context export is unavailable for this provider".into());
     }
     if at.is_some_and(|at|at.len()>128) {return Err("Export timestamp exceeds its byte budget".into());}

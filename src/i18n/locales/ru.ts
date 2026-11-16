@@ -2,6 +2,7 @@
 //! Russian nouns use three number-dependent forms (1, 2–4, and 5+), selected by the plural() helper.
 
 import type en from "./en";
+import assist from "../assist/ru";
 
 /** Select one of the Russian plural forms [1, 2–4, 5+] using ones and tens digit rules. */
 function plural(n: number, one: string, few: string, many: string): string {
@@ -18,6 +19,8 @@ const ru: typeof en = {
   "panel.showChangedFiles": "Показать файлы, изменённые за этот ход",
   "panel.noFilesChanged": "За этот ход файлы не редактировались.",
   "panel.shellEditsNotListed": "Изменения, сделанные командами оболочки, в список не попадают.",
+  "panel.usageShowScope": (scope: string) => `Показать ${scope}`,
+  "panel.usageHideScope": (scope: string) => `Скрыть ${scope}`,
   "translation.swap": "Поменять языки местами",
   "translation.openai": "Совместимый с OpenAI",
   "translation.bing": "Bing Переводчик (без ключа API)",
@@ -383,6 +386,7 @@ const ru: typeof en = {
   "common.create": "Создать", // Create
   "common.close": "Закрыть", // Close
   "chat.copyAsMarkdown": "Копировать в формате Markdown",
+  "chat.copyEntireMessage": "Копировать всё сообщение",
   "chat.imageViewOriginal": "Открыть исходное изображение",
   "chat.imageCopy": "Копировать изображение",
   "chat.imageSave": "Сохранить изображение",
@@ -533,6 +537,19 @@ const ru: typeof en = {
   "settings.agentDefaultView": "Вид по умолчанию", // Default view
   "settings.agentDefaultViewHint":
     "Вид, в котором открываются новые сессии этого агента. Уже созданные сессии сохраняют вид, с которым были созданы.", // Agent default view hint
+  "settings.deepseekApiTitle": "DeepSeek API",
+  "settings.deepseekApiDesc":
+    "Диалоги DeepSeek работают через OpenCode. Укажите здесь адрес и ключ API, чтобы все диалоги использовали одни и те же учётные данные.",
+  "settings.deepseekBaseUrl": "Адрес API",
+  "settings.deepseekEndpointHint":
+    "Оставьте адрес пустым, чтобы использовать официальную конечную точку. Изменения вступают в силу со следующего сообщения.",
+  "settings.deepseekApiKey": "Ключ API",
+  "settings.deepseekKeySaved": "Сохранён (оставьте поле пустым, чтобы сохранить)",
+  "settings.deepseekKeyPlaceholder": "Введите ключ API DeepSeek",
+  "settings.deepseekRemoveKey": "Удалить ключ",
+  "settings.deepseekSaved": "Сохранено.",
+  "settings.deepseekInvalid": "Укажите корректный адрес API http(s) и ключ API в одну строку.",
+  "settings.deepseekLocalOnly": "Эти учётные данные хранятся на хост-устройстве, поэтому изменить их можно только там.",
   "settings.appearance": "Внешний вид", // Appearance
   "settings.accent": "Акцент", // Accent
   "settings.accentAuto": "Как тема", // Follow theme
@@ -832,16 +849,26 @@ const ru: typeof en = {
   "settings.recordSessions": "Запись журналов сессий", // Record session logs
   "settings.recordSessionsHint":
     "По умолчанию выключено. Когда включено, вывод терминала сохраняется в файл журнала для воспроизведения из архива и поиска. Обычные сессии терминала никогда не записываются; сессии агента читают собственную расшифровку.", // Record session logs hint
-  "settings.fonts": "Fonts", // TODO translate
+  "settings.fonts": "Шрифты",
   "settings.uiFontSize": "Размер шрифта интерфейса",
   "settings.termFont": "Шрифт терминала",
   "settings.termFontSize": "Размер шрифта терминала",
   "settings.termLineHeight": "Высота строки в терминале",
   "settings.chatTypography": "Просмотр диалога",
-  "settings.chatTypographyHint": "Эти настройки шрифта не зависят от терминала и применяются сразу.",
+  "settings.chatTypographyHint": "Эти настройки не зависят от терминала и применяются сразу. По умолчанию текст использует шрифт интерфейса, а код — моноширинный шрифт интерфейса.",
   "settings.chatFont": "Шрифт диалога",
   "settings.chatFontSize": "Размер шрифта диалога",
   "settings.chatLineHeight": "Высота строки диалога",
+  "settings.chatCodeFont": "Шрифт кода в диалоге",
+  "settings.chatLetterSpacing": "Межбуквенный интервал диалога",
+  "settings.uiTypography": "Шрифты интерфейса",
+  "settings.uiTypographyHint": "Применяются к меню, спискам, диалоговым окнам и документам. Моноширинный шрифт используется для кода, путей и сравнения изменений; у терминала собственные настройки шрифта.",
+  "settings.uiFont": "Шрифт интерфейса",
+  "settings.uiMonoFont": "Моноширинный шрифт",
+  "settings.fontPreview": "Предпросмотр",
+  "settings.fontPreviewText": "Съешь же ещё этих мягких французских булок да выпей чаю. 0123456789",
+  "settings.fontPreviewChat": "Страница настроек обновлена. Каждый параметр шрифта применяется сразу, а значения по умолчанию можно восстановить в любой момент.",
+  "settings.fontResetGroup": "Восстановить шрифты по умолчанию",
   "settings.composerChips": "Панель инструментов ввода",
   "settings.composerChipsHint": "Включённые элементы отображаются рядом с сообщением в указанном порядке. Если функция временно недоступна (агент не запущен, нет фоновых задач или вход в аккаунт ещё не завершён), её элемент остаётся видимым, но пустым или неактивным. Функции, которые текущий агент не поддерживает, не отображаются. Элементы, для которых не хватает места, перемещаются в меню «Ещё». Выключенные здесь элементы отображаются только в этом меню; их настройки по-прежнему доступны здесь.",
   "settings.composerChipUp": (chip: string) => `Переместить «${chip}» вверх`,
@@ -859,15 +886,21 @@ const ru: typeof en = {
   "settings.composerChip.account": "Аккаунт",
   "settings.composerChip.codexCredits": "Сбросы лимитов Codex",
   "settings.fontDefault": "По умолчанию",
-  "settings.fontCustom": "Custom…", // TODO translate
+  "settings.fontSearch": "Поиск шрифтов…",
+  "settings.fontUseCustom": (query: string) => `Использовать «${query}»`,
   "settings.fontListUnavailable": "Не удалось получить список системных шрифтов. Название шрифта можно ввести вручную.",
   "settings.fontUnconfirmed": "Не удалось подтвердить доступность этого шрифта.",
-  "settings.fontAuto": "Auto", // TODO translate
-  "settings.fontSmaller": "Smaller", // TODO translate
-  "settings.fontLarger": "Larger", // TODO translate
-  "settings.fontReset": "Reset", // TODO translate
+  "settings.fontAuto": "Авто",
+  "settings.fontSmaller": "Меньше",
+  "settings.fontLarger": "Больше",
+  "settings.fontReset": "Сбросить",
   "settings.sound": "Звук уведомлений", // Notification sound
   "settings.language": "Язык", // Language
+  "settings.serverRegion": "Сервер", // Server
+  "settings.serverRegionGlobal": "Международный", // International
+  "settings.serverRegionChina": "Материковый Китай", // Mainland China
+  "settings.serverRegionHint":
+    "Используется для проверки обновлений, загрузок и ссылок на сайт. При выборе «Материковый Китай» VelaTerm использует velaterm.cn: из Китая он доступен быстрее и предлагает те же версии. Функции учётной записи всегда используют velaterm.com.",
   "settings.langAuto": "Авто (система)", // Auto (system)
   "settings.skillLabel": "Vela Skills",
   "settings.skillInstall": "Install", // Install
@@ -1060,6 +1093,7 @@ const ru: typeof en = {
   "tree.deleteGroup": "Удалить группу", // Delete Group
   "tree.deleteSession": "Удалить сессию", // Delete Session
   "tree.projectRoot": "Корень проекта (без группы)", // Project root (no group)
+  "tree.collectionRoot": (name: string) => `${name} (без группы)`,
   "tree.moveToSession": "Переместить под сессию (сделать дочерней)", // Move under a session (as child)
   "tree.moveTo": "Переместить в…", // Move to…
   "tree.openNewTab": "Открыть в новой вкладке", // Open in New Tab
@@ -1163,6 +1197,7 @@ const ru: typeof en = {
   "tree.filterStatus": "Фильтр по статусу", // Filter by status
   "tree.refreshStatusFilter": "Обновить фильтр по статусу",
   "tree.refreshStatusMatch": "Обновить статус",
+  "tree.setStatus": "Установить статус", // Set Status
   "tree.filterStatusSection": "Статус", // Status
   "tree.filterMarkSection": "Метка", // Mark
   "tree.viewMainName": "Основной",
@@ -1386,10 +1421,9 @@ const ru: typeof en = {
 
   // ── Center pane ──
   "center.noSession": "Нет сессии", // No session
-  "center.noSessionHintPre": "Выберите сессию в боковой панели или нажмите ", // Pick a session from the sidebar, or press
-  "center.noSessionHintPost": ", чтобы создать терминал", // to create a terminal
   "center.createTerminal": "Создать терминал", // Create Terminal
-  "center.splitHint": "Откройте сессию, чтобы разделить окно с помощью этих сочетаний клавиш:",
+  "center.startTitle": "Начать сессию", // Start a session
+  "center.startHint": "Выберите сессию в боковой панели или начните новую.", // Pick one from the sidebar, or start something new.
   "tab.unsavedDot": "Несохранённые изменения", // Unsaved changes
   "tab.newTerminal": "Новый терминал", // New terminal
   "tab.newDocument": "Новый документ", // New document
@@ -1615,6 +1649,8 @@ const ru: typeof en = {
   "transfer.downloading": "Скачивание…", // Downloading…
   "transfer.savedToDownloads": "Сохранено в папке «Загрузки»", // Saved to Downloads
   "transfer.foldersUnsupported": "Папки загрузить нельзя.", // Folders can't be uploaded.
+  "drop.browserFilesHint": "В браузере сюда можно перетащить только изображения. Другие файлы сначала загрузите в проект.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
+  "files.copyFailed": "Не удалось скопировать некоторые файлы. Убедитесь, что они ещё существуют и что у вас есть права на запись в эту папку.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
 
   // ── Status bar ──
   "statusbar.sessions": (n) =>
@@ -1632,6 +1668,11 @@ const ru: typeof en = {
   "statusbar.permSkip": "Права: пропускать", // Perms: Skip
   "statusbar.notifyOn": "Notify: On", // TODO translate
   "statusbar.notifyOff": "Notify: Off", // TODO translate
+  "statusbar.zoomGroup": "Масштаб интерфейса",
+  "statusbar.zoomOut": "Уменьшить",
+  "statusbar.zoomIn": "Увеличить",
+  "statusbar.zoomEdit": "Масштаб интерфейса · Нажмите, чтобы ввести процент (80–200 %)",
+  "statusbar.zoomInput": "Масштаб интерфейса в процентах, от 80 до 200",
   "statusbar.permTooltip":
     "Режим прав этой сессии · нажмите, чтобы изменить (только эта сессия)", // This session's permission mode · click to change (this session only)
   "statusbar.permMenuTitle": "Права этой сессии", // This session's permissions
@@ -1990,10 +2031,12 @@ const ru: typeof en = {
   "updater.hide": "Hide", // TODO translate
   "updater.hideHint":
     "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
-  "updater.downloadManually": "Download manually", // TODO translate
-  "updater.downloadManuallyHint": "Open the download page in your browser.", // TODO translate
+  "updater.downloadManually": "Скачать вручную",
+  "updater.downloadManuallyHint": "Открывает страницу загрузки в браузере.",
   "updater.windowsNotice":
     "VelaTerm will close while the installer runs, then reopen on its own.", // TODO translate
+  "updater.portableNotice":
+    "Портативная версия не обновляется автоматически. Скачайте новую версию и замените ею эту папку — настройки и сессии сохранятся.",
   "updater.installingWindows":
     "Installing… VelaTerm is about to close. The installer will finish the update and reopen it.", // TODO translate
   "statusbar.updateAvailable": (version) => `Update ${version}`, // TODO translate
@@ -2015,6 +2058,7 @@ const ru: typeof en = {
   "skills.vstat": "Показывает, какие сессии работают или ожидают ввода.",
   "skills.vtell": "Отправляет сообщение другой сессии.",
   "skills.vkb": "Выполняет запросы к CodeGraph и базе знаний проекта.",
+  "skills.vapp": "Позволяет агенту управлять VelaTerm; каждое действие подтверждаете вы.",
   "skills.settingsHint": "Их также можно установить позже в разделе «Настройки > Дополнительно».",
   "skills.installFailed": (err) => `Не удалось установить: ${err}`,
   "skills.dontRemind": "Больше не напоминать",
@@ -2134,6 +2178,7 @@ const ru: typeof en = {
   "chat.question.submit": "Отправить",
   "chat.question.next": "Далее",
   "chat.question.dismiss": "Закрыть",
+  "chat.question.skip": "Пропустить",
   "chat.question.answerPlaceholder": "Введите ответ",
   "chat.question.otherPlaceholder": "Другой ответ",
   "chat.question.answeredHeading": (n: number) =>
@@ -2192,6 +2237,8 @@ const ru: typeof en = {
   "chat.rewind.editWarning": "Исходное сообщение и все последующие сообщения будут удалены без возможности восстановления. Изменённое сообщение будет отправлено с этого места. Изменения в файлах не будут отменены.",
   "chat.rewind.inactive": "Процесс диалога не запущен. Эти действия станут доступны после его запуска.",
   "chat.rewind.unsupported": "Подключённый агент пока не предоставляет это действие.",
+  "chat.rewind.latestOnly": "Подключённый агент может выполнить откат только с последнего сообщения.",
+  "chat.rewind.appliesOnSend": "Откат будет выполнен, когда вы отправите следующее сообщение. До этого диалог и файлы останутся без изменений.",
   "chat.rewind.title": "Откатить отсюда",
   "chat.rewind.warning": "Это действие нельзя отменить.",
   "chat.rewind.conversation": "Откатить диалог",
@@ -2375,7 +2422,7 @@ const ru: typeof en = {
   "settings.completionTab": "Только Tab",
   "settings.completionOff": "Выключены",
   "settings.completionUnavailable": "Не удалось загрузить или сохранить настройки.",
-  "settings.completionHint": "При вводе в Zsh после курсора бледным текстом показывается последняя подходящая команда из истории; нажмите → или End, чтобы принять её. Tab работает так же, как в самой оболочке: единственный вариант вставляется сразу, общая часть дополняется первой, а список открывается, если вариантов остаётся несколько. Применяется к новым терминалам Zsh, Bash 4+, Fish и PowerShell.",
+  "settings.completionHint": "При вводе в Zsh после курсора бледным текстом показывается последняя подходящая команда из истории; нажмите → или End, чтобы принять её. При вводе через удалённое подключение она не показывается. Tab работает так же, как в самой оболочке: единственный вариант вставляется сразу, общая часть дополняется первой, а список открывается, если вариантов остаётся несколько. Применяется к новым терминалам Zsh, Bash 4+, Fish и PowerShell.",
   "settings.completionTabOnlyHint": "Во время ввода подсказки не показываются. Нажмите Tab, чтобы дополнить так же, как в самой оболочке: единственный вариант вставляется сразу, общая часть дополняется первой, а список открывается, если вариантов остаётся несколько. Применяется к новым терминалам Zsh, Bash 4+, Fish и PowerShell.",
   "settings.completionTabKey": "Клавиша Tab",
   "settings.completionTabAccept": "Принять подсказку",
@@ -2492,10 +2539,16 @@ const ru: typeof en = {
   "chat.antigravity.placeholder": "Напишите Antigravity или укажите файлы через @файлы",
   "chat.antigravity.textOnly": "В режиме диалога Antigravity пока поддерживаются только текстовые сообщения.",
   "chat.textOnly": (agent: string) => `В режиме диалога ${agent} поддерживаются только текстовые сообщения.`,
+  "chat.attach.modelTextOnly": "Выбранная модель не поддерживает изображения.",
   "chat.signInRequired": (agent: string) => `Чтобы пользоваться режимом диалога, войдите в ${agent}. Перейдите в режим терминала, выполните вход и отправьте сообщение ещё раз.`,
-  "chat.apiKeyRequired": "Для DeepSeek Harness нужен ключ API. Задайте переменную окружения DEEPSEEK_API_KEY или запустите `dsh web` и сохраните ключ на странице Models, затем отправьте сообщение ещё раз.",
+  "chat.apiKeyRequired": "Для DeepSeek нужен ключ API. Откройте «API» рядом с полем сообщения и укажите его либо задайте переменную окружения `DEEPSEEK_API_KEY`, затем отправьте сообщение ещё раз.",
   "chat.antigravity.permissionsHint": "Инструменты, требующие одобрения, необходимо заранее разрешить в настройках Antigravity или использовать в режиме терминала.",
   "chat.antigravity.settingsHint": "Изменяйте модель, уровень рассуждений или разрешения между ходами.",
+  "chat.antigravity.rewindTitle": "Откат в виде терминала",
+  "chat.antigravity.rewindHint": "Откат и редактирование отправленных сообщений для Antigravity пока недоступны в этом виде. Переключитесь в вид терминала и выполните /rewind — при возврате состояние обновится автоматически.",
+  "chat.antigravity.rewindGuide": "Прямой откат и редактирование отправленных сообщений для Antigravity пока недоступны в виде беседы. Переключитесь в вид терминала и выполните /rewind, чтобы откатить диалог или восстановить файлы; при возврате актуальное состояние загрузится автоматически.",
+  "chat.antigravity.rewindCommandDescription": "Переключиться в вид терминала для отката через /rewind",
+  "chat.antigravity.switchToTerminal": "Переключиться в вид терминала",
   "chat.history.imageDownloadRequired": "Это изображение нельзя открыть здесь. Скачайте оригинал, чтобы просмотреть его.",
   "chat.history.readBody": "Прочитать полностью",
   "chat.history.selectDetail": "Выберите файл или поле",
@@ -2671,6 +2724,8 @@ const ru: typeof en = {
   "kb.searchEntries": "Поиск по статьям…",
   "kb.updatedOn": (date: string) => `Обновлено ${date}`,
   "archive.sessionsCount": (count: string) => `Сессий: ${count}`,
+
+  ...assist,
 };
 
 export default ru;

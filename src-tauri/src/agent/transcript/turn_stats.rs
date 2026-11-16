@@ -2,6 +2,7 @@
 //! Token usage is deduplicated by message/response identity; absent usage is never represented as zero.
 //! Claude, Codex and OpenCode are read from their own recordings; Pi and OMP keep one JSONL tree each,
 //! whose active branch supplies the same numbers. ZCode keeps its own usage tables; see `agent::zcode_info`.
+//! Antigravity writes per-step usage to its native transcript; see `agent::antigravity_stats`.
 
 use super::{resume, AgentContextInfo};
 use crate::agent::opencode_store::{self, OpencodeMessage};
@@ -608,7 +609,9 @@ fn opencode_edit(part: &Value) -> Option<(String, Lines)> {
         let count = |key: &str| diff.and_then(|d| d.get(key)).and_then(Value::as_u64).map(|n| n as u32);
         count("additions").zip(count("deletions"))
     } else if metadata.and_then(|m| m.get("exists")).and_then(Value::as_bool) == Some(false) {
-        input.get("content").and_then(Value::as_str).map(|c| (c.lines().count() as u32, 0))
+        // The statistics reader counts the write body in the store and supplies the count instead.
+        input.get("contentLines").and_then(Value::as_u64).map(|lines| (lines as u32, 0))
+            .or_else(|| input.get("content").and_then(Value::as_str).map(|c| (c.lines().count() as u32, 0)))
     } else {
         None
     };
@@ -902,11 +905,21 @@ fn pi_read_cached(entry: &mut PiCached) -> Result<TurnStats, String> {
 pub fn current_turn_stats(kind: SessionKind, agent_session_id: &str) -> Result<TurnStats, String> {
     if kind == SessionKind::Kiro { return crate::agent::kiro_info::turn_stats(agent_session_id); }
     if kind == SessionKind::Zcode { return crate::agent::zcode_info::turn_stats(agent_session_id); }
-    if kind == SessionKind::Opencode {
-        return Ok(opencode_stats_from_messages(&opencode_store::messages(agent_session_id)?));
+    if kind.uses_opencode() {
+        if kind == SessionKind::Deepseek
+            && crate::agent::history_store::deepseek_legacy::is_legacy(agent_session_id)
+        {
+            return crate::agent::chat::deepseek_stats::turn_stats(agent_session_id);
+        }
+        // Statistics need a few fields, not the whole recording: the store projects them, so a
+        // session past the conversation reader's paging budget still reports its numbers.
+        return Ok(opencode_stats_from_messages(&opencode_store::stats_messages(agent_session_id)?));
     }
     if matches!(kind, SessionKind::Pi | SessionKind::Omp) {
         return pi_stats_from_file(kind, agent_session_id);
+    }
+    if kind == SessionKind::Antigravity {
+        return crate::agent::antigravity_stats::turn_stats(agent_session_id);
     }
     if !matches!(kind, SessionKind::Claude | SessionKind::Codex) {
         return Ok(TurnStats::default());
@@ -1451,6 +1464,9 @@ mod file_tests {
                     tool("edit", "/r/a.ts", serde_json::json!({"filediff": {"additions": 4, "deletions": 1}})),
                     tool("write", "/r/new.ts", serde_json::json!({"exists": false})),
                     tool("write", "/r/old.ts", serde_json::json!({"exists": true})),
+                    serde_json::json!({"type": "tool", "callID": "/r/count.ts", "tool": "write",
+                        "state": {"status": "completed", "input": {"filePath": "/r/count.ts", "contentLines": 3},
+                            "metadata": {"exists": false}}}),
                     serde_json::json!({"type": "patch", "files": ["/r/a.ts", "/r/shell.ts"]}),
                 ],
             },
@@ -1458,6 +1474,7 @@ mod file_tests {
         let stats = opencode_stats_from_messages(&messages);
         assert_eq!(stats.changed_files, Some(vec![
             changed_file("/r/a.ts", Some((4, 1))),
+            changed_file("/r/count.ts", Some((3, 0))),
             changed_file("/r/new.ts", Some((2, 0))),
             changed_file("/r/old.ts", None),
             changed_file("/r/shell.ts", None),

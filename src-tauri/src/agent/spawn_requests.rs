@@ -70,6 +70,9 @@ fn active_session(conn: &Connection, id: &str) -> Result<Session, String> {
 }
 fn validate_request(conn: &Connection, request: &SpawnRequest) -> Result<(), String> {
     if request.prompt.trim().is_empty() { return Err("A child task needs a prompt".into()); }
+    if request.title.as_deref().is_some_and(|title| !super::session_title::is_valid_title(title.trim())) {
+        return Err(format!("A session title must be 1 to {} characters without control characters", super::session_title::MAX_TITLE_CHARS));
+    }
     active_session(conn, &request.parent_session_id)?;
     if let Some(kind) = &request.kind { parse_launch_kind(kind)?; }
     core::check_images(&request.images)?;
@@ -263,9 +266,20 @@ fn launch_defaults(app: &AppCtx, conn: &Connection, parent: Option<&Session>, ki
     permission_catalog::validate(kind, permission.as_deref())?;
     let engine = if !kind.supports_chat() { "tui" }
         else if !kind.has_terminal_interface() { "chat" }
-        else if let Some(parent) = parent.filter(|p| p.kind.supports_chat()) { &parent.engine }
-        else { prefs["agentDefaults"][kind.as_str()]["engine"].as_str()
-            .unwrap_or(if matches!(kind, SessionKind::Claude | SessionKind::Codex) { "chat" } else { "tui" }) };
+        else if let Some(parent) = parent.filter(|p| p.kind.supports_chat()) {
+            let candidate = parent.engine.trim();
+            if candidate.is_empty() {
+                if matches!(kind, SessionKind::Claude | SessionKind::Codex) { "chat" } else { "tui" }
+            } else {
+                candidate
+            }
+        } else {
+            prefs["agentDefaults"][kind.as_str()]["engine"]
+                .as_str()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(if matches!(kind, SessionKind::Claude | SessionKind::Codex) { "chat" } else { "tui" })
+        };
     let _ = app;
     if !matches!(engine, "tui" | "chat") { return Err("Invalid default session engine".into()); }
     Ok((args, permission, engine.into()))
@@ -273,7 +287,12 @@ fn launch_defaults(app: &AppCtx, conn: &Connection, parent: Option<&Session>, ki
 
 pub(crate) fn default_selection(conn: &Connection, kind: SessionKind, args: Option<&str>) -> Result<session_settings::Selection, String> {
     let mut selection = session_settings::from_args(kind, args);
-    if selection != session_settings::Selection::default() { return Ok(selection); }
+    if selection != session_settings::Selection::default() {
+        if kind == SessionKind::Antigravity {
+            super::antigravity_models::normalize_selection_with_conn(conn, &mut selection);
+        }
+        return Ok(selection);
+    }
     let prefs = settings(conn)?;
     let key = kind.as_str();
     selection.model = session_settings::clean(prefs["chatModelByKind"][key].as_str().or_else(||
@@ -281,6 +300,14 @@ pub(crate) fn default_selection(conn: &Connection, kind: SessionKind, args: Opti
     let model = selection.model.as_deref().unwrap_or("");
     selection.effort = session_settings::clean(prefs["chatEffortByModel"][format!("{key}:{model}")].as_str().or_else(||
         (kind == SessionKind::Claude).then(|| prefs["chatEffortByModel"][model].as_str()).flatten()));
+    if kind == SessionKind::Antigravity {
+        super::antigravity_models::normalize_selection_with_conn(conn, &mut selection);
+        if selection.effort.is_none() {
+            if let Some(base) = selection.model.as_deref() {
+                selection.effort = session_settings::clean(prefs["chatEffortByModel"][format!("{key}:{base}")].as_str());
+            }
+        }
+    }
     Ok(selection)
 }
 
@@ -293,12 +320,18 @@ fn prepare_launch(app: &AppCtx, request: &SpawnRequest) -> Result<Launch, String
             Some(kind) => parse_launch_kind(kind)?,
             None => parse_agent(parent.kind.as_str()).unwrap_or(SessionKind::Claude),
         };
-        let (args, permission, engine) = launch_defaults(app, &conn, Some(&parent), kind)?;
+        let (args, permission, mut engine) = launch_defaults(app, &conn, Some(&parent), kind)?;
+        if parent.project_id == crate::db::system_collections::CHAT {
+            if !kind.supports_chat() {
+                return Err("This agent cannot hold a chat session".into());
+            }
+            engine = "chat".into();
+        }
         let args = launch_options::apply(kind, args.as_deref(), request.model.as_deref(), request.effort.as_deref())?;
         let cwd = request.cwd.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned)
             .or_else(|| app.pty().cwd(&parent.id)).or(parent.cwd.clone()).or(repo::get_project_root(&conn, &parent.project_id)?);
         let launch = Launch { project_id: parent.project_id.clone(), group_id: parent.group_id.clone(), parent_id: Some(parent.id.clone()),
-            name: request.prompt.trim().chars().take(24).collect(), kind, cwd, selection: default_selection(&conn, kind, args.as_deref())?,
+            name: request.title.as_deref().map_or_else(|| request.prompt.trim().chars().take(24).collect(), |title| title.trim().to_owned()), kind, cwd, selection: default_selection(&conn, kind, args.as_deref())?,
             args, permission, engine, preset_id: None, agent_path: None, worktree: None, base: None };
         (parent, launch)
     };
@@ -320,6 +353,12 @@ fn insert_session(conn: &Connection, id: &str, launch: &Launch) -> Result<Sessio
     if matches!(launch.kind, SessionKind::Zoo | SessionKind::Grok) {
         repo::set_agent_session_id(conn, id, id, launch.kind)?;
         session.agent_session_id = Some(id.to_string());
+    }
+    if launch.kind == SessionKind::Antigravity {
+        let perm = launch.permission.as_deref().unwrap_or("default");
+        let acp_mode = super::chat::antigravity_protocol::acp_mode_for_permission(perm);
+        repo::set_collaboration_mode(conn, id, acp_mode)?;
+        session.collaboration_mode = Some(acp_mode.to_string());
     }
     session_settings::save(conn, id, &launch.selection, &json!({}))?;
     Ok(session)
@@ -661,12 +700,31 @@ fn agent_launch(app: &AppCtx, conn: &Connection, request: &AgentSessionRequest, 
         if !kind.supports_chat() { return Err("This agent cannot hold a chat session".into()); }
         engine = "chat".into();
     }
-    let model = request.model.as_deref().map(str::trim).filter(|m| !m.is_empty());
-    let effort = request.effort.as_deref().map(str::trim).filter(|e| !e.is_empty());
-    if model.is_some() || effort.is_some() { args = launch_options::apply(kind, args.as_deref(), model, effort)?; }
+    let model = request.model.as_deref().map(str::trim);
+    let effort = request.effort.as_deref().map(str::trim);
     let mut selection = default_selection(conn, kind, args.as_deref())?;
+    let initial_model = selection.model.clone();
+    if model.is_some() || effort.is_some() { args = launch_options::apply(kind, args.as_deref(), model, effort)?; }
+    let args_selection = session_settings::from_args(kind, args.as_deref());
     if model.is_some() { selection.model = session_settings::clean(model); }
-    if effort.is_some() { selection.effort = session_settings::clean(effort); }
+    if effort.is_some() {
+        selection.effort = session_settings::clean(effort);
+    } else if model.is_some() && selection.model != initial_model {
+        selection.effort = if args_selection.effort.is_some() {
+            args_selection.effort
+        } else {
+            let prefs = settings(conn)?;
+            let key = kind.as_str();
+            let selected_model = selection.model.as_deref().unwrap_or("");
+            session_settings::clean(
+                prefs["chatEffortByModel"][format!("{key}:{selected_model}")].as_str().or_else(||
+                    (kind == SessionKind::Claude).then(|| prefs["chatEffortByModel"][selected_model].as_str()).flatten()),
+            )
+        };
+    }
+    if kind == SessionKind::Antigravity {
+        super::antigravity_models::normalize_selection_with_conn(conn, &mut selection);
+    }
     let name = if let Some(preset) = &preset { preset.name.clone() }
         else if let Some(prompt) = prompt { prompt.lines().next().unwrap_or(prompt).trim().chars().take(24).collect() }
         else {
@@ -764,6 +822,17 @@ mod tests {
         let mut changed = a; changed.prompt.push_str(" changed");
         assert!(register(&f.app, changed).is_err());
         assert_eq!(children(&f).len(), 2);
+    }
+
+    #[test]
+    fn an_explicit_title_names_the_child_and_an_absent_one_uses_the_prompt() {
+        let f = fixture();
+        let mut titled = request(&f, false); titled.title = Some("  Parser audit ".into());
+        assert_eq!(confirm(&f, titled).session.unwrap().name, "Parser audit");
+        assert_eq!(confirm(&f, request(&f, false)).session.unwrap().name, "Investigate the task");
+        let mut invalid = request(&f, false); invalid.title = Some("two\nlines".into());
+        assert!(register(&f.app, invalid).is_err());
+        assert!(!encoded(&request(&f, false)).unwrap().contains("\"title\""), "stored untitled requests must stay byte-identical");
     }
 
     #[test]
@@ -1340,6 +1409,98 @@ mod tests {
         let group = repo::create_group(&f.app.db().conn.lock().unwrap(), &f.parent.project_id, None, "Group").unwrap();
         req.request_id = uuid::Uuid::new_v4().to_string(); req.context.active_session_id = None; req.context.group_id = Some(group.id.clone());
         assert_eq!(create_agent_session(&f.app, &req).unwrap().group_id.as_deref(),Some(group.id.as_str()));
+    }
+
+    #[test]
+    fn selector_clears_remembered_defaults_updates_model_effort_and_supports_zcode() {
+        let f = fixture();
+        repo::set_app_settings(&f.app.db().conn.lock().unwrap(), &std::collections::HashMap::from([("vlx-settings".into(),
+            json!({
+                "chatModelByKind": {"claude": "claude-opus-5-5"},
+                "chatEffortByModel": {"claude:claude-opus-5-5": "max", "claude:claude-sonnet-5": "medium"}
+            }).to_string())])).unwrap();
+        let inherited = create_agent_session(&f.app, &selector(&f)).unwrap();
+        assert_eq!(session_settings::resolve(&f.app, &inherited).unwrap(),
+            session_settings::Selection { model: Some("claude-opus-5-5".into()), effort: Some("max".into()) });
+        let mut cleared_req = selector(&f);
+        cleared_req.model = Some(String::new());
+        cleared_req.effort = Some(String::new());
+        let cleared = create_agent_session(&f.app, &cleared_req).unwrap();
+        assert_eq!(session_settings::resolve(&f.app, &cleared).unwrap(), session_settings::Selection::default());
+        let mut switched_req = selector(&f);
+        switched_req.model = Some("claude-sonnet-5".into());
+        let switched = create_agent_session(&f.app, &switched_req).unwrap();
+        assert_eq!(session_settings::resolve(&f.app, &switched).unwrap(),
+            session_settings::Selection { model: Some("claude-sonnet-5".into()), effort: Some("medium".into()) });
+        let mut other_req = selector(&f);
+        other_req.model = Some("claude-haiku-4-5".into());
+        let other = create_agent_session(&f.app, &other_req).unwrap();
+        assert_eq!(session_settings::resolve(&f.app, &other).unwrap(),
+            session_settings::Selection { model: Some("claude-haiku-4-5".into()), effort: None });
+        let mut zcode_req = selector(&f);
+        zcode_req.kind = Some("zcode".into());
+        zcode_req.engine = Some("chat".into());
+        zcode_req.model = Some("glm-5".into());
+        zcode_req.effort = Some("high".into());
+        let zcode = create_agent_session(&f.app, &zcode_req).unwrap();
+        assert_eq!(zcode.agent_args, None);
+        assert_eq!(session_settings::resolve(&f.app, &zcode).unwrap(),
+            session_settings::Selection { model: Some("glm-5".into()), effort: Some("high".into()) });
+    }
+
+    #[test]
+    fn antigravity_spawn_falls_back_on_blank_engine_enforces_chat_collection_and_syncs_mode() {
+        let f = fixture();
+        repo::set_app_settings(&f.app.db().conn.lock().unwrap(), &std::collections::HashMap::from([("vlx-settings".into(),
+            json!({"agentDefaults":{"antigravity":{"engine":"  ","permissionMode":"acceptEdits"}}}).to_string())])).unwrap();
+        let mut req = selector(&f);
+        req.kind = Some("antigravity".into());
+        let agy = create_agent_session(&f.app, &req).unwrap();
+        assert_eq!(agy.engine, "tui");
+        assert_eq!(agy.permission_mode.as_deref(), Some("acceptEdits"));
+        assert_eq!(agy.collaboration_mode.as_deref(), Some("accept-edits"));
+
+        // `prepare_launch` inside the CHAT system collection must force `engine == "chat"` even when
+        // defaults specify `"tui"` (explicitly or via fallback).
+        let chat_parent = {
+            let conn = f.app.db().conn.lock().unwrap();
+            crate::db::system_collections::ensure(&conn).unwrap();
+            repo::create_session_identified(
+                &conn,
+                "chat-parent-1",
+                crate::db::system_collections::CHAT,
+                None,
+                "Chat parent",
+                SessionKind::Claude,
+                None,
+                f.parent.cwd.as_deref(),
+                None,
+                None,
+                None,
+                None,
+                Some("default"),
+                None,
+                None,
+                None,
+                Some("chat"),
+            ).unwrap()
+        };
+        let spawn_req: SpawnRequest = serde_json::from_value(json!({
+            "parentSessionId": chat_parent.id,
+            "prompt": "follow-up work",
+            "kind": "antigravity"
+        })).unwrap();
+        let launch = prepare_launch(&f.app, &spawn_req).unwrap();
+        assert_eq!(launch.engine, "chat");
+        assert_eq!(launch.permission.as_deref(), Some("acceptEdits"));
+
+        let mut plan_req = selector(&f);
+        plan_req.kind = Some("antigravity".into());
+        plan_req.engine = Some("chat".into());
+        plan_req.permission_mode = Some("plan".into());
+        let planned = create_agent_session(&f.app, &plan_req).unwrap();
+        assert_eq!(planned.permission_mode.as_deref(), Some("plan"));
+        assert_eq!(planned.collaboration_mode.as_deref(), Some("plan"));
     }
 }
 

@@ -37,6 +37,11 @@ afterEach(() => {
 
 const row = (name: string) => within(screen.getByText(name).parentElement!);
 
+it("no longer offers DeepSeek as a settings category", async () => {
+  await act(async () => render(<SettingsModal onClose={() => {}} />));
+  expect(screen.queryByRole("link", { name: "DeepSeek" })).toBeNull();
+});
+
 it("reveals Translation only for an Alt settings opening and hides it on the next normal opening", async () => {
   // The title bar mounts the settings dialog; the gear that opens it lives at the bottom of the activity bar.
   await act(async () => render(<><TitleBar /><SidebarRail /></>));

@@ -591,6 +591,10 @@ impl PtyManager {
         // `/spawn` endpoint. All sessions receive them, including terminals where users launch agents manually.
         cmd.env("VLX_SESSION_ID", &id);
         cmd.env("VLX_TOKEN", &hook.token);
+        // Some harnesses drop inherited names that look like credentials, `VLX_TOKEN` included, from the
+        // shell their tools run in. Mirror the token under `VLX_AUTH` so `vspawn` and the other commands
+        // still reach this instance; see agent/session_env.rs.
+        cmd.env("VLX_AUTH", &hook.token);
         cmd.env("VLX_SPAWN_URL", format!("http://127.0.0.1:{}", hook.port));
         // A spawned session also learns who spawned it, so an agent can reach its parent with
         // `vrefer`/`vtell` without guessing. Absent for top-level sessions. `vself` resolves the full
@@ -1530,14 +1534,19 @@ impl PtyManager {
     }
 
     /// Writes keyboard data to a session's PTY. Input is global across viewers and does not participate in
-    /// size ownership, so no source ID is required.
+    /// size ownership, so no source ID is required. `remote` says whether the typist is on another device,
+    /// which decides whether the shell may draw its inline hint for this keystroke.
     ///
     /// Briefly lock to clone the sender, then enqueue and return. A dedicated FIFO writer touches the PTY
     /// descriptor without holding the global session lock. A full queue returns an error instead of blocking.
-    pub fn write(&self, id: &str, data: &str) -> Result<(), String> {
+    pub fn write(&self, id: &str, data: &str, remote: bool) -> Result<(), String> {
         let map = self.sessions.lock().unwrap();
         let session = map.get(id).ok_or_else(|| format!("Session {id} not found"))?;
-        session.completion.lock().unwrap().input(data);
+        {
+            let mut completion = session.completion.lock().unwrap();
+            completion.input_origin(remote);
+            completion.input(data);
+        }
         session.input.try_send(data.as_bytes().to_vec()).map_err(|e| match e {
             std::sync::mpsc::TrySendError::Full(_) => {
                 format!("Session {id} input backlogged (PTY not consuming stdin)")

@@ -75,7 +75,7 @@ export const applyLaunchArgs = (
   });
 
 
-export interface LaunchModelContext { parentSessionId?: string | null; cwd?: string | null; inheritArgs?: boolean }
+export interface LaunchModelContext { parentSessionId?: string | null; cwd?: string | null; execPath?: string | null; inheritArgs?: boolean }
 export interface LaunchModel { id: string; label: string; effortLevels: string[]; description?: string; largeContext?: boolean }
 export interface LaunchModelCatalog { models: LaunchModel[]; effortLevels: string[] }
 export const launchModels = (kind: string, context: LaunchModelContext) =>

@@ -10,6 +10,8 @@
 //!   IPC handlers backed by dialog, shell, app.setBadgeCount, and BrowserWindow.
 
 import { normalizeBrowserUrl } from "../ipc/browserUrl";
+import { getUiZoom } from "./uiZoom";
+import { loadServerRegion, type ServerRegion } from "../ipc/serverRegion";
 import { copyText, invoke as transportInvoke, listen as transportListen } from "../ipc/transport";
 import {
   getEffectiveNotifyPermission,
@@ -44,6 +46,7 @@ import type {
   VelaCommandCapability,
   VelaCommandStatus,
   WindowCapability,
+  DroppedPath,
 } from "./types";
 
 /** Controlled native API exposed as `window.vlxNative` by electron/preload.cjs. */
@@ -75,7 +78,11 @@ interface VlxNativeBridge {
   browser?: VlxBrowserBridge;
   updater?: {
     supported: boolean;
-    check(headers?: Record<string, string>): Promise<Omit<UpdateHandle, "downloadAndInstall" | "close"> | null>;
+    /** `region` selects the update service and download mirror: "global" (velaterm.com) or "cn" (velaterm.cn). */
+    check(
+      headers?: Record<string, string>,
+      region?: ServerRegion,
+    ): Promise<Omit<UpdateHandle, "downloadAndInstall" | "close"> | null>;
     downloadAndInstall(onEvent?: (event: UpdateDownloadEvent) => void): Promise<void>;
     relaunch(): Promise<void>;
   };
@@ -131,15 +138,15 @@ const dialog: DialogCapability = {
   async pickFile(opts) {
     return (await bridge()?.pickFile(opts)) ?? null;
   },
-  async droppedFolders(transfer) {
+  async droppedPaths(transfer) {
     const pathForFile = bridge()?.pathForFile;
     if (!pathForFile) return [];
-    const paths: string[] = [];
+    const paths: DroppedPath[] = [];
     for (const item of Array.from(transfer.items)) {
-      if (item.kind !== "file" || !item.webkitGetAsEntry()?.isDirectory) continue;
+      if (item.kind !== "file") continue;
       const file = item.getAsFile();
       const path = file ? pathForFile(file) : "";
-      if (path) paths.push(path);
+      if (path) paths.push({ path, isDir: !!item.webkitGetAsEntry()?.isDirectory });
     }
     return paths;
   },
@@ -261,9 +268,15 @@ const notify: NotifyCapability = {
  * shared `normalizeBrowserUrl` before sending them, matching Tauri's Rust rules. Callers catch invalid
  * input and log address-bar navigation failures only.
  */
+/** Page zoom scales CSS pixels; WebContentsView bounds are in window DIPs, so convert before sending. */
+function zoomRect(rect: BrowserRect): BrowserRect {
+  const z = getUiZoom();
+  return { x: rect.x * z, y: rect.y * z, w: rect.w * z, h: rect.h * z };
+}
+
 const browser: BrowserCapability = {
   async open(tabId, url, rect) {
-    await bridge()?.browser?.open(tabId, normalizeBrowserUrl(url), rect);
+    await bridge()?.browser?.open(tabId, normalizeBrowserUrl(url), zoomRect(rect));
   },
   async navigate(tabId, input) {
     await bridge()?.browser?.navigate(tabId, normalizeBrowserUrl(input));
@@ -281,7 +294,7 @@ const browser: BrowserCapability = {
     await bridge()?.browser?.stop(tabId);
   },
   async setBounds(tabId, rect) {
-    await bridge()?.browser?.setBounds(tabId, rect);
+    await bridge()?.browser?.setBounds(tabId, zoomRect(rect));
   },
   async setVisible(tabId, visible) {
     await bridge()?.browser?.setVisible(tabId, visible);
@@ -311,7 +324,7 @@ const updater: UpdaterCapability = {
   async check(headers) {
     const native = bridge()?.updater;
     if (!native?.supported) return null;
-    const found = await native.check(headers);
+    const found = await native.check(headers, loadServerRegion());
     if (!found) return null;
     return {
       ...found,

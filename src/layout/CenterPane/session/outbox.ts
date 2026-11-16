@@ -27,6 +27,11 @@ function change(session: string, update: (items: Submission[]) => Submission[]) 
   useOutbox.setState(state => ({ sessions: { ...state.sessions, [session]: update(state.sessions[session] ?? EMPTY) } }));
 }
 
+/** Drop a submission the backend returned to the composer, so no optimistic row outlives it. */
+export function discardSubmission(session: string, id: string) {
+  change(session, items => items.filter(item => item.id !== id));
+}
+
 export function acknowledgeSubmissions(session: string, ids: string[]) {
   const confirmed = new Set(ids);
   if (submissionsFor(session).some(item => confirmed.has(item.id) && (!item.observed || item.status === "sent" || item.status === "queued"))) {

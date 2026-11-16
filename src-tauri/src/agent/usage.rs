@@ -1,4 +1,4 @@
-//! Account usage for Claude, Grok Build and ZCode subscription plans.
+//! Account usage for Claude, Grok Build, ZCode and Antigravity subscription plans.
 //!
 //! - **Claude**: Anthropic `oauth/usage` (five-hour / weekly windows). Credentials come from the Claude
 //!   Code keychain item or `~/.claude/.credentials.json`.
@@ -7,6 +7,9 @@
 //!   access tokens are refreshed via `auth.x.ai/oauth2/token`.
 //! - **ZCode**: the GLM Coding Plan quota at `<platform>/api/monitor/usage/quota/limit` (five-hour and weekly
 //!   windows), authorized by the plan's API key that `zcode login` saved; see `agent::zcode_account`.
+//! - **Antigravity**: the installed `agy` CLI's own `-p /usage --output-format json` answer, quota buckets
+//!   grouped by model family (window, remaining fraction, reset time). The CLI handles sign-in, token
+//!   refresh and project lookup itself, so nothing here touches its OAuth token.
 //!
 //! The Claude and Grok endpoints are rate-limited or network-bound, so process-wide TTL caches sit under the poller's
 //! interval to absorb repeated manual clicks. A failed request is reported as `FetchError`; keeping the
@@ -808,6 +811,128 @@ fn zcode_window(limit: &Value) -> Option<ZcodeWindow> {
     })
 }
 
+/// The Antigravity plan quota as `agy -p /usage` reports it, in the CLI's group order.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AntigravityUsage {
+    pub windows: Vec<AntigravityWindow>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AntigravityWindow {
+    /// Row label such as `5h · gemini` or `7d · claude/gpt`.
+    pub label: String,
+    /// Used percentage, 0-100. The CLI reports what remains; the panel shows what is used, like the others.
+    pub used_percent: f64,
+    /// RFC 3339 time of the next reset.
+    pub resets_at: Option<String>,
+}
+
+/// One `agy -p /usage` run starts the CLI's backend and asks the server; about eight seconds in practice.
+const AGY_USAGE_TIMEOUT: Duration = Duration::from_secs(45);
+
+/// Ask the installed `agy` for its quota. `log_file` takes the CLI's per-run log: by default every run
+/// writes a new file into `~/.gemini/antigravity-cli/log`, which keeps only the latest few dozen, so
+/// background polling would push out the logs of the user's real sessions.
+pub fn antigravity_usage(bin: &str, cwd: &std::path::Path, log_file: &std::path::Path) -> Result<AntigravityUsage, FetchError> {
+    use crate::agent::headless::HeadlessError;
+    let mut command = crate::host::command(bin);
+    command.arg("--log-file").arg(log_file).args(["-p", "/usage", "--output-format", "json"]).current_dir(cwd);
+    crate::login_env::refresh_command(&mut command);
+    crate::agent::executable::prepare_command(&mut command, bin);
+    // A quota query is not a session: keep it out of VelaTerm's spawn and hook plumbing.
+    command.env_remove("VLX_SPAWN_URL");
+    command.env_remove("VLX_SESSION_ID");
+    command.env_remove("VLX_TOKEN");
+    command.env_remove("VLX_AUTH");
+    let out = crate::agent::headless::run_command(command, None, AGY_USAGE_TIMEOUT).map_err(|e| {
+        FetchError::from(match e {
+            HeadlessError::Start(e) => format!("Antigravity could not be started: {e}"),
+            HeadlessError::Timeout(d) => format!("Antigravity did not report its quota within {}s", d.as_secs()),
+            HeadlessError::Failed { stderr, .. } if !stderr.trim().is_empty() => {
+                format!("Antigravity quota query failed: {}", stderr.trim())
+            }
+            HeadlessError::Empty | HeadlessError::Failed { .. } => {
+                "Sign in to Antigravity (agy) to see its quota".to_string()
+            }
+            other => format!("Antigravity quota query failed: {other}"),
+        })
+    })?;
+    parse_antigravity_usage(&out).map_err(FetchError::from)
+}
+
+/// Parse the print-mode JSON payload: `{status, command:{data:{groups:[{name, buckets:[{name, window,
+/// remaining_fraction, reset_time, disabled}]}]}}}`. `window` is `5h` / `weekly`; the bucket's display
+/// name is the fallback for a window this code does not know yet.
+fn parse_antigravity_usage(out: &str) -> Result<AntigravityUsage, String> {
+    const SIGN_IN: &str = "Sign in to Antigravity (agy) to see its quota";
+    let v: Value = serde_json::from_str(out.trim())
+        .map_err(|e| format!("failed to parse Antigravity quota JSON: {e}"))?;
+    if let Some(status) = v.get("status").and_then(Value::as_str).filter(|s| *s != "SUCCESS") {
+        return Err(format!("Antigravity quota query failed ({status})"));
+    }
+    let groups = v.pointer("/command/data/groups").and_then(Value::as_array).ok_or(SIGN_IN)?;
+    let mut windows = Vec::new();
+    for group in groups {
+        let scope = agy_scope(group.get("name").and_then(Value::as_str).unwrap_or("quota"));
+        let mut rows: Vec<(u8, AntigravityWindow)> = group
+            .get("buckets")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter(|b| b.get("disabled").and_then(Value::as_bool) != Some(true))
+            .filter_map(|b| {
+                let remaining = b.get("remaining_fraction").and_then(Value::as_f64)?;
+                let (window, rank) = match b.get("window").and_then(Value::as_str) {
+                    Some("5h") => ("5h".to_string(), 0),
+                    Some("daily") => ("1d".to_string(), 1),
+                    Some("weekly") => ("7d".to_string(), 2),
+                    Some("monthly") => ("mo".to_string(), 3),
+                    _ => agy_window(b.get("name").and_then(Value::as_str).unwrap_or("")),
+                };
+                let window = AntigravityWindow {
+                    label: format!("{window} · {scope}"),
+                    used_percent: ((1.0 - remaining) * 100.0).clamp(0.0, 100.0),
+                    resets_at: b.get("reset_time").and_then(Value::as_str).filter(|r| !r.is_empty()).map(str::to_string),
+                };
+                Some((rank, window))
+            })
+            .collect();
+        // Keep the CLI's group order; inside a group put the short window first, as the other providers do.
+        rows.sort_by_key(|(rank, _)| *rank);
+        windows.extend(rows.into_iter().map(|(_, w)| w));
+    }
+    if windows.is_empty() {
+        return Err(SIGN_IN.to_string());
+    }
+    Ok(AntigravityUsage { windows })
+}
+
+/// Short window label and its sort rank: "Five Hour Limit Remaining" -> 5h, "... Weekly Limit" -> 7d.
+fn agy_window(name: &str) -> (String, u8) {
+    let n = name.to_ascii_lowercase();
+    if n.contains("five hour") || n.contains("5 hour") || n.contains("5-hour") {
+        ("5h".into(), 0)
+    } else if n.contains("daily") || n.contains("day limit") {
+        ("1d".into(), 1)
+    } else if n.contains("weekly") || n.contains("7 day") {
+        ("7d".into(), 2)
+    } else if n.contains("monthly") {
+        ("mo".into(), 3)
+    } else {
+        let short = n.replace("limit", "").replace("remaining", "");
+        (short.split_whitespace().collect::<Vec<_>>().join(" "), 4)
+    }
+}
+
+/// Short group name: "Gemini Models" -> gemini, "Claude and GPT models" -> claude/gpt.
+fn agy_scope(group: &str) -> String {
+    let g = group.to_ascii_lowercase();
+    let g = g.trim().trim_end_matches("models").trim();
+    g.replace(" and ", "/")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -955,6 +1080,28 @@ mod tests {
         // Fractional seconds stripped.
         let u2 = parse_rfc3339_unix("2026-07-28T14:08:44.883383Z").unwrap();
         assert_eq!(unix_to_rfc3339_utc(u2), "2026-07-28T14:08:44Z");
+    }
+
+    #[test]
+    fn antigravity_usage_json() {
+        let out = r#"{"conversation_id":"","status":"SUCCESS","response":"...","command":{"name":"usage","data":{"groups":[
+            {"name":"Gemini Models","buckets":[
+                {"id":"gemini-weekly","name":"Weekly Limit Remaining","window":"weekly","remaining_fraction":0.79,"reset_time":"2026-11-16T13:24:09Z"},
+                {"id":"gemini-5h","name":"Five Hour Limit Remaining","window":"5h","remaining_fraction":0.91,"reset_time":"2026-11-10T09:24:09Z"}]},
+            {"name":"Claude and GPT models","buckets":[
+                {"id":"3p-weekly","name":"Weekly Limit Remaining","window":"weekly","remaining_fraction":1},
+                {"id":"3p-5h","name":"Five Hour Limit Remaining","window":"5h","remaining_fraction":1,"disabled":true}]},
+            {"name":"Gemini 4 Argon","buckets":[
+                {"id":"argon-weekly","name":"Gemini 4 Argon Weekly Limit","remaining_fraction":0.5}]}]}}}"#;
+        let u = parse_antigravity_usage(out).unwrap();
+        let labels: Vec<&str> = u.windows.iter().map(|w| w.label.as_str()).collect();
+        assert_eq!(labels, ["5h · gemini", "7d · gemini", "7d · claude/gpt", "7d · gemini 4 argon"]);
+        assert!((u.windows[0].used_percent - 9.0).abs() < 1e-9);
+        assert!((u.windows[1].used_percent - 21.0).abs() < 1e-9);
+        assert_eq!(u.windows[0].resets_at.as_deref(), Some("2026-11-10T09:24:09Z"));
+        assert_eq!(u.windows[2].resets_at, None);
+        assert!(parse_antigravity_usage(r#"{"status":"SUCCESS","command":{"data":{"groups":[]}}}"#).is_err());
+        assert!(parse_antigravity_usage(r#"{"status":"ERROR"}"#).unwrap_err().contains("ERROR"));
     }
 
     #[test]

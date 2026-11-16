@@ -12,11 +12,34 @@ fn data_url(text:&str) -> Option<(&str,usize)> {
     Some((mime,5+mime.len()+8))
 }
 
+fn resolve_antigravity_media(source:&RegisteredSource,uri:&str) -> Option<(std::path::PathBuf,u64)> {
+    let raw=uri.trim();
+    let path=raw.strip_prefix("file://").unwrap_or(raw);
+    if path.is_empty() {return None;}
+    let parent=source.segment.path.parent()?;
+    let allowed_root=if parent.file_name().and_then(|s|s.to_str())==Some("logs") {parent.parent().unwrap_or(parent)} else {parent};
+    let canonical_root=std::fs::canonicalize(allowed_root).ok()?;
+    let canonical_path=std::fs::canonicalize(std::path::Path::new(path)).ok()?;
+    if !canonical_path.starts_with(&canonical_root) {return None;}
+    let metadata=std::fs::metadata(&canonical_path).ok()?;
+    if !metadata.is_file() {return None;}
+    Some((canonical_path,metadata.len()))
+}
+
 pub(super) fn attach(state:&mut State,source:&RegisteredSource,record:&Record,row:&str,refs:&Refs) {
-    let _=source;let mut selected=Vec::new();
+    let mut selected=Vec::new();
     let mut fields=record.fields.iter().filter(|field|field.encoding=="string").collect::<Vec<_>>();fields.sort_by_key(|field|field.start);
     for field in fields.into_iter().take(super::limits::MAX_FIELDS) {
         let path=field.path.as_str();let value=&record.value;let size=field.decoded_bytes;
+        if let Some(root)=path.strip_suffix("/uri").filter(|_|value["type"]=="USER_INPUT").filter(|root|root.starts_with("/media/")) {
+            let Some(mime)=value.pointer(&format!("{root}/mime_type")).and_then(Value::as_str) else {continue;};
+            if mime.len()>100 || !mime.starts_with("image/") || !mime.bytes().all(|byte|byte.is_ascii_alphanumeric() || matches!(byte,b'/'|b'-'|b'.'|b'+')) {continue;}
+            let Some(uri)=value.pointer(path).and_then(Value::as_str) else {continue;};
+            if let Some((_,file_len))=resolve_antigravity_media(source,uri) {
+                selected.push((path.to_owned(),format!("attachment_file:{mime}:{file_len}")));
+            }
+            continue;
+        }
         let image=if path.starts_with("/images/") && path.ends_with("/data") && value["type"]=="dispatch" {
             value.pointer(path.strip_suffix("/data").unwrap()).and_then(|image|image["mimeType"].as_str()).map(|mime|(mime,0))
         } else if let Some(root)=path.strip_suffix("/source/data").filter(|root|root.starts_with("/message/content/")) {
@@ -40,15 +63,22 @@ pub(super) fn decorate(state:&State,source:&RegisteredSource,row:Value) -> Value
     if row["kind"]!="user" {return row;}
     let mut images=Vec::new();
     let mut fields=state.row_fields.get(row["id"].as_str().unwrap_or_default()).into_iter().flatten()
-        .filter(|field|field.label.starts_with("attachment:")).collect::<Vec<_>>();
+        .filter(|field|field.label.starts_with("attachment:") || field.label.starts_with("attachment_file:")).collect::<Vec<_>>();
     fields.sort_by_key(|field|field.sequence);
     for field in fields {
         if images.len()>=20 {break;}
         let Some(meta)=state.fields.get(&field.reference) else {continue;};
         if !super::api::record_visible(state,source,meta.record_start) {continue;}
-        let Some((mime,prefix))=field.label.strip_prefix("attachment:").and_then(|label|label.rsplit_once(':')) else {continue;};
-        let Ok(prefix)=prefix.parse::<u64>() else {continue;};
-        images.push(json!({"attachmentId":format!("history:{}",field.reference),"mimeType":mime,"sizeBytes":meta.decoded_bytes.saturating_sub(prefix),
+        let (mime,size_bytes)=if let Some(rest)=field.label.strip_prefix("attachment:") {
+            let Some((mime,prefix))=rest.rsplit_once(':') else {continue;};
+            let Ok(prefix)=prefix.parse::<u64>() else {continue;};
+            (mime,meta.decoded_bytes.saturating_sub(prefix))
+        } else if let Some(rest)=field.label.strip_prefix("attachment_file:") {
+            let Some((mime,file_len))=rest.rsplit_once(':') else {continue;};
+            let Ok(file_len)=file_len.parse::<u64>() else {continue;};
+            (mime,file_len)
+        } else {continue;};
+        images.push(json!({"attachmentId":format!("history:{}",field.reference),"mimeType":mime,"sizeBytes":size_bytes,
             "contentRevision":format!("{}:{}",source.generation,field.reference)}));
     }
     // Images load through their attachment ids. `bodyAvailable` says only that the text preview is cut short;
@@ -59,14 +89,30 @@ pub(super) fn decorate(state:&State,source:&RegisteredSource,row:Value) -> Value
 fn label(branch:&Branch,reference:&str) -> Result<Option<String>,String> {
     let (source,_)=branch.authorize(reference)?;let state=source.current()?;
     Ok(state.field_rows.get(reference).into_iter().flatten().filter_map(|row|state.row_fields.get(row)).flatten()
-        .find(|field|field.reference==reference && field.label.starts_with("attachment:")).map(|field|field.label.clone()))
+        .find(|field|field.reference==reference && (field.label.starts_with("attachment:") || field.label.starts_with("attachment_file:")))
+        .map(|field|field.label.clone()))
 }
 
-pub struct Facts {pub mime:String,pub prefix:u64,pub encoded:u64,pub revision:String,pub source:RegisteredSource,pub field:FieldMeta}
+pub struct Facts {pub mime:String,pub prefix:u64,pub encoded:u64,pub revision:String,pub source:RegisteredSource,pub field:FieldMeta,pub file_path:Option<std::path::PathBuf>}
 pub fn is_attachment(branch:&Branch,reference:&str) -> Result<bool,String> {Ok(label(branch,reference)?.is_some())}
 pub fn facts(branch:&Branch,reference:&str,expected:Option<&str>) -> Result<Facts,String> {
     let (source,field)=branch.authorize(reference)?;let (revision,_)=branch.detail_facts(reference,expected)?;
     let label=label(branch,reference)?.ok_or("detail_unavailable: this detail is not an image attachment")?;
+    if let Some(rest)=label.strip_prefix("attachment_file:") {
+        let (mime,expected_len)=rest.rsplit_once(':').ok_or("index_incomplete: image metadata is invalid")?;
+        let expected_len=expected_len.parse::<u64>().map_err(|_|"index_incomplete: image length is invalid")?;
+        let root=field.path.strip_suffix("/uri").ok_or("index_incomplete: image metadata has no verified original field")?;
+        let metadata=format!("{root}/mime_type");
+        let record=super::store::reproject(&source,field.record_start,&mut |_|Ok(()))?;
+        let value=record.value.pointer(&metadata).and_then(Value::as_str).ok_or("index_incomplete: image metadata has no verified original field")?;
+        if value.len()>100 || value!=mime {return Err("source_changed: image media type changed".into());}
+        let (uri,_,end,size)=super::fields::read_piece(&source,&field,0,0)?;
+        if end<size {return Err("detail_unavailable: image URI exceeds the detail budget".into());}
+        let (canonical_path,current_len)=resolve_antigravity_media(&source,&uri)
+            .ok_or("detail_unavailable: image file is outside the session directory or missing")?;
+        if current_len!=expected_len {return Err("source_changed: image file length changed".into());}
+        return Ok(Facts {mime:mime.into(),prefix:0,encoded:current_len,revision,source,field,file_path:Some(canonical_path)});
+    }
     let (mime,prefix)=label.strip_prefix("attachment:").and_then(|label|label.rsplit_once(':')).ok_or("index_incomplete: image metadata is invalid")?;
     let prefix=prefix.parse::<u64>().map_err(|_|"index_incomplete: image boundary is invalid")?;
     let encoded=field.decoded_bytes.checked_sub(prefix).ok_or("index_incomplete: image boundary is outside the original")?;
@@ -82,11 +128,25 @@ pub fn facts(branch:&Branch,reference:&str,expected:Option<&str>) -> Result<Fact
         let value=record.value.pointer(&metadata).and_then(Value::as_str).ok_or("index_incomplete: image metadata has no verified original field")?;
         if value.len()>100 || value!=mime {return Err("source_changed: image media type changed".into());}
     }
-    Ok(Facts {mime:mime.into(),prefix,encoded,revision,source,field})
+    Ok(Facts {mime:mime.into(),prefix,encoded,revision,source,field,file_path:None})
 }
 
 pub fn write(branch:&Branch,reference:&str,expected:Option<&str>,writer:&mut impl Write,cancel:&AtomicBool) -> Result<u64,String> {
     let facts=facts(branch,reference,expected)?;
+    if let Some(file_path)=&facts.file_path {
+        let mut file=std::fs::File::open(file_path).map_err(|_|"detail_unavailable: image file is unavailable")?;
+        let mut buffer=[0;super::limits::CHECKPOINT_BYTES];let mut bytes=0u64;
+        loop {
+            if cancel.load(Ordering::Relaxed) {return Err("read_canceled".into());}
+            branch.detail_facts(reference,Some(&facts.revision))?;
+            let count=file.read(&mut buffer).map_err(|_|"detail_unavailable: image file could not be read")?;
+            if count==0 {break;}
+            writer.write_all(&buffer[..count]).map_err(|_|"storage_pressure: image original could not be written")?;
+            bytes+=count as u64;
+        }
+        self::facts(branch,reference,Some(&facts.revision))?;
+        return Ok(bytes);
+    }
     let reader=DecodedFieldReader::new(&facts.source,&facts.field,facts.prefix,None,0)?;
     let mut reader=base64::read::DecoderReader::new(reader,&STANDARD);let mut buffer=[0;super::limits::CHECKPOINT_BYTES];let mut bytes=0u64;
     loop {
@@ -173,8 +233,14 @@ fn resolve_owned_locked(original:crate::agent::chat::protocol::ChatImage,purpose
 pub fn resolve(branch:&Branch,reference:&str,expected:Option<&str>,original:bool) -> Result<crate::agent::chat::protocol::ChatImage,String> {
     let _preview=preview_guard()?;
     let facts=facts(branch,reference,expected)?;
-    if facts.encoded>4*((crate::command_core::MAX_IMAGE_BYTES as u64+2)/3) {return Err("image_requires_download: image original exceeds the attachment read budget".into());}
-    let cancel=AtomicBool::new(false);let mut bytes=Vec::with_capacity((facts.encoded/4*3) as usize);
+    let max_encoded=if facts.file_path.is_some() {
+        crate::command_core::MAX_IMAGE_BYTES as u64
+    } else {
+        4*((crate::command_core::MAX_IMAGE_BYTES as u64+2)/3)
+    };
+    if facts.encoded>max_encoded {return Err("image_requires_download: image original exceeds the attachment read budget".into());}
+    let cap=if facts.file_path.is_some() {facts.encoded as usize} else {(facts.encoded/4*3) as usize};
+    let cancel=AtomicBool::new(false);let mut bytes=Vec::with_capacity(cap);
     write(branch,reference,Some(&facts.revision),&mut bytes,&cancel)?;
     image(bytes,facts.mime,original,false)
 }
@@ -245,7 +311,7 @@ mod tests {
             conn.execute("INSERT INTO message VALUES(?1,?1,1,1,?2)",params![scope,json!({"role":"user","time":{"created":1}}).to_string()]).unwrap();
             conn.execute("INSERT INTO part VALUES(?1,?1,?1,1,1,?2)",params![scope,json!({"type":"file","mime":"image/png","url":format!("data:image/png;base64,{encoded}")}).to_string()]).unwrap();
         }drop(conn);let before=std::fs::read(&path).unwrap();
-        let store=super::super::store::Store::at(&temp.0).unwrap();let source=super::super::opencode::register(&store,path.clone(),"selected").unwrap();
+        let store=super::super::store::Store::at(&temp.0).unwrap();let source=super::super::opencode::register(&store,crate::models::SessionKind::Opencode,path.clone(),"selected").unwrap();
         store.scan(crate::models::SessionKind::Opencode,&source,&AtomicBool::new(false),false).unwrap();
         let branch=Branch {store,sources:vec![source],generation:"branch".into(),kind:crate::models::SessionKind::Opencode,native_id:"selected".into(),error:None,scope:"selected".into(),parent:None};
         let reference=reference(&branch);assert_eq!(resolve(&branch,&reference,None,true).unwrap().data,encoded);
@@ -271,5 +337,31 @@ mod tests {
         let original=crate::agent::chat::protocol::ChatImage {mime_type:"image/png".into(),data:STANDARD.encode(oversized)};
         for purpose in ["preview","view"] {assert!(resolve_owned(original.clone(),purpose).unwrap_err().starts_with("image_requires_download:"));}
         assert_eq!(resolve_owned(original.clone(),"original").unwrap(),original);
+    }
+
+    #[test]
+    fn antigravity_user_media_uris_resolve_confined_images_and_reject_escapes() {
+        use crate::models::SessionKind;
+        let temp=super::super::tests::Temp::new();
+        let sys=temp.0.join("session");let logs=sys.join("logs");let media=sys.join("media");
+        std::fs::create_dir_all(&logs).unwrap();std::fs::create_dir_all(&media).unwrap();
+        let bytes=image();let img_path=media.join("shot.png");std::fs::write(&img_path,&bytes).unwrap();
+        let outside=temp.0.join("secret.png");std::fs::write(&outside,&bytes).unwrap();
+        let transcript=logs.join("transcript_full.jsonl");
+        let lines=[json!({"step_index":0,"type":"USER_INPUT","content":"<USER_REQUEST>check shot</USER_REQUEST>","media":[
+            {"mime_type":"image/png","uri":format!("file://{}",img_path.to_string_lossy())},
+            {"mime_type":"image/png","uri":outside.to_string_lossy()}
+        ]})];
+        std::fs::write(&transcript,lines.iter().map(|v|v.to_string()+"\n").collect::<String>()).unwrap();
+        let store=super::super::store::Store::at(&temp.0).unwrap();
+        let source=store.register(SessionKind::Antigravity,super::super::source::Segment {path:transcript,native_id:"agy-1".into(),end_byte:None,end_ordinal:None}).unwrap();
+        store.scan(SessionKind::Antigravity,&source,&AtomicBool::new(false),false).unwrap();
+        let branch=Branch {store,sources:vec![source],generation:"branch".into(),kind:SessionKind::Antigravity,native_id:"agy-1".into(),error:None,scope:"agy".into(),parent:None};
+        let reference=reference(&branch);
+        let resolved=resolve(&branch,&reference,None,true).unwrap();
+        assert_eq!(STANDARD.decode(resolved.data).unwrap(),bytes);
+        let mut streamed=Vec::new();
+        assert_eq!(write(&branch,&reference,None,&mut streamed,&AtomicBool::new(false)).unwrap(),bytes.len() as u64);
+        assert_eq!(streamed,bytes);
     }
 }

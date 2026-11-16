@@ -18,8 +18,11 @@ use std::time::Duration;
 use base64::Engine;
 use serde::Deserialize;
 
-/// Distribution root shared with the updater.
-const DL_BASE: &str = "https://dl.velaterm.com";
+/// Distribution root shared with the updater, following the selected server region: dl.velaterm.com or
+/// its China mirror dl.velaterm.cn, which holds the same files under the same keys.
+fn dl_base() -> &'static str {
+    crate::server_region::current().dl_base()
+}
 
 /// Embedded minisign public key, which must match `plugins.updater.pubkey` in tauri.conf.json because
 /// publish-server.sh signs vela-server with the updater key. Tauri wraps the two-line minisign public-key
@@ -278,7 +281,7 @@ pub fn sha256_hex(data: &[u8]) -> String {
 
 /// Fetch server-manifest.json for a version.
 pub fn fetch_manifest(version: &str) -> Result<ServerManifest, String> {
-    let url = format!("{DL_BASE}/server/{version}/server-manifest.json");
+    let url = format!("{}/server/{version}/server-manifest.json", dl_base());
     let body = ureq::get(&url)
         .timeout(Duration::from_secs(30))
         .call()
@@ -292,7 +295,7 @@ pub fn fetch_manifest(version: &str) -> Result<ServerManifest, String> {
 /// `latest.json` for releases published before the server pointer existed.
 pub fn fetch_latest_version() -> Result<String, String> {
     let read = |path: &str| -> Option<String> {
-        let body = ureq::get(&format!("{DL_BASE}/{path}"))
+        let body = ureq::get(&format!("{}/{path}", dl_base()))
             .timeout(Duration::from_secs(30))
             .call()
             .ok()?
@@ -428,7 +431,9 @@ fn download_verified(
     signature: &str,
     on_pct: &dyn Fn(u8),
 ) -> Result<Vec<u8>, String> {
-    let data = download(url, on_pct)?;
+    // Manifests always list dl.velaterm.com; fetch from the selected region's mirror of the same key.
+    let url = crate::server_region::current().localize_download_url(url);
+    let data = download(&url, on_pct)?;
     verify_signature(&data, signature)?;
     let got = sha256_hex(&data);
     if !got.eq_ignore_ascii_case(sha256) {

@@ -19,14 +19,14 @@ pub fn wait(mut branch:Branch,cancel:&AtomicBool) -> Result<Branch,String> {
     let session=branch.scope.clone();
     if let Some(error)=&branch.error {return Err(error.clone());}
     for source in &mut branch.sources {source.segment.end_byte=Some(source.segment.end_byte.unwrap_or(source.size));}
-    let reader=branch.store.subscribe(&session,&branch.sources,None)?;
+    let mut reader=branch.store.subscribe(&session,&branch.sources,None)?;
     let mut observed=HashSet::new();
     let mut refreshed=std::time::Instant::now();
     let result=(|| {
         loop {
             if cancel.load(Ordering::Relaxed) {return Err("read_canceled".into());}
             if refreshed.elapsed()>=std::time::Duration::from_secs(60) {
-                branch.store.subscribe(&session,&branch.sources,Some(&reader))?;refreshed=std::time::Instant::now();
+                reader=branch.store.subscribe(&session,&branch.sources,Some(&reader))?;refreshed=std::time::Instant::now();
             }
             let mut done=true;
             for index in 0..branch.sources.len() {
@@ -209,7 +209,7 @@ impl Cursor {
             if let Some(event)=self.pending.pop_front() {return Ok(Some(event));}
             let Some(IndexedRecord {source,record,references})=self.next_record(cancel)? else {return Ok(None);};
             let raw=record.value.to_string();
-            if self.branch.kind==SessionKind::Opencode && record.value["info"]["role"]=="user" {
+            if self.branch.kind.uses_opencode() && record.value["info"]["role"]=="user" {
                 if record.value["type"]!="opencode_message" {continue;}
                 let message=record.value["info"]["id"].as_str().ok_or("unsupported_record: native user identity is unavailable")?;
                 let bytes=super::opencode::bytes(&source)?;
@@ -220,20 +220,22 @@ impl Cursor {
                     return Ok(Some(StreamEvent {event:Event::User {text,ts:at},body:Text {pieces:vec![Piece::NativeUser(source,message.into())],quote_json:false,separator:"\n"},row_id}));
                 }continue;
             }
-            let events=match self.branch.kind {
+            let events=if record.value["type"].as_str()==Some("dsh_row") {
+                super::deepseek_legacy::events(&record.value)
+            } else {match self.branch.kind {
                 SessionKind::Codex=>export::codex_events(&raw),SessionKind::Claude=>export::claude_events(&raw),
                 SessionKind::Pi|SessionKind::Omp=>export::pi_events(&raw),
                 SessionKind::Kiro=>if record.value["type"]=="kiro_message" {
                     let text=record.value["text"].as_str().unwrap_or_default().into();let ts=record.value["timestamp"].as_str().map(str::to_owned);
                     vec![if record.value["role"]=="user" {Event::User {text,ts}} else {Event::AssistantText {text,ts}}]
                 } else {Vec::new()},
-                SessionKind::Opencode=> {
+                kind if kind.uses_opencode()=> {
                     let message=crate::agent::opencode_store::OpencodeMessage {info:record.value["info"].clone(),
                         parts:if record.value["type"]=="opencode_part" {vec![record.value["part"].clone()]} else {vec![]}};
                     crate::agent::chat::opencode_timeline::events(&[message])
                 },
                 other=>return Err(format!("Streamed event adapter is unavailable for {} sessions",other.as_str())),
-            };
+            }};
             let refs:HashMap<&str,&FieldMeta>=references.iter().map(|(path,(_,meta))|(path.as_str(),meta)).collect();
             for (local,mut event) in events.into_iter().enumerate() {
                 let (role,call,fallback,quote)=match &event {
@@ -264,7 +266,9 @@ impl Cursor {
                 let row_id=if self.branch.kind==SessionKind::Kiro {
                     record.value["id"].as_str().map(|id|format!("native:{}",super::store::digest(format!("kiro:{}:{id}:{}",source.segment.native_id,
                         if record.value["role"]=="user" {"user"} else {"assistant"}).as_bytes())))
-                } else if self.branch.kind==SessionKind::Opencode {
+                } else if record.value["type"]=="dsh_row" {
+                    record.value.pointer("/row/id").and_then(Value::as_str).map(str::to_owned)
+                } else if self.branch.kind.uses_opencode() {
                     record.value.pointer("/part/id").and_then(Value::as_str).map(|id|format!("native:{}",super::store::digest(format!("opencode:{}:{id}",source.segment.native_id).as_bytes())))
                 } else {None};
                 self.pending.push_back(StreamEvent {event,body,row_id});

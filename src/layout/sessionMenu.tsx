@@ -57,6 +57,7 @@ import { kindIconEl } from "./sessionViewers/sessionMeta";
 import { importSessionsUrl, openImportSessions } from "./ImportSessions";
 import { memoryNavigate, memoryUrl } from "./Memory/navigation";
 import { kindLabel, supportsAgentArgs } from "./sessionMenuShared";
+import { projectDisplayName } from "./LeftSidebar/systemCollections";
 import { navigatePlanExecute, planExecuteUrl } from "../components/planExecuteNavigation";
 
 // The menu's dialogs (about 30 KB) open only from a menu action, so they load on first use instead of with
@@ -80,20 +81,20 @@ const DEFAULT_QUICK_AGENTS: SessionKind[] = ["claude", "codex", "opencode"];
 const QUICK_AGENT_KINDS: SessionKind[] = [
   "claude",
   "codex",
-  "opencode",
-  "copilot",
-  "cursor",
   "antigravity",
-  "cline",
+  "opencode",
+  "deepseek",
+  "zcode",
   "pi",
   "omp",
+  "copilot",
+  "cursor",
+  "cline",
   "crush",
   "kimi",
   "kiro",
   "grok",
   "zoo",
-  "zcode",
-  "deepseek",
 ];
 
 /**
@@ -112,6 +113,36 @@ function computeQuickAgents(sessions: Session[]): SessionKind[] {
     if (ordered.length === QUICK_AGENT_COUNT) break;
   }
   return ordered;
+}
+
+/**
+ * Set Status for one or more sessions, shared by the single-session and multiselection menus. Its submenu
+ * offers Viewed (clears the unread marker) and Pending (raises it); each is disabled when no target would
+ * change. Browser sessions have no agent status and are left out, so the item is null when none remain.
+ */
+export function sessionStatusItem(ids: readonly string[]): MenuItem | null {
+  const st = useTermStore.getState();
+  const targets = ids.filter((id) => {
+    const kind = (st.sessions.find((s) => s.id === id) ?? st.ephemeralSessions[id])?.kind;
+    return kind !== undefined && kind !== "browser";
+  });
+  if (targets.length === 0) return null;
+  const unread = targets.filter((id) => id in st.notifications).length;
+  return {
+    label: t("tree.setStatus"),
+    submenu: [
+      {
+        label: t("tree.filterWaiting"),
+        disabled: unread === 0,
+        onClick: () => useTermStore.getState().markSessionsReview(targets, "viewed"),
+      },
+      {
+        label: t("tree.filterAsking"),
+        disabled: unread === targets.length,
+        onClick: () => useTermStore.getState().markSessionsReview(targets, "pending"),
+      },
+    ],
+  };
 }
 
 export type Dialog =
@@ -650,6 +681,14 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
   // New Session can include browser, terminal, agent submenu, and resume. withTerminal is used by sidebar plus/project/group
   // menus but not child-session menus. withBrowser creates a persistent Browser node only for project/group menus and
   // is hidden remotely because no native child WebView exists.
+  // The "no group" entry of Move To: a collection, including Tasks and Chats, is named instead of called a project root.
+  const ungroupedTarget = (projectId: string): Pick<MenuItem, "label" | "icon"> => {
+    const project = useTermStore.getState().projects.find((p) => p.id === projectId);
+    return isVirtualProject(project)
+      ? { label: t("tree.collectionRoot", projectDisplayName(t, project!)), icon: <Icons.collection size={14} /> }
+      : { label: t("tree.projectRoot"), icon: <Icons.project size={14} /> };
+  };
+
   const newSessionItems = (
     projectId: string,
     groupId: string | null,
@@ -703,9 +742,35 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
           onClick: () => void handleNewSession(projectId, groupId, "codex", parentSessionId),
         },
         {
+          label: t("tree.newAgentSession", "Antigravity"),
+          icon: kindIconEl("antigravity"),
+          onClick: () =>
+            void handleNewSession(projectId, groupId, "antigravity", parentSessionId),
+        },
+        {
           label: t("tree.newAgentSession", "OpenCode"),
           icon: kindIconEl("opencode"),
           onClick: () => void handleNewSession(projectId, groupId, "opencode", parentSessionId),
+        },
+        {
+          label: t("tree.newAgentSession", "DeepSeek"),
+          icon: kindIconEl("deepseek"),
+          onClick: () => void handleNewSession(projectId, groupId, "deepseek", parentSessionId),
+        },
+        {
+          label: t("tree.newAgentSession", "ZCode"),
+          icon: kindIconEl("zcode"),
+          onClick: () => void handleNewSession(projectId, groupId, "zcode", parentSessionId),
+        },
+        {
+          label: t("tree.newAgentSession", "Pi"),
+          icon: kindIconEl("pi"),
+          onClick: () => void handleNewSession(projectId, groupId, "pi", parentSessionId),
+        },
+        {
+          label: t("tree.newAgentSession", "OMP"),
+          icon: kindIconEl("omp"),
+          onClick: () => void handleNewSession(projectId, groupId, "omp", parentSessionId),
         },
         {
           label: t("tree.newAgentSession", "Copilot"),
@@ -720,26 +785,10 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
             void handleNewSession(projectId, groupId, "cursor", parentSessionId),
         },
         {
-          label: t("tree.newAgentSession", "Antigravity"),
-          icon: kindIconEl("antigravity"),
-          onClick: () =>
-            void handleNewSession(projectId, groupId, "antigravity", parentSessionId),
-        },
-        {
           label: t("tree.newAgentSession", "Cline"),
           icon: kindIconEl("cline"),
           onClick: () =>
             void handleNewSession(projectId, groupId, "cline", parentSessionId),
-        },
-        {
-          label: t("tree.newAgentSession", "Pi"),
-          icon: kindIconEl("pi"),
-          onClick: () => void handleNewSession(projectId, groupId, "pi", parentSessionId),
-        },
-        {
-          label: t("tree.newAgentSession", "OMP"),
-          icon: kindIconEl("omp"),
-          onClick: () => void handleNewSession(projectId, groupId, "omp", parentSessionId),
         },
         {
           label: t("tree.newAgentSession", "Crush"),
@@ -765,16 +814,6 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
           label: t("tree.newAgentSession", "Zoo Code"),
           icon: kindIconEl("zoo"),
           onClick: () => void handleNewSession(projectId, groupId, "zoo", parentSessionId),
-        },
-        {
-          label: t("tree.newAgentSession", "ZCode"),
-          icon: kindIconEl("zcode"),
-          onClick: () => void handleNewSession(projectId, groupId, "zcode", parentSessionId),
-        },
-        {
-          label: t("tree.newAgentSession", "DeepSeek"),
-          icon: kindIconEl("deepseek"),
-          onClick: () => void handleNewSession(projectId, groupId, "deepseek", parentSessionId),
         },
         // Saved presets, listed after the built-in agents they behave like. Each launches directly with
         // its own executable and defaults, which is the point of saving one.
@@ -948,9 +987,7 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
       };
       walk(null, 0);
       const rootItem: MenuItem = {
-        label: t("tree.projectRoot"),
-        icon: isVirtualProject(useTermStore.getState().projects.find(p => p.id === node.projectId))
-          ? <Icons.collection size={14} /> : <Icons.project size={14} />,
+        ...ungroupedTarget(node.projectId),
         disabled: node.groupId === null,
         onClick: () => void moveNode("session", node.id, node.projectId, null, null, Date.now()),
       };
@@ -1014,12 +1051,13 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
       items.push(buildMarkItem("session", node.id), sep, buildMoveTo(), sep, remove);
       return items;
     }
-    // Fork is available only to Claude/Codex/Pi/OMP with a captured conversation ID and native fork support.
+    // Fork is available only to Claude/Codex/Pi/OMP/ZCode with a captured conversation ID and native fork support.
     const canFork =
       (sessionRec?.kind === "claude" ||
         sessionRec?.kind === "codex" ||
         sessionRec?.kind === "pi" ||
-        sessionRec?.kind === "omp") &&
+        sessionRec?.kind === "omp" ||
+        sessionRec?.kind === "zcode") &&
       !!sessionRec?.agentSessionId;
 
     // Quick shell switching applies only to plain terminals with detected shells; agents use fixed injection logic.
@@ -1032,6 +1070,7 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
       (useTermStore.getState().projects.find((p) => p.id === node.projectId)?.rootPath ?? "").trim() ||
       null;
 
+    const statusItem = sessionStatusItem([node.id]);
     const items: MenuItem[] = [
       { label: t("common.open"), onClick: () => openSession(node.id) },
       { label: t("tree.openNewTab"), onClick: () => openSession(node.id, { newTab: true }) },
@@ -1073,6 +1112,7 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
         : []),
       sep,
       ...(refreshStatusItem ? [refreshStatusItem] : []),
+      ...(statusItem ? [statusItem] : []),
       // Marks apply only to persisted nodes; drafts have no database row to write.
       buildMarkItem("session", node.id),
       {
@@ -1155,9 +1195,7 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
     walk(null, 0);
 
     const rootItem: MenuItem = {
-      label: t("tree.projectRoot"),
-      icon: isVirtualProject(useTermStore.getState().projects.find(p => p.id === projectId))
-        ? <Icons.collection size={14} /> : <Icons.project size={14} />,
+      ...ungroupedTarget(projectId),
       // Disable project root when every session is already ungrouped there.
       disabled: recs.every((s) => (s.groupId ?? null) === null),
       onClick: () => void moveMany(ids, projectId, null, null),
@@ -1593,7 +1631,7 @@ const sessionFields = (
     ? [
         {
           key: "permissionMode",
-          ...(["claude", "codex", "opencode"].includes(kind) ? {
+          ...(["claude", "codex", "opencode", "antigravity"].includes(kind) ? {
             label: t("info.permission"),
             render: (value: string, onChange: (value: string) => void) =>
               <AgentPermissionSelect kind={kind} value={value} onChange={onChange} />,

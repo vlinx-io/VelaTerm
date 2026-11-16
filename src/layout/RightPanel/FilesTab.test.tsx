@@ -74,6 +74,25 @@ describe("Files background decorations", () => {
   });
 });
 
+describe("Files quick filter", () => {
+  it("clears the filter when the root switches to another project", async () => {
+    mocks.list.mockImplementation(async (path: string) => path === "/repo"
+      ? [{ name: "a.ts", isDir: false, isHidden: false, gitBadge: null }]
+      : [{ name: "b.ts", isDir: false, isHidden: false, gitBadge: null }]);
+    const view = render(<FilesTab rootPath="/repo" rootName="A" />);
+    await act(async () => {});
+    fireEvent.click(screen.getByLabelText("files.filterPlaceholder"));
+    fireEvent.change(screen.getByPlaceholderText("files.filterPlaceholder"), { target: { value: "zzz" } });
+    expect(screen.queryByText("a.ts")).toBeNull();
+
+    view.rerender(<FilesTab rootPath="/other" rootName="B" />);
+    await act(async () => {});
+    expect(screen.queryByPlaceholderText("files.filterPlaceholder")).toBeNull();
+    expect(screen.getByLabelText("files.filterPlaceholder").getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByText("b.ts")).toBeTruthy();
+  });
+});
+
 describe("Files change notification", () => {
   it("re-reads only the shown directories an event names and polls rarely while watched", async () => {
     mocks.watch.mockResolvedValue({ root: "/repo", supported: true });

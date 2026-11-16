@@ -341,9 +341,10 @@ export interface ChatWorkflowAgent {
 export type ChatWorkflowEntry = ChatWorkflowPhase | ChatWorkflowAgent;
 
 /**
- * One of Claude's background tasks: a shell command, a subagent or a workflow still running after its turn
- * moved on, merged by the backend from the inventory and every task-protocol frame. Keys are Claude's
- * snake_case. Only `task_id`, `task_type`, `description` and `status` are always present.
+ * One background task of a conversation: a shell command, a subagent or a workflow still running after
+ * its turn moved on, merged by the backend from the agent's own task reports. Claude's keys stay
+ * snake_case, and OpenCode maps its background jobs onto them. Only `task_id`, `task_type`, `description`
+ * and `status` are always present.
  */
 export interface ChatBackgroundTask {
   task_id: string;
@@ -392,7 +393,7 @@ export interface ChatApiRetry {
   message: string;
 }
 
-/** What Claude's protocol reports about the process beyond the conversation itself. Replaced whole. */
+/** What the agent reports about the process beyond the conversation itself. Replaced whole. */
 export interface ChatAuthState {
   status: "required" | "starting" | "pending" | "submitting" | "canceling" | "success" | "failed" | "canceled" | "signingOut" | "signedOut" | "logoutFailed";
   verificationUrl?: string;
@@ -540,6 +541,8 @@ export interface ChatSnapshot {
   agentSessionId?: string;
   model?: string;
   effort?: string;
+  /** Whether the running agent accepts image prompts; absent until it has answered its handshake. */
+  images?: boolean;
   mode?: string;
   pendingPermissionMode?: PendingPermissionMode | null;
   /** Backend-owned conversation choices; null fields explicitly retain automatic defaults. */
@@ -626,7 +629,10 @@ export type ChatEvent =
   | { type: "codexSettingsChanged"; serviceTier?: string | null; personality?: string | null }
   /** Claude in Chrome was attached or detached for this conversation, by this view or another one. */
   | { type: "chromeChanged"; enabled: boolean }
-  | { type: "settingsChanged"; model?: string | null; effort?: string | null; mode?: string; pendingPermissionMode?: PendingPermissionMode | null }
+  /** What the agent's handshake says about image prompts; sent once it starts, and again when its model
+   * changes to one the current connection did not advertise. */
+  | { type: "capabilities"; images: boolean }
+  | { type: "settingsChanged"; model?: string | null; effort?: string | null; images?: boolean | null; mode?: string; pendingPermissionMode?: PendingPermissionMode | null }
   /**
    * Which process is behind this conversation, announced as soon as it exists.
    *
@@ -644,8 +650,9 @@ export type ChatEvent =
    */
   | { type: "exited"; code: number; stderr: string; released?: boolean }
   | { type: "error"; message: string; /** Text of messages that were waiting and will not be sent. */ unsent?: string[] }
-  /** The agent refused this message before keeping it, so it goes back to the composer. */
-  | { type: "unsent"; text: string; images: ChatImage[] }
+  /** The agent refused this message before keeping it, so it goes back to the composer. `id` names the
+   * submission to drop when the refusal happens after it was queued and acknowledged. */
+  | { type: "unsent"; id?: string; text: string; images: ChatImage[] }
   | { type: "storagePressure"; message: string }
   | { type: "extras"; extras: ChatExtras }
   /** The wait for a usage limit to reset began, moved, or ended; `reason` says why it ended unsent. */
@@ -726,7 +733,7 @@ export function chatMcpReconnect(
   return invoke("chat_mcp_reconnect", { sessionId, server });
 }
 
-/** Stop one of Claude's background tasks. */
+/** Stop one background task. */
 export function chatStopTask(sessionId: string, taskId: string): Promise<void> {
   return invoke("chat_stop_task", { sessionId, taskId });
 }
@@ -744,7 +751,7 @@ export function chatTaskOutput(sessionId: string, taskId: string): Promise<ChatT
   return invoke("chat_task_output", { sessionId, taskId });
 }
 
-/** What one of Claude's subagents has done so far, as rows of its own conversation. */
+/** What one subagent has done so far, as rows of its own conversation. */
 export function chatSubagentRows(sessionId: string, taskId: string): Promise<ChatRow[]> {
   return invoke("chat_subagent_rows", { sessionId, taskId });
 }
@@ -848,7 +855,11 @@ export function chatInterrupt(sessionId: string): Promise<void> {
 }
 
 /** Native option indices and explicitly typed text stay separate until the host builds the answer. */
-export interface QuestionAnswerSelection { selected: number[]; text: string }
+export interface QuestionAnswerSelection {
+  selected: number[];
+  text: string;
+  skipped?: boolean;
+}
 
 /**
  * Answer a permission question.

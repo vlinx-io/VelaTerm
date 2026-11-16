@@ -7,6 +7,7 @@ import { safeError } from "../../ipc/diagnosticSafety";
 import { useEffect, useState } from "react";
 import { Backdrop } from "../../components/Backdrop";
 import { CompletionModeField } from "./CompletionModeField";
+import { ServerRegionField } from "./ServerRegionField";
 import { FontSelect, useFontCatalog } from "./FontSelect";
 import Select, { type SelectOption } from "../../components/Select";
 import {
@@ -28,7 +29,14 @@ import { env, platform } from "../../platform";
 import type { VelaCommandStatus } from "../../platform/types";
 import { COMPOSER_CHIP_IDS, INPUT_LATENCY_THRESHOLDS, type ComposerChipId } from "../../store/settings";
 import { useTermStore, type TermRenderer } from "../../store/termStore";
-import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT } from "../../theme";
+import {
+  DEFAULT_CHAT_TRACKING,
+  DEFAULT_CONVERSATION_FONT_SIZE,
+  DEFAULT_TERMINAL_FONT_SIZE,
+  DEFAULT_TERMINAL_LINE_HEIGHT,
+  MAX_CHAT_TRACKING,
+  MIN_CHAT_TRACKING,
+} from "../../theme";
 import type {
   AccentChoice,
   Density,
@@ -78,6 +86,9 @@ const STEP_BTN: React.CSSProperties = {
   cursor: "pointer",
   flex: "none",
 };
+
+/** Choices for the background-tab limit dropdown. */
+const MAX_LIVE_TABS_CHOICES = [8, 16, 32, 64, 128, 256, 512];
 
 /** Language picker. Writing the choice through to the backend as well keeps other shells in sync. */
 function LangSelect() {
@@ -203,6 +214,7 @@ function FontSizeStepper({
   max,
   defaultValue,
   autoLabel,
+  autoVar = "--ui-fs",
   stepSize = 0.5,
   unit = "px",
   label,
@@ -213,6 +225,8 @@ function FontSizeStepper({
   max: number;
   defaultValue: number;
   autoLabel?: string;
+  /** CSS variable on documentElement holding the value currently in effect while the setting is automatic. */
+  autoVar?: string;
   stepSize?: number;
   unit?: string;
   label?: string;
@@ -220,13 +234,14 @@ function FontSizeStepper({
   const t = useT();
   const display = value == null ? (autoLabel ?? String(defaultValue)) : `${value}${unit}`;
   const step = (d: number) => {
+    // Stepping out of automatic starts from what is on screen rather than jumping to the fallback.
     const autoSize = autoLabel != null
-      ? parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--ui-fs"))
+      ? parseFloat(getComputedStyle(document.documentElement).getPropertyValue(autoVar))
       : NaN;
     const base = value ?? (Number.isFinite(autoSize) ? autoSize : defaultValue);
     onChange(Math.max(min, Math.min(max, Math.round((base + d * stepSize) * 10) / 10)));
   };
-  // UI size resets to null to follow density; terminal size resets to its explicit default.
+  // Automatic values reset to null; terminal size resets to its explicit default.
   const reset = () => onChange(autoLabel != null ? null : defaultValue);
   return (
     <div role={label ? "group" : undefined} aria-label={label} style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -253,6 +268,65 @@ function FontSizeStepper({
       </button>
       <button style={STEP_BTN} onClick={() => step(1)} title={t("settings.fontLarger")}>
         +
+      </button>
+    </div>
+  );
+}
+
+/** Code shown in the previews. It is program text, identical in every language. */
+const PREVIEW_CODE = "const total = items.reduce((sum, x) => sum + x, 0); // 0O 1lI";
+
+/** Live sample of the interface or conversation typography. It reads the same CSS variables as the real
+ * views, so every change above shows here at once without a separate code path. */
+function TypographyPreview({ variant }: { variant: "ui" | "chat" }) {
+  const t = useT();
+  const box: React.CSSProperties = {
+    margin: "12px 0 0",
+    padding: "10px 12px",
+    border: "1px solid var(--border)",
+    borderRadius: 8,
+    background: variant === "chat" ? "var(--bg-term)" : "var(--bg-0)",
+    color: "var(--text)",
+    overflow: "hidden",
+  };
+  const caption = (
+    <div style={{ fontFamily: "var(--font-ui)", fontSize: 10.5, color: "var(--text-dim)", marginBottom: 6 }}>
+      {t("settings.fontPreview")}
+    </div>
+  );
+  if (variant === "ui") {
+    return (
+      <div role="group" aria-label={t("settings.fontPreview")} style={box}>
+        {caption}
+        <div style={{ fontFamily: "var(--font-ui)", fontSize: "var(--ui-fs)", lineHeight: 1.5 }}>
+          {t("settings.fontPreviewText")}
+        </div>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: "calc(var(--ui-fs) - 1px)", lineHeight: 1.5, color: "var(--text-dim)", whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>
+          {PREVIEW_CODE}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div role="group" aria-label={t("settings.fontPreview")} style={box}>
+      {caption}
+      <div style={{ fontFamily: "var(--chat-font)", fontSize: "var(--chat-fs)", lineHeight: "var(--chat-line-height)", letterSpacing: "var(--chat-tracking)" }}>
+        {t("settings.fontPreviewChat")}
+      </div>
+      <pre style={{ margin: "8px 0 0", padding: "6px 8px", borderRadius: 6, background: "var(--bg-active)", fontFamily: "var(--chat-code-font)", fontSize: "calc(var(--ui-fs) - 1px)", lineHeight: "var(--chat-line-height)", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+        {PREVIEW_CODE}
+      </pre>
+    </div>
+  );
+}
+
+/** Restores one group of font settings at once. */
+function FontResetRow({ onReset }: { onReset: () => void }) {
+  const t = useT();
+  return (
+    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+      <button type="button" className="vlx-btn" onClick={onReset}>
+        {t("settings.fontResetGroup")}
       </button>
     </div>
   );
@@ -301,6 +375,23 @@ function AccentPicker({
 
 type Cat = "appearance" | "terminal" | "conversation" | "translation" | "behavior" | "advanced" | "agents" | "shortcuts" | "general";
 
+const CATS = new Set<Cat>([
+  "general",
+  "appearance",
+  "terminal",
+  "conversation",
+  "translation",
+  "behavior",
+  "advanced",
+  "agents",
+  "shortcuts",
+]);
+
+/** A category from the URL, or null for a missing or retired one so no blank page can be opened. */
+function categoryOf(value: string | null): Cat | null {
+  return value !== null && CATS.has(value as Cat) ? (value as Cat) : null;
+}
+
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const fonts = useFontCatalog();
   const t = useT();
@@ -343,6 +434,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const soundEnabled = useTermStore((s) => s.soundEnabled);
   const toggleSound = useTermStore((s) => s.toggleSound);
   const uiFontSize = useTermStore((s) => s.uiFontSize);
+  const uiFontFamily = useTermStore((s) => s.uiFontFamily);
+  const uiMonoFontFamily = useTermStore((s) => s.uiMonoFontFamily);
+  const chatCodeFontFamily = useTermStore((s) => s.chatCodeFontFamily);
+  const chatLetterSpacing = useTermStore((s) => s.chatLetterSpacing);
+  const setUiFontFamily = useTermStore((s) => s.setUiFontFamily);
+  const setUiMonoFontFamily = useTermStore((s) => s.setUiMonoFontFamily);
+  const resetUiTypography = useTermStore((s) => s.resetUiTypography);
+  const setChatCodeFontFamily = useTermStore((s) => s.setChatCodeFontFamily);
+  const setChatLetterSpacing = useTermStore((s) => s.setChatLetterSpacing);
+  const resetChatTypography = useTermStore((s) => s.resetChatTypography);
   const termFontFamily = useTermStore((s) => s.termFontFamily);
   const termFontSize = useTermStore((s) => s.termFontSize);
   const termLineHeight = useTermStore((s) => s.termLineHeight);
@@ -359,10 +460,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const route = useTranslationRoute();
   const legacyTranslation = route.get("settings") === "conversation" && route.get("settingsSection") === "translation";
-  const requestedCategory = legacyTranslation ? "translation" : route.get("settings");
+  const requestedCategory = legacyTranslation ? "translation" : categoryOf(route.get("settings"));
   const showTranslation = route.get("settingsTranslation") === "1" || requestedCategory === "translation";
-  const [cat, setCat] = useState<Cat>((requestedCategory as Cat) || "appearance");
-  useEffect(() => { if (requestedCategory) setCat(requestedCategory as Cat); }, [requestedCategory]);
+  const [cat, setCat] = useState<Cat>(requestedCategory ?? "appearance");
+  useEffect(() => { if (requestedCategory) setCat(requestedCategory); }, [requestedCategory]);
   useEffect(() => { if (legacyTranslation) navigateTranslation(translationUrl({ settings: "translation", settingsSection: null }), true); }, [legacyTranslation]);
   const [skillOn, setSkillOn] = useState<boolean | null>(null);
   const [cliStatus, setCliStatus] = useState<VelaCommandStatus | null>(null);
@@ -550,17 +651,31 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     onChange={setNavLayout}
                   />
                 </Field>
-                <Field label={t("settings.uiFontSize")}>
-                  <FontSizeStepper
-                    value={uiFontSize}
-                    label={t("settings.uiFontSize")}
-                    onChange={setUiFontSize}
-                    min={10}
-                    max={20}
-                    defaultValue={13}
-                    autoLabel={t("settings.fontAuto")}
-                  />
-                </Field>
+                <div style={{ marginTop: 20 }}>
+                  <SectionTitle>{t("settings.uiTypography")}</SectionTitle>
+                  <p style={{ color: "var(--text-dim)", fontSize: 12, lineHeight: 1.5, margin: "0 0 12px" }}>
+                    {t("settings.uiTypographyHint")}
+                  </p>
+                  <Field label={t("settings.uiFont")}>
+                    <FontSelect fonts={fonts} value={uiFontFamily} onChange={setUiFontFamily} label={t("settings.uiFont")} />
+                  </Field>
+                  <Field label={t("settings.uiMonoFont")}>
+                    <FontSelect fonts={fonts} value={uiMonoFontFamily} onChange={setUiMonoFontFamily} label={t("settings.uiMonoFont")} />
+                  </Field>
+                  <Field label={t("settings.uiFontSize")}>
+                    <FontSizeStepper
+                      value={uiFontSize}
+                      label={t("settings.uiFontSize")}
+                      onChange={setUiFontSize}
+                      min={10}
+                      max={20}
+                      defaultValue={13}
+                      autoLabel={t("settings.fontAuto")}
+                    />
+                  </Field>
+                  <TypographyPreview variant="ui" />
+                  <FontResetRow onReset={resetUiTypography} />
+                </div>
               </>
             )}
 
@@ -602,6 +717,9 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 <Field label={t("settings.chatFont")}>
                   <FontSelect fonts={fonts} value={chatFontFamily} onChange={setChatFontFamily} label={t("settings.chatFont")} />
                 </Field>
+                <Field label={t("settings.chatCodeFont")}>
+                  <FontSelect fonts={fonts} value={chatCodeFontFamily} onChange={setChatCodeFontFamily} label={t("settings.chatCodeFont")} />
+                </Field>
                 <Field label={t("settings.chatFontSize")}>
                   <FontSizeStepper value={chatFontSize} label={t("settings.chatFontSize")}
                     onChange={(v) => setChatFontSize(v ?? DEFAULT_CONVERSATION_FONT_SIZE)}
@@ -612,6 +730,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     onChange={(v) => setChatLineHeight(v ?? DEFAULT_TERMINAL_LINE_HEIGHT)}
                     min={1} max={2} defaultValue={DEFAULT_TERMINAL_LINE_HEIGHT} stepSize={0.1} unit="×" />
                 </Field>
+                <Field label={t("settings.chatLetterSpacing")}>
+                  <FontSizeStepper value={chatLetterSpacing} label={t("settings.chatLetterSpacing")}
+                    onChange={setChatLetterSpacing} autoLabel={t("settings.fontAuto")} autoVar="--chat-tracking"
+                    min={MIN_CHAT_TRACKING} max={MAX_CHAT_TRACKING} defaultValue={DEFAULT_CHAT_TRACKING} stepSize={0.1} />
+                </Field>
+                <TypographyPreview variant="chat" />
+                <FontResetRow onReset={resetChatTypography} />
                 <ComposerChipsSection />
               </>
             )}
@@ -727,15 +852,15 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   </Field>
                   {singleTabMode && (
                     <Field label={t("settings.maxLiveTabs")}>
-                      <Seg<string>
+                      <Select
                         value={String(maxLiveTabs)}
-                        options={[
-                          ["8", "8"],
-                          ["16", "16"],
-                          ["32", "32"],
-                          ["64", "64"],
-                        ]}
+                        options={MAX_LIVE_TABS_CHOICES.map((n) => ({ value: String(n), label: String(n) }))}
                         onChange={(v) => setMaxLiveTabs(Number(v))}
+                        size="sm"
+                        width={160}
+                        menuWidth={172}
+                        align="right"
+                        ariaLabel={t("settings.maxLiveTabs")}
                       />
                     </Field>
                   )}
@@ -810,6 +935,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 <Field label={t("settings.language")}>
                   <LangSelect />
                 </Field>
+                <ServerRegionField />
                 <Field label={t("settings.sound")}>
                   <Seg<"on" | "off">
                     value={soundEnabled ? "on" : "off"}

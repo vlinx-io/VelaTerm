@@ -50,8 +50,24 @@ it("copies through the native copy path from the context menu", () => {
   Reflect.deleteProperty(document, "execCommand");
 });
 
-it("shows no menu without a selection", () => {
+it("offers only the entire message without a selection", () => {
+  const writeText = vi.spyOn(platform.clipboard, "writeText").mockResolvedValue();
   const { container } = render(<MessageBubble who="Claude" isUser={false} text={TEXT} />);
   fireEvent.contextMenu(container.querySelector(".sv-msg-body")!);
   expect(screen.queryByText("Copy as Markdown")).toBeNull();
+  fireEvent.click(screen.getByText("Copy Entire Message"));
+  expect(writeText).toHaveBeenCalledWith(TEXT, { reportFailure: true });
+});
+
+it("keeps the entire message available beside a selection", () => {
+  const body = renderAndSelect();
+  fireEvent.contextMenu(body);
+  expect(screen.getByText("Copy as Markdown")).toBeTruthy();
+  expect(screen.getByText("Copy Entire Message")).toBeTruthy();
+});
+
+it("shows no menu when the message cannot be copied and nothing is selected", () => {
+  const { container } = render(<MessageBubble who="Claude" isUser={false} text={TEXT} copyAvailable={false} />);
+  fireEvent.contextMenu(container.querySelector(".sv-msg-body")!);
+  expect(screen.queryByRole("menu")).toBeNull();
 });

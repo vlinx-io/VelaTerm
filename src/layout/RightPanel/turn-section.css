@@ -21,7 +21,7 @@
 .turn-section .kv .k { color: var(--text-dim); }
 .turn-section .kv .v { font-variant-numeric: tabular-nums; }
 .turn-section .kv .v.turn-strong { color: var(--accent); font-weight: 700; }
-.turn-section .kv .v small { margin-left: 5px; font-size: 10px; color: var(--text-faint); }
+.turn-section .kv .v small { margin-left: 5px; font-size: 10px; font-weight: 400; color: var(--text-faint); }
 .turn-section .turn-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 16px; }
 .turn-section .turn-metric { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .turn-section .turn-metric .m-k { color: var(--text-dim); font-size: 11px; }

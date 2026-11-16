@@ -648,7 +648,7 @@ pub fn confirmed_missing(kind: SessionKind, id: &str) -> bool {
         // Crush uses an internal database. Do not verify initially; if invalid IDs hang or repeatedly error, add
         // session-list verification analogous to OpenCode.
         SessionKind::Crush => false,
-        SessionKind::Deepseek => crate::agent::chat::deepseek_history::confirmed_missing(id),
+        SessionKind::Deepseek => opencode_session_missing(id),
         // Kimi Code manages internal storage; let `--session` handle IDs when reliable verification is unavailable.
         SessionKind::Kimi => false,
         // ZCode keeps sessions in SQLite under ~/.zcode/cli/db. An unknown or soft-deleted ID fails only once its
@@ -734,6 +734,33 @@ fn grok_home() -> Option<std::path::PathBuf> {
 pub fn find_grok_updates(id: &str) -> Option<std::path::PathBuf> {
     let sessions = grok_home()?.join("sessions");
     find_grok_updates_in(&sessions, id)
+}
+
+/// The working directory Grok filed a session under, decoded from its `<encoded-cwd>` directory.
+/// Grok looks a session up by the exact cwd text it was created with, so `C:/a` and `C:\a` are different
+/// directories; reopening must send that same text rather than whatever spelling VelaTerm stored.
+pub fn grok_session_cwd(id: &str) -> Option<String> {
+    let updates = find_grok_updates(id)?;
+    let group = updates.parent()?.parent()?.file_name()?.to_str()?;
+    percent_decode(group).filter(|cwd| !cwd.is_empty())
+}
+
+/// Decode `%XX` escapes; `None` for a malformed escape or a result that is not UTF-8.
+fn percent_decode(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hex = std::str::from_utf8(bytes.get(i + 1..i + 3)?).ok()?;
+            out.push(u8::from_str_radix(hex, 16).ok()?);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
 }
 
 fn find_grok_updates_in(sessions: &std::path::Path, id: &str) -> Option<std::path::PathBuf> {
@@ -1572,6 +1599,17 @@ mod tests {
         assert!(find_grok_updates_in(&grok_sessions, "../escape").is_none());
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn grok_cwd_directory_names_decode_to_the_filed_spelling() {
+        assert_eq!(percent_decode("%2FUsers%2Fx%2Fwork").as_deref(), Some("/Users/x/work"));
+        // Both Windows spellings survive as Grok wrote them; they are distinct sessions to Grok.
+        assert_eq!(percent_decode("C%3A%5CUsers%5Ca").as_deref(), Some(r"C:\Users\a"));
+        assert_eq!(percent_decode("C%3A%2FUsers%2Fa").as_deref(), Some("C:/Users/a"));
+        assert_eq!(percent_decode("%E4%B8%AD").as_deref(), Some("中"));
+        assert!(percent_decode("%2").is_none());
+        assert!(percent_decode("%zz").is_none());
     }
 
     #[test]

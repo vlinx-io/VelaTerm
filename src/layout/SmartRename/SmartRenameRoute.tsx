@@ -53,7 +53,11 @@ function AgentChoice({ route }: { route: Route }) {
     submitLabel={t("common.rename")} onCancel={close} onSubmit={() => {}}
     fields={[{ key: "loading", label: "", required: true, render: () =>
       <LaunchLoadState state={error ? "error" : "loading"} error={error} retry={() => setRevision(value => value + 1)} /> }]} />;
-  const agent = route.agent ?? data.agent;
+  const lastAgent = useTermStore.getState().sessionTitleAgent;
+  // The agent explicitly chosen last time wins while it is still offered and installed, so a repeated
+  // rename opens on the setup that was used last time; otherwise the session's own agent is the default.
+  const agent = route.agent ?? (lastAgent && data.agents.some(option => option.id === lastAgent && option.available)
+    ? lastAgent : data.agent);
   // An agent's last model and effort chosen here win over the session's own; without one, use the session's.
   const choiceFor = (id: string) => {
     const option = data.agents.find(item => item.id === id);
@@ -72,10 +76,12 @@ function AgentChoice({ route }: { route: Route }) {
     fields={[{ key: "agent", label: t("orch.agentLabel"), required: true, render: (value, _change, context) =>
       <AgentSelect value={value as SessionKind | ""} disabled={context.disabled} onChange={next => {
         context.changeValues({ agent: next, ...choiceFor(next) });
+        if (next) useTermStore.getState().setSessionTitleAgent(next);
       }} options={data.agents} placeholder={t("orch.agentLabel")} /> },
       { key: "model", label: "", render: (_value, _change, { values, changeValues, disabled }) => {
         const spec = data.agents.find(option => option.id === values.agent && option.available);
-        return spec ? <FieldStack><ModelEffortFields spec={spec} model={values.model} effort={values.effort}
+        // ZCode has no per-run model or reasoning switch, so those fields would be a promise it cannot keep.
+        return spec && spec.modelSelectable ? <FieldStack><ModelEffortFields spec={spec} model={values.model} effort={values.effort}
           disabled={disabled} context={{ parentSessionId: route.sessionId, inheritArgs: true }}
           onChange={(model, effort) => changeValues({ model, effort })}
           onModelCommit={model => remember(values.agent, "model", model)}

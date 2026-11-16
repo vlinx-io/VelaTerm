@@ -144,6 +144,7 @@ fn data_dir(options: &Options) -> Result<PathBuf, String> {
 fn open(options: &Options) -> Result<AppCtx, String> {
     let dir = data_dir(options)?;
     let db = Db::open(&dir.join("vlx-term.db"))?;
+    crate::server_region::load(&db);
     Ok(AppCtx::Headless(std::sync::Arc::new(HeadlessHost::new(dir, db))))
 }
 

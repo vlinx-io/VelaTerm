@@ -24,10 +24,13 @@ if "serve" in sys.argv:
         def do_GET(self):
             value = {"healthy": True}
             if self.path.split("?", 1)[0] == "/provider":
-                value = {"connected": ["fixture"], "default": {"fixture": "deep"}, "all": [
+                value = {"connected": ["fixture", "deepseek"], "default": {"fixture": "deep", "deepseek": "deepseek-flash"}, "all": [
                     {"id": "fixture", "name": "Fixture", "models": {
                         "deep": {"name": "Deep", "variants": {"high": {}, "low": {}, "custom": {}}},
                         "plain": {"name": "Plain", "variants": {}}}},
+                    {"id": "deepseek", "name": "DeepSeek", "models": {
+                        "deepseek-flash": {"name": "DeepSeek V4.1 Flash", "variants": {"low": {}, "high": {}, "max": {}}},
+                        "deepseek-v4-pro": {"name": "DeepSeek V4 Pro", "variants": {"high": {}, "max": {}}}}},
                     {"id": "disconnected", "models": {"hidden": {"variants": {"bad": {}}}}},
                 ]}
             body = json.dumps(value).encode()

@@ -103,7 +103,17 @@ pub fn export_markdown(
             let (path, content) = resume::read_codex_rollout_chain(agent_session_id)?;
             (path, codex_events(&content))
         }
-        SessionKind::Opencode => {
+        kind if kind.uses_opencode() => {
+            if kind == SessionKind::Deepseek
+                && crate::agent::history_store::deepseek_legacy::is_legacy(agent_session_id)
+            {
+                let path = crate::agent::chat::deepseek_history::find(agent_session_id)
+                    .ok_or("source_missing: The DeepSeek conversation log could not be found")?;
+                return Ok(render(
+                    &crate::agent::chat::deepseek_history::export_events(agent_session_id)?,
+                    session_name, kind.as_str(), agent_session_id, &path.display().to_string(), exported_at,
+                ));
+            }
             let path = crate::agent::opencode_store::db_path()
                 .ok_or("OpenCode's data directory could not be located")?;
             let messages = crate::agent::opencode_store::messages(agent_session_id)?;

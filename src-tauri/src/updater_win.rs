@@ -39,6 +39,25 @@ fn updates_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(base.join(UPDATES_DIR))
 }
 
+/// Whether this copy runs from the portable zip rather than an NSIS installation. The installer always writes
+/// `uninstall.exe` beside `velaterm.exe`; the zip (and a bare release build) has none. Running the installer
+/// from such a copy would install a second VelaTerm elsewhere instead of updating it, so the frontend offers
+/// the download page instead. Async because it touches the file system.
+#[tauri::command]
+pub async fn updater_windows_portable() -> bool {
+    if !cfg!(windows) {
+        return false;
+    }
+    tauri::async_runtime::spawn_blocking(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|dir| !dir.join("uninstall.exe").is_file()))
+            .unwrap_or(false)
+    })
+    .await
+    .unwrap_or(false)
+}
+
 /// Download the update behind the plugin resource `rid`, verify it, install it from VelaTerm's own folder and
 /// exit. Only returns on failure. Async with blocking file IO moved off the runtime: the installer is ~150 MB.
 #[tauri::command]

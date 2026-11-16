@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use crate::host::AppCtx;
 use super::claude_models::ClaudeModel;
 
-const URL: &str = "https://velaterm.com/api/model-catalog/claude";
+/// Path on the website origin, which follows the selected server region (velaterm.com or velaterm.cn).
+const PATH: &str = "/api/model-catalog/claude";
 const KEY: &str = "model-catalog.claude.v1";
 const LIMIT: u64 = 1_048_576;
 const INTERVAL: u64 = 6 * 60 * 60;
@@ -78,7 +79,9 @@ pub fn models(installed: Option<(u32,u32,u32)>) -> Option<Vec<ClaudeModel>> {
 pub fn status() -> Status {
     STATE.lock().unwrap().as_ref().map(|s| s.status.clone()).unwrap_or_else(|| Status { source: "bundled".into(), ..Status::default() })
 }
-fn endpoint() -> String { std::env::var("VLX_MODEL_CATALOG_URL").unwrap_or_else(|_| URL.into()) }
+fn endpoint() -> String {
+    std::env::var("VLX_MODEL_CATALOG_URL").unwrap_or_else(|_| format!("{}{PATH}", crate::server_region::current().site_origin()))
+}
 fn fetch(url: &str, previous: Option<&Catalog>) -> Result<Option<Catalog>, String> {
     let parsed = url::Url::parse(url).map_err(|_| "invalidUrl")?;
     if parsed.scheme() != "https" && !(parsed.scheme() == "http" && matches!(parsed.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))) { return Err("invalidUrl".into()); }

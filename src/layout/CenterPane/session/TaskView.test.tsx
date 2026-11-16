@@ -356,6 +356,26 @@ it("does not read output for tasks that are not shell commands", async () => {
   expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "chat_task_output")).toBe(false);
 });
 
+it("renders Antigravity local_workflow tasks as shell output instead of empty workflow phases", async () => {
+  const previous = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) =>
+    command === "chat_task_output"
+      ? Promise.resolve({ command: "cargo test --lib", output: "test result: ok.\n", truncated: false })
+      : previous(command, args));
+  useTermStore.setState({
+    sessions: [{ id: "s", projectId: "p", name: "Antigravity", kind: "antigravity", engine: "chat", collapsed: false, sortOrder: 0, createdAt: 0 }],
+  });
+  try {
+    await mount();
+    expect(await screen.findByText("cargo test --lib")).toBeTruthy();
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("chat_task_output", { sessionId: "s", taskId: "worwyzf75" });
+    expect(screen.getByText(/test result: ok\./)).toBeTruthy();
+    expect(screen.queryByText("This task reports no per-agent progress.")).toBeNull();
+  } finally {
+    useTermStore.setState({ sessions: [] });
+  }
+});
+
 it("renders terminal output as plain text", () => {
   expect(plainOutput("\x1b[1;31mred\x1b[0m\r\n\x1b]0;title\x07ok")).toBe("red\nok");
   expect(plainOutput("10%\r50%\r100%\nnext")).toBe("100%\nnext");

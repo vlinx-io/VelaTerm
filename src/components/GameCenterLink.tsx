@@ -1,5 +1,6 @@
 import Icons from "./Icons";
 import { getLocale, useT } from "../i18n";
+import { siteUrl } from "../ipc/serverRegion";
 import { isTauri } from "../ipc/transport";
 import { env } from "../platform";
 import { useTermStore } from "../store/termStore";
@@ -8,7 +9,7 @@ import { useTermStore } from "../store/termStore";
 export function GameCenterLink({ className = "tab-add", iconSize = 14 }: { className?: string; iconSize?: number }) {
   const t = useT();
   const locale = getLocale();
-  const href = `https://velaterm.com${locale === "en" ? "" : `/${locale}`}/game-center`;
+  const href = siteUrl(`${locale === "en" ? "" : `/${locale}`}/game-center`);
   return <a className={className} href={href} target="_blank" rel="noopener noreferrer"
     title={t("titlebar.gameCenter")} aria-label={t("titlebar.gameCenter")}
     onClick={(event) => {

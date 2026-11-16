@@ -237,7 +237,7 @@ fn catalog(app: &AppCtx, agent: &str) -> Result<crate::agent::launch_models::Cat
 /// The audit attaches its own MCP server to collect findings, and the argument that does so is written
 /// differently by every CLI. Adding an agent here means teaching `upstream::launch_args` that CLI's
 /// syntax first; listing one without it would offer an audit that silently collects nothing.
-const AUDIT_AGENTS: &[&str] = &["codex", "claude", "deepseek"];
+const AUDIT_AGENTS: &[&str] = &["codex", "claude"];
 
 /// The agent kind for an audit request, rejecting any agent the audit cannot instrument.
 fn audit_kind(agent: &str) -> Result<SessionKind> {

@@ -338,27 +338,30 @@ export function CenterPane() {
         {openTabs.length === 0 && (
           <div className="empty">
             <div className="inner">
-              <div className="glyph">
-                <Icons.terminal size={34} />
+              {isShareSurface ? <>
+                <div className="glyph">
+                  <Icons.terminal size={34} />
+                </div>
+                <div>{t("center.noSession")}</div>
+                <div style={{color:"var(--text-faint)"}}>{remoteText("remote.select")}</div>
+              </> : <>
+              <div className="empty-tile">
+                <Icons.sparkle size={22} />
               </div>
-              <div>{t("center.noSession")}</div>
-              {isShareSurface ? <div style={{color:"var(--text-faint)"}}>{remoteText("remote.select")}</div> : <><div style={{ color: "var(--text-faint)" }}>
-                {t("center.noSessionHintPre")}
-                <kbd>{formatCombo(effectiveCombo("newTab", shortcutOverrides))}</kbd>
-                {t("center.noSessionHintPost")}
-              </div>
+              <div className="empty-title">{t("center.startTitle")}</div>
+              <div className="empty-sub">{t("center.startHint")}</div>
               <div className="empty-actions">
-                <button className="empty-action" onClick={() => void newScratchTab()}>
-                  <Icons.terminal size={14} />
-                  {t("center.createTerminal")}
-                </button>
-                <button className="empty-action" onClick={openNewSessionHere}>
+                <button className="empty-action primary" onClick={openNewSessionHere}>
                   <Icons.sparkle size={14} />
                   {t("tree.newSession")}
                 </button>
+                <button className="empty-action" onClick={() => void newScratchTab()}>
+                  <Icons.terminal size={14} />
+                  {t("center.createTerminal")}
+                  <kbd>{formatCombo(effectiveCombo("newTab", shortcutOverrides))}</kbd>
+                </button>
               </div>
               <div className="empty-split-hints">
-                <div>{t("center.splitHint")}</div>
                 <div className="empty-split-keys">
                   <span>
                     {t("term.splitRight")}

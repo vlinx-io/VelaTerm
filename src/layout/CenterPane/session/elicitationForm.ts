@@ -46,9 +46,24 @@ export function parseElicitationFields(schema: unknown): ElicitationField[] {
     Array.isArray(schema.required) ? schema.required.filter((n): n is string => typeof n === "string") : [],
   );
   const entries = Object.entries(schema.properties);
-  if (Array.isArray(schema.propertyOrder)) {
-    const order = new Map(schema.propertyOrder.map((key, index) => [key, index]));
+  const explicitOrder = Array.isArray(schema.propertyOrder)
+    ? schema.propertyOrder
+    : Array.isArray(schema.propertyOrdering)
+      ? schema.propertyOrdering
+      : null;
+  if (explicitOrder) {
+    const order = new Map(explicitOrder.map((key, index) => [key, index]));
     entries.sort(([a], [b]) => (order.get(a) ?? entries.length) - (order.get(b) ?? entries.length));
+  } else if (entries.every(([key]) => /^q\d+(?:_other)?$/.test(key))) {
+    const rank = (key: string): [number, number] => {
+      const m = /^q(\d+)(_other)?$/.exec(key)!;
+      return [Number(m[1]), m[2] ? 1 : 0];
+    };
+    entries.sort(([a], [b]) => {
+      const [na, oa] = rank(a);
+      const [nb, ob] = rank(b);
+      return na !== nb ? na - nb : oa - ob;
+    });
   }
   return entries.flatMap(([name, raw]) => {
     if (!isRecord(raw)) return [];
@@ -102,8 +117,9 @@ function enumOptions(raw: Record<string, unknown>): ElicitationOption[] | undefi
       .map((v, i) => ({ value: String(v), label: asString(names[i]) ?? String(v) }));
     return options.length > 0 ? options : undefined;
   }
-  if (Array.isArray(raw.oneOf)) {
-    const options = raw.oneOf.flatMap((entry) => {
+  const union = Array.isArray(raw.oneOf) ? raw.oneOf : Array.isArray(raw.anyOf) ? raw.anyOf : null;
+  if (union) {
+    const options = union.flatMap((entry) => {
       if (!isRecord(entry) || entry.const === undefined) return [];
       const value = String(entry.const);
       return [{ value, label: asString(entry.title) ?? value }];

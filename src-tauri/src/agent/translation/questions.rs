@@ -3,7 +3,7 @@ use super::*;
 
 #[derive(Deserialize)]
 #[serde(rename_all="camelCase",deny_unknown_fields)]
-struct Answer { #[serde(default)] selected:Vec<usize>, #[serde(default)] text:String }
+struct Answer { #[serde(default)] selected:Vec<usize>, #[serde(default)] text:String, #[serde(default)] skipped:bool }
 
 fn pending(app: &AppCtx,sid: &str,id: &str) -> Result<Value,String> {
     let request=app.chat().pending_permission(sid,id)?;
@@ -91,30 +91,59 @@ pub(super) fn question(app: &AppCtx,sid: &str,id: &str,manual: bool) -> Result<V
 }
 
 /// Rebuild answers from host-owned questions; only explicitly typed answers enter outgoing translation.
-fn answered_input(input: &Value,answers: &[Answer]) -> Result<(Value,Vec<(String,String)>),String> {
+fn answered_input(input: &Value,answers: &[Answer]) -> Result<(Value,Vec<(usize,Vec<String>,String)>),String> {
     let questions=input["questions"].as_array().ok_or("translation:structure")?;
     if questions.is_empty() || questions.len()!=answers.len() {return Err("translation:structure".into());}
-    let mut values=serde_json::Map::new();let mut typed=Vec::new();
-    for (q,answer) in questions.iter().zip(answers) {
+    let mut values=serde_json::Map::new();let mut answer_list=Vec::with_capacity(questions.len());let mut typed=Vec::new();
+    let mut selected_indices=serde_json::Map::new();
+    let mut other_texts=serde_json::Map::new();
+    let mut skipped_indices=Vec::new();
+    let track_indices=input.get("_acpAskQuestion")==Some(&Value::Bool(true));
+    for (idx,(q,answer)) in questions.iter().zip(answers).enumerate() {
         let key=q["question"].as_str().ok_or("translation:structure")?;
         let options=q["options"].as_array().ok_or("translation:structure")?;
         let text=answer.text.trim();
-        let value=if !text.is_empty() {
-            if !answer.selected.is_empty() || !options.is_empty() && q["allowOther"]==false {return Err("translation:structure".into());}
-            typed.push((key.to_string(),text.to_string()));text.to_string()
-        } else if !answer.selected.is_empty() {
-            if q["multiSelect"]!=true && answer.selected.len()!=1 {return Err("translation:structure".into());}
+        let value=if answer.skipped {
+            if !answer.selected.is_empty() || !text.is_empty() || !(questions.len()>1 || q["allowEmpty"]==true || track_indices) {
+                return Err("translation:structure".into());
+            }
+            skipped_indices.push(idx);
+            String::new()
+        } else {
             let mut seen=HashSet::new();let mut labels=Vec::new();
             for i in &answer.selected {
                 if !seen.insert(i) {return Err("translation:structure".into());}
-                labels.push(options.get(*i).and_then(|o|o["label"].as_str()).ok_or("translation:structure")?);
+                labels.push(options.get(*i).and_then(|o|o["label"].as_str()).ok_or("translation:structure")?.to_string());
             }
-            labels.join(", ")
-        } else if q["allowEmpty"]==true && (options.is_empty() || q["allowOther"]!=false) {String::new()}
-        else {return Err("translation:structure".into());};
-        if values.insert(key.to_string(),json!(value)).is_some() {return Err("translation:structure".into());}
+            if !answer.selected.is_empty() && q["multiSelect"]!=true && (answer.selected.len()!=1 || !text.is_empty()) {
+                return Err("translation:structure".into());
+            }
+            if !text.is_empty() && !options.is_empty() && q["allowOther"]==false {return Err("translation:structure".into());}
+            if answer.selected.is_empty() && text.is_empty() && !(q["allowEmpty"]==true && (options.is_empty() || q["allowOther"]!=false)) {
+                return Err("translation:structure".into());
+            }
+            if !answer.selected.is_empty() && track_indices {selected_indices.insert(idx.to_string(),json!(answer.selected));}
+            if !text.is_empty() {
+                typed.push((idx,labels.clone(),text.to_string()));
+                if track_indices {other_texts.insert(idx.to_string(),json!(text));}
+            }
+            match (!labels.is_empty(),!text.is_empty()) {
+                (true,true)=>{let mut parts=labels;parts.push(text.to_string());parts.join(", ")},
+                (true,false)=>labels.join(", "),
+                (false,true)=>text.to_string(),
+                (false,false)=>String::new(),
+            }
+        };
+        answer_list.push(value.clone());
+        values.insert(key.to_string(),json!(value));
     }
-    let mut result=input.clone();result["answers"]=Value::Object(values);Ok((result,typed))
+    let mut result=input.clone();result["answers"]=Value::Object(values);result["_answerList"]=json!(answer_list);
+    if track_indices {
+        if !selected_indices.is_empty() {result["_selectedIndices"]=Value::Object(selected_indices);}
+        if !other_texts.is_empty() {result["_otherTexts"]=Value::Object(other_texts);}
+        if !skipped_indices.is_empty() {result["_skippedIndices"]=json!(skipped_indices);}
+    }
+    Ok((result,typed))
 }
 
 pub fn answer(app: &AppCtx,sid: &str,id: &str,answers: &Value,send_original: bool) -> Result<(),String> {
@@ -124,9 +153,18 @@ pub fn answer(app: &AppCtx,sid: &str,id: &str,answers: &Value,send_original: boo
     let (cfg,prefs,enabled)=settings(app,sid)?;
     let translating=enabled && prefs.outgoing && !send_original && !typed.is_empty();
     if translating {
-        let originals=typed.iter().map(|(_,text)|text.clone()).collect::<Vec<_>>();
+        let originals=typed.iter().map(|(_,_,text)|text.clone()).collect::<Vec<_>>();
         let translated=translate_fields(app,&cfg,&prefs.source,&prefs.target,&originals,id)?;
-        for ((key,_),text) in typed.into_iter().zip(translated) {input["answers"][key]=json!(text);}
+        let acp=input.get("_acpAskQuestion")==Some(&Value::Bool(true));
+        for ((idx,labels,_),translated_text) in typed.into_iter().zip(translated) {
+            let combined=if labels.is_empty() {translated_text.clone()} else {
+                let mut parts=labels;parts.push(translated_text.clone());parts.join(", ")
+            };
+            let key=input["questions"][idx]["question"].as_str().unwrap_or("").to_string();
+            input["answers"][key]=json!(combined);
+            input["_answerList"][idx]=json!(combined);
+            if acp {input["_otherTexts"][idx.to_string()]=json!(translated_text);}
+        }
     }
     let _gate=GATE.lock().unwrap();
     if translating {still_current(app,sid,&cfg,&prefs,true,false)?;}
@@ -151,8 +189,28 @@ mod tests {
         let (answered,typed)=answered_input(&input,&answers).unwrap();
         assert_eq!(answered["questions"],input["questions"]);
         assert_eq!(answered["answers"],json!({"First?":"B, A","Second?":"A typed answer"}));
-        assert_eq!(typed,vec![("Second?".to_string(),"A typed answer".to_string())]);
-        for bad in [json!([]),json!([{"selected":[2]},{}]),json!([{"selected":[0,0]},{}]),json!([{"text":"custom","selected":[0]},{}])] {
+        assert_eq!(answered["_answerList"],json!(["B, A","A typed answer"]));
+        assert_eq!(typed,vec![(1,Vec::<String>::new(),"A typed answer".to_string())]);
+        let mut acp_input=input.clone();acp_input["_acpAskQuestion"]=json!(true);
+        let combined:Vec<Answer>=serde_json::from_value(json!([{"selected":[0],"text":"  custom  "},{"skipped":true}])).unwrap();
+        let (acp_answered,combined_typed)=answered_input(&acp_input,&combined).unwrap();
+        assert_eq!(acp_answered["answers"],json!({"First?":"A, custom","Second?":""}));
+        assert_eq!(acp_answered["_answerList"],json!(["A, custom",""]));
+        assert_eq!(acp_answered["_selectedIndices"],json!({"0":[0]}));
+        assert_eq!(acp_answered["_otherTexts"],json!({"0":"custom"}));
+        assert_eq!(acp_answered["_skippedIndices"],json!([1]));
+        assert_eq!(combined_typed,vec![(0,vec!["A".to_string()],"custom".to_string())]);
+        assert!(answered.get("_selectedIndices").is_none());
+        let dup_input=json!({"questions":[
+            {"header":"Q1","question":"Pick one","options":[{"label":"X"},{"label":"Y"}],"multiSelect":false},
+            {"header":"Q2","question":"Pick one","options":[{"label":"X"},{"label":"Y"}],"multiSelect":false}
+        ]});
+        let (dup_answered,_)=answered_input(&dup_input,&serde_json::from_value::<Vec<Answer>>(json!([{"selected":[0]},{"selected":[1]}])).unwrap()).unwrap();
+        assert_eq!(dup_answered["_answerList"],json!(["X","Y"]));
+        let single=json!({"questions":[{"header":"Plan","question":"One?","options":[{"label":"A"},{"label":"B"}],"multiSelect":false}]});
+        assert!(answered_input(&single,&serde_json::from_value::<Vec<Answer>>(json!([{"text":"custom","selected":[0]}])).unwrap()).is_err());
+        assert!(answered_input(&single,&serde_json::from_value::<Vec<Answer>>(json!([{"skipped":true}])).unwrap()).is_err());
+        for bad in [json!([]),json!([{"selected":[2]},{}]),json!([{"selected":[0,0]},{}]),json!([{"selected":[0],"skipped":true},{}])] {
             assert!(answered_input(&input,&serde_json::from_value::<Vec<Answer>>(bad).unwrap()).is_err());
         }
     }

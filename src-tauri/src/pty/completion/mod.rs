@@ -20,6 +20,8 @@ pub const QUERY_KEY: &[u8] = b"\x1b[24;5~";
 pub const ACCEPT_KEY: &[u8] = b"\x1b[23;5~";
 /// Same as `QUERY_KEY`, except that the shell accepts a visible hint instead of collecting candidates.
 pub const QUERY_HINT_KEY: &[u8] = b"\x1b[21;5~";
+/// While this file exists in the session directory, the shell draws no inline hint.
+const REMOTE_INPUT_FILE: &str = "remote-input";
 const PREFIX: &[u8] = b"\x1b]6973;";
 const LIMIT: usize = 64;
 
@@ -62,6 +64,7 @@ pub struct State {
     collecting_hint_accepted: bool,
     /// The shell declared the `QUERY_HINT_KEY` binding. Sending it to any other shell would type garbage.
     pub hint_capable: bool,
+    remote_input: bool,
     pub owner: Option<String>,
 }
 
@@ -78,6 +81,7 @@ impl Default for State {
             collecting_extendable: false,
             collecting_hint_accepted: false,
             hint_capable: false,
+            remote_input: false,
             owner: None,
         }
     }
@@ -92,6 +96,17 @@ impl Drop for State {
 }
 
 impl State {
+    /// Records who is typing before their bytes reach the shell. The hint is part of the output every client
+    /// shares, so it follows the typist: in a mirrored session it shows for keys typed on the host and not for
+    /// keys typed remotely. Runs on the typing path (a permitted synchronous case), and touches the disk only
+    /// when the typist changes.
+    pub fn input_origin(&mut self, remote: bool) {
+        if !self.hint_capable || self.remote_input == remote { return; }
+        self.remote_input = remote;
+        let marker = self.selection_file.with_file_name(REMOTE_INPUT_FILE);
+        let _ = if remote { std::fs::write(&marker, "") } else { std::fs::remove_file(&marker) };
+    }
+
     pub fn input(&mut self, data: &str) {
         self.snapshot.input_version = self.snapshot.input_version.wrapping_add(1);
         self.snapshot.items.clear();

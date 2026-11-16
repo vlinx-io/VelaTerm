@@ -164,3 +164,49 @@ describe("search text filtering", () => {
     expect(container.querySelectorAll(".row .nm")).toHaveLength(0);
   });
 });
+
+describe("nodes created while filtering", () => {
+  const collection = (id: string, name: string): Project => ({ ...project(id, name, 0, null, false), rootPath: "" });
+
+  it("keeps a group created under a search filter visible until the text changes", () => {
+    mocks.state.sessions = [session("api", 1)];
+    const { container, rerender } = render(<ProjectTree {...filtered("api")} />);
+    expect(names(container)).toEqual(["app", "Feature", "api"]);
+
+    mocks.state.groups = [group("g1", "Feature"), { ...group("g2", "Empty"), sortOrder: 2 }];
+    rerender(<ProjectTree {...filtered("api")} />);
+    expect(names(container)).toEqual(["app", "Feature", "api", "Empty"]);
+
+    rerender(<ProjectTree {...filtered("pi")} />);
+    expect(names(container)).toEqual(["app", "Feature", "api"]);
+  });
+
+  it("keeps a group created under a marker filter visible", () => {
+    const marked = handlers({ view: { ...handlers().view, markFilter: "red" } });
+    mocks.state.sessions = [session("s1", 1, { mark: "red" })];
+    const { container, rerender } = render(<ProjectTree {...marked} />);
+    expect(names(container)).toEqual(["app", "Feature", "s1"]);
+
+    mocks.state.groups = [group("g1", "Feature"), { ...group("g2", "Empty"), sortOrder: 2 }];
+    rerender(<ProjectTree {...marked} />);
+    expect(names(container)).toEqual(["app", "Feature", "s1", "Empty"]);
+  });
+
+  it("keeps a collection created under a filter visible", () => {
+    mocks.state.sessions = [session("api", 1)];
+    const { container, rerender } = render(<ProjectTree {...filtered("api")} />);
+    mocks.state.projects = [...(mocks.state.projects as Project[]), collection("c1", "Archive")];
+    rerender(<ProjectTree {...filtered("api")} />);
+    expect(names(container)).toEqual(["Archive", "app", "Feature", "api"]);
+  });
+
+  it("does not treat nodes already present when the tree loads as new", () => {
+    mocks.state.treeLoaded = false;
+    mocks.state.sessions = [session("api", 1)];
+    const { container, rerender } = render(<ProjectTree {...filtered("api")} />);
+    mocks.state.treeLoaded = true;
+    mocks.state.projects = [...(mocks.state.projects as Project[]), collection("c1", "Archive")];
+    rerender(<ProjectTree {...filtered("api")} />);
+    expect(names(container)).toEqual(["app", "Feature", "api"]);
+  });
+});

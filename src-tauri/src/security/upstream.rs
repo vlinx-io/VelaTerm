@@ -211,23 +211,11 @@ mod tests {
         let temp = Temp::new();
         let plugin = temp.0.join("plugin's files");
         let state = temp.0.join("state with spaces");
-        for agent in ["codex", "claude", "deepseek"] {
+        for agent in ["codex", "claude"] {
             let args = launch_args(agent, &plugin, &state, "--existing 'a b'").unwrap();
             let parsed = crate::agent::inject::split_extra_args(Some(&args));
             assert_eq!(&parsed[..2], &["--existing", "a b"]);
-            if agent == "deepseek" {
-                assert_eq!(parsed[2], "--patch");
-                let patch: Value = serde_json::from_slice(&std::fs::read(&parsed[3]).unwrap()).unwrap();
-                let config = &patch[0]["insert"][0]["config"];
-                assert_eq!(patch[0]["insert"][0]["name"], "@deepseek-ai/dsh-mcp-client");
-                assert_eq!(config["serverName"], mcp_server_name(agent));
-                assert_eq!(config["args"][0], plugin.join("vlx-security-mcp.mjs").to_string_lossy().as_ref());
-                assert_eq!(config["env"]["CODEX_SECURITY_STATE_DIR"], state.to_string_lossy().as_ref());
-                // DeepSeek hashes function names over 64 characters; every scan tool must keep its name.
-                for tool in ["record_codex_security_candidate_validations", "record_codex_security_discovery_candidates"] {
-                    assert!(format!("mcp__{}__{tool}", mcp_server_name(agent)).len() <= 64, "{tool}");
-                }
-            } else if agent == "codex" {
+            if agent == "codex" {
                 assert!(parsed.windows(2).any(|pair| pair == ["-c", "mcp_servers.codex-security.command=\"node\""]));
                 assert!(parsed.windows(2).any(|pair| pair == ["-c", "mcp_servers.codex-security.enabled=false"]));
                 let table: toml_edit::DocumentMut = parsed[3].parse().unwrap();
@@ -550,16 +538,8 @@ fn explicit_selection_preserves_other_native_arguments() {
 }
 
 /// The name each agent registers the audit MCP server under, which prefixes every tool it exposes.
-///
-/// DeepSeek limits a function name to 64 characters and hashes anything longer, so the long default
-/// prefix would rename tools the workflow names explicitly, such as
-/// `record_codex_security_candidate_validations`. A shorter server name keeps every scan tool intact.
-pub fn mcp_server_name(agent: &str) -> &'static str {
-    if agent == "deepseek" {
-        "vlx-security"
-    } else {
-        "vlx-codex-security"
-    }
+pub fn mcp_server_name(_agent: &str) -> &'static str {
+    "vlx-codex-security"
 }
 
 pub fn launch_args(agent: &str, plugin: &Path, state: &Path, existing: &str) -> Result<String> {
@@ -604,24 +584,6 @@ pub fn launch_args(agent: &str, plugin: &Path, state: &Path, existing: &str) -> 
                 quote_argument("mcp_servers.codex-security.command=\"node\""),
                 quote_argument("mcp_servers.codex-security.enabled=false")
             ))
-        }
-        "deepseek" => {
-            // DeepSeek Harness composes its profile from patch layers; an inserted MCP client entry adds
-            // the server for this session only. JSON is valid YAML, so the patch is written as JSON.
-            std::fs::create_dir_all(state).map_err(|e| e.to_string())?;
-            let patch = state.join("dsh-mcp.json");
-            std::fs::write(
-                &patch,
-                serde_json::to_vec_pretty(&serde_json::json!([{"insert":[{
-                    "id":"mcp-vlx-security", "name":"@deepseek-ai/dsh-mcp-client",
-                    "config":{"serverName":mcp_server_name(agent), "transport":"stdio",
-                        "command":server["command"], "args":server["args"], "env":server["env"],
-                        "toolCallTimeoutMs":600_000, "failOnStartupError":true}
-                }]}]))
-                .map_err(|e| e.to_string())?,
-            )
-            .map_err(|e| e.to_string())?;
-            Ok(format!("{existing} --patch {}", quote_argument(&patch.to_string_lossy())))
         }
         _ => Err("security_invalid:agent".into()),
     }

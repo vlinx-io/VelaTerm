@@ -120,7 +120,7 @@ pub fn reindex_session_quiet(app: &AppCtx, session_id: &str) {
         let session=corpus::sessions(&app,None).ok().and_then(|_|{
             let conn=app.db().conn.lock().unwrap();
             repo::get_session(&conn,&id).ok().flatten().map(|session|corpus::Session {id:session.id,name:session.name,kind:session.kind,
-                native:session.agent_session_id,archived:session.archived_at.is_some()})
+                native:session.agent_session_id.or(session.legacy_agent_session_id),archived:session.archived_at.is_some()})
         });
         let Some(session)=session else {return;};
         let cancel=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));

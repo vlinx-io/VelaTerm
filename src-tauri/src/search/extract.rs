@@ -55,7 +55,7 @@ fn add_tools(message:&mut Message,tools:Vec<String>) {for tool in tools {if mess
 /// provider that is not read directly.
 pub(crate) fn conversation(kind:SessionKind,id:&str,cancel:&AtomicBool) -> Result<Option<Vec<transcript::TranscriptMessage>>,String> {
     let convert=|message:Message|transcript::TranscriptMessage {role:message.role.into(),text:message.text,timestamp:message.timestamp,tools:message.tools};
-    if matches!(kind,SessionKind::Opencode|SessionKind::Kiro) {
+    if matches!(kind,SessionKind::Opencode|SessionKind::Deepseek|SessionKind::Kiro) {
         let (found,_)=native_messages(kind,id,cancel)?.ok_or("conversation recording is unavailable")?;
         return Ok(Some(found.into_iter().map(convert).collect()));
     }
@@ -214,7 +214,13 @@ fn head(path:&Path,limit:u64) -> Result<String,String> {
 /// revision that changes when any of them does.
 pub(super) fn native_messages(kind:SessionKind,id:&str,cancel:&AtomicBool) -> Result<Option<(Vec<Message>,String)>,String> {
     let pieces:Vec<transcript::Piece>=match kind {
-        SessionKind::Opencode=> {
+        SessionKind::Opencode|SessionKind::Deepseek=> {
+            if kind==SessionKind::Deepseek && crate::agent::history_store::deepseek_legacy::is_legacy(id) {
+                crate::agent::chat::deepseek_history::transcript(id)?.into_iter().map(|message| transcript::Piece {
+                    role: if message.role=="user" {"user"} else {"assistant"}, text: message.text,
+                    timestamp: message.timestamp, tools: message.tools,
+                }).collect()
+            } else {
             let Some(path)=crate::agent::opencode_store::db_path().filter(|path|path.is_file()) else {return Ok(None);};
             let messages=match crate::agent::opencode_store::messages_in(&path,id) {
                 Ok(messages)=>messages,
@@ -222,6 +228,7 @@ pub(super) fn native_messages(kind:SessionKind,id:&str,cancel:&AtomicBool) -> Re
                 Err(error)=>return Err(error),
             };
             check(cancel)?;transcript::opencode_pieces(&messages)
+            }
         },
         SessionKind::Kiro=> {
             let session=match crate::agent::kiro_store::read(id) {Ok(session)=>session,Err(_)=>return Ok(None)};

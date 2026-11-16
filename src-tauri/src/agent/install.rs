@@ -155,14 +155,18 @@ pub fn install_recipe(agent: &str) -> Option<InstallRecipe> {
                     .into(),
         },
         "deepseek" => InstallRecipe {
-            label: "DeepSeek Harness".into(),
-            bin: "dsh".into(),
-            // Published on npm only; the package's `dsh` launcher runs every profile, including `acp`.
-            command: "npm install -g @deepseek-ai/dsh".into(),
-            needs_node: true,
-            docs_url: "https://github.com/deepseek-ai/deepseek-harness".into(),
+            label: "DeepSeek".into(),
+            bin: "opencode".into(),
+            // DeepSeek conversations run through OpenCode, so its installation is the same one.
+            command: if win {
+                "npm install -g --allow-scripts=opencode-ai opencode-ai".into()
+            } else {
+                "curl -fsSL https://opencode.ai/install | bash".into()
+            },
+            needs_node: win,
+            docs_url: "https://opencode.ai/docs/".into(),
             auth_hint:
-                "Set `DEEPSEEK_API_KEY`, or run `dsh web` and save your API key on its Models page."
+                "Run `opencode auth login` and choose DeepSeek, or set `DEEPSEEK_API_KEY`."
                     .into(),
         },
         "kimi" => InstallRecipe {
@@ -371,7 +375,11 @@ pub fn install_finished(data_dir: &std::path::Path, token: &str) -> bool {
         return false;
     }
     let marker = data_dir.join(INSTALL_MARKER_DIR).join(token);
-    marker.is_file() && std::fs::remove_file(&marker).is_ok()
+    let finished = marker.is_file() && std::fs::remove_file(&marker).is_ok();
+    if finished {
+        forget_shell_discovery();
+    }
+    finished
 }
 
 /// Longest a backgrounded install may run before it is stopped and reported as failed.
@@ -434,6 +442,7 @@ pub fn run_install(data_dir: &std::path::Path, agent: &str) -> Result<(), String
 /// Whether an install that just exited left an agent that can be found and starts. An installer can exit
 /// cleanly and still leave a launcher whose package never arrived.
 fn installed_and_working(kind: crate::models::SessionKind) -> bool {
+    forget_shell_discovery();
     match super::executable::discover(kind) {
         super::executable::LaunchBinary::Path(path) => {
             super::health::forget(&path);
@@ -447,6 +456,7 @@ fn installed_and_working(kind: crate::models::SessionKind) -> bool {
 /// an installer exits, so what is known about the file from before the install does not count.
 pub fn locate_working_bin(agent: &str) -> Option<String> {
     let path = locate_installed_bin(agent)?;
+    forget_shell_discovery();
     super::health::forget(&path);
     let kind = crate::models::SessionKind::from_db(agent);
     (super::health::check(kind, &path) != super::health::Health::Broken).then_some(path)
@@ -538,9 +548,22 @@ fn node_dependencies_missing(root: &std::path::Path) -> bool {
 /// Strategies mirror install_recipe: native installers stat fixed locations; global npm installations query
 /// `npm prefix -g`. Unix probes interactive profiles for nvm/fnm accuracy; Windows uses cmd /C.
 pub fn locate_installed_bin(agent: &str) -> Option<String> {
+    locate_installed_bin_with_prefixes(agent, npm_global_prefixes)
+}
+
+pub(crate) fn locate_installed_bin_cached(agent: &str) -> Option<String> {
+    locate_installed_bin_with_prefixes(agent, || cached_shell_discovery().npm_prefixes)
+}
+
+fn locate_installed_bin_with_prefixes(
+    agent: &str,
+    npm_prefixes: impl FnOnce() -> Vec<std::path::PathBuf>,
+) -> Option<String> {
     let (bin, mut candidates, use_npm) = agent_layout(agent)?;
     if use_npm {
-        push_npm_candidates(&mut candidates, bin);
+        for prefix in npm_prefixes() {
+            push_npm_candidates_at(&mut candidates, bin, &prefix);
+        }
     }
     candidates
         .into_iter()
@@ -605,10 +628,21 @@ fn locate_installed_bins_with(
 /// package while keeping the wrapper it created. Launching that wrapper prints only cmd.exe's bare path
 /// error, so the launch path reports the agent as missing and shows the installation guidance instead.
 pub fn dangling_npm_install(agent: &str) -> bool {
+    dangling_npm_install_with_prefixes(agent, npm_global_prefixes)
+}
+
+pub(crate) fn dangling_npm_install_cached(agent: &str) -> bool {
+    dangling_npm_install_with_prefixes(agent, || cached_shell_discovery().npm_prefixes)
+}
+
+fn dangling_npm_install_with_prefixes(
+    agent: &str,
+    npm_prefixes: impl FnOnce() -> Vec<std::path::PathBuf>,
+) -> bool {
     let Some((bin, _, true)) = agent_layout(agent) else {
         return false;
     };
-    npm_global_prefixes().iter().any(|prefix| {
+    npm_prefixes().iter().any(|prefix| {
         let shim = npm_bin_candidate(prefix, bin, cfg!(target_os = "windows"));
         shim.is_file() && !super::executable::is_executable_file(&shim)
     })
@@ -651,7 +685,8 @@ fn agent_layout_at(agent: &str, home: &std::path::Path) -> Option<(&'static str,
             ("cursor-agent", false)
         }
         // OpenCode's Unix script uses ~/.opencode/bin or, in some versions, ~/.local/bin; Windows uses npm.
-        "opencode" => {
+        // DeepSeek conversations use the same installation.
+        "opencode" | "deepseek" => {
             if !win {
                 candidates.push(home.join(".opencode").join("bin").join("opencode"));
                 candidates.push(home.join(".local").join("bin").join("opencode"));
@@ -704,8 +739,6 @@ fn agent_layout_at(agent: &str, home: &std::path::Path) -> Option<(&'static str,
                 ("crush", true)
             }
         }
-        // DeepSeek Harness installs through global npm on every platform.
-        "deepseek" => ("dsh", true),
         // Kimi installers have used ~/.kimi-code/bin and ~/.local/bin; prefer KIMI_CODE_HOME/bin when set.
         "kimi" => {
             if let Some(root) = std::env::var_os("KIMI_CODE_HOME") {
@@ -788,10 +821,6 @@ fn agent_layout_at(agent: &str, home: &std::path::Path) -> Option<(&'static str,
 ///
 /// Launching the payload directly avoids cmd.exe re-parsing the wrapper's arguments, which can mangle
 /// structured values such as JSON.
-fn push_npm_candidates(candidates: &mut Vec<std::path::PathBuf>, bin: &str) {
-    for prefix in npm_global_prefixes() { push_npm_candidates_at(candidates, bin, &prefix); }
-}
-
 fn push_npm_candidates_at(candidates: &mut Vec<std::path::PathBuf>, bin: &str, prefix: &std::path::Path) {
     let shim = npm_bin_candidate(prefix, bin, cfg!(target_os = "windows"));
     if let Some(exe) = super::executable::shim_payload_exe(&shim) {
@@ -824,6 +853,102 @@ fn npm_bin_candidate(prefix: &std::path::Path, bin: &str, win: bool) -> std::pat
     } else {
         prefix.join("bin").join(bin)
     }
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct ShellDiscovery {
+    pub(crate) npm_prefixes: Vec<std::path::PathBuf>,
+    shell_bins: Vec<String>,
+}
+
+impl ShellDiscovery {
+    pub(crate) fn shell_bin(&self, name: &str) -> Option<String> {
+        self.shell_bins.iter().find(|path| {
+            let file = std::path::Path::new(path.as_str());
+            file.file_name().and_then(|s| s.to_str()) == Some(name)
+                && super::executable::is_executable_file(file)
+        }).cloned()
+    }
+}
+
+struct DiscoveryCache {
+    generation: std::sync::atomic::AtomicU64,
+    snapshot: std::sync::Mutex<Option<(u64, ShellDiscovery)>>,
+    probe_lock: std::sync::Mutex<()>,
+}
+
+impl DiscoveryCache {
+    fn new() -> Self {
+        Self {
+            generation: std::sync::atomic::AtomicU64::new(0),
+            snapshot: std::sync::Mutex::new(None),
+            probe_lock: std::sync::Mutex::new(()),
+        }
+    }
+
+    fn get_or_probe(&self, probe: impl FnOnce() -> ShellDiscovery) -> ShellDiscovery {
+        let epoch = self.generation.load(std::sync::atomic::Ordering::Acquire);
+        if let Some((cached_epoch, discovery)) = self.snapshot.lock().unwrap().as_ref() {
+            if *cached_epoch == epoch {
+                return discovery.clone();
+            }
+        }
+        let _guard = self.probe_lock.lock().unwrap();
+        let epoch = self.generation.load(std::sync::atomic::Ordering::Acquire);
+        if let Some((cached_epoch, discovery)) = self.snapshot.lock().unwrap().as_ref() {
+            if *cached_epoch == epoch {
+                return discovery.clone();
+            }
+        }
+        let discovery = probe();
+        let mut snapshot = self.snapshot.lock().unwrap();
+        if self.generation.load(std::sync::atomic::Ordering::Acquire) == epoch {
+            *snapshot = Some((epoch, discovery.clone()));
+        }
+        discovery
+    }
+
+    fn forget(&self) {
+        self.generation.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        *self.snapshot.lock().unwrap() = None;
+    }
+}
+
+static SHELL_DISCOVERY: std::sync::OnceLock<DiscoveryCache> = std::sync::OnceLock::new();
+
+fn discovery_cache() -> &'static DiscoveryCache {
+    SHELL_DISCOVERY.get_or_init(DiscoveryCache::new)
+}
+
+/// Drop the cached shell discovery snapshot so the next UI catalog query re-probes cleanly.
+pub(crate) fn forget_shell_discovery() {
+    discovery_cache().forget();
+}
+
+/// Cached interactive shell and npm discovery, populated once on first read after startup or invalidation.
+pub(crate) fn cached_shell_discovery() -> ShellDiscovery {
+    discovery_cache().get_or_probe(probe_shell_discovery)
+}
+
+pub(crate) fn cached_shell_bin(name: &str) -> Option<String> {
+    cached_shell_discovery().shell_bin(name)
+}
+
+fn probe_shell_discovery() -> ShellDiscovery {
+    #[cfg(windows)]
+    {
+        ShellDiscovery { npm_prefixes: npm_global_prefixes(), shell_bins: Vec::new() }
+    }
+    #[cfg(unix)]
+    {
+        probe_shell_discovery_in(&probe_shell())
+    }
+}
+
+#[cfg(unix)]
+fn probe_shell_discovery_in(shell: &str) -> ShellDiscovery {
+    let (npm_prefixes, shell_bins, _) = shell_installations_in_with_extra(shell, None, &["opencode2"]);
+    ShellDiscovery { npm_prefixes, shell_bins }
 }
 
 /// Read every npm prefix exposed by the user's interactive environment. Bash may initialize nvm/fnm only
@@ -869,16 +994,32 @@ fn shell_installations(shell: &str) -> (Vec<std::path::PathBuf>, Vec<String>, Op
 
 #[cfg(unix)]
 fn shell_installations_in(shell: &str, cwd: Option<&std::path::Path>) -> (Vec<std::path::PathBuf>, Vec<String>, Option<crate::login_env::SessionEnvironment>) {
+    shell_installations_in_with_extra(shell, cwd, &[])
+}
+
+#[cfg(unix)]
+fn shell_installations_in_with_extra(
+    shell: &str,
+    cwd: Option<&std::path::Path>,
+    extra_bins: &[&str],
+) -> (Vec<std::path::PathBuf>, Vec<String>, Option<crate::login_env::SessionEnvironment>) {
     let nonce = uuid::Uuid::new_v4().simple().to_string();
     let prefix_marker = format!("VLX_PREFIX_{nonce}");
     let bin_marker = format!("VLX_BINS_{nonce}");
     let end_marker = format!("VLX_END_{nonce}");
     let path_marker = format!("VLX_PATH_{nonce}");
     let path_end_marker = format!("VLX_PATH_END_{nonce}");
-    let names = super::launch_options::catalog().into_iter()
-        .filter(|option| !matches!(option.id, crate::models::SessionKind::Terminal | crate::models::SessionKind::Browser))
-        .map(|option| format!("command -v {}", super::executable::command_name(option.id)))
-        .collect::<Vec<_>>().join("; ");
+    let mut commands = Vec::new();
+    for option in super::launch_options::catalog() {
+        if !matches!(option.id, crate::models::SessionKind::Terminal | crate::models::SessionKind::Browser) {
+            let cmd = super::executable::command_name(option.id);
+            if !commands.contains(&cmd) { commands.push(cmd); }
+        }
+    }
+    for &cmd in extra_bins {
+        if !commands.contains(&cmd) { commands.push(cmd); }
+    }
+    let names = commands.into_iter().map(|cmd| format!("command -v {cmd}")).collect::<Vec<_>>().join("; ");
     let path_script = crate::login_env::environment_capture(&path_marker, &path_end_marker);
     let script = format!("{path_script}; printf '\\n{prefix_marker}\\n'; npm prefix -g; printf '\\n{bin_marker}\\n'; {names}; printf '\\n{end_marker}\\n'");
     let mut prefixes = Vec::new();
@@ -957,7 +1098,8 @@ mod tests {
                 fixture_executable(&prefix.join("bin/node"), "#!/bin/sh\nprintf 'FIXTURE:codex\\n'\n");
                 "#!/usr/bin/env node\n".to_string()
             } else {
-                format!("#!/bin/sh\nprintf 'FIXTURE:{}\\n'\n", option.id.as_str())
+                let command = super::super::executable::command_name(option.id);
+                format!("#!/bin/sh\nprintf 'FIXTURE:{command}\\n'\n")
             };
             fixture_executable(&path, &script);
             kinds.push(option.id);
@@ -970,8 +1112,10 @@ mod tests {
         std::fs::write(home.join(".bash_profile"), "export PATH=/usr/bin:/bin\n").unwrap();
         std::fs::write(home.join(".zprofile"), "export PATH=/usr/bin:/bin\n").unwrap();
         std::fs::write(home.join(".zlogin"), "export PATH=/usr/bin:/bin\n").unwrap();
-        let script = kinds.iter().map(|kind| super::super::executable::command_name(*kind))
-            .collect::<Vec<_>>().join("; ");
+        let mut commands: Vec<_> = kinds.iter().map(|kind| super::super::executable::command_name(*kind)).collect();
+        commands.sort_unstable();
+        commands.dedup();
+        let script = commands.join("; ");
         let dirs = super::super::executable::binary_dirs(&binaries);
         let launch = format!("{} {script}", super::super::executable::PATH_APPEND_COMMAND);
         // Typed sessions retain Bash's native login startup and receive this single launch command afterwards.
@@ -981,7 +1125,7 @@ mod tests {
             .args(["-lic", &launch]).output().unwrap();
         assert!(output.status.success());
         let output = String::from_utf8(output.stdout).unwrap();
-        for kind in &kinds { assert!(output.contains(&format!("FIXTURE:{}\n", kind.as_str())), "{output}"); }
+        for command in &commands { assert!(output.contains(&format!("FIXTURE:{command}\n")), "{output}"); }
         for shell in ["/bin/bash", "/bin/zsh"] {
             if !std::path::Path::new(shell).exists() { continue; }
             let (state, _) = crate::pty::completion::install(&root, shell).unwrap().unwrap();
@@ -998,7 +1142,7 @@ mod tests {
             let output = command.output().unwrap();
             assert!(output.status.success(), "{shell}: {}", String::from_utf8_lossy(&output.stderr));
             let output = String::from_utf8(output.stdout).unwrap();
-            for kind in &kinds { assert!(output.contains(&format!("FIXTURE:{}\n", kind.as_str())), "{shell}: {output}"); }
+            for command in &commands { assert!(output.contains(&format!("FIXTURE:{command}\n")), "{shell}: {output}"); }
             drop(state);
         }
         std::fs::remove_dir_all(root).unwrap();
@@ -1033,7 +1177,9 @@ mod tests {
         let (prefixes, mut binaries, _) = shell_installations(shell.to_str().unwrap());
         assert_eq!(prefixes, vec![prefix]);
         binaries.sort();
+        binaries.dedup();
         expected.sort();
+        expected.dedup();
         assert_eq!(binaries, expected, "all 15 commands come from .bashrc, excluding the startup banner");
         std::fs::write(home.join(".bash_profile"), "source \"$HOME/.bashrc\"\n").unwrap();
         let (prefixes, mut binaries, _) = shell_installations(shell.to_str().unwrap());
@@ -1062,7 +1208,7 @@ mod tests {
             ("omp", false),
             ("antigravity", false),
             ("kimi", false),
-            ("deepseek", true),
+            ("deepseek", win),
             ("kiro", false),
             ("zoo", false),
             ("zcode", false),
@@ -1263,6 +1409,101 @@ mod tests {
         let custom = root.join("custom").join("bin").join("roo");
         fixture_executable(&custom, "#!/bin/sh\n");
         assert!(!incomplete_install("zoo", &custom));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn discovery_cache_refreshes_once_and_reprobes_after_forget() {
+        let cache = DiscoveryCache::new();
+        let probes = std::cell::Cell::new(0);
+        let first = cache.get_or_probe(|| {
+            probes.set(probes.get() + 1);
+            ShellDiscovery {
+                npm_prefixes: vec![std::path::PathBuf::from("/first")],
+                shell_bins: Vec::new(),
+            }
+        });
+        assert_eq!(first.npm_prefixes, vec![std::path::PathBuf::from("/first")]);
+        assert_eq!(probes.get(), 1);
+
+        let second = cache.get_or_probe(|| {
+            probes.set(probes.get() + 1);
+            ShellDiscovery {
+                npm_prefixes: vec![std::path::PathBuf::from("/stale")],
+                shell_bins: Vec::new(),
+            }
+        });
+        assert_eq!(second.npm_prefixes, vec![std::path::PathBuf::from("/first")]);
+        assert_eq!(probes.get(), 1);
+
+        cache.forget();
+        let refreshed = cache.get_or_probe(|| {
+            probes.set(probes.get() + 1);
+            ShellDiscovery {
+                npm_prefixes: vec![std::path::PathBuf::from("/second")],
+                shell_bins: Vec::new(),
+            }
+        });
+        assert_eq!(refreshed.npm_prefixes, vec![std::path::PathBuf::from("/second")]);
+        assert_eq!(probes.get(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_discovery_captures_npm_catalog_and_opencode2_in_one_pass() {
+        let root = std::env::temp_dir().join(format!("vlx-shell-cache-{}", uuid::Uuid::new_v4()));
+        let bin_dir = root.join("bin");
+        let npm_prefix = root.join("npm-prefix");
+        let count_file = root.join("invocations");
+        let shell = root.join("shell").join("zsh");
+        let claude = bin_dir.join("claude");
+        let opencode2 = bin_dir.join("opencode2");
+        let npm = bin_dir.join("npm");
+        std::fs::create_dir_all(&npm_prefix).unwrap();
+        fixture_executable(&claude, "#!/bin/sh\n");
+        fixture_executable(&opencode2, "#!/bin/sh\n");
+        fixture_executable(&npm, &format!("#!/bin/sh\nprintf '%s\\n' '{}'\n", npm_prefix.display()));
+        fixture_executable(
+            &shell,
+            &format!(
+                "#!/bin/sh\nprintf '1\\n' >> '{}'\nexport PATH='{}:/usr/bin:/bin'\nshift\nexec /bin/sh -c \"$1\"\n",
+                count_file.display(),
+                bin_dir.display()
+            ),
+        );
+
+        let cache = DiscoveryCache::new();
+        let shell_str = shell.to_str().unwrap();
+        let discovery = cache.get_or_probe(|| probe_shell_discovery_in(shell_str));
+        assert_eq!(discovery.npm_prefixes, vec![npm_prefix]);
+        assert_eq!(discovery.shell_bin("claude"), Some(claude.to_string_lossy().into_owned()));
+        assert_eq!(discovery.shell_bin("opencode2"), Some(opencode2.to_string_lossy().into_owned()));
+        assert_eq!(std::fs::read_to_string(&count_file).unwrap().lines().count(), 1);
+
+        let cached_resolve = super::super::executable::discover_with_path(
+            crate::models::SessionKind::Opencode,
+            |_| None,
+            |_| None,
+            |name| cache.get_or_probe(|| probe_shell_discovery_in(shell_str)).shell_bin(name),
+            |_| false,
+        );
+        assert_eq!(
+            cached_resolve,
+            super::super::executable::LaunchBinary::Path(opencode2.to_string_lossy().into_owned())
+        );
+        assert_eq!(std::fs::read_to_string(&count_file).unwrap().lines().count(), 1);
+
+        // Removing a binary from disk drops it from cached discovery without another shell probe.
+        std::fs::remove_file(&opencode2).unwrap();
+        let after_unlink = super::super::executable::discover_with_path(
+            crate::models::SessionKind::Opencode,
+            |_| None,
+            |_| None,
+            |name| cache.get_or_probe(|| probe_shell_discovery_in(shell_str)).shell_bin(name),
+            |_| false,
+        );
+        assert_eq!(after_unlink, super::super::executable::LaunchBinary::Unresolved);
+        assert_eq!(std::fs::read_to_string(&count_file).unwrap().lines().count(), 1);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

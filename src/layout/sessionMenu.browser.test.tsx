@@ -38,6 +38,7 @@ const testState = vi.hoisted(() => {
       projects: [{ id: "project-1", rootPath: "/tmp/project" }],
       agentDefaults: {},
       agentPresets: [],
+      notifications: {} as Record<string, number>,
     },
   };
 });

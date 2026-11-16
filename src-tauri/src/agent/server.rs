@@ -30,6 +30,10 @@ pub struct SpawnRequest {
     pub parent_session_id: String,
     /// Self-contained task description for the child session.
     pub prompt: String,
+    /// Session name from `vspawn --title`; absent derives the name from the prompt. A workflow applies it to
+    /// the planner. Skipped when absent so a retried request stored before this field still matches byte for byte.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     /// Images added while reviewing the initial task in the launch dialog.
     #[serde(default)]
     pub images: Vec<super::chat::protocol::ChatImage>,
@@ -527,6 +531,16 @@ fn serve_with_app(
             }
             continue;
         }
+        if url == "/app" {
+            if let Some(app) = &app {
+                let app = app.clone();
+                let token = token.to_string();
+                std::thread::spawn(move || super::app_cli::handle(app, request, token));
+            } else {
+                let _ = request.respond(tiny_http::Response::empty(404));
+            }
+            continue;
+        }
         if url == "/plan-execute" {
             if let Some(app) = &app {
                 let app = app.clone();
@@ -624,6 +638,67 @@ fn serve_with_app(
             on_spawn(req);
         } else if url.split('?').next() == Some("/spawn") {
             let _ = request.respond(tiny_http::Response::from_string("Invalid spawn request").with_status_code(400));
+            continue;
+        } else if let Some(parsed) = parse_agy_stop(&url, token) {
+            let sid = match parsed {
+                Ok(sid) => sid,
+                Err((code, reason)) => {
+                    let _ = request.respond(tiny_http::Response::from_string(reason).with_status_code(code));
+                    continue;
+                }
+            };
+            if let Some(app) = &app {
+                if app.chat().is_alive(&sid) {
+                    let app = app.clone();
+                    std::thread::spawn(move || {
+                        let reply = app.chat().handle_antigravity_stop(&app, &sid, &body);
+                        let response = tiny_http::Response::from_string(reply)
+                            .with_status_code(200)
+                            .with_header(
+                                tiny_http::Header::from_bytes("Content-Type", "application/json")
+                                    .unwrap(),
+                            );
+                        let _ = request.respond(response);
+                    });
+                    continue;
+                }
+                if crate::session_state::has_chat_source(&sid) {
+                    let response = tiny_http::Response::from_string("{\"decision\":\"allow\"}")
+                        .with_status_code(200)
+                        .with_header(
+                            tiny_http::Header::from_bytes("Content-Type", "application/json")
+                                .unwrap(),
+                        );
+                    let _ = request.respond(response);
+                    continue;
+                }
+            }
+            if let Some(agent_session_id) = parse_session_id(&body) {
+                let _ = on_session_id(sid.clone(), agent_session_id);
+            }
+            if !agy_named.contains(&sid) {
+                if let Some(text) = crate::agent::antigravity::first_prompt_from_transcript(&body) {
+                    agy_named.insert(sid.clone());
+                    on_prompt(sid.clone(), text);
+                }
+            }
+            if let Some(tool_signal) = parse_tool_signal(&body) {
+                on_signal(sid.clone(), tool_signal);
+            }
+            on_signal(
+                sid,
+                StatusSignal::State {
+                    state: AgentState::Waiting,
+                    silent: false,
+                    authoritative: false,
+                },
+            );
+            let response = tiny_http::Response::from_string("{\"decision\":\"allow\"}")
+                .with_status_code(200)
+                .with_header(
+                    tiny_http::Header::from_bytes("Content-Type", "application/json").unwrap(),
+                );
+            let _ = request.respond(response);
             continue;
         } else if let Some((sid, signal)) = handle(&url, token) {
             // Chat protocols own identity, naming, tooling and lifecycle state. Global hooks from a
@@ -2072,6 +2147,30 @@ fn handle(url: &str, expected_token: &str) -> Option<(String, Option<StatusSigna
     Some((sid, signal))
 }
 
+/// Validate `/agy-stop/<sid>?t=<token>` and return `Ok(sid)` or an HTTP error `(code, reason)`.
+fn parse_agy_stop(url: &str, expected_token: &str) -> Option<Result<String, (u16, &'static str)>> {
+    let (path, query) = match url.split_once('?') {
+        Some((p, q)) => (p, q),
+        None => (url, ""),
+    };
+    let sid = path.strip_prefix("/agy-stop/")?;
+    if sid.is_empty() || sid.contains('/') {
+        return Some(Err((400, "Invalid session id")));
+    }
+    let mut token = None;
+    for pair in query.split('&') {
+        if let Some((k, v)) = pair.split_once('=') {
+            if k == "t" {
+                token = Some(v);
+            }
+        }
+    }
+    if token != Some(expected_token) {
+        return Some(Err((403, "Forbidden")));
+    }
+    Some(Ok(sid.to_string()))
+}
+
 /// Extract (sid, token, event) from `/hook/<sid>?t=<token>&e=<event>`; require all components.
 fn parse_url(url: &str) -> Option<(String, String, String)> {
     let (path, query) = match url.split_once('?') {
@@ -3284,6 +3383,11 @@ mod tests {
             post("asking", r#"{"hook_event_name":"PreToolUse","tool_name":"NestedTool"}"#);
             post("waiting", r#"{"conversationId":"nested-agy","hook_event_name":"Stop"}"#);
             post("boot", r#"{"session_id":"nested-cli"}"#);
+            let stop_resp = ureq::post(&format!("http://127.0.0.1:{port}/agy-stop/{sid}?t=tok"))
+                .send_string(r#"{"conversationId":"nested-agy","hookEventName":"Stop"}"#)
+                .unwrap();
+            assert_eq!(stop_resp.status(), 200);
+            assert_eq!(stop_resp.into_string().unwrap(), r#"{"decision":"allow"}"#);
             assert!(rx.try_recv().is_err(), "{kind}: no hook callback may reach chat consumers");
             let record = crate::session_state::snapshot()[&sid].clone();
             assert_eq!(record.agent_state.as_deref(), Some("working"));

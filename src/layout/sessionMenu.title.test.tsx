@@ -7,6 +7,8 @@ const state = vi.hoisted(() => new Proxy({
   sessions: [] as Session[], projects: [], groups: [], agentPresets: [], agentDefaults: {},
   runtimes: {}, paneTrees: {}, sidebarTreeViews: [], ephemeralSessions: {}, openTabs: [], liveTabs: [],
   sessionTitlePrefs: {},
+  sessionTitleAgent: "",
+  setSessionTitleAgent: vi.fn(),
 }, { get: (target, key) => key in target ? target[key as keyof typeof target] : vi.fn() }));
 vi.mock("../store/termStore", () => ({
   useTermStore: Object.assign((select: (s: typeof state) => unknown) => select(state), { getState: () => state }),
@@ -37,7 +39,7 @@ function titleItem(menu: ReturnType<typeof useSessionMenu>, s: Session) {
   return menu.buildSessionItems({ kind: "session", id: s.id, name: s.name, projectId: s.projectId, groupId: s.groupId ?? null })
     .find(item => item.label.startsWith("sessionTitle."));
 }
-const spec = { supportsPlanExecute: true, supportsReferSummary: true, acceptsTask: true, effortFlag: "--effort", effortLevels: ["low", "high"] };
+const spec = { supportsPlanExecute: true, supportsReferSummary: true, acceptsTask: true, effortFlag: "--effort", effortLevels: ["low", "high"], modelSelectable: true };
 function options(available = true) {
   return { agent: "claude", sessionName: "Existing title", agents: [
     { ...spec, id: "claude", label: "Claude", available, model: "current-model", effort: "high" },
@@ -48,6 +50,7 @@ function openRoute(query = "?smartRename=session") { window.history.replaceState
 beforeEach(() => {
   state.sessions = [session()]; mocks.rename.mockReset(); mocks.options.mockReset(); mocks.models.mockReset();
   mocks.cancel.mockReset(); mocks.cancel.mockResolvedValue(true);
+  state.sessionTitlePrefs = {}; state.sessionTitleAgent = ""; state.setSessionTitleAgent.mockReset();
   mocks.options.mockResolvedValue(options());
   mocks.models.mockResolvedValue({ models: [{ id: "custom-model", label: "Custom", effortLevels: ["low", "high", "ultra"] }], effortLevels: ["low", "high", "ultra"] });
   window.history.replaceState(null, "", "/");
@@ -90,12 +93,49 @@ describe("AI session renaming", () => {
     openRoute();
     expect(await screen.findByRole("combobox", { name: "orch.agentLabel" })).toHaveProperty("textContent", expect.stringContaining("Claude"));
     expect(screen.getByText("sessionTitle.confirmHint")).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "spawn.modelLabel" })).toHaveProperty("value", "current-model");
-    expect(screen.getByRole("combobox", { name: "spawn.effortLabel" })).toHaveProperty("value", "high");
+    expect(screen.getByRole("combobox", { name: "spawn.modelLabel" }).textContent).toContain("current-model");
+    expect(screen.getByRole("combobox", { name: "spawn.effortLabel" }).textContent).toContain("chat.effort.high");
     expect(mocks.rename).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
     await waitFor(() => expect(readSmartRenameRoute()).toBeNull());
     expect(mocks.rename).not.toHaveBeenCalled();
+  });
+
+  it("hides model and effort for an agent whose CLI cannot take a per-run selection", async () => {
+    mocks.options.mockResolvedValue({ agent: "zcode", sessionName: "Existing title", agents: [
+      { ...spec, id: "zcode", label: "ZCode", available: true, model: "provider/model", effort: "max", modelSelectable: false },
+    ] });
+    openRoute();
+    expect(await screen.findByRole("combobox", { name: "orch.agentLabel" })).toHaveProperty("textContent", expect.stringContaining("ZCode"));
+    expect(screen.getByText("sessionTitle.confirmHint")).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "spawn.modelLabel" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "spawn.effortLabel" })).toBeNull();
+    expect(screen.getByRole("button", { name: "common.rename" })).toHaveProperty("disabled", false);
+  });
+
+  it("restores the agent and its model and effort chosen last time, even without a session default", async () => {
+    state.sessionTitleAgent = "codex";
+    state.sessionTitlePrefs = { codex: { model: "custom-model", effort: "ultra" } };
+    mocks.options.mockResolvedValue({ ...options(), agent: "", agents: options().agents });
+    openRoute();
+    expect(await screen.findByRole("combobox", { name: "orch.agentLabel" })).toHaveProperty("textContent", expect.stringContaining("Codex"));
+    expect(screen.getByRole("combobox", { name: "spawn.modelLabel" }).textContent).toContain("custom-model");
+    expect(screen.getByRole("combobox", { name: "spawn.effortLabel" }).textContent).toContain("chat.effort.ultra");
+    expect(screen.getByRole("button", { name: "common.rename" })).toHaveProperty("disabled", false);
+  });
+
+  it("remembers an explicitly chosen agent for the next dialog", async () => {
+    openRoute();
+    const agent = await screen.findByRole("combobox", { name: "orch.agentLabel" });
+    fireEvent.keyDown(agent, { key: "Enter" }); fireEvent.keyDown(agent, { key: "ArrowDown" }); fireEvent.keyDown(agent, { key: "Enter" });
+    expect(state.setSessionTitleAgent).toHaveBeenCalledWith("codex");
+  });
+
+  it("falls back to the session's own agent when the remembered one is unavailable", async () => {
+    state.sessionTitleAgent = "codex";
+    mocks.options.mockResolvedValue({ ...options(), agents: options().agents.map(item => item.id === "codex" ? { ...item, available: false } : item) });
+    openRoute();
+    expect(await screen.findByRole("combobox", { name: "orch.agentLabel" })).toHaveProperty("textContent", expect.stringContaining("Claude"));
   });
 
   it("submits the chosen agent/model/effort only on confirmation and suppresses duplicate submission", async () => {
@@ -104,14 +144,16 @@ describe("AI session renaming", () => {
     openRoute();
     const agent = await screen.findByRole("combobox", { name: "orch.agentLabel" });
     fireEvent.keyDown(agent, { key: "Enter" }); fireEvent.keyDown(agent, { key: "ArrowDown" }); fireEvent.keyDown(agent, { key: "Enter" });
-    expect(screen.getByRole("combobox", { name: "spawn.modelLabel" })).toHaveProperty("value", "codex-default");
-    expect(screen.getByRole("combobox", { name: "spawn.effortLabel" })).toHaveProperty("value", "low");
+    expect(screen.getByRole("combobox", { name: "spawn.modelLabel" }).textContent).toContain("codex-default");
+    expect(screen.getByRole("combobox", { name: "spawn.effortLabel" }).textContent).toContain("chat.effort.low");
     const model = screen.getByRole("combobox", { name: "spawn.modelLabel" });
     const effort = screen.getByRole("combobox", { name: "spawn.effortLabel" });
-    fireEvent.change(model, { target: { value: "custom-model" } });
-    fireEvent.change(effort, { target: { value: "ultra" } });
-    expect(readSmartRenameRoute()).toEqual({ sessionId: "session", agent: "codex", model: "custom-model", effort: "ultra" });
     await waitFor(() => expect(mocks.models).toHaveBeenCalledWith("codex", { parentSessionId: "session", cwd: null, inheritArgs: true }));
+    fireEvent.click(model);
+    fireEvent.click(await screen.findByRole("option", { name: /Custom/ }));
+    fireEvent.click(effort);
+    fireEvent.click(await screen.findByRole("option", { name: "chat.effort.ultra" }));
+    expect(readSmartRenameRoute()).toEqual({ sessionId: "session", agent: "codex", model: "custom-model", effort: "ultra" });
     expect(mocks.rename).not.toHaveBeenCalled();
     const submit = screen.getByRole("button", { name: "common.rename" });
     fireEvent.click(submit); fireEvent.click(submit);
@@ -170,7 +212,7 @@ describe("AI session renaming", () => {
     await screen.findByRole("combobox", { name: "spawn.modelLabel" });
     fireEvent.click(screen.getByRole("button", { name: "common.rename" }));
     expect((await screen.findByRole("alert")).textContent).toContain("sessionTitle.changed");
-    expect(screen.getByRole("combobox", { name: "spawn.modelLabel" })).toHaveProperty("value", "current-model");
+    expect(screen.getByRole("combobox", { name: "spawn.modelLabel" }).textContent).toContain("current-model");
     expect(readSmartRenameRoute()?.sessionId).toBe("session");
     expect(state.sessions[0].name).toBe("Existing title");
     fireEvent.click(screen.getByRole("button", { name: "common.rename" }));
@@ -181,8 +223,8 @@ describe("AI session renaming", () => {
   it("restores URL selections and explicit native defaults without generating", async () => {
     openRoute("?smartRename=session&smartRenameAgent=codex&smartRenameModel=&smartRenameEffort=");
     expect(await screen.findByRole("combobox", { name: "orch.agentLabel" })).toHaveProperty("textContent", expect.stringContaining("Codex"));
-    expect(screen.getByRole("combobox", { name: "spawn.modelLabel" })).toHaveProperty("value", "");
-    expect(screen.getByRole("combobox", { name: "spawn.effortLabel" })).toHaveProperty("value", "");
+    expect(screen.getByRole("combobox", { name: "spawn.modelLabel" }).textContent).toContain("chat.followModelDefault");
+    expect(screen.getByRole("combobox", { name: "spawn.effortLabel" }).textContent).toContain("chat.effort.auto");
     expect(mocks.rename).not.toHaveBeenCalled();
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(readSmartRenameRoute()).toBeNull();

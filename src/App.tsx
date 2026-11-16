@@ -44,6 +44,7 @@ import { startUpdateSchedule, useUpdateState } from "./ipc/updater";
 import { env, platform } from "./platform";
 import { ConnectionBanner } from "./remote/ConnectionBanner";
 import { ProjectDialogRoutes } from "./remote/ProjectDialogRoutes";
+import { AssistRequestListener } from "./layout/Assist/AssistRequests";
 import { startMirrorSync } from "./store/mirrorSync";
 import { useTermStore } from "./store/termStore";
 import { isArtifactPath, noteArtifactWriter, openBesideSession } from "./layout/CenterPane/doc/artifact/artifactWriters";
@@ -194,8 +195,9 @@ function App() {
         useTermStore.getState().openBrowserTab(req.path);
         return;
       }
-      // `vopen` always opens a tab. `vartifact` opens the file beside the calling conversation, and falls
-      // back to a tab when that conversation is not on screen (terminal session, hidden pane, phone).
+      // `vopen` always opens a tab. `vartifact` opens the file beside the calling conversation; a mounted
+      // conversation claims it even from a background tab, and the panel waits there. Only a session with
+      // no conversation pane at all (terminal session, closed tab, phone) falls back to a tab.
       if (isArtifactPath(req.path)) noteArtifactWriter(req.path, req.sessionId);
       if (req.beside && openBesideSession(req.sessionId, req.path)) return;
       useTermStore.getState().openDocTab(req.path);
@@ -309,6 +311,7 @@ function App() {
         <DirectoryPickerModal />
       </Suspense>
       <ProjectDialogRoutes />
+      {!isShareSurface && <AssistRequestListener />}
       <Suspense fallback={null}>
         <CreateProjectModal />
         <CloneProjectModal />

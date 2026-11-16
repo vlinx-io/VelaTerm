@@ -20,9 +20,12 @@ pub(super) fn annotate(kind:SessionKind,record:&Record,row:&mut Value) -> Result
             (id,json!({"description":result["description"],"model":result["resolvedModel"],"totalTokens":result["totalTokens"],
                 "toolUses":result["totalToolUseCount"],"durationMs":result["totalDurationMs"]}))
         },
-        SessionKind::Opencode=>{
-            let part=&record.value["part"];if part["tool"]!="task" {return Ok(());}
-            let Some(id)=part.pointer("/state/metadata/sessionId").or_else(||part.pointer("/state/metadata/sessionID")).and_then(Value::as_str) else {return Ok(());};
+        SessionKind::Opencode|SessionKind::Deepseek=>{
+            let part=&record.value["part"];
+            if !matches!(part["tool"].as_str(),Some("task"|"subagent")) {return Ok(());}
+            let Some(id)=part.pointer("/state/metadata/sessionId").or_else(||part.pointer("/state/metadata/sessionID"))
+                .or_else(||part.pointer("/state/metadata/childSessionId")).or_else(||part.pointer("/state/metadata/childSessionID"))
+                .and_then(Value::as_str) else {return Ok(());};
             (id,row["subagent"].clone())
         },
         _=>return Ok(()),
@@ -32,6 +35,8 @@ pub(super) fn annotate(kind:SessionKind,record:&Record,row:&mut Value) -> Result
 }
 
 fn valid(id:&str) -> bool {!id.is_empty() && id.len()<=200 && id.bytes().all(|byte|byte.is_ascii_alphanumeric() || matches!(byte,b'-'|b'_'))}
+
+pub(super) fn valid_id(id:&str) -> bool {valid(id)}
 
 pub(super) fn public_row(mut row:Value) -> Value {
     if let Some(child)=row.as_object_mut().and_then(|object|object.remove("_child")) {
@@ -86,7 +91,7 @@ fn association(state:&State,source:&RegisteredSource,row:&str) -> Option<(u64,St
     })
 }
 
-fn linked(parent:&Branch,row_id:&str) -> Result<(RegisteredSource,String),String> {
+pub(super) fn linked(parent:&Branch,row_id:&str) -> Result<(RegisteredSource,String),String> {
     // Resolve aliases and visibility before consulting private metadata. Knowledge of a native child
     // id does not confer access, and a row discarded by rewind cannot authorize its old descendants.
     let manifest=parent.manifest(row_id,0)?;
@@ -98,13 +103,20 @@ fn linked(parent:&Branch,row_id:&str) -> Result<(RegisteredSource,String),String
         if !valid(&id) {continue;}
         // The original record must still name this child: it is parsed again from verified bytes.
         let record=super::store::reproject(source,start,&mut |_|Ok(()))?;
-        let verified=record.fields.iter().filter(|field|field.encoding=="string" && super::projection::identity_path(&field.path)).any(|field| {
-            let path=field.path.as_str();
-            record.value.pointer(path).and_then(Value::as_str)==Some(id.as_str()) && (path=="/toolUseResult/agentId" || path.ends_with("/agent_thread_id") || path.ends_with("/agentThreadId")
-                || path.starts_with("/payload/item/receiver_thread_ids/") || path.starts_with("/payload/item/receiverThreadIds/")
-                || path.starts_with("/params/item/receiver_thread_ids/") || path.starts_with("/params/item/receiverThreadIds/")
-                || path=="/part/state/metadata/sessionId" || path=="/part/state/metadata/sessionID")
-        });
+        let verified=if parent.kind==SessionKind::Antigravity {
+            record.value["content"].as_str()
+                .and_then(crate::agent::chat::antigravity_protocol::subagent_conversation_id)
+                .as_deref()==Some(id.as_str())
+        } else {
+            record.fields.iter().filter(|field|field.encoding=="string" && super::projection::identity_path(&field.path)).any(|field| {
+                let path=field.path.as_str();
+                record.value.pointer(path).and_then(Value::as_str)==Some(id.as_str()) && (path=="/toolUseResult/agentId" || path.ends_with("/agent_thread_id") || path.ends_with("/agentThreadId")
+                    || path.starts_with("/payload/item/receiver_thread_ids/") || path.starts_with("/payload/item/receiverThreadIds/")
+                    || path.starts_with("/params/item/receiver_thread_ids/") || path.starts_with("/params/item/receiverThreadIds/")
+                    || path=="/part/state/metadata/sessionId" || path=="/part/state/metadata/sessionID"
+                    || path=="/part/state/metadata/childSessionId" || path=="/part/state/metadata/childSessionID")
+            })
+        };
         if !verified {return Err("source_changed: parent child association changed".into());}
         return Ok((source.clone(),id));
     }
@@ -134,8 +146,16 @@ fn child(parent:Branch,row:&str,seen:&mut HashSet<(String,String)>) -> Result<Br
                 sources.push(parent.store.register(SessionKind::Codex,segment)?);
             }(sources,id.clone(),resolved.error)
         },
-        SessionKind::Opencode=>{
-            (vec![super::opencode::register(&parent.store,origin.segment.path.clone(),&id)?],id.clone(),None)
+        SessionKind::Opencode|SessionKind::Deepseek=>{
+            (vec![super::opencode::register(&parent.store,parent.kind,origin.segment.path.clone(),&id)?],id.clone(),None)
+        },
+        SessionKind::Antigravity=>{
+            let resolved=source::resolve(SessionKind::Antigravity,&id)?;
+            let mut sources=Vec::new();
+            for segment in resolved.segments {
+                sources.push(parent.store.register(SessionKind::Antigravity,segment)?);
+            }
+            (sources,id.clone(),resolved.error)
         },
         _=>return Err("detail_unavailable: this provider has no child history adapter".into()),
     };
@@ -304,4 +324,20 @@ mod tests {
         assert!(!rows.iter().any(|row|row["text"]=="Discarded prompt"));assert!(rows.iter().any(|row|row["text"]=="Final answer"));
         assert_eq!(std::fs::read_to_string(directory.join("agent-child.jsonl")).unwrap(),raw);
     }
+
+    #[test]
+    fn opencode_subagent_parts_name_their_child_session() {
+        let record=super::super::projection::Record {
+            start:0,end:0,complete:true,error:None,fields:Vec::new(),
+            value:json!({"part":{"tool":"subagent","state":{"metadata":{"sessionID":"ses_child"}}}}),
+        };
+        let mut row=json!({"kind":"tool","name":"Task","subagent":{"description":"Map it"}});
+        annotate(SessionKind::Opencode,&record,&mut row).unwrap();
+        assert_eq!(row["_child"]["id"],json!("ses_child"));
+        let row=public_row(row);
+        assert_eq!(row["childAvailable"],json!(true));
+        assert_eq!(row["subagent"]["description"],json!("Map it"));
+        assert!(row.get("_child").is_none());
+    }
+
 }

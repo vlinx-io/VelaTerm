@@ -22,6 +22,7 @@ const SKILLS = [
   ["vstat", "skills.vstat"],
   ["vtell", "skills.vtell"],
   ["vkb", "skills.vkb"],
+  ["vapp", "skills.vapp"],
 ] as const;
 
 export function VelaSkillsModal() {

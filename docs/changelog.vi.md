@@ -1,3 +1,22 @@
+## v0.3.1 — 2026-11-16
+
+- 🪐 Chế độ xem hội thoại của Antigravity nay hỗ trợ chuyển đổi mô hình và mức suy luận, theo dõi tác nhân phụ và tác vụ nền, lời nhắc tương tác `ask_question`, năm mức quyền, đổi tên bằng AI cùng thống kê lượt, tốc độ xuất và hạn mức sử dụng trong bảng Info.
+- 🐋 Các phiên DeepSeek nay hỗ trợ tác vụ nền, nhập hình ảnh theo từng mô hình, mức sử dụng ngữ cảnh, đổi tên bằng AI, cấu hình URL và khóa API ngay cạnh ô nhập liệu, và xem chỉ đọc lịch sử `dsh` trước đây.
+- 🤖 Các agent nay có thể đề xuất thao tác ứng dụng VelaTerm bằng `vapp` (bao gồm sắp xếp cây thanh bên với tham chiếu `$name`), mỗi thao tác hoặc lô thao tác hiển thị thành thẻ xác nhận trong chế độ xem hội thoại.
+- 📁 Mục Tác vụ và Trò chuyện ở thanh bên trái hỗ trợ tạo nhóm, thêm mục từ menu ngữ cảnh vùng trống và kéo thả mục ra cấp cao nhất.
+- 📦 Bản phát hành Windows nay có thêm gói zip portable cho cả bản đầy đủ và bản tối giản, và bản portable cập nhật từ trang tải xuống.
+- 🇨🇳 Phần Cài đặt cho phép chuyển máy chủ cập nhật và tải xuống sang máy chủ phản chiếu tại Trung Quốc đại lục `velaterm.cn`.
+- 🔍 Thanh trạng thái bổ sung điều khiển thu phóng giao diện hỗ trợ nhập trực tiếp phần trăm, và phần Cài đặt cho phép tìm kiếm và chọn riêng phông chữ cho giao diện và hội thoại.
+- 📎 Tệp kéo từ Finder hoặc File Explorer nay có thể thả trực tiếp vào terminal, hội thoại và cây tệp dự án.
+- 🍴 Phiên ZCode hỗ trợ rẽ nhánh từ phản hồi mới nhất mà không sửa vùng làm việc, hoàn tác từ tin nhắn mới nhất và đổi tên bằng AI, còn phiên Pi và OMP hỗ trợ tự hoàn thành lệnh gạch chéo.
+- 📋 Menu ngữ cảnh của tin nhắn hội thoại có thêm mục Sao chép toàn bộ tin nhắn, ô nhập liệu có menu Cắt/Sao chép/Dán/Chọn tất cả kèm nhãn phím tắt, và tìm kiếm trong hội thoại sẽ quét toàn bộ bản ghi trước.
+- 📊 Mục Usage trong bảng Info hiển thị các thanh hạn mức được nhóm theo chu kỳ đặt lại với thước chia 20 vạch cùng thời gian đặt lại riêng, và mặc định thu gọn các hạn mức Antigravity không phải Gemini.
+- 🏷️ Menu ngữ cảnh của phiên có thêm Đặt trạng thái (Đã xem / Đang chờ), các phiên mới tạo vẫn hiển thị khi đang bật bộ lọc trạng thái, và `vspawn --title` đặt tiêu đề tùy chỉnh cho phiên tách nhánh và phiên lập kế hoạch.
+- 🪟 `vartifact` neo tệp ngay cả khi mở từ thẻ nền, danh sách giới hạn thẻ nền mở rộng lên đến 512, và người xem liên kết chia sẻ công khai có thể mở rộng hoặc thu gọn cây bên trái cục bộ.
+- ⌨️ Xác nhận tổ hợp IME bằng Enter trên macOS không còn gửi nhầm câu trả lời hay tìm kiếm trước khi hoàn tất, nhập liệu trên terminal từ xa ẩn gợi ý lịch sử nội tuyến của Zsh, và các cập nhật đồng bộ trên terminal không còn làm nhấp nháy khung nhìn.
+- 🔔 Nhấp vào thông báo của cửa sổ từ xa trên macOS sẽ đưa thẳng cửa sổ đó lên trước mà không làm lóe cửa sổ chính trước, và mở lại ứng dụng sẽ khôi phục cửa sổ chính ngay cả khi chỉ có các cửa sổ từ xa đang mở.
+- 🔧 Chuyển dự án sẽ xóa bộ lọc cây tệp, bộ chọn quyền lưu ngay mặc định khi chọn Set as default, đổi tên bằng AI hoạt động với các phiên rất dài, và tin nhắn đầu tiên trong phiên mới không còn nhấp nháy trước khi phiên bắt đầu.
+
 ## v0.3.0 — 2026-11-08
 
 - 🔏 Bản macOS nay được ký bằng chứng chỉ của Vlinx Software, Inc. thay cho chứng chỉ trước đây, nên sau khi cập nhật có thể bạn cần cấp lại một số quyền của macOS, và các mục lưu trong Chuỗi khóa, như mật khẩu kết nối từ xa, cần được cho phép lại: khi được hỏi, hãy nhập mật khẩu đăng nhập và chọn “Luôn cho phép”.

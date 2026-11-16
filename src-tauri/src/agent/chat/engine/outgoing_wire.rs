@@ -35,9 +35,6 @@ pub(super) fn pi(writer:&mut dyn Write,id:&str,kind:&str,text:&str,images:&[Chat
         }writer.write_all(b"]")?;
     }writer.write_all(b"}")
 }
-pub(super) fn antigravity(writer:&mut dyn Write,text:&str) -> io::Result<()> {
-    writer.write_all(b"{\"event\":\"user\",\"message\":{\"content\":")?;string(writer,&[text])?;writer.write_all(b"}}")
-}
 pub(super) fn codex(writer:&mut dyn Write,request:&Value,text:&str,images:&[ChatImage]) -> io::Result<()> {
     let root=request.as_object().ok_or_else(||io::Error::other("Invalid Codex request envelope"))?;
     let params=request["params"].as_object().ok_or_else(||io::Error::other("Invalid Codex request parameters"))?;
@@ -84,7 +81,6 @@ mod tests {
                 let envelope=crate::agent::chat::skills::with_inputs(request("",&[]),text,&commands);
                 actual.clear();codex(&mut actual,&envelope,text,images).unwrap();assert_eq!(serde_json::from_slice::<Value>(&actual).unwrap(),expected);
             }
-            actual.clear();antigravity(&mut actual,text).unwrap();assert_eq!(serde_json::from_slice::<Value>(&actual).unwrap(),crate::agent::chat::antigravity_protocol::user_message(text));
         }}
     }
     #[test]

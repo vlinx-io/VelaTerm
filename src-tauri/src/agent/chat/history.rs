@@ -120,7 +120,7 @@ pub fn read(kind: SessionKind, agent_session_id: &str) -> Result<Vec<ChatEvent>,
             let (_, content) = resume::read_codex_rollout_chain(agent_session_id)?;
             codex_events(&content)
         }
-        SessionKind::Opencode => {
+        kind if kind.uses_opencode() => {
             let messages = crate::agent::opencode_store::messages(agent_session_id)?;
             return Ok(opencode_history(&messages));
         }
@@ -163,7 +163,7 @@ pub fn rewind_targets(
     let content = match kind {
         SessionKind::Claude => resume::read_claude_transcript(agent_session_id)?,
         SessionKind::Codex => resume::read_codex_rollout_chain(agent_session_id)?.1,
-        SessionKind::Opencode => {
+        kind if kind.uses_opencode() => {
             let messages = crate::agent::opencode_store::messages(agent_session_id)?;
             return Ok(super::opencode_timeline::user_turns(&messages));
         }
@@ -573,7 +573,14 @@ fn replay_recorded(kind: SessionKind, agent_session_id: &str) -> Result<Vec<Chat
         attach_recorded_turn_durations(&mut rows);
         return Ok(rows);
     }
-    if kind == SessionKind::Opencode {
+    if kind.uses_opencode() {
+        // A DeepSeek conversation the retired harness recorded is not in OpenCode's store. Its own log
+        // replays to the same timeline rows, so an idle session still opens with what was already said.
+        if kind == SessionKind::Deepseek
+            && crate::agent::history_store::deepseek_legacy::is_legacy(agent_session_id)
+        {
+            return super::deepseek_history::replay(agent_session_id);
+        }
         // OpenCode's store already holds addressable parts, and its subagents are whole sessions of their
         // own; the row ids come from the store so a later live event can update the same rows.
         let mut remaining=crate::agent::history_store::limits::PAGE_BYTES;

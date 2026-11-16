@@ -116,6 +116,8 @@ it("preserves dismiss semantics and does not submit while confirming an IME comp
   const answer = vi.fn(); render(<PermissionCard request={request} onAnswer={answer} />);
   fireEvent.change(screen.getByRole("textbox"), { target: { value: "自定义回答" } });
   fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter", isComposing: true });
+  // WebKit reports the confirming Enter with isComposing false and keyCode 229.
+  fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter", keyCode: 229 });
   expect(answer).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
   expect(answer).toHaveBeenCalledWith(request, { allow: false, message: "Dismissed by user" });
@@ -133,4 +135,45 @@ it("lets option text be selected without picking the option, and still picks fro
   window.getSelection()!.removeAllRanges();
   fireEvent.keyDown(option, { key: " " });
   expect(option.getAttribute("aria-checked")).toBe("true");
+});
+
+it("keeps checkboxes selected while typing custom text on multi-select questions", async () => {
+  mocks.state = null;
+  const answer = vi.fn();
+  const multi = { ...request, input: { questions: [{ ...input.questions[0], multiSelect: true }] } };
+  render(<PermissionCard request={multi} onAnswer={answer} />);
+  const box = screen.getByRole("checkbox", { name: /Additive zip fields/ });
+  fireEvent.click(box);
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "custom" } });
+  expect(box.getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+  await waitFor(() => expect(answer).toHaveBeenCalledWith(multi, {
+    allow: true,
+    questionAnswers: [{ selected: [0], text: "custom" }],
+    sendOriginal: false,
+  }));
+});
+
+it("supports skipping individual questions in a multi-question prompt", async () => {
+  mocks.state = null;
+  const answer = vi.fn();
+  const two = {
+    ...request,
+    input: {
+      questions: [
+        { ...input.questions[0], header: "First" },
+        { header: "Second", question: "Pick target?", options: [{ label: "macOS" }, { label: "Linux" }], multiSelect: false },
+      ],
+    },
+  };
+  render(<PermissionCard request={two} onAnswer={answer} />);
+  fireEvent.click(screen.getByRole("button", { name: "Skip" }));
+  expect(await screen.findByText("Pick target?")).toBeTruthy();
+  fireEvent.click(screen.getByRole("radio", { name: /Linux/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+  await waitFor(() => expect(answer).toHaveBeenCalledWith(two, {
+    allow: true,
+    questionAnswers: [{ selected: [], text: "", skipped: true }, { selected: [1], text: "" }],
+    sendOriginal: false,
+  }));
 });

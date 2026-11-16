@@ -103,12 +103,21 @@ pub(super) fn store(state:&mut State,scanned:&Scanned,record:&Record,refs:&Refs)
                 state.pending.entry((record.start,index as u64)).or_insert((row_id,true));
             }
         },
-        Some("ERROR_MESSAGE"|"GENERIC"|"LIST_DIRECTORY"|"VIEW_FILE"|"CODE_ACTION")=>{
+        Some("ERROR_MESSAGE"|"GENERIC"|"LIST_DIRECTORY"|"VIEW_FILE"|"CODE_ACTION"|"ASK_QUESTION")=>{
             let pending=state.pending.range(..(record.start,0)).find(|(_,(_,active))|*active).map(|(key,(row,_))|(*key,row.clone()));
             if let Some((key,row_id))=pending {
                 let error=value["type"]=="ERROR_MESSAGE";
-                let row=json!({"kind":"tool","id":row_id,"name":"tool","input":{},"output":preview(value["content"].as_str().unwrap_or_default(),512),
+                let content=value["content"].as_str().unwrap_or_default();
+                let limit=if value["type"]=="ASK_QUESTION" {2048} else {512};
+                let mut row=json!({"kind":"tool","id":row_id,"name":"tool","input":{},"output":preview(content,limit),
                     "isError":error,"status":if error {"failed"} else if value["status"]=="DONE" {"completed"} else {"running"},"detailAvailable":true});
+                if !error {
+                    if let Some(call)=state.summary(&row_id).and_then(|summary|serde_json::from_str::<Value>(summary).ok()).filter(|value|value["name"]=="Agent") {
+                        if let Some(child)=crate::agent::chat::antigravity_protocol::subagent_conversation_id(content).filter(|id|super::children::valid_id(id)) {
+                            row["_child"]=json!({"id":child,"facts":{"description":call["input"]["description"]}});
+                        }
+                    }
+                }
                 write_row(state,scanned,record,0,Some(&row_id),&row,refs);attach(state,&row_id,"output",&["/content".into()],refs);
                 if let Some(entry)=state.pending.get_mut(&key) {entry.1=false;}
             } else if value["type"]=="ERROR_MESSAGE" {
@@ -166,5 +175,49 @@ mod tests {
         assert!(manifest["fields"].as_array().unwrap().iter().any(|field|field["label"]=="input"));
         assert!(manifest["fields"].as_array().unwrap().iter().any(|field|field["label"]=="output"));
         let pending=branch.sources[0].current().unwrap().pending.values().filter(|(_,active)|*active).count();assert_eq!(pending,0);
+    }
+
+    #[test]
+    fn invoke_subagent_rows_expose_verified_child_association() {
+        let temp=super::super::tests::Temp::new();
+        let records=[
+            json!({"type":"PLANNER_RESPONSE","step_index":0,"tool_calls":[{"name":"invoke_subagent","args":{"Role":"Researcher","TypeName":"research","Prompt":"Inspect engine"}}]}),
+            json!({"type":"GENERIC","step_index":1,"status":"DONE","content":"Subagent started: {\"conversationId\":\"child-conv-42\"}"}),
+        ];
+        let branch=indexed(&temp,&records);
+        let page=branch.page(None,None,None).unwrap();
+        let rows=page["rows"].as_array().unwrap();
+        assert_eq!(rows.len(),1);
+        assert_eq!(rows[0]["name"],"Agent");
+        assert_eq!(rows[0]["childAvailable"],true);
+        assert_eq!(rows[0]["subagent"]["description"],"Researcher");
+        assert!(rows[0].get("_child").is_none());
+        let row_id=rows[0]["id"].as_str().unwrap();
+        let (_,child_id)=super::super::children::linked(&branch,row_id).unwrap();
+        assert_eq!(child_id,"child-conv-42");
+    }
+
+    #[test]
+    fn ask_question_step_pairs_in_bounded_history_and_keeps_questions() {
+        let temp=super::super::tests::Temp::new();
+        let records=[
+            json!({"type":"PLANNER_RESPONSE","step_index":0,"tool_calls":[
+                {"name":"ask_question","args":{"questions":[{"question":"Which port?","is_multi_select":false,"options":[{"id":"1","text":"8080"}]}]}},
+                {"name":"view_file","args":{"AbsolutePath":"/tmp/cfg"}}
+            ]}),
+            json!({"type":"ASK_QUESTION","step_index":1,"status":"DONE","content":"Created At: 2026-11-16T10:00:00+08:00\nA1: 8080"}),
+            json!({"type":"VIEW_FILE","step_index":2,"status":"DONE","content":"port=8080"}),
+        ];
+        let branch=indexed(&temp,&records);
+        let page=branch.page(None,None,None).unwrap();
+        let rows=page["rows"].as_array().unwrap();
+        assert_eq!(rows.len(),2);
+        assert_eq!(rows[0]["name"],"AskUserQuestion");
+        assert_eq!(rows[0]["status"],"completed");
+        assert_eq!(rows[0]["input"]["questions"][0]["question"],"Which port?");
+        assert_eq!(rows[0]["input"]["questions"][0]["options"][0]["label"],"8080");
+        assert!(rows[0]["output"].as_str().unwrap().contains("A1: 8080"));
+        assert_eq!(rows[1]["name"],"Read");
+        assert_eq!(rows[1]["output"],"port=8080");
     }
 }

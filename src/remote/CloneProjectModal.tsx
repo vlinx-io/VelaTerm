@@ -15,7 +15,7 @@ import { DestinationBox, LocationField, rememberProjectLocation, useDestination,
 import { pushRecentFolder } from "./ServerFileBrowser";
 import { ExecutionContext } from "./ExecutionContext";
 import { trapDialogFocus, useDialogFocus } from "./dialogFocus";
-import { useDialogDraft, useDialogNavigationLock } from "./dialogNavigation";
+import { takeCloneUrl, useDialogDraft, useDialogNavigationLock } from "./dialogNavigation";
 
 export function CloneProjectModal() {
   const t = useT();
@@ -47,7 +47,7 @@ export function CloneProjectModal() {
   // Reset input state each time the dialog opens.
   useEffect(() => {
     if (open) {
-      setUrl("");
+      setUrl(takeCloneUrl());
       setFolderTouched(false);
       setBranchOpen(!!new URLSearchParams(window.location.search).get("projectBranch"));
       setCloning(false);

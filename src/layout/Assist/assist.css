@@ -1,0 +1,28 @@
+/* App actions a session's agent asked for with vapp. In the conversation view they share the permission
+   lane; above a terminal they get a lane of their own, and the terminal shrinks to fit. */
+.assist-term-lane { flex: none; max-height: 45%; overflow-y: auto; padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-1); }
+.assist-request-group { display: flex; flex-direction: column; gap: 8px; padding-bottom: 8px; }
+.assist-request-group > header { display: flex; align-items: flex-start; gap: 8px; }
+.assist-request-group > header svg { flex: none; margin-top: 3px; color: var(--accent); }
+.assist-request-group > header strong { font-weight: 600; overflow-wrap: anywhere; }
+.assist-note { margin: 0; color: var(--text-dim); }
+.assist-error { margin: 0; color: var(--red); white-space: pre-wrap; overflow-wrap: anywhere; }
+.assist-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.assist-card { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-0); }
+.assist-card-head { display: flex; align-items: flex-start; gap: 8px; }
+.assist-card-head > svg { flex: none; margin-top: 2px; color: var(--text-dim); }
+.assist-card-head strong { flex: 1; font-weight: 500; overflow-wrap: anywhere; }
+.assist-card.danger .assist-card-head > svg { color: var(--red); }
+.assist-details { margin: 0; padding-left: 21px; color: var(--text-mid); display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.assist-choices { display: flex; flex-direction: column; gap: 4px; color: var(--text-mid); }
+.assist-card-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.assist-card-actions .vlx-btn { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.assist-card.danger .assist-confirm { background: var(--red); border-color: var(--red); }
+/* Consecutive host changes confirmed together: one card, a scrolling list of every change in order. */
+.assist-batch-list { max-height: min(40vh, 320px); overflow-y: auto; margin: 0; padding: 0 0 0 21px; color: var(--text-mid); display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.assist-batch-list li.danger { color: var(--red); }
+.assist-batch-detail { color: var(--text-dim); margin-left: 6px; }
+/* Changes that could not be made; the agent receives the details. */
+.assist-failed { display: flex; flex-direction: column; gap: 4px; color: var(--text-dim); }
+.assist-failed p { margin: 0; }
+.assist-failed ul { margin: 0; padding-left: 18px; overflow-wrap: anywhere; }

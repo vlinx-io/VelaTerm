@@ -53,6 +53,12 @@ pub struct SessionState {
     /// pop a *system notification* remains each client's own decision — that one depends on which
     /// window has focus, which is a device fact, not a session fact.
     pub unread: bool,
+    /// The unread marker was set by hand from the session menu rather than by a new result.
+    ///
+    /// Clients still show and count it like any other marker, but none pops a system notification for
+    /// it: the person who set it already knows, and marking a batch would otherwise fire one per session
+    /// on every other client.
+    pub unread_manual: bool,
     /// Which agent is running here: `claude`, `codex`, `opencode`, and so on. None for a plain terminal.
     pub agent: Option<String>,
     /// What that agent is doing: `working`, `asking`, `waiting`, or `background`. Meaningless without an
@@ -273,7 +279,23 @@ fn drain_dirty() -> HashMap<String, SessionState> {
 /// window, for long enough to count as read. Raising happens from `observe_status` below, and — until
 /// screen detection reports through the backend — from a client that saw something worth a look.
 pub fn set_unread(ctx: &AppCtx, session_id: &str, unread: bool) -> bool {
-    update(ctx, session_id, |s| s.unread = unread)
+    update(ctx, session_id, |s| {
+        s.unread = unread;
+        s.unread_manual = false;
+    })
+}
+
+/// Raise the unread marker by hand, from the session menu's Mark as Pending.
+///
+/// Differs from `set_unread` only in flagging the marker as manual, so clients skip the system
+/// notification a new result would bring. A marker already raised by a result keeps its origin.
+pub fn mark_pending(ctx: &AppCtx, session_id: &str) -> bool {
+    update(ctx, session_id, |s| {
+        if !s.unread {
+            s.unread = true;
+            s.unread_manual = true;
+        }
+    })
 }
 
 /// Record whether a process is running behind this session.
@@ -367,9 +389,11 @@ pub fn observe_status(
         apply_signal(record, payload);
         if notable {
             record.unread = true;
+            record.unread_manual = false;
         }
         if resumed {
             record.unread = false;
+            record.unread_manual = false;
         }
     });
     if notable {

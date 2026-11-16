@@ -1,6 +1,7 @@
 //! Japanese dictionary. Each entry includes its English source in a trailing review comment; en.ts enforces the complete key set.
 
 import type en from "./en";
+import assist from "../assist/ja";
 
 const ja: typeof en = {
   "panel.turnStats": "ターンの統計",
@@ -8,6 +9,8 @@ const ja: typeof en = {
   "panel.showChangedFiles": "このターンで変更したファイルを表示",
   "panel.noFilesChanged": "このターンで編集したファイルはありません。",
   "panel.shellEditsNotListed": "シェルコマンドによる変更は一覧に含まれません。",
+  "panel.usageShowScope": (scope: string) => `${scope} を表示`,
+  "panel.usageHideScope": (scope: string) => `${scope} を非表示`,
   "translation.swap": "言語を入れ替え",
   "translation.openai": "OpenAI 互換",
   "translation.bing": "Bing 翻訳（API キー不要）",
@@ -373,6 +376,7 @@ const ja: typeof en = {
   "common.create": "作成", // Create
   "common.close": "閉じる", // Close
   "chat.copyAsMarkdown": "Markdown 形式でコピー",
+  "chat.copyEntireMessage": "メッセージ全体をコピー",
   "chat.imageViewOriginal": "元の画像を表示",
   "chat.imageCopy": "画像をコピー",
   "chat.imageSave": "画像を保存",
@@ -523,6 +527,19 @@ const ja: typeof en = {
   "settings.agentDefaultView": "既定のビュー", // Default view
   "settings.agentDefaultViewHint":
     "このエージェントの新しいセッションを開くときのビューです。既存のセッションは作成時のビューのままです。", // Agent default view hint
+  "settings.deepseekApiTitle": "DeepSeek API",
+  "settings.deepseekApiDesc":
+    "DeepSeek の会話は OpenCode 経由で実行されます。ここに API アドレスとキーを入力すると、すべての会話で同じ認証情報を使用できます。",
+  "settings.deepseekBaseUrl": "API アドレス",
+  "settings.deepseekEndpointHint":
+    "アドレスを空欄にすると公式エンドポイントを使用します。変更は次のメッセージから反映されます。",
+  "settings.deepseekApiKey": "API キー",
+  "settings.deepseekKeySaved": "保存済み（空欄のままにすると維持）",
+  "settings.deepseekKeyPlaceholder": "DeepSeek API キーを入力",
+  "settings.deepseekRemoveKey": "キーを削除",
+  "settings.deepseekSaved": "保存しました。",
+  "settings.deepseekInvalid": "有効な http(s) API アドレスと 1 行の API キーを入力してください。",
+  "settings.deepseekLocalOnly": "この認証情報は実行ホストに保存されるため、変更できるのはホスト上のみです。",
   "settings.appearance": "外観", // Appearance
   "settings.accent": "アクセント", // Accent
   "settings.accentAuto": "テーマに従う", // Follow theme
@@ -822,16 +839,26 @@ const ja: typeof en = {
   "settings.recordSessions": "セッションログを記録", // Record session logs
   "settings.recordSessionsHint":
     "既定はオフ。オンにするとターミナル出力をログファイルに保存し、アーカイブ再生と検索に使います。通常のターミナルセッションは記録しません。エージェントセッションは独自の会話記録を読み込みます。", // Record session logs hint
-  "settings.fonts": "Fonts", // TODO translate
+  "settings.fonts": "フォント",
   "settings.uiFontSize": "インターフェースの文字サイズ",
   "settings.termFont": "ターミナルのフォント",
   "settings.termFontSize": "ターミナルの文字サイズ",
   "settings.termLineHeight": "ターミナルの行の高さ",
   "settings.chatTypography": "会話ビュー",
-  "settings.chatTypographyHint": "フォント設定はターミナルとは別に保存され、変更はすぐに反映されます。",
+  "settings.chatTypographyHint": "これらの設定はターミナルとは別に保存され、変更はすぐに反映されます。デフォルトでは、本文にはインターフェースのフォント、コードにはインターフェースの等幅フォントが使われます。",
   "settings.chatFont": "会話のフォント",
   "settings.chatFontSize": "会話の文字サイズ",
   "settings.chatLineHeight": "会話の行の高さ",
+  "settings.chatCodeFont": "会話のコードフォント",
+  "settings.chatLetterSpacing": "会話の文字間隔",
+  "settings.uiTypography": "インターフェースのフォント",
+  "settings.uiTypographyHint": "メニュー、リスト、ダイアログ、ドキュメントに適用されます。等幅フォントはコード、パス、差分の表示に使われます。ターミナルのフォントは別に設定します。",
+  "settings.uiFont": "標準フォント",
+  "settings.uiMonoFont": "等幅フォント",
+  "settings.fontPreview": "プレビュー",
+  "settings.fontPreviewText": "いろはにほへと ちりぬるを。The quick brown fox 0123456789",
+  "settings.fontPreviewChat": "設定画面を更新しました。各フォント設定はすぐに反映され、いつでもデフォルトに戻せます。",
+  "settings.fontResetGroup": "フォントをデフォルトに戻す",
   "settings.composerChips": "メッセージ入力ツールバー",
   "settings.composerChipsHint": "有効にした項目は、この順序でメッセージの横に表示されます。エージェントが起動していない、バックグラウンドタスクがない、ログインが未完了など、機能が一時的に利用できない場合も、項目は空または無効の状態で表示されます。現在のエージェントが対応していない機能は表示されません。収まらない項目は「その他」メニューに移動します。ここでオフにした項目は、そのメニューにのみ表示され、設定は引き続きここで変更できます。",
   "settings.composerChipUp": (chip: string) => `${chip}を上へ移動`,
@@ -849,15 +876,21 @@ const ja: typeof en = {
   "settings.composerChip.account": "アカウント",
   "settings.composerChip.codexCredits": "Codex リセット券",
   "settings.fontDefault": "デフォルト",
-  "settings.fontCustom": "Custom…", // TODO translate
+  "settings.fontSearch": "フォントを検索…",
+  "settings.fontUseCustom": (query: string) => `「${query}」を使用`,
   "settings.fontListUnavailable": "システムフォントの一覧を取得できません。フォント名を手動で入力できます。",
   "settings.fontUnconfirmed": "このフォントが利用可能か確認できません。",
-  "settings.fontAuto": "Auto", // TODO translate
-  "settings.fontSmaller": "Smaller", // TODO translate
-  "settings.fontLarger": "Larger", // TODO translate
-  "settings.fontReset": "Reset", // TODO translate
+  "settings.fontAuto": "自動",
+  "settings.fontSmaller": "小さく",
+  "settings.fontLarger": "大きく",
+  "settings.fontReset": "リセット",
   "settings.sound": "通知音", // Notification sound
   "settings.language": "言語", // Language
+  "settings.serverRegion": "サーバー", // Server
+  "settings.serverRegionGlobal": "国際", // International
+  "settings.serverRegionChina": "中国本土", // Mainland China
+  "settings.serverRegionHint":
+    "アップデートの確認、ダウンロード、公式サイトへのリンクに使用します。「中国本土」を選ぶと velaterm.cn を使用します。中国国内からの接続が速く、提供されるバージョンは同じです。アカウント関連の機能は常に velaterm.com を使用します。",
   "settings.langAuto": "自動（システム）", // Auto (system)
   "settings.skillLabel": "Vela Skills",
   "settings.skillInstall": "Install", // Install
@@ -1048,6 +1081,7 @@ const ja: typeof en = {
   "tree.deleteGroup": "グループを削除", // Delete Group
   "tree.deleteSession": "セッションを削除", // Delete Session
   "tree.projectRoot": "プロジェクトルート（グループなし）", // Project root (no group)
+  "tree.collectionRoot": (name: string) => `${name}（グループなし）`,
   "tree.moveToSession": "セッションの下へ移動（子にする）", // Move under a session (as child)
   "tree.moveTo": "移動先…", // Move to…
   "tree.openNewTab": "新しいタブで開く", // Open in New Tab
@@ -1152,6 +1186,7 @@ const ja: typeof en = {
   "tree.filterStatus": "ステータスで絞り込み", // Filter by status
   "tree.refreshStatusFilter": "ステータスフィルターを更新",
   "tree.refreshStatusMatch": "ステータスを更新",
+  "tree.setStatus": "ステータスを設定", // Set Status
   "tree.filterStatusSection": "ステータス", // Status
   "tree.filterMarkSection": "マーク", // Mark
   "tree.viewMainName": "メイン",
@@ -1368,10 +1403,9 @@ const ja: typeof en = {
 
   // ── Center pane ──
   "center.noSession": "セッションなし", // No session
-  "center.noSessionHintPre": "サイドバーからセッションを選ぶか、", // Pick a session from the sidebar, or press
-  "center.noSessionHintPost": " でターミナルを作成", // to create a terminal
   "center.createTerminal": "ターミナルを作成", // Create Terminal
-  "center.splitHint": "セッションを開くと、次のショートカットで画面を分割できます：",
+  "center.startTitle": "セッションを開始", // Start a session
+  "center.startHint": "サイドバーからセッションを選ぶか、新しく始めてください。", // Pick one from the sidebar, or start something new.
   "tab.unsavedDot": "未保存の変更あり", // Unsaved changes
   "tab.newTerminal": "新規ターミナル", // New terminal
   "tab.newDocument": "新規ドキュメント", // New document
@@ -1600,6 +1634,8 @@ const ja: typeof en = {
   "transfer.downloading": "ダウンロード中…", // Downloading…
   "transfer.savedToDownloads": "ダウンロードフォルダに保存しました", // Saved to Downloads
   "transfer.foldersUnsupported": "フォルダーはアップロードできません。", // Folders can't be uploaded.
+  "drop.browserFilesHint": "ブラウザでは、ここにドロップできるのは画像だけです。その他のファイルは、先にプロジェクトへアップロードしてください。", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
+  "files.copyFailed": "一部のファイルをコピーできませんでした。ファイルがまだ存在するか、このフォルダーへの書き込み権限があるかを確認してください。", // Some files could not be copied. Check that they still exist and that you can write to this folder.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => `${n} セッション`, // {n} sessions
@@ -1615,6 +1651,11 @@ const ja: typeof en = {
   "statusbar.permSkip": "権限：スキップ", // Perms: Skip
   "statusbar.notifyOn": "Notify: On", // TODO translate
   "statusbar.notifyOff": "Notify: Off", // TODO translate
+  "statusbar.zoomGroup": "表示倍率",
+  "statusbar.zoomOut": "縮小",
+  "statusbar.zoomIn": "拡大",
+  "statusbar.zoomEdit": "表示倍率 · クリックして倍率を入力（80〜200%）",
+  "statusbar.zoomInput": "表示倍率（80〜200）",
   "statusbar.permTooltip":
     "このセッションの権限モード · クリックで切り替え（このセッションのみ）", // This session's permission mode · click to change (this session only)
   "statusbar.permMenuTitle": "このセッションの権限", // This session's permissions
@@ -1974,10 +2015,12 @@ const ja: typeof en = {
   "updater.hide": "Hide", // TODO translate
   "updater.hideHint":
     "Keep downloading in the background. Progress stays in the status bar.", // TODO translate
-  "updater.downloadManually": "Download manually", // TODO translate
-  "updater.downloadManuallyHint": "Open the download page in your browser.", // TODO translate
+  "updater.downloadManually": "手動でダウンロード",
+  "updater.downloadManuallyHint": "ブラウザでダウンロードページを開きます。",
   "updater.windowsNotice":
     "VelaTerm will close while the installer runs, then reopen on its own.", // TODO translate
+  "updater.portableNotice":
+    "このポータブル版は自動では更新されません。新しいバージョンをダウンロードし、このフォルダと置き換えてください。設定とセッションはそのまま引き継がれます。",
   "updater.installingWindows":
     "Installing… VelaTerm is about to close. The installer will finish the update and reopen it.", // TODO translate
   "statusbar.updateAvailable": (version) => `Update ${version}`, // TODO translate
@@ -1999,6 +2042,7 @@ const ja: typeof en = {
   "skills.vstat": "作業中または入力待ちのセッションを確認します。",
   "skills.vtell": "ほかのセッションにメッセージを送信します。",
   "skills.vkb": "プロジェクトの CodeGraph とナレッジベースを照会します。",
+  "skills.vapp": "エージェントに VelaTerm を操作させます。各操作はユーザーの確認後に実行されます。",
   "skills.settingsHint": "後から「設定 > 詳細設定」でもインストールできます。",
   "skills.installFailed": (err) => `インストールに失敗しました: ${err}`,
   "skills.dontRemind": "今後表示しない",
@@ -2116,6 +2160,7 @@ const ja: typeof en = {
   "chat.question.submit": "送信",
   "chat.question.next": "次へ",
   "chat.question.dismiss": "閉じる",
+  "chat.question.skip": "スキップ",
   "chat.question.answerPlaceholder": "回答を入力",
   "chat.question.otherPlaceholder": "その他の回答",
   "chat.question.answeredHeading": (n: number) => `${n} 件の質問に回答済み`,
@@ -2169,6 +2214,8 @@ const ja: typeof en = {
   "chat.rewind.editWarning": "元のメッセージとそれ以降のすべてのメッセージが完全に削除され、編集した内容がこの位置から送信されます。ファイルの変更は元に戻りません。",
   "chat.rewind.inactive": "会話のプロセスが起動していません。起動後にこれらの操作を利用できます。",
   "chat.rewind.unsupported": "接続中のエージェントは現在この操作に対応していません。",
+  "chat.rewind.latestOnly": "接続中のエージェントは最新のメッセージからのみ巻き戻せます。",
+  "chat.rewind.appliesOnSend": "巻き戻しは次のメッセージを送信した時点で反映されます。それまで会話とファイルは変更されません。",
   "chat.rewind.title": "ここから巻き戻す",
   "chat.rewind.warning": "この操作は元に戻せません。",
   "chat.rewind.conversation": "会話を巻き戻す",
@@ -2351,7 +2398,7 @@ const ja: typeof en = {
   "settings.completionTab": "Tab のみ",
   "settings.completionOff": "オフ",
   "settings.completionUnavailable": "設定を読み込めないか、保存できませんでした。",
-  "settings.completionHint": "Zsh で入力していると、履歴の中で一致する最新のコマンドがカーソルの後ろに薄く表示され、→ または End で確定できます。Tab はシェル本来の動作と同じで、候補が 1 つならそのまま入力し、候補に共通する部分があれば先に補完し、複数の候補が残るときに一覧を表示します。新しい Zsh、Bash 4+、Fish、PowerShell のターミナルに適用されます。",
+  "settings.completionHint": "Zsh で入力していると、履歴の中で一致する最新のコマンドがカーソルの後ろに薄く表示され、→ または End で確定できます。リモート接続から入力しているときは表示されません。Tab はシェル本来の動作と同じで、候補が 1 つならそのまま入力し、候補に共通する部分があれば先に補完し、複数の候補が残るときに一覧を表示します。新しい Zsh、Bash 4+、Fish、PowerShell のターミナルに適用されます。",
   "settings.completionTabOnlyHint": "入力中に候補は表示されません。Tab を押すとシェル本来の動作と同じように補完し、候補が 1 つならそのまま入力し、候補に共通する部分があれば先に補完し、複数の候補が残るときに一覧を表示します。新しい Zsh、Bash 4+、Fish、PowerShell のターミナルに適用されます。",
   "settings.completionTabKey": "Tab キー",
   "settings.completionTabAccept": "候補を確定",
@@ -2468,10 +2515,16 @@ const ja: typeof en = {
   "chat.antigravity.placeholder": "Antigravity にメッセージを送信。@ファイル でファイルを参照できます",
   "chat.antigravity.textOnly": "Antigravity の会話ビューは現在、テキストメッセージのみに対応しています。",
   "chat.textOnly": (agent: string) => `${agent} の会話ビューはテキストメッセージのみに対応しています。`,
+  "chat.attach.modelTextOnly": "選択中のモデルは画像に対応していません。",
   "chat.signInRequired": (agent: string) => `会話ビューを使うには ${agent} へのログインが必要です。ターミナルビューに切り替えてログインしてから、メッセージをもう一度送信してください。`,
-  "chat.apiKeyRequired": "DeepSeek Harness には API キーが必要です。環境変数 DEEPSEEK_API_KEY を設定するか、`dsh web` を実行して Models ページでキーを保存してから、メッセージをもう一度送信してください。",
+  "chat.apiKeyRequired": "DeepSeek には API キーが必要です。メッセージ入力欄の「API」を開いて入力するか、環境変数 `DEEPSEEK_API_KEY` を設定してから、もう一度メッセージを送信してください。",
   "chat.antigravity.permissionsHint": "承認が必要なツールは、Antigravity の設定で事前に許可するか、ターミナルビューで使用してください。",
   "chat.antigravity.settingsHint": "モデル、推論の強度、権限はターンの合間に変更してください。",
+  "chat.antigravity.rewindTitle": "ターミナルビューで巻き戻す",
+  "chat.antigravity.rewindHint": "Antigravity の会話ビューでは、送信済みメッセージの巻き戻しや編集にまだ対応していません。ターミナルビューに切り替えて /rewind を実行すると、戻った際に自動で反映されます。",
+  "chat.antigravity.rewindGuide": "Antigravity の会話ビューでは、送信済みメッセージの巻き戻しや編集を直接行えません。ターミナルビューに切り替えて /rewind で会話の巻き戻しやファイルの復元を行ってください。会話ビューに戻ると最新の状態が自動的に反映されます。",
+  "chat.antigravity.rewindCommandDescription": "ターミナルビューに切り替えて /rewind で巻き戻す",
+  "chat.antigravity.switchToTerminal": "ターミナルビューに切り替える",
   "chat.history.imageDownloadRequired": "この画像はここでは開けません。元の画像をダウンロードしてご確認ください。",
   "chat.history.readBody": "全文を読む",
   "chat.history.selectDetail": "ファイルまたは項目を選択",
@@ -2647,6 +2700,8 @@ const ja: typeof en = {
   "kb.searchEntries": "記事を検索…",
   "kb.updatedOn": (date: string) => `${date} に更新`,
   "archive.sessionsCount": (count: string) => `${count} セッション`,
+
+  ...assist,
 };
 
 export default ja;

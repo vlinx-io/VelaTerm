@@ -14,10 +14,13 @@ export function handleMessageCopy(event: ClipboardEvent<HTMLElement>) {
   event.clipboardData.setData("text/html", content.html);
 }
 
-/** Right-click menu for a selection inside one message body: copy as displayed, or as Markdown source. */
-export function useMessageCopyMenu() {
+/**
+ * Right-click menu for one message body: a selection copies as displayed or as Markdown source, and
+ * `wholeText`, when given, offers the entire message whether or not anything is selected.
+ */
+export function useMessageCopyMenu(wholeText?: string) {
   const t = useT();
-  const [menu, setMenu] = useState<{ x: number; y: number; host: Element; content: MessageClipboardContent } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; host: Element; content: MessageClipboardContent | null; whole?: string } | null>(null);
   const [error, setError] = useState(false);
   useEffect(() => {
     if (!menu) return;
@@ -40,18 +43,22 @@ export function useMessageCopyMenu() {
       // Text fields keep their own editing behavior.
       if ((event.target as Element).closest("textarea, input")) return;
       const content = createMessageSelectionClipboardContent(window.getSelection(), event.currentTarget);
-      if (!content) return;
+      if (!content && !wholeText) return;
       event.preventDefault();
-      setMenu({ x: event.clientX, y: event.clientY, host: event.currentTarget.closest("dialog") || document.body, content });
+      setMenu({ x: event.clientX, y: event.clientY, host: event.currentTarget.closest("dialog") || document.body, content, whole: wholeText });
     },
     copyMenu: <>
       {menu && createPortal(<ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
-        // The menu keeps the DOM selection, so a native copy reaches `handleMessageCopy` with both flavors.
-        { label: t("common.copy"), onClick: () => {
-          setError(false);
-          if (!document.execCommand("copy")) write(menu.content.plainText);
-        } },
-        { label: t("chat.copyAsMarkdown"), onClick: () => write(menu.content.markdown) },
+        ...(menu.content ? [
+          // The menu keeps the DOM selection, so a native copy reaches `handleMessageCopy` with both flavors.
+          { label: t("common.copy"), onClick: () => {
+            setError(false);
+            if (!document.execCommand("copy")) write(menu.content!.plainText);
+          } },
+          { label: t("chat.copyAsMarkdown"), onClick: () => write(menu.content!.markdown) },
+          ...(menu.whole ? [{ label: "", separator: true }] : []),
+        ] : []),
+        ...(menu.whole ? [{ label: t("chat.copyEntireMessage"), onClick: () => write(menu.whole!) }] : []),
       ]} />, menu.host)}
       {error && <span role="alert" {...copyAttributes.ignore}>{t("common.copyFailed")}</span>}
     </>,

@@ -73,6 +73,16 @@ pub fn resolve(kind: SessionKind, id: &str) -> Result<Resolved, String> {
             path:crate::agent::opencode_store::db_path().filter(|path|path.is_file()).ok_or("source_missing: OpenCode database is unavailable")?,
             native_id:id.into(),end_byte:None,end_ordinal:None,
         }],error:None}),
+        // A DeepSeek conversation recorded before OpenCode took over exists only as a dsh log.
+        SessionKind::Deepseek=>match super::deepseek_legacy::log(id) {
+            Some(path)=>Ok(Resolved {segments:vec![Segment {
+                path,native_id:format!("{}{id}",super::deepseek_legacy::NATIVE_PREFIX),end_byte:None,end_ordinal:None,
+            }],error:None}),
+            None=>Ok(Resolved {segments:vec![Segment {
+                path:crate::agent::opencode_store::db_path().filter(|path|path.is_file()).ok_or("source_missing: OpenCode database is unavailable")?,
+                native_id:id.into(),end_byte:None,end_ordinal:None,
+            }],error:None}),
+        },
         SessionKind::Kiro=>{
             let roots=crate::agent::kiro_store::Roots::native()?;
             if !crate::agent::kiro_store::valid_id(id) {return Err("unsupported_record: Kiro session identity is invalid".into());}

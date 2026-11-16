@@ -144,6 +144,19 @@
   gap: 6px;
   min-width: 0;
 }
+/* Model discovery loading/empty/failure status inside the portaled Select footer. */
+.launch-select-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 6px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+.launch-select-status.is-error {
+  color: var(--red);
+}
 .launch-hint {
   color: var(--text-muted);
   font-size: 11px;

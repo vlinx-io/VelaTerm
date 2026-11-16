@@ -146,6 +146,21 @@ async function open(req: Partial<SpawnRequest> = {}, waitForOptions = true) {
   render(<SpawnConfirmModal />);
   if (waitForOptions) await screen.findByLabelText("spawn.modelLabel");
 }
+function pickModel(field: HTMLElement, value: string) {
+  fireEvent.click(field);
+  const popup = screen.getByRole("listbox");
+  if (value === "") {
+    fireEvent.click(within(popup).getAllByRole("option")[0]);
+    return;
+  }
+  fireEvent.change(within(popup).getByRole("textbox"), { target: { value } });
+  fireEvent.click(within(popup).getAllByRole("option")[0]);
+}
+function pickEffort(field: HTMLElement, level: string) {
+  fireEvent.click(field);
+  const popup = screen.getByRole("listbox");
+  fireEvent.click(within(popup).getByRole("option", { name: level ? `chat.effort.${level}` : "chat.effort.auto" }));
+}
 async function launch() {
   await waitFor(() => expect((screen.getByRole("button", { name: "spawn.launch" }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole("button", { name: "spawn.launch" }));
@@ -161,15 +176,17 @@ describe("single child-session review", () => {
       worktree: false,
     });
     expect(screen.getByText("/other repo")).toBeTruthy();
-    expect(
-      (screen.getByLabelText("spawn.modelLabel") as HTMLInputElement).value,
-    ).toBe("opus");
+    expect(screen.getByLabelText("spawn.modelLabel").textContent).toContain("opus");
     expect(await launch()).toMatchObject({
       cwd: "/other repo",
       model: "opus",
       effort: "high",
       worktree: false,
     });
+  });
+  it("keeps the requested session title when the launch is confirmed", async () => {
+    await open({ title: "Parser audit" });
+    expect(await launch()).toMatchObject({ title: "Parser audit" });
   });
   it("uses backend-resolved inherited settings and can explicitly clear a model", async () => {
     await open();
@@ -179,11 +196,9 @@ describe("single child-session review", () => {
     );
     await act(async () => { await Promise.resolve(); });
     expect(mocks.prepareSpawn).toHaveBeenCalledTimes(1);
-    fireEvent.change(screen.getByLabelText("spawn.modelLabel"), {
-      target: { value: "" },
-    });
+    pickModel(screen.getByLabelText("spawn.modelLabel"), "");
     await act(async () => { await Promise.resolve(); });
-    expect((screen.getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("");
+    expect(screen.getByLabelText("spawn.modelLabel").textContent).toContain("chat.followModelDefault");
     expect((await launch()).model).toBe("");
   });
   it("supports Codex effort without silently dropping the request", async () => {
@@ -265,12 +280,12 @@ it.each(["none", "shared", "each"] as const)("keeps both roles editable and subm
   const labels = { none: "orch.worktreeNone", shared: "orch.worktreeShared", each: "orch.worktreeEach" };
   expect((screen.getByRole("radio", { name: /orch.worktreeShared/ }) as HTMLInputElement).checked).toBe(true);
   fireEvent.click(screen.getByRole("radio", { name: new RegExp(labels[mode]) }));
-  expect((planner.getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("planner");
-  expect((executor.getByLabelText("spawn.effortLabel") as HTMLInputElement).value).toBe("medium");
-  fireEvent.change(planner.getByLabelText("spawn.modelLabel"), { target: { value: "final-planner" } });
-  fireEvent.change(planner.getByLabelText("spawn.effortLabel"), { target: { value: "xhigh" } });
-  fireEvent.change(executor.getByLabelText("spawn.modelLabel"), { target: { value: "final-executor" } });
-  fireEvent.change(executor.getByLabelText("spawn.effortLabel"), { target: { value: "low" } });
+  expect(planner.getByLabelText("spawn.modelLabel").textContent).toContain("planner");
+  expect(executor.getByLabelText("spawn.effortLabel").textContent).toContain("chat.effort.medium");
+  pickModel(planner.getByLabelText("spawn.modelLabel"), "final-planner");
+  pickEffort(planner.getByLabelText("spawn.effortLabel"), "xhigh");
+  pickModel(executor.getByLabelText("spawn.modelLabel"), "final-executor");
+  pickEffort(executor.getByLabelText("spawn.effortLabel"), "low");
   const submitted = await launch();
   expect(submitted.worktree).toBe(mode !== "none");
   expect(submitted.planExecute).toEqual({
@@ -338,11 +353,11 @@ it("opens the workflow on the choices remembered from the previous one", async (
   await open({ planExecute: { plan: {}, exec: {} } }, false);
   const planner = within(await screen.findByRole("region", { name: "launch.planTitle" }));
   const executor = within(screen.getByRole("region", { name: "launch.execTitle" }));
-  expect((planner.getByLabelText("spawn.agentLabel") as HTMLInputElement).value).toBe("Claude");
-  expect((planner.getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("opus");
-  expect((planner.getByLabelText("spawn.effortLabel") as HTMLInputElement).value).toBe("high");
-  expect((executor.getByLabelText("spawn.agentLabel") as HTMLInputElement).value).toBe("Codex");
-  expect((executor.getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("executor");
+  expect(planner.getByLabelText("spawn.agentLabel").textContent).toContain("Claude");
+  expect(planner.getByLabelText("spawn.modelLabel").textContent).toContain("opus");
+  expect(planner.getByLabelText("spawn.effortLabel").textContent).toContain("chat.effort.high");
+  expect(executor.getByLabelText("spawn.agentLabel").textContent).toContain("Codex");
+  expect(executor.getByLabelText("spawn.modelLabel").textContent).toContain("executor");
 });
 
 it("lets an explicit request value win over the remembered choice", async () => {
@@ -351,9 +366,9 @@ it("lets an explicit request value win over the remembered choice", async () => 
   mocks.planExecuteDefaults.mockResolvedValue(config);
   await open({ planExecute: config }, false);
   const planner = within(await screen.findByRole("region", { name: "launch.planTitle" }));
-  expect((planner.getByLabelText("spawn.agentLabel") as HTMLInputElement).value).toBe("Codex");
-  expect((planner.getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("requested");
-  expect((planner.getByLabelText("spawn.effortLabel") as HTMLInputElement).value).toBe("low");
+  expect(planner.getByLabelText("spawn.agentLabel").textContent).toContain("Codex");
+  expect(planner.getByLabelText("spawn.modelLabel").textContent).toContain("requested");
+  expect(planner.getByLabelText("spawn.effortLabel").textContent).toContain("chat.effort.low");
 });
 
 
@@ -377,8 +392,8 @@ describe("new planning workflow from the session menu", () => {
     expect((screen.getByRole("button", { name: "launch.createAndStart" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText("spawn.promptLabel"), { target: { value: "Implement the requested feature" } });
     fireEvent.change(screen.getByLabelText("launch.workingDirectory"), { target: { value: "/repo/selected" } });
-    fireEvent.change(planner.getByLabelText("spawn.modelLabel"), { target: { value: "review-model" } });
-    fireEvent.change(executor.getByLabelText("spawn.effortLabel"), { target: { value: "low" } });
+    pickModel(planner.getByLabelText("spawn.modelLabel"), "review-model");
+    pickEffort(executor.getByLabelText("spawn.effortLabel"), "low");
     expect(screen.getAllByRole("radio")).toHaveLength(3);
     const labels = { none: "orch.worktreeNone", shared: "orch.worktreeShared", each: "orch.worktreeEach" };
     expect((screen.getByRole("radio", { name: /orch.worktreeNone/ }) as HTMLInputElement).checked).toBe(true);
@@ -447,14 +462,14 @@ it("renders invalid caller model values for correction and gives the executor's 
   });
   await open({ planExecute: config }, false);
   const executor = within(await screen.findByRole("region", { name: "launch.execTitle" }));
-  expect((executor.getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("gpt 5.6 sol");
+  expect(executor.getByLabelText("spawn.modelLabel").textContent).toContain("gpt 5.6 sol");
   pasteImage(screen.getByLabelText("spawn.promptLabel"));
   await screen.findByAltText("screenshot.png");
   fireEvent.click(screen.getByRole("button", { name: "spawn.launch" }));
   expect((await screen.findByRole("alert")).textContent).toContain("launch.execTitle: Model and effort must be identifiers");
   expect(mocks.store.confirmSpawn).not.toHaveBeenCalled();
   expect(screen.getByAltText("screenshot.png")).toBeTruthy();
-  fireEvent.change(executor.getByLabelText("spawn.modelLabel"), { target: { value: "gpt-5.6-sol" } });
+  pickModel(executor.getByLabelText("spawn.modelLabel"), "gpt-5.6-sol");
   expect((await launch()).images).toEqual([{ mimeType: "image/png", data: "AQID" }]);
 });
 
@@ -553,22 +568,22 @@ it.each(["spawn", "menu"])("selects independent Codex effort levels from both %s
   const executor = within(screen.getByRole("region", { name: "launch.execTitle" }));
   const choose = async (field: HTMLElement, level: string) => {
     fireEvent.click(field);
-    await screen.findByRole("option", { name: "ultra" });
+    await screen.findByRole("option", { name: "chat.effort.ultra" });
     expect(screen.getAllByRole("option").map(option => option.textContent)).toEqual([
-      "spawn.modelDefault", "low", "medium", "high", "xhigh", "max", "ultra",
+      "chat.effort.auto", "chat.effort.low", "chat.effort.medium", "chat.effort.high", "chat.effort.xhigh", "chat.effort.max", "chat.effort.ultra",
     ]);
-    fireEvent.click(screen.getByRole("option", { name: level }));
-    expect((field as HTMLInputElement).value).toBe(level);
+    fireEvent.click(screen.getByRole("option", { name: `chat.effort.${level}` }));
+    expect(field.textContent).toContain(`chat.effort.${level}`);
   };
   await choose(planner.getByLabelText("spawn.effortLabel"), "xhigh");
   await choose(executor.getByLabelText("spawn.effortLabel"), "high");
-  expect((planner.getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("");
-  expect((executor.getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("gpt-5.6-sol");
+  expect(planner.getByLabelText("spawn.modelLabel").textContent).toContain("chat.followModelDefault");
+  expect(executor.getByLabelText("spawn.modelLabel").textContent).toContain("gpt-5.6-sol");
   expect(mocks.store.setPlanExecuteRolePrefs).toHaveBeenCalledWith("plan", { effort: "xhigh" });
   expect(mocks.store.setPlanExecuteRolePrefs).toHaveBeenCalledWith("exec", { effort: "high" });
   // Returning one role to its native default must leave the other role's explicit choice intact.
   fireEvent.click(planner.getByLabelText("spawn.effortLabel"));
-  fireEvent.click(screen.getByRole("option", { name: "spawn.modelDefault" }));
+  fireEvent.click(screen.getByRole("option", { name: "chat.effort.auto" }));
   expect(mocks.store.setPlanExecuteRolePrefs).toHaveBeenCalledWith("plan", { effort: "" });
   const expected = { worktreeMode: entry === "menu" ? "none" : "shared", plan: config.plan, exec: { ...config.exec, effort: "high" } };
   if (entry === "menu") {
@@ -633,8 +648,8 @@ it.each(["failed", "uncertain", "dispatching"].flatMap(state => [false, true].ma
     expect(screen.queryByText("delivery error")).toBeNull();
   }
   expect((screen.getByLabelText("spawn.promptLabel") as HTMLTextAreaElement).disabled).toBe(true);
-  expect((screen.getByLabelText("spawn.modelLabel") as HTMLInputElement).disabled).toBe(true);
-  expect((screen.getByLabelText("spawn.agentLabel") as HTMLInputElement).disabled).toBe(true);
+  expect((screen.getByLabelText("spawn.modelLabel") as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByLabelText("spawn.agentLabel") as HTMLButtonElement).disabled).toBe(true);
   const retry = screen.getByRole("button", { name: "common.retry" });
   expect((retry as HTMLButtonElement).disabled).toBe(state !== "failed");
   const historyLength = window.history.length;
@@ -704,14 +719,14 @@ it("preserves pending text, attachment removal and model edits across copied rec
   const view = render(<SpawnConfirmModal />);
   await screen.findByLabelText("spawn.modelLabel");
   fireEvent.change(screen.getByLabelText("spawn.promptLabel"), { target: { value: "Local unsubmitted task" } });
-  fireEvent.change(screen.getByLabelText("spawn.modelLabel"), { target: { value: "local-model" } });
+  pickModel(screen.getByLabelText("spawn.modelLabel"), "local-model");
   fireEvent.click(screen.getByTitle("chat.attach.remove"));
   const calls = mocks.prepareSpawn.mock.calls.length;
   mocks.store.pendingSpawns = [{ ...first, images: [...first.images!] }];
   view.rerender(<SpawnConfirmModal />);
   expect((screen.getByLabelText("spawn.promptLabel") as HTMLTextAreaElement).value).toBe("Local unsubmitted task");
-  expect((screen.getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("local-model");
-  expect(screen.queryByRole("img")).toBeNull();
+  expect(screen.getByLabelText("spawn.modelLabel").textContent).toContain("local-model");
+  expect(screen.queryByAltText("image-1.png")).toBeNull();
   expect(mocks.prepareSpawn).toHaveBeenCalledTimes(calls);
   const approved = { ...first, prompt: "Task confirmed by the other client", worktree: true,
     kind: "codex" as const, model: "approved-model", effort: "xhigh", images: [{ mimeType: "image/png", data: "BAUG" }] };
@@ -719,10 +734,10 @@ it("preserves pending text, attachment removal and model edits across copied rec
   // The receipt is authoritative even if the queue still contains its previous copy.
   mocks.store.spawnReceipts["request-id"] = confirmedReceipt(approved, "failed");
   view.rerender(<SpawnConfirmModal />);
-  await waitFor(() => expect((screen.getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("approved-model"));
+  await waitFor(() => expect(screen.getByLabelText("spawn.modelLabel").textContent).toContain("approved-model"));
   expect((screen.getByLabelText("spawn.promptLabel") as HTMLTextAreaElement).value).toBe(approved.prompt);
   expect((screen.getByRole("radio", { name: /orch.worktreeNone/ }) as HTMLInputElement).checked).toBe(false);
-  expect(screen.getByRole("img").getAttribute("src")).toBe("data:image/png;base64,BAUG");
+  expect(screen.getByAltText("image-1.png").getAttribute("src")).toBe("data:image/png;base64,BAUG");
   expect(screen.getByText("/approved/worktree")).toBeTruthy();
   expect((screen.getByTitle("chat.attach.remove") as HTMLButtonElement).disabled).toBe(true);
 });
@@ -740,12 +755,12 @@ it.each(["pending", "failed", "uncertain", "dispatching"] as const)("locks both 
   for (const [role, label] of [["plan", "launch.legacyPlanTitle"], ["exec", "launch.execTitle"]] as const) {
     const section = within(screen.getByRole("region", { name: label }));
     for (const name of ["spawn.agentLabel", "spawn.modelLabel", "spawn.effortLabel"]) {
-      expect((section.getByLabelText(name) as HTMLInputElement).disabled).toBe(true);
+      expect((section.getByLabelText(name) as HTMLButtonElement).disabled).toBe(true);
     }
-    expect((section.getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe(resolved[role].model);
-    expect((section.getByLabelText("spawn.effortLabel") as HTMLInputElement).value).toBe(resolved[role].effort);
-    fireEvent.change(section.getByLabelText("spawn.modelLabel"), { target: { value: "attempted-change" } });
-    fireEvent.blur(section.getByLabelText("spawn.modelLabel"));
+    expect(section.getByLabelText("spawn.modelLabel").textContent).toContain(resolved[role].model);
+    expect(section.getByLabelText("spawn.effortLabel").textContent).toContain(`chat.effort.${resolved[role].effort}`);
+    fireEvent.click(section.getByLabelText("spawn.modelLabel"));
+    expect(screen.queryByRole("listbox")).toBeNull();
   }
   const split = screen.getByRole("checkbox") as HTMLInputElement;
   expect(split.checked).toBe(true); expect(split.disabled).toBe(true);
@@ -766,11 +781,11 @@ it("keeps pending workflow edits, closes an open role portal on confirmation and
   mocks.store.pendingSpawns = [request];
   const view = render(<SpawnConfirmModal />);
   const planner = within(await screen.findByRole("region", { name: "launch.planTitle" }));
-  fireEvent.change(planner.getByLabelText("spawn.modelLabel"), { target: { value: "local-plan" } });
+  pickModel(planner.getByLabelText("spawn.modelLabel"), "local-plan");
   fireEvent.click(screen.getByRole("checkbox"));
   mocks.store.pendingSpawns = [{ ...request, planExecute: { ...config } }];
   view.rerender(<SpawnConfirmModal />);
-  expect((planner.getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("local-plan");
+  expect(planner.getByLabelText("spawn.modelLabel").textContent).toContain("local-plan");
   expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
   expect(mocks.planExecuteDefaults).toHaveBeenCalledOnce();
   fireEvent.click(planner.getByLabelText("spawn.agentLabel"));
@@ -783,7 +798,7 @@ it("keeps pending workflow edits, closes an open role portal on confirmation and
   fireEvent.click(staleOption);
   expect(mocks.store.setPlanExecuteRolePrefs).not.toHaveBeenCalled();
   expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
-  expect((within(screen.getByRole("region", { name: "launch.legacyPlanTitle" })).getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("initial-plan");
+  expect(within(screen.getByRole("region", { name: "launch.legacyPlanTitle" })).getByLabelText("spawn.modelLabel").textContent).toContain("initial-plan");
 });
 
 it("discards late workflow defaults and accepts only a later persisted snapshot after another client confirms", async () => {
@@ -798,12 +813,12 @@ it("discards late workflow defaults and accepts only a later persisted snapshot 
   view.rerender(<SpawnConfirmModal />);
   await screen.findByRole("region", { name: "launch.legacyPlanTitle" });
   await act(async () => defaults({ plan: { agent: "claude", model: "late-default" }, exec: { agent: "codex", model: "late-exec" } }));
-  expect((within(screen.getByRole("region", { name: "launch.legacyPlanTitle" })).getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("frozen-plan");
+  expect(within(screen.getByRole("region", { name: "launch.legacyPlanTitle" })).getByLabelText("spawn.modelLabel").textContent).toContain("frozen-plan");
   expect(mocks.store.setPlanExecuteRolePrefs).not.toHaveBeenCalled();
   // A later resolved receipt replaces the explicit, incomplete confirmed request without reading memory.
   mocks.store.spawnReceipts["request-id"] = confirmedReceipt(request, "dispatching", { ...config, worktreeMode: "each", exec: { ...config.exec, model: "persisted-exec" } });
   view.rerender(<SpawnConfirmModal />);
-  await waitFor(() => expect((within(screen.getByRole("region", { name: "launch.execTitle" })).getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("persisted-exec"));
+  await waitFor(() => expect(within(screen.getByRole("region", { name: "launch.execTitle" })).getByLabelText("spawn.modelLabel").textContent).toContain("persisted-exec"));
   expect((screen.getAllByRole("radio")[2] as HTMLInputElement).checked).toBe(true);
 });
 
@@ -821,13 +836,12 @@ describe("optional independent review", () => {
     await open({ planExecute: { plan: {}, exec: {} } }, false);
     const reviewer = within(await screen.findByRole("region", { name: "launch.reviewTitle" }));
     expect((screen.getByRole("checkbox", { name: "launch.reviewEnabled" }) as HTMLInputElement).checked).toBe(true);
-    fireEvent.change(reviewer.getByLabelText("spawn.modelLabel"), { target: { value: "custom-reviewer" } });
-    fireEvent.blur(reviewer.getByLabelText("spawn.modelLabel"));
+    pickModel(reviewer.getByLabelText("spawn.modelLabel"), "custom-reviewer");
     fireEvent.click(screen.getByRole("checkbox", { name: "launch.reviewEnabled" }));
     expect(screen.queryByRole("region", { name: "launch.reviewTitle" })).toBeNull();
     expect(screen.getByText("launch.reviewDisabledHint")).toBeTruthy();
     fireEvent.click(screen.getByRole("checkbox", { name: "launch.reviewEnabled" }));
-    expect((within(screen.getByRole("region", { name: "launch.reviewTitle" })).getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("custom-reviewer");
+    expect(within(screen.getByRole("region", { name: "launch.reviewTitle" })).getByLabelText("spawn.modelLabel").textContent).toContain("custom-reviewer");
     const req = await launch();
     expect(req.planExecute?.reviewEnabled).toBe(true);
     expect(req.planExecute?.review?.model).toBe("custom-reviewer");
@@ -855,8 +869,8 @@ describe("optional independent review", () => {
     expect(toggle.disabled).toBe(true);
     fireEvent.click(toggle);
     expect(toggle.checked).toBe(true);
-    expect((reviewer.getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("reviewer");
-    expect((reviewer.getByLabelText("spawn.modelLabel") as HTMLInputElement).disabled).toBe(true);
+    expect(reviewer.getByLabelText("spawn.modelLabel").textContent).toContain("reviewer");
+    expect((reviewer.getByLabelText("spawn.modelLabel") as HTMLButtonElement).disabled).toBe(true);
     expect(mocks.planExecuteDefaults).not.toHaveBeenCalled();
   });
 });

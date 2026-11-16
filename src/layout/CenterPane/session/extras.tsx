@@ -147,6 +147,7 @@ export function ChipPopover({
   width = 300,
   fitViewport = true,
   disabled = false,
+  maxHeight = 320,
   children,
   onOpen,
 }: {
@@ -159,6 +160,8 @@ export function ChipPopover({
   width?: number;
   fitViewport?: boolean;
   disabled?: boolean;
+  /** Cap for the panel's height; content taller than this scrolls. */
+  maxHeight?: number;
   children: ReactNode;
   onOpen?: () => void;
 }) {
@@ -215,7 +218,7 @@ export function ChipPopover({
       {open && (
         <div
           className="sv-popover"
-          style={{ ...SELECT_PANEL, top: "auto", bottom: "calc(100% + 4px)", left: panelLeft, width: panelWidth, maxHeight: 320 }}
+          style={{ ...SELECT_PANEL, top: "auto", bottom: "calc(100% + 4px)", left: panelLeft, width: panelWidth, maxHeight }}
         >
           {children}
         </div>
@@ -335,7 +338,7 @@ function taskStatusLabel(t: ReturnType<typeof useT>, status: string | undefined)
 }
 
 /**
- * Claude's background tasks, and the way to send the running turn's foreground work there.
+ * The conversation's background tasks, and the way to send the running turn's foreground work there.
  *
  * The chip is always drawn once the user turned it on; with nothing to list it carries no badge and its
  * menu says so, rather than the chip appearing and vanishing with the task list. `disabled` covers the
@@ -356,7 +359,7 @@ export function TasksChip({
   disabled?: boolean;
   onStop: (taskId: string) => void;
   onOpen: (task: ChatBackgroundTask) => void;
-  onBackgroundAll: () => void;
+  onBackgroundAll?: () => void;
 }) {
   const t = useT();
   const running = disabled ? 0 : tasks.filter((task) => !isTaskFinished(task)).length;
@@ -370,7 +373,7 @@ export function TasksChip({
       width={340}
       disabled={disabled}
     >
-      {busy ? (
+      {busy && onBackgroundAll ? (
         <button className="sv-popover-wide" onClick={onBackgroundAll}>
           <Icons.download size={12} />
           {t("chat.tasks.backgroundAll")}

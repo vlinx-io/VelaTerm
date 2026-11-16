@@ -10,7 +10,8 @@ import type { ReactNode } from "react";
 vi.mock("../../../ipc/transport", async (original) => ({
   ...await original<typeof import("../../../ipc/transport")>(), invoke: vi.fn(), listen: vi.fn(), onTransportReconnect: vi.fn(),
 }));
-vi.mock("./engineSwitch", () => ({ useEngineSwitch: () => ({ switchTo: vi.fn(), confirm: null }) }));
+const switchTo = vi.hoisted(() => vi.fn());
+vi.mock("./engineSwitch", () => ({ useEngineSwitch: () => ({ switchTo, confirm: null }) }));
 // Exercise the pane's orchestration; menu layout is covered separately by the controls themselves.
 vi.mock("./controls", () => ({
   LevelBar: () => null,
@@ -52,6 +53,7 @@ beforeEach(() => {
   useOutbox.setState({ sessions: {} });
   snapshotOverrides = {};
   permissions = [];
+  switchTo.mockReset();
   vi.mocked(invoke).mockReset();
   const reconnectListeners = new Set<() => void>();
   reconnectCallback = () => reconnectListeners.forEach(callback => callback());
@@ -287,7 +289,7 @@ it("replays newer events over a late snapshot without losing history or restorin
   expect(screen.getByText("New queue")).toBeTruthy();
 });
 
-async function mountPane(kind: "claude" | "codex" | "opencode" | "antigravity" = "claude", expectedModel: string | null = "old-model", mobile = false) {
+async function mountPane(kind: "claude" | "codex" | "opencode" | "antigravity" | "deepseek" = "claude", expectedModel: string | null = "old-model", mobile = false) {
   const view = render(<ChatPane session={{ id: "s", projectId: "p", name: "Claude", kind, engine: "chat", collapsed: false, sortOrder: 0, createdAt: 0 }}
     area={{}} hidden={false} focused multi={false} mobile={mobile} onActivate={() => {}} onSplit={() => {}} onClose={() => {}} />);
   if (expectedModel !== null) await waitFor(() => expect((screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement).value).toBe(expectedModel));
@@ -352,6 +354,41 @@ it("still waits for the native Codex session before sending a translated message
   expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "translation_send")).toBe(false);
   act(() => eventCallback({ type: "session", agentSessionId: "thread-1", model: "old-model" }));
   await waitFor(() => expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "translation_send")).toBe(true));
+});
+
+it("keeps the first DeepSeek message in the conversation while its session opens", async () => {
+  snapshotOverrides = { running: false };
+  const { container } = await mountPane("deepseek");
+  const input = container.querySelector<HTMLTextAreaElement>(".sv-box textarea")!;
+  fireEvent.change(input, { target: { value: "First question" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "chat_start")).toBe(true));
+  // It is already on screen as a sent message and waits for the session, without entering the pending queue
+  // in between; a queue event would move it there and back once the agent started.
+  expect(container.querySelectorAll(".sv-msg-user")).toHaveLength(1);
+  expect(container.querySelector(".sv-queue")).toBeNull();
+  expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "chat_send")).toBe(false);
+  act(() => eventCallback({ type: "session", agentSessionId: "dsh-1", model: "old-model" }));
+  await waitFor(() => expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "chat_send")).toBe(true));
+  expect(container.querySelectorAll(".sv-msg-user")).toHaveLength(1);
+  // The host-backed row replaces the optimistic one under the same id rather than drawing a second one.
+  const messageId = vi.mocked(invoke).mock.calls.find(([command]) => command === "chat_send")![1]!.messageId as string;
+  act(() => eventCallback({ type: "rows", revision: 1, rows: [{ kind: "user", id: messageId, text: "First question" }] } as ChatEvent));
+  await waitFor(() => expect(container.querySelectorAll(".sv-msg-user")).toHaveLength(1));
+  expect(container.querySelector(".sv-queue")).toBeNull();
+});
+
+it("offers DeepSeek API settings from the composer rather than the app's Settings", async () => {
+  await mountPane("deepseek");
+  const chip = screen.getByRole("button", { name: "API" });
+  expect(chip).toBeTruthy();
+  fireEvent.click(chip);
+  expect(await screen.findByLabelText("API address")).toBeTruthy();
+});
+
+it("does not offer the DeepSeek API chip to other agents", async () => {
+  await mountPane();
+  expect(screen.queryByRole("button", { name: "API" })).toBeNull();
 });
 
 /** Serve `session_permission_state` from a value the test can change between events. */
@@ -1145,6 +1182,8 @@ it.each([
   expect(input.value).toBe(native);
   fireEvent.change(input, { target: { value: native + "inspect the project" } });
   fireEvent.keyDown(input, { key: "Enter" });
+  // Codex opens its thread before taking the first message; Claude accepts it directly.
+  act(() => eventCallback({ type: "session", agentSessionId: "native-1", model: "old-model" }));
   await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_send", expect.objectContaining({ text: native + "inspect the project" })));
 });
 
@@ -2021,6 +2060,20 @@ it("keeps MCP and Tasks chips in the row while no process runs, disabled and sil
   expect(mcp.getAttribute("aria-expanded")).toBe("false");
 });
 
+it("lists OpenCode background tasks in the same chip as Claude's", async () => {
+  snapshotOverrides = { running: false };
+  await mountPane("opencode");
+  const tasks = screen.getByRole("button", { name: "Tasks" });
+  expect(tasks.hasAttribute("disabled")).toBe(true);
+  act(() => eventCallback({ type: "process", pid: 123, startedAt: 100 }));
+  expect(tasks.getAttribute("title")).toBe("Background tasks");
+  act(() => eventCallback({ type: "extras", extras: { backgroundTasks: [
+    { task_id: "ses_child", task_type: "local_agent", description: "Map the parser", can_stop: true },
+  ] } }));
+  fireEvent.click(tasks);
+  expect(screen.getByText("Map the parser")).toBeTruthy();
+});
+
 it("brings the Tasks chip back at the end of the row when it is switched off and on with no tasks", async () => {
   snapshotOverrides = { running: false };
   useTermStore.setState({ composerInlineChips: ["model", "tasks", "effort"] });
@@ -2062,30 +2115,97 @@ it("switches Claude in Chrome for the conversation, remembers the default, and f
 });
 
 
-it("Antigravity disables launch settings while working and queues Alt+Enter without steering", async () => {
+it("Antigravity keeps live settings available while working and steers with Alt+Enter", async () => {
   const { container } = await mountPane("antigravity", null);
   await waitFor(() => expect(container.querySelector('[data-chip="model"] select')).toBeTruthy());
   act(() => useTermStore.setState({ runtimes: { s: { status: "running", agent: "antigravity", agentState: "working" } } }));
   act(() => eventCallback({ type: "turnStarted", startedAt: Date.now() }));
   for (const chip of ["model", "effort", "permission"]) {
-    expect(container.querySelector<HTMLButtonElement>(`[data-chip="${chip}"] select, [data-chip="${chip}"] button`)?.disabled).toBe(true);
+    expect(container.querySelector<HTMLButtonElement>(`[data-chip="${chip}"] select, [data-chip="${chip}"] button`)?.disabled).toBe(false);
   }
-  expect(screen.queryByRole("button", { name: "Steer" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Steer" })).toBeTruthy();
   const input = container.querySelector<HTMLTextAreaElement>(".sv-composer textarea")!;
   fireEvent.change(input, { target: { value: "Next request" } });
   fireEvent.keyDown(input, { key: "Enter", altKey: true });
-  await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_send", expect.objectContaining({ behavior: "queue", text: "Next request" })));
-  act(() => useTermStore.setState({ runtimes: { s: { status: "running", agent: "antigravity", agentState: "waiting" } } }));
-  act(() => eventCallback({ type: "turnCompleted" }));
-  expect(container.querySelector<HTMLButtonElement>('[data-chip="model"] select')?.disabled).toBe(false);
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_send", expect.objectContaining({ behavior: "steer", text: "Next request" })));
 });
 
-it("Antigravity rejects dropped images with a clear text-only notice", async () => {
+it("accepts dropped images in the Antigravity conversation view", async () => {
   const { container } = await mountPane("antigravity", null);
   fireEvent.drop(container.querySelector(".sv-composer")!, { dataTransfer: { files: [new File(["png"], "example.png", { type: "image/png" })] } });
-  await screen.findByText("Antigravity conversation view currently supports text messages only.");
-  expect(container.querySelector(".sv-attach-thumb")).toBeNull();
+  await waitFor(() => expect(container.querySelector(".sv-attach-thumb")).toBeTruthy());
+  expect(screen.queryByText("Antigravity conversation view currently supports text messages only.")).toBeNull();
   expect(container.querySelector<HTMLTextAreaElement>(".sv-composer textarea")?.placeholder).toBe("Message Antigravity, or use @files");
+});
+
+it("exposes only the five-mode permission control for Antigravity across reset and switches per-model effort levels together", async () => {
+  const previous = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    if (command === "chat_snapshot") {
+      return Promise.resolve({
+        submissionReceipts: true,
+        running: false,
+        model: "gemini-4-argon",
+        effort: "high",
+        selection: { model: "gemini-4-argon", effort: "high" },
+        collaborationMode: "default",
+        collaborationModes: [
+          { mode: "default", name: "Default" },
+          { mode: "plan", name: "Plan" },
+        ],
+        mode: "default",
+        rows: [],
+        queue: [],
+        permissions: [],
+        commands: [],
+        configKeys: [],
+      }) as Promise<never>;
+    }
+    if (command === "chat_models") {
+      return Promise.resolve([
+        { id: "gemini-4-argon", label: "Gemini 4 Argon", description: "", effortLevels: ["low", "medium", "high"] },
+        { id: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen", description: "", effortLevels: ["low", "medium", "high", "xhigh"] },
+        { id: "gemini-pro-orchestrator", label: "Orchestrator (Carbon)", description: "", effortLevels: [] },
+      ]) as Promise<never>;
+    }
+    return previous(command, args);
+  });
+  useTermStore.setState({
+    chatEffortByModel: { "antigravity:gemini-4-hydrogen": "xhigh" },
+  });
+  await mountPane("antigravity", "gemini-4-argon");
+
+  expect(screen.queryByRole("combobox", { name: "Collaboration mode" })).toBeNull();
+  const permissionChip = screen.getByRole("combobox", { name: "Permission mode" }) as HTMLSelectElement;
+  await waitFor(() => expect(permissionChip.disabled).toBe(false));
+  expect(permissionChip.value).toBe("default");
+  expect(Array.from(permissionChip.options).map((o) => o.value)).toEqual(["plan", "default", "acceptEdits", "auto", "bypassPermissions"]);
+  act(() => {
+    eventCallback({ type: "collaborationModes", modes: [{ mode: "default", name: "Default" }, { mode: "plan", name: "Plan" }], mode: "plan" });
+    eventCallback({ type: "reset" });
+  });
+  expect(screen.queryByRole("combobox", { name: "Collaboration mode" })).toBeNull();
+  const resetPermissionChip = screen.getByRole("combobox", { name: "Permission mode" }) as HTMLSelectElement;
+  expect(resetPermissionChip.disabled).toBe(false);
+  expect(resetPermissionChip.value).toBe("default");
+  expect(Array.from(resetPermissionChip.options).map((o) => o.value)).toEqual(["plan", "default", "acceptEdits", "auto", "bypassPermissions"]);
+
+  const effortChip = screen.getByRole("combobox", { name: "Thinking effort" }) as HTMLSelectElement;
+  expect(effortChip.value).toBe("high");
+  expect(Array.from(effortChip.options).map((o) => o.value)).toEqual(["", "low", "medium", "high"]);
+
+  const modelChip = screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement;
+  fireEvent.change(modelChip, { target: { value: "gemini-4-hydrogen" } });
+  await act(async () => complete());
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_set_effort", { sessionId: "s", effort: "xhigh" }));
+  expect(effortChip.value).toBe("xhigh");
+  expect(Array.from(effortChip.options).map((o) => o.value)).toEqual(["", "low", "medium", "high", "xhigh"]);
+
+  fireEvent.change(modelChip, { target: { value: "gemini-pro-orchestrator" } });
+  await act(async () => complete());
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_set_effort", { sessionId: "s", effort: undefined }));
+  expect(effortChip.value).toBe("");
+  expect(Array.from(effortChip.options).map((o) => o.value)).toEqual([""]);
 });
 
 function mockReadiness(readiness: { installed: boolean; signedIn?: boolean | null }) {
@@ -2141,4 +2261,84 @@ it("puts a refused message and its images back ahead of what is being typed", as
   act(() => eventCallback({ type: "unsent", text: "First message", images: [{ mimeType: "image/png", data: "AAAA" }] }));
   await waitFor(() => expect(composer().value).toBe("First message\n\nLater thought"));
   expect(document.querySelectorAll(".sv-attach-item").length).toBe(1);
+});
+
+it("drops a queued submission the backend returns after the handshake", async () => {
+  await mountPane("claude");
+  const images = [{ mimeType: "image/png", data: "AAAA" }];
+  useOutbox.setState({ sessions: { s: [{ id: "msg-unsent", text: "First message", images, behavior: "queue", status: "queued" }] } });
+  act(() => eventCallback({ type: "unsent", id: "msg-unsent", text: "First message", images }));
+  await waitFor(() => expect(useOutbox.getState().sessions.s ?? []).toHaveLength(0));
+  expect(composer().value).toBe("First message");
+  expect(document.querySelectorAll(".sv-attach-item").length).toBe(1);
+});
+
+it("lists Antigravity background tasks in the Tasks chip without Stop or Move-to-background actions", async () => {
+  snapshotOverrides = { running: false };
+  await mountPane("antigravity", null);
+  const tasks = screen.getByRole("button", { name: "Tasks" });
+  expect(tasks.hasAttribute("disabled")).toBe(true);
+  act(() => eventCallback({ type: "process", pid: 123, startedAt: 100 }));
+  expect(tasks.hasAttribute("disabled")).toBe(false);
+  act(() => eventCallback({ type: "turnStarted", startedAt: 100 }));
+  act(() => eventCallback({ type: "extras", extras: { backgroundTasks: [
+    { task_id: "task-1", task_type: "local_bash", description: "cargo check", can_stop: false },
+  ] } }));
+  expect(tasks.textContent).toContain("1");
+  fireEvent.click(tasks);
+  expect(screen.getByText("cargo check")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  expect(screen.queryByText("Move the running work to the background")).toBeNull();
+});
+
+it("explains terminal-view rewind on Antigravity message actions and guides /rewind to terminal view", async () => {
+  snapshotOverrides = {
+    running: false,
+    rewindScopes: [],
+    rows: [{ kind: "user", id: "agy-u1", text: "Explain this change" }],
+  };
+  const { container } = await mountPane("antigravity", null);
+
+  const rewindBtn = screen.getByRole("button", { name: "Rewind from here" }) as HTMLButtonElement;
+  const editBtn = screen.getByRole("button", { name: "Edit" }) as HTMLButtonElement;
+  expect(rewindBtn.disabled).toBe(false);
+  expect(editBtn.disabled).toBe(false);
+  expect(rewindBtn.title).toContain("/rewind");
+  expect(editBtn.title).toContain("/rewind");
+
+  fireEvent.click(rewindBtn);
+  const dialog = screen.getByRole("dialog", { name: "Rewind in terminal view" });
+  expect(dialog.textContent).toContain("/rewind");
+  fireEvent.click(screen.getByRole("button", { name: "Switch to terminal view" }));
+  expect(switchTo).toHaveBeenCalledWith("tui");
+  expect(screen.queryByRole("dialog", { name: "Rewind in terminal view" })).toBeNull();
+
+  // Completion lists /rewind and submitting it opens the composer-lane guide without calling chat_send.
+  switchTo.mockReset();
+  const input = container.querySelector<HTMLTextAreaElement>(".sv-box textarea")!;
+  fireEvent.change(input, { target: { value: "/rew", selectionStart: 4 } });
+  expect(screen.getByRole("option", { name: /\/rewind/ })).toBeTruthy();
+
+  fireEvent.change(input, { target: { value: "/rewind", selectionStart: 7 } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(input.value).toBe("");
+  expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "chat_send")).toBe(false);
+  const guideCard = screen.getByRole("region", { name: "Rewind in terminal view" });
+  expect(guideCard.textContent).toContain("/rewind");
+  fireEvent.click(guideCard.querySelector("button.sv-allow")!);
+  expect(switchTo).toHaveBeenCalledWith("tui");
+  expect(screen.queryByRole("region", { name: "Rewind in terminal view" })).toBeNull();
+});
+
+it("shows the Antigravity /rewind guide on mobile without offering a terminal switch button", async () => {
+  snapshotOverrides = { running: false, rewindScopes: [], rows: [] };
+  const { container } = await mountPane("antigravity", null, true);
+  const input = container.querySelector<HTMLTextAreaElement>(".sv-box textarea")!;
+  fireEvent.change(input, { target: { value: "/rewind", selectionStart: 7 } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  const guideCard = screen.getByRole("region", { name: "Rewind in terminal view" });
+  expect(guideCard.textContent).toContain("/rewind");
+  expect(screen.queryByRole("button", { name: "Switch to terminal view" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  expect(screen.queryByRole("region", { name: "Rewind in terminal view" })).toBeNull();
 });

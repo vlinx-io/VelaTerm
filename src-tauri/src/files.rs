@@ -365,6 +365,91 @@ pub fn delete_path(path: &str) -> Result<(), String> {
     }
 }
 
+/// Copies files and folders dropped from the OS file manager into `dir`, returning the paths created.
+///
+/// Nothing is ever overwritten: a name already taken in `dir` gets a ` (2)`, ` (3)`… suffix before its
+/// extension, the way file managers keep both. A source that already sits directly in `dir` is skipped, since
+/// dragging a file back onto its own folder is almost always a slip rather than a request for a duplicate.
+/// Copying stops at the first failure; whatever was copied before it stays and is listed in the error.
+pub fn copy_into_dir(sources: &[String], dir: &str) -> Result<Vec<String>, String> {
+    use std::path::Path;
+    let dir_path = Path::new(dir);
+    if !dir_path.is_dir() {
+        return Err("The destination folder does not exist".to_string());
+    }
+    let dir_real = dir_path.canonicalize().map_err(|e| format!("Failed to read destination folder: {e}"))?;
+    let mut created = Vec::new();
+    for source in sources {
+        let src = Path::new(source);
+        let result = (|| {
+            let meta = std::fs::symlink_metadata(src).map_err(|e| format!("Failed to read {source}: {e}"))?;
+            let name = src.file_name().ok_or_else(|| format!("Cannot copy {source}"))?;
+            let src_real = src.canonicalize().unwrap_or_else(|_| src.to_path_buf());
+            if src_real.parent() == Some(dir_real.as_path()) {
+                return Ok(None);
+            }
+            if meta.is_dir() && dir_real.starts_with(&src_real) {
+                return Err("Cannot copy a folder into itself".to_string());
+            }
+            let dest = unique_destination(dir_path, name);
+            copy_entry(src, &dest, &meta).map_err(|e| format!("Failed to copy {source}: {e}"))?;
+            Ok(Some(dest.to_string_lossy().into_owned()))
+        })();
+        match result {
+            Ok(Some(dest)) => created.push(dest),
+            Ok(None) => {}
+            Err(e) if created.is_empty() => return Err(e),
+            Err(e) => return Err(format!("{e} (copied before the failure: {})", created.join(", "))),
+        }
+    }
+    Ok(created)
+}
+
+/// First free path for `name` in `dir`: the name itself, then `stem (2).ext`, `stem (3).ext`, and so on.
+fn unique_destination(dir: &std::path::Path, name: &std::ffi::OsStr) -> std::path::PathBuf {
+    let first = dir.join(name);
+    if std::fs::symlink_metadata(&first).is_err() {
+        return first;
+    }
+    let as_path = std::path::Path::new(name);
+    let stem = as_path.file_stem().unwrap_or(name).to_string_lossy();
+    let ext = as_path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    (2u32..)
+        .map(|n| dir.join(format!("{stem} ({n}){ext}")))
+        .find(|p| std::fs::symlink_metadata(p).is_err())
+        .expect("an unused name exists")
+}
+
+/// Copies one file, folder (recursively), or symlink to a destination that must not exist yet.
+fn copy_entry(src: &std::path::Path, dest: &std::path::Path, meta: &std::fs::Metadata) -> std::io::Result<()> {
+    if meta.file_type().is_symlink() {
+        // Recreate the link itself on Unix; Windows needs privileges for that, so copy what it points to.
+        #[cfg(unix)]
+        return std::os::unix::fs::symlink(std::fs::read_link(src)?, dest);
+        #[cfg(not(unix))]
+        {
+            let target = std::fs::metadata(src)?;
+            return copy_entry_followed(src, dest, &target);
+        }
+    }
+    copy_entry_followed(src, dest, meta)
+}
+
+fn copy_entry_followed(src: &std::path::Path, dest: &std::path::Path, meta: &std::fs::Metadata) -> std::io::Result<()> {
+    if meta.is_dir() {
+        std::fs::create_dir(dest)?;
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            copy_entry(&entry.path(), &dest.join(entry.file_name()), &entry.metadata()?)?;
+        }
+        return Ok(());
+    }
+    // create_new refuses an existing destination, so a file that appeared since the name was chosen survives.
+    let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(dest)?;
+    std::io::copy(&mut std::fs::File::open(src)?, &mut out)?;
+    std::fs::set_permissions(dest, meta.permissions())
+}
+
 // Document editor read/write/stat.
 
 /// Full editor-read limit. Larger files load only the first `EDIT_MAX` bytes as read-only to protect memory/UI.
@@ -1082,6 +1167,40 @@ mod tests {
         assert!(err.contains("already exists"), "got: {err}");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "keep", "an existing name must not be overwritten");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn copy_into_dir_keeps_both_copies_folders_and_skips_own_folder() {
+        use super::copy_into_dir;
+        let base = std::env::temp_dir().join(format!("vlx-copy-into-{}", uuid::Uuid::new_v4()));
+        let src = base.join("src");
+        let dest = base.join("dest");
+        std::fs::create_dir_all(src.join("folder/inner")).unwrap();
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(src.join("a.txt"), "new").unwrap();
+        std::fs::write(src.join("folder/inner/b.txt"), "deep").unwrap();
+        std::fs::write(dest.join("a.txt"), "old").unwrap();
+        std::fs::write(dest.join("here.txt"), "here").unwrap();
+        let s = |p: std::path::PathBuf| p.to_string_lossy().to_string();
+
+        let created = copy_into_dir(
+            &[s(src.join("a.txt")), s(src.join("folder")), s(dest.join("here.txt"))],
+            &s(dest.clone()),
+        )
+        .expect("copy should succeed");
+        // A taken name gets a suffix and the existing file is untouched.
+        assert_eq!(std::fs::read_to_string(dest.join("a.txt")).unwrap(), "old");
+        assert_eq!(std::fs::read_to_string(dest.join("a (2).txt")).unwrap(), "new");
+        // Folders copy recursively.
+        assert_eq!(std::fs::read_to_string(dest.join("folder/inner/b.txt")).unwrap(), "deep");
+        // A file already in the destination folder is skipped, not duplicated.
+        assert!(!dest.join("here (2).txt").exists());
+        assert_eq!(created.len(), 2, "got: {created:?}");
+
+        // A folder cannot be copied into its own subtree.
+        let err = copy_into_dir(&[s(src.clone())], &s(src.join("folder"))).unwrap_err();
+        assert!(err.contains("into itself"), "got: {err}");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

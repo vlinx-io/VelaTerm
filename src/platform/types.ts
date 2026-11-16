@@ -82,11 +82,17 @@ export interface DialogCapability {
   /** Open the system file picker; return the selected absolute path, or null on cancel or without a native picker. */
   pickFile(opts?: PickFileOptions): Promise<string | null>;
   /**
-   * Absolute paths of the folders in an external file drop; files are left out. Call synchronously from the
-   * `drop` handler, because the DataTransfer is emptied once the handler returns. Returns an empty list where
-   * local paths are unavailable, as in browsers and remote-connection windows.
+   * Absolute paths of the files and folders in an external file drop. Call synchronously from the `drop`
+   * handler, because the DataTransfer is emptied once the handler returns. Returns an empty list where local
+   * paths are unavailable, as in browsers and remote-connection windows.
    */
-  droppedFolders(transfer: DataTransfer): Promise<string[]>;
+  droppedPaths(transfer: DataTransfer): Promise<DroppedPath[]>;
+}
+
+/** One entry of an external file drop, as returned by `droppedPaths`. */
+export interface DroppedPath {
+  path: string;
+  isDir: boolean;
 }
 
 /** External-opening capability using default applications or the file manager. */
@@ -269,6 +275,8 @@ export interface UpdateHandle {
   downloadAndInstall(onEvent?: (event: UpdateDownloadEvent) => void): Promise<void>;
   /** Release the handle when the prompt is dismissed or replaced. */
   close(): Promise<void>;
+  /** This copy cannot install updates itself (the Windows portable zip); offer the download page instead. */
+  manualOnly?: boolean;
 }
 
 /**

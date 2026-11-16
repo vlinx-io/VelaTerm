@@ -20,6 +20,7 @@ import {
   ToolRunCard,
   TurnHead,
   WakeRow,
+  type RewindGuide,
 } from "./rows";
 import type { DisplayRow, TurnFold } from "./toolRuns";
 import { DeferredBody } from "./DeferredContents";
@@ -42,6 +43,7 @@ export const Entry = memo(function Entry({
   onRewind,
   rewindDisabledReason,
   rewindScopes,
+  rewindGuide,
   rewindRequest,
   onRewindRequestHandled,
   onCancelShell,
@@ -57,6 +59,7 @@ export const Entry = memo(function Entry({
   onRewind?: (rowId: string, scope: ChatRewindScope, replacement?: MessageReplacement) => void;
   rewindDisabledReason?: string;
   rewindScopes: ChatRewindScope[];
+  rewindGuide?: RewindGuide;
   rewindRequest: { rowId: string; token: number } | null;
   onRewindRequestHandled: (token: number) => void;
   onCancelShell?: (rowId: string) => void;
@@ -102,6 +105,7 @@ export const Entry = memo(function Entry({
         onRewind={onRewind}
         rewindDisabledReason={rewindDisabledReason}
         rewindScopes={rewindScopes}
+        rewindGuide={rewindGuide}
         rewindRequest={rewindRequest}
         onRewindRequestHandled={onRewindRequestHandled}
         onCancelShell={onCancelShell}
@@ -121,6 +125,7 @@ export function Row({
   onRewind,
   rewindDisabledReason,
   rewindScopes,
+  rewindGuide,
   rewindRequest,
   onRewindRequestHandled,
   onCancelShell,
@@ -135,6 +140,7 @@ export function Row({
   onRewind?: (rowId: string, scope: ChatRewindScope, replacement?: MessageReplacement) => void;
   rewindDisabledReason?: string;
   rewindScopes?: ChatRewindScope[];
+  rewindGuide?: RewindGuide;
   rewindRequest?: { rowId: string; token: number } | null;
   onRewindRequestHandled?: (token: number) => void;
   /** Stop a running shell command; the row knows only its own id. */
@@ -207,6 +213,7 @@ export function Row({
           rewindDisabledReason={rewindDisabledReason || (rewindScopes?.length ? undefined : t("chat.rewind.unsupported"))}
           editDisabledReason={rewindDisabledReason || (rewindScopes?.includes("conversation") ? undefined : t("chat.rewind.unsupported"))}
           rewindScopes={rewindScopes}
+          rewindGuide={rewindGuide}
           openRewindToken={rewindRequest?.rowId === row.id ? rewindRequest.token : undefined}
           onRewindMenuOpened={onRewindRequestHandled}
         />

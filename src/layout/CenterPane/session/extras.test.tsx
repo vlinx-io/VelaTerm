@@ -187,3 +187,11 @@ it("offers no Stop for a finished task, only its status", () => {
   fireEvent.click(screen.getByText("npm test"));
   expect(screen.getByText("Completed", { selector: ".sv-task-row-status" })).toBeTruthy();
 });
+
+it("hides the move-to-background action when onBackgroundAll is omitted even while busy", () => {
+  const { rerender } = render(<TasksChip sessionId="s" tasks={tasks} busy={true} onStop={vi.fn()} onOpen={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: /Tasks/ }));
+  expect(screen.queryByText("Move the running work to the background")).toBeNull();
+  rerender(<TasksChip sessionId="s" tasks={tasks} busy={true} onStop={vi.fn()} onOpen={vi.fn()} onBackgroundAll={vi.fn()} />);
+  expect(screen.getByText("Move the running work to the background")).toBeTruthy();
+});

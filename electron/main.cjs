@@ -769,7 +769,14 @@ function buildMenu() {
 // download replaces the file the app was launched from, then the app restarts from it. Other installations
 // (unpacked builds, macOS, Windows) report updates as unsupported, and the page hides the feature.
 
-const UPDATE_ENDPOINT = "https://velaterm.com/api/updater";
+// Update service and release mirror per server region (see src/ipc/serverRegion.ts). The China mirror serves
+// the same manifest and the same signed files under the same keys; only the hosts differ.
+const UPDATE_ENDPOINTS = {
+  global: "https://velaterm.com/api/updater",
+  cn: "https://velaterm.cn/api/updater",
+};
+const GLOBAL_DL = "https://dl.velaterm.com/";
+const CHINA_DL = "https://dl.velaterm.cn/";
 
 /** Manifest of the release found by the last check; the renderer never supplies the URL or signature. */
 let pendingUpdate = null;
@@ -792,11 +799,13 @@ function compareVersions(a, b) {
 }
 
 /** Ask the update service for a newer release. Returns what the page shows, or null when up to date. */
-async function checkForUpdate(headers) {
+async function checkForUpdate(headers, region) {
   if (!updaterSupported()) throw new Error("Automatic updates are not available for this installation.");
+  const china = region === "cn";
   const arch = process.arch === "arm64" ? "aarch64" : "x86_64";
   const current = app.getVersion();
-  const url = `${UPDATE_ENDPOINT}/linux/${arch}?current_version=${encodeURIComponent(current)}`;
+  const endpoint = china ? UPDATE_ENDPOINTS.cn : UPDATE_ENDPOINTS.global;
+  const url = `${endpoint}/linux/${arch}?current_version=${encodeURIComponent(current)}`;
   // Forward only update telemetry headers and identify this shell's updater to the service.
   const installId = headers && typeof headers["X-Install-Id"] === "string" ? headers["X-Install-Id"] : "";
   const language = headers && typeof headers["X-App-Language"] === "string" ? headers["X-App-Language"] : "";
@@ -822,6 +831,8 @@ async function checkForUpdate(headers) {
     pendingUpdate = null;
     return null;
   }
+  // The manifest lists dl.velaterm.com; download the same signed file from the selected region's mirror.
+  if (china && manifest.url.startsWith(GLOBAL_DL)) manifest.url = CHINA_DL + manifest.url.slice(GLOBAL_DL.length);
   pendingUpdate = manifest;
   return { version: manifest.version, currentVersion: current, body: manifest.notes ?? "", rawJson: manifest };
 }
@@ -884,7 +895,7 @@ async function downloadAndInstallUpdate(sender) {
 }
 
 function registerUpdaterIpc() {
-  ipcMain.handle("vlx:updater:check", (_e, headers) => checkForUpdate(headers));
+  ipcMain.handle("vlx:updater:check", (_e, headers, region) => checkForUpdate(headers, region));
   ipcMain.handle("vlx:updater:downloadAndInstall", (event) => downloadAndInstallUpdate(event.sender));
   ipcMain.handle("vlx:updater:relaunch", () => {
     // The user asked for the restart, so it skips the quit confirmation.

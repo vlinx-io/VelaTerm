@@ -7,22 +7,27 @@
 //!
 //! Images pasted into the task go with it: a conversation receives them with its first message, and a
 //! terminal session gets uploaded copies whose paths are added to its first task, as a terminal paste does.
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { AgentPermissionSelect } from "../../components/AgentPermissionSelect";
 import Icons from "../../components/Icons";
-import { LaunchField, ModelEffortFields } from "../../components/LaunchFields";
+import { LaunchField, ModelEffortFields, buildEffortChips, useLaunchModels } from "../../components/LaunchFields";
 import Select from "../../components/Select";
 import { useTaskImages } from "../../components/useTaskImages";
 import { genId } from "../../genId";
 import { useGitBranchInfo } from "../../hooks/useGitBranch";
 import { useT } from "../../i18n";
-import { createAgentSession, prepareAgentSession, type AgentSessionContext, type LaunchOption } from "../../ipc/launch";
+import {
+  createAgentSession, prepareAgentSession, type AgentSessionContext, type LaunchOption,
+} from "../../ipc/launch";
 import { uploadImage } from "../../ipc/transport";
 import { setCollapsed } from "../../ipc/tree";
 import { defaultEngineFor } from "../../store/settings";
 import { extOf } from "../../terminal/imageInput";
 import { useTermStore, type NewSessionTab } from "../../store/termStore";
-import { hasTerminalInterface, isVirtualProject, supportsChatEngine, type AgentPreset, type SessionEngine, type SessionKind } from "../../types";
+import {
+  hasTerminalInterface, isVirtualProject, supportsChatEngine, supportsPermissionToggle,
+  type AgentPreset, type SessionEngine, type SessionKind,
+} from "../../types";
 import { dataUrl, type Attachment } from "../CenterPane/session/attachments";
 import { PresetIcon } from "../agentPresetIcon";
 import { agentChoices, recentAgentChoices, recentProjectId, rememberAgentChoice, rememberProject, type AgentChoice } from "../NewAgentSession/choices";
@@ -58,6 +63,102 @@ async function withImagePaths(task: string, images: Attachment[], kind: SessionK
 const agentGlyph = (choice: AgentChoice | undefined, size: number) =>
   choice?.preset ? <PresetIcon preset={choice.preset} size={size} /> : kindIconEl(choice?.kind ?? "claude", size);
 
+/** Split an agent launch argument string into shell tokens using single/double quote and backslash rules. */
+function splitArgs(text?: string | null): string[] {
+  if (!text?.trim()) return [];
+  const out: string[] = [];
+  let cur = "";
+  let inToken = false;
+  let quote: "'" | '"' | null = null;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quote === "'") {
+      if (ch === "'") quote = null;
+      else cur += ch;
+      inToken = true;
+      continue;
+    }
+    if (quote === '"') {
+      if (ch === '"') quote = null;
+      else if (ch === "\\" && i + 1 < text.length) cur += text[++i];
+      else cur += ch;
+      inToken = true;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      inToken = true;
+    } else if (ch === "\\" && i + 1 < text.length) {
+      cur += text[++i];
+      inToken = true;
+    } else if (/\s/.test(ch)) {
+      if (inToken) { out.push(cur); cur = ""; inToken = false; }
+    } else {
+      cur += ch;
+      inToken = true;
+    }
+  }
+  if (inToken) out.push(cur);
+  return out;
+}
+
+/** Mirror backend `session_settings::from_args` so New Session prefills what preset/default args set. */
+function selectionFromArgs(kind: SessionKind, text?: string | null): { model: string; effort: string } {
+  const args = splitArgs(text);
+  let model = "";
+  let effort = "";
+  const clean = (v?: string) => {
+    const t = v?.trim() ?? "";
+    return t && !t.startsWith("-") ? t : "";
+  };
+  for (let i = 0; i < args.length; ) {
+    const eq = args[i].indexOf("=");
+    const flag = eq >= 0 ? args[i].slice(0, eq) : args[i];
+    const inline = eq >= 0 ? args[i].slice(eq + 1) : undefined;
+    const value = inline !== undefined ? inline : args[i + 1];
+    let known = false;
+    if (flag === "--model" || flag === "-m") {
+      model = clean(value);
+      known = true;
+    } else if (flag === "--effort" && (kind === "claude" || kind === "antigravity")) {
+      const next = clean(value);
+      effort = next && next !== "auto" ? next : "";
+      known = true;
+    } else if (flag === "--variant" && (kind === "opencode" || kind === "deepseek")) {
+      const next = clean(value);
+      effort = next && next !== "default" ? next : "";
+      known = true;
+    } else if (flag === "--thinking" && (kind === "pi" || kind === "omp")) {
+      effort = clean(value);
+      known = true;
+    } else if ((flag === "-c" || flag === "--config") && kind === "codex" && value) {
+      const sep = value.indexOf("=");
+      if (sep >= 0) {
+        const k = value.slice(0, sep).trim();
+        let v = value.slice(sep + 1).trim();
+        if (k === "model" || k === "model_reasoning_effort") {
+          try {
+            const parsed = JSON.parse(v);
+            if (typeof parsed === "string") v = parsed;
+          } catch {
+            if (v.startsWith("'") && v.endsWith("'") && v.length >= 2) v = v.slice(1, -1);
+          }
+          const next = clean(v);
+          if (k === "model") model = next;
+          else effort = next;
+        }
+      }
+      known = true;
+    }
+    i += known && inline === undefined ? 2 : 1;
+  }
+  return { model, effort };
+}
+
+function effortKey(kind: SessionKind, model: string): string {
+  return `${kind}:${model}`;
+}
+
 export function NewSessionView({ tab, hidden }: { tab: NewSessionTab; hidden: boolean }) {
   const t = useT();
   const id = useId();
@@ -67,6 +168,9 @@ export function NewSessionView({ tab, hidden }: { tab: NewSessionTab; hidden: bo
   const groups = useTermStore((s) => s.groups);
   const sessions = useTermStore((s) => s.sessions);
   const agentDefaults = useTermStore((s) => s.agentDefaults);
+  const chatModel = useTermStore((s) => s.chatModel);
+  const chatModelByKind = useTermStore((s) => s.chatModelByKind);
+  const chatEffortByModel = useTermStore((s) => s.chatEffortByModel);
   const project = projects.find((p) => p.id === tab.projectId);
   const sessionType = sessionTypeOf(tab.projectId);
   // Fixed collections are not projects to pick; Tasks and Chat are reached through the type switch.
@@ -92,8 +196,8 @@ export function NewSessionView({ tab, hidden }: { tab: NewSessionTab; hidden: bo
   const [revision, setRevision] = useState(0);
   const [choiceId, setChoiceId] = useState("");
   const [engine, setEngine] = useState<SessionEngine | null>(null);
-  const [model, setModel] = useState("");
-  const [effort, setEffort] = useState("");
+  const [model, setModel] = useState<string | null>(null);
+  const [effort, setEffort] = useState<string | null>(null);
   const [permission, setPermission] = useState<string | null>(null);
   const [worktree, setWorktree] = useState(false);
   const [worktreeName, setWorktreeName] = useState("");
@@ -150,11 +254,61 @@ export function NewSessionView({ tab, hidden }: { tab: NewSessionTab; hidden: bo
   const cwd = parent?.cwd || project?.rootPath || null;
   const git = useGitBranchInfo(cwd, !hidden);
   const location = (ready ? prepared.locationNames : []).join(" / ");
+  const execPath = choice?.preset?.execPath || null;
+  const models = useLaunchModels(spec?.id, { cwd, ...(execPath ? { execPath } : {}) });
+  const catalog = models.catalog;
+  const modelsFailed = Boolean(models.current?.error);
+
+  const argsText = choice?.preset?.agentArgs ?? (kind ? agentDefaults[kind]?.args : undefined);
+  const argsSelection = useMemo(
+    () => (kind ? selectionFromArgs(kind, argsText) : { model: "", effort: "" }),
+    [kind, argsText],
+  );
+  const rememberedModel = kind ? (chatModelByKind[kind] ?? (kind === "claude" ? chatModel : "")) : "";
+  const defaultModel = argsSelection.model || rememberedModel;
+  const modelValue = model !== null ? model : defaultModel;
+
+  const rememberedEffortFor = useCallback((targetModel: string) => (
+    kind
+      ? (chatEffortByModel[effortKey(kind, targetModel)] ?? (kind === "claude" ? chatEffortByModel[targetModel] : "") ?? "")
+      : ""
+  ), [kind, chatEffortByModel]);
+
+  const validEffortsFor = useCallback((targetModel: string) => {
+    if (!kind || !spec) return new Set<string>();
+    const chips = buildEffortChips(t, kind, spec, catalog, modelsFailed, targetModel, true);
+    return new Set(chips.map((o) => o.value));
+  }, [kind, spec, catalog, modelsFailed, t]);
+
+  const resolveEffortForModel = useCallback((targetModel: string) => {
+    const valid = validEffortsFor(targetModel);
+    const candidate = rememberedEffortFor(targetModel)
+      || (targetModel === argsSelection.model ? argsSelection.effort : "");
+    return candidate && valid.has(candidate) ? candidate : "";
+  }, [validEffortsFor, rememberedEffortFor, argsSelection.model, argsSelection.effort]);
+
+  const validEffortValues = useMemo(() => validEffortsFor(modelValue), [validEffortsFor, modelValue]);
+
+  const rawEffort = effort !== null
+    ? effort
+    : model === null
+      ? (argsSelection.effort || rememberedEffortFor(modelValue))
+      : resolveEffortForModel(modelValue);
+  const effortValue = rawEffort && validEffortValues.has(rawEffort) ? rawEffort : "";
+
+  const savedDefaultTag = t("chat.savedModelDefault");
+
+  const rememberPair = (modelId: string, level: string) => {
+    if (!kind) return;
+    const st = useTermStore.getState();
+    st.setChatModel(kind, modelId);
+    st.setChatEffort(effortKey(kind, modelId), level);
+  };
 
   const pickAgent = (next: string) => {
     if (next === choice?.id) return;
     // Model, effort, permission and view belong to one agent; another agent starts from its own defaults.
-    setChoiceId(next); setEngine(null); setModel(""); setEffort(""); setPermission(null); setError("");
+    setChoiceId(next); setEngine(null); setModel(null); setEffort(null); setPermission(null); setError("");
   };
   // After a create, import or clone started here, the project it produced is selected in this tab: import
   // and create reveal the project (also when the folder was already a project), clone only adds it to the
@@ -198,8 +352,8 @@ export function NewSessionView({ tab, hidden }: { tab: NewSessionTab; hidden: bo
       context,
       ...(choice.preset ? { presetId: choice.preset.id } : { kind: choice.kind }),
       ...(canChat && canTui && sessionType !== "chat" ? { engine: view } : {}),
-      ...(model.trim() ? { model: model.trim() } : {}),
-      ...(effort.trim() ? { effort: effort.trim() } : {}),
+      ...(model !== null ? { model: modelValue.trim() } : {}),
+      ...(model !== null || effort !== null ? { effort: effortValue.trim() } : {}),
       ...(permission ? { permissionMode: permission } : {}),
       ...(worktree && worktreeAllowed ? { worktree: true, ...(worktreeName.trim() ? { worktreeName: worktreeName.trim() } : {}) } : {}),
       ...(task ? { prompt: task } : {}),
@@ -232,6 +386,8 @@ export function NewSessionView({ tab, hidden }: { tab: NewSessionTab; hidden: bo
       rememberProject(session.projectId);
       store.openSession(session.id);
       useTermStore.getState().closeTab(tab.id);
+      // The sidebar switches to the section the session was created in and scrolls to its row.
+      useTermStore.getState().revealSession(session.id);
       void setCollapsed(session.parentSessionId ? "session" : session.groupId ? "group" : "project",
         session.parentSessionId ?? session.groupId ?? session.projectId, false)
         .catch(() => {}).then(() => useTermStore.getState().loadTree());
@@ -316,11 +472,39 @@ export function NewSessionView({ tab, hidden }: { tab: NewSessionTab; hidden: bo
                   }))}
                   onChange={pickAgent} />
               </LaunchField>
-              {spec && <ModelEffortFields key={choice?.id} spec={spec} model={model} effort={effort} disabled={disabled}
-                context={{ cwd }} onChange={(nextModel, nextEffort) => { setModel(nextModel); setEffort(nextEffort); }} />}
-              {kind && <LaunchField label={t("info.permission")}>
-                <AgentPermissionSelect key={choice?.id} kind={kind} value={permissionValue}
-                  onChange={(mode) => setPermission(mode)} />
+              {spec && kind && (
+                <ModelEffortFields
+                  key={choice?.id ?? ""}
+                  spec={spec}
+                  models={models}
+                  model={modelValue}
+                  effort={effortValue}
+                  disabled={disabled}
+                  conversationEfforts
+                  defaultModel={rememberedModel}
+                  defaultEffortForModel={rememberedEffortFor}
+                  resolveEffortForModel={resolveEffortForModel}
+                  onKeep={rememberPair}
+                  onChange={() => {}}
+                  onModelCommit={(nextModel) => {
+                    setModel(nextModel);
+                    setEffort(resolveEffortForModel(nextModel));
+                  }}
+                  onEffortCommit={(nextEffort) => setEffort(nextEffort)}
+                />
+              )}
+              {kind && supportsPermissionToggle(kind) && <LaunchField label={t("info.permission")}>
+                <AgentPermissionSelect
+                  key={choice?.id}
+                  kind={kind}
+                  width="100%"
+                  disabled={disabled}
+                  value={permissionValue}
+                  defaultMode={agentDefaults[kind]?.permissionMode ?? "default"}
+                  defaultLabel={savedDefaultTag}
+                  keepLabel={t("chat.keepChoice")}
+                  onChange={(mode) => setPermission(mode)}
+                />
               </LaunchField>}
             </div>
             {loadError && <div className="nsv-notice" role="alert">

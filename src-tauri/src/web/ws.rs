@@ -297,11 +297,15 @@ async fn handle_socket(
         crate::host::SETTINGS_CHANGED,
         crate::session_state::STATE_EVENT,
     ];
-    let full_events: [&str; 18] = [
+    let full_events: [&str; 20] = [
         "spawn://request",
         "spawn://resolved",
         "plan-execute://proposal",
         "view://request",
+        // A session's agent submitted actions with `vapp`; that session's view shows them for confirmation.
+        crate::assist::REQUEST_EVENT,
+        // Some of those actions were decided, so every other view of that session drops them too.
+        crate::assist::CHANGED_EVENT,
         "knowledge://changed",
         crate::host::TREE_CHANGED,
         crate::host::PRESETS_CHANGED,

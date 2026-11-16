@@ -2,7 +2,7 @@
 
 Created: 2026-07-09 20:41
 
-Updated: 2026-09-30 21:12
+Updated: 2026-11-14 12:26
 
 > This chapter covers how VelaTerm hosts AI coding agents as typed sessions: supported agents, live status, automatic conversation resume, importing and forking conversations, permission modes, launch settings, install guidance and the Info panel. The conversation view has its own chapter: [Conversation View](conversation-view_20260925_1012.md).
 
@@ -118,7 +118,7 @@ With an agent session open, the Info tab of the right panel shows:
 
 - **Agent**: the agent type, session name, working directory, Git branch, start time and uptime. For Kiro sessions it also links to a read-only view of the conversation history.
 - **Usage** (Claude, Codex, Grok Build): account quota usage, for example the five-hour and seven-day windows, with their reset times. The ↻ button refreshes immediately. Automatic refresh and its interval are set in Settings ▸ Behavior ("Usage auto-refresh", "Usage refresh"). When a refresh fails, the last values stay visible with a "stale" mark.
-- **This turn** (Claude, Codex, Grok Build, OpenCode, Pi, OMP, Kiro): the model, how full the context window is, and the current turn's token counts and tools.
+- **This turn** (Claude, Codex, Grok Build, OpenCode, Pi, OMP, Kiro, ZCode, DeepSeek, Antigravity): the model, how full the context window is, and the current turn's token counts and tools.
 - **Resources**: CPU and memory of the session's processes; the "system" option adds figures for the whole computer.
 
 ## 9. Transcripts, export and archiving

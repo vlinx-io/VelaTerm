@@ -10,25 +10,46 @@
 //! - Windows receives the dropped `File` objects from `chrome.webview.postMessageWithAdditionalObjects`,
 //!   which WebView2 hands to the host with their paths.
 //!
-//! Only directories are returned: the single consumer adds dropped folders as projects.
+//! Each path comes back with whether it is a directory: the sidebar adds dropped folders as projects, the
+//! file tree copies files and folders into the project, and terminals and the chat composer insert the paths.
 
 use std::path::PathBuf;
 
-/// Returns the directories among the paths of the drop currently being handled by the frontend.
+/// One path of the drop currently being handled by the frontend.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DroppedPath {
+    pub path: String,
+    pub is_dir: bool,
+}
+
+/// Returns the paths of the drop currently being handled by the frontend.
 ///
 /// Async per the IO rule: the pasteboard read, the Windows hand-off wait, and the `is_dir` checks all
 /// run on the blocking pool.
 #[tauri::command]
-pub async fn take_dropped_paths() -> Result<Vec<String>, String> {
+pub async fn take_dropped_paths() -> Result<Vec<DroppedPath>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         platform::take()
             .into_iter()
-            .filter(|p| p.is_dir())
-            .map(|p| p.to_string_lossy().into_owned())
+            .filter(|p| p.exists())
+            .map(|p| DroppedPath { is_dir: p.is_dir(), path: p.to_string_lossy().into_owned() })
             .collect()
     })
     .await
     .map_err(|e| format!("Failed to read dropped paths: {e}"))
+}
+
+/// Refuses every `file://` navigation in every webview.
+///
+/// With Tauri's drag/drop handler disabled, a file dropped where the page does not cancel the drop gets the
+/// WebView's default action: the window navigates to that file and the interface is replaced by it. The
+/// frontend cancels unhandled file drops itself; this is the backstop for any path that slips past it, such
+/// as a drop landing before the page has loaded. No app page, artifact, or browser tab loads `file://`.
+pub fn nav_guard<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    tauri::plugin::Builder::new("file-nav-guard")
+        .on_navigation(|_webview, url| url.scheme() != "file")
+        .build()
 }
 
 /// Attaches the native listener that captures dropped paths, where the platform needs one.

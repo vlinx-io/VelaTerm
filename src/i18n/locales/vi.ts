@@ -1,6 +1,7 @@
 //! Từ điển tiếng Việt. Tập khóa và kiểu giá trị được ràng buộc bởi en.ts.
 
 import type en from "./en";
+import assist from "../assist/vi";
 
 const vi: typeof en = {
   "panel.turnStats": "Thống kê lượt",
@@ -8,6 +9,8 @@ const vi: typeof en = {
   "panel.showChangedFiles": "Xem các tệp đã sửa trong lượt này",
   "panel.noFilesChanged": "Không có tệp nào được chỉnh sửa trong lượt này.",
   "panel.shellEditsNotListed": "Các thay đổi thực hiện bằng lệnh shell không được liệt kê.",
+  "panel.usageShowScope": (scope: string) => `Hiện ${scope}`,
+  "panel.usageHideScope": (scope: string) => `Ẩn ${scope}`,
   "translation.swap": "Đổi ngôn ngữ",
   "translation.openai": "Tương thích OpenAI",
   "translation.bing": "Bing Dịch (không cần khóa API)",
@@ -373,6 +376,7 @@ const vi: typeof en = {
   "common.create": "Tạo",
   "common.close": "Đóng",
   "chat.copyAsMarkdown": "Sao chép dưới dạng Markdown",
+  "chat.copyEntireMessage": "Sao chép toàn bộ tin nhắn",
   "chat.imageViewOriginal": "Xem ảnh gốc",
   "chat.imageCopy": "Sao chép ảnh",
   "chat.imageSave": "Lưu ảnh",
@@ -523,6 +527,19 @@ const vi: typeof en = {
   "settings.agentDefaultView": "Chế độ xem mặc định",
   "settings.agentDefaultViewHint":
     "Chế độ xem mà các phiên mới của tác nhân này sẽ mở. Các phiên đã có giữ nguyên chế độ xem lúc tạo.",
+  "settings.deepseekApiTitle": "DeepSeek API",
+  "settings.deepseekApiDesc":
+    "Các cuộc trò chuyện DeepSeek chạy qua OpenCode. Nhập địa chỉ và khóa API tại đây để dùng chung một đăng nhập cho mọi cuộc trò chuyện.",
+  "settings.deepseekBaseUrl": "Địa chỉ API",
+  "settings.deepseekEndpointHint":
+    "Để trống địa chỉ để dùng điểm cuối chính thức. Thay đổi có hiệu lực từ tin nhắn tiếp theo.",
+  "settings.deepseekApiKey": "Khóa API",
+  "settings.deepseekKeySaved": "Đã lưu (để trống để giữ nguyên)",
+  "settings.deepseekKeyPlaceholder": "Nhập khóa API DeepSeek của bạn",
+  "settings.deepseekRemoveKey": "Xóa khóa",
+  "settings.deepseekSaved": "Đã lưu.",
+  "settings.deepseekInvalid": "Nhập địa chỉ API http(s) hợp lệ và khóa API trên một dòng.",
+  "settings.deepseekLocalOnly": "Thông tin đăng nhập này được lưu trên thiết bị chủ, nên chỉ có thể thay đổi tại đó.",
   "settings.appearance": "Giao diện",
   "settings.accent": "Màu nhấn",
   "settings.accentAuto": "Theo chủ đề",
@@ -826,10 +843,20 @@ const vi: typeof en = {
   "settings.termFontSize": "Cỡ chữ terminal",
   "settings.termLineHeight": "Chiều cao dòng terminal",
   "settings.chatTypography": "Chế độ xem hội thoại",
-  "settings.chatTypographyHint": "Các thiết lập phông chữ này độc lập với terminal và có hiệu lực ngay lập tức.",
+  "settings.chatTypographyHint": "Các thiết lập này độc lập với terminal và có hiệu lực ngay lập tức. Theo mặc định, văn bản dùng phông chữ giao diện và mã dùng phông chữ đơn cách của giao diện.",
   "settings.chatFont": "Phông chữ hội thoại",
   "settings.chatFontSize": "Cỡ chữ hội thoại",
   "settings.chatLineHeight": "Chiều cao dòng hội thoại",
+  "settings.chatCodeFont": "Phông chữ mã trong hội thoại",
+  "settings.chatLetterSpacing": "Khoảng cách chữ trong hội thoại",
+  "settings.uiTypography": "Phông chữ giao diện",
+  "settings.uiTypographyHint": "Áp dụng cho menu, danh sách, hộp thoại và tài liệu. Phông chữ đơn cách dùng cho mã, đường dẫn và so sánh thay đổi; terminal có thiết lập phông chữ riêng.",
+  "settings.uiFont": "Phông chữ chính",
+  "settings.uiMonoFont": "Phông chữ đơn cách",
+  "settings.fontPreview": "Xem trước",
+  "settings.fontPreviewText": "Con cáo nâu nhanh nhẹn nhảy qua chú chó lười. 0123456789",
+  "settings.fontPreviewChat": "Trang cài đặt đã được cập nhật. Mỗi thiết lập phông chữ có hiệu lực ngay và bạn có thể khôi phục giá trị mặc định bất cứ lúc nào.",
+  "settings.fontResetGroup": "Khôi phục phông chữ mặc định",
   "settings.composerChips": "Thanh công cụ soạn tin",
   "settings.composerChipsHint": "Các mục được bật xuất hiện cạnh tin nhắn theo thứ tự hiển thị ở đây. Khi một tính năng tạm thời không dùng được (tác nhân chưa chạy, không có tác vụ nền hoặc chưa đăng nhập xong), mục đó vẫn hiển thị nhưng trống hoặc bị vô hiệu hóa. Các tính năng mà tác nhân hiện tại không hỗ trợ sẽ không xuất hiện. Những mục không đủ chỗ sẽ chuyển vào menu Thêm. Các mục được tắt ở đây chỉ xuất hiện trong menu đó và vẫn có thể được cấu hình tại đây.",
   "settings.composerChipUp": (chip: string) => `Đưa ${chip} lên trên`,
@@ -847,7 +874,8 @@ const vi: typeof en = {
   "settings.composerChip.account": "Tài khoản",
   "settings.composerChip.codexCredits": "Lượt đặt lại giới hạn Codex",
   "settings.fontDefault": "Mặc định",
-  "settings.fontCustom": "Tùy chỉnh…",
+  "settings.fontSearch": "Tìm phông chữ…",
+  "settings.fontUseCustom": (query: string) => `Dùng “${query}”`,
   "settings.fontListUnavailable": "Không thể lấy danh sách phông chữ hệ thống. Bạn có thể nhập tên phông chữ theo cách thủ công.",
   "settings.fontUnconfirmed": "Không thể xác nhận phông chữ này có sẵn hay không.",
   "settings.fontAuto": "Tự động",
@@ -856,6 +884,11 @@ const vi: typeof en = {
   "settings.fontReset": "Đặt lại",
   "settings.sound": "Âm báo",
   "settings.language": "Ngôn ngữ",
+  "settings.serverRegion": "Máy chủ",
+  "settings.serverRegionGlobal": "Quốc tế",
+  "settings.serverRegionChina": "Trung Quốc đại lục",
+  "settings.serverRegionHint":
+    "Dùng để kiểm tra cập nhật, tải xuống và mở trang web. Khi chọn “Trung Quốc đại lục”, VelaTerm dùng velaterm.cn, truy cập nhanh hơn từ trong Trung Quốc và cung cấp cùng các phiên bản. Các tính năng tài khoản luôn dùng velaterm.com.",
   "settings.langAuto": "Tự động (hệ thống)",
   "settings.skillLabel": "Kỹ năng Vela",
   "settings.skillInstall": "Cài đặt",
@@ -1038,6 +1071,7 @@ const vi: typeof en = {
   "tree.deleteGroup": "Xóa nhóm",
   "tree.deleteSession": "Xóa phiên",
   "tree.projectRoot": "Gốc dự án (không có nhóm)",
+  "tree.collectionRoot": (name: string) => `${name} (không có nhóm)`,
   "tree.moveToSession": "Chuyển xuống dưới một phiên (làm phiên con)",
   "tree.moveTo": "Di chuyển đến…",
   "tree.openNewTab": "Mở trong thẻ mới",
@@ -1140,6 +1174,7 @@ const vi: typeof en = {
   "tree.filterStatus": "Lọc theo trạng thái",
   "tree.refreshStatusFilter": "Làm mới bộ lọc trạng thái",
   "tree.refreshStatusMatch": "Làm mới trạng thái",
+  "tree.setStatus": "Đặt trạng thái",
   "tree.filterStatusSection": "Trạng thái", // Status
   "tree.filterMarkSection": "Dấu", // Mark
   "tree.viewMainName": "Chính",
@@ -1346,10 +1381,9 @@ const vi: typeof en = {
 
   // Khung giữa và trình duyệt
   "center.noSession": "Không có phiên",
-  "center.noSessionHintPre": "Chọn một phiên từ thanh bên hoặc nhấn ",
-  "center.noSessionHintPost": " để tạo terminal",
   "center.createTerminal": "Tạo terminal",
-  "center.splitHint": "Mở một phiên để chia màn hình bằng các phím tắt sau:",
+  "center.startTitle": "Bắt đầu một phiên",
+  "center.startHint": "Chọn một phiên từ thanh bên hoặc bắt đầu phiên mới.",
   "tab.unsavedDot": "Thay đổi chưa lưu",
   "tab.newTerminal": "Terminal mới",
   "tab.newDocument": "Tài liệu mới",
@@ -1580,6 +1614,8 @@ const vi: typeof en = {
   "transfer.downloading": "Đang tải xuống…", // Downloading…
   "transfer.savedToDownloads": "Đã lưu vào thư mục Tải về", // Saved to Downloads
   "transfer.foldersUnsupported": "Không thể tải thư mục lên.", // Folders can't be uploaded.
+  "drop.browserFilesHint": "Trong trình duyệt, bạn chỉ có thể thả hình ảnh vào đây. Với các tệp khác, hãy tải chúng lên dự án trước.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
+  "files.copyFailed": "Không thể sao chép một số tệp. Hãy kiểm tra xem các tệp vẫn còn tồn tại và bạn có quyền ghi vào thư mục này.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
 
   // Thanh trạng thái
   "statusbar.sessions": (n: number) => `${n} phiên`,
@@ -1596,6 +1632,11 @@ const vi: typeof en = {
   "statusbar.permSkip": "Quyền: Bỏ qua",
   "statusbar.notifyOn": "Thông báo: Bật",
   "statusbar.notifyOff": "Thông báo: Tắt",
+  "statusbar.zoomGroup": "Thu phóng giao diện",
+  "statusbar.zoomOut": "Thu nhỏ",
+  "statusbar.zoomIn": "Phóng to",
+  "statusbar.zoomEdit": "Thu phóng giao diện · Nhấp để nhập tỷ lệ phần trăm (80–200%)",
+  "statusbar.zoomInput": "Tỷ lệ thu phóng giao diện, từ 80 đến 200",
   "statusbar.permTooltip":
     "Chế độ quyền của phiên này · nhấp để đổi (chỉ phiên này)",
   "statusbar.permMenuTitle": "Quyền của phiên này",
@@ -1937,6 +1978,8 @@ const vi: typeof en = {
   "updater.downloadManuallyHint": "Mở trang tải xuống trong trình duyệt.",
   "updater.windowsNotice":
     "VelaTerm sẽ đóng khi trình cài đặt chạy rồi tự mở lại.",
+  "updater.portableNotice":
+    "Bản di động này không tự cập nhật. Hãy tải phiên bản mới về và dùng nó thay thế thư mục này; cài đặt và các phiên của bạn vẫn được giữ nguyên.",
   "updater.installingWindows":
     "Đang cài đặt… VelaTerm sắp đóng. Trình cài đặt sẽ hoàn tất cập nhật và mở lại ứng dụng.",
   "statusbar.updateAvailable": (version: string) => `Cập nhật ${version}`,
@@ -1958,6 +2001,7 @@ const vi: typeof en = {
   "skills.vstat": "Xem phiên nào đang làm việc hoặc đang chờ nhập liệu.",
   "skills.vtell": "Gửi tin nhắn đến phiên khác.",
   "skills.vkb": "Truy vấn CodeGraph và cơ sở tri thức của dự án.",
+  "skills.vapp": "Cho phép tác nhân thao tác VelaTerm; bạn xác nhận từng thao tác.",
   "skills.settingsHint": "Bạn cũng có thể cài đặt sau trong Cài đặt > Nâng cao.",
   "skills.installFailed": (err) => `Cài đặt thất bại: ${err}`,
   "skills.dontRemind": "Không nhắc lại",
@@ -2076,6 +2120,7 @@ const vi: typeof en = {
   "chat.question.submit": "Gửi",
   "chat.question.next": "Tiếp",
   "chat.question.dismiss": "Bỏ qua",
+  "chat.question.skip": "Bỏ qua câu này",
   "chat.question.answerPlaceholder": "Nhập câu trả lời của bạn",
   "chat.question.otherPlaceholder": "Câu trả lời khác",
   "chat.question.answeredHeading": (n: number) => `Đã trả lời ${n} câu hỏi`,
@@ -2129,6 +2174,8 @@ const vi: typeof en = {
   "chat.rewind.editWarning": "Tin nhắn gốc và tất cả tin nhắn sau đó sẽ bị xóa vĩnh viễn. Nội dung đã chỉnh sửa sẽ được gửi từ vị trí này. Các thay đổi đối với tệp sẽ không được hoàn tác.",
   "chat.rewind.inactive": "Tiến trình hội thoại chưa chạy. Các thao tác này sẽ khả dụng sau khi tiến trình khởi động.",
   "chat.rewind.unsupported": "Tác nhân đang kết nối hiện chưa cung cấp thao tác này.",
+  "chat.rewind.latestOnly": "Tác nhân đang kết nối chỉ có thể quay lại từ tin nhắn mới nhất.",
+  "chat.rewind.appliesOnSend": "Tác nhân chỉ quay lại khi bạn gửi tin nhắn tiếp theo. Trước đó, hội thoại và tệp vẫn giữ nguyên.",
   "chat.rewind.title": "Quay lại từ đây",
   "chat.rewind.warning": "Không thể hoàn tác thao tác này.",
   "chat.rewind.conversation": "Quay lại hội thoại",
@@ -2312,7 +2359,7 @@ const vi: typeof en = {
   "settings.completionTab": "Chỉ Tab",
   "settings.completionOff": "Tắt",
   "settings.completionUnavailable": "Không thể tải hoặc lưu cài đặt.",
-  "settings.completionHint": "Khi gõ trong Zsh, lệnh khớp gần nhất trong lịch sử sẽ hiện mờ sau con trỏ; nhấn → hoặc End để chấp nhận. Tab hoạt động giống shell: nếu chỉ có một kết quả thì chèn ngay, nếu các kết quả có phần chung thì điền phần đó trước, và hiện danh sách khi vẫn còn nhiều lựa chọn. Áp dụng cho các terminal Zsh, Bash 4+, Fish và PowerShell mới mở.",
+  "settings.completionHint": "Khi gõ trong Zsh, lệnh khớp gần nhất trong lịch sử sẽ hiện mờ sau con trỏ; nhấn → hoặc End để chấp nhận. Gợi ý này không hiện khi gõ qua kết nối từ xa. Tab hoạt động giống shell: nếu chỉ có một kết quả thì chèn ngay, nếu các kết quả có phần chung thì điền phần đó trước, và hiện danh sách khi vẫn còn nhiều lựa chọn. Áp dụng cho các terminal Zsh, Bash 4+, Fish và PowerShell mới mở.",
   "settings.completionTabOnlyHint": "Không có gợi ý nào hiện ra khi bạn gõ. Nhấn Tab để hoàn thành giống shell: nếu chỉ có một kết quả thì chèn ngay, nếu các kết quả có phần chung thì điền phần đó trước, và hiện danh sách khi vẫn còn nhiều lựa chọn. Áp dụng cho các terminal Zsh, Bash 4+, Fish và PowerShell mới mở.",
   "settings.completionTabKey": "Phím Tab",
   "settings.completionTabAccept": "Chấp nhận gợi ý",
@@ -2429,10 +2476,16 @@ const vi: typeof en = {
   "chat.antigravity.placeholder": "Nhắn cho Antigravity hoặc dùng @tệp để tham chiếu tệp",
   "chat.antigravity.textOnly": "Chế độ hội thoại của Antigravity hiện chỉ hỗ trợ tin nhắn văn bản.",
   "chat.textOnly": (agent: string) => `Chế độ hội thoại của ${agent} chỉ hỗ trợ tin nhắn văn bản.`,
+  "chat.attach.modelTextOnly": "Mô hình đã chọn không hỗ trợ hình ảnh.",
   "chat.signInRequired": (agent: string) => `Bạn cần đăng nhập ${agent} để dùng chế độ hội thoại. Hãy chuyển sang chế độ thiết bị đầu cuối để đăng nhập, sau đó gửi lại tin nhắn.`,
-  "chat.apiKeyRequired": "DeepSeek Harness cần khóa API. Hãy đặt biến môi trường DEEPSEEK_API_KEY, hoặc chạy `dsh web` rồi lưu khóa ở trang Models, sau đó gửi lại tin nhắn.",
+  "chat.apiKeyRequired": "DeepSeek cần khóa API. Mở «API» bên cạnh ô tin nhắn và nhập khóa, hoặc đặt biến môi trường `DEEPSEEK_API_KEY`, sau đó gửi lại tin nhắn.",
   "chat.antigravity.permissionsHint": "Các công cụ cần phê duyệt phải được cho phép trước trong cài đặt Antigravity hoặc sử dụng ở chế độ thiết bị đầu cuối.",
   "chat.antigravity.settingsHint": "Thay đổi mô hình, mức độ suy luận hoặc quyền giữa các lượt.",
+  "chat.antigravity.rewindTitle": "Quay lại trong chế độ terminal",
+  "chat.antigravity.rewindHint": "Chế độ hội thoại của Antigravity hiện chưa hỗ trợ quay lại hoặc chỉnh sửa tin nhắn đã gửi. Hãy chuyển sang chế độ terminal và chạy /rewind; trạng thái sẽ tự động đồng bộ khi bạn quay về.",
+  "chat.antigravity.rewindGuide": "Chế độ hội thoại của Antigravity hiện chưa hỗ trợ quay lại trực tiếp hoặc chỉnh sửa tin nhắn đã gửi. Hãy chuyển sang chế độ terminal và chạy /rewind để quay lại hội thoại hoặc khôi phục tệp; trạng thái mới nhất sẽ tự động tải khi bạn quay về.",
+  "chat.antigravity.rewindCommandDescription": "Chuyển sang chế độ terminal để quay lại bằng /rewind",
+  "chat.antigravity.switchToTerminal": "Chuyển sang chế độ terminal",
   "chat.history.imageDownloadRequired": "Không thể mở hình ảnh này tại đây. Hãy tải bản gốc xuống để xem.",
   "chat.history.readBody": "Đọc toàn bộ nội dung",
   "chat.history.selectDetail": "Chọn tệp hoặc trường",
@@ -2608,6 +2661,8 @@ const vi: typeof en = {
   "kb.searchEntries": "Tìm bài viết…",
   "kb.updatedOn": (date: string) => `Cập nhật ${date}`,
   "archive.sessionsCount": (count: string) => `${count} phiên`,
+
+  ...assist,
 };
 
 export default vi;

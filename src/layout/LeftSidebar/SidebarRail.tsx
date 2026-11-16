@@ -6,6 +6,7 @@ import { Fragment, useEffect, useState } from "react";
 import { GameCenterLink } from "../../components/GameCenterLink";
 import Icons from "../../components/Icons";
 import { getLocale, useT } from "../../i18n";
+import { siteUrl } from "../../ipc/serverRegion";
 import { isShareSurface } from "../../ipc/shareBase";
 import { invoke } from "../../ipc/transport";
 import { env, platform } from "../../platform";
@@ -75,7 +76,6 @@ export function SidebarRail() {
   );
 }
 
-const FEEDBACK_URL = "https://velaterm.com/feedback";
 
 /** Settings, account, feedback, share, and game center entries pinned to the bottom of the activity bar. */
 function RailFooter() {
@@ -130,7 +130,7 @@ function RailFooter() {
         title={t("titlebar.feedback")}
         aria-label={t("titlebar.feedback")}
         onClick={() => {
-          void platform.opener.openExternal(FEEDBACK_URL).catch(() => {});
+          void platform.opener.openExternal(siteUrl("/feedback")).catch(() => {});
         }}
       >
         <Icons.feedback size={16} />

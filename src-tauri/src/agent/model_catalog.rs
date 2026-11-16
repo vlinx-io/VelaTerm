@@ -53,12 +53,12 @@ fn list_args(agent: &str) -> Option<&'static [&'static str]> {
 /// dialog can say why the list is empty instead of silently offering nothing.
 pub fn list_models(app: &crate::host::AppCtx, agent: &str) -> Result<Vec<String>, String> {
     if agent == "claude" {
-        let bin = super::executable::resolve(app, crate::models::SessionKind::Claude, None)
+        let bin = super::executable::resolve_cached(app, crate::models::SessionKind::Claude, None)
             .unwrap_or_else(|| "claude".into());
         return Ok(super::claude_models::list_for_bin(&bin).into_iter().map(|m| m.id).collect());
     }
     if agent == "codex" {
-        let bin = super::executable::resolve(app, crate::models::SessionKind::Codex, None)
+        let bin = super::executable::resolve_cached(app, crate::models::SessionKind::Codex, None)
             .unwrap_or_else(|| "codex".into());
         return super::codex_models::list(&bin, &[]).map(|models| models.into_iter().map(|m| m.id).collect());
     }
@@ -67,23 +67,29 @@ pub fn list_models(app: &crate::host::AppCtx, agent: &str) -> Result<Vec<String>
     }
     if list_args(agent).is_none() { return Ok(Vec::new()); }
     let kind = crate::models::SessionKind::from_db(agent);
-    let bin = super::executable::resolve(app, kind, None)
+    let bin = super::executable::resolve_cached(app, kind, None)
         .unwrap_or_else(|| super::executable::command_name(kind).to_string());
     list_models_at(agent, &bin)
 }
 
-/// Use the session's selected executable for both model discovery and conversation launches.
-pub fn list_models_at(agent: &str, bin: &str) -> Result<Vec<String>, String> {
-    let Some(args) = list_args(agent) else { return Ok(Vec::new()); };
+/// Run the configured model-list command for `agent` and return its raw stdout.
+pub(crate) fn run_list_command(agent: &str, bin: &str) -> Result<String, String> {
+    let Some(args) = list_args(agent) else { return Ok(String::new()); };
     let mut cmd = crate::host::command(bin);
     crate::login_env::refresh_command(&mut cmd);
-    super::executable::prepare_command(&mut cmd, &bin);
+    super::executable::prepare_command(&mut cmd, bin);
     cmd.args(args);
     // Several CLIs render a decorated tree when they detect a terminal and one plain identifier per
     // line otherwise. Capturing through a pipe already puts them in the plain mode; NO_COLOR removes
     // any remaining escape sequences.
     cmd.env("NO_COLOR", "1");
-    let text = run_capture(cmd)?;
+    run_capture(cmd)
+}
+
+/// Use the session's selected executable for both model discovery and conversation launches.
+pub fn list_models_at(agent: &str, bin: &str) -> Result<Vec<String>, String> {
+    let text = run_list_command(agent, bin)?;
+    if text.is_empty() { return Ok(Vec::new()); }
     Ok(parse(agent, &text))
 }
 
@@ -251,7 +257,7 @@ fn parse_omp_json(text: &str) -> Vec<String> {
 }
 
 /// Whether a token is shaped like a model identifier rather than table decoration or prose.
-fn looks_like_id(s: &str) -> bool {
+pub(crate) fn looks_like_id(s: &str) -> bool {
     s.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
         && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':'))

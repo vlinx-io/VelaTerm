@@ -1,5 +1,4 @@
-//! Agent Client Protocol (ACP): the wire format Copilot, Cursor, Kimi, Grok and DeepSeek Harness share,
-//! and its timeline.
+//! Agent Client Protocol (ACP): the wire format Copilot, Cursor, Kimi and Grok share, and its timeline.
 //!
 //! ACP is JSON-RPC 2.0 with one message per line on the agent's stdin and stdout. VelaTerm is the client:
 //! it opens a session (`session/new`, or `session/load` to continue one), sends each turn as a
@@ -17,15 +16,8 @@
 //! a conversation shows before its agent is started again. Once started, `session/load` is authoritative:
 //! it also covers turns taken in the terminal view, and the journal is rewritten from it.
 //!
-//! **DeepSeek Harness** (`dsh --profile acp`) continues a conversation with `session/resume`, which replays
-//! nothing; its own session log is the history (`deepseek_history`). It tags message chunks with the
-//! assistant message's id and names each tool call after the dsh tool, so for it the mapper takes row ids
-//! from those message ids and draws calls by tool name, which is what lets a live turn and its log replay
-//! to the same rows.
-//!
-//! Verified against Copilot 1.0.63 (complete turns and `session/load`), DeepSeek Harness 0.2.1-rc.2 and
-//! rc.3 (complete turns, permission requests, cancellation, `session/resume`), and the initialize handshake
-//! of Cursor 2026.07.01, Kimi 2.1.1 and Grok 1.0.46.
+//! Verified against Copilot 1.0.63 (complete turns and `session/load`), and the initialize handshake of
+//! Cursor 2026.07.01, Kimi 2.1.1 and Grok 1.0.46.
 
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
@@ -34,6 +26,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use super::engine::ChatRow;
+use super::protocol::ChatImage;
 use crate::models::SessionKind;
 
 pub const PROTOCOL_VERSION: u64 = 1;
@@ -56,11 +49,11 @@ pub fn supported(kind: SessionKind) -> bool {
 /// The product name shown in permission cards and messages.
 pub fn label(kind: SessionKind) -> &'static str {
     match kind {
+        SessionKind::Antigravity => "Antigravity",
         SessionKind::Copilot => "Copilot",
         SessionKind::Cursor => "Cursor",
         SessionKind::Kimi => "Kimi",
         SessionKind::Grok => "Grok",
-        SessionKind::Deepseek => "DeepSeek",
         _ => "Agent",
     }
 }
@@ -71,13 +64,16 @@ pub fn label(kind: SessionKind) -> &'static str {
 /// others publish one and are switched over the protocol once the session is open. Copilot's options are
 /// global, so a session's own launch arguments still apply; the others' arguments belong to their terminal
 /// interface and would be misread by the server subcommand.
+///
+/// Antigravity is the exception that keeps safe arguments: `agy acp` accepts flags such as `--add-dir`
+/// and `--sandbox`, while model, effort and the conversation itself are owned by the protocol.
 pub fn launch_args(kind: SessionKind, model: Option<&str>, effort: Option<&str>, extra: &[String]) -> Result<Vec<String>, String> {
     let mut args: Vec<String> = match kind {
+        SessionKind::Antigravity => vec!["acp".into()],
         SessionKind::Copilot => vec!["--acp".into()],
         SessionKind::Cursor => vec!["acp".into()],
         SessionKind::Kimi => vec!["acp".into()],
         SessionKind::Grok => vec!["agent".into(), "stdio".into()],
-        SessionKind::Deepseek => vec!["--profile".into(), "acp".into()],
         other => return Err(format!("The chat engine does not support {} sessions", other.as_str())),
     };
     if kind == SessionKind::Copilot {
@@ -95,23 +91,39 @@ pub fn launch_args(kind: SessionKind, model: Option<&str>, effort: Option<&str>,
         }
         args.extend_from_slice(extra);
     }
-    // dsh's launcher options (`--patch <overlay>` and the like) apply to the ACP profile as they would to any
-    // other; the profile is VelaTerm's to choose. Model and reasoning are switched over the protocol.
-    if kind == SessionKind::Deepseek {
+    if kind == SessionKind::Antigravity {
+        let mut skip_value = false;
         for arg in extra {
+            if skip_value { skip_value = false; continue; }
             let flag = arg.split('=').next().unwrap_or(arg);
-            if matches!(flag, "--profile" | "--from-default-profile" | "--dump-config" | "--dump-config-schema" | "--dump-default-config") {
-                return Err(format!("The DeepSeek conversation view manages {flag}; remove it from custom arguments"));
+            // Model, effort, mode, and skip flags are managed over the protocol or terminal launch, so
+            // terminal-era arguments for them must not reach `agy acp`.
+            if flag == "--dangerously-skip-permissions" {
+                continue;
             }
+            if matches!(flag, "--model" | "--effort" | "--mode") {
+                skip_value = !arg.contains('=');
+                continue;
+            }
+            if matches!(flag,
+                "--input-format" | "--output-format" | "--conversation" | "--continue" | "-c" |
+                "--print" | "-p" | "--prompt" | "--prompt-interactive" | "-i" | "--remote-control" |
+                "--remote-agent" | "--project" | "--new-project" | "--login" | "--worker" | "-h" | "--help")
+            {
+                return Err(format!("Antigravity conversation view manages {flag}; remove it from custom arguments"));
+            }
+            args.push(arg.clone());
         }
-        args.extend_from_slice(extra);
     }
     Ok(args)
 }
 
-/// Whether a message can go out in this conversation. ACP has no way into a running turn.
-pub fn validate(behavior: &str, image_count: usize, images_supported: bool) -> Result<(), String> {
-    if behavior == "steer" {
+/// Whether a message can go out in this conversation.
+///
+/// ACP itself has no standard steer; Antigravity's server accepts another prompt while a turn runs and
+/// delivers it at the next invocation, so only that kind advertises `steering_supported`.
+pub fn validate(behavior: &str, image_count: usize, images_supported: bool, steering_supported: bool) -> Result<(), String> {
+    if behavior == "steer" && !steering_supported {
         return Err("This agent does not support steering; queue the message instead".into());
     }
     if image_count > 0 && !images_supported {
@@ -129,7 +141,11 @@ pub fn request(id: &str, method: &str, params: Value) -> Value {
 pub fn initialize(id: &str) -> Value {
     request(id, "initialize", json!({
         "protocolVersion": PROTOCOL_VERSION,
-        "clientCapabilities": {"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false},
+        "clientCapabilities": {
+            "fs": {"readTextFile": false, "writeTextFile": false},
+            "terminal": false,
+            "elicitation": {"form": {}},
+        },
         "clientInfo": {"name": "velaterm", "title": "VelaTerm", "version": env!("CARGO_PKG_VERSION")},
     }))
 }
@@ -223,8 +239,7 @@ pub fn auth_required(error: &Value) -> bool {
     code == Some(AUTH_REQUIRED_CODE) && (message.contains("auth") || message.contains("login") || message.contains("sign in"))
 }
 
-/// Whether an error says the agent has no API key to call its model with. DeepSeek Harness reports it as
-/// an internal error whose text names the missing key (0.2.1-rc.3: `no API key for provider route`).
+/// Whether an error says the agent has no API key to call its model with.
 pub fn api_key_missing(error: &Value) -> bool {
     error_text(error).to_ascii_lowercase().contains("no api key")
 }
@@ -250,15 +265,8 @@ pub fn stop_reason_error(reason: &str) -> Option<&'static str> {
     }
 }
 
-/// The model name a reply is credited to. DeepSeek Harness names a model by its provider route and model id
-/// as a JSON pair (`["deepseek-official","deepseek-v4-flash"]`); the reply shows the model id, as its log
-/// records it. Other agents' model values are already names.
-pub fn reply_model(kind: SessionKind, value: &str) -> String {
-    if kind == SessionKind::Deepseek {
-        if let Ok(Value::Array(parts)) = serde_json::from_str::<Value>(value) {
-            if let Some(model) = parts.last().and_then(Value::as_str).filter(|model| !model.is_empty()) { return model.to_string(); }
-        }
-    }
+/// The model name a reply is credited to. ACP agents already report it as a name.
+pub fn reply_model(_kind: SessionKind, value: &str) -> String {
     value.to_string()
 }
 
@@ -279,6 +287,10 @@ pub struct Catalog {
     pub model_option: Option<String>,
     /// Whether the models came from the `models` state, which `session/set_model` switches.
     pub models_from_state: bool,
+    /// Raw `models.availableModels` reported on session open, kept even when `configOptions` replaces `models`.
+    pub state_models: Vec<Choice>,
+    /// Live `thought_level` option ids observed per active model id during this session.
+    pub model_efforts: HashMap<String, Vec<String>>,
     pub efforts: Vec<Choice>,
     pub effort: Option<String>,
     pub effort_option: Option<String>,
@@ -303,6 +315,7 @@ impl Catalog {
             let listed: Vec<Choice> = distinct(models.get("availableModels").and_then(Value::as_array).into_iter().flatten()
                 .filter_map(|model| choice(model, "modelId")).collect());
             if !listed.is_empty() {
+                self.state_models = listed.clone();
                 self.models = listed;
                 self.models_from_state = true;
             }
@@ -315,6 +328,12 @@ impl Catalog {
 
     /// Fold in a `config_option_update`, which always carries the complete set.
     pub fn absorb_options(&mut self, options: &[Value]) {
+        // A model without thinking support omits `thought_level`, so stale levels from the previous
+        // model must be cleared rather than left active.
+        self.effort_option = None;
+        self.efforts.clear();
+        self.effort = None;
+        let (mut saw_model, mut saw_effort) = (false, false);
         for option in options {
             if option.get("type").and_then(Value::as_str) != Some("select") { continue; }
             let Some(id) = option.get("id").and_then(Value::as_str) else { continue };
@@ -327,16 +346,23 @@ impl Catalog {
                     if current.is_some() { self.mode = current; }
                 }
                 Some("model") => {
+                    saw_model = true;
                     self.model_option = Some(id.into());
                     if !choices.is_empty() { self.models = choices; self.models_from_state = false; }
                     if current.is_some() { self.model = current; }
                 }
                 Some("thought_level") => {
+                    saw_effort = true;
                     self.effort_option = Some(id.into());
                     self.efforts = choices;
                     self.effort = current;
                 }
                 _ => {}
+            }
+        }
+        if saw_model || saw_effort {
+            if let Some(model) = &self.model {
+                self.model_efforts.insert(model.clone(), self.efforts.iter().map(|c| c.id.clone()).collect());
             }
         }
     }
@@ -406,15 +432,15 @@ pub fn commands(update: &Value) -> Vec<Value> {
 /// The tool call it asks about is drawn with the same mapping as the timeline, so the card reads like the
 /// tool card that follows it. An `allow_always` option becomes the card's one standing rule.
 ///
-/// A request may name only the call (DeepSeek Harness sends just its `toolCallId`), so what the mapper
-/// already knows about that call is the base the request's own fields are laid over.
+/// A request may name only the call, so what the mapper already knows about that call is the base the
+/// request's own fields are laid over.
 pub fn permission_payload(kind: SessionKind, request_id: &str, params: &Value, mapper: Option<&Mapper>) -> Value {
     let call = params.get("toolCall").cloned().unwrap_or(Value::Null);
     let known = call.get("toolCallId").and_then(Value::as_str)
         .and_then(|id| mapper.and_then(|mapper| mapper.tools.get(id)).cloned());
     let mut tool = known.unwrap_or_default();
     tool.merge(&call);
-    let (name, input) = tool.card(kind == SessionKind::Deepseek);
+    let (name, input) = tool.card();
     let options = params.get("options").cloned().unwrap_or_else(|| json!([]));
     let mut payload = json!({
         "id": request_id,
@@ -423,12 +449,7 @@ pub fn permission_payload(kind: SessionKind, request_id: &str, params: &Value, m
         "input": input,
         "_acpOptions": options,
     });
-    // DeepSeek Harness asks when a command must leave its sandbox, and the model states why in the call.
-    let reason = tool.raw_input.as_ref().and_then(|input| input.get("justification")).and_then(Value::as_str)
-        .filter(|reason| kind == SessionKind::Deepseek && !reason.trim().is_empty());
-    if let Some(reason) = reason {
-        payload["description"] = json!(reason);
-    } else if let Some(title) = tool.title.as_deref().filter(|title| !title.is_empty() && kind != SessionKind::Deepseek) {
+    if let Some(title) = tool.title.as_deref().filter(|title| !title.is_empty()) {
         payload["description"] = json!(title);
     }
     if let Some(option) = option_of(params.get("options"), &["allow_always"]) {
@@ -471,6 +492,348 @@ pub fn permission_outcome(id: &Value, option: Option<&str>) -> Value {
     })
 }
 
+/// Convert an ACP `elicitation/create` request into a VelaTerm interactive card.
+///
+/// Antigravity sends `ask_question` prompts as form elicitations whose schema uses `q1`, `q1_other`,
+/// ... fields. Converting that shape into `AskUserQuestion` reuses the dedicated question card; any
+/// other schema or URL elicitation falls back to the shared MCP `elicitation` form card.
+pub fn elicitation_payload(kind: SessionKind, request_id: &str, params: &Value) -> Value {
+    let mode = match params.get("mode").and_then(Value::as_str) {
+        Some("url") => "url",
+        _ => "form",
+    };
+    if mode != "url" {
+        if let Some(questions) = parse_ask_question_schema(params) {
+            let message = params.get("message").and_then(Value::as_str).unwrap_or("");
+            let mut input = json!({
+                "questions": questions,
+                "_acpAskQuestion": true,
+            });
+            if !message.is_empty() {
+                input["prompt"] = json!(message);
+            }
+            return json!({
+                "id": request_id,
+                "tool_name": "AskUserQuestion",
+                "display_name": label(kind),
+                "description": if message.is_empty() { Value::Null } else { json!(message) },
+                "input": input,
+            });
+        }
+    }
+    let server = params.get("serverName").or_else(|| params.get("server")).cloned().unwrap_or(Value::Null);
+    json!({
+        "id": request_id,
+        "subtype": "elicitation",
+        "tool_name": "MCP",
+        "display_name": label(kind),
+        "mcp_server_name": server,
+        "message": params.get("message").cloned().unwrap_or(Value::Null),
+        "mode": mode,
+        "url": params.get("url").cloned().unwrap_or(Value::Null),
+        "requested_schema": params.get("requestedSchema").cloned().unwrap_or(Value::Null),
+        "input": {
+            "server": server,
+            "mode": params.get("mode").cloned().unwrap_or(Value::Null),
+        },
+    })
+}
+
+/// Build the JSON-RPC response for an ACP `elicitation/create` request.
+pub fn elicitation_outcome(
+    id: &Value,
+    request_card: &Value,
+    params: &Value,
+    allow: bool,
+    updated_input: Option<&Value>,
+    message: Option<&str>,
+) -> Value {
+    if !allow {
+        let action = if message == Some("cancel") { "cancel" } else { "decline" };
+        return response(id, json!({"action": action}));
+    }
+    let is_url = params.get("mode").and_then(Value::as_str) == Some("url");
+    if is_url {
+        return response(id, json!({"action": "accept"}));
+    }
+    let is_ask = request_card.pointer("/input/_acpAskQuestion").and_then(Value::as_bool) == Some(true);
+    let content = if is_ask {
+        build_ask_question_content(request_card, params, updated_input)
+    } else {
+        updated_input.cloned().unwrap_or_else(|| json!({}))
+    };
+    response(id, json!({
+        "action": "accept",
+        "content": content,
+    }))
+}
+
+fn parse_ask_question_schema(params: &Value) -> Option<Vec<Value>> {
+    let schema = params.get("requestedSchema")?.as_object()?;
+    let props = schema.get("properties")?.as_object()?;
+    if props.is_empty() {
+        return None;
+    }
+    let mut grouped: std::collections::BTreeMap<usize, (bool, bool)> = std::collections::BTreeMap::new();
+    for key in props.keys() {
+        let Some(rest) = key.strip_prefix('q') else { return None; };
+        if let Some(base_num) = rest.strip_suffix("_other") {
+            if !base_num.is_empty() && base_num.chars().all(|c| c.is_ascii_digit()) {
+                let num = base_num.parse::<usize>().ok()?;
+                grouped.entry(num).or_insert((false, false)).1 = true;
+                continue;
+            }
+            return None;
+        }
+        if !rest.is_empty() && rest.chars().all(|c| c.is_ascii_digit()) {
+            let num = rest.parse::<usize>().ok()?;
+            grouped.entry(num).or_insert((false, false)).0 = true;
+            continue;
+        }
+        return None;
+    }
+    if grouped.is_empty() {
+        return None;
+    }
+    let mut keys: Vec<(usize, String, bool, bool)> = grouped.into_iter().map(|(num, (has_main, has_other))| {
+        let key = if has_main { format!("q{num}") } else { format!("q{num}_other") };
+        (num, key, has_other, !has_main && has_other)
+    }).collect();
+    if let Some(order) = schema.get("propertyOrdering").or_else(|| schema.get("propertyOrder")).and_then(Value::as_array) {
+        let positions: std::collections::HashMap<&str, usize> = order.iter().enumerate()
+            .filter_map(|(idx, val)| val.as_str().map(|s| (s, idx)))
+            .collect();
+        keys.sort_by_key(|(num, key, _, _)| (positions.get(key.as_str()).copied().unwrap_or(usize::MAX), *num));
+    } else {
+        keys.sort_by_key(|(num, _, _, _)| *num);
+    }
+
+    let fallback_msg = params.get("message").and_then(Value::as_str).unwrap_or("");
+    let questions = keys.into_iter().map(|(num, key, has_other, free_text_only)| {
+        let prop = props.get(&key).and_then(Value::as_object);
+        let multi = !free_text_only && prop.and_then(|p| p.get("type")).and_then(Value::as_str) == Some("array");
+        let title = prop.and_then(|p| p.get("title").or_else(|| p.get("description")))
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(if !fallback_msg.is_empty() { fallback_msg } else { key.as_str() });
+        let other_key = if free_text_only { Some(key.clone()) } else { has_other.then(|| format!("{key}_other")) };
+        let choices_source = if free_text_only {
+            None
+        } else if multi {
+            prop.and_then(|p| p.get("items"))
+        } else {
+            props.get(&key)
+        };
+        let raw_options = extract_schema_options(choices_source);
+        let options: Vec<Value> = raw_options.iter().map(|(val, label, desc)| {
+            let mut item = json!({"label": label});
+            if let Some(desc) = desc {
+                item["description"] = json!(desc);
+            }
+            let _ = val;
+            item
+        }).collect();
+        let option_values: Vec<String> = raw_options.into_iter().map(|(val, _, _)| val).collect();
+        let mut q = json!({
+            "header": format!("Q{num}"),
+            "question": title,
+            "multiSelect": multi,
+            "allowOther": has_other || options.is_empty(),
+            "options": options,
+            "_key": key,
+            "_optionValues": option_values,
+        });
+        if let Some(ok) = other_key {
+            q["_otherKey"] = json!(ok);
+        }
+        if free_text_only {
+            q["_freeTextOnly"] = json!(true);
+        }
+        q
+    }).collect();
+    Some(questions)
+}
+
+fn extract_schema_options(schema: Option<&Value>) -> Vec<(String, String, Option<String>)> {
+    let Some(obj) = schema.and_then(Value::as_object) else { return Vec::new(); };
+    if let Some(arr) = obj.get("oneOf").or_else(|| obj.get("anyOf")).and_then(Value::as_array) {
+        let mut out = Vec::new();
+        for entry in arr {
+            let Some(entry_obj) = entry.as_object() else { continue; };
+            let Some(val) = entry_obj.get("const").and_then(scalar_to_string) else { continue; };
+            let label = entry_obj.get("title").and_then(Value::as_str).filter(|s| !s.is_empty())
+                .unwrap_or(&val).to_string();
+            let desc = entry_obj.get("description").and_then(Value::as_str)
+                .filter(|s| !s.is_empty()).map(str::to_string);
+            out.push((val, label, desc));
+        }
+        return out;
+    }
+    if let Some(arr) = obj.get("enum").and_then(Value::as_array) {
+        let names = obj.get("enumNames").and_then(Value::as_array);
+        return arr.iter().enumerate().filter_map(|(idx, v)| {
+            let val = scalar_to_string(v)?;
+            let label = names.and_then(|n| n.get(idx)).and_then(Value::as_str)
+                .filter(|s| !s.is_empty()).unwrap_or(&val).to_string();
+            Some((val, label, None))
+        }).collect();
+    }
+    Vec::new()
+}
+
+fn scalar_to_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
+fn build_ask_question_content(request_card: &Value, params: &Value, updated_input: Option<&Value>) -> Value {
+    let mut content = serde_json::Map::new();
+    let questions = request_card.pointer("/input/questions").and_then(Value::as_array)
+        .or_else(|| updated_input.and_then(|u| u.get("questions")).and_then(Value::as_array));
+    let Some(questions) = questions else { return Value::Object(content); };
+    let answers = updated_input.and_then(|u| u.get("answers")).and_then(Value::as_object);
+    let answer_list = updated_input.and_then(|u| u.get("_answerList")).and_then(Value::as_array);
+    let selected_indices = updated_input.and_then(|u| u.get("_selectedIndices")).and_then(Value::as_object);
+    let other_texts = updated_input.and_then(|u| u.get("_otherTexts")).and_then(Value::as_object);
+    let skipped_indices: std::collections::HashSet<usize> = updated_input
+        .and_then(|u| u.get("_skippedIndices"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_u64)
+        .map(|n| n as usize)
+        .collect();
+    let has_structured = selected_indices.is_some() || other_texts.is_some() || !skipped_indices.is_empty();
+    let required: std::collections::HashSet<&str> = params.pointer("/requestedSchema/required")
+        .and_then(Value::as_array).into_iter().flatten()
+        .filter_map(Value::as_str).collect();
+
+    for (idx, q) in questions.iter().enumerate() {
+        let Some(key) = q.get("_key").and_then(Value::as_str) else { continue; };
+        let other_key = q.get("_otherKey").and_then(Value::as_str);
+        let free_text_only = q.get("_freeTextOnly") == Some(&Value::Bool(true));
+        let multi = !free_text_only && q.get("multiSelect").and_then(Value::as_bool) == Some(true);
+        let question_text = q.get("question").and_then(Value::as_str).unwrap_or("");
+        let opt_values: Vec<String> = q.get("_optionValues").and_then(Value::as_array)
+            .map(|arr| arr.iter().filter_map(Value::as_str).map(str::to_string).collect())
+            .unwrap_or_default();
+        let opt_labels: Vec<String> = q.get("options").and_then(Value::as_array)
+            .map(|arr| arr.iter().filter_map(|o| o.get("label").and_then(Value::as_str).map(str::to_string)).collect())
+            .unwrap_or_default();
+
+        if skipped_indices.contains(&idx) {
+            if multi && required.contains(key) {
+                content.insert(key.to_string(), json!(Vec::<String>::new()));
+            }
+            continue;
+        }
+
+        let idx_key = idx.to_string();
+        if has_structured {
+            let picked = selected_indices.and_then(|m| m.get(&idx_key).or_else(|| m.get(key))).and_then(Value::as_array);
+            let custom = other_texts.and_then(|m| m.get(&idx_key).or_else(|| m.get(key)))
+                .and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty());
+            if picked.is_some() || custom.is_some() {
+                let vals: Vec<String> = picked.into_iter().flatten().filter_map(Value::as_u64).filter_map(|i| {
+                    let i = i as usize;
+                    opt_values.get(i).cloned().or_else(|| Some((i + 1).to_string()))
+                }).collect();
+                if free_text_only {
+                    if let Some(text) = custom {
+                        content.insert(key.to_string(), json!(text));
+                    }
+                } else if multi {
+                    if !vals.is_empty() || required.contains(key) {
+                        content.insert(key.to_string(), json!(vals));
+                    }
+                    if let Some(text) = custom {
+                        if let Some(ok) = other_key {
+                            content.insert(ok.to_string(), json!(text));
+                        } else if vals.is_empty() {
+                            content.insert(key.to_string(), json!([text]));
+                        }
+                    }
+                } else if let Some(first) = vals.first() {
+                    content.insert(key.to_string(), json!(first));
+                } else if let Some(text) = custom {
+                    content.insert(other_key.unwrap_or(key).to_string(), json!(text));
+                }
+                continue;
+            }
+        }
+
+        let Some(raw_ans) = answer_list.and_then(|arr| arr.get(idx)).and_then(Value::as_str)
+            .or_else(|| answers.and_then(|a| a.get(question_text)).and_then(Value::as_str))
+            .map(str::trim).filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        if free_text_only {
+            content.insert(key.to_string(), json!(raw_ans));
+        } else if multi {
+            let (vals, custom) = match_multi_answer(raw_ans, &opt_labels, &opt_values);
+            if !vals.is_empty() || required.contains(key) {
+                content.insert(key.to_string(), json!(vals));
+            }
+            if let Some(text) = custom {
+                if let Some(ok) = other_key {
+                    content.insert(ok.to_string(), json!(text));
+                } else if vals.is_empty() {
+                    content.insert(key.to_string(), json!([text]));
+                }
+            }
+        } else if let Some(pos) = opt_labels.iter().position(|label| label == raw_ans) {
+            let val = opt_values.get(pos).cloned().unwrap_or_else(|| (pos + 1).to_string());
+            content.insert(key.to_string(), json!(val));
+        } else if let Some(ok) = other_key {
+            content.insert(ok.to_string(), json!(raw_ans));
+        } else {
+            content.insert(key.to_string(), json!(raw_ans));
+        }
+    }
+    Value::Object(content)
+}
+
+fn match_multi_answer(raw: &str, labels: &[String], values: &[String]) -> (Vec<String>, Option<String>) {
+    // Match full known labels left-to-right at `, ` boundaries before treating leftovers as custom text,
+    // so option labels containing commas are preserved intact.
+    let mut selected = Vec::new();
+    let mut custom_parts = Vec::new();
+    let mut rest = raw.trim();
+    while !rest.is_empty() {
+        let matched = labels.iter().enumerate().find(|(_, label)| {
+            if !rest.starts_with(label.as_str()) {
+                return false;
+            }
+            let after = &rest[label.len()..];
+            after.is_empty() || after.starts_with(", ")
+        });
+        if let Some((pos, label)) = matched {
+            let val = values.get(pos).cloned().unwrap_or_else(|| (pos + 1).to_string());
+            if !selected.contains(&val) {
+                selected.push(val);
+            }
+            rest = rest[label.len()..].strip_prefix(", ").unwrap_or("").trim_start();
+        } else if let Some(comma) = rest.find(", ") {
+            let part = rest[..comma].trim();
+            if !part.is_empty() {
+                custom_parts.push(part);
+            }
+            rest = rest[comma + 2..].trim_start();
+        } else {
+            if !rest.trim().is_empty() {
+                custom_parts.push(rest.trim());
+            }
+            break;
+        }
+    }
+    let custom = if custom_parts.is_empty() { None } else { Some(custom_parts.join(", ")) };
+    (selected, custom)
+}
+
 // ─────────────────────────── Timeline ───────────────────────────
 
 /// What one tool call has said about itself so far. Updates carry only the fields that changed.
@@ -490,8 +853,35 @@ impl ToolState {
         if let Some(title) = update.get("title").and_then(Value::as_str) { self.title = Some(title.into()); }
         if let Some(kind) = update.get("kind").and_then(Value::as_str) { self.kind = Some(kind.into()); }
         if let Some(status) = update.get("status").and_then(Value::as_str) { self.status = Some(status.into()); }
-        if let Some(input) = update.get("rawInput").filter(|input| !input.is_null()) { self.raw_input = Some(input.clone()); }
-        if let Some(output) = update.get("rawOutput").filter(|output| !output.is_null()) { self.raw_output = Some(output.clone()); }
+        if let Some(input) = update.get("rawInput").filter(|input| !input.is_null()) {
+            let mut next = input.clone();
+            // Preserve host-recorded AskUserQuestion questions and answers if a trailing tool_call_update
+            // resends a partial or empty rawInput.
+            if let (Some(prev), Some(obj)) = (self.raw_input.as_ref(), next.as_object_mut()) {
+                for key in ["answers", "_answerList"] {
+                    if !obj.contains_key(key) {
+                        if let Some(val) = prev.get(key) {
+                            obj.insert(key.into(), val.clone());
+                        }
+                    }
+                }
+                if !obj.get("questions").and_then(Value::as_array).is_some_and(|a| !a.is_empty()) {
+                    for key in ["questions", "_acpAskQuestion"] {
+                        if let Some(val) = prev.get(key) {
+                            obj.insert(key.into(), val.clone());
+                        }
+                    }
+                }
+            }
+            self.raw_input = Some(next);
+        }
+        if let Some(output) = update.get("rawOutput").filter(|output| !output.is_null()) {
+            let keep_dismissed = self.raw_output.as_ref().and_then(Value::as_str) == Some("Dismissed by user")
+                && (output.as_str() == Some("") || output.as_object().is_some_and(|o| o.is_empty()));
+            if !keep_dismissed {
+                self.raw_output = Some(output.clone());
+            }
+        }
         // Content and locations replace the previous collection when present, as the protocol specifies.
         if let Some(content) = update.get("content").and_then(Value::as_array) { self.content = content.clone(); }
         if let Some(locations) = update.get("locations").and_then(Value::as_array) { self.locations = locations.clone(); }
@@ -511,15 +901,8 @@ impl ToolState {
 
     /// The tool card this call is drawn as: one of the view's known tools where the call is one, so it
     /// gets that tool's summary and body, or its own title with the raw input otherwise.
-    fn card(&self, by_name: bool) -> (String, Value) {
+    fn card(&self) -> (String, Value) {
         let raw = self.raw_input.clone().unwrap_or_else(|| json!({}));
-        // DeepSeek Harness reports every call as kind `other`, titled with the tool's own name; the name is
-        // what tells its tools apart, mapped the same way its log replay maps them.
-        if by_name {
-            if let Some(title) = self.title.as_deref().filter(|title| !title.is_empty()) {
-                return super::deepseek_history::tool_card(title, &raw);
-            }
-        }
         let mut input = if raw.is_object() { raw.clone() } else { json!({"input": raw}) };
         let object = input.as_object_mut().expect("tool input is an object");
         let title = self.title.clone().unwrap_or_default();
@@ -587,8 +970,16 @@ impl ToolState {
                 }
             }
             _ => {
-                if let Some(path) = &path { object.entry("path").or_insert(json!(path)); }
-                short_title(&title, "Tool")
+                if raw.get("questions").and_then(Value::as_array).is_some()
+                    || title.eq_ignore_ascii_case("ask_question")
+                    || title.eq_ignore_ascii_case("ask question")
+                {
+                    input = super::antigravity_protocol::normalize_ask_question_input(&input);
+                    "AskUserQuestion".to_string()
+                } else {
+                    if let Some(path) = &path { object.entry("path").or_insert(json!(path)); }
+                    short_title(&title, "Tool")
+                }
             }
         };
         (name, input)
@@ -662,6 +1053,17 @@ fn content_text(block: Option<&Value>) -> Option<String> {
     }
 }
 
+fn content_image(block: Option<&Value>) -> Option<ChatImage> {
+    let block = block?;
+    if block.get("type").and_then(Value::as_str) != Some("image") {
+        return None;
+    }
+    let mime = block.get("mimeType").or_else(|| block.get("mime_type")).and_then(Value::as_str)
+        .filter(|m| m.starts_with("image/"))?;
+    let data = block.get("data").and_then(Value::as_str).filter(|d| !d.is_empty())?;
+    Some(ChatImage { mime_type: mime.to_string(), data: data.to_string() })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Block { User, Assistant, Reasoning }
 
@@ -674,16 +1076,17 @@ pub struct Mapper {
     seq: u64,
     /// The streaming block: its kind, row id, text so far, and the time it began.
     open: Option<(Block, String, String, Option<i64>)>,
+    /// Images attached to an open `Block::User` block during `session/load` replay.
+    open_user_images: Vec<ChatImage>,
     tools: HashMap<String, ToolState>,
     tool_order: Vec<String>,
+    last_ask_question_id: Option<String>,
     turn: u64,
     /// True while replaying a recording, where the user's own messages arrive as chunks. Live, the engine
     /// draws a prompt itself when it sends one, and an agent's echo would draw it a second time.
     pub replaying: bool,
     /// Timestamp applied to rows created from the next updates, from a journal line.
     pub at: Option<i64>,
-    /// Take row ids from each chunk's `messageId` and draw tool calls by name, as DeepSeek Harness needs.
-    pub native_ids: bool,
 }
 
 impl Mapper {
@@ -691,11 +1094,13 @@ impl Mapper {
     pub fn replay() -> Self { Mapper { replaying: true, ..Mapper::default() } }
 
     /// A live mapper for one agent's conversation.
-    pub fn for_kind(kind: SessionKind) -> Self { Mapper { native_ids: kind == SessionKind::Deepseek, ..Mapper::default() } }
+    pub fn for_kind(_kind: SessionKind) -> Self { Mapper::default() }
 
     /// A new prompt goes out: whatever was streaming is finished, and the next plan belongs to this turn.
     pub fn begin_turn(&mut self) {
         self.open = None;
+        self.open_user_images.clear();
+        self.last_ask_question_id = None;
         self.turn += 1;
     }
 
@@ -705,7 +1110,48 @@ impl Mapper {
     /// Close the streaming block and return its final row, so the view stops drawing it as live.
     pub fn finish(&mut self) -> Option<ChatRow> {
         let (block, id, text, at) = self.open.take()?;
-        Some(text_row(block, id, text, false, at))
+        let images = if block == Block::User {
+            std::mem::take(&mut self.open_user_images)
+        } else {
+            self.open_user_images.clear();
+            Vec::new()
+        };
+        Some(text_row(block, id, text, images, false, at))
+    }
+
+    /// Write answered or dismissed `AskUserQuestion` state onto the active ACP tool row so the live
+    /// timeline renders a `<QuestionAnswerCard>` rather than an empty collapsed row.
+    pub fn record_ask_question_answer(&mut self, updated_input: Option<&Value>, allow: bool) -> Option<ChatRow> {
+        let id = self.last_ask_question_id.clone()?;
+        let tool = self.tools.get_mut(&id)?;
+        if tool.card().0 != "AskUserQuestion" {
+            return None;
+        }
+        let mut raw = tool.raw_input.clone().unwrap_or_else(|| json!({}));
+        if !raw.get("questions").and_then(Value::as_array).is_some_and(|a| !a.is_empty()) {
+            if let Some(qs) = updated_input.and_then(|u| u.get("questions")) {
+                if let Some(obj) = raw.as_object_mut() {
+                    obj.insert("questions".into(), qs.clone());
+                } else {
+                    raw = json!({"questions": qs});
+                }
+            }
+        }
+        let mut normalized = super::antigravity_protocol::normalize_ask_question_input(&raw);
+        if allow {
+            if let Some(obj) = normalized.as_object_mut() {
+                if let Some(answers) = updated_input.and_then(|u| u.get("answers")) {
+                    obj.insert("answers".into(), answers.clone());
+                }
+                if let Some(list) = updated_input.and_then(|u| u.get("_answerList")) {
+                    obj.insert("_answerList".into(), list.clone());
+                }
+            }
+        } else {
+            tool.raw_output = Some(json!("Dismissed by user"));
+        }
+        tool.raw_input = Some(normalized);
+        Some(tool_row(&id, tool))
     }
 
     /// Tool calls the agent left running when its turn ended, marked so they stop spinning.
@@ -716,7 +1162,7 @@ impl Mapper {
             if tool.status() != "running" { continue; }
             tool.status = Some(if canceled { "canceled".into() } else { "completed".into() });
             let tool = tool.clone();
-            rows.push(tool_row(&id, &tool, self.native_ids));
+            rows.push(tool_row(&id, &tool));
         }
         rows
     }
@@ -735,7 +1181,11 @@ impl Mapper {
                     rows.extend(self.finish());
                     self.begin_turn();
                 }
-                if let Some(text) = content_text(update.get("content")) { rows.push(self.append(Block::User, &text, None)); }
+                if let Some(text) = content_text(update.get("content")) {
+                    rows.push(self.append(Block::User, &text, None));
+                } else if let Some(image) = content_image(update.get("content")) {
+                    rows.push(self.append_user_image(image));
+                }
             }
             "agent_message_chunk" => {
                 let message = self.message_id(update);
@@ -754,16 +1204,22 @@ impl Mapper {
                 // `session/load` replays it; hiding it keeps both views alike, and its updates then fall
                 // through as unannounced.
                 if tool.title.as_deref() == Some("report_intent") { return rows; }
+                if tool.card().0 == "AskUserQuestion" {
+                    self.last_ask_question_id = Some(id.to_string());
+                }
                 self.remember(id, tool.clone());
-                rows.push(tool_row(id, &tool, self.native_ids));
+                rows.push(tool_row(id, &tool));
             }
             "tool_call_update" => {
                 let Some(id) = update.get("toolCallId").and_then(Value::as_str) else { return rows };
                 // An update for a call never announced is an internal tool the agent keeps to itself.
                 let Some(tool) = self.tools.get_mut(id) else { return rows };
                 tool.merge(update);
+                if tool.card().0 == "AskUserQuestion" {
+                    self.last_ask_question_id = Some(id.to_string());
+                }
                 let tool = tool.clone();
-                rows.push(tool_row(id, &tool, self.native_ids));
+                rows.push(tool_row(id, &tool));
             }
             "plan" => {
                 rows.extend(self.finish());
@@ -787,20 +1243,17 @@ impl Mapper {
         rows
     }
 
-    /// The chunk's own message id, when this agent's ids name rows.
-    fn message_id(&self, update: &Value) -> Option<String> {
-        if !self.native_ids { return None; }
-        update.get("messageId").and_then(Value::as_str).filter(|id| !id.is_empty()).map(str::to_string)
+    /// ACP does not give chunks message ids that could name rows.
+    fn message_id(&self, _update: &Value) -> Option<String> {
+        None
     }
 
-    /// Append to the open block of this kind, closing any other kind first. A block named by a message id
-    /// is also closed by a chunk of another message, so two messages in a row never share a row.
-    fn append_closing(&mut self, block: Block, text: &str, message: Option<String>) -> Vec<ChatRow> {
+    /// Append to the open block of this kind, closing any other kind first, so two messages in a row
+    /// never share a row.
+    fn append_closing(&mut self, block: Block, text: &str, _message: Option<String>) -> Vec<ChatRow> {
         let mut rows = Vec::new();
-        let named = message.as_deref().map(|message| block_id(block, message));
-        let other = self.open.as_ref().is_some_and(|(open, id, _, _)| *open != block || named.as_ref().is_some_and(|named| named != id));
-        if other { rows.extend(self.finish()); }
-        rows.push(self.append(block, text, named));
+        if self.open.as_ref().is_some_and(|(open, _, _, _)| *open != block) { rows.extend(self.finish()); }
+        rows.push(self.append(block, text, None));
         rows
     }
 
@@ -810,10 +1263,28 @@ impl Mapper {
             let prefix = match block { Block::User => "u", Block::Assistant => "a", Block::Reasoning => "r" };
             let id = named.unwrap_or_else(|| format!("acp-{prefix}{}", self.seq));
             self.open = Some((block, id, String::new(), self.at));
+            if block != Block::User {
+                self.open_user_images.clear();
+            }
         }
         let (_, id, buffer, at) = self.open.as_mut().expect("a block was just opened");
         buffer.push_str(text);
-        text_row(block, id.clone(), buffer.clone(), true, *at)
+        let images = if block == Block::User { self.open_user_images.clone() } else { Vec::new() };
+        text_row(block, id.clone(), buffer.clone(), images, true, *at)
+    }
+
+    fn append_user_image(&mut self, image: ChatImage) -> ChatRow {
+        if self.open.as_ref().is_none_or(|(open, _, _, _)| *open != Block::User) {
+            self.seq += 1;
+            let id = format!("acp-u{}", self.seq);
+            self.open = Some((Block::User, id, String::new(), self.at));
+            self.open_user_images.clear();
+        }
+        if self.open_user_images.len() < crate::command_core::MAX_IMAGES_PER_MESSAGE {
+            self.open_user_images.push(image);
+        }
+        let (_, id, buffer, at) = self.open.as_ref().expect("a user block was just opened");
+        text_row(Block::User, id.clone(), buffer.clone(), self.open_user_images.clone(), true, *at)
     }
 
     fn remember(&mut self, id: &str, tool: ToolState) {
@@ -828,23 +1299,16 @@ impl Mapper {
 }
 
 /// The row id of a block named by its message, matching what the agent's log replays to.
-fn block_id(block: Block, message: &str) -> String {
+fn text_row(block: Block, id: String, text: String, images: Vec<ChatImage>, streaming: bool, at: Option<i64>) -> ChatRow {
     match block {
-        Block::Reasoning => super::deepseek_history::reasoning_id(message),
-        _ => super::deepseek_history::answer_id(message),
-    }
-}
-
-fn text_row(block: Block, id: String, text: String, streaming: bool, at: Option<i64>) -> ChatRow {
-    match block {
-        Block::User => ChatRow::User { id, text, images: Vec::new(), at },
+        Block::User => ChatRow::User { id, text, images, at },
         Block::Assistant => ChatRow::Assistant { id, text, streaming, model: None, at, duration_ms: None },
         Block::Reasoning => ChatRow::Reasoning { id, text, streaming },
     }
 }
 
-fn tool_row(id: &str, tool: &ToolState, by_name: bool) -> ChatRow {
-    let (name, input) = tool.card(by_name);
+fn tool_row(id: &str, tool: &ToolState) -> ChatRow {
+    let (name, input) = tool.card();
     let status = tool.status();
     ChatRow::Tool {
         id: format!("acp-t-{id}"),
@@ -874,7 +1338,7 @@ pub fn history_rows(content: &str) -> Vec<ChatRow> {
     for line in content.lines() {
         let Ok(value) = serde_json::from_str::<Value>(line) else { continue };
         if value.get("method").and_then(Value::as_str) == Some("_vlx/turn_end") {
-            for row in mapper.finish() { place(row, &mut rows); }
+            if let Some(row) = mapper.finish() { place(row, &mut rows); }
             if let Some(duration) = value.get("durationMs").and_then(Value::as_u64) { attach_duration(&mut rows, duration); }
             continue;
         }
@@ -899,6 +1363,11 @@ fn line_time(value: &Value) -> Option<i64> {
 
 /// Where the engine keeps a conversation's notifications for agents without a readable recording.
 pub fn journal_path(data_dir: &Path, kind: SessionKind, native_id: &str) -> Option<PathBuf> {
+    // Antigravity writes its own transcript, which also keeps attached media paths; a journal would only
+    // duplicate it and lose those images.
+    if kind == SessionKind::Antigravity {
+        return None;
+    }
     if native_id.is_empty() || !native_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) || native_id.starts_with('.') {
         return None;
     }
@@ -970,14 +1439,21 @@ pub fn read_recording(path: &Path) -> Result<String, String> {
 
 /// History rows of an ACP conversation that has no running process.
 pub fn replay(data_dir: Option<&Path>, kind: SessionKind, native_id: &str) -> Result<Vec<ChatRow>, String> {
-    if kind == SessionKind::Deepseek { return super::deepseek_history::replay(native_id); }
     let path = if kind == SessionKind::Grok {
         crate::agent::resume::find_grok_updates(native_id)
+    } else if kind == SessionKind::Antigravity {
+        crate::agent::antigravity::transcript_path(native_id)
     } else {
         data_dir.and_then(|dir| journal_path(dir, kind, native_id)).filter(|path| path.is_file())
     };
     let path = path.ok_or("source_missing: The conversation recording could not be found")?;
-    let mut rows = history_rows(&read_recording(&path)?);
+    let content = read_recording(&path)?;
+    // Antigravity's transcript is its own step format, not ACP notifications.
+    let mut rows = if kind == SessionKind::Antigravity {
+        super::antigravity_protocol::history_rows(&content)
+    } else {
+        history_rows(&content)
+    };
     super::shell::map_replayed_rows(&mut rows);
     Ok(rows)
 }
@@ -1057,7 +1533,7 @@ mod tests {
 
     #[test]
     fn tool_kinds_map_to_the_view_cards() {
-        let card = |update: Value| { let mut tool = ToolState::default(); tool.merge(&update); tool.card(false) };
+        let card = |update: Value| { let mut tool = ToolState::default(); tool.merge(&update); tool.card() };
         let (name, input) = card(json!({"kind":"edit","title":"Edit a.rs","content":[{"type":"diff","path":"/w/a.rs","oldText":"x","newText":"y"}]}));
         assert_eq!((name.as_str(), &input["file_path"], &input["old_string"], &input["new_string"]), ("Edit", &json!("/w/a.rs"), &json!("x"), &json!("y")));
         let (name, input) = card(json!({"kind":"edit","content":[{"type":"diff","path":"/w/new.rs","newText":"fn main() {}"}]}));
@@ -1152,18 +1628,6 @@ mod tests {
     }
 
     #[test]
-    fn a_deepseek_request_naming_only_its_call_is_drawn_from_the_call_already_shown() {
-        let mut mapper = Mapper::for_kind(SessionKind::Deepseek);
-        mapper.update(&json!({"sessionUpdate":"tool_call","toolCallId":"c1","title":"bash","kind":"other","status":"in_progress",
-            "rawInput":{"command":"touch /x","justification":"The file is outside the workspace."}}));
-        let params = json!({"sessionId":"s","toolCall":{"toolCallId":"c1"},"options":[{"optionId":"allow-once","kind":"allow_once"}]});
-        let payload = permission_payload(SessionKind::Deepseek, "acp-0", &params, Some(&mapper));
-        assert_eq!((payload["tool_name"].as_str(), payload["input"]["command"].as_str()), (Some("Bash"), Some("touch /x")));
-        assert_eq!(payload["description"], "The file is outside the workspace.");
-        assert_eq!(payload["display_name"], "DeepSeek");
-    }
-
-    #[test]
     fn a_selector_of_one_model_is_not_a_choice_and_internal_intent_calls_stay_hidden() {
         let mut catalog = Catalog::default();
         catalog.absorb_session(&json!({"models":{"availableModels":[{"modelId":"auto","name":"Auto"},{"modelId":"auto","name":"Auto"}],"currentModelId":"auto"},
@@ -1192,9 +1656,23 @@ mod tests {
         assert_eq!(catalog.model.as_deref(), Some("m2"));
         assert!(catalog.model_switchable() && catalog.effort_switchable());
         assert_eq!(catalog.effort.as_deref(), Some("high"));
+        assert_eq!(catalog.model_efforts.get("m2").map(Vec::as_slice), Some(&["low".into(), "high".into()][..]));
+        // Switching to a model whose options omit `thought_level` clears stale effort state.
+        catalog.absorb_options(&[json!({"type":"select","id":"model","category":"model","currentValue":"m1","options":[
+            {"value":"m1","name":"One"},{"value":"m2","name":"Two"}]})]);
+        assert!(!catalog.effort_switchable());
+        assert!(catalog.efforts.is_empty() && catalog.effort.is_none());
+        assert_eq!(catalog.model_efforts.get("m1").map(Vec::as_slice), Some(&[][..]));
         let mut state = Catalog::default();
-        state.absorb_session(&json!({"models":{"availableModels":[{"modelId":"g1","name":"G1"},{"modelId":"g2","name":"G2"}],"currentModelId":"g1"}}));
-        assert!(state.model_switchable() && state.models_from_state);
+        state.absorb_session(&json!({
+            "models":{"availableModels":[{"modelId":"g1-low","name":"G1 (Low)"},{"modelId":"g1-high","name":"G1 (High)"}],"currentModelId":"g1-low"},
+            "configOptions":[{"type":"select","id":"model","category":"model","currentValue":"g1","options":[{"value":"g1","name":"G1"}]}]
+        }));
+        assert_eq!(state.state_models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["g1-low", "g1-high"]);
+        assert!(!state.models_from_state);
+        let mut legacy = Catalog::default();
+        legacy.absorb_session(&json!({"models":{"availableModels":[{"modelId":"g1","name":"G1"},{"modelId":"g2","name":"G2"}],"currentModelId":"g1"}}));
+        assert!(legacy.model_switchable() && legacy.models_from_state);
     }
 
     #[test]
@@ -1218,23 +1696,224 @@ mod tests {
     #[test]
     fn launch_arguments_follow_each_agent() {
         assert_eq!(launch_args(SessionKind::Grok, Some("grok-4.6"), None, &[]).unwrap(), ["agent", "stdio"]);
+        assert_eq!(launch_args(SessionKind::Antigravity, Some("gemini-4-argon"), Some("high"),
+            &[
+                "--dangerously-skip-permissions".into(),
+                "--add-dir=/w".into(),
+                "--model".into(),
+                "gemini".into(),
+                "--mode".into(),
+                "plan".into(),
+                "--effort=high".into(),
+            ]).unwrap(),
+            ["acp", "--add-dir=/w"]);
+        assert!(launch_args(SessionKind::Antigravity, None, None, &["--conversation=old".into()]).is_err());
         assert_eq!(launch_args(SessionKind::Cursor, None, None, &["--force".into()]).unwrap(), ["acp"]);
         assert_eq!(launch_args(SessionKind::Copilot, Some("gpt-5"), Some("high"), &["--allow-all-paths".into()]).unwrap(),
             ["--acp", "--model", "gpt-5", "--effort", "high", "--allow-all-paths"]);
         assert!(launch_args(SessionKind::Copilot, None, None, &["--resume=abc".into()]).is_err());
-        assert_eq!(launch_args(SessionKind::Deepseek, Some("x"), None, &["--patch".into(), "/p.yml".into()]).unwrap(), ["--profile", "acp", "--patch", "/p.yml"]);
-        assert!(launch_args(SessionKind::Deepseek, None, None, &["--profile".into(), "web".into()]).is_err());
-        assert_eq!(reply_model(SessionKind::Deepseek, r#"["deepseek-official","deepseek-v4-pro"]"#), "deepseek-v4-pro");
         assert_eq!(reply_model(SessionKind::Kimi, "kimi-k2"), "kimi-k2");
-        assert!(validate("steer", 0, true).is_err());
-        assert!(validate("queue", 1, false).is_err());
-        assert!(validate("interrupt", 1, true).is_ok());
+        assert!(validate("steer", 0, true, false).is_err());
+        assert!(validate("steer", 0, true, true).is_ok());
+        assert!(validate("queue", 1, false, true).is_err());
+        assert!(validate("interrupt", 1, true, false).is_ok());
+    }
+
+    #[test]
+    fn initialize_advertises_form_elicitation_capability() {
+        let req = initialize("init-1");
+        assert_eq!(req.pointer("/params/clientCapabilities/elicitation"), Some(&json!({"form": {}})));
+    }
+
+    #[test]
+    fn ask_question_elicitation_converts_and_round_trips_answers() {
+        let params = json!({
+            "mode": "form",
+            "toolCallId": "tc-1",
+            "message": "Need your preferences",
+            "requestedSchema": {
+                "type": "object",
+                "properties": {
+                    "q10": { "type": "string", "title": "Final note" },
+                    "q1": {
+                        "type": "string",
+                        "title": "Choose deploy target",
+                        "oneOf": [
+                            {"const": "1", "title": "Staging"},
+                            {"const": "2", "title": "Production"}
+                        ]
+                    },
+                    "q1_other": { "type": "string", "title": "Other" },
+                    "q2": {
+                        "type": "array",
+                        "title": "Enable features",
+                        "items": {
+                            "anyOf": [
+                                {"const": "1", "title": "Metrics, Tracing"},
+                                {"const": "2", "title": "Alerts"}
+                            ]
+                        }
+                    },
+                    "q2_other": { "type": "string", "title": "Other" }
+                },
+                "required": ["q1", "q2"]
+            }
+        });
+        let card = elicitation_payload(SessionKind::Antigravity, "acp-5", &params);
+        assert_eq!(card["tool_name"], "AskUserQuestion");
+        assert_eq!(card["input"]["_acpAskQuestion"], true);
+        let qs = card["input"]["questions"].as_array().unwrap();
+        assert_eq!(qs.iter().map(|q| q["_key"].as_str().unwrap()).collect::<Vec<_>>(), ["q1", "q2", "q10"]);
+        assert_eq!(qs[0]["multiSelect"], false);
+        assert_eq!(qs[0]["allowOther"], true);
+        assert_eq!(qs[1]["multiSelect"], true);
+        assert_eq!(qs[2]["allowOther"], true);
+
+        let via_ui = json!({
+            "answers": {
+                "Choose deploy target": "custom cluster",
+                "Enable features": "Metrics, Tracing, custom flag",
+                "Final note": "looks good"
+            }
+        });
+        let ok = elicitation_outcome(&json!(5), &card, &params, true, Some(&via_ui), None);
+        assert_eq!(ok["result"], json!({
+            "action": "accept",
+            "content": {
+                "q1_other": "custom cluster",
+                "q2": ["1"],
+                "q2_other": "custom flag",
+                "q10": "looks good"
+            }
+        }));
+
+        let via_indices = json!({
+            "_selectedIndices": {"0": [1], "1": [0, 1]},
+            "_otherTexts": {"1": "extra"}
+        });
+        let ok2 = elicitation_outcome(&json!(5), &card, &params, true, Some(&via_indices), None);
+        assert_eq!(ok2["result"], json!({
+            "action": "accept",
+            "content": {
+                "q1": "2",
+                "q2": ["1", "2"],
+                "q2_other": "extra"
+            }
+        }));
+
+        let declined = elicitation_outcome(&json!(5), &card, &params, false, None, Some("decline"));
+        assert_eq!(declined["result"], json!({"action": "decline"}));
+        let cancelled = elicitation_outcome(&json!(5), &card, &params, false, None, Some("cancel"));
+        assert_eq!(cancelled["result"], json!({"action": "cancel"}));
+
+        let skipped = json!({
+            "_selectedIndices": {"0": [0]},
+            "_otherTexts": {"2": "notes"},
+            "_skippedIndices": [1]
+        });
+        let ok_skip = elicitation_outcome(&json!(5), &card, &params, true, Some(&skipped), None);
+        assert_eq!(ok_skip["result"], json!({
+            "action": "accept",
+            "content": {
+                "q1": "1",
+                "q2": [],
+                "q10": "notes"
+            }
+        }));
+    }
+
+    #[test]
+    fn optionsless_q_other_elicitation_and_timeline_writeback_work() {
+        let params = json!({
+            "mode": "form",
+            "toolCallId": "tc-free",
+            "message": "The agent has a question.",
+            "requestedSchema": {
+                "type": "object",
+                "properties": {
+                    "q1_other": { "type": "string", "title": "What port?" }
+                }
+            }
+        });
+        let card = elicitation_payload(SessionKind::Antigravity, "acp-12", &params);
+        assert_eq!(card["tool_name"], "AskUserQuestion");
+        assert_eq!(card["input"]["questions"][0]["options"], json!([]));
+        assert_eq!(card["input"]["questions"][0]["allowOther"], true);
+        let ok = elicitation_outcome(&json!(12), &card, &params, true, Some(&json!({"_otherTexts": {"0": "8080"}})), None);
+        assert_eq!(ok["result"], json!({"action": "accept", "content": {"q1_other": "8080"}}));
+
+        let mut mapper = Mapper::default();
+        let rows = mapper.update(&json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": "tc-free",
+            "title": "ask_question",
+            "kind": "other",
+            "status": "in_progress",
+            "rawInput": {"questions": [{"question": "What port?", "is_multi_select": false, "options": []}]}
+        }));
+        assert!(matches!(&rows[0], ChatRow::Tool { name, .. } if name == "AskUserQuestion"));
+        let answered = mapper.record_ask_question_answer(Some(&json!({
+            "answers": {"What port?": "8080"},
+            "_answerList": ["8080"]
+        })), true).expect("recorded row");
+        let ChatRow::Tool { name, input, .. } = answered else { panic!() };
+        assert_eq!(name, "AskUserQuestion");
+        assert_eq!(input["answers"], json!({"What port?": "8080"}));
+        assert_eq!(input["_answerList"], json!(["8080"]));
+
+        let trailing = mapper.update(&json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "tc-free",
+            "status": "completed",
+            "rawInput": {}
+        }));
+        let ChatRow::Tool { input: after_update, .. } = &trailing[0] else { panic!() };
+        assert_eq!(after_update["answers"], json!({"What port?": "8080"}));
+        assert_eq!(after_update["questions"][0]["header"], "Q1");
+
+        let mut replay = Mapper::replay();
+        let _ = replay.update(&json!({
+            "sessionUpdate": "user_message_chunk",
+            "content": {"type": "image", "mimeType": "image/png", "data": "UE5H"}
+        }));
+        let closed = replay.finish().expect("closed user row");
+        let ChatRow::User { text, images, .. } = closed else { panic!() };
+        assert_eq!(text, "");
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].data, "UE5H");
+    }
+
+    #[test]
+    fn generic_elicitation_preserves_mcp_card_and_tool_card_normalizes_ask_question() {
+        let params = json!({
+            "mode": "form",
+            "serverName": "github",
+            "message": "Sign in",
+            "requestedSchema": {"type": "object", "properties": {"token": {"type": "string"}}}
+        });
+        let card = elicitation_payload(SessionKind::Antigravity, "acp-9", &params);
+        assert_eq!(card["subtype"], "elicitation");
+        assert_eq!(card["tool_name"], "MCP");
+        let resp = elicitation_outcome(&json!(9), &card, &params, true, Some(&json!({"token": "abc"})), None);
+        assert_eq!(resp["result"], json!({"action": "accept", "content": {"token": "abc"}}));
+
+        let mut state = ToolState::default();
+        state.merge(&json!({
+            "title": "ask_question",
+            "kind": "other",
+            "rawInput": {"questions": [{"question": "Pick?", "multi_select": true, "allow_other": false}]}
+        }));
+        let (name, input) = state.card();
+        assert_eq!(name, "AskUserQuestion");
+        assert_eq!(input["questions"][0]["multiSelect"], true);
+        assert_eq!(input["questions"][0]["allowOther"], false);
     }
 
     #[test]
     fn journal_paths_reject_names_that_leave_the_directory() {
         let root = Path::new("/data");
         assert_eq!(journal_path(root, SessionKind::Kimi, "a1-b2").unwrap(), root.join("chat-acp/kimi/a1-b2.jsonl"));
+        assert!(journal_path(root, SessionKind::Antigravity, "a1-b2").is_none());
         for bad in ["", "../x", "a/b", ".hidden", "a\\b"] { assert!(journal_path(root, SessionKind::Kimi, bad).is_none()); }
     }
 

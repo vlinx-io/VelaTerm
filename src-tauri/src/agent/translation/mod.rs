@@ -74,7 +74,7 @@ fn agent_command(app: &AppCtx,cfg: &config::Config,bin: &str,dir: &std::path::Pa
     let model=if cfg.model.is_empty() {defaults.model.unwrap_or_default()} else {cfg.model.clone()};
     let effort=if cfg.effort.is_empty() {defaults.effort.unwrap_or_default()} else {cfg.effort.clone()};
     let flags=super::launch_options::apply(kind,None,(!model.is_empty()).then_some(model.as_str()),(!effort.is_empty()).then_some(effort.as_str())).map_err(|_|"translation:configuration")?;
-    let (mut command,stdin)=super::session_title::isolated_command(bin,kind,dir,raw,None,None,&schema()).map_err(|_|"translation:agent")?;
+    let (mut command,stdin)=super::session_title::isolated_command(bin,kind,dir,raw,None,None,&schema(),None,None).map_err(|_|"translation:agent")?;
     if kind==SessionKind::Codex {
         // This task transforms text; coding instructions and skill discovery only add unrelated context.
         let instructions=dir.join("translation-instructions.md");

@@ -133,10 +133,56 @@ pub(crate) fn short_input(input:&Value) -> Value {
             object.insert(key.into(),Value::String(preview(value,512)));
         }
     }
+    // Preserve bounded AskUserQuestion structure so answered Q&A cards render directly on history pages.
+    if let Some(questions)=input.get("questions").and_then(Value::as_array) {
+        let bounded:Vec<Value>=questions.iter().take(16).filter_map(|item| {
+            let item=item.as_object()?;
+            let mut q=serde_json::Map::new();
+            if let Some(header)=item.get("header").and_then(Value::as_str) {q.insert("header".into(),json!(preview(header,64)));}
+            if let Some(question)=item.get("question").and_then(Value::as_str) {q.insert("question".into(),json!(preview(question,512)));}
+            if let Some(placeholder)=item.get("placeholder").and_then(Value::as_str) {q.insert("placeholder".into(),json!(preview(placeholder,128)));}
+            for flag in ["multiSelect","allowOther","allowEmpty"] {
+                if let Some(val)=item.get(flag).and_then(Value::as_bool) {q.insert(flag.into(),json!(val));}
+            }
+            let opts:Vec<Value>=item.get("options").and_then(Value::as_array).into_iter().flatten().take(20).filter_map(|opt| {
+                let opt=opt.as_object()?;
+                let label=opt.get("label").and_then(Value::as_str)?;
+                let mut o=json!({"label":preview(label,256)});
+                if let Some(desc)=opt.get("description").and_then(Value::as_str) {o["description"]=json!(preview(desc,256));}
+                Some(o)
+            }).collect();
+            q.insert("options".into(),Value::Array(opts));
+            Some(Value::Object(q))
+        }).collect();
+        if !bounded.is_empty() {object.insert("questions".into(),Value::Array(bounded));}
+    }
+    if let Some(answers)=input.get("answers").and_then(Value::as_object) {
+        let mut bounded=serde_json::Map::new();
+        for (k,v) in answers.iter().take(16) {
+            if let Some(s)=v.as_str() {bounded.insert(preview(k,512),json!(preview(s,512)));}
+        }
+        if !bounded.is_empty() {object.insert("answers".into(),Value::Object(bounded));}
+    }
+    if let Some(list)=input.get("_answerList").and_then(Value::as_array) {
+        let bounded:Vec<Value>=list.iter().take(16).map(|v| match v.as_str() {
+            Some(s)=>json!(preview(s,512)),
+            None=>Value::Null,
+        }).collect();
+        if !bounded.is_empty() {object.insert("_answerList".into(),Value::Array(bounded));}
+    }
     Value::Object(object)
 }
 
 pub(crate) fn body_paths(record:&Record,role:&str,call:Option<&str>,local:usize) -> Vec<String> {
+    if record.value["type"]=="dsh_row" {
+        return match role {
+            "toolInput"=>record.fields.iter().filter(|field|field.path=="/input" || field.path.starts_with("/input/")).map(|field|field.path.clone()).collect(),
+            "toolOutput"=>if record.value.pointer("/row/kind").and_then(Value::as_str)==Some("shell") {
+                vec!["/fullStdout".into(),"/fullStderr".into()]
+            } else if record.value.get("fullOutput").is_some() {vec!["/fullOutput".into()]} else {Vec::new()},
+            _=>vec!["/body".into()],
+        };
+    }
     if record.value["method"]=="session/update" {return vec!["/params/update/content/text".into()];}
     if record.value["type"]=="kiro_message" {return vec!["/text".into()];}
     if matches!(record.value["type"].as_str(),Some("opencode_message"|"opencode_part")) {return super::opencode::body_paths(record,role);}
@@ -202,7 +248,7 @@ fn facts(kind:SessionKind,record:&Record) -> Rec {
     let native=match kind {
         SessionKind::Claude=>get(value,&["uuid"]),
         SessionKind::Pi|SessionKind::Omp=>get(value,&["id"]),
-        SessionKind::Opencode|SessionKind::Kiro=>None,
+        SessionKind::Opencode|SessionKind::Deepseek|SessionKind::Kiro=>None,
         _=>value.pointer("/payload/id").and_then(Value::as_str),
     };
     let results=value["type"]=="user" && value.pointer("/message/content").and_then(Value::as_array)
@@ -225,9 +271,10 @@ pub(super) fn store_record(state:&mut State,kind:SessionKind,scanned:&Scanned,re
         let row=json!({"kind":"notice","id":format!("gap:{}:{}:{}",source.id,source.generation,record.start),"message":error});
         state.write_row(record,0,None,&row);return Ok(());
     }
+    if record.value["type"].as_str()==Some("dsh_row") {return super::deepseek_legacy::store_record(state,scanned,record,refs);}
     match kind {
         SessionKind::Antigravity=>return super::antigravity_adapter::store(state,scanned,record,refs),
-        SessionKind::Opencode=>return super::opencode::store_record(state,scanned,record,refs),
+        SessionKind::Opencode|SessionKind::Deepseek=>return super::opencode::store_record(state,kind,scanned,record,refs),
         SessionKind::Kiro=>return super::kiro::store_record(state,scanned,record,refs),
         _=>{},
     }

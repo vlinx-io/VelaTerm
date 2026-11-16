@@ -61,7 +61,7 @@ The row under the message box holds controls for the next message. Which control
 | Speed | Codex, when several speeds are offered | Pick the service speed |
 | Tone | Codex, on models that support it | "Default tone", "Neutral", "Friendly" or "Pragmatic" |
 | MCP servers | Claude, Codex | Show configured MCP servers and their state; reconnect, disable or enable a server. For Codex, enabling or disabling a server changes your Codex user configuration, which other Codex conversations also use |
-| Background tasks | Claude | See §9 |
+| Background tasks | Claude, OpenCode | See §9 |
 | Account | Claude, Codex | Sign in again or sign out; see §12 |
 | Codex reset credits | Codex | Show and use Codex rate-limit reset credits |
 
@@ -126,9 +126,11 @@ Rewinding removes the chosen message and everything after it. It is available on
 
 Claude and Codex messages also have an "Edit" button. Change the text or images, choose "Review and resend", and confirm with "Delete and resend". The original message and everything after it are permanently deleted, and your edited message is sent from that point. File changes are not restored.
 
-## 9. Background tasks (Claude)
+## 9. Background tasks (Claude and OpenCode)
 
-Claude can run subagents and commands in the background. The **Background tasks** control lists them with their state ("Running", "Completed", "Failed", "Stopped"). Use "Stop" to end a task, or open it in its own tab to see its elapsed time, token count, tool calls, prompt and result. While a turn is running, "Move the running work to the background" sends the current work to the background so you can continue the conversation.
+Claude and OpenCode can run subagents and commands in the background. The **Background tasks** control lists them with their state ("Running", "Completed", "Failed", "Stopped"). Use "Stop" to end a task, or open it in its own tab to see its elapsed time, token count, tool calls, prompt and result. While a turn is running, "Move the running work to the background" sends the current work to the background so you can continue the conversation.
+
+OpenCode lists both background subagents and background shell commands. Opening a subagent task shows its own conversation; opening a shell task shows the command and its output.
 
 While background tasks run, the session keeps its "working" status.
 

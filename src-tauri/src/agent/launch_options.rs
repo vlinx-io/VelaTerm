@@ -58,7 +58,7 @@ pub fn catalog() -> Vec<LaunchOption> {
             Copilot,
             "Copilot",
             Some("--effort"),
-            &["none", "low", "medium", "high"],
+            super::chat::acp_protocol::COPILOT_EFFORTS,
         ),
         (Cursor, "Cursor", None, &[]),
         (
@@ -89,8 +89,8 @@ pub fn catalog() -> Vec<LaunchOption> {
         (Kimi, "Kimi Code", None, &[]),
         // ZCode takes its model and reasoning level with every message of its protocol server, not as launch flags.
         (Zcode, "ZCode", None, &[]),
-        // DeepSeek Harness takes its model and reasoning over ACP, not as launch flags.
-        (Deepseek, "DeepSeek", None, &[]),
+        // DeepSeek runs through OpenCode, whose `run` subcommand takes the model and variant as flags.
+        (Deepseek, "DeepSeek", Some("--variant"), &["low", "high", "max"]),
         (
             Kiro,
             "Kiro",
@@ -243,6 +243,13 @@ pub fn apply(
             );
         }
     }
+    if kind == SessionKind::Zcode {
+        // ZCode runs through its protocol server and reads model/effort from `session_model_settings`.
+        return Ok(args
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string));
+    }
     let raw = tokens(args.unwrap_or(""));
     let mut kept = Vec::new();
     let mut i = 0;
@@ -286,14 +293,16 @@ pub fn apply(
         kept.push(format!("--model '{model}'"));
     }
     if let Some(effort) = effort.filter(|s| !s.is_empty()) {
-        let flag = spec
-            .effort_flag
-            .ok_or("This agent does not expose a reasoning effort option")?;
-        kept.push(if kind == SessionKind::Codex {
-            format!("-c model_reasoning_effort={effort}")
-        } else {
-            format!("{flag} {effort}")
-        });
+        if !(kind == SessionKind::Claude && effort == super::chat::protocol::THINKING_OFF) {
+            let flag = spec
+                .effort_flag
+                .ok_or("This agent does not expose a reasoning effort option")?;
+            kept.push(if kind == SessionKind::Codex {
+                format!("-c model_reasoning_effort={effort}")
+            } else {
+                format!("{flag} {effort}")
+            });
+        }
     }
     let result = kept.join(" ");
     Ok((!result.is_empty()).then_some(result))
@@ -473,5 +482,35 @@ mod tests {
         assert!(apply(SessionKind::Claude, None, None, None)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn claude_thinking_off_zcode_selection_and_copilot_efforts_match_chat() {
+        assert_eq!(
+            apply(
+                SessionKind::Claude,
+                Some("--model opus --effort high --verbose"),
+                Some("sonnet"),
+                Some("off")
+            )
+            .unwrap()
+            .as_deref(),
+            Some("--verbose --model 'sonnet'")
+        );
+        assert_eq!(
+            apply(
+                SessionKind::Zcode,
+                Some("--custom-flag value"),
+                Some("glm-5"),
+                Some("high")
+            )
+            .unwrap()
+            .as_deref(),
+            Some("--custom-flag value")
+        );
+        assert!(apply(SessionKind::Zcode, None, Some("bad model"), None).is_err());
+        let copilot = catalog().into_iter().find(|s| s.id == SessionKind::Copilot).unwrap();
+        assert!(copilot.effort_levels.contains(&"xhigh"));
+        assert!(copilot.effort_levels.contains(&"max"));
     }
 }

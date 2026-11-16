@@ -9,7 +9,7 @@ pub fn command_name(kind: SessionKind) -> &'static str {
         SessionKind::Antigravity => "agy",
         SessionKind::Kiro => "kiro-cli",
         SessionKind::Zoo => "roo",
-        SessionKind::Deepseek => "dsh",
+        SessionKind::Deepseek => "opencode",
         _ => kind.as_str(),
     }
 }
@@ -64,6 +64,27 @@ pub fn resolve(app: &AppCtx, kind: SessionKind, session_path: Option<&str>) -> O
     }
 }
 
+/// Resolve an agent executable for UI option catalogs using the cached shell discovery snapshot.
+pub(crate) fn resolve_cached(app: &AppCtx, kind: SessionKind, session_path: Option<&str>) -> Option<String> {
+    if matches!(kind, SessionKind::Terminal | SessionKind::Browser) {
+        return None;
+    }
+    let settings = load_vlx_settings(app).ok()?;
+    resolve_cached_with_settings(kind, session_path, &settings)
+}
+
+/// Resolve using pre-loaded `vlx-settings` JSON and cached shell discovery to avoid repeated DB locks.
+pub(crate) fn resolve_cached_with_settings(
+    kind: SessionKind,
+    session_path: Option<&str>,
+    settings: &serde_json::Value,
+) -> Option<String> {
+    match resolve_binary_with_settings(kind, session_path, settings, discover_cached) {
+        LaunchBinary::Path(path) => Some(path),
+        _ => None,
+    }
+}
+
 pub fn for_session(app: &AppCtx, session: &crate::models::Session) -> String {
     resolve(app, session.kind, session.agent_path.as_deref())
         .unwrap_or_else(|| command_name(session.kind).to_string())
@@ -94,13 +115,27 @@ fn resolve_binary(
     if matches!(kind, SessionKind::Terminal | SessionKind::Browser) {
         return Ok(LaunchBinary::Unresolved);
     }
-    let settings = {
-        let conn = app.db().conn.lock().map_err(|e| e.to_string())?;
-        crate::db::repo::get_app_settings(&conn)?.remove("vlx-settings")
-    };
-    let settings: serde_json::Value = settings
+    let settings = load_vlx_settings(app)?;
+    Ok(resolve_binary_with_settings(kind, session_path, &settings, discover))
+}
+
+fn load_vlx_settings(app: &AppCtx) -> Result<serde_json::Value, String> {
+    let conn = app.db().conn.lock().map_err(|e| e.to_string())?;
+    Ok(crate::db::repo::get_app_settings(&conn)?
+        .remove("vlx-settings")
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
+        .unwrap_or_default())
+}
+
+fn resolve_binary_with_settings(
+    kind: SessionKind,
+    session_path: Option<&str>,
+    settings: &serde_json::Value,
+    discover_bin: fn(SessionKind) -> LaunchBinary,
+) -> LaunchBinary {
+    if matches!(kind, SessionKind::Terminal | SessionKind::Browser) {
+        return LaunchBinary::Unresolved;
+    }
     let global = settings
         .get("agentDefaults")
         .and_then(|v| v.get(kind.as_str()))
@@ -108,9 +143,24 @@ fn resolve_binary(
         .and_then(|v| v.as_str());
     let binary = match configured_session(session_path, global) {
         Some(path) => configured_binary(kind, path),
-        None => discover(kind),
+        None => discover_bin(kind),
     };
-    Ok(working(kind, binary))
+    // DeepSeek conversations used to run DeepSeek Harness. A path saved by an older install still
+    // points at `dsh`, which is not an OpenCode server; discover OpenCode instead of launching it.
+    let binary = if kind == SessionKind::Deepseek && is_deepseek_harness(&binary) {
+        discover_bin(kind)
+    } else {
+        binary
+    };
+    working(kind, binary)
+}
+
+/// Whether a resolved path is DeepSeek Harness rather than an OpenCode executable.
+fn is_deepseek_harness(binary: &LaunchBinary) -> bool {
+    let LaunchBinary::Path(path) = binary else { return false };
+    let file = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
+    stem.eq_ignore_ascii_case("dsh")
 }
 
 /// An installation counts only once it starts: an install or update that stopped partway leaves a file
@@ -137,25 +187,58 @@ fn configured_binary(kind: SessionKind, path: String) -> LaunchBinary {
 /// only), and last a dead command wrapper. Checking the wrapper last keeps a working copy found
 /// anywhere else in the lead.
 pub(crate) fn discover(kind: SessionKind) -> LaunchBinary {
+    discover_with(
+        kind,
+        super::install::locate_installed_bin,
+        find_in_shell,
+        super::install::dangling_npm_install,
+    )
+}
+
+pub(crate) fn discover_cached(kind: SessionKind) -> LaunchBinary {
+    discover_with(
+        kind,
+        super::install::locate_installed_bin_cached,
+        super::install::cached_shell_bin,
+        super::install::dangling_npm_install_cached,
+    )
+}
+
+pub(crate) fn discover_with(
+    kind: SessionKind,
+    locate_bin: impl FnOnce(&str) -> Option<String>,
+    shell_find: impl Fn(&str) -> Option<String>,
+    dangling_npm: impl FnOnce(&str) -> bool,
+) -> LaunchBinary {
+    discover_with_path(kind, locate_bin, find_on_path, shell_find, dangling_npm)
+}
+
+pub(crate) fn discover_with_path(
+    kind: SessionKind,
+    locate_bin: impl FnOnce(&str) -> Option<String>,
+    path_find: impl Fn(&str) -> Option<String>,
+    shell_find: impl Fn(&str) -> Option<String>,
+    dangling_npm: impl FnOnce(&str) -> bool,
+) -> LaunchBinary {
     let name = command_name(kind);
-    if let Some(path) = super::install::locate_installed_bin(kind.as_str()) {
+    if let Some(path) = locate_bin(kind.as_str()) {
         return LaunchBinary::Path(path);
     }
     // The known locations already skip a partial install; one reached through PATH or the shell profile is
     // the same launcher, so it reports the agent as missing rather than starting a crash.
     let partial = |path: &str| super::install::incomplete_install(kind.as_str(), Path::new(path));
-    if let Some(path) = find_on_path(name) {
+    if let Some(path) = path_find(name) {
         return if partial(&path) { LaunchBinary::Broken } else { LaunchBinary::Path(path) };
     }
-    if let Some(path) = find_in_shell(name) {
+    if let Some(path) = shell_find(name) {
         return if partial(&path) { LaunchBinary::Broken } else { LaunchBinary::Path(path) };
     }
-    if kind == SessionKind::Opencode {
-        if let Some(path)=find_on_path("opencode2").or_else(||find_in_shell("opencode2")) {
+    if kind.uses_opencode() {
+        if let Some(path) = path_find("opencode2").or_else(|| shell_find("opencode2")) {
             return LaunchBinary::Path(path);
         }
     }
-    if super::install::dangling_npm_install(kind.as_str()) {
+    if dangling_npm(kind.as_str()) {
         return LaunchBinary::Broken;
     }
     LaunchBinary::Unresolved
@@ -968,5 +1051,13 @@ mod tests {
         std::fs::write(dep.join("package.json"), b"{}").unwrap();
         assert_eq!(configured_binary(SessionKind::Zoo, path.clone()), LaunchBinary::Path(path));
         let _ = std::fs::remove_dir_all(&cli);
+    }
+
+    #[test]
+    fn a_saved_deepseek_harness_path_is_not_an_opencode_installation() {
+        assert!(is_deepseek_harness(&LaunchBinary::Path("/opt/bin/dsh".into())));
+        assert!(is_deepseek_harness(&LaunchBinary::Path("C:\\tools\\DSH.EXE".into())));
+        assert!(!is_deepseek_harness(&LaunchBinary::Path("/opt/bin/opencode".into())));
+        assert!(!is_deepseek_harness(&LaunchBinary::Unresolved));
     }
 }

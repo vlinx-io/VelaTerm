@@ -8,13 +8,15 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { markSessionRead, markSessionUnread, reportScreen, sessionStates } = vi.hoisted(() => ({
+const { markSessionPending, markSessionRead, markSessionUnread, reportScreen, sessionStates } = vi.hoisted(() => ({
+  markSessionPending: vi.fn().mockResolvedValue(undefined),
   markSessionRead: vi.fn().mockResolvedValue(undefined),
   markSessionUnread: vi.fn().mockResolvedValue(undefined),
   reportScreen: vi.fn().mockResolvedValue(undefined),
   sessionStates: vi.fn().mockResolvedValue({}),
 }));
 vi.mock("../ipc/sessionState", () => ({
+  markSessionPending,
   markSessionRead,
   markSessionUnread,
   reportScreen,
@@ -53,6 +55,7 @@ import { registerTerminal, unregisterTerminal } from "../terminal/registry";
 const SID = "unread-1";
 
 beforeEach(() => {
+  markSessionPending.mockClear();
   markSessionRead.mockClear();
   markSessionUnread.mockClear();
   reportScreen.mockClear();
@@ -64,6 +67,8 @@ beforeEach(() => {
     windowFocused: false,
     notifyEnabled: true,
     activeTabId: null,
+    activeSessionId: null,
+    unreadHold: null,
     paneTrees: {},
   });
 });
@@ -355,5 +360,43 @@ describe("reading every record at once", () => {
     await useTermStore.getState().syncSessionStates();
 
     expect(useTermStore.getState().notifications[SID]).toBe(1);
+  });
+});
+
+describe("marking sessions viewed or pending by hand", () => {
+  it("raises the marker on every unmarked session without a system notification", () => {
+    useTermStore.setState({ notifications: { a: 1 } });
+
+    useTermStore.getState().markSessionsReview(["a", "b", "c"], "pending");
+
+    expect(markSessionPending.mock.calls.map((c) => c[0]).sort()).toEqual(["b", "c"]);
+    expect(Object.keys(useTermStore.getState().notifications).sort()).toEqual(["a", "b", "c"]);
+    expect(useTermStore.getState().notifications.a).toBe(1);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("clears only the marked sessions when marking viewed", () => {
+    useTermStore.setState({ notifications: { a: 1, b: 2, other: 3 } });
+
+    useTermStore.getState().markSessionsReview(["a", "b", "c"], "viewed");
+
+    expect(markSessionRead.mock.calls.map((c) => c[0]).sort()).toEqual(["a", "b"]);
+    expect(useTermStore.getState().notifications).toEqual({ other: 3 });
+  });
+
+  it("holds the marker on the active session so the read delay does not clear it", () => {
+    useTermStore.setState({ activeSessionId: "a", notifications: { a: 1 } });
+
+    useTermStore.getState().markSessionsReview(["a"], "pending");
+
+    expect(useTermStore.getState().unreadHold).toBe("a");
+    expect(markSessionPending).not.toHaveBeenCalled();
+  });
+
+  it("pops nothing on another client for a marker set by hand", () => {
+    useTermStore.getState().applySessionStates({ [SID]: { unread: true, unreadManual: true } });
+
+    expect(useTermStore.getState().notifications).toHaveProperty(SID);
+    expect(notify).not.toHaveBeenCalled();
   });
 });

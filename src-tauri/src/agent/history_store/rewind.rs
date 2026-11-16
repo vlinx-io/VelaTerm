@@ -98,10 +98,11 @@ impl Selection {
 
 fn ready(branch:&Branch) -> Result<(),String> {
     if let Some(error)=&branch.error {return Err(error.clone());}
-    if !matches!(branch.kind,SessionKind::Claude|SessionKind::Codex|SessionKind::Opencode) {
+    if !(matches!(branch.kind,SessionKind::Claude|SessionKind::Codex) || branch.kind.uses_opencode()) {
         return Err("detail_unavailable: this provider does not support conversation rewind".into());
     }
     for source in &branch.sources {
+        if super::deepseek_legacy::is_legacy_source(source) {continue;}
         let state=source.current().map_err(|_|"source_changed: rewind source generation changed".to_string())?;
         if state.status!="complete" {return Err(state.error.clone().unwrap_or_else(||"index_busy: native rewind targets are still being indexed".into()));}
     }Ok(())
@@ -109,6 +110,7 @@ fn ready(branch:&Branch) -> Result<(),String> {
 
 /// Visible user, command and shell rows of one source in order: the messages a rewind can target.
 fn native_rows(branch:&Branch,state:&State,source:&RegisteredSource) -> Vec<((u64,u32),std::sync::Arc<str>)> {
+    if super::deepseek_legacy::is_legacy_source(source) {return Vec::new();}
     branch.ordered(state,source,source.segment.end_byte).into_iter().filter(|(_,id)|matches!(&*state.rows[&**id].kind,"user"|"command"|"shell")).collect()
 }
 fn identity(value:Option<&str>) -> Result<String,String> {
@@ -181,7 +183,7 @@ fn target(branch:&Branch,source:&RegisteredSource,start:u64,end:u64,validate:boo
     if validate {verify(source,start,end)?;}
     let value=super::store::reproject(source,start,&mut |_|Ok(()))?.value;
     let (message,turn)=match branch.kind {
-        SessionKind::Opencode=>(identity(value.pointer(if value.pointer("/info/role").and_then(Value::as_str)==Some("assistant") {"/info/parentID"} else {"/info/id"}).and_then(Value::as_str))?,None),
+        SessionKind::Opencode|SessionKind::Deepseek=>(identity(value.pointer(if value.pointer("/info/role").and_then(Value::as_str)==Some("assistant") {"/info/parentID"} else {"/info/id"}).and_then(Value::as_str))?,None),
         SessionKind::Codex=>{
             let turn={
                 let state=source.current()?;

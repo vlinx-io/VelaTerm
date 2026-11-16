@@ -85,13 +85,15 @@ export function questionShowsTextInput(question: QuestionFormQuestion): boolean 
   return question.options.length === 0 || question.allowOther;
 }
 
-/** Whether one question has been answered, by a pick or by typing. */
+/** Whether one question has been answered, by a pick, typing, or explicitly skipping. */
 export function isQuestionAnswered(
   question: QuestionFormQuestion,
   qIndex: number,
   selections: QuestionSelections,
   otherTexts: QuestionOtherTexts,
+  skipped?: ReadonlySet<number>,
 ): boolean {
+  if (skipped?.has(qIndex)) return true;
   const selected = selections[qIndex];
   if (selected && selected.size > 0) return true;
   if (!questionShowsTextInput(question)) return false;
@@ -105,48 +107,78 @@ export function areQuestionsAnswered(
   questions: QuestionFormQuestion[] | null,
   selections: QuestionSelections,
   otherTexts: QuestionOtherTexts,
+  skipped?: ReadonlySet<number>,
 ): boolean {
   return (
-    questions?.every((question, i) => isQuestionAnswered(question, i, selections, otherTexts)) ??
+    questions?.every((question, i) => isQuestionAnswered(question, i, selections, otherTexts, skipped)) ??
     false
+  );
+}
+
+function resolveQuestionAnswer(
+  q: QuestionFormQuestion,
+  selected: ReadonlySet<number> | undefined,
+  rawTyped: string | undefined,
+  isSkipped: boolean,
+): string | null {
+  if (isSkipped) return "";
+  const typed = questionShowsTextInput(q) ? rawTyped?.trim() : undefined;
+  const selectedLabels =
+    selected && selected.size > 0
+      ? Array.from(selected)
+          .map((idx) => q.options[idx]?.label)
+          .filter((label): label is string => typeof label === "string")
+      : [];
+
+  if (q.multiSelect) {
+    const parts = [...selectedLabels];
+    if (typed) parts.push(typed);
+    if (parts.length > 0) return parts.join(", ");
+    if (q.allowEmpty && q.options.length === 0) return "";
+    return null;
+  }
+
+  if (questionShowsTextInput(q)) {
+    if (typed) return typed;
+    if (q.allowEmpty && q.options.length === 0) return "";
+  }
+
+  if (selectedLabels.length > 0) return selectedLabels.join(", ");
+  return null;
+}
+
+/**
+ * Per-question answers ordered by question index, preserving distinct answers even when two
+ * questions share the same prompt text.
+ */
+export function buildQuestionAnswerList(
+  questions: QuestionFormQuestion[],
+  selections: QuestionSelections,
+  otherTexts: QuestionOtherTexts,
+  skipped?: ReadonlySet<number>,
+): (string | null)[] {
+  return questions.map((q, i) =>
+    resolveQuestionAnswer(q, selections[i], otherTexts[i], skipped?.has(i) === true),
   );
 }
 
 /**
  * The answers, keyed by question text.
  *
- * A typed answer wins over the options, because typing one clears the picks: someone who writes their own
- * answer has left the menu behind. Several picks in a multi-select join into one line, which is the shape
- * the tool reads them in.
+ * Multi-select combines chosen options with any custom text; single-select prefers typed text over picks
+ * because typing clears the pick. Skipped questions map to an empty string.
  */
 export function buildQuestionFormAnswers(
   questions: QuestionFormQuestion[],
   selections: QuestionSelections,
   otherTexts: QuestionOtherTexts,
+  skipped?: ReadonlySet<number>,
 ): Record<string, string> {
   const answers: Record<string, string> = {};
+  const list = buildQuestionAnswerList(questions, selections, otherTexts, skipped);
   for (let i = 0; i < questions.length; i++) {
-    const q = questions[i];
-    const selected = selections[i];
-    const typed = otherTexts[i]?.trim();
-
-    if (questionShowsTextInput(q)) {
-      if (typed) {
-        answers[q.question] = typed;
-        continue;
-      }
-      if (q.allowEmpty && q.options.length === 0) {
-        answers[q.question] = "";
-        continue;
-      }
-    }
-
-    if (selected && selected.size > 0) {
-      answers[q.question] = Array.from(selected)
-        .map((idx) => q.options[idx]?.label)
-        .filter((label): label is string => typeof label === "string")
-        .join(", ");
-    }
+    const value = list[i];
+    if (value !== null) answers[questions[i].question] = value;
   }
   return answers;
 }
@@ -162,9 +194,16 @@ export function buildAnsweredInput(
   questions: QuestionFormQuestion[],
   selections: QuestionSelections,
   otherTexts: QuestionOtherTexts,
+  skipped?: ReadonlySet<number>,
 ): Record<string, unknown> {
   const base = typeof input === "object" && input !== null ? (input as Record<string, unknown>) : {};
-  return { ...base, answers: buildQuestionFormAnswers(questions, selections, otherTexts) };
+  const list = buildQuestionAnswerList(questions, selections, otherTexts, skipped);
+  const answers: Record<string, string> = {};
+  for (let i = 0; i < questions.length; i++) {
+    const value = list[i];
+    if (value !== null) answers[questions[i].question] = value;
+  }
+  return { ...base, answers, _answerList: list };
 }
 
 /**
@@ -218,14 +257,30 @@ export function parseAnsweredQuestions(
 ): AnsweredQuestion[] | null {
   const questions = parseQuestionFormQuestions(input);
   if (!questions) return null;
+  const answerList = readAnswerList(input);
   const given = readGivenAnswers(input);
+  const agyAnswers = extractAntigravityAnswers(output);
   const answered: AnsweredQuestion[] = [];
-  for (const question of questions) {
-    const answer = given?.[question.question] ?? extractAnswer(output, question.question);
+  for (let i = 0; i < questions.length; i++) {
+    const question = questions[i];
+    const listItem = answerList?.[i];
+    const fromList = typeof listItem === "string" ? listItem : undefined;
+    const answer =
+      fromList ??
+      given?.[question.question] ??
+      extractAnswer(output, question.question) ??
+      agyAnswers?.[i + 1];
     if (answer === undefined) continue;
     answered.push({ header: question.header, question: question.question, answer });
   }
   return answered.length > 0 ? answered : null;
+}
+
+/** Indexed answers array preserved alongside `answers` when questions share text. */
+function readAnswerList(input: unknown): unknown[] | null {
+  if (typeof input !== "object" || input === null) return null;
+  const raw = (input as Record<string, unknown>)._answerList;
+  return Array.isArray(raw) ? raw : null;
 }
 
 /** The `answers` map, when the input on hand is the answered copy rather than the proposal. */
@@ -238,6 +293,46 @@ function readGivenAnswers(input: unknown): Record<string, string> | null {
     if (typeof value === "string") answers[key] = value;
   }
   return Object.keys(answers).length > 0 ? answers : null;
+}
+
+/**
+ * Parse Antigravity's `A1: <answer>` output format after stripping timestamp headers.
+ *
+ * Returns null for empty, canceled, or dismissed outputs so unfinished/refused calls fall back to
+ * the plain tool card.
+ */
+function extractAntigravityAnswers(output: string | undefined): Record<number, string> | null {
+  if (!output) return null;
+  const lines = output.replace(/\r\n/g, "\n").split("\n");
+  let start = 0;
+  while (
+    start < lines.length &&
+    (lines[start].startsWith("Created At:") ||
+      lines[start].startsWith("Completed At:") ||
+      lines[start].trim() === "")
+  ) {
+    start += 1;
+  }
+  const body = lines.slice(start).join("\n").trim();
+  if (!body || body === "Step was canceled" || body === "Dismissed by user") return null;
+
+  const answers: Record<number, string> = {};
+  let current: number | null = null;
+  for (const line of lines.slice(start)) {
+    const match = /^A(\d+):(?:\s(.*)|$)$/.exec(line);
+    if (match) {
+      current = Number(match[1]);
+      answers[current] = match[2] ?? "";
+    } else if (current !== null) {
+      answers[current] = `${answers[current]}\n${line}`;
+    }
+  }
+  if (Object.keys(answers).length === 0) return null;
+  for (const [key, value] of Object.entries(answers)) {
+    const trimmed = value.trim();
+    answers[Number(key)] = trimmed === "User Skipped" ? "" : trimmed;
+  }
+  return answers;
 }
 
 /**

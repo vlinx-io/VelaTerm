@@ -15,6 +15,8 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod tasks;
+
 use serde_json::{json, Value};
 
 use super::{
@@ -61,6 +63,18 @@ pub(super) struct OpencodeState {
     v2: crate::agent::chat::opencode_v2::Projection,
     /// When the usage limit that refused this turn resets, if the provider said; read at turn end.
     usage_limit_reset: Option<crate::agent::chat::auto_continue::Reset>,
+    /// Tool call part id to the subagent session it started, learned from the task tool's metadata.
+    child_parts: HashMap<String, String>,
+    /// Tool call part id to when it started, in milliseconds since the epoch.
+    tool_started: HashMap<String, u64>,
+    /// Task id to the shell command id a v2 job reports, for its output and to stop it.
+    shell_ids: HashMap<String, String>,
+    /// Whether this server reports background jobs; None until the first probe answers.
+    jobs: Option<bool>,
+    /// One poller thread is following this process's background tasks.
+    polling: bool,
+    /// How many consecutive job lists omitted a task that is still marked running.
+    job_misses: HashMap<String, u8>,
 }
 
 /// A turn failed with this error. A usage limit is remembered for automatic continuation at turn end.
@@ -76,9 +90,27 @@ fn note_turn_error(proc: &ChatProcess, error: &Value) {
     }
 }
 
+/// Turn a provider's missing-credential message into the stable code the pane already translates.
+fn error_code(proc: &ChatProcess, message: String) -> String {
+    if proc.kind != SessionKind::Deepseek {
+        return message;
+    }
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("api key") || lower.contains("unauthorized") || lower.contains("no credentials") {
+        format!("agent_api_key_required:{}", proc.kind.as_str())
+    } else {
+        message
+    }
+}
+
 /// The reset of the usage limit that refused the turn just ended, if any was reported.
 pub(super) fn take_usage_limit_reset(proc: &ChatProcess) -> Option<crate::agent::chat::auto_continue::Reset> {
     proc.opencode.lock().unwrap().usage_limit_reset.take()
+}
+
+/// The product name permission and question cards attribute this engine's prompts to.
+fn display_name(kind: SessionKind) -> &'static str {
+    if kind == SessionKind::Deepseek { "DeepSeek" } else { "OpenCode" }
 }
 
 fn server(proc: &ChatProcess) -> Result<Arc<Server>, String> {
@@ -166,6 +198,9 @@ pub(super) fn bootstrap(
         let opened = match &resume {
             Some(id) => match server.get(&format!("/session/{id}")) {
                 Ok(session) => Ok(session),
+                // A DeepSeek conversation used to be recorded by DeepSeek Harness, whose id means
+                // nothing to OpenCode. Open a fresh conversation instead of refusing to start.
+                Err(error) if proc.kind == SessionKind::Deepseek && wire::is_not_found(&error) => server.post("/session", None),
                 Err(e) => Err(e),
             },
             None => server.post("/session", None),
@@ -221,8 +256,14 @@ pub(super) fn bootstrap(
                     .pointer("/model/providerID")
                     .and_then(Value::as_str)
                     .map(str::to_string);
-                proc.opencode.lock().unwrap().default_model =
-                    wire::default_model(&providers, preferred.as_deref());
+                let preferred = if proc.kind == SessionKind::Deepseek {
+                    Some(crate::agent::chat::deepseek_models::PROVIDER.to_string())
+                } else { preferred };
+                let mut default = wire::default_model(&providers, preferred.as_deref());
+                if proc.kind == SessionKind::Deepseek {
+                    default = default.filter(|model| model.starts_with("deepseek/"));
+                }
+                proc.opencode.lock().unwrap().default_model = default;
             }
         }
 
@@ -233,27 +274,62 @@ pub(super) fn bootstrap(
                 crate::diagnostic_warn!("chat: OpenCode history not reloaded: {e}");
             }
         }
+        // A conversation continued after the harness switch opens with what the old harness recorded; the
+        // idle history view shows both recordings, and the running view must not be the one place the
+        // earlier half disappears.
+        prepend_retired_harness(&app, &session_id, &proc);
         if server.is_v2() { restore_v2_prompts(&app,&session_id,&proc,&server,&native_id); }
-        proc.ready.store(true, Ordering::Relaxed);
-        emit_state(&app, &session_id, AgentState::Waiting);
-        start_waiting_message(&app, &session_id, &proc);
+        finish_startup(&app, &session_id, &proc, &native_id);
     });
 }
 
-/// Keep the native session id, persist it for the next resume, and tell the clients about it along with
-/// the model and agent the session already carries.
+/// Put a retired DeepSeek Harness recording in front of this process's timeline, when the session has one.
+fn prepend_retired_harness(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
+    if proc.kind != SessionKind::Deepseek {
+        return;
+    }
+    let legacy = {
+        let conn = app.db().conn.lock().unwrap();
+        crate::db::repo::get_session(&conn, session_id)
+            .ok()
+            .flatten()
+            .and_then(|session| session.legacy_agent_session_id)
+    };
+    let Some(legacy) = legacy else { return };
+    match crate::agent::chat::deepseek_history::replay(&legacy) {
+        Ok(rows) => proc.timeline.lock().unwrap().prepend_history(rows),
+        Err(error) => crate::diagnostic_warn!("chat: retired DeepSeek history not reloaded: {error}"),
+    }
+}
+
+/// Mark the engine ready and then announce the native session.
+///
+/// A client that waits for `session` sends its first message as soon as the event arrives. Announcing
+/// earlier — while the catalogue requests are still running — would put that message into the startup
+/// queue, so it would leave the conversation for the pending list and come back once the queue drained.
+pub(super) fn finish_startup(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, native_id: &str) {
+    proc.ready.store(true, Ordering::Relaxed);
+    announce_session(app, session_id, proc, native_id);
+    emit_state(app, session_id, AgentState::Waiting);
+    start_waiting_message(app, session_id, proc);
+}
+
+/// Keep the native session id and persist it for the next resume.
 fn remember_session(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, native_id: &str, session: &Value) {
     *proc.agent_session_id.lock().unwrap() = Some(native_id.to_string());
     let stored_model = session.get("model").and_then(|model| {
         let provider = model.get("providerID").and_then(Value::as_str)?;
         let id = model.get("id").and_then(Value::as_str)?;
         Some(format!("{provider}/{id}"))
-    });
+    }).filter(|model| proc.kind != SessionKind::Deepseek || model.starts_with("deepseek/"));
     let stored_variant = session
         .pointer("/model/variant")
         .and_then(Value::as_str)
         .filter(|v| *v != "default")
         .map(str::to_string);
+    let stored_variant = if proc.kind == SessionKind::Deepseek {
+        crate::agent::chat::deepseek_models::normalize_effort(stored_variant.as_deref())
+    } else { stored_variant };
     let keep_auto = crate::agent::session_settings::keeps_automatic_effort(app, session_id);
     {
         let mut state = proc.opencode.lock().unwrap();
@@ -276,12 +352,16 @@ fn remember_session(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, nat
     }
     let changed = {
         let conn = app.db().conn.lock().unwrap();
-        crate::db::repo::set_agent_session_id(&conn, session_id, native_id, SessionKind::Opencode)
+        crate::db::repo::set_agent_session_id(&conn, session_id, native_id, proc.kind)
             .unwrap_or(false)
     };
     if changed {
         app.emit(crate::host::TREE_CHANGED, ());
     }
+}
+
+/// Tell the clients the conversation is open, along with the model and agent it carries.
+fn announce_session(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, native_id: &str) {
     let model = proc.model.lock().unwrap().clone();
     let effort = proc.effort.lock().unwrap().clone();
     let collaboration_mode = proc.collaboration_mode.lock().unwrap().clone();
@@ -523,9 +603,14 @@ fn handle_routed(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, path: 
         "permission.replied" => resolve_prompt(app, session_id, proc, props.get("requestID").or_else(|| props.get("id"))),
         "question.asked" => question_asked(app, session_id, proc, props),
         "form.created" => {
-            if let Some(id)=props.get("id").and_then(Value::as_str) {
-                proc.permissions.lock().unwrap().insert(id.to_string(),props.clone());
-                emit(app,session_id,json!({"type":"permission","request":props}));
+            let mut request = props.clone();
+            if proc.kind == SessionKind::Deepseek {
+                request["display_name"] = json!("DeepSeek");
+                request["mcp_server_name"] = json!("DeepSeek");
+            }
+            if let Some(id)=request.get("id").and_then(Value::as_str) {
+                proc.permissions.lock().unwrap().insert(id.to_string(),request.clone());
+                emit(app,session_id,json!({"type":"permission","request":request}));
                 emit_state(app,session_id,AgentState::Asking);
             }
         }
@@ -536,9 +621,13 @@ fn handle_routed(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, path: 
             Some("idle") => turn_idle(app, session_id, proc),
             Some("busy") => {
                 proc.opencode.lock().unwrap().busy = true;
-                if proc.turn.lock().unwrap().running {
-                    emit_state(app, session_id, AgentState::Working);
+                {
+                    let mut turn = proc.turn.lock().unwrap();
+                    // A busy root without a user turn is the agent answering background work. Keep the
+                    // session working, and let the background settle wait for this turn to finish.
+                    if !turn.running { turn.waking = Some(Instant::now()); }
                 }
+                emit_state(app, session_id, AgentState::Working);
             }
             Some("retry") => {
                 let attempt = props.pointer("/status/attempt").and_then(Value::as_u64).unwrap_or(0);
@@ -558,6 +647,7 @@ fn handle_routed(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, path: 
             let error = props.get("error").unwrap_or(&Value::Null);
             note_turn_error(proc, error);
             if let Some(message) = timeline::error_message(error) {
+                let message = error_code(proc, message);
                 let mut rows = proc.timeline.lock().unwrap();
                 // The failed message usually reported the same error already; one row is enough per turn.
                 let shown = rows.rows.iter().rev()
@@ -610,9 +700,19 @@ fn turn_idle(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
             timeline.upsert(row);
         }
     }
-    let running = proc.turn.lock().unwrap().running;
+    // Work still running now will outlive this turn. Register it before the turn ends so its end reports
+    // background rather than waiting, exactly as Claude's own background inventory does.
+    tasks::after_turn(app, session_id, proc);
+    let (running, background) = {
+        let mut turn = proc.turn.lock().unwrap();
+        if !turn.running { turn.waking = None; }
+        (turn.running, super::background_pending(&turn))
+    };
     if running {
         handle_turn_end(app, session_id, proc, "success", None);
+    } else if background {
+        emit_state(app, session_id, AgentState::Background);
+        super::settle_background_state(app, session_id, proc);
     } else {
         emit_state(app, session_id, AgentState::Waiting);
     }
@@ -701,6 +801,7 @@ fn message_updated(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, path
         }
     }
     if let Some(message) = info.get("error").and_then(timeline::error_message) {
+        let message = error_code(proc, message);
         proc.timeline.lock().unwrap().upsert_at(
             path,
             ChatRow::Error { id: timeline::error_row_id(id), message },
@@ -811,12 +912,12 @@ fn part_updated(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, path: &
                     }
                 }
             }
-            if let Some(call_id) = part.get("callID").and_then(Value::as_str) {
-                proc.opencode
-                    .lock()
-                    .unwrap()
-                    .calls
-                    .insert(call_id.to_string(), (path.clone(), part_id.to_string()));
+            {
+                let mut state = proc.opencode.lock().unwrap();
+                tasks::observe_tool(&mut state, part);
+                if let Some(call_id) = part.get("callID").and_then(Value::as_str) {
+                    state.calls.insert(call_id.to_string(), (path.clone(), part_id.to_string()));
+                }
             }
             proc.timeline.lock().unwrap().upsert_at(path, row);
             if let Some(child) = timeline::child_session_of(part) {
@@ -873,7 +974,7 @@ fn permission_asked(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, pro
             Some(ChatRow::Tool { input, .. }) => Some(input.clone()),
             _ => None,
         });
-    let mut payload = wire::permission_payload(props, tool_input);
+    let mut payload = wire::permission_payload(props, tool_input, display_name(proc.kind));
     let owner = props.get("sessionID").and_then(Value::as_str).map(str::to_string)
         .or_else(|| root_session(proc).ok()).unwrap_or_default();
     payload["_opencodeSessionId"] = json!(owner);
@@ -892,7 +993,7 @@ fn permission_asked(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, pro
 }
 
 fn question_asked(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, props: &Value) {
-    let Some(payload) = wire::question_payload(props) else { return };
+    let Some(payload) = wire::question_payload(props, display_name(proc.kind)) else { return };
     let id = payload["id"].as_str().unwrap_or("").to_string();
     proc.permissions.lock().unwrap().insert(id, payload.clone());
     emit(app, session_id, json!({"type":"permission","request":payload}));
@@ -1095,7 +1196,7 @@ fn run_turn_request(
                 });
                 handle_turn_end(&app, &session_id, &proc, "request_failed", None);
             } else {
-                emit(&app, &session_id, json!({"type":"error","message":message}));
+                emit(&app, &session_id, json!({"type":"error","message":error_code(&proc,message)}));
             }
         }
     });
@@ -1298,6 +1399,8 @@ pub(super) fn rebuild_timeline(proc: &Arc<ChatProcess>, server: &Arc<Server>, na
         state.calls.extend(restored.calls);
         state.models.extend(restored.models);
         state.message_parts.extend(restored.message_parts);
+        state.child_parts.extend(restored.child_parts);
+        state.tool_started.extend(restored.tool_started);
         if server.is_v2() {state.v2.restore(restored.v2);}
         state.summaries.extend(
             messages
@@ -1346,6 +1449,7 @@ fn collect_routes(
         }
         for part in &message.parts {
             let Some(part_id) = part.get("id").and_then(Value::as_str) else { continue };
+            tasks::observe_tool(state, part);
             if let Some(call) = part.get("callID").and_then(Value::as_str) {
                 state.calls.insert(call.to_string(), (path.clone(), part_id.to_string()));
             }
@@ -1364,6 +1468,27 @@ fn collect_routes(
 
 // ─────────────────────────── Shared helpers used by the engine ───────────────────────────
 
+pub(super) fn stop_task(
+    app: &AppCtx,
+    session_id: &str,
+    proc: &Arc<ChatProcess>,
+    task_id: &str,
+) -> Result<(), String> {
+    tasks::stop_task(app, session_id, proc, task_id)
+}
+
+pub(super) fn task_output(proc: &Arc<ChatProcess>, task_id: &str) -> Result<super::TaskOutput, String> {
+    tasks::task_output(proc, task_id)
+}
+
+pub(super) fn background(
+    app: &AppCtx,
+    session_id: &str,
+    proc: &Arc<ChatProcess>,
+) -> Result<(), String> {
+    tasks::background(app, session_id, proc)
+}
+
 /// The permission mode this engine runs OpenCode in, from what the session stored.
 pub(super) fn initial_mode(stored: Option<&str>) -> &'static str {
     match stored.map(str::trim) {
@@ -1375,7 +1500,17 @@ pub(super) fn initial_mode(stored: Option<&str>) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::validate_snapshot_scope;
+    use crate::models::SessionKind;
     use std::path::Path;
+
+    #[test]
+    fn deepseek_errors_and_cards_use_its_own_name_and_api_key_code() {
+        let proc = super::super::tests::inert_process(SessionKind::Deepseek);
+        assert_eq!(super::error_code(&proc, "no API key configured".into()), "agent_api_key_required:deepseek");
+        assert_eq!(super::error_code(&proc, "rate limited".into()), "rate limited");
+        assert_eq!(super::display_name(SessionKind::Deepseek), "DeepSeek");
+        assert_eq!(super::display_name(SessionKind::Opencode), "OpenCode");
+    }
 
     #[test]
     fn chat_title_uses_opencode_native_updates_and_preserves_custom_names() {

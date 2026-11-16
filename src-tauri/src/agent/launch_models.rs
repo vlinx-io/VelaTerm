@@ -11,6 +11,8 @@ pub struct Context {
     pub parent_session_id: Option<String>,
     pub cwd: Option<String>,
     #[serde(default)]
+    pub exec_path: Option<String>,
+    #[serde(default)]
     pub inherit_args: bool,
 }
 
@@ -98,9 +100,14 @@ pub fn list(app: &AppCtx, kind: SessionKind, context: &Context) -> Result<Catalo
         (parent, root, settings)
     };
     let same_agent = parent.as_ref().filter(|p| p.kind == kind);
-    let bin =
-        super::executable::resolve(app, kind, same_agent.and_then(|p| p.agent_path.as_deref()))
-            .unwrap_or_else(|| super::executable::command_name(kind).to_string());
+    let exec_override = context
+        .exec_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| same_agent.and_then(|p| p.agent_path.as_deref()));
+    let bin = super::executable::resolve_cached(app, kind, exec_override)
+        .unwrap_or_else(|| super::executable::command_name(kind).to_string());
     let cwd = context
         .cwd
         .as_deref()
@@ -124,7 +131,7 @@ pub fn list(app: &AppCtx, kind: SessionKind, context: &Context) -> Result<Catalo
         SessionKind::Codex => {
             serde_json::to_value(super::codex_models::list_in_dir(&bin, &extra, cwd)?)
         }
-        SessionKind::Opencode => {
+        SessionKind::Opencode | SessionKind::Deepseek => {
             // A stable scope reuses the backend's reserved port. Serialize discovery so simultaneous
             // clients do not treat another lookup's listener as a port conflict.
             static LOOKUP: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -133,10 +140,28 @@ pub fn list(app: &AppCtx, kind: SessionKind, context: &Context) -> Result<Catalo
                 "launch-{:x}",
                 Sha256::digest(format!("{bin}\0{}", cwd.unwrap_or("")))
             );
-            serde_json::to_value(super::opencode_models::list(app, &scope, &bin, cwd, None)?)
+            let provider = (kind == SessionKind::Deepseek).then_some(super::chat::deepseek_models::PROVIDER);
+            let models = match super::opencode_models::list_provider(app, &scope, &bin, cwd, None, provider) {
+                Ok(models) if !models.is_empty() => models,
+                // A missing or unconfigured OpenCode cannot answer yet; show the two DeepSeek routes so
+                // the dialog still names the conversation's model while the install card is shown.
+                Ok(_) if kind == SessionKind::Deepseek => super::chat::deepseek_models::shipped(),
+                Err(_) if kind == SessionKind::Deepseek => super::chat::deepseek_models::shipped(),
+                Ok(models) => models,
+                Err(error) => return Err(error),
+            };
+            serde_json::to_value(models)
         }
         SessionKind::Pi | SessionKind::Omp => {
             serde_json::to_value(super::pi_models::list_for_launch(kind, &bin, cwd, &extra)?)
+        }
+        SessionKind::Antigravity => {
+            serde_json::to_value(super::antigravity_models::list(app, &bin)?)
+        }
+        SessionKind::Zcode => {
+            let dir = crate::host::spawn_dir(cwd)
+                .ok_or("ZCode needs a working directory to list its models")?;
+            serde_json::to_value(super::zcode::list_models(&bin, &dir)?)
         }
         _ => {
             let levels = super::launch_options::catalog()
@@ -149,7 +174,12 @@ pub fn list(app: &AppCtx, kind: SessionKind, context: &Context) -> Result<Catalo
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
-            let models = super::model_catalog::list_models(app, kind.as_str())?
+            let models = if kind == SessionKind::Kimi {
+                super::model_catalog::list_models(app, kind.as_str())?
+            } else {
+                super::model_catalog::list_models_at(kind.as_str(), &bin)?
+            };
+            let models = models
                 .into_iter()
                 .map(|id| Model {
                     label: id.clone(),
@@ -196,7 +226,7 @@ mod tests {
             db,
         )));
         let mut defaults = serde_json::Map::new();
-        for kind in ["claude", "codex", "opencode", "pi", "omp"] {
+        for kind in ["claude", "codex", "opencode", "deepseek", "pi", "omp"] {
             let path = dir.join(format!("{kind}.py"));
             std::fs::write(&path, include_str!("testdata/launch_catalog.py")).unwrap();
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -258,11 +288,19 @@ mod tests {
         }
         for _ in 0..2 {
             let opencode = list(&app, SessionKind::Opencode, &context).unwrap();
-            assert_eq!(opencode.models.len(), 2);
+            assert_eq!(opencode.models.len(), 4);
             assert_eq!(opencode.models[0].id, "fixture/deep");
             assert_eq!(opencode.models[0].effort_levels, ["low", "high", "custom"]);
             assert!(opencode.models[1].effort_levels.is_empty());
         }
+        // DeepSeek uses OpenCode's catalogue but keeps only the official provider.
+        let deepseek = list(&app, SessionKind::Deepseek, &context).unwrap();
+        assert_eq!(deepseek.models.len(), 2);
+        assert_eq!(deepseek.models[0].id, "deepseek/deepseek-flash");
+        assert_eq!(deepseek.models[0].label, "DeepSeek V4.1 Flash");
+        assert_eq!(deepseek.models[0].effort_levels, ["low", "high", "max"]);
+        assert_eq!(deepseek.models[1].id, "deepseek/deepseek-v4-pro");
+        assert_eq!(deepseek.models[1].label, "DeepSeek V4 Pro");
         let calls: Vec<Value> = std::fs::read_to_string(dir.join("calls.jsonl"))
             .unwrap()
             .lines()

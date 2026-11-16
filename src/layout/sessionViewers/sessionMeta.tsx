@@ -13,6 +13,7 @@ import {
   kimiMarkEl,
   kiroMarkEl,
   openAiMarkEl,
+  OPENCODE_BRAND_COLOR,
   ompMarkEl,
   piMarkEl,
   zcodeMarkEl,
@@ -35,7 +36,7 @@ import { sessionIconEl } from "../agentPresetIcon";
 const KIND_COLOR: Partial<Record<SessionKind, string>> = {
   claude: "#D97757", // Orange (Anthropic's official color)
   codex: CODEX_BRAND_COLOR, // Theme-aware color shared with Usage (see brandIcons)
-  opencode: "#3B82F6", // Blue
+  opencode: OPENCODE_BRAND_COLOR, // Blue in light; official monochrome in dark
   copilot: "#8957E5", // Purple
   cursor: "#18B5C9", // Cyan
   // Cline's official logo is also near-black (simple-icons hex #18181B), which disappears into dark
@@ -45,7 +46,7 @@ const KIND_COLOR: Partial<Record<SessionKind, string>> = {
   // OMP's own accent orange. It sits near Claude's terracotta and Pi's amber, so the plug-tipped pi mark,
   // not the colour, is what tells it apart at a glance.
   omp: "#F97316",
-  antigravity: "#4285F4", // Google blue; the chevron mark distinguishes it from OpenCode's blue flower
+  antigravity: "#4285F4", // Google blue; the arch mark supplies the official gradient in dark mode
   crush: "#EC4899", // Pink, echoing Crush's love theme and remaining clear in both themes
   kimi: "#7C6CF2", // Moon purple, distinct from the Codex blue and Copilot purple
   grok: GROK_BRAND_COLOR, // Official black mark in light mode, reversed to white in dark mode
@@ -54,7 +55,7 @@ const KIND_COLOR: Partial<Record<SessionKind, string>> = {
   // the notched Z, not the colour, tells the two apart.
   zcode: GROK_BRAND_COLOR,
   kiro: "#A855F7", // Violet, one step brighter than the Copilot and Kimi purples so the ghost mark reads apart
-  deepseek: DEEPSEEK_BRAND_COLOR, // DeepSeek blue; the whale mark tells it apart from OpenCode and Antigravity
+  deepseek: DEEPSEEK_BRAND_COLOR, // DeepSeek's official brand blue; OpenCode and Antigravity are non-blue in dark mode
 };
 
 /** Fallback local-agent display names used before install recipes arrive, preventing an empty title flash. */
@@ -74,7 +75,7 @@ export const AGENT_KIND_LABEL: Partial<Record<SessionKind, string>> = {
   grok: "Grok Build",
   zoo: "Zoo Code",
   zcode: "ZCode",
-  deepseek: "DeepSeek Harness",
+  deepseek: "DeepSeek",
 };
 
 // Sidebar and tab icons can mount for the same session together. Share only the in-flight cwd lookup so they do
@@ -111,7 +112,7 @@ function rawKindIcon(kind: SessionKind, size: number) {
       return brandIconEl("cline", size) ?? <Icons.bot size={size} />;
     case "deepseek":
       return brandIconEl("deepseek", size) ?? <Icons.bot size={size} />;
-    // Antigravity uses a custom rising-chevron mark because simple-icons does not include it.
+    // Antigravity uses its official arched mark because simple-icons does not include it.
     case "antigravity":
       return antigravityMarkEl(size);
     // Pi uses a custom pi-shaped mark because simple-icons does not include it.
@@ -281,4 +282,24 @@ export function locationOf(
     if (parent) parts.push(parent.name);
   }
   return parts.join(" › ");
+}
+
+/** Assistant display name based on session type. */
+export function assistantLabel(kind: Session["kind"]): string {
+  if (kind === "codex") return "Codex";
+  if (kind === "opencode") return "OpenCode";
+  if (kind === "copilot") return "Copilot";
+  if (kind === "cursor") return "Cursor";
+  if (kind === "antigravity") return "Antigravity";
+  if (kind === "cline") return "Cline";
+  if (kind === "pi") return "Pi";
+  if (kind === "omp") return "OMP";
+  if (kind === "crush") return "Crush";
+  if (kind === "kimi") return "Kimi Code";
+  if (kind === "kiro") return "Kiro";
+  if (kind === "grok") return "Grok Build";
+  if (kind === "zoo") return "Zoo Code";
+  if (kind === "zcode") return "ZCode";
+  if (kind === "deepseek") return "DeepSeek";
+  return "Claude";
 }

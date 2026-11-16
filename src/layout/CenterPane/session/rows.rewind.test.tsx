@@ -64,6 +64,45 @@ describe("message rewind menu", () => {
   });
 });
 
+describe("message rewind guide", () => {
+  it("explains terminal rewind on both buttons, opens the guide, runs the action, and closes on Escape", () => {
+    const onAction = vi.fn();
+    const guide = {
+      title: "Rewind in terminal view",
+      tooltip: "Switch to terminal view and run /rewind.",
+      description: "Use /rewind in terminal view to rewind the conversation or restore files.",
+      actionLabel: "Switch to terminal view",
+      onAction,
+    };
+    render(<MessageBubble who="You" isUser text="Previous turn" rewindGuide={guide} />);
+
+    const rewindBtn = screen.getByRole("button", { name: "Rewind from here" }) as HTMLButtonElement;
+    const editBtn = screen.getByRole("button", { name: "Edit" }) as HTMLButtonElement;
+    expect(rewindBtn.disabled).toBe(false);
+    expect(editBtn.disabled).toBe(false);
+    expect(rewindBtn.title).toBe(guide.tooltip);
+    expect(editBtn.title).toBe(guide.tooltip);
+
+    fireEvent.click(rewindBtn);
+    expect(screen.getByRole("dialog", { name: guide.title })).toBeTruthy();
+    expect(rewindBtn.getAttribute("aria-expanded")).toBe("true");
+    expect(editBtn.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(editBtn);
+    expect(screen.getByRole("dialog", { name: guide.title })).toBeTruthy();
+    expect(rewindBtn.getAttribute("aria-expanded")).toBe("false");
+    expect(editBtn.getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: guide.title })).toBeNull();
+
+    fireEvent.click(editBtn);
+    fireEvent.click(screen.getByRole("button", { name: guide.actionLabel }));
+    expect(onAction).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("dialog", { name: guide.title })).toBeNull();
+  });
+});
+
 describe("editing a previous message", () => {
   it("warns before requesting confirmation and keeps editing separate from rewind", () => {
     const onRewind = vi.fn();

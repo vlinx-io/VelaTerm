@@ -64,6 +64,7 @@ import {
   unregisterTerminal,
 } from "../terminal/registry";
 import { installQueryReplyGuard } from "../terminal/queryReplyGuard";
+import { installSyncOutputFix } from "../terminal/syncOutputFix";
 import { installCompletion } from "../terminal/completion/controller";
 import {
   discardTerminalOutput,
@@ -291,7 +292,8 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
         !e.ctrlKey &&
         !e.altKey &&
         !e.metaKey &&
-        !e.isComposing
+        !e.isComposing &&
+        e.keyCode !== 229 // WebKit reports the composition-confirming Enter with isComposing false.
       ) {
         e.preventDefault();
         completion?.input("\x1b\r");
@@ -449,6 +451,8 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       swallowReplies: () => replaying || modeRef.current === "mirror",
       swallowClipboardWrites: () => replaying,
     });
+    // Prevent xterm 6.0.0 from forcing a full-viewport DOM redraw on every CSI ? 2026 l exit.
+    const disposeSyncOutputFix = installSyncOutputFix(term);
 
     // Never fit a display:none/zero-width container. xterm silently shrinks to two columns and
     // permanently hard-wraps history rather than throwing.
@@ -982,6 +986,7 @@ export function usePtySession(session: Session, cwd?: string, hidden?: boolean) 
       unlistenStatus?.();
       unlistenReattach?.();
       unlistenReattachStart?.();
+      disposeSyncOutputFix();
       disposeReplyGuard();
       unregisterSearch(session.id, searchAddon);
       unregisterRedraw(session.id, hardRedraw);

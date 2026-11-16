@@ -30,6 +30,21 @@ it("reads snippets and cancels the read job when the search closes", async () =>
   expect(chatReadCancel).toHaveBeenCalledWith("s", "j");
 });
 
+it("leaves the Enter that confirms IME composition to the input method", async () => {
+  vi.mocked(chatSearch).mockResolvedValue({ hits: [{ rowId: "r", snippet: "a needle", offset: 2 }], jobId: "j", coverage: "complete", nextCursor: null, scannedBytes: 10 });
+  const locate = vi.fn().mockResolvedValue(undefined);
+  render(<HistorySearch sessionId="s" onLocate={locate} onClose={vi.fn()} />);
+  const input = screen.getByRole("textbox");
+  fireEvent.change(input, { target: { value: "needle" } });
+  await screen.findByText("a needle");
+  locate.mockClear();
+  // WebKit reports the confirming Enter with isComposing false and keyCode 229.
+  expect(fireEvent.keyDown(input, { key: "Enter", keyCode: 229 })).toBe(true);
+  expect(locate).not.toHaveBeenCalled();
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(locate).toHaveBeenCalledTimes(1));
+});
+
 it("continues bounded empty pages and preserves an incomplete coverage result", async () => {
   vi.mocked(chatSearch).mockResolvedValueOnce({ hits: [], jobId: "j", coverage: "partial", nextCursor: "j.1", scannedBytes: 100 })
     .mockResolvedValueOnce({ hits: [], jobId: "j", coverage: "partial", nextCursor: null, scannedBytes: 200 });

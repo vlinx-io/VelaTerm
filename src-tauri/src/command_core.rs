@@ -24,16 +24,16 @@ use crate::models::{AgentPreset, Group, NodeKind, Project, Session, SessionKind,
 /// Reads a session's `(kind, captured agent-native session ID)`, returning a specific error if either is absent.
 /// Shared by the four transcript/usage commands for consistent lookup and error messages.
 fn session_kind_and_agent(ctx: &AppCtx, session_id: &str) -> Result<(SessionKind, String), String> {
-    let (kind, agent_id) = {
+    let session = {
         let conn = ctx.db().conn.lock().unwrap();
-        (
-            repo::get_session_kind(&conn, session_id)?,
-            repo::get_agent_session_id(&conn, session_id)?,
-        )
-    };
-    let kind = kind.ok_or("Session not found")?;
-    let agent_id = agent_id.ok_or("No agent session id captured for this session yet")?;
-    Ok((kind, agent_id))
+        repo::get_session(&conn, session_id)?
+    }
+    .ok_or("Session not found")?;
+    // A parked DeepSeek conversation still has its retired harness recording while the new OpenCode
+    // conversation has not reported an id yet.
+    let agent_id = session.agent_session_id.or(session.legacy_agent_session_id)
+        .ok_or("No agent session id captured for this session yet")?;
+    Ok((session.kind, agent_id))
 }
 
 /// Normalizes empty strings to None so blank values are not persisted.
@@ -52,9 +52,16 @@ fn next_chat_session_name(
         SessionKind::Claude => "Claude",
         SessionKind::Codex => "Codex",
         SessionKind::Opencode => "OpenCode",
-        _ => {
-            return Err("Only Claude, Codex, and OpenCode chat sessions can be cleared".to_string())
-        }
+        SessionKind::Antigravity => "Antigravity",
+        SessionKind::Pi => "Pi",
+        SessionKind::Omp => "OMP",
+        SessionKind::Zcode => "ZCode",
+        SessionKind::Deepseek => "DeepSeek",
+        SessionKind::Copilot => "Copilot",
+        SessionKind::Cursor => "Cursor",
+        SessionKind::Kimi => "Kimi Code",
+        SessionKind::Grok => "Grok Build",
+        _ => return Err("Only chat sessions can be cleared".to_string()),
     };
     let prefix = format!("{label} ");
     let max_suffix = repo::list_all_sessions(conn)?
@@ -374,6 +381,8 @@ pub fn update_session(
 ) -> Result<(), String> {
     {
         let conn = ctx.db().conn.lock().unwrap();
+        let kind = repo::get_session_kind(&conn, id)?;
+        let normalized_perm = empty_to_none(permission_mode);
         repo::update_session(
             &conn,
             id,
@@ -382,8 +391,19 @@ pub fn update_session(
             empty_to_none(cwd),
             empty_to_none(init_cmd),
             empty_to_none(agent_args),
-            empty_to_none(permission_mode),
+            normalized_perm,
         )?;
+        if kind == Some(SessionKind::Antigravity) {
+            let effective = crate::agent::permission_catalog::effective(
+                &conn,
+                SessionKind::Antigravity,
+                normalized_perm,
+            )?
+            .unwrap_or_else(|| "default".to_string());
+            let acp_mode =
+                crate::agent::chat::antigravity_protocol::acp_mode_for_permission(&effective);
+            repo::set_collaboration_mode(&conn, id, acp_mode)?;
+        }
     }
     ctx.emit(TREE_CHANGED, ());
     Ok(())
@@ -628,9 +648,19 @@ pub fn set_app_settings(
             return Err("Invalid terminal Tab behavior".into());
         }
     }
+    let region = match entries.get(crate::server_region::SETTING_KEY) {
+        Some(value) => Some(crate::server_region::Region::parse(value).ok_or("Invalid server region")?),
+        None => None,
+    };
     {
         let conn = ctx.db().conn.lock().unwrap();
         repo::set_app_settings(&conn, &entries)?;
+    }
+    if entries.contains_key("vlx-settings") {
+        crate::agent::install::forget_shell_discovery();
+    }
+    if let Some(region) = region {
+        crate::server_region::set(region);
     }
     if let Some(mode) = entries.get(crate::pty::completion::MODE_KEY) {
         // Running shells pick up the new mode at their next prompt.
@@ -672,12 +702,37 @@ fn session_worktree(ctx: &AppCtx, session_id: &str) -> Result<(Option<String>, S
 
 /// Current shell identifier, also the data-directory suffix. It isolates development and release Gitea Keychain
 /// services. A fixed fallback keeps the service name stable if detection fails.
-fn app_identifier(ctx: &AppCtx) -> String {
+pub(crate) fn app_identifier(ctx: &AppCtx) -> String {
     ctx.data_dir()
         .ok()
         .and_then(|p| p.file_name().map(|s| s.to_string_lossy().to_string()))
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "io.vlinx.vlxterm".to_string())
+}
+
+/// Returns the DeepSeek endpoint and whether a key is stored, never the key itself.
+pub fn deepseek_get_status(ctx: &AppCtx) -> crate::agent::deepseek_config::Status {
+    crate::agent::deepseek_config::status(ctx.db(), &app_identifier(ctx))
+}
+
+/// Saves the DeepSeek endpoint and key. An empty key preserves the stored one unless `clear_key` is set.
+pub fn deepseek_set_config(
+    ctx: &AppCtx,
+    base_url: &str,
+    api_key: &str,
+    clear_key: bool,
+) -> Result<crate::agent::deepseek_config::Status, String> {
+    let status = crate::agent::deepseek_config::set_config(
+        ctx.db(),
+        &app_identifier(ctx),
+        base_url,
+        api_key,
+        clear_key,
+    )?;
+    // Running DeepSeek servers hold the configuration they started with, so idle ones are ended here and
+    // restart with the new credentials on the next message.
+    ctx.chat().refresh_deepseek(ctx);
+    Ok(status)
 }
 
 /// Returns Gitea integration status for settings without exposing the token.
@@ -1013,12 +1068,32 @@ pub fn chat_start(
     effort: Option<&str>,
     fast_mode: bool,
 ) -> Result<(), String> {
-    let (session, project_root) = {
+    let (mut session, project_root) = {
         let conn = ctx.db().conn.lock().unwrap();
         let session = repo::get_session(&conn, session_id)?.ok_or("Session not found")?;
         let root = repo::get_project_root(&conn, &session.project_id)?;
         (session, root)
     };
+    // A DeepSeek conversation recorded by the retired harness cannot be resumed in OpenCode. Park its id
+    // in `legacy_agent_session_id` first: that both lets the new conversation claim `agent_session_id` and
+    // keeps the old recording visible above it in the history view.
+    if session.kind == SessionKind::Deepseek {
+        if let Some(legacy) = session
+            .agent_session_id
+            .clone()
+            .filter(|id| {
+                crate::agent::history_store::deepseek_legacy::is_legacy(id)
+                    // A saved id neither store knows can still block startup through the identity
+                    // check; park it the same way so a fresh conversation may begin.
+                    || crate::agent::resume::confirmed_missing(SessionKind::Deepseek, id)
+            })
+        {
+            let conn = ctx.db().conn.lock().unwrap();
+            repo::park_legacy_agent_session_id(&conn, session_id, &legacy, SessionKind::Deepseek)?;
+            session.agent_session_id = None;
+            session.legacy_agent_session_id = Some(legacy);
+        }
+    }
     if session.archived_at.is_some() { return Err("Restore this conversation before restarting its agent.".into()); }
     if session.engine!="chat" { return Err("Open this conversation in the chat view before starting its agent.".into()); }
     if ctx.chat().is_alive(session_id) { return Ok(()); }
@@ -1049,6 +1124,14 @@ pub fn chat_start(
     if effort.is_some() {
         selection.effort = session_settings::clean(effort);
     }
+    // DeepSeek is driven by OpenCode but only offers the official DeepSeek provider. Older conversations
+    // saved DeepSeek Harness's opaque route pair, so normalize it to OpenCode's `deepseek/<model>` spelling.
+    if session.kind == SessionKind::Deepseek {
+        selection.model = Some(crate::agent::chat::deepseek_models::normalize_model(selection.model.as_deref()));
+        selection.effort = crate::agent::chat::deepseek_models::normalize_effort(selection.effort.as_deref());
+    } else if session.kind == SessionKind::Antigravity {
+        crate::agent::antigravity_models::normalize_selection(ctx, &mut selection);
+    }
     session_settings::persist(ctx, &session, &selection)?;
     let extra_args =
         session_settings::without_selection_args(session.kind, session.agent_args.as_deref());
@@ -1056,13 +1139,19 @@ pub fn chat_start(
         let conn = ctx.db().conn.lock().unwrap();
         crate::agent::permission_catalog::effective(&conn, session.kind, session.permission_mode.as_deref())?
     };
+    // A DeepSeek conversation used to be recorded by DeepSeek Harness, so its saved id is not an
+    // OpenCode session. Start a new OpenCode conversation instead of failing to resume a foreign id.
+    let resume = session.agent_session_id.as_deref().filter(|id| {
+        session.kind != SessionKind::Deepseek
+            || !crate::agent::resume::confirmed_missing(session.kind, id)
+    });
     ctx.chat().start(
         ctx,
         session_id,
         session.kind,
         cwd.as_deref(),
         &bin,
-        session.agent_session_id.as_deref(),
+        resume,
         selection.model.as_deref(),
         selection.effort.as_deref(),
         permission_mode.as_deref(),
@@ -1212,9 +1301,9 @@ pub fn chat_mcp_reconnect(
     ctx.chat().mcp_reconnect(session_id, server)
 }
 
-/// Stop one of Claude's background tasks.
+/// Stop one of a conversation's background tasks.
 pub fn chat_stop_task(ctx: &AppCtx, session_id: &str, task_id: &str) -> Result<(), String> {
-    ctx.chat().stop_task(session_id, task_id)
+    ctx.chat().stop_task(ctx, session_id, task_id)
 }
 
 /// The command and recent output of one background shell task, for its task tab.
@@ -1226,22 +1315,26 @@ pub fn chat_task_output(
     ctx.chat().task_output(session_id, task_id)
 }
 
-/// What one of a Claude conversation's subagents has done so far, read from its own recording.
+/// What one of a session's subagents has done so far, read from its own recording.
 pub fn chat_subagent_rows(
     ctx: &AppCtx,
     session_id: &str,
     task_id: &str,
 ) -> Result<Vec<crate::agent::chat::engine::ChatRow>, String> {
     let (kind, agent_id) = session_kind_and_agent(ctx, session_id)?;
-    if kind != SessionKind::Claude {
-        return Err("Subagent conversations are available only for Claude".into());
+    match kind {
+        SessionKind::Claude => crate::agent::chat::history::replay_claude_subagent(&agent_id, task_id),
+        SessionKind::Antigravity => {
+            let content = crate::agent::antigravity::read_transcript(task_id)?;
+            Ok(crate::agent::chat::antigravity_protocol::history_rows(&content))
+        }
+        _ => Err("Subagent conversations are available only for Claude and Antigravity".into()),
     }
-    crate::agent::chat::history::replay_claude_subagent(&agent_id, task_id)
 }
 
 /// Move every foreground task of the running turn to the background.
 pub fn chat_background_tasks(ctx: &AppCtx, session_id: &str) -> Result<(), String> {
-    ctx.chat().background_tasks(session_id)
+    ctx.chat().background_tasks(ctx, session_id)
 }
 
 /// How many images one message may carry, and how large each may be once decoded.
@@ -1474,15 +1567,6 @@ pub fn chat_permission(
 pub fn chat_set_mode(ctx: &AppCtx, session_id: &str, mode: &str) -> Result<(), String> {
     let session = session_settings::session(ctx, session_id)?;
     let mode = crate::agent::permission_catalog::normalize(session.kind, Some(mode))?;
-    if session.kind == SessionKind::Antigravity {
-        return ctx.chat().update_launch_settings(ctx, session_id, || {
-            let stored = if mode == "bypassPermissions" { "skip" } else { mode };
-            repo::set_permission_mode(&ctx.db().conn.lock().unwrap(), session_id, stored)?;
-            ctx.emit(TREE_CHANGED, ());
-            ctx.emit(&crate::agent::chat::engine::event_name(session_id), serde_json::json!({"type":"settingsChanged","mode":mode}));
-            Ok(())
-        });
-    }
     // The agent starts with the first message, so a mode chosen before that has nobody to tell yet; the
     // stored value below is what that launch reads.
     let restart_required = if ctx.chat().is_alive(session_id) {
@@ -1504,6 +1588,10 @@ pub fn chat_set_mode(ctx: &AppCtx, session_id: &str, mode: &str) -> Result<(), S
     {
         let conn = ctx.db().conn.lock().unwrap();
         repo::set_permission_mode(&conn, session_id, stored)?;
+        if session.kind == SessionKind::Antigravity {
+            let acp_mode = crate::agent::chat::antigravity_protocol::acp_mode_for_permission(mode);
+            repo::set_collaboration_mode(&conn, session_id, acp_mode)?;
+        }
     }
     ctx.emit(TREE_CHANGED, ());
     // Keep a deferred choice in the database without claiming the running process adopted it.
@@ -1528,6 +1616,10 @@ pub fn chat_set_collaboration_mode(
     session_id: &str,
     mode: &str,
 ) -> Result<(), String> {
+    let session = session_settings::session(ctx, session_id)?;
+    if session.kind == SessionKind::Antigravity {
+        return Err("antigravity does not support collaboration modes".into());
+    }
     if ctx.chat().is_alive(session_id) {
         ctx.chat().set_collaboration_mode(ctx, session_id, mode)?;
     }
@@ -1544,26 +1636,54 @@ pub fn chat_set_model(ctx: &AppCtx, session_id: &str, model: Option<&str>) -> Re
     let session = session_settings::session(ctx, session_id)?;
     let mut selection = session_settings::resolve(ctx, &session)?;
     selection.model = session_settings::clean(model);
-    // A model the running process cannot switch to is a launch setting: it applies when the process restarts.
-    let launch_only = crate::agent::chat::acp_protocol::supported(session.kind) && ctx.chat().is_alive(session_id)
+    if session.kind == SessionKind::Deepseek {
+        selection.model = crate::agent::chat::deepseek_models::normalize_model(selection.model.as_deref()).into();
+        selection.effort = crate::agent::chat::deepseek_models::normalize_effort(selection.effort.as_deref());
+    } else if session.kind == SessionKind::Antigravity {
+        crate::agent::antigravity_models::normalize_selection(ctx, &mut selection);
+    }
+    // Only Copilot passes `--model` exclusively at ACP launch; other ACP agents switch live over
+    // the protocol once their handshake settles.
+    let launch_only = session.kind == SessionKind::Copilot && ctx.chat().is_alive(session_id)
         && !ctx.chat().acp_switchable(session_id).0;
-    if session.kind == SessionKind::Antigravity || launch_only {
+    if launch_only {
         return ctx.chat().update_launch_settings(ctx, session_id, || {
             session_settings::persist(ctx, &session, &selection)?;
-            ctx.emit(&crate::agent::chat::engine::event_name(session_id), serde_json::json!({"type":"settingsChanged","model":selection.model}));
+            ctx.emit(&crate::agent::chat::engine::event_name(session_id), serde_json::json!({
+                "type":"settingsChanged","model":selection.model,"images":ctx.chat().image_support(session_id)
+            }));
             Ok(())
         });
     }
     if ctx.chat().is_alive(session_id) {
         ctx.chat()
             .set_model(session_id, selection.model.as_deref())?;
-        selection.model = ctx.chat().snapshot(session_id).model;
+        let snap = ctx.chat().snapshot(session_id);
+        selection.model = snap.model;
+        if session.kind == SessionKind::Antigravity {
+            ctx.chat().sync_antigravity_catalog(ctx, session_id);
+            if snap.running {
+                selection.effort = snap.effort;
+            }
+            crate::agent::antigravity_models::normalize_selection(ctx, &mut selection);
+        }
     }
     session_settings::persist(ctx, &session, &selection)?;
-    ctx.emit(
-        &crate::agent::chat::engine::event_name(session_id),
-        serde_json::json!({"type":"settingsChanged","model":selection.model}),
-    );
+    let payload = if session.kind == SessionKind::Antigravity {
+        serde_json::json!({
+            "type":"settingsChanged",
+            "model":selection.model,
+            "effort":selection.effort,
+            "images":ctx.chat().image_support(session_id)
+        })
+    } else {
+        serde_json::json!({
+            "type":"settingsChanged",
+            "model":selection.model,
+            "images":ctx.chat().image_support(session_id)
+        })
+    };
+    ctx.emit(&crate::agent::chat::engine::event_name(session_id), payload);
     Ok(())
 }
 
@@ -1572,12 +1692,14 @@ pub fn chat_set_effort(ctx: &AppCtx, session_id: &str, effort: Option<&str>) -> 
     let session = session_settings::session(ctx, session_id)?;
     let mut selection = session_settings::resolve(ctx, &session)?;
     selection.effort = session_settings::clean(effort);
-    let launch_only = crate::agent::chat::acp_protocol::supported(session.kind) && ctx.chat().is_alive(session_id)
+    if session.kind == SessionKind::Deepseek {
+        selection.effort = crate::agent::chat::deepseek_models::normalize_effort(selection.effort.as_deref());
+    } else if session.kind == SessionKind::Antigravity {
+        crate::agent::antigravity_models::normalize_selection(ctx, &mut selection);
+    }
+    let launch_only = session.kind == SessionKind::Copilot && ctx.chat().is_alive(session_id)
         && !ctx.chat().acp_switchable(session_id).1;
-    if session.kind == SessionKind::Antigravity || launch_only {
-        if selection.effort.as_deref().is_some_and(|value| !crate::agent::chat::antigravity_protocol::EFFORTS.contains(&value)) {
-            return Err("Antigravity effort must be low, medium, high, max, or automatic".into());
-        }
+    if launch_only {
         return ctx.chat().update_launch_settings(ctx, session_id, || {
             session_settings::persist(ctx, &session, &selection)?;
             ctx.emit(&crate::agent::chat::engine::event_name(session_id), serde_json::json!({"type":"settingsChanged","effort":selection.effort}));
@@ -1596,38 +1718,12 @@ pub fn chat_set_effort(ctx: &AppCtx, session_id: &str, effort: Option<&str>) -> 
     Ok(())
 }
 
-/// Models reported by the agent behind this session.
-/// DeepSeek's model picker while its agent is not running: the catalogue the last session reported, or the
-/// models dsh 0.2.1 ships with until one has. dsh names a model by its provider route and model id as a
-/// JSON pair, the same opaque value its ACP selector takes.
-fn deepseek_idle_models(ctx: &AppCtx) -> serde_json::Value {
-    let saved = ctx.db().conn.lock().ok()
-        .and_then(|conn| crate::db::repo::get_app_settings(&conn).ok())
-        .and_then(|settings| settings.get(crate::agent::chat::engine::DEEPSEEK_MODELS_SETTING).cloned())
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .filter(|models| models.as_array().is_some_and(|models| !models.is_empty()));
-    saved.unwrap_or_else(|| {
-        let efforts = ["off", "low", "high", "max"];
-        serde_json::json!([
-            {"id":"[\"deepseek-official\",\"deepseek-v4-flash\"]","label":"deepseek-v4-flash","description":"","effortLevels":efforts},
-            {"id":"[\"deepseek-official\",\"deepseek-v4-pro\"]","label":"DeepSeek-V4-Pro","description":"","effortLevels":efforts},
-        ])
-    })
-}
-
 pub fn chat_models(ctx: &AppCtx, session_id: &str) -> Result<serde_json::Value, String> {
     let session = {
         let conn = ctx.db().conn.lock().unwrap();
         repo::get_session(&conn, session_id)?.ok_or("Session not found")?
     };
     match session.kind {
-        SessionKind::Antigravity => {
-            let bin = crate::agent::executable::for_session(ctx, &session);
-            let models = crate::agent::model_catalog::list_models_at("antigravity", &bin)?;
-            serde_json::to_value(models.into_iter().map(|id| serde_json::json!({
-                "label":id,"id":id,"description":"","effortLevels":crate::agent::chat::antigravity_protocol::EFFORTS,
-            })).collect::<Vec<_>>())
-        }
         // Live capabilities enrich the complete catalogue; the CLI picker only lists a subset. What a
         // running conversation reports is kept, so a session that is not running still offers the models
         // only the installed CLI knows about.
@@ -1655,7 +1751,7 @@ pub fn chat_models(ctx: &AppCtx, session_id: &str) -> Result<serde_json::Value, 
             let cwd = session.cwd.as_deref().filter(|c| !c.trim().is_empty()).or(root.as_deref());
             serde_json::to_value(crate::agent::codex_models::list_in_dir(&bin, &args, cwd)?)
         }
-        SessionKind::Opencode => {
+        SessionKind::Opencode | SessionKind::Deepseek => {
             // The running server already knows its providers; without one, a short-lived server answers.
             let bin = crate::agent::executable::for_session(ctx, &session);
             let root = {
@@ -1669,13 +1765,23 @@ pub fn chat_models(ctx: &AppCtx, session_id: &str) -> Result<serde_json::Value, 
                 .map(str::to_string)
                 .or(root);
             let running = ctx.chat().opencode_server(session_id);
-            serde_json::to_value(crate::agent::opencode_models::list(
+            let provider = (session.kind == SessionKind::Deepseek)
+                .then_some(crate::agent::chat::deepseek_models::PROVIDER);
+            let models = match crate::agent::opencode_models::list_provider(
                 ctx,
                 session_id,
                 &bin,
                 cwd.as_deref(),
                 running,
-            )?)
+                provider,
+            ) {
+                Ok(models) if !models.is_empty() => models,
+                Ok(_) if session.kind == SessionKind::Deepseek => crate::agent::chat::deepseek_models::shipped(),
+                Err(_) if session.kind == SessionKind::Deepseek => crate::agent::chat::deepseek_models::shipped(),
+                Ok(models) => models,
+                Err(error) => return Err(error),
+            };
+            serde_json::to_value(models)
         }
         SessionKind::Zcode => {
             if let Some(models) = ctx.chat().zcode_models(session_id) {
@@ -1686,20 +1792,28 @@ pub fn chat_models(ctx: &AppCtx, session_id: &str) -> Result<serde_json::Value, 
                 let conn = ctx.db().conn.lock().unwrap();
                 repo::get_project_root(&conn, &session.project_id)?
             };
-            let cwd = session.cwd.as_deref().filter(|c| !c.trim().is_empty()).map(str::to_string).or(root)
+            // The directory the conversation itself would start in. A session in Chats has neither its own
+            // directory nor a project root, and runs in home.
+            let cwd = crate::host::spawn_dir(session.cwd.as_deref().filter(|c| !c.trim().is_empty()).or(root.as_deref()))
                 .ok_or("ZCode needs a working directory to list its models")?;
             serde_json::to_value(crate::agent::zcode::list_models(&bin, &cwd)?)
         }
         // A running ACP session lists the models it can switch to. Without one, the CLI's own catalogue is
         // what its next launch can be given.
         kind if crate::agent::chat::acp_protocol::supported(kind) => {
-            if let Some(models) = ctx.chat().acp_models(session_id) {
+            if let Some(models) = ctx.chat().acp_models(ctx, session_id) {
                 return Ok(serde_json::Value::Array(models));
             }
-            if kind == SessionKind::Deepseek {
-                return Ok(deepseek_idle_models(ctx));
+            if kind == SessionKind::Antigravity {
+                let bin = crate::agent::executable::for_session(ctx, &session);
+                return serde_json::to_value(crate::agent::antigravity_models::list(ctx, &bin)?)
+                    .map_err(|e| format!("Failed to serialize model catalogue: {e}"));
             }
-            let efforts: &[&str] = if kind == SessionKind::Copilot { crate::agent::chat::acp_protocol::COPILOT_EFFORTS } else { &[] };
+            let efforts: &[&str] = if kind == SessionKind::Copilot {
+                crate::agent::chat::acp_protocol::COPILOT_EFFORTS
+            } else {
+                &[]
+            };
             let models = if kind == SessionKind::Kimi {
                 crate::agent::model_catalog::list_models(ctx, kind.as_str())?
             } else {
@@ -1757,7 +1871,7 @@ pub fn chat_commands(ctx: &AppCtx, session_id: &str) -> Result<Vec<serde_json::V
         return Ok(commands);
     }
     let session = session_settings::session(ctx, session_id)?;
-    if !matches!(session.kind, SessionKind::Codex | SessionKind::Claude) {
+    if !matches!(session.kind, SessionKind::Codex | SessionKind::Claude | SessionKind::Pi | SessionKind::Omp) {
         return Ok(Vec::new());
     }
     let root = {
@@ -1806,8 +1920,10 @@ pub fn chat_snapshot_control(
     window: Option<&crate::agent::chat::engine::ChatWindow>,
 ) -> Result<crate::agent::chat::engine::ChatSnapshot, String> {
     let mut snapshot = ctx.chat().snapshot_window(session_id, window);
+    let mut session_kind = None;
     if !snapshot.running {
         let session = session_settings::session(ctx, session_id)?;
+        session_kind = Some(session.kind);
         let selection = session_settings::resolve(ctx, &session)?;
         snapshot.model = selection.model.clone();
         snapshot.effort = selection.effort.clone();
@@ -1818,7 +1934,11 @@ pub fn chat_snapshot_control(
         let (tier, personality) = repo::codex_chat_settings(&conn, session_id)?;
         snapshot.service_tier = tier;
         snapshot.personality = personality;
-        if repo::get_session_kind(&conn, session_id)? == Some(SessionKind::Claude) {
+        let kind = match session_kind {
+            Some(kind) => Some(kind),
+            None => repo::get_session_kind(&conn, session_id)?,
+        };
+        if kind == Some(SessionKind::Claude) {
             snapshot.chrome = Some(session_settings::chrome(&conn, session_id)?);
         }
     }
@@ -1840,7 +1960,9 @@ pub fn chat_snapshot_window(
             let conn = ctx.db().conn.lock().unwrap();
             repo::get_session(&conn, session_id)?
         };
-        if let Some((kind, id)) = session.and_then(|s| s.agent_session_id.map(|id| (s.kind, id))) {
+        if let Some((kind, id)) = session.and_then(|s| {
+            s.agent_session_id.or(s.legacy_agent_session_id).map(|id| (s.kind, id))
+        }) {
             let replayed = if crate::agent::chat::acp_protocol::supported(kind) {
                 crate::agent::chat::acp_protocol::replay(ctx.data_dir().ok().as_deref(), kind, &id)
             } else {
@@ -1953,9 +2075,10 @@ pub fn chat_rewind(
     if crate::security::session_active(session_id) {
         return Err("security_audit_owns_conversation".into());
     }
+    // A scheduled continuation would send a message while the rewind stops and restarts the agent.
+    crate::agent::chat::auto_continue::cancel(ctx, session_id);
     let result = if let Some(generation)=history_generation {ctx.chat().rewind_indexed(ctx,session_id,row_id,scope,generation)?}
         else {ctx.chat().rewind(ctx, session_id, row_id, scope)?};
-    crate::agent::chat::auto_continue::cancel(ctx, session_id);
     Ok(result)
 }
 
@@ -1999,10 +2122,10 @@ pub fn read_agent_chat(
 ) -> Result<Vec<crate::agent::chat::ChatEvent>, String> {
     let (kind, agent_id) = {
         let conn = ctx.db().conn.lock().unwrap();
-        (
-            repo::get_session_kind(&conn, session_id)?,
-            repo::get_agent_session_id(&conn, session_id)?,
-        )
+        let session = repo::get_session(&conn, session_id)?;
+        let kind = session.as_ref().map(|session| session.kind);
+        let agent_id = session.and_then(|session| session.agent_session_id.or(session.legacy_agent_session_id));
+        (kind, agent_id)
     };
     let kind = kind.ok_or("Session not found")?;
     let Some(agent_id) = agent_id else {
@@ -2011,7 +2134,7 @@ pub fn read_agent_chat(
     crate::agent::chat::read(kind, &agent_id)
 }
 
-/// Queries model/context usage for the Info panel (Claude, Codex, Grok, OpenCode, Pi, OMP).
+/// Queries model/context usage for the Info panel (Claude, Codex, Grok, OpenCode, Pi, OMP, DeepSeek).
 pub fn agent_context_info(
     ctx: &AppCtx,
     session_id: &str,
@@ -2063,19 +2186,31 @@ pub fn export_session_context(
     dest_path: Option<&str>,
     exported_at: Option<&str>,
 ) -> Result<Option<String>, String> {
-    let (kind, agent_id, name) = {
+    let (kind, agent_id, legacy_id, name) = {
         let conn = ctx.db().conn.lock().unwrap();
         (
             repo::get_session_kind(&conn, session_id)?,
             repo::get_agent_session_id(&conn, session_id)?,
+            repo::get_session(&conn, session_id)?.and_then(|session| session.legacy_agent_session_id),
             repo::get_session_name(&conn, session_id)?,
         )
     };
     let kind = kind.ok_or("Session not found")?;
-    let agent_id =
-        agent_id.ok_or("No agent session id captured for this session yet; nothing to export")?;
     let name = name.unwrap_or_else(|| "Session".to_string());
-    let md = crate::agent::export::export_markdown(kind, &agent_id, &name, exported_at)?;
+    // DeepSeek can have two native recordings: the retired harness log and the OpenCode session that
+    // followed it. The bounded markdown writer reads the whole branch, so the export is one document
+    // instead of whichever half a single native id names.
+    let md = if kind == SessionKind::Deepseek {
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let branch = crate::agent::history_store::event_stream::complete(ctx, session_id, &cancel)?;
+        let mut bytes = Vec::new();
+        crate::agent::history_store::markdown::write_markdown(branch, &name, exported_at, &cancel, &mut bytes)?;
+        String::from_utf8(bytes).map_err(|e| format!("Failed to build the context export: {e}"))?
+    } else {
+        let agent_id = agent_id.or(legacy_id)
+            .ok_or("No agent session id captured for this session yet; nothing to export")?;
+        crate::agent::export::export_markdown(kind, &agent_id, &name, exported_at)?
+    };
     match dest_path {
         Some(p) => {
             std::fs::write(p, md).map_err(|e| format!("Failed to write export file: {e}"))?;
@@ -2653,6 +2788,125 @@ mod tests {
         let mut lan = full;
         lan.insert("remoteAccess.lanHttp".into(), "1".into());
         assert!(matches!(autostart_config(&lan), Some((_, true, _))));
+    }
+
+    #[test]
+    fn chat_clear_supports_antigravity_and_increments_name() {
+        let tmp = std::env::temp_dir().join(format!(
+            "vlx-cc-agy-clear-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        let ctx = headless_ctx(&tmp);
+        let (project_id, session_id) = {
+            let conn = ctx.db().conn.lock().unwrap();
+            let project = crate::db::repo::import_project(&conn, tmp.to_str().unwrap()).unwrap();
+            let session = crate::db::repo::create_session_full(
+                &conn,
+                &project.id,
+                None,
+                "Antigravity 1",
+                crate::models::SessionKind::Antigravity,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some("chat"),
+            )
+            .unwrap();
+            (project.id, session.id)
+        };
+
+        let fresh = super::chat_clear(&ctx, &session_id).unwrap();
+        assert_eq!(fresh.kind, crate::models::SessionKind::Antigravity);
+        assert_eq!(fresh.name, "Antigravity 2");
+        assert_eq!(fresh.project_id, project_id);
+
+        let conn = ctx.db().conn.lock().unwrap();
+        let archived = crate::db::repo::get_session(&conn, &session_id).unwrap().unwrap();
+        assert!(archived.archived_at.is_some());
+        drop(conn);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn update_session_syncs_antigravity_collaboration_mode() {
+        let tmp = std::env::temp_dir().join(format!(
+            "vlx-cc-agy-update-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        let ctx = headless_ctx(&tmp);
+        let session_id = {
+            let conn = ctx.db().conn.lock().unwrap();
+            let project = crate::db::repo::import_project(&conn, tmp.to_str().unwrap()).unwrap();
+            let session = crate::db::repo::create_session_full(
+                &conn,
+                &project.id,
+                None,
+                "Antigravity 1",
+                crate::models::SessionKind::Antigravity,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some("plan"),
+                None,
+                None,
+                None,
+                Some("chat"),
+            )
+            .unwrap();
+            crate::db::repo::set_collaboration_mode(&conn, &session.id, "plan").unwrap();
+            session.id
+        };
+
+        super::update_session(
+            &ctx,
+            &session_id,
+            "Antigravity 1",
+            None,
+            None,
+            None,
+            None,
+            Some("default"),
+        )
+        .unwrap();
+        {
+            let conn = ctx.db().conn.lock().unwrap();
+            let updated = crate::db::repo::get_session(&conn, &session_id).unwrap().unwrap();
+            assert_eq!(updated.permission_mode.as_deref(), Some("default"));
+            assert_eq!(updated.collaboration_mode.as_deref(), Some("default"));
+        }
+
+        super::update_session(
+            &ctx,
+            &session_id,
+            "Antigravity 1",
+            None,
+            None,
+            None,
+            None,
+            Some("acceptEdits"),
+        )
+        .unwrap();
+        {
+            let conn = ctx.db().conn.lock().unwrap();
+            let updated = crate::db::repo::get_session(&conn, &session_id).unwrap().unwrap();
+            assert_eq!(updated.permission_mode.as_deref(), Some("acceptEdits"));
+            assert_eq!(updated.collaboration_mode.as_deref(), Some("accept-edits"));
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
 

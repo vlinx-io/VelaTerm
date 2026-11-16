@@ -425,7 +425,7 @@ fn extra_args_fragment(extra: Option<&str>) -> String {
 /// - Codex: `--dangerously-bypass-approvals-and-sandbox` (also disables the sandbox)
 /// - Copilot: `--allow-all-tools`
 /// - Cursor: `--force`
-/// - Antigravity: `--dangerously-skip-permissions`
+/// - Antigravity: `--mode <plan|accept-edits|auto>`, `None` for `default`, `--dangerously-skip-permissions` for skip
 /// - Grok: `--always-approve`
 /// - OpenCode: no CLI flag; permissions are configured in its settings
 /// - Pi: no permission-confirmation mechanism by design
@@ -452,6 +452,15 @@ pub fn permission_flag(kind: SessionKind, mode: Option<&str>) -> Option<&'static
             Some("read-only") => return Some("--sandbox read-only --ask-for-approval on-request"),
             Some("auto") => return Some("--sandbox workspace-write --ask-for-approval on-request"),
             Some("full-access") => return Some("--dangerously-bypass-approvals-and-sandbox"),
+            _ => {}
+        }
+    }
+    if kind == SessionKind::Antigravity {
+        match mode.map(str::trim) {
+            Some("plan") => return Some("--mode plan"),
+            Some("acceptEdits") | Some("accept-edits") => return Some("--mode accept-edits"),
+            Some("auto") => return Some("--mode auto"),
+            Some("default") => return None,
             _ => {}
         }
     }
@@ -492,7 +501,7 @@ pub fn permission_flag(kind: SessionKind, mode: Option<&str>) -> Option<&'static
         // Grok Build's documented always-approve mode bypasses tool confirmations.
         SessionKind::Grok => Some("--always-approve"),
         // OpenCode has no equivalent flag, Pi has no confirmation mechanism, and Terminal/Browser do not apply.
-        // DeepSeek Harness and ZCode never run in a terminal; their conversation view sends the mode itself.
+        // DeepSeek and ZCode never run in a terminal; their conversation view sends the mode itself.
         SessionKind::Opencode | SessionKind::Pi | SessionKind::Deepseek | SessionKind::Zcode | SessionKind::Terminal
             | SessionKind::Browser => {
             None
@@ -510,7 +519,9 @@ pub fn permission_flag(kind: SessionKind, mode: Option<&str>) -> Option<&'static
 pub fn model_flag(kind: SessionKind, model: Option<&str>, effort: Option<&str>) -> Option<String> {
     let model = model.map(str::trim).filter(|m| !m.is_empty())?;
     match kind {
-        SessionKind::Claude | SessionKind::Copilot => Some(format!("--model {model}")),
+        SessionKind::Claude | SessionKind::Copilot | SessionKind::Antigravity => {
+            Some(format!("--model {model}"))
+        }
         SessionKind::Codex | SessionKind::Grok | SessionKind::Opencode => {
             Some(format!("-m {model}"))
         }
@@ -538,7 +549,9 @@ pub fn model_flag(kind: SessionKind, model: Option<&str>, effort: Option<&str>) 
 pub fn effort_flag(kind: SessionKind, effort: Option<&str>) -> Option<String> {
     let effort = effort.map(str::trim).filter(|e| !e.is_empty())?;
     match kind {
-        SessionKind::Claude | SessionKind::Copilot => Some(format!("--effort {effort}")),
+        SessionKind::Claude | SessionKind::Copilot | SessionKind::Antigravity => {
+            Some(format!("--effort {effort}"))
+        }
         SessionKind::Grok => Some(format!("--reasoning-effort {effort}")),
         // Codex has no dedicated flag; the generic config override sets the same setting.
         SessionKind::Codex => Some(format!("-c model_reasoning_effort={effort}")),
@@ -1169,25 +1182,26 @@ pub fn prepare_with_args_capabilities(
         }
         SessionKind::Antigravity => {
             // Google Antigravity CLI (`agy`):
-            // `agy [--conversation=<id>] [permission flag + custom args] ["$VLX_INIT_PROMPT"]`.
+            // `agy [--conversation=<id>] [permission flag + custom args] [--prompt-interactive "$VLX_INIT_PROMPT"]`.
+            // Always use `--prompt-interactive` instead of a bare positional prompt because a bare
+            // positional prompt starts one-shot print mode on `agy` instead of keeping the TUI open.
             // Hooks require fixed file configuration, installed and merged by `agent/antigravity.rs`; they
             // report through injected `VLX_*` values and no-op outside VelaTerm. `--conversation=<id>` avoids
-            // ambiguity with the trailing positional prompt, and the ID comes from the hook payload's
-            // `session_id`. Existence is not yet checked. The prompt is injected only for new sessions, and
-            // Antigravity does not support forks.
+            // ambiguity, and the ID comes from the hook payload's `session_id`. Existence is not yet checked.
+            // The prompt is injected only for new sessions, and Antigravity does not support forks.
             let mut env = Vec::new();
             let mut args: Vec<String> = Vec::new();
             if let Some(rid) = resume {
                 args.push(format!("--conversation={rid}"));
             }
-            // Custom arguments, including permission flags, precede the positional prompt.
+            // Custom arguments, including permission flags, precede the interactive prompt flag.
             if let Some(extra) = normalize_extra_args(extra_args) {
                 args.push(extra);
             }
             if resume.is_none() {
                 if let Some(p) = init_prompt.map(str::trim).filter(|s| !s.is_empty()) {
                     env.push((INIT_PROMPT_ENV.to_string(), p.to_string()));
-                    args.push(prompt_ref(shell, INIT_PROMPT_ENV));
+                    args.push(format!("--prompt-interactive {}", prompt_ref(shell, INIT_PROMPT_ENV)));
                 }
             }
             let launch = launch(shell, "agy", bin_path, &args.join(" "));
@@ -3491,7 +3505,6 @@ mod tests {
         );
     }
 
-    #[test]
     /// Splitting keeps a quoted path together and drops the quotes, the way a shell would.
     #[test]
     fn split_extra_args_respects_quotes() {
@@ -3549,5 +3562,73 @@ mod tests {
             "whitespace containing only newlines counts as unset"
         );
         assert!(normalize_extra_args(None).is_none());
+    }
+
+    #[test]
+    fn antigravity_tui_uses_interactive_prompt_and_all_permission_and_model_flags() {
+        assert_eq!(permission_flag(SessionKind::Antigravity, Some("plan")), Some("--mode plan"));
+        assert_eq!(permission_flag(SessionKind::Antigravity, Some("default")), None);
+        assert_eq!(permission_flag(SessionKind::Antigravity, Some("acceptEdits")), Some("--mode accept-edits"));
+        assert_eq!(permission_flag(SessionKind::Antigravity, Some("accept-edits")), Some("--mode accept-edits"));
+        assert_eq!(permission_flag(SessionKind::Antigravity, Some("auto")), Some("--mode auto"));
+        assert_eq!(
+            permission_flag(SessionKind::Antigravity, Some("bypassPermissions")),
+            Some("--dangerously-skip-permissions")
+        );
+        assert_eq!(
+            permission_flag(SessionKind::Antigravity, Some("skip")),
+            Some("--dangerously-skip-permissions")
+        );
+        assert_eq!(
+            model_flag(SessionKind::Antigravity, Some("gemini-4-argon"), None).as_deref(),
+            Some("--model gemini-4-argon")
+        );
+        assert_eq!(
+            effort_flag(SessionKind::Antigravity, Some("high")).as_deref(),
+            Some("--effort high")
+        );
+
+        let endpoint = HookEndpoint {
+            port: 1,
+            token: "tok".into(),
+        };
+        for (shell, expected_prompt_arg) in [
+            ("/bin/zsh", "--prompt-interactive \"$VLX_INIT_PROMPT\""),
+            ("/bin/bash", "--prompt-interactive \"$VLX_INIT_PROMPT\""),
+            ("/opt/homebrew/bin/fish", "--prompt-interactive \"$VLX_INIT_PROMPT\""),
+            ("pwsh.exe", "--prompt-interactive \"$env:VLX_INIT_PROMPT\""),
+            ("cmd.exe", "--prompt-interactive \"%VLX_INIT_PROMPT%\""),
+        ] {
+            let spawn = prepare(
+                SessionKind::Antigravity,
+                shell,
+                "/usr/local/bin/agy",
+                &endpoint,
+                "sid-agy",
+                None,
+                false,
+                Some("hello world"),
+            );
+            let cmd = spawn.launch.unwrap();
+            assert!(
+                cmd.contains(expected_prompt_arg),
+                "shell {shell} cmd missing {expected_prompt_arg}: {cmd}"
+            );
+            assert!(spawn.env.iter().any(|(k, v)| k == INIT_PROMPT_ENV && v == "hello world"));
+        }
+
+        let resumed = prepare(
+            SessionKind::Antigravity,
+            "/bin/zsh",
+            "/usr/local/bin/agy",
+            &endpoint,
+            "sid-agy",
+            Some("conv-123"),
+            false,
+            Some("ignored on resume"),
+        );
+        let cmd = resumed.launch.unwrap();
+        assert!(cmd.contains("--conversation=conv-123"));
+        assert!(!cmd.contains("--prompt-interactive"));
     }
 }

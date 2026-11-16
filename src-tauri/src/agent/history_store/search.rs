@@ -30,6 +30,8 @@ struct Job {
     summary_offset:Option<usize>,
     inspected:u64,
     rows:u64,
+    /// Hits returned over every page of this job.
+    found:u64,
     canceled:Arc<AtomicBool>,
     touched:Instant,
     page_sequence:u64,
@@ -74,17 +76,22 @@ fn snippets(text:&str,query:&str,offset:usize,skip_end:usize,limit:usize) -> (Ve
     (hits,None)
 }
 
+/// Find in the conversation is literal first: the scan reports every occurrence, in tool calls and
+/// content newer than the index as well. The content index indexes message prose only, one hit per
+/// message, and matches each word anywhere in it, so answering from it first hid most occurrences. It
+/// answers only a query the whole conversation never contains verbatim, so words in another order or
+/// with other text between them still find their message.
 pub fn read(app:&AppCtx,session:&str,query:&str,cursor:Option<&str>) -> Result<Value,String> {
-    if cursor.is_none() && !query.trim().is_empty() {
-        if let Some(page)=indexed(app,session,query)? {return Ok(page);}
+    let page=read_with(session,query,cursor,||api::prepare(app,session))?;
+    if page["nextCursor"].is_null() && page["totalHits"]==0 && query.split_whitespace().count()>1 {
+        if let Some(indexed)=indexed(app,session,query)? {return Ok(indexed);}
     }
-    read_with(session,query,cursor,||api::prepare(app,session))
+    Ok(page)
 }
 
 /// Full-text search through the global content index, scoped to this session: every whitespace-separated
 /// term must match, in any order, whole words first. Returns None when the index has no transcript match,
-/// or cannot answer, so the caller falls back to the literal scan, which also covers content newer than
-/// the index.
+/// or cannot answer.
 fn indexed(app:&AppCtx,session:&str,query:&str) -> Result<Option<Value>,String> {
     let Ok(result)=crate::search::jobs::blocking(app,query,crate::search::SearchScope::All,Some(session),1,true) else {return Ok(None);};
     let Some(matches)=result["hits"].as_array().and_then(|hits|hits.iter().find(|hit|hit["sessionId"]==session))
@@ -128,7 +135,7 @@ fn read_with(session:&str,query:&str,cursor:Option<&str>,mut prepare:impl FnMut(
         let id=uuid::Uuid::new_v4().to_string();
         let job=Arc::new(Mutex::new(Job {session:session.into(),generation,query:query.into(),branch,complete,after:None,pending:VecDeque::new(),row:None,
             fields:VecDeque::new(),field:None,sequence:0,offset:0,carry:String::new(),previous_bytes:0,summary:String::new(),summary_offset:None,
-            inspected:0,rows:0,canceled:Arc::new(AtomicBool::new(false)),touched:Instant::now(),
+            inspected:0,rows:0,found:0,canceled:Arc::new(AtomicBool::new(false)),touched:Instant::now(),
             page_sequence:0,responses:VecDeque::new()}));
         let mut jobs=map.lock().unwrap();
         jobs.retain(|_,job|job.try_lock().map_or(true,|job|job.touched.elapsed()<Duration::from_secs(600)));
@@ -165,7 +172,7 @@ fn read_with(session:&str,query:&str,cursor:Option<&str>,mut prepare:impl FnMut(
                     if field.label=="original" || !matches!(meta.encoding.as_str(),"string"|"slice"|"json") {continue;}
                     // A document nested in a string is searched through its outer field.
                     if meta.parent.as_ref().is_some_and(|parent|listed.iter().any(|(_,other)|other==&**parent)) {continue;}
-                    if field.label!="body_image" && !field.label.starts_with("attachment:") {fields.push_back((field.reference.clone(),field.label.clone()));}
+                    if field.label!="body_image" && !field.label.starts_with("attachment:") && !field.label.starts_with("attachment_file:") {fields.push_back((field.reference.clone(),field.label.clone()));}
                 }
             }
             // Only content searchable in the existing view belongs here; ids, states, and wire keys do
@@ -215,10 +222,11 @@ fn read_with(session:&str,query:&str,cursor:Option<&str>,mut prepare:impl FnMut(
             job.carry=combined[left..].to_owned();job.previous_bytes=text.len(); job.offset=0; job.sequence+=1;
         }
     }
+    job.found+=hits.len() as u64;
     let next=format!("{id}.{}",job.page_sequence+1);
     let result=json!({"protocolVersion":2,"historyGeneration":job.generation,"hits":hits,"jobId":id,
         "nextCursor":if finished {None} else {Some(next)},"coverage":if finished && job.complete {"complete"} else {"partial"},
-        "scannedBytes":job.inspected,"scannedRows":job.rows});
+        "scannedBytes":job.inspected,"scannedRows":job.rows,"totalHits":job.found});
     if serde_json::to_vec(&result).map_err(|e|e.to_string())?.len()>PAGE_BYTES {return Err("Search results exceed their wire byte budget".into());}
     let sequence=job.page_sequence;
     job.responses.push_back((sequence,result.clone()));
@@ -260,6 +268,7 @@ mod tests {
         let cursor=first["nextCursor"].as_str().unwrap();
         let second=read_with(&session,"needle",Some(cursor),||Ok(branch.clone())).unwrap();
         assert_eq!(second["hits"].as_array().unwrap().len(),50);
+        assert_eq!(second["totalHits"],100,"The running total decides whether the word index may answer");
         assert_eq!(read_with(&session,"needle",Some(cursor),||Ok(branch.clone())).unwrap(),second);
         assert!(read_with("foreign","needle",Some(cursor),||Ok(branch.clone())).unwrap_err().contains("scope or query"));
         assert!(cancel("foreign",first["jobId"].as_str().unwrap()).is_err());

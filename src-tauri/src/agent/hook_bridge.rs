@@ -13,11 +13,14 @@ use std::time::Duration;
 const MAX_PAYLOAD: u64 = 1024 * 1024;
 const STDIN_TIMEOUT: Duration = Duration::from_secs(1);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(3);
+const STOP_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+const STOP_HTTP_TIMEOUT: Duration = Duration::from_secs(86400);
+const STOP_ALLOW: &[u8] = b"{\"decision\":\"allow\"}\n";
 
 /// Contract of one agent served by `--agent-hook <agent> <event>`. Each `events` list matches the `e=` values
 /// that agent's Unix forwarding script posts, so the hook server sees the same events on every platform.
 struct Spec {
-    /// `e=` values the agent's hook configuration may pass.
+    /// event arguments the agent's hook configuration may pass.
     events: &'static [&'static str],
     /// Exact stdout the agent expects from an observe-only hook.
     response: &'static [u8],
@@ -29,8 +32,8 @@ fn spec(agent: &str) -> Option<Spec> {
         "crush" => Spec { events: &["working"], response: b"" },
         // Kiro adds a successful hook's stdout to the agent context, so the bridge stays silent.
         "kiro" => Spec { events: &["boot", "kiro_working", "kiro_waiting"], response: b"" },
-        // Antigravity reads stdout as a decision; allow keeps an observer from ever blocking a tool.
-        "antigravity" => Spec { events: &["working", "waiting"], response: b"{\"decision\":\"allow\"}\n" },
+        // PreInvocation and PostInvocation require `{}` for protojson parsing; `stop` handles `/agy-stop` separately.
+        "antigravity" => Spec { events: &["working", "waiting", "stop"], response: b"{}\n" },
         "copilot" => Spec { events: &["boot", "working", "asking", "waiting"], response: b"" },
         // Kimi's forwarding script never wrote to stdout; keep that contract.
         "kimi" => Spec { events: &["boot", "kimi_working", "kimi_asking", "kimi_waiting", "kimi_idle"], response: b"" },
@@ -38,11 +41,11 @@ fn spec(agent: &str) -> Option<Spec> {
     })
 }
 
-fn callback_url(base: &str, sid: &str, token: &str, event: &str) -> Option<url::Url> {
+fn validated_base_url(base: &str, sid: &str, token: &str) -> Option<url::Url> {
     if sid.is_empty() || token.is_empty() {
         return None;
     }
-    let mut url = url::Url::parse(base).ok()?;
+    let url = url::Url::parse(base).ok()?;
     // The injected hook server uses IPv4 loopback. Avoid DNS, redirects, and inherited proxies.
     if url.scheme() != "http" || url.host_str() != Some("127.0.0.1") || url.port().is_none()
         || !url.username().is_empty() || url.password().is_some() || url.path() != "/"
@@ -50,8 +53,20 @@ fn callback_url(base: &str, sid: &str, token: &str, event: &str) -> Option<url::
     {
         return None;
     }
+    Some(url)
+}
+
+fn callback_url(base: &str, sid: &str, token: &str, event: &str) -> Option<url::Url> {
+    let mut url = validated_base_url(base, sid, token)?;
     url.path_segments_mut().ok()?.extend(["hook", sid]);
     url.query_pairs_mut().append_pair("t", token).append_pair("e", event);
+    Some(url)
+}
+
+fn agy_stop_url(base: &str, sid: &str, token: &str) -> Option<url::Url> {
+    let mut url = validated_base_url(base, sid, token)?;
+    url.path_segments_mut().ok()?.extend(["agy-stop", sid]);
+    url.query_pairs_mut().append_pair("t", token);
     Some(url)
 }
 
@@ -82,14 +97,58 @@ fn forward(url: &url::Url, body: &[u8]) {
     let _ = agent.post(url.as_str()).set("Content-Type", "application/json").send_bytes(body);
 }
 
+fn forward_stop(url: &url::Url, body: &[u8], timeout: Duration) -> Vec<u8> {
+    let agent = ureq::AgentBuilder::new()
+        .try_proxy_from_env(false)
+        .redirects(0)
+        .timeout_connect(STOP_CONNECT_TIMEOUT)
+        .timeout(timeout)
+        .build();
+    let Ok(response) = agent.post(url.as_str()).set("Content-Type", "application/json").send_bytes(body) else {
+        return STOP_ALLOW.to_vec();
+    };
+    if response.status() != 200 {
+        return STOP_ALLOW.to_vec();
+    }
+    let Ok(text) = response.into_string() else {
+        return STOP_ALLOW.to_vec();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return STOP_ALLOW.to_vec();
+    };
+    if value.get("decision").and_then(serde_json::Value::as_str).is_some() {
+        let mut out = serde_json::to_vec(&value).unwrap_or_else(|_| b"{\"decision\":\"allow\"}".to_vec());
+        out.push(b'\n');
+        return out;
+    }
+    STOP_ALLOW.to_vec()
+}
+
+fn run_antigravity_stop() -> ! {
+    let token = super::session_env::token().unwrap_or_default();
+    let url = agy_stop_url(
+        &std::env::var("VLX_SPAWN_URL").unwrap_or_default(),
+        &std::env::var("VLX_SESSION_ID").unwrap_or_default(),
+        &token,
+    );
+    let out = match (url, bounded_payload(std::io::stdin())) {
+        (Some(url), Some(body)) => forward_stop(&url, &body, STOP_HTTP_TIMEOUT),
+        _ => STOP_ALLOW.to_vec(),
+    };
+    let _ = std::io::stdout().write_all(&out);
+    let _ = std::io::stdout().flush();
+    std::process::exit(0);
+}
+
 /// Forward one event when it is one of `events`, print `response`, and exit successfully, including with
 /// missing environment or a pipe whose writer never closes. Explicit process exit also ends a blocked stdin
 /// worker without waiting for its inherited handle.
 pub fn run(event: Option<&str>, events: &[&str], response: &[u8]) -> ! {
+    let token = super::session_env::token().unwrap_or_default();
     let url = event.filter(|event| events.contains(event)).and_then(|event| callback_url(
         &std::env::var("VLX_SPAWN_URL").unwrap_or_default(),
         &std::env::var("VLX_SESSION_ID").unwrap_or_default(),
-        &std::env::var("VLX_TOKEN").unwrap_or_default(), event,
+        &token, event,
     ));
     if let Some(url) = url {
         if let Some(body) = bounded_payload(std::io::stdin()) { forward(&url, &body); }
@@ -101,10 +160,15 @@ pub fn run(event: Option<&str>, events: &[&str], response: &[u8]) -> ! {
 
 /// Hidden `--agent-hook <agent> <event>` entry. An unknown agent still exits successfully with no output.
 pub fn run_agent(args: &[String]) -> ! {
-    let Some(spec) = args.get(2).and_then(|agent| spec(agent)) else {
+    let agent = args.get(2).map(String::as_str);
+    let event = args.get(3).map(String::as_str);
+    if agent == Some("antigravity") && event == Some("stop") {
+        run_antigravity_stop();
+    }
+    let Some(spec) = agent.and_then(spec) else {
         run(None, &[], b"")
     };
-    run(args.get(3).map(String::as_str), spec.events, spec.response)
+    run(event, spec.events, spec.response)
 }
 
 /// How an agent runs a hook command string.
@@ -201,8 +265,8 @@ mod tests {
         let kiro = spec("kiro").unwrap();
         assert_eq!((kiro.events, kiro.response), (&["boot", "kiro_working", "kiro_waiting"][..], &b""[..]));
         let antigravity = spec("antigravity").unwrap();
-        assert_eq!(antigravity.events, &["working", "waiting"][..]);
-        assert_eq!(antigravity.response, b"{\"decision\":\"allow\"}\n");
+        assert_eq!(antigravity.events, &["working", "waiting", "stop"][..]);
+        assert_eq!(antigravity.response, b"{}\n");
         let copilot = spec("copilot").unwrap();
         assert_eq!((copilot.events, copilot.response), (&["boot", "working", "asking", "waiting"][..], &b""[..]));
         let kimi = spec("kimi").unwrap();
@@ -233,5 +297,36 @@ mod tests {
         // Without a usable short form, double quotes still serve cmd.exe and POSIX shells.
         assert_eq!(any_shell_word(r"C:\Users\John Smith\velaterm.exe", || None), "\"C:/Users/John Smith/velaterm.exe\"");
         assert_eq!(any_shell_word(r"C:\a&b\velaterm.exe", || Some(r"C:\a&b\velaterm.exe".into())), "\"C:/a&b/velaterm.exe\"");
+    }
+
+    #[test]
+    fn agy_stop_forwards_server_decision_and_fails_open_on_error() {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let handle = std::thread::spawn(move || {
+            for idx in 0..2 {
+                let req = server.recv().unwrap();
+                assert_eq!(req.url(), "/agy-stop/s-1?t=tok");
+                let body = if idx == 0 {
+                    r#"{"decision":"continue"}"#
+                } else {
+                    "not json"
+                };
+                let _ = req.respond(tiny_http::Response::from_string(body).with_status_code(200));
+            }
+        });
+        let url = agy_stop_url(&format!("http://127.0.0.1:{port}"), "s-1", "tok").unwrap();
+        assert_eq!(
+            forward_stop(&url, b"{}", Duration::from_secs(2)),
+            b"{\"decision\":\"continue\"}\n"
+        );
+        assert_eq!(
+            forward_stop(&url, b"{}", Duration::from_secs(2)),
+            STOP_ALLOW
+        );
+        // Unreachable loopback port fails open to allow immediately.
+        let closed = agy_stop_url("http://127.0.0.1:1", "s-1", "tok").unwrap();
+        assert_eq!(forward_stop(&closed, b"{}", Duration::from_secs(1)), STOP_ALLOW);
+        handle.join().unwrap();
     }
 }

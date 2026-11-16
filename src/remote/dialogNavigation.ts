@@ -41,6 +41,13 @@ export function navigateProjectDialog(kind: ProjectDialog, open: boolean, replac
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
+// A repository URL can carry credentials, so a prefilled one stays in memory instead of the address bar.
+let clonePreset = "";
+/** Prefills the clone form's repository URL the next time it opens. */
+export function presetCloneUrl(url: string) { clonePreset = url; }
+/** Returns and clears the prefilled repository URL. */
+export function takeCloneUrl(): string { const url = clonePreset; clonePreset = ""; return url; }
+
 export function writeDialogDraft(key: string, value: string) {
   const url = new URL(window.location.href);
   if (!readProjectDialog()) return;

@@ -2003,6 +2003,15 @@ select.sv-pill {
   opacity: 0.45;
   cursor: default;
 }
+.sv-rewind-guide-card {
+  width: var(--sv-col);
+  margin: 0 auto 8px;
+  padding: 9px 10px;
+  box-sizing: border-box;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+}
 .sv-permission {
   margin-bottom: 8px;
   padding: 8px 10px;
@@ -2429,6 +2438,57 @@ select.sv-pill {
 .sv-popover-error {
   color: var(--red);
 }
+/* The DeepSeek endpoint and key, entered from the composer without leaving the conversation. */
+.sv-deepseek-api {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px;
+  white-space: normal;
+}
+.sv-deepseek-api-title {
+  color: var(--text);
+  font-size: calc(var(--ui-fs) - 0.5px);
+  font-weight: 600;
+}
+.sv-deepseek-api-desc,
+.sv-deepseek-api-hint {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: calc(var(--ui-fs) - 2px);
+  line-height: 1.45;
+}
+.sv-deepseek-api-hint {
+  color: var(--text-faint);
+}
+.sv-deepseek-api-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--text-dim);
+  font-size: calc(var(--ui-fs) - 2px);
+}
+.sv-deepseek-api-field .vlx-input {
+  box-sizing: border-box;
+  padding: 5px 8px;
+  font-size: calc(var(--ui-fs) - 1px);
+}
+.sv-deepseek-api-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.sv-deepseek-api-msg {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: calc(var(--ui-fs) - 2px);
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.sv-deepseek-api-error {
+  color: var(--danger, #e05252);
+}
 .sv-mcp-dot {
   flex-shrink: 0;
   width: 7px;
@@ -2718,6 +2778,7 @@ select.sv-pill {
   min-width: 0;
 }
 .sv-message-tools {
+  position: relative;
   order: 1;
   display: flex;
   align-items: center;
@@ -2743,12 +2804,13 @@ select.sv-pill {
   cursor: pointer;
   transition: color 120ms ease, background 120ms ease;
 }
-.sv-message-tools button:hover,
-.sv-message-tools button[aria-expanded="true"] {
+.sv-message-tools :is(.sv-rewind-button, .sv-message-copy-button, .sv-message-edit-button):hover,
+.sv-message-tools :is(.sv-rewind-button, .sv-message-copy-button, .sv-message-edit-button)[aria-expanded="true"] {
   color: var(--text);
   background: var(--bg-hover);
 }
-.sv-message-tools button:focus-visible {
+.sv-message-tools :is(.sv-rewind-button, .sv-message-copy-button, .sv-message-edit-button):focus-visible,
+.sv-rewind-guide-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -2756,6 +2818,36 @@ select.sv-pill {
   left: auto;
   right: 0;
   max-width: calc(100vw - 48px);
+}
+.sv-rewind-menu.sv-rewind-guide {
+  width: 288px;
+  padding: 10px 12px;
+}
+.sv-rewind-guide-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: var(--ui-fs);
+}
+.sv-rewind-guide-body {
+  margin-top: 5px;
+  color: var(--text-dim);
+  font-size: calc(var(--ui-fs) - 0.5px);
+  line-height: 1.5;
+}
+.sv-rewind-guide-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.sv-rewind-guide-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.sv-rewind-guide-btn:hover {
+  filter: brightness(0.95);
 }
 @media (pointer: coarse) {
   .sv-message-tools .sv-rewind-button,
@@ -2765,7 +2857,7 @@ select.sv-pill {
     height: 34px;
   }
 }
-.sv-message-tools button:disabled {
+.sv-message-tools :is(.sv-rewind-button, .sv-message-copy-button, .sv-message-edit-button):disabled {
   color: var(--text-faint);
   background: transparent;
   cursor: not-allowed;

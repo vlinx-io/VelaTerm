@@ -161,7 +161,7 @@ it("saves a translation agent independently without enabling the feature or send
   fireEvent.click(screen.getByLabelText("Model"));
   fireEvent.click(await screen.findByRole("option", { name: /Fixture model/ }));
   fireEvent.click(screen.getByLabelText("Reasoning effort"));
-  fireEvent.click(screen.getByRole("option", { name: "high" }));
+  fireEvent.click(screen.getByRole("option", { name: "High" }));
   fireEvent.click(screen.getByRole("button", { name: "Save configuration" }));
   await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("translation_save", { config: expect.objectContaining({ agent: "codex", engine: "agent", model: "fixture-model", effort: "high", enabled: false }) }));
   expect(mocks.invoke).toHaveBeenCalledTimes(1);
@@ -172,10 +172,10 @@ it("clears an incompatible effort when switching models and preserves the defaul
   render(<TranslationSettingsSection />);
   fireEvent.click(screen.getByLabelText("Model"));
   fireEvent.click(await screen.findByRole("option", { name: /Other model/ }));
-  expect((screen.getByLabelText("Reasoning effort") as HTMLInputElement).value).toBe("");
+  expect(screen.getByLabelText("Reasoning effort").textContent).toContain("Auto");
   fireEvent.click(screen.getByLabelText("Reasoning effort"));
-  expect(screen.queryByRole("option", { name: "high" })).toBeNull();
-  fireEvent.click(screen.getByRole("option", { name: "Agent default" }));
+  expect(screen.queryByRole("option", { name: "High" })).toBeNull();
+  fireEvent.click(screen.getByRole("option", { name: "Auto" }));
   fireEvent.click(screen.getByRole("button", { name: "Save configuration" }));
   await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("translation_save", { config: expect.objectContaining({ model: "other-model", effort: "" }) }));
 });

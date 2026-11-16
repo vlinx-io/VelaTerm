@@ -47,6 +47,8 @@ export function mapBackendError(raw: string): string {
     history_protocol_unsupported: "chat.history.updateServer",
   } as const;
   if (Object.hasOwn(historyKey,code)) return `${code}: ${t(historyKey[code as keyof typeof historyKey])}`;
+  // DeepSeek's API panel validates the endpoint and key, with no detail worth echoing.
+  if (raw === "deepseek_invalid_url" || raw === "deepseek_invalid_key") return t("settings.deepseekInvalid");
   if (idx <= 0) return raw;
   const detail = raw.slice(idx + 1);
   switch (raw.slice(0, idx)) {
@@ -59,7 +61,7 @@ export function mapBackendError(raw: string): string {
     // An ACP agent refused to open the conversation until its user signs in.
     case "agent_sign_in_required":
       return t("chat.signInRequired", SIGN_IN_AGENT_LABEL[detail] ?? detail);
-    // The agent has no API key to call its model with; DeepSeek Harness is the one that reports this.
+    // The agent has no API key to call its model with; DeepSeek through OpenCode is the one that reports this.
     case "agent_api_key_required":
       return t("chat.apiKeyRequired");
     // Signed in to ZCode, but the account holds no usable GLM Coding Plan on that platform

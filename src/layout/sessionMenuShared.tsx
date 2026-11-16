@@ -14,20 +14,20 @@ import { type SessionKind } from "../types";
 export const AGENT_ARGS_KINDS: SessionKind[] = [
   "claude",
   "codex",
-  "opencode",
-  "copilot",
-  "cursor",
   "antigravity",
-  "cline",
+  "opencode",
+  "deepseek",
+  "zcode",
   "pi",
   "omp",
+  "copilot",
+  "cursor",
+  "cline",
   "crush",
   "kimi",
   "kiro",
   "grok",
   "zoo",
-  "zcode",
-  "deepseek",
 ];
 export function supportsAgentArgs(kind: SessionKind): boolean {
   return AGENT_ARGS_KINDS.includes(kind);
@@ -37,20 +37,20 @@ export function supportsAgentArgs(kind: SessionKind): boolean {
 export const RESUMABLE_KINDS: { kind: SessionKind; label: string }[] = [
   { kind: "claude", label: "Claude" },
   { kind: "codex", label: "Codex" },
-  { kind: "opencode", label: "OpenCode" },
-  { kind: "copilot", label: "Copilot" },
-  { kind: "cursor", label: "Cursor" },
   { kind: "antigravity", label: "Antigravity" },
-  { kind: "cline", label: "Cline" },
+  { kind: "opencode", label: "OpenCode" },
+  { kind: "deepseek", label: "DeepSeek" },
+  { kind: "zcode", label: "ZCode" },
   { kind: "pi", label: "Pi" },
   { kind: "omp", label: "OMP" },
+  { kind: "copilot", label: "Copilot" },
+  { kind: "cursor", label: "Cursor" },
+  { kind: "cline", label: "Cline" },
   { kind: "crush", label: "Crush" },
   { kind: "kimi", label: "Kimi Code" },
   { kind: "kiro", label: "Kiro" },
   { kind: "grok", label: "Grok Build" },
   { kind: "zoo", label: "Zoo Code" },
-  { kind: "zcode", label: "ZCode" },
-  { kind: "deepseek", label: "DeepSeek" },
 ];
 
 /** Worktree choice for a new session: none, create one, or attach to an existing worktree. */

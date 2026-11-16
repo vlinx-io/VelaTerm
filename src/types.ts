@@ -17,7 +17,8 @@ export type AgentKind = "claude" | "codex" | "opencode" | "copilot" | "cursor" |
  *   events, or a
  *   PreToolUse hook injected through Crush's shadow configuration. Crush exposes only PreToolUse and therefore
  *   reports working only; idle state comes from screen detection.
- * - deepseek: DeepSeek Harness (`dsh`), which has no terminal interface and runs only in the conversation view.
+ * - deepseek: DeepSeek, which runs through OpenCode's local server but keeps its own session type.
+ *   It has no terminal interface and runs only in the conversation view.
  */
 export type SessionKind = "terminal" | "claude" | "codex" | "opencode" | "copilot" | "cursor" | "antigravity" | "cline" | "pi" | "omp" | "crush" | "kimi" | "kiro" | "grok" | "zoo" | "zcode" | "deepseek" | "browser";
 
@@ -46,26 +47,45 @@ export function supportsChatEngine(kind: SessionKind): boolean {
   return CHAT_ENGINE_KINDS.includes(kind);
 }
 
-/** Whether the agent has a terminal interface. DeepSeek Harness has none, and VelaTerm drives ZCode only through
- * the protocol server of the agent its desktop release bundles, so both only run as a conversation. */
+/** Whether the agent has a terminal interface. DeepSeek runs through OpenCode but is offered only as a
+ * conversation, and VelaTerm drives ZCode only through the protocol server of the agent its desktop
+ * release bundles, so both only run as a conversation. */
 export function hasTerminalInterface(kind: SessionKind): boolean {
   return kind !== "deepseek" && kind !== "zcode";
 }
 
 /** Agents driven over the Agent Client Protocol. ACP has no way to add a message to a running turn. */
-export const ACP_CHAT_KINDS: SessionKind[] = ["copilot", "cursor", "kimi", "grok", "deepseek"];
+export const ACP_CHAT_KINDS: SessionKind[] = ["antigravity", "copilot", "cursor", "kimi", "grok"];
 
-/** Whether a message can be added to the turn already running, rather than waiting behind it. Antigravity
- * and the ACP agents queue a message sent mid-turn instead; ZCode steers via `guide` delivery, joining the
- * turn at its next tool boundary. */
+/** Whether a message can be added to the turn already running, rather than waiting behind it. Most ACP
+ * agents queue a message sent mid-turn; Antigravity's server accepts another prompt and delivers it at the
+ * next invocation. ZCode steers via `guide` delivery, joining the turn at its next tool boundary, and
+ * OpenCode, including DeepSeek, accepts a steer as another prompt. */
 export function supportsSteering(kind: SessionKind): boolean {
-  return kind !== "antigravity" && !ACP_CHAT_KINDS.includes(kind);
+  return kind === "antigravity" || !ACP_CHAT_KINDS.includes(kind);
 }
 
-/** Whether the conversation view can send images to this agent. The ACP servers of Grok and DeepSeek Harness
- * decline image prompts. */
+/** Whether the conversation view can offer images to this agent at all. Grok's ACP server declines image
+ * prompts; Antigravity's accepts them, and OpenCode, including DeepSeek, leaves the model to decide. */
 export function acceptsChatImages(kind: SessionKind): boolean {
-  return kind !== "antigravity" && kind !== "grok" && kind !== "deepseek";
+  return kind !== "grok";
+}
+
+/** Whether rewinding works only from the latest message, by replacing it. ZCode moves a conversation back
+ * only by editing its latest query: the view drops the turn at once, and the agent applies the rewind when
+ * the edited message is sent. Which scopes exist still comes from the backend. */
+export function rewindsLatestByEditing(kind: SessionKind): boolean {
+  return kind === "zcode";
+}
+
+/** Agents that open their native session before they read the first message. Their first message can wait
+ * for the `session` event and then go out as an ordinary turn instead of waiting in the engine's startup
+ * queue, which is what kept it from jumping into the pending queue and back. Claude reports its session
+ * only after that first message, and ZCode creates a new one from it, so waiting there would stall until
+ * the startup timeout. */
+export const SESSION_BEFORE_INPUT_KINDS: SessionKind[] = ["codex", "opencode", "deepseek", "pi", "omp", ...ACP_CHAT_KINDS];
+export function opensSessionBeforeFirstMessage(kind: SessionKind): boolean {
+  return SESSION_BEFORE_INPUT_KINDS.includes(kind);
 }
 
 /**

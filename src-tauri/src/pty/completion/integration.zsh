@@ -28,8 +28,10 @@ add-zle-hook-widget isearch-exit _vlxc_keymap
 (( $+functions[compdef] )) || { autoload -Uz compinit; compinit -i; }
 
 # Inline history hint: the most recent history entry extending the line, drawn after the cursor in dim text.
-# The application writes the mode to a file shared by all sessions; it is read once per prompt.
+# The application writes the mode to a file shared by all sessions; it is read once per prompt. The per-session
+# marker exists while the latest input came from a remote client, and is checked on every redraw.
 typeset -g _vlxc_mode=auto _vlxc_mode_file=${_vlxc_selection:h:h}/mode _vlxc_hint='' _vlxc_hint_style='' _vlxc_undo_value=''
+typeset -g _vlxc_remote_input=${_vlxc_selection:h}/remote-input
 typeset -gi _vlxc_hint_reported=0
 typeset -gA _vlxc_hint_fallback
 # The last history lookup, so typing on does not rescan the whole history on every key: a line with no match
@@ -62,7 +64,7 @@ _vlxc_hint_update() {
   setopt localoptions extendedglob
   local match='' hint pattern
   # Stay out of zsh-autosuggestions' way, other POSTDISPLAY owners, typeahead and incremental search.
-  if [[ $_vlxc_mode == auto && -n ${BUFFER//[[:space:]]/} && $CURSOR -eq ${#BUFFER} && $KEYMAP != vicmd ]] \
+  if [[ $_vlxc_mode == auto && ! -e $_vlxc_remote_input && -n ${BUFFER//[[:space:]]/} && $CURSOR -eq ${#BUFFER} && $KEYMAP != vicmd ]] \
       && (( ! PENDING && ! KEYS_QUEUED_COUNT && ! ${ISEARCHMATCH_ACTIVE:-0} && ! $+functions[_zsh_autosuggest_fetch] )) \
       && [[ -z $POSTDISPLAY || $POSTDISPLAY == $_vlxc_hint ]]; then
     if [[ -n $_vlxc_hint_miss && $BUFFER == ${_vlxc_hint_miss}* ]]; then

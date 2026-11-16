@@ -60,7 +60,7 @@ async function pick(label: string, option: RegExp | string) {
   fireEvent.click(screen.getByRole("combobox", { name: label }));
   fireEvent.click(await screen.findByRole("option", { name: option }));
 }
-const field = (label: string) => screen.getByRole("combobox", { name: label }) as HTMLInputElement;
+const field = (label: string) => screen.getByRole("combobox", { name: label }) as HTMLButtonElement;
 
 describe("Knowledge Base interactions", () => {
   it.each(["tauri://localhost", "tauri://localhost/"])("builds an explicit close URL for %s", (base) => {
@@ -107,8 +107,8 @@ describe("Knowledge Base interactions", () => {
     await waitFor(() => expect(agents.textContent).toContain("Codex"));
     choose("Agent", "Claude");
     await screen.findByRole("combobox", { name: "Model" });
-    await pick("Model", /chosen-model/);
-    await pick("Reasoning effort", "high");
+    await pick("Model", /Chosen model/);
+    await pick("Reasoning effort", "High");
     fireEvent.click(screen.getByRole("button", { name: "Organize and save" }));
     await waitFor(() => expect(api.start).toHaveBeenCalledWith("session", "claude", "chosen-model", "high"));
     await waitFor(() => expect(new URLSearchParams(location.search).get("memory")).toBe("job/job-1"));
@@ -117,16 +117,16 @@ describe("Knowledge Base interactions", () => {
   it("clears an effort the new model lacks and clears both overrides when changing agents", async () => {
     render(<MemoryCompile sessionId="session" />);
     await screen.findByRole("combobox", { name: "Model" });
-    await pick("Model", /chosen-model/);
-    await pick("Reasoning effort", "high");
-    await pick("Model", /simple-model/);
-    expect(field("Model").value).toBe("simple-model");
-    expect(field("Reasoning effort").value).toBe("");
-    await pick("Model", /chosen-model/);
-    await pick("Reasoning effort", "low");
+    await pick("Model", /Chosen model/);
+    await pick("Reasoning effort", "High");
+    await pick("Model", /Simple model/);
+    expect(field("Model").textContent).toContain("Simple model");
+    expect(field("Reasoning effort").textContent).toContain("Auto");
+    await pick("Model", /Chosen model/);
+    await pick("Reasoning effort", "Low");
     choose("Agent", "Claude");
-    await waitFor(() => expect(field("Model").value).toBe(""));
-    expect(field("Reasoning effort").value).toBe("");
+    await waitFor(() => expect(field("Model").textContent).toContain("Use Claude default"));
+    expect(field("Reasoning effort").textContent).toContain("Auto");
   });
 
   it("restores the remembered agent, model and effort on reopen", async () => {
@@ -134,8 +134,8 @@ describe("Knowledge Base interactions", () => {
     render(<MemoryCompile sessionId="session" />);
     const agents = await screen.findByRole("combobox", { name: "Agent" });
     await waitFor(() => expect(agents.textContent).toContain("Claude"));
-    await waitFor(() => expect(field("Model").value).toBe("chosen-model"));
-    expect(field("Reasoning effort").value).toBe("high");
+    await waitFor(() => expect(field("Model").textContent).toContain("Chosen model"));
+    expect(field("Reasoning effort").textContent).toContain("High");
   });
 
   it("remembers each selection for the next visit", async () => {
@@ -144,9 +144,9 @@ describe("Knowledge Base interactions", () => {
     choose("Agent", "Claude");
     expect(store.setMemoryPrefs).toHaveBeenCalledWith({ agent: "claude", model: null, effort: null });
     await screen.findByRole("combobox", { name: "Model" });
-    await pick("Model", /chosen-model/);
+    await pick("Model", /Chosen model/);
     expect(store.setMemoryPrefs).toHaveBeenCalledWith({ model: "chosen-model" });
-    await pick("Reasoning effort", "high");
+    await pick("Reasoning effort", "High");
     expect(store.setMemoryPrefs).toHaveBeenCalledWith({ effort: "high" });
   });
 
@@ -157,18 +157,18 @@ describe("Knowledge Base interactions", () => {
     const agents = await screen.findByRole("combobox", { name: "Agent" });
     await waitFor(() => expect(agents.textContent).toContain("Codex"));
     await screen.findByRole("combobox", { name: "Model" });
-    expect(field("Model").value).toBe("");
+    expect(field("Model").textContent).toContain("Use Codex default");
   });
 
   it("keeps the agent default usable when the model list fails and retries it", async () => {
     api.models.mockRejectedValueOnce(new Error("Provider catalogue unavailable"));
     render(<MemoryCompile sessionId="session" />);
     await screen.findByText("Provider catalogue unavailable");
-    // The shared fields accept a typed identifier or the agent default, so a missing list does not block.
+    // The shared fields accept a custom identifier or the agent default, so a missing list does not block.
     expect((screen.getByRole("button", { name: "Organize and save" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     fireEvent.click(screen.getByRole("combobox", { name: "Model" }));
-    await screen.findByRole("option", { name: /chosen-model/ });
+    await screen.findByRole("option", { name: /Chosen model/ });
     expect(api.start).not.toHaveBeenCalled();
   });
 

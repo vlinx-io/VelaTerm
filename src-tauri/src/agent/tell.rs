@@ -365,7 +365,7 @@ pub(super) fn post_local(route: &str, body: &Value) -> Result<Value, String> {
     if url.scheme() != "http" || !matches!(url.host_str(), Some("127.0.0.1" | "localhost")) {
         return Err("Expected the local VelaTerm endpoint".into());
     }
-    let token = std::env::var("VLX_TOKEN").map_err(|_| "Missing VelaTerm credentials")?;
+    let token = super::session_env::token().ok_or("Missing VelaTerm credentials")?;
     let response = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(50))
         .redirects(0)

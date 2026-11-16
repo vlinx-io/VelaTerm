@@ -66,6 +66,8 @@ const MANAGEMENT_CMDS: &[&str] = &[
 /// behind the protected-settings ACL, swept across every dispatch arm:
 /// - `gitea_set_config` writes the Gitea token (keyring, or the plaintext `gitea.token` app-settings
 ///   fallback that `is_protected_setting` hides from remote clients — this arm bypassed that ACL).
+/// - `deepseek_set_config` writes the DeepSeek API key with the same keychain/plaintext policy; its
+///   `deepseek_get_status` is not gated because it returns only whether a key exists.
 /// - `url_host_password` returns a remembered remote-window password from the keyring in plaintext.
 /// - `url_host_record` writes such a password into the keyring.
 /// - `ssh_host_forget` / `url_host_forget` DELETE remembered passwords from the keyring — a secret-store
@@ -81,6 +83,7 @@ const SECRET_CMDS: &[&str] = &[
     "translation_service_save",
     "translation_service_key",
     "translation_service_delete",
+    "deepseek_set_config",
     "gitea_set_config",
     "url_host_password",
     "url_host_record",
@@ -93,7 +96,9 @@ const SECRET_CMDS: &[&str] = &[
 /// target) and the autostart port/enabled keys the next restart trusts; `gitea.token` is a plaintext
 /// credential fallback when no keyring is available.
 fn is_protected_setting(key: &str) -> bool {
-    key.starts_with("remoteAccess.") || key == "gitea.token"
+    key.starts_with("remoteAccess.")
+        || key == "gitea.token"
+        || key == crate::agent::deepseek_config::KEY_API_KEY_FALLBACK
 }
 
 /// Deny remote clients direct file access inside the app data directory, which holds the secret files
@@ -110,7 +115,7 @@ fn is_protected_setting(key: &str) -> bool {
 ///   be swapped for a symlink between the check and the file operation. Closing either gap would
 ///   need openat-style descriptor-anchored traversal, which std::fs does not expose; the threat
 ///   model (a paired remote device already trusted with a shell) accepts both.
-fn guard_remote_path(app: &AppCtx, origin: CallOrigin, path: &str) -> Result<(), String> {
+pub(crate) fn guard_remote_path(app: &AppCtx, origin: CallOrigin, path: &str) -> Result<(), String> {
     if origin != CallOrigin::Remote {
         return Ok(());
     }
@@ -218,6 +223,9 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
     if cmd.starts_with("security_") {
         return crate::security::dispatch(app, cmd, args);
     }
+    if cmd.starts_with("assist_") {
+        return crate::assist::dispatch(app, cmd, args, origin);
+    }
     if cmd.starts_with("translation_") {
         return crate::agent::translation::dispatch(app, cmd, args, origin == CallOrigin::Local);
     }
@@ -264,8 +272,10 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         }
         "pty_write" => {
             // Input does not participate in resize-owner arbitration and needs no source identifier.
+            // `remote` comes from the client: serve mode cannot tell an SSH window from the local Electron shell.
+            let remote = args.get("remote").and_then(Value::as_bool).unwrap_or(false);
             app.pty()
-                .write(&req_str(args, "sessionId")?, &req_str(args, "data")?)?;
+                .write(&req_str(args, "sessionId")?, &req_str(args, "data")?, remote)?;
             Ok(Value::Null)
         }
         "pty_resize" => {
@@ -1048,13 +1058,15 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
                 let kind=crate::db::repo::get_session_kind(&app.db().conn.lock().unwrap(),&sid)?;
                 // A Grok conversation view draws its native stream through the ACP mapper, which keeps tool
                 // cards; the paged reader serves its read-only history views.
-                (matches!(kind,Some(SessionKind::Codex|SessionKind::Claude|SessionKind::Pi|SessionKind::Omp|SessionKind::Antigravity|SessionKind::Opencode|SessionKind::Kiro))
+                (matches!(kind,Some(SessionKind::Codex|SessionKind::Claude|SessionKind::Pi|SessionKind::Omp|SessionKind::Antigravity|SessionKind::Opencode|SessionKind::Deepseek|SessionKind::Kiro))
                     || kind==Some(SessionKind::Grok) && history_only)
                     && (history_only || app.chat().snapshot_window(&sid,Some(&crate::agent::chat::engine::ChatWindow {control_only:true,..Default::default()})).pid.is_none())
             } else {false};
             if args.get("protocolVersion").and_then(Value::as_u64)==Some(2) || idle_bounded {
                 let mut value=to_value(core::chat_snapshot_control(app,&sid,Some(window.as_ref().unwrap_or(&Default::default())))?)?;
-                match crate::agent::history_store::children::prepare(app,&sid,&crate::agent::history_store::children::path(args)?) {
+                let child_path=crate::agent::history_store::children::path(args)?;
+                let child_empty=child_path.is_empty();
+                match crate::agent::history_store::children::prepare(app,&sid,&child_path) {
                     Ok(branch)=>{
                         if args.get("historyGeneration").and_then(Value::as_str).is_some_and(|g|g!=branch.generation) {
                             return Err("cursor_expired: history generation changed".into());
@@ -1084,24 +1096,45 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
                         } else {branch.page(window.as_ref().and_then(|w|w.before.as_deref()),opt_str(args,"after").as_deref(),opt_str(args,"anchor").as_deref())?};
                         let read_job=branch.store.subscribe(&sid,&branch.sources,opt_str(args,"readJobId").as_deref())?;
                         page["readJobId"]=serde_json::json!(read_job);
-                        if value.get("pid").is_none() || history_only || !crate::agent::history_store::children::path(args)?.is_empty() {
+                        if value.get("pid").is_none() || history_only || !child_empty {
                             value.as_object_mut().unwrap().extend(page.as_object().unwrap().clone());
-                            if history_only || !crate::agent::history_store::children::path(args)?.is_empty() {
+                            if history_only || !child_empty {
                                 for key in ["pid","startedAt","turnStartedAt","auth"] {value.as_object_mut().unwrap().remove(key);}
                                 value["permissions"]=serde_json::json!([]);value["queue"]=serde_json::json!([]);value["running"]=serde_json::json!(false);
                             }
                         } else {
+                            app.chat().decorate_runtime_snapshot(&sid,&mut value);
                             // Live and historical row identity mapping is introduced at the receive boundary.
                             // Until that mapping is available, publish control facts without guessing a merge.
                             for key in ["protocolVersion","historyGeneration","coverage","indexing","pendingLocation","indexedBytes","sourceBytes","knownRows","snapshotRevision","readJobId"] {
                                 value[key]=page[key].clone();
                             }
+                            if let Some(rows)=value.get_mut("rows").and_then(Value::as_array_mut) {
+                                for row in rows.iter_mut() {
+                                    if let Some(obj)=row.as_object_mut() {
+                                        obj.entry("detailProtocol").or_insert_with(||serde_json::json!(1));
+                                    }
+                                }
+                            }
                         }
                     }
                     Err(error)=>{
-                        value["protocolVersion"]=serde_json::json!(2);
-                        value["coverage"]=serde_json::json!("error");
-                        value["historyError"]=serde_json::json!(error);
+                        if value.get("pid").is_some() && !history_only && child_empty && error.starts_with("source_missing:") {
+                            app.chat().decorate_runtime_snapshot(&sid,&mut value);
+                            if let Some(rows)=value.get_mut("rows").and_then(Value::as_array_mut) {
+                                for row in rows.iter_mut() {
+                                    if let Some(obj)=row.as_object_mut() {
+                                        obj.entry("detailProtocol").or_insert_with(||serde_json::json!(1));
+                                    }
+                                }
+                            }
+                            value["protocolVersion"]=serde_json::json!(2);
+                            value["coverage"]=serde_json::json!("complete");
+                        } else {
+                            value["protocolVersion"]=serde_json::json!(2);
+                            value["coverage"]=serde_json::json!("error");
+                            value["historyError"]=serde_json::json!(error);
+                        }
                     }
                 }
                 crate::agent::tell::decorate(app,&sid,&mut value);
@@ -1296,6 +1329,16 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             guard_remote_path(app, origin, &path)?;
             to_value(files::delete_path(&path)?)
         }
+        "copy_into_dir" => {
+            // Both ends are gated like rename_path: copying a secret out is exfiltration, copying in plants files.
+            let dir = req_str(args, "dir")?;
+            let sources = req_str_vec(args, "sources")?;
+            guard_remote_path(app, origin, &dir)?;
+            for source in &sources {
+                guard_remote_path(app, origin, source)?;
+            }
+            to_value(files::copy_into_dir(&sources, &dir)?)
+        }
         // The generic full-content read/write arms are the ones that could hand a remote client the
         // secret files in the data directory (DB with the PHC verifier, pairing/E2EE/TLS keys), so they
         // carry the data-dir ACL; all other paths behave exactly as before.
@@ -1449,6 +1492,25 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             &req_str(args, "target")?,
             opt_str(args, "commitMessage").as_deref(),
         )?),
+        // DeepSeek's own endpoint and key. Status returns only whether a key is stored; the save is gated
+        // to local origins because it writes that key to the keychain or its plaintext fallback. The
+        // reply also says whether this client may edit, so a remote settings page disables the form
+        // instead of letting it fail at save time.
+        "deepseek_get_status" => {
+            let mut status = to_value(core::deepseek_get_status(app))?;
+            status["editable"] = Value::Bool(origin != CallOrigin::Remote);
+            Ok(status)
+        }
+        "deepseek_set_config" => {
+            let mut status = to_value(core::deepseek_set_config(
+                app,
+                args.get("baseUrl").and_then(Value::as_str).unwrap_or_default(),
+                args.get("apiKey").and_then(Value::as_str).unwrap_or_default(),
+                args.get("clearKey").and_then(Value::as_bool).unwrap_or(false),
+            )?)?;
+            status["editable"] = Value::Bool(origin != CallOrigin::Remote);
+            Ok(status)
+        }
         "gitea_get_status" => to_value(core::gitea_get_status(app)),
         "gitea_set_config" => to_value(core::gitea_set_config(
             app,
@@ -1565,6 +1627,12 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         // backend raises the marker from its own arbitration instead.
         "session_mark_unread" => {
             crate::session_state::set_unread(app, &req_str(args, "sessionId")?, true);
+            Ok(Value::Null)
+        }
+        // The user marked this session Pending from the session menu. The marker is flagged as manual so
+        // other clients show it without popping a system notification for something nobody new produced.
+        "session_mark_pending" => {
+            crate::session_state::mark_pending(app, &req_str(args, "sessionId")?);
             Ok(Value::Null)
         }
         // A client reports what it sees on the rendered terminal grid, which the backend cannot read for
@@ -2143,6 +2211,7 @@ mod tests {
             "translation_service_save",
             "translation_service_key",
             "translation_service_delete",
+            "deepseek_set_config",
             "gitea_set_config",
             "url_host_password",
             "url_host_record",
@@ -2166,6 +2235,31 @@ mod tests {
                 "{cmd} must be gated for remote origins"
             );
         }
+    }
+
+    /// The DeepSeek settings page reads both values to render its form, but only a local client may
+    /// write them. Reporting that in the reply keeps a remote page from offering a save that will fail.
+    #[test]
+    fn deepseek_settings_report_whether_this_client_may_edit() {
+        let app = test_ctx();
+        let local = dispatch(
+            &app,
+            "deepseek_get_status",
+            &json!({}),
+            DESKTOP_SOURCE,
+            CallOrigin::Local,
+        )
+        .unwrap();
+        assert_eq!(local["editable"], json!(true));
+        let remote = dispatch(
+            &app,
+            "deepseek_get_status",
+            &json!({}),
+            "ws-1",
+            CallOrigin::Remote,
+        )
+        .unwrap();
+        assert_eq!(remote["editable"], json!(false));
     }
 
     /// The local lane keeps working for every newly gated secret command: gitea_set_config reaches core
@@ -2464,6 +2558,9 @@ mod tests {
             // guard on `to` denies).
             ("rename_path", json!({ "from": format!("{}/nonexistent-src.txt", std::env::temp_dir().to_string_lossy()), "to": format!("{dd}/planted.txt") }), format!("{dd}/planted.txt")),
             ("delete_path", json!({ "path": secret_str }), secret_str.clone()),
+            // Copy is gated on both ends, like rename: into the data dir, and a secret out of it.
+            ("copy_into_dir", json!({ "dir": dd.clone(), "sources": [] }), dd.clone()),
+            ("copy_into_dir", json!({ "dir": std::env::temp_dir().to_string_lossy(), "sources": [secret_str.clone()] }), secret_str.clone()),
             ("save_doc_image", json!({ "docPath": format!("{dd}/doc.md"), "bytesB64": "aGk=", "ext": "png" }), format!("{dd}/doc.md")),
             // Planting direction through clone: a remote client must not clone a fresh repository
             // into the data dir; the gate fires on parentDir before any git/network work starts.

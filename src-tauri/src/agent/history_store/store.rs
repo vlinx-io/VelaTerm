@@ -506,9 +506,13 @@ impl Store {
         let mut readers=readers().lock().unwrap();
         readers.retain(|_,reader|reader.touched.elapsed()<IDLE);
         if let Some(id)=existing {
-            let reader=readers.get_mut(id).ok_or("cursor_expired: index reader expired")?;
-            if reader.scope!=scope {return Err("cursor_expired: index reader belongs to another session".into());}
-            reader.sources=indexes;reader.touched=Instant::now();return Ok(id.to_owned());
+            if let Some(reader)=readers.get_mut(id) {
+                if reader.scope!=scope {return Err("cursor_expired: index reader belongs to another session".into());}
+                reader.sources=indexes;reader.touched=Instant::now();return Ok(id.to_owned());
+            }
+            // An idle reader is reclaimed while its client may still hold the id. Page cursors are row
+            // identifiers, not reader state, so the request is served with a fresh reader instead of
+            // failing every retry the client makes with the id it kept.
         }
         if readers.len()>=128 {return Err("index_busy: too many active history readers".into());}
         let id=format!("index:{}",uuid::Uuid::new_v4());

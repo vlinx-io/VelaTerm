@@ -1,4 +1,4 @@
-//! One of a Claude conversation's background tasks, opened as a tab of its own.
+//! One of a conversation's background tasks, opened as a tab of its own.
 //!
 //! The view subscribes independently of its conversation pane. Reconnection registers the new socket
 //! with a snapshot without starting an agent; backend facts own lifecycle and elapsed time.
@@ -26,6 +26,7 @@ import {
   type ChatWorkflowPhase,
 } from "../../../ipc/chat";
 import { onTransportReconnect, onTransportDisconnect } from "../../../ipc/transport";
+import { STALE_CURSOR, failureText } from "./historyCursor";
 import { useTermStore, type TaskTab } from "../../../store/termStore";
 import { kindIconEl } from "../../sessionViewers/sessionMeta";
 import { assistantLabel } from "../../sessionViewers/TranscriptViewer";
@@ -83,6 +84,7 @@ export function plainOutput(text: string): string {
 
 export function TaskView({ tab, hidden }: { tab: TaskTab; hidden: boolean }) {
   const t = useT();
+  const parentKind = useTermStore((state) => state.sessions.find((session) => session.id === tab.sessionId)?.kind);
   const [task, setTask] = useState<ChatBackgroundTask | undefined>(tab.seed);
   /** The last list did not carry this task, and no terminal frame explained why. */
   const [stale, setStale] = useState(false);
@@ -176,9 +178,10 @@ export function TaskView({ tab, hidden }: { tab: TaskTab; hidden: boolean }) {
     .sort((a, b) => (a.index ?? Infinity) - (b.index ?? Infinity));
   const agents = progress.filter((entry): entry is ChatWorkflowAgent => entry?.type === "workflow_agent");
   const unphased = agents.filter((agent) => !phases.some((phase) => phase.index != null && phase.index === agent.phaseIndex));
-  const isWorkflow = (task?.task_type || tab.taskType) === "local_workflow";
-  const isShell = (task?.task_type || tab.taskType) === "local_bash";
-  const isAgent = (task?.task_type || tab.taskType) === "local_agent";
+  const effectiveType = task?.task_type || tab.taskType;
+  const isWorkflow = effectiveType === "local_workflow" && parentKind !== "antigravity";
+  const isShell = effectiveType === "local_bash" || (effectiveType === "local_workflow" && parentKind === "antigravity");
+  const isAgent = effectiveType === "local_agent";
   const when = (ms: number) => new Date(ms).toLocaleString(dateLocale());
 
   return (
@@ -364,9 +367,13 @@ function SubagentConversation({ sessionId, taskId, live, hidden }: { sessionId: 
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let inFlight=false;
+    // One automatic reload per cursor failure: a cursor the rebuilt index no longer has is dropped,
+    // then the newest rows are read again instead of polling the same dead window forever.
+    let coldRetry=false;
     const load = async (direction?:"before"|"after") => {
       if (inFlight) return;
       inFlight=true;setPageBusy(true);clearTimeout(timer);
+      let retryCold=false;
       try {
         const known=pageRef.current;
         const value = await chatSubagentSnapshot(sessionId, taskId,{
@@ -381,12 +388,23 @@ function SubagentConversation({ sessionId, taskId, live, hidden }: { sessionId: 
           setRows(value.rows);
         }
         if (!disposed) setUnavailable(false);
-      } catch {
+        coldRetry=false;
+      } catch (failure) {
         // Keep what was last read; the recording may not exist until the subagent writes its first step.
-        if (!disposed) setUnavailable(true);
+        if (!disposed) {
+          if (STALE_CURSOR.test(failureText(failure)) && !coldRetry) {
+            coldRetry=true;retryCold=true;
+            if (reader.current) void chatReadCancel(sessionId,reader.current).catch(()=>{});
+            reader.current=undefined;pageRef.current=undefined;
+            setUnavailable(false);
+          } else setUnavailable(true);
+        }
       }
       inFlight=false;if (!disposed) setPageBusy(false);
-      if (!disposed && (live || pageRef.current?.indexing)) timer = setTimeout(() => void load(), OUTPUT_POLL_MS);
+      if (!disposed) {
+        if (retryCold) timer = setTimeout(() => void load(), 250);
+        else if (live || pageRef.current?.indexing) timer = setTimeout(() => void load(), OUTPUT_POLL_MS);
+      }
     };
     loadPage.current=load;
     void load();

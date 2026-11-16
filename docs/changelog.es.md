@@ -1,3 +1,22 @@
+## v0.3.1 — 2026-11-16
+
+- 🪐 La vista de conversación de Antigravity ahora admite cambio de modelo y esfuerzo de razonamiento, seguimiento de subagentes y tareas en segundo plano, preguntas interactivas con `ask_question`, permisos de cinco niveles, renombrado con IA y estadísticas de turno, velocidad de salida y uso de cuota en el panel Info.
+- 🐋 Las sesiones de DeepSeek ahora admiten tareas en segundo plano, entrada de imágenes según el modelo, uso de contexto, renombrado con IA, configuración de URL y clave de API junto al cuadro de entrada y visualización de solo lectura del historial anterior de `dsh`.
+- 🤖 Los agentes ahora pueden proponer acciones de la aplicación VelaTerm mediante `vapp` (incluida la organización de árboles de la barra lateral con referencias `$name`), mostrando cada acción o lote como una tarjeta de confirmación en la vista de conversación.
+- 📁 Tareas y Chats en la barra lateral izquierda permiten crear grupos, añadir elementos desde el menú contextual del área vacía y arrastrar elementos al nivel superior.
+- 📦 Las versiones de Windows ahora incluyen paquetes zip portables tanto para la compilación completa como para la mínima, y las copias portables se actualizan desde la página de descargas.
+- 🇨🇳 Ajustes permite cambiar el servidor de actualizaciones y descargas al espejo de China continental `velaterm.cn`.
+- 🔍 La barra de estado incorpora controles de zoom de la interfaz con entrada directa de porcentaje, y Ajustes permite elegir fuentes buscables distintas para la interfaz y las conversaciones.
+- 📎 Los archivos arrastrados desde Finder o el Explorador de archivos ahora pueden soltarse directamente en terminales, conversaciones y el árbol de archivos del proyecto.
+- 🍴 Las sesiones de ZCode permiten bifurcar desde la última respuesta sin modificar el espacio de trabajo, revertir desde el último mensaje y renombrar con IA, mientras que las sesiones de Pi y OMP admiten autocompletado de comandos con barra.
+- 📋 Los mensajes de conversación incluyen «Copiar mensaje completo» en su menú contextual, el cuadro de entrada tiene un menú contextual de Cortar/Copiar/Pegar/Seleccionar todo con etiquetas de atajos, y la búsqueda dentro de la conversación recorre primero la transcripción completa.
+- 📊 La sección Usage del panel Info muestra barras de cuota agrupadas por ventana de reinicio con una escala de 20 divisiones y horas de reinicio independientes, y contrae por defecto las cuotas de Antigravity que no son de Gemini.
+- 🏷️ Las sesiones tienen «Definir estado» (Visto / Pendiente) en su menú contextual, las sesiones recién creadas permanecen visibles bajo filtros de estado y `vspawn --title` asigna títulos personalizados a las sesiones derivadas y de planificación.
+- 🪟 `vartifact` acopla archivos incluso al abrirse desde pestañas en segundo plano, el desplegable de límite de pestañas en segundo plano llega hasta 512 y los visitantes de enlaces públicos compartidos pueden expandir o contraer el árbol izquierdo localmente.
+- ⌨️ Confirmar una composición IME con Intro en macOS ya no envía respuestas ni búsquedas antes de tiempo, la entrada en terminales remotos oculta las sugerencias en línea del historial de Zsh y las actualizaciones sincronizadas del terminal ya no hacen parpadear el área visible.
+- 🔔 Al hacer clic en una notificación de una ventana remota en macOS se trae esa ventana al frente directamente sin mostrar primero la ventana principal, y volver a abrir la aplicación restaura la ventana principal incluso cuando solo hay ventanas remotas abiertas.
+- 🔧 Cambiar de proyecto limpia el filtro del árbol de archivos, los selectores de permisos guardan los valores predeterminados al instante con Set as default, el renombrado con IA funciona en sesiones muy largas y el primer mensaje de una sesión nueva ya no parpadea antes de que inicie la sesión.
+
 ## v0.3.0 — 2026-11-08
 
 - 🔏 La versión para macOS ahora se firma con el certificado de Vlinx Software, Inc. en lugar del anterior, por lo que tras actualizar puede que deba volver a conceder algunos permisos de macOS, y los elementos guardados en el llavero, como las contraseñas de conexiones remotas, requieren una nueva autorización: cuando se le solicite, introduzca su contraseña de inicio de sesión y elija «Permitir siempre».

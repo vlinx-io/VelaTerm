@@ -79,11 +79,16 @@ const BRAND: Record<string, SimpleIcon> = {
   cursor: siCursor,
   // Cline's near-black #18181B mark falls back to currentColor through brandFill.
   cline: siCline,
-  // DeepSeek's whale, the mark DeepSeek Harness uses for itself.
+  // DeepSeek's whale, the mark the service uses for itself.
   deepseek: siDeepseek,
 };
 
-/** DeepSeek's brand blue, shared by its session icon and accent. */
+/**
+ * OpenCode switches to its official monochrome treatment in dark mode while keeping its flat blue in light mode.
+ */
+export const OPENCODE_BRAND_COLOR = "var(--opencode-brand-color, #3B82F6)";
+
+/** DeepSeek's brand blue, shared by its session icon and accent in both themes. */
 export const DEEPSEEK_BRAND_COLOR = `#${siDeepseek.hex}`;
 
 /** Return an official agent brand icon, or null for the caller's fallback. */
@@ -166,18 +171,31 @@ export function ompMarkEl(size = 14) {
 }
 
 /**
- * Hand-drawn Google Antigravity CLI (`agy`) mark: a double up-chevron evokes upward motion and stays
- * distinct from other logos. It uses currentColor, typically the session tree's blue KIND_COLOR.
+ * Official Google Antigravity CLI (`agy`) mark, redrawn from the Antigravity app icon: a rounded arch
+ * that lifts into a wide "A". The gradient stops come from CSS so the light scheme can collapse them
+ * into a flat Google blue, keeping the official blue-green-red tile for dark mode only.
  */
 function AntigravityMark({ size = 14 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" role="img" aria-label="Antigravity">
-      <path d="M12 3 L21 12 L18 12 L12 6 L6 12 L3 12 Z M12 10 L21 19 L18 19 L12 13 L6 19 L3 19 Z" />
+    <svg width={size} height={size} viewBox="0 0 24 24" role="img" aria-label="Antigravity">
+      <defs>
+        <linearGradient id="antigravity-mark-gradient" x1="0.2" y1="1" x2="0.75" y2="0">
+          <stop offset="0" stopColor="var(--antigravity-stop-1)" />
+          <stop offset="0.42" stopColor="var(--antigravity-stop-2)" />
+          <stop offset="0.6" stopColor="var(--antigravity-stop-3)" />
+          <stop offset="0.8" stopColor="var(--antigravity-stop-4)" />
+          <stop offset="1" stopColor="var(--antigravity-stop-5)" />
+        </linearGradient>
+      </defs>
+      <path
+        fill="url(#antigravity-mark-gradient)"
+        d="M11.39 2.32C9.08 2.77 7.94 4.63 6.22 10.8C4.78 15.99 3.92 17.95 2.37 19.61C1.48 20.57 1.3 21.01 1.66 21.37C2.08 21.79 2.94 21.62 3.89 20.92C5.09 20.04 6.11 18.82 7.26 16.86C9.29 13.41 10.07 12.73 12 12.73C13.87 12.73 14.73 13.44 16.48 16.44C18.49 19.88 20.51 21.8 21.86 21.54C22.7 21.39 22.63 20.71 21.67 19.66C20.07 17.92 19.3 16.18 17.86 11.11C16.23 5.34 15.46 3.76 13.82 2.77C13.23 2.42 12.04 2.2 11.39 2.32Z"
+      />
     </svg>
   );
 }
 
-/** Antigravity upward mark using the caller's currentColor. */
+/** Antigravity arch mark using the theme-aware official gradient. */
 export function antigravityMarkEl(size = 14) {
   return <AntigravityMark size={size} />;
 }

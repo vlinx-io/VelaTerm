@@ -17,9 +17,11 @@ use crate::agent::chat::opencode_protocol::{self, OpencodeModel, Server};
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 
-pub fn list(app: &crate::host::AppCtx, session_id: &str, bin: &str, cwd: Option<&str>, running: Option<Arc<Server>>) -> Result<Vec<OpencodeModel>, String> {
+/// The models OpenCode offers, optionally restricted to one provider. A DeepSeek conversation uses the
+/// filter so the picker cannot offer another provider's models.
+pub fn list_provider(app: &crate::host::AppCtx, session_id: &str, bin: &str, cwd: Option<&str>, running: Option<Arc<Server>>, provider: Option<&str>) -> Result<Vec<OpencodeModel>, String> {
     if let Some(server) = running {
-        return fetch(&server);
+        return fetch(&server, provider);
     }
     let port = opencode_protocol::configured_port(app, &format!("catalog.{session_id}"))?;
     let password = opencode_protocol::random_password();
@@ -51,7 +53,7 @@ pub fn list(app: &crate::host::AppCtx, session_id: &str, bin: &str, cwd: Option<
     let deadline = Instant::now() + STARTUP_TIMEOUT;
     let result = loop {
         if server.healthy() {
-            break fetch(&server);
+            break fetch(&server, provider);
         }
         if let Ok(Some(status)) = child.try_wait() {
             break Err(format!("OpenCode exited before answering ({status})"));
@@ -66,9 +68,15 @@ pub fn list(app: &crate::host::AppCtx, session_id: &str, bin: &str, cwd: Option<
     result
 }
 
-fn fetch(server: &Server) -> Result<Vec<OpencodeModel>, String> {
+fn fetch(server: &Server, provider: Option<&str>) -> Result<Vec<OpencodeModel>, String> {
     let providers = server.get("/provider")?;
-    Ok(opencode_protocol::parse_models(&providers))
+    let models = opencode_protocol::parse_models(&providers);
+    Ok(match provider {
+        Some(provider) => models.into_iter()
+            .filter(|model| model.id.split_once('/').is_some_and(|(id, _)| id == provider))
+            .collect(),
+        None => models,
+    })
 }
 
 /// Context windows by provider, then model, read from one version of the catalogue file.

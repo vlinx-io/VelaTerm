@@ -15,7 +15,7 @@ import type { ReactNode } from "react";
 import { getLocale, useT } from "../i18n";
 import {
   closeUpdateModal,
-  DOWNLOAD_PAGE_URL,
+  downloadPageUrl,
   dismissUpdate,
   restartApp,
   startInstall,
@@ -249,6 +249,8 @@ export function UpdateModal() {
 
   const busy = stage.kind === "downloading" || stage.kind === "installing";
   const win = isWindows();
+  // A portable Windows copy is updated by downloading the new zip; it never runs the installer.
+  const manualOnly = !!prompt.update.manualOnly;
   // useT subscribes to the locale store, so changing language rerenders with the matching changelog.
   const releaseNotes = prompt.localizedNotes[getLocale()] ?? prompt.notes;
 
@@ -331,7 +333,7 @@ export function UpdateModal() {
 
         {stage.kind === "available" && win && (
           <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 12 }}>
-            {t("updater.windowsNotice")}
+            {manualOnly ? t("updater.portableNotice") : t("updater.windowsNotice")}
           </div>
         )}
         {stage.kind === "downloading" && (
@@ -371,7 +373,7 @@ export function UpdateModal() {
           {stage.kind === "error" && (
             <button
               onClick={() => {
-                void platform.opener.openExternal(DOWNLOAD_PAGE_URL).catch(() => {});
+                void platform.opener.openExternal(downloadPageUrl()).catch(() => {});
               }}
               title={t("updater.downloadManuallyHint")}
               style={{
@@ -397,7 +399,23 @@ export function UpdateModal() {
           >
             {busy ? t("updater.hide") : t("updater.later")}
           </button>
-          {(stage.kind === "available" || stage.kind === "error") && (
+          {manualOnly && stage.kind === "available" && (
+            <button
+              onClick={() => {
+                void platform.opener.openExternal(downloadPageUrl()).catch(() => {});
+              }}
+              title={t("updater.downloadManuallyHint")}
+              style={{
+                ...BTN_BASE,
+                border: "1px solid var(--accent)",
+                background: "var(--accent)",
+                color: "var(--text-on-accent)",
+              }}
+            >
+              {t("updater.downloadManually")}
+            </button>
+          )}
+          {!manualOnly && (stage.kind === "available" || stage.kind === "error") && (
             <button
               onClick={() => void startInstall()}
               style={{

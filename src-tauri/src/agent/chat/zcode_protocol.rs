@@ -134,6 +134,167 @@ pub fn ack_error(result: &Value) -> String {
         .to_string()
 }
 
+/// Shown when a conversation has no reply a fork can branch from yet.
+pub const FORK_NOT_READY: &str = "This conversation can be forked once its latest reply has finished.";
+/// Shown for any other failure to fork; the reason itself goes to the diagnostics log.
+pub const FORK_FAILED: &str = "ZCode could not fork this conversation. Please try again.";
+
+/// The reply a fork branches from, with the conversation state it was read at.
+#[derive(Debug, PartialEq)]
+pub struct ForkTarget {
+    pub row_id: i64,
+    pub entity_id: String,
+    pub revision: u64,
+    pub log_epoch: String,
+}
+
+/// Where a fork of this snapshot branches: the latest reply, provided ZCode offers to fork from it. It does not
+/// once that reply's turn was cancelled or failed.
+pub fn fork_target(snapshot: &Value) -> Option<ForkTarget> {
+    let reply = snapshot
+        .pointer("/rows/window")?
+        .as_array()?
+        .iter()
+        .rev()
+        .find(|row| row.get("kind").and_then(Value::as_str) == Some("assistantText"))?;
+    if reply.pointer("/actions/canFork").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    Some(ForkTarget {
+        row_id: reply.get("rowId")?.as_i64()?,
+        entity_id: reply.get("entityId")?.as_str()?.to_string(),
+        revision: snapshot.get("revision")?.as_u64()?,
+        log_epoch: snapshot.get("logEpoch")?.as_str()?.to_string(),
+    })
+}
+
+/// A `forkAssistant` command, which copies the conversation up to the reply and leaves the workspace alone. It
+/// is compare-and-set, so unlike `command` it carries the state the target was read at.
+pub fn fork_command(id: &str, command_id: &str, session_id: &str, target: &ForkTarget, now_ms: u64) -> Value {
+    request(
+        id,
+        "v4/command",
+        json!({
+            "commandId": command_id,
+            "clientId": CLIENT_ID,
+            "sessionId": session_id,
+            "type": "forkAssistant",
+            "baseRevision": target.revision,
+            "baseLogEpoch": target.log_epoch,
+            "payload": {"target": {"rowId": target.row_id, "entityId": target.entity_id}},
+            "issuedAt": now_ms,
+        }),
+    )
+}
+
+/// The conversation's current revision, when a compare-and-set command was turned down only for naming an
+/// older one. Retrying with it is safe: the target row is still checked by its entity id.
+pub fn stale_revision(ack: &Value) -> Option<u64> {
+    if ack.get("reasonCode").and_then(Value::as_str) != Some("proto.staleRevision") {
+        return None;
+    }
+    ack.get("revisionAtDecision").and_then(Value::as_u64)
+}
+
+/// The message for a refused fork. ZCode's `guard.*` reasons all mean the latest reply cannot be branched from.
+pub fn fork_refusal(ack: &Value) -> &'static str {
+    let guarded = ack.get("reasonCode").and_then(Value::as_str).is_some_and(|code| code.starts_with("guard."));
+    if guarded { FORK_NOT_READY } else { FORK_FAILED }
+}
+
+/// A compare-and-set `v4/command`: ZCode applies it only while the conversation is still at `revision` in
+/// `log_epoch`, the state the caller read its target in.
+#[allow(clippy::too_many_arguments)]
+pub fn cas_command(
+    id: &str,
+    command_id: &str,
+    session_id: &str,
+    kind: &str,
+    payload: Value,
+    revision: u64,
+    log_epoch: &str,
+    now_ms: u64,
+) -> Value {
+    request(
+        id,
+        "v4/command",
+        json!({
+            "commandId": command_id,
+            "clientId": CLIENT_ID,
+            "sessionId": session_id,
+            "type": kind,
+            "baseRevision": revision,
+            "baseLogEpoch": log_epoch,
+            "payload": payload,
+            "issuedAt": now_ms,
+        }),
+    )
+}
+
+/// How a row action names its row: the projection id and the entity behind it, which ZCode checks are still
+/// the same before acting.
+pub fn row_target(row: &Value) -> Option<Value> {
+    Some(json!({"rowId": row.get("rowId")?.as_i64()?, "entityId": row.get("entityId")?.as_str()?}))
+}
+
+/// The latest message the user typed, and the turn header it opened. ZCode offers to edit only this one
+/// (`actions.canEdit`), and its file changes are the only ones whose restore means "as before this message":
+/// an older turn's restore undoes that turn alone.
+pub fn latest_query<'a>(rows: impl IntoIterator<Item = &'a Value>) -> Option<(&'a Value, Option<&'a Value>)> {
+    let rows: Vec<&Value> = rows.into_iter().collect();
+    let query = rows
+        .iter()
+        .filter(|row| str_of(row, "kind") == "userInput" && str_of(row, "origin") == "realUser")
+        .max_by_key(|row| row.get("rowId").and_then(Value::as_i64).unwrap_or(i64::MIN))
+        .copied()?;
+    let turn = str_of(query, "turnId");
+    let header = rows
+        .iter()
+        .find(|row| str_of(row, "kind") == "turnHeader" && !turn.is_empty() && str_of(row, "turnId") == turn)
+        .copied();
+    Some((query, header))
+}
+
+pub fn can_edit(query: &Value) -> bool {
+    query.pointer("/actions/canEdit").and_then(Value::as_bool) == Some(true)
+}
+
+pub fn can_restore_files(header: Option<&Value>) -> bool {
+    header.and_then(|h| h.pointer("/actions/canRewindFiles")).and_then(Value::as_bool) == Some(true)
+}
+
+/// Shown when ZCode has nothing to restore for the latest turn, or restored nothing.
+pub const NO_FILE_CHANGES: &str = "ZCode has no file changes it can restore for this message.";
+
+/// ZCode's file restore preview in the view's shape: whether it can apply, the files it would restore
+/// (relative to the workspace when inside it), and the turn's line counts.
+pub fn rewind_preview(preview: &Value, header: &Value, workspace: &str) -> Value {
+    let relative = |path: &str| {
+        let root = workspace.trim_end_matches('/');
+        path.strip_prefix(root).and_then(|rest| rest.strip_prefix('/')).unwrap_or(path).to_string()
+    };
+    let paths = |key: &str| -> Vec<String> {
+        preview.get(key).and_then(Value::as_array).into_iter().flatten()
+            .filter_map(|file| file.get("path").and_then(Value::as_str)).map(relative).collect()
+    };
+    let can_apply = preview.get("canApply").and_then(Value::as_bool) == Some(true);
+    let mut value = json!({
+        "canRewind": can_apply,
+        "filesChanged": paths("safeFiles"),
+        "insertions": header.pointer("/fileChanges/additions").and_then(Value::as_u64).unwrap_or(0),
+        "deletions": header.pointer("/fileChanges/deletions").and_then(Value::as_u64).unwrap_or(0),
+    });
+    if !can_apply {
+        let blocked = paths("unsafeFiles");
+        value["error"] = json!(if blocked.is_empty() {
+            NO_FILE_CHANGES.to_string()
+        } else {
+            format!("ZCode cannot restore files that changed after this message: {}", blocked.join(", "))
+        });
+    }
+    value
+}
+
 pub fn subscribe_params(session_id: &str, connection_id: &str, workspace: &str) -> Value {
     json!({
         "topic": format!("conversation/{session_id}"),
@@ -606,6 +767,79 @@ pub const ATTACHMENT_CHUNK: usize = 256 * 1024;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fork_branches_from_the_latest_reply_only_when_zcode_offers_it() {
+        let reply = |actions: Value| json!({"rowId":7,"kind":"assistantText","entityId":"msg_1","actions":actions});
+        let snapshot = |rows: Value| json!({"revision":5,"logEpoch":"e1","rows":{"window":rows}});
+        let marker = json!({"rowId":8,"kind":"timelineMarker","entityId":"m"});
+        assert_eq!(
+            fork_target(&snapshot(json!([reply(json!({"canFork":true})), marker]))),
+            Some(ForkTarget { row_id: 7, entity_id: "msg_1".into(), revision: 5, log_epoch: "e1".into() })
+        );
+        assert_eq!(fork_target(&snapshot(json!([reply(json!({}))]))), None);
+        assert_eq!(fork_target(&snapshot(json!([marker]))), None);
+    }
+
+    #[test]
+    fn a_fork_command_carries_the_state_its_target_was_read_at() {
+        let target = ForkTarget { row_id: 7, entity_id: "msg_1".into(), revision: 5, log_epoch: "e1".into() };
+        let command = fork_command("r1", "c1", "sess_1", &target, 9);
+        assert_eq!(command["method"], "v4/command");
+        assert_eq!(command["params"]["type"], "forkAssistant");
+        assert_eq!(command["params"]["baseRevision"], 5);
+        assert_eq!(command["params"]["baseLogEpoch"], "e1");
+        assert_eq!(command["params"]["payload"]["target"], json!({"rowId":7,"entityId":"msg_1"}));
+    }
+
+    #[test]
+    fn fork_acknowledgements_say_whether_to_retry_and_what_to_show() {
+        let stale = json!({"status":"stale","reasonCode":"proto.staleRevision","revisionAtDecision":9});
+        assert_eq!(stale_revision(&stale), Some(9));
+        assert_eq!(stale_revision(&json!({"status":"stale","reasonCode":"proto.staleLogEpoch","revisionAtDecision":9})), None);
+        assert_eq!(fork_refusal(&json!({"status":"rejected","reasonCode":"guard.forkTargetNotStable"})), FORK_NOT_READY);
+        assert_eq!(fork_refusal(&stale), FORK_FAILED);
+    }
+
+    #[test]
+    fn only_the_latest_query_and_its_own_turn_are_rewind_targets() {
+        let rows = [
+            json!({"rowId":1,"kind":"turnHeader","turnId":"t1","entityId":"t1","actions":{"canRewindFiles":true}}),
+            json!({"rowId":2,"kind":"userInput","origin":"realUser","turnId":"t1","entityId":"m1"}),
+            json!({"rowId":8,"kind":"turnHeader","turnId":"t2","entityId":"t2","actions":{"canRewindFiles":true}}),
+            json!({"rowId":9,"kind":"userInput","origin":"realUser","turnId":"t2","entityId":"m2","actions":{"canEdit":true}}),
+            json!({"rowId":10,"kind":"userInput","origin":"backgroundResult","turnId":"t3","entityId":"m3"}),
+        ];
+        let (query, header) = latest_query(rows.iter().rev()).unwrap();
+        assert_eq!(query["rowId"], 9);
+        assert_eq!(header.unwrap()["rowId"], 8);
+        assert!(can_edit(query) && can_restore_files(header));
+        assert_eq!(row_target(query), Some(json!({"rowId":9,"entityId":"m2"})));
+        assert!(!can_restore_files(Some(&json!({"rowId":8,"kind":"turnHeader"}))));
+        assert!(latest_query([&json!({"rowId":3,"kind":"assistantText"})]).is_none());
+    }
+
+    #[test]
+    fn row_actions_are_compare_and_set() {
+        let command = cas_command("r1", "c1", "sess_1", "editUserQuery", json!({"newText":"x"}), 27, "e1", 9);
+        assert_eq!(command["params"]["type"], "editUserQuery");
+        assert_eq!(command["params"]["baseRevision"], 27);
+        assert_eq!(command["params"]["baseLogEpoch"], "e1");
+        assert_eq!(command["params"]["sessionId"], "sess_1");
+    }
+
+    #[test]
+    fn file_restore_previews_list_workspace_paths_and_say_why_not() {
+        let header = json!({"fileChanges":{"additions":3,"deletions":1}});
+        let safe = json!({"canApply":true,"safeFiles":[{"path":"/w/src/a.txt"},{"path":"/elsewhere/b.txt"}],"unsafeFiles":[]});
+        assert_eq!(rewind_preview(&safe, &header, "/w/"),
+            json!({"canRewind":true,"filesChanged":["src/a.txt","/elsewhere/b.txt"],"insertions":3,"deletions":1}));
+        let blocked = json!({"canApply":false,"safeFiles":[],"unsafeFiles":[{"path":"/w/a.txt","reason":"external_modified"}]});
+        let value = rewind_preview(&blocked, &header, "/w");
+        assert_eq!(value["canRewind"], false);
+        assert!(value["error"].as_str().unwrap().ends_with("a.txt"));
+        assert_eq!(rewind_preview(&json!({"canApply":false}), &header, "/w")["error"], NO_FILE_CHANGES);
+    }
 
     #[test]
     fn parse_line_tells_responses_requests_and_notifications_apart() {

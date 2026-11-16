@@ -2,7 +2,7 @@
 
 Created: 2026-09-08
 
-Updated: 2026-11-08 09:33
+Updated: 2026-11-09 09:37
 
 Command suggestions help in a plain terminal session when you press Tab: the shell's own completion definitions provide the candidates, and a list opens when there is more than one choice. Optionally, Zsh can also show the latest matching command from your history dimmed after the cursor while you type. The command stays in the terminal's normal input line, and accepting a suggestion inserts text without running it. This feature does not use an AI model.
 
@@ -21,6 +21,8 @@ Typing never opens the list in any mode. A change takes effect in open terminals
 ### History hints
 
 When the cursor is at the end of the line in Zsh, VelaTerm looks up the most recent history entry that starts with what you typed and shows the rest of it in dim text. Press Right arrow or End, or Ctrl+E with Emacs key bindings, to accept it (or Tab, if you choose that below); any other key keeps typing normally. While a hint is showing, the terminal's header names the key to press. Elsewhere on the line, those keys keep the behavior they had before. Hints skip multi-line history entries and pause while you type faster than the shell redraws, during incremental history search and in vi command mode.
+
+Hints appear only for what you type in the VelaTerm desktop app on the machine running the shell. Input from a remote window, browser or phone never produces one, even with **Inline + Tab** selected. In a mirrored session, the hint follows whoever is typing: keys typed on the desktop can show a hint on both screens, and keys typed remotely clear it.
 
 If zsh-autosuggestions is loaded, VelaTerm leaves the hints to it. Fish has its own inline suggestions, and PSReadLine can show history predictions through its `PredictionSource` option, so VelaTerm adds none to those shells. Bash has no way to draw a hint after the cursor and shows none.
 

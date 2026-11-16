@@ -6,7 +6,7 @@ description: >-
   (use vspawn-tree for a worktree). Only use when the user explicitly invokes /vspawn or $vspawn; never auto-trigger.
   This is a real session run by its own process in the vlx-term left-panel tree — not an in-process sub-agent,
   and not a background Task. Available only inside vlx-term-hosted sessions.
-argument-hint: "[--plan-execute] [--review|--no-review] [--review-agent <agent>] [--review-model <model>] [--review-effort <level>] [--split-tasks] [--plan-agent <agent>] [--plan-model <model>] [--plan-effort <level>] [--exec-agent <agent>] [--exec-model <model>] [--exec-effort <level>] [--worktree-mode <none|shared|each>] [--worktree] [--cwd <path>] [--yes] [--agent <agent>] [--model <name>] [--effort <level>] <task>"
+argument-hint: "[--plan-execute] [--review|--no-review] [--review-agent <agent>] [--review-model <model>] [--review-effort <level>] [--split-tasks] [--plan-agent <agent>] [--plan-model <model>] [--plan-effort <level>] [--exec-agent <agent>] [--exec-model <model>] [--exec-effort <level>] [--worktree-mode <none|shared|each>] [--worktree] [--cwd <path>] [--title <text>] [--yes] [--agent <agent>] [--model <name>] [--effort <level>] <task>"
 disable-model-invocation: true
 allowed-tools: Bash(vspawn:*)
 ---
@@ -92,6 +92,8 @@ flag, and **do not** write that instruction into the prompt:
   → add `--agent <agent>`. Accepted names: `claude`, `codex`, `opencode`, `copilot`, `cursor`, `antigravity`,
   `cline`, `pi`, `omp`, `crush`, `kimi`, `kiro`, `grok`, `zoo`; `--claude`, `--codex`, `--copilot`, `--kiro` and
   `--pi` remain as shortcuts.
+- Naming the session ("call it X / title it X"), or a leading `--title` → add `--title "<text>"`, up to 80 characters
+  on one line. With `--plan-execute` it names the planner. Without it, the name comes from the start of the task.
 - "no dialog / don't ask me / just start it / start it straight away," or a leading `--yes` (`-y`) → add `--yes`.
   This skips the initial launch card, never the split-task proposal review. Split-task skill invocations
   add it automatically as described above.
@@ -116,7 +118,7 @@ Pass the prompt you expanded in Step 1 **as a single argument** (escaping any qu
 `vspawn` from PATH:
 
 ```bash
-vspawn [--worktree] [--cwd <absolute-path>] [--yes] [--agent <agent>] [--model <name>] [--effort <level>] "<expanded self-contained prompt>"
+vspawn [--worktree] [--cwd <absolute-path>] [--title <text>] [--yes] [--agent <agent>] [--model <name>] [--effort <level>] "<expanded self-contained prompt>"
 ```
 
 For a split-task skill invocation, use this form, adding only the user's explicit role and directory choices:

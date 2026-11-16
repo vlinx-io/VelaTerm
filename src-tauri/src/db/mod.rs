@@ -90,6 +90,12 @@ fn migrate(conn: &Connection) -> Result<(), String> {
         conn.execute("ALTER TABLE sessions ADD COLUMN agent_session_id TEXT", [])
             .map_err(|e| format!("Failed to migrate sessions.agent_session_id: {e}"))?;
     }
+    // Add nullable legacy_agent_session_id for a recording the current engine cannot resume but must
+    // keep readable, such as a DeepSeek conversation written by the retired DeepSeek Harness.
+    if !column_exists(conn, "sessions", "legacy_agent_session_id") {
+        conn.execute("ALTER TABLE sessions ADD COLUMN legacy_agent_session_id TEXT", [])
+            .map_err(|e| format!("Failed to migrate sessions.legacy_agent_session_id: {e}"))?;
+    }
     // Add nullable parent_session_id for nested sessions. SQLite cannot enforce cascades retroactively on
     // columns added by ALTER, so repo::delete_node recursively deletes children as an application fallback.
     if !column_exists(conn, "sessions", "parent_session_id") {

@@ -95,13 +95,21 @@ export function useNotifications(): void {
     };
   }, [setWindowFocused, focusReturned]);
 
+  // A Pending mark set on the active session holds only while it stays active; leaving it releases the hold,
+  // so coming back later reads it as usual.
+  const unreadHold = useTermStore((s) => s.unreadHold);
+  useEffect(() => {
+    if (unreadHold && unreadHold !== activeSessionId) useTermStore.setState({ unreadHold: null });
+  }, [unreadHold, activeSessionId]);
+
   // Clear the active session's marker after it remains focused and visible for the delay.
   useEffect(() => {
     if (!windowFocused || !activeSessionId) return;
     if (!(activeSessionId in notifications)) return;
+    if (unreadHold === activeSessionId) return;
     const t = setTimeout(() => clearNotification(activeSessionId), CLEAR_DELAY_MS);
     return () => clearTimeout(t);
-  }, [windowFocused, activeSessionId, notifications, clearNotification]);
+  }, [windowFocused, activeSessionId, notifications, clearNotification, unreadHold]);
 
   // Dock badge count equals unread sessions plus pending spawn confirmations. It decreases after
   // viewing a session or resolving a spawn and disappears at zero. Non-desktop platforms ignore it.

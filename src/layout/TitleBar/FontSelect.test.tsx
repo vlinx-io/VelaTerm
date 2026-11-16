@@ -12,15 +12,28 @@ const catalog: FontCatalog = { families: ["JetBrains Mono", "User Installed Font
 beforeEach(() => { setLang("en"); catalogCall.mockReset(); });
 afterEach(cleanup);
 
-it("offers only catalog families while retaining a saved custom value", () => {
+it("offers catalog families and retains a saved custom value", () => {
   render(<FontSelect value="Saved Font" onChange={vi.fn()} label="Font" fonts={{ catalog, loading: false }} />);
   fireEvent.click(screen.getByRole("combobox", { name: "Font" }));
   expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
-    "Default", "Custom…", "Saved Font", "JetBrains Mono", "User Installed Font",
+    "Default", "Saved Font", "JetBrains Mono", "User Installed Font",
   ]);
   expect(screen.queryByText("Consolas")).toBeNull();
   expect(screen.queryByText("Not installed on this device")).toBeNull();
   expect(screen.getByRole("status").textContent).toBe("Unable to confirm whether this font is available.");
+});
+
+it("filters families as the user types and commits the highlighted match", () => {
+  const change = vi.fn();
+  render(<FontSelect value={null} onChange={change} label="Font" fonts={{ catalog, loading: false }} />);
+  fireEvent.click(screen.getByRole("combobox", { name: "Font" }));
+  const search = screen.getByRole("textbox", { name: "Search fonts…" });
+  fireEvent.change(search, { target: { value: "user" } });
+  expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+    "User Installed Font", "Use “user”",
+  ]);
+  fireEvent.keyDown(search, { key: "Enter" });
+  expect(change).toHaveBeenCalledExactlyOnceWith("User Installed Font");
 });
 
 it("accepts an installed font without measuring canvas text", () => {
@@ -32,31 +45,31 @@ it("accepts an installed font without measuring canvas text", () => {
   } finally { measure.mockRestore(); }
 });
 
-it("keeps bundled fonts and manual entry when system enumeration is unavailable", () => {
+it("keeps bundled fonts and typed names when system enumeration is unavailable", () => {
   render(<FontSelect value="JetBrains Mono" onChange={vi.fn()} label="Font" fonts={{ catalog: { families: ["JetBrains Mono"], systemFontsAvailable: false }, loading: false }} />);
   expect(screen.getByRole("status").textContent).toContain("Unable to list system fonts");
   fireEvent.click(screen.getByRole("combobox"));
   expect(screen.getByRole("option", { name: "JetBrains Mono" })).toBeTruthy();
-  expect(screen.getByRole("option", { name: "Custom…" })).toBeTruthy();
+  fireEvent.change(screen.getByRole("textbox", { name: "Search fonts…" }), { target: { value: "Offline Font" } });
+  expect(screen.getByRole("option", { name: "Use “Offline Font”" })).toBeTruthy();
 });
 
-it("saves custom fallback lists and cancels editing without saving on blur", () => {
+it("commits a typed fallback list as-is and cancels on Escape", () => {
   const change = vi.fn();
   render(<FontSelect value="User Installed Font" onChange={change} label="Font" fonts={{ catalog, loading: false }} />);
-  const edit = () => {
+  const open = () => {
     fireEvent.click(screen.getByRole("combobox"));
-    fireEvent.click(screen.getByRole("option", { name: "Custom…" }));
-    return screen.getByRole("textbox");
+    return screen.getByRole("textbox", { name: "Search fonts…" });
   };
-  let input = edit();
-  fireEvent.change(input, { target: { value: '"User Installed Font", monospace' } });
-  fireEvent.keyDown(input, { key: "Enter" });
+  let search = open();
+  fireEvent.change(search, { target: { value: '"User Installed Font", monospace' } });
+  fireEvent.click(screen.getByRole("option", { name: /Use “"User Installed Font", monospace”/ }));
   expect(change).toHaveBeenCalledExactlyOnceWith('"User Installed Font", monospace');
   change.mockClear();
-  input = edit();
-  fireEvent.change(input, { target: { value: "Canceled Font" } });
-  fireEvent.keyDown(input, { key: "Escape" });
-  fireEvent.blur(input);
+  search = open();
+  fireEvent.change(search, { target: { value: "Canceled Font" } });
+  fireEvent.keyDown(search, { key: "Escape" });
+  fireEvent.blur(search);
   expect(change).not.toHaveBeenCalled();
 });
 

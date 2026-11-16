@@ -32,15 +32,25 @@ pub const NOTIFY_CLICK_EVENT: &str = "notification://click";
 /// Store the app handle globally because the Objective-C delegate cannot access setup state.
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 
-/// Waits between checks that the clicked notification's window holds focus, about 1.2 s in total. The system
-/// activates the app and orders its main window forward at a time of its own choosing, which can follow any
-/// single raise, so a window that lost focus during this period is raised again.
+/// Waits between checks that the clicked notification's window still holds focus, about 1.2 s in total. The
+/// system activates the app and orders a window forward at a time of its own choosing, which can follow the
+/// first raise, so a window displaced by another of this app's windows during this period is raised again.
 const RAISE_CHECK_WAITS_MS: [u64; 5] = [150, 200, 250, 300, 300];
 
 fn raise(win: &tauri::WebviewWindow) {
     let _ = win.unminimize();
     let _ = win.show();
     let _ = win.set_focus();
+}
+
+/// Another window of this app holds focus instead of `label`. While the app is still being activated no
+/// window is key at all; raising again then only replays the switch and makes the screen flicker, so that
+/// state does not count as displaced.
+fn displaced_by(app: &AppHandle, label: &str) -> Option<String> {
+    app.webview_windows()
+        .into_iter()
+        .find(|(other, win)| other != label && win.is_focused().unwrap_or(false))
+        .map(|(other, _)| other)
 }
 
 /// Route notification clicks using identifier `{window label}\x1f{session ID}`. Raise and emit only
@@ -55,19 +65,28 @@ fn emit_click(identifier: &str) {
             // Emit navigation to the source window first so the frontend opens the session.
             let _ = app.emit_to(label, NOTIFY_CLICK_EVENT, session_id);
             if app.get_webview_window(label).is_some() {
+                // Raise at once, still inside the click callback. Waiting let the system's activation bring
+                // the last-used window (usually the main window) forward first, so the screen showed that
+                // window, or switched to its Space, before jumping to the notification's window. A window
+                // made key before activation completes is the one activation brings forward.
+                let raise_app = app.clone();
+                let raise_label = label.to_string();
+                let _ = app.run_on_main_thread(move || {
+                    if let Some(win) = raise_app.get_webview_window(&raise_label) {
+                        raise(&win);
+                    }
+                });
                 let app = app.clone();
                 let label = label.to_string();
                 std::thread::spawn(move || {
-                    for (check, wait) in RAISE_CHECK_WAITS_MS.into_iter().enumerate() {
+                    for wait in RAISE_CHECK_WAITS_MS {
                         std::thread::sleep(std::time::Duration::from_millis(wait));
                         let app_main = app.clone();
                         let label = label.clone();
                         let _ = app.run_on_main_thread(move || {
                             let Some(win) = app_main.get_webview_window(&label) else { return };
-                            if check == 0 {
-                                raise(&win);
-                            } else if !win.is_focused().unwrap_or(true) {
-                                crate::diagnostic_warn!("notification click: window {label} lost focus during activation, raising it again");
+                            if let Some(other) = displaced_by(&app_main, &label) {
+                                crate::diagnostic_warn!("notification click: window {other} took focus from {label} during activation, raising it again");
                                 raise(&win);
                             }
                         });

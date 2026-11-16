@@ -211,7 +211,7 @@ export function cancelSessionTitle(sessionId: string, operationId: string): Prom
 }
 
 export function sessionTitleOptions(sessionId: string): Promise<{
-  agents: (import("./launch").LaunchOption & { available: boolean; model: string; effort: string })[];
+  agents: (import("./launch").LaunchOption & { available: boolean; model: string; effort: string; modelSelectable: boolean })[];
   agent: SessionKind | ""; sessionName: string;
 }> {
   return invoke("session_title_options", { sessionId });

@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+use super::pi_protocol::{self, PiVariant};
 use super::{codex_protocol, protocol};
 use crate::models::SessionKind;
 
@@ -127,6 +128,11 @@ pub fn lookup(kind: SessionKind, bin: &str, cwd: Option<&str>, args: &[String]) 
             // only because a launch never leaves it to the CLI's settings.
             command.args(protocol::launch_args(None, false, None, None, "default")).args(args);
         }
+        // No session is resumed and no prompt is sent, so the probe leaves no conversation behind.
+        SessionKind::Pi | SessionKind::Omp => {
+            let variant = PiVariant::of(kind).unwrap_or(PiVariant::Pi);
+            command.args(pi_protocol::launch_args(variant, None, false, None, false)).args(args);
+        }
         _ => return Ok(Vec::new()),
     }
     if let Some(cwd) = cwd { command.current_dir(cwd); }
@@ -142,9 +148,20 @@ pub fn lookup(kind: SessionKind, bin: &str, cwd: Option<&str>, args: &[String]) 
                 if tx.send(line).is_err() { break; }
             }
         });
-        let init = if kind == SessionKind::Codex { codex_protocol::initialize("skills_init") }
-            else { protocol::control_request("skills_init", protocol::initialize()) };
-        writeln!(stdin, "{init}").and_then(|_| stdin.flush()).map_err(|e| e.to_string())?;
+        let opening = match kind {
+            SessionKind::Codex => vec![codex_protocol::initialize("skills_init")],
+            SessionKind::Claude => vec![protocol::control_request("skills_init", protocol::initialize())],
+            _ => {
+                let variant = PiVariant::of(kind).unwrap_or(PiVariant::Pi);
+                let mut opening = Vec::new();
+                if variant == PiVariant::Omp { opening.push(pi_protocol::negotiate("skills_negotiate")); }
+                opening.push(pi_protocol::get_commands("skills_init", variant));
+                opening
+            }
+        };
+        for request in opening {
+            writeln!(stdin, "{request}").and_then(|_| stdin.flush()).map_err(|e| e.to_string())?;
+        }
         let deadline = Instant::now() + Duration::from_secs(20);
         // Account plugins can take a slow network's time to sync; past this the local skills are offered.
         let sync_deadline = Instant::now() + Duration::from_secs(10);
@@ -161,7 +178,16 @@ pub fn lookup(kind: SessionKind, bin: &str, cwd: Option<&str>, args: &[String]) 
                     Err("The agent did not return its skill catalogue. Reopen the completion menu to retry.".into())),
             };
             let Ok(value) = serde_json::from_str::<Value>(&line) else { continue; };
-            if kind == SessionKind::Claude {
+            if matches!(kind, SessionKind::Pi | SessionKind::Omp) {
+                if value["type"] == "response" && value["id"] == "skills_init" {
+                    if value["success"] != true {
+                        return Err("The agent could not read its command catalogue. Reopen the completion menu to retry.".into());
+                    }
+                    let commands = value.pointer("/data/commands").and_then(Value::as_array)
+                        .ok_or("The agent returned an invalid command catalogue")?;
+                    return Ok(pi_protocol::to_chat_commands(commands));
+                }
+            } else if kind == SessionKind::Claude {
                 if value.pointer("/response/request_id").and_then(Value::as_str) == Some("skills_init") {
                     return claude_commands(&value["response"]["response"]);
                 }

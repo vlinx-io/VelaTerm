@@ -3,7 +3,7 @@
 //! SettingsModal and the store share types while reducing the size of the main store.
 
 import { pushSetting } from "../ipc/settingsSync";
-import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, normalizeTextSize, normalizeTextLineHeight } from "../theme";
+import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, normalizeFontFamily, normalizeLetterSpacing, normalizeTextSize, normalizeTextLineHeight } from "../theme";
 import type {
   AccentChoice,
   DarkStyle,
@@ -147,6 +147,10 @@ export interface PersistedSettings {
   defaultShell: string;
   /** UI font size in pixels; null follows density without an inline `--ui-fs`. */
   uiFontSize: number | null;
+  /** Interface font family; null uses the bundled Inter stack. */
+  uiFontFamily: string | null;
+  /** Monospace font for code, paths and diffs outside the terminal; null uses the default stack. */
+  uiMonoFontFamily: string | null;
   /** Primary terminal monospace font; null uses the default stack. */
   termFontFamily: string | null;
   /** Terminal font size in pixels, defaulting to 13. */
@@ -155,8 +159,12 @@ export interface PersistedSettings {
   termLineHeight: number;
   /** Conversation typography is saved independently of terminal preferences. */
   chatFontFamily: string | null;
+  /** Conversation code and tool-output font; null follows uiMonoFontFamily. */
+  chatCodeFontFamily: string | null;
   chatFontSize: number;
   chatLineHeight: number;
+  /** Conversation letter spacing in pixels; null is automatic. */
+  chatLetterSpacing: number | null;
   /** Global shortcut overrides from action ID to chord; missing entries use shortcutRegistry defaults. */
   shortcutOverrides: Record<string, string>;
   /** Defaults by agent type, serving as global templates for new local-agent sessions. Explicit
@@ -177,6 +185,9 @@ export interface PersistedSettings {
   /** Whether a Claude or Codex conversation stopped by a five-hour or weekly usage limit continues on its own
    * once the limit resets. The backend scheduler reads this key from the shared settings block. */
   autoContinueAtUsageLimit: boolean;
+  /** Whether the Antigravity quota section in the Info panel expands non-Gemini buckets (such as
+   * `claude/gpt`). Hidden by default so only Gemini quotas appear until the user clicks to show them. */
+  usageAntigravityShowOther: boolean;
   /** Image paste mode: upload writes a file path, while agent lets the agent read the clipboard and show
    * `[Image #x]`. Configurable only on local desktop clients; browser and remote clients always upload. */
   imagePasteMode: ImagePasteMode;
@@ -203,6 +214,9 @@ export interface PersistedSettings {
   memoryPrefs: MemoryPrefs;
   /** Last model and reasoning effort chosen for each agent in the AI rename dialog. */
   sessionTitlePrefs: SessionTitlePrefs;
+  /** Last agent explicitly chosen in the AI rename dialog. Empty falls back to the session's own
+   * agent, which is the default before the user ever picks one there. */
+  sessionTitleAgent: SessionKind | "";
   /** Optional pre-summary used by `vrefer --ask`; there is one choice for every caller and target. */
   referSummary: ReferSummaryConfig;
   /** Whether the Info panel's Resources section shows the whole-machine group. Off hides those rows and
@@ -254,7 +268,7 @@ export const DEFAULT_COMPOSER_INLINE_CHIPS: ComposerChipId[] = ["model", "effort
 /** Revision 1 made Tasks an inline chip by default. */
 export const COMPOSER_INLINE_CHIPS_REVISION = 1;
 
-const SETTINGS_DEFAULTS: PersistedSettings = {
+export const SETTINGS_DEFAULTS: PersistedSettings = {
   darkStyle: "classic",
   accent: "auto",
   density: "regular",
@@ -272,12 +286,16 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   maxLiveTabs: DEFAULT_MAX_LIVE_TABS,
   defaultShell: "",
   uiFontSize: null,
+  uiFontFamily: null,
+  uiMonoFontFamily: null,
   termFontFamily: null,
   termFontSize: DEFAULT_TERMINAL_FONT_SIZE,
   termLineHeight: DEFAULT_TERMINAL_LINE_HEIGHT,
   chatFontFamily: null,
+  chatCodeFontFamily: null,
   chatFontSize: DEFAULT_CONVERSATION_FONT_SIZE,
   chatLineHeight: DEFAULT_TERMINAL_LINE_HEIGHT,
+  chatLetterSpacing: null,
   shortcutOverrides: {},
   agentDefaults: {},
   spawnConfirm: true,
@@ -285,6 +303,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   usageAutoRefresh: true,
   usageRefreshSec: 300,
   autoContinueAtUsageLimit: true,
+  usageAntigravityShowOther: false,
   imagePasteMode: "upload",
   chatModel: "",
   chatModelByKind: {},
@@ -294,6 +313,7 @@ const SETTINGS_DEFAULTS: PersistedSettings = {
   planExecutePrefs: { plan: {}, exec: {}, review: {} },
   memoryPrefs: {},
   sessionTitlePrefs: {},
+  sessionTitleAgent: "",
   referSummary: { enabled: false, agent: "claude", model: "", effort: "" },
   showSystemResources: true,
   turnFilesView: false,
@@ -371,7 +391,15 @@ export function loadSettings(): PersistedSettings {
     const merged = { ...SETTINGS_DEFAULTS, ...parsed };
     // Retired comparison styles and missing preferences use the single supported dark palette.
     merged.darkStyle = "classic";
-    merged.chatFontFamily = typeof merged.chatFontFamily === "string" ? merged.chatFontFamily.trim() || null : null;
+    // Before v0.3.0, uiFontFamily held the retired monospace interface face, and v0.3.0 fixed the interface to Inter.
+    // Saves without uiMonoFontFamily predate the current interface font settings, so a leftover value there would
+    // turn the whole interface monospace. Drop it to keep the Inter default.
+    if (!("uiMonoFontFamily" in parsed)) merged.uiFontFamily = null;
+    merged.chatFontFamily = normalizeFontFamily(merged.chatFontFamily);
+    merged.chatCodeFontFamily = normalizeFontFamily(merged.chatCodeFontFamily);
+    merged.uiFontFamily = normalizeFontFamily(merged.uiFontFamily);
+    merged.uiMonoFontFamily = normalizeFontFamily(merged.uiMonoFontFamily);
+    merged.chatLetterSpacing = normalizeLetterSpacing(merged.chatLetterSpacing);
     merged.chatFontSize = normalizeTextSize(merged.chatFontSize, DEFAULT_CONVERSATION_FONT_SIZE);
     merged.chatLineHeight = normalizeTextLineHeight(merged.chatLineHeight);
     merged.termLineHeight = normalizeTextLineHeight(merged.termLineHeight);
@@ -389,11 +417,15 @@ export function loadSettings(): PersistedSettings {
         ? Object.fromEntries(Object.entries(parsed.infoCollapsed).filter(([, closed]) => closed === true))
         : {};
     merged.turnFilesView = merged.turnFilesView === true;
+    merged.usageAntigravityShowOther = merged.usageAntigravityShowOther === true;
     // The right panel's knowledge tab was removed; a saved value for it, or any unknown value, opens Info.
     if (!["files", "info", "git"].includes(merged.inspectorTab)) merged.inspectorTab = "info";
     merged.planExecutePrefs = sanitizePlanExecutePrefs(parsed.planExecutePrefs);
     merged.memoryPrefs = sanitizeLaunchChoice(parsed.memoryPrefs);
     merged.sessionTitlePrefs = sanitizeSessionTitlePrefs(parsed.sessionTitlePrefs);
+    // The remembered agent is re-validated against the agents a dialog actually offers, so a stale or
+    // corrupted kind is harmless here and simply falls back to the session's own agent.
+    merged.sessionTitleAgent = typeof parsed.sessionTitleAgent === "string" ? parsed.sessionTitleAgent as SessionKind : "";
     merged.referSummary = sanitizeReferSummary(parsed.referSummary);
     merged.composerInlineChips = sanitizeComposerInlineChips(parsed.composerInlineChips);
     merged.inputLatencyLog = merged.inputLatencyLog === true;
@@ -452,7 +484,11 @@ export const visualOf = (s: PersistedSettings): VisualSettings => ({
   dividerStyle: s.dividerStyle,
   navLayout: s.navLayout,
   uiFontSize: s.uiFontSize,
+  uiFontFamily: s.uiFontFamily,
+  uiMonoFontFamily: s.uiMonoFontFamily,
   chatFontFamily: s.chatFontFamily,
+  chatCodeFontFamily: s.chatCodeFontFamily,
   chatFontSize: s.chatFontSize,
   chatLineHeight: s.chatLineHeight,
+  chatLetterSpacing: s.chatLetterSpacing,
 });

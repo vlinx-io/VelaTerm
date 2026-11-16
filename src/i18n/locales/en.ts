@@ -1,12 +1,16 @@
 //! English dictionary: the sole source of i18n keys and the fallback locale.
 //! Add new text here first, then translate it in every other dictionary; type constraints prevent omissions.
 
+import assist from "../assist/en";
+
 const en = {
   "panel.turnStats": "Turn stats",
   "panel.fileCount": (n: number) => n === 1 ? "1 file" : `${n} files`,
   "panel.showChangedFiles": "Show the files changed in this turn",
   "panel.noFilesChanged": "No files were edited in this turn.",
   "panel.shellEditsNotListed": "Edits made through shell commands are not listed.",
+  "panel.usageShowScope": (scope: string) => `Show ${scope}`,
+  "panel.usageHideScope": (scope: string) => `Hide ${scope}`,
   "translation.swap": "Swap languages",
   "translation.openai": "OpenAI compatible",
   "translation.bing": "Bing Translator (no API key)",
@@ -372,6 +376,7 @@ const en = {
   "common.create": "Create",
   "common.close": "Close",
   "chat.copyAsMarkdown": "Copy as Markdown",
+  "chat.copyEntireMessage": "Copy Entire Message",
   "chat.imageViewOriginal": "View original image",
   "chat.imageCopy": "Copy image",
   "chat.imageSave": "Save image",
@@ -522,6 +527,19 @@ const en = {
   "settings.agentDefaultView": "Default view",
   "settings.agentDefaultViewHint":
     "The view a new session of this agent opens in. Existing sessions keep the view they were created with.",
+  "settings.deepseekApiTitle": "DeepSeek API",
+  "settings.deepseekApiDesc":
+    "DeepSeek conversations run through OpenCode. Enter the API address and key here to sign in once for every conversation.",
+  "settings.deepseekBaseUrl": "API address",
+  "settings.deepseekEndpointHint":
+    "Leave the address blank to use the official endpoint. Changes apply from the next message.",
+  "settings.deepseekApiKey": "API key",
+  "settings.deepseekKeySaved": "Saved (leave blank to keep)",
+  "settings.deepseekKeyPlaceholder": "Enter your DeepSeek API key",
+  "settings.deepseekRemoveKey": "Remove key",
+  "settings.deepseekSaved": "Saved.",
+  "settings.deepseekInvalid": "Enter a valid http(s) API address and a single-line API key.",
+  "settings.deepseekLocalOnly": "These credentials are stored on the host device, so they can only be changed there.",
   "settings.appearance": "Appearance",
   "settings.accent": "Accent",
   "settings.accentAuto": "Follow theme",
@@ -829,10 +847,20 @@ const en = {
   "settings.termFontSize": "Terminal size",
   "settings.termLineHeight": "Terminal line height",
   "settings.chatTypography": "Conversation view",
-  "settings.chatTypographyHint": "These font settings are independent of the terminal and take effect immediately.",
+  "settings.chatTypographyHint": "These settings are independent of the terminal and take effect immediately. By default, text uses the interface font and code uses the interface monospace font.",
   "settings.chatFont": "Conversation font",
   "settings.chatFontSize": "Conversation font size",
   "settings.chatLineHeight": "Conversation line height",
+  "settings.chatCodeFont": "Conversation code font",
+  "settings.chatLetterSpacing": "Conversation letter spacing",
+  "settings.uiTypography": "Interface fonts",
+  "settings.uiTypographyHint": "Applies to menus, lists, dialogs and documents. The monospace font is used for code, paths and diffs; the terminal has its own font settings.",
+  "settings.uiFont": "Interface font",
+  "settings.uiMonoFont": "Monospace font",
+  "settings.fontPreview": "Preview",
+  "settings.fontPreviewText": "The quick brown fox jumps over the lazy dog. 0123456789",
+  "settings.fontPreviewChat": "I updated the settings page. Each font setting takes effect immediately, and you can restore the defaults at any time.",
+  "settings.fontResetGroup": "Restore default fonts",
   "settings.composerChips": "Composer toolbar",
   "settings.composerChipsHint": "Enabled items appear beside the message in the order shown here. If a feature is temporarily unavailable (the agent is not running, there are no background tasks, or sign-in is pending), its item remains visible but empty or disabled. Features the current agent does not support are omitted. Items that do not fit move to the More menu. Items switched off here appear only in that menu and remain configurable here.",
   "settings.composerChipUp": (chip: string) => `Move ${chip} up`,
@@ -850,7 +878,8 @@ const en = {
   "settings.composerChip.account": "Account",
   "settings.composerChip.codexCredits": "Codex reset credits",
   "settings.fontDefault": "Default",
-  "settings.fontCustom": "Custom…",
+  "settings.fontSearch": "Search fonts…",
+  "settings.fontUseCustom": (query: string) => `Use “${query}”`,
   "settings.fontListUnavailable": "Unable to list system fonts. You can enter a font name manually.",
   "settings.fontUnconfirmed": "Unable to confirm whether this font is available.",
   "settings.fontAuto": "Auto",
@@ -859,6 +888,11 @@ const en = {
   "settings.fontReset": "Reset",
   "settings.sound": "Notification sound",
   "settings.language": "Language",
+  "settings.serverRegion": "Server",
+  "settings.serverRegionGlobal": "International",
+  "settings.serverRegionChina": "Mainland China",
+  "settings.serverRegionHint":
+    "Used for update checks, downloads, and website links. With Mainland China selected, VelaTerm uses velaterm.cn, which is faster to reach from within China and offers the same releases. Account features always use velaterm.com.",
   "settings.langAuto": "Auto (system)",
   "settings.skillLabel": "Vela Skills",
   "settings.skillInstall": "Install",
@@ -1048,6 +1082,7 @@ const en = {
   "tree.deleteGroup": "Delete Group",
   "tree.deleteSession": "Delete Session",
   "tree.projectRoot": "Project root (no group)",
+  "tree.collectionRoot": (name: string) => `${name} (no group)`,
   "tree.moveToSession": "Move under a session (as child)",
   "tree.moveTo": "Move to…",
   "tree.openNewTab": "Open in New Tab",
@@ -1150,6 +1185,7 @@ const en = {
   "tree.filterStatus": "Filter by status",
   "tree.refreshStatusFilter": "Refresh status filter",
   "tree.refreshStatusMatch": "Refresh Status",
+  "tree.setStatus": "Set Status",
   "tree.filterStatusSection": "Status",
   "tree.filterMarkSection": "Mark",
   "tree.viewMainName": "Main",
@@ -1372,10 +1408,9 @@ const en = {
 
   // ── Center pane (tabs, empty state, and background keep-alive) ──
   "center.noSession": "No session",
-  "center.noSessionHintPre": "Pick a session from the sidebar, or press ",
-  "center.noSessionHintPost": " to create a terminal",
   "center.createTerminal": "Create Terminal",
-  "center.splitHint": "Open a session to use these split shortcuts:",
+  "center.startTitle": "Start a session",
+  "center.startHint": "Pick one from the sidebar, or start something new.",
   "tab.unsavedDot": "Unsaved changes",
   "tab.newTerminal": "New terminal",
   "tab.newDocument": "New document",
@@ -1615,6 +1650,8 @@ const en = {
   "transfer.downloading": "Downloading…",
   "transfer.savedToDownloads": "Saved to Downloads",
   "transfer.foldersUnsupported": "Folders can't be uploaded.",
+  "drop.browserFilesHint": "In the browser, only images can be dropped here. To use other files, upload them to the project first.",
+  "files.copyFailed": "Some files could not be copied. Check that they still exist and that you can write to this folder.",
 
   // ── Status bar ──
   "statusbar.sessions": (n: number) =>
@@ -1632,6 +1669,11 @@ const en = {
   "statusbar.permSkip": "Perms: Skip",
   "statusbar.notifyOn": "Notify: On",
   "statusbar.notifyOff": "Notify: Off",
+  "statusbar.zoomGroup": "Interface zoom",
+  "statusbar.zoomOut": "Zoom out",
+  "statusbar.zoomIn": "Zoom in",
+  "statusbar.zoomEdit": "Interface zoom · Click to type a percentage (80–200%)",
+  "statusbar.zoomInput": "Interface zoom percentage, 80 to 200",
   "statusbar.permTooltip":
     "This session's permission mode · click to change (this session only)",
   "statusbar.permMenuTitle": "This session's permissions",
@@ -1982,6 +2024,8 @@ const en = {
   "updater.downloadManuallyHint": "Open the download page in your browser.",
   "updater.windowsNotice":
     "VelaTerm will close while the installer runs, then reopen on its own.",
+  "updater.portableNotice":
+    "This portable copy does not update itself. Download the new version and replace this folder with it; your settings and sessions are kept.",
   "updater.installingWindows":
     "Installing… VelaTerm is about to close. The installer will finish the update and reopen it.",
   // The status-bar new-version segment belongs to automatic updates and stays here for centralized editing.
@@ -2004,6 +2048,7 @@ const en = {
   "skills.vstat": "See which sessions are working or waiting for input.",
   "skills.vtell": "Send a message to another session.",
   "skills.vkb": "Query the project's CodeGraph and knowledge base.",
+  "skills.vapp": "Let the agent operate VelaTerm, with each action confirmed by you.",
   "skills.settingsHint": "You can also install them later in Settings > Advanced.",
   "skills.installFailed": (err: string) => `Installation failed: ${err}`,
   "skills.dontRemind": "Don't remind me again",
@@ -2122,6 +2167,7 @@ const en = {
   "chat.question.submit": "Submit",
   "chat.question.next": "Next",
   "chat.question.dismiss": "Dismiss",
+  "chat.question.skip": "Skip",
   "chat.question.answerPlaceholder": "Type your answer",
   "chat.question.otherPlaceholder": "Something else",
   "chat.question.answeredHeading": (n: number) =>
@@ -2176,6 +2222,8 @@ const en = {
   "chat.rewind.editWarning": "The original message and all later messages will be permanently deleted. Your edited message will be sent from this point. File changes will not be restored.",
   "chat.rewind.inactive": "The conversation process is not running. These actions become available after it starts.",
   "chat.rewind.unsupported": "The connected agent does not currently offer this action.",
+  "chat.rewind.latestOnly": "The connected agent can rewind only from the latest message.",
+  "chat.rewind.appliesOnSend": "The agent applies the rewind when you send your next message. Until then, its conversation and files stay unchanged.",
   "chat.rewind.title": "Rewind from here",
   "chat.rewind.warning": "This cannot be undone.",
   "chat.rewind.conversation": "Rewind conversation",
@@ -2362,7 +2410,7 @@ const en = {
   "settings.completionTab": "Tab only",
   "settings.completionOff": "Off",
   "settings.completionUnavailable": "Settings are unavailable or could not be saved.",
-  "settings.completionHint": "As you type in Zsh, the latest matching command from history appears dimmed after the cursor; press → or End to accept it. Tab completes like the shell: a single match is inserted, shared text is filled in first, and the list opens when several choices remain. Applies to new Zsh, Bash 4+, Fish and PowerShell terminals.",
+  "settings.completionHint": "As you type in Zsh, the latest matching command from history appears dimmed after the cursor; press → or End to accept it. It stays off for input from remote connections. Tab completes like the shell: a single match is inserted, shared text is filled in first, and the list opens when several choices remain. Applies to new Zsh, Bash 4+, Fish and PowerShell terminals.",
   "settings.completionTabOnlyHint": "No suggestions appear while you type. Press Tab to complete like the shell: a single match is inserted, shared text is filled in first, and the list opens when several choices remain. Applies to new Zsh, Bash 4+, Fish and PowerShell terminals.",
   "settings.completionTabKey": "Tab key",
   "settings.completionTabAccept": "Accept suggestion",
@@ -2480,10 +2528,16 @@ const en = {
   "chat.antigravity.placeholder": "Message Antigravity, or use @files",
   "chat.antigravity.textOnly": "Antigravity conversation view currently supports text messages only.",
   "chat.textOnly": (agent: string) => `${agent} conversation view supports text messages only.`,
+  "chat.attach.modelTextOnly": "The selected model does not accept images.",
   "chat.signInRequired": (agent: string) => `Sign in to ${agent} to use the conversation view. Switch to terminal view to sign in, then send your message again.`,
-  "chat.apiKeyRequired": "DeepSeek Harness needs an API key. Set the DEEPSEEK_API_KEY environment variable, or run `dsh web` and save your key on its Models page, then send your message again.",
+  "chat.apiKeyRequired": "DeepSeek needs an API key. Select API beside the message box and enter one, or set the `DEEPSEEK_API_KEY` environment variable, then send your message again.",
   "chat.antigravity.permissionsHint": "Tools that require approval must be allowed in Antigravity settings or used in terminal view.",
   "chat.antigravity.settingsHint": "Change the model, reasoning effort, or permissions between turns.",
+  "chat.antigravity.rewindTitle": "Rewind in terminal view",
+  "chat.antigravity.rewindHint": "Rewinding and editing sent messages are not yet available in Antigravity conversation view. Switch to terminal view and run /rewind; changes sync back when you return.",
+  "chat.antigravity.rewindGuide": "Antigravity conversation view does not yet support rewinding or editing sent messages directly. Switch to terminal view and run /rewind to rewind the conversation or restore files; the updated state syncs automatically when you return.",
+  "chat.antigravity.rewindCommandDescription": "Switch to terminal view to rewind with /rewind",
+  "chat.antigravity.switchToTerminal": "Switch to terminal view",
   "chat.history.imageDownloadRequired": "This image cannot be opened here. Download the original to view it.",
   "chat.history.readBody": "Read complete content",
   "chat.history.selectDetail": "Choose a file or field",
@@ -2659,6 +2713,8 @@ const en = {
   "kb.searchEntries": "Search entries…",
   "kb.updatedOn": (date: string) => `Updated ${date}`,
   "archive.sessionsCount": (count: string) => `${count} ${count === "1" ? "session" : "sessions"}`,
+
+  ...assist,
 };
 
 export default en;

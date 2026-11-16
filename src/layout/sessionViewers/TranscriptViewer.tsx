@@ -22,29 +22,11 @@ import { MessageBubble } from "../CenterPane/session/rows";
 import { UserMessageRail } from "../CenterPane/session/UserMessageRail";
 import { userMessagePreview } from "../CenterPane/session/userMessageRailItems";
 import { highlightMatches } from "./highlight";
-import { kindIconEl } from "./sessionMeta";
+import { assistantLabel, kindIconEl } from "./sessionMeta";
 import "../CenterPane/session/session-view.css";
 import "./transcript-viewer.css";
 
-/** Assistant display name based on session type. */
-export function assistantLabel(kind: Session["kind"]): string {
-  if (kind === "codex") return "Codex";
-  if (kind === "opencode") return "OpenCode";
-  if (kind === "copilot") return "Copilot";
-  if (kind === "cursor") return "Cursor";
-  if (kind === "antigravity") return "Antigravity";
-  if (kind === "cline") return "Cline";
-  if (kind === "pi") return "Pi";
-  if (kind === "omp") return "OMP";
-  if (kind === "crush") return "Crush";
-  if (kind === "kimi") return "Kimi Code";
-  if (kind === "kiro") return "Kiro";
-  if (kind === "grok") return "Grok Build";
-  if (kind === "zoo") return "Zoo Code";
-  if (kind === "zcode") return "ZCode";
-  if (kind === "deepseek") return "DeepSeek";
-  return "Claude";
-}
+export { assistantLabel };
 
 /** Convert an ISO timestamp to local time, returning an empty string on parse failure. */
 export function fmtTs(ts?: string | null): string {

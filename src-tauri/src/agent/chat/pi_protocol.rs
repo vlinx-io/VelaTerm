@@ -131,6 +131,22 @@ pub fn get_commands(id: &str, variant: PiVariant) -> Value {
     json!({"id": id, "type": variant.commands_command()})
 }
 
+/// Convert a slash-command catalogue into the composer's `ChatCommand` shape. Both variants invoke every
+/// entry, skills included (`skill:<name>`), with a leading `/`.
+pub fn to_chat_commands(commands: &[Value]) -> Vec<Value> {
+    commands
+        .iter()
+        .filter_map(|command| {
+            let name = command.get("name").and_then(Value::as_str).filter(|name| !name.is_empty())?;
+            Some(json!({
+                "name": name,
+                "description": command.get("description").cloned().unwrap_or(Value::Null),
+                "invocation": "/",
+            }))
+        })
+        .collect()
+}
+
 pub fn set_model(id: &str, provider: &str, model_id: &str) -> Value {
     json!({"id": id, "type": "set_model", "provider": provider, "modelId": model_id})
 }
@@ -490,5 +506,15 @@ mod tests {
         for variant in [PiVariant::Pi, PiVariant::Omp] {
             assert_eq!(launch_args(variant, Some("abc"), true, None, false), vec!["--mode", "rpc", "--fork", "abc"]);
         }
+    }
+
+    #[test]
+    fn command_catalogue_keeps_skills_and_drops_nameless_entries() {
+        let commands = to_chat_commands(&[
+            json!({"name":"skill:vapp","description":"Operate the app","source":"skill"}),
+            json!({"name":"","description":"Nameless"}),
+            json!({"description":"Missing"}),
+        ]);
+        assert_eq!(commands, vec![json!({"name":"skill:vapp","description":"Operate the app","invocation":"/"})]);
     }
 }

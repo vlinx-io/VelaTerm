@@ -1,0 +1,360 @@
+/* Usage section in RightPanel InfoTab. Styled to sit seamlessly between Agent and This turn
+   with shared hairlines, compact right-aligned meters, and clean header hierarchy. */
+
+.usg-section {
+  container-type: inline-size;
+}
+
+/* Header layout: USAGE dot Provider on the left; metadata + actions flush-right beside collapse. */
+.usg-section .insp-head {
+  gap: 6px;
+}
+
+.usg-section .insp-head .insp-head-toggle {
+  flex: 0 0 auto;
+}
+
+.usg-provider {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.usg-provider::before {
+  content: "";
+  flex: none;
+  width: 2px;
+  height: 2px;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  opacity: 0.7;
+}
+
+.usg-provider > svg {
+  flex: none;
+}
+
+.usg-provider-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usg-head-meta {
+  margin-left: auto;
+  margin-right: -4px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.usg-countdown {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  margin-right: 2px;
+}
+
+.usg-stale {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 16px;
+  padding: 0 5px;
+  margin-right: 2px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--yellow) 14%, transparent);
+  color: var(--yellow);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1;
+}
+
+.usg-stale > i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.usg-refresh {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-faint);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 0.14s, background 0.14s;
+}
+
+.usg-refresh:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.usg-refresh:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.usg-refresh > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.usg-refresh > span.spin {
+  animation: usg-spin 0.48s cubic-bezier(0.22, 1, 0.36, 1) 1;
+}
+
+@keyframes usg-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Disclosure toggle for non-Gemini Antigravity buckets (collapsed by default) */
+.usg-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 2px 4px 2px 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 450;
+  line-height: 1.3;
+  cursor: pointer;
+  transition: color 0.14s;
+}
+
+.usg-more:hover {
+  color: var(--text-mid);
+}
+
+.usg-more:focus-visible {
+  outline: 1px solid var(--accent-line);
+  outline-offset: 1px;
+}
+
+/* Grouped and flat quota rows */
+.usg-groups {
+  display: flex;
+  flex-direction: column;
+}
+
+.usg-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.usg-group + .usg-group {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.usg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.usg-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 1.5px 0;
+}
+
+.usg-win {
+  flex: none;
+  width: 22px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.usg-scope {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  font-weight: 450;
+  color: var(--text);
+}
+
+[data-theme="dark"] .usg-scope {
+  color: var(--text-mid);
+}
+
+.usg-scope.is-flat {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.usg-reset {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.usg-meter {
+  flex: none;
+  width: 44px;
+  height: 3px;
+  border-radius: 1.5px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.usg-meter > i {
+  display: block;
+  height: 100%;
+  border-radius: 1.5px;
+  background: var(--text-mid);
+  transition: width 0.2s ease;
+}
+
+.usg-row:not(.zero) .usg-meter > i {
+  min-width: 2px;
+}
+
+.usg-pct {
+  flex: none;
+  width: 30px;
+  text-align: right;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+[data-theme="dark"] .usg-pct {
+  color: var(--text-mid);
+}
+
+/* Tone refinements: neutral ink below 70%, muted 0%, amber/red only for alert thresholds. */
+.usg-row.zero .usg-scope {
+  color: var(--text-dim);
+}
+
+[data-theme="dark"] .usg-row.zero .usg-scope {
+  color: var(--text-faint);
+}
+
+.usg-row.zero .usg-pct {
+  color: var(--text-faint);
+  font-weight: 400;
+}
+
+.usg-row.zero .usg-meter {
+  opacity: 0.55;
+}
+
+.usg-row.warn .usg-pct {
+  color: var(--yellow);
+  font-weight: 600;
+}
+
+.usg-row.warn .usg-meter > i {
+  background: var(--yellow);
+}
+
+.usg-row.crit .usg-pct {
+  color: var(--red);
+  font-weight: 600;
+}
+
+.usg-row.crit .usg-meter > i {
+  background: var(--red);
+}
+
+/* Loading and error hint states */
+.usg-empty {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 2px 0;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.usg-empty-key {
+  flex: none;
+  white-space: nowrap;
+}
+
+.usg-empty-err {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+@container (max-width: 268px) {
+  .usg-row {
+    gap: 5px;
+  }
+
+  .usg-win {
+    width: 20px;
+  }
+
+  .usg-meter {
+    width: 32px;
+  }
+}
+
+@container (max-width: 240px) {
+  .usg-countdown {
+    display: none;
+  }
+}

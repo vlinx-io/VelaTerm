@@ -284,7 +284,7 @@ pub fn pty_write(state: State<PtyManager>, session_id: String, data: String) -> 
     // Timed by hand rather than with a `Slow` guard: this runs on every keystroke, so the fast path must
     // not build a diagnostic payload that is thrown away.
     let started = std::time::Instant::now();
-    let outcome = state.write(&session_id, &data);
+    let outcome = state.write(&session_id, &data, false);
     let elapsed = started.elapsed();
     if elapsed >= UI_THREAD_REPORT_THRESHOLD {
         crate::diagnostics::record(

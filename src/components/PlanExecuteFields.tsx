@@ -6,7 +6,7 @@ import { planExecuteDefaults, type LaunchOption } from "../ipc/launch";
 import type { PlanExecuteRolePrefs } from "../store/settings";
 import { useTermStore } from "../store/termStore";
 import type { SessionKind } from "../types";
-import Combo from "./Combo";
+import AgentSelect from "./AgentSelect";
 import { ModelEffortFields, LaunchField, LaunchLoadState, launchErrorText } from "./LaunchFields";
 
 type Config = NonNullable<SpawnRequest["planExecute"]>;
@@ -112,12 +112,19 @@ export function PlanExecuteFields({ parentSessionId, config, options, onChange, 
       return <section className="launch-panel" key={role} aria-label={label}>
         <h3>{label}</h3>
         <LaunchField label={t("spawn.agentLabel")}>
-          <Combo key={String(disabled || confirmed)} disabled={disabled || confirmed} value={value.agent ?? ""} width="100%" menuPortal ariaLabel={t("spawn.agentLabel")}
-            options={available.map(option => ({ value: option.id, label: option.label }))}
+          <AgentSelect
+            key={String(disabled || confirmed)}
+            disabled={disabled || confirmed}
+            value={(value.agent ?? "") as SessionKind | ""}
+            width="100%"
+            ariaLabel={t("spawn.agentLabel")}
+            options={available.map(option => ({ id: option.id as SessionKind, label: option.label }))}
             onChange={agent => {
+              if (locked.current || !agent) return;
               update({ agent: agent as typeof value.agent, model: "", effort: "" });
               remember({ agent: agent as SessionKind, model: null, effort: null });
-            }} />
+            }}
+          />
         </LaunchField>
         {spec && <div className="launch-model-grid">
           <ModelEffortFields disabled={disabled || confirmed} spec={spec} model={value.model ?? ""} effort={value.effort ?? ""}

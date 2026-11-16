@@ -38,7 +38,7 @@ pub fn for_session(app: &AppCtx, id: &str, check_updates: bool) -> Result<AgentV
     let live = app.chat().agent_version(id);
     let running = live.is_some();
     let version = live.unwrap_or_else(|| installed(&super::executable::for_session(app, &session)));
-    let opencode_v2=session.kind==SessionKind::Opencode && super::opencode::is_v2_version(version.as_deref());
+    let opencode_v2=session.kind.uses_opencode() && super::opencode::is_v2_version(version.as_deref());
     let latest = if opencode_v2 {latest_opencode_v2(check_updates)} else {latest(session.kind, check_updates)};
     let update_available = if opencode_v2 {newer_opencode_v2(version.as_deref(),latest.version.as_deref())}
         else {newer(version.as_deref(), latest.version.as_deref())};
@@ -90,7 +90,7 @@ fn source(kind: SessionKind) -> Option<(String, &'static str)> {
         SessionKind::Codex => Some("@openai/codex"),
         SessionKind::Opencode => Some("opencode-ai"),
         SessionKind::Pi => Some("@earendil-works/pi-coding-agent"),
-        SessionKind::Deepseek => Some("@deepseek-ai/dsh"),
+        SessionKind::Deepseek => Some("opencode-ai"),
         _ => None,
     };
     if let Some(package) = package { return Some((format!("https://registry.npmjs.org/{package}/latest"), "version")); }

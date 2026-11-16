@@ -28,7 +28,7 @@ describe("mapBackendError", () => {
     expect(mapBackendError("agent_sign_in_required:future")).toBe("chat.signInRequired|future");
   });
 
-  it("explains where DeepSeek Harness reads its API key from", () => {
+  it("explains how to give DeepSeek an API key", () => {
     expect(mapBackendError("agent_api_key_required:deepseek")).toBe("chat.apiKeyRequired");
   });
 

@@ -14,7 +14,8 @@ pub fn modes(kind: SessionKind) -> &'static [&'static str] {
     match kind {
         SessionKind::Claude => CLAUDE_MODES,
         SessionKind::Codex => &["read-only", "auto", "full-access"],
-        SessionKind::Opencode | SessionKind::Antigravity => &["default", "bypassPermissions"],
+        SessionKind::Opencode => &["default", "bypassPermissions"],
+        SessionKind::Antigravity => CLAUDE_MODES,
         // OMP can ask for approval; its bypass maps to `--approval-mode=yolo`. Pi has no approval step at
         // all, so it exposes no modes and the composer shows no permission control for it.
         SessionKind::Omp => &["default", "bypassPermissions"],
@@ -24,7 +25,10 @@ pub fn modes(kind: SessionKind) -> &'static [&'static str] {
         // ACP agents ask the client before acting; bypass is the client answering for the user. Their terminal
         // interface maps the same two choices to its own skip flag.
         SessionKind::Copilot | SessionKind::Cursor | SessionKind::Kimi | SessionKind::Grok => &["default", "bypassPermissions"],
-        // DeepSeek Harness keeps its own sandbox and asks before widening it; bypass answers those requests.
+        // Terminal agents that map default and bypass to CLI approval flags (e.g. Cline `--auto-approve`,
+        // Crush `--yolo`, Kiro `--trust-all-tools`, Zoo `--require-approval`).
+        SessionKind::Cline | SessionKind::Crush | SessionKind::Kiro | SessionKind::Zoo => &["default", "bypassPermissions"],
+        // DeepSeek runs through OpenCode and uses the same two modes.
         SessionKind::Deepseek => &["default", "bypassPermissions"],
         _ => &[],
     }
@@ -56,6 +60,10 @@ fn kind(agent: &str) -> Result<SessionKind, String> {
         "copilot" => Ok(SessionKind::Copilot),
         "cursor" => Ok(SessionKind::Cursor),
         "kimi" => Ok(SessionKind::Kimi),
+        "cline" => Ok(SessionKind::Cline),
+        "crush" => Ok(SessionKind::Crush),
+        "kiro" => Ok(SessionKind::Kiro),
+        "zoo" => Ok(SessionKind::Zoo),
         "grok" => Ok(SessionKind::Grok),
         "deepseek" => Ok(SessionKind::Deepseek),
         _ => Err(format!("Unsupported permission agent: {agent}")),
@@ -66,6 +74,7 @@ pub fn normalize(kind: SessionKind, stored: Option<&str>) -> Result<&str, String
     let mode = match (kind, stored.map(str::trim).unwrap_or("")) {
         (SessionKind::Codex, "" | "default") => "auto",
         (SessionKind::Codex, "skip") => "full-access",
+        (SessionKind::Antigravity, "accept-edits") => "acceptEdits",
         (_, "") => "default",
         (_, "skip") => "bypassPermissions",
         (_, value) => value,
@@ -163,7 +172,7 @@ mod tests {
 
     #[test]
     fn permission_catalog_preserves_modes_and_legacy_aliases() {
-        for agent in ["claude", "codex", "opencode", "omp"] {
+        for agent in ["claude", "codex", "opencode", "omp", "antigravity"] {
             let kind = kind(agent).unwrap();
             for mode in modes(kind) {
                 assert_eq!(catalog(agent, Some(mode)).unwrap().selected, *mode);
@@ -175,9 +184,23 @@ mod tests {
             };
             assert_eq!(catalog(agent, Some("skip")).unwrap().selected, bypass);
         }
+        assert_eq!(
+            catalog("antigravity", Some("accept-edits")).unwrap().selected,
+            "acceptEdits"
+        );
+        assert_eq!(
+            modes(SessionKind::Antigravity),
+            ["plan", "default", "acceptEdits", "auto", "bypassPermissions"]
+        );
         assert!(catalog("opencode", Some("plan")).is_err());
         assert!(catalog("claude", Some("read-only")).is_err());
         assert!(catalog("terminal", None).is_err());
+        assert!(catalog("pi", None).is_err());
+        for agent in ["cline", "crush", "kiro", "zoo"] {
+            assert_eq!(catalog(agent, None).unwrap().modes, ["default", "bypassPermissions"]);
+            assert_eq!(catalog(agent, Some("default")).unwrap().selected, "default");
+            assert_eq!(catalog(agent, Some("skip")).unwrap().selected, "bypassPermissions");
+        }
     }
 
     #[test]

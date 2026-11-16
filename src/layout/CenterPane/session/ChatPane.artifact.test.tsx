@@ -39,11 +39,16 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+const pane = (hidden: boolean) => (
+  <ChatPane session={{ id: "s", projectId: "p", name: "Claude", kind: "claude", engine: "chat", collapsed: false, sortOrder: 0, createdAt: 0 }}
+    area={{}} hidden={hidden} focused multi={false} onActivate={() => {}} onSplit={() => {}} onClose={() => {}} />
+);
+
 async function mountPane(hidden = false) {
-  render(<ChatPane session={{ id: "s", projectId: "p", name: "Claude", kind: "claude", engine: "chat", collapsed: false, sortOrder: 0, createdAt: 0 }}
-    area={{}} hidden={hidden} focused multi={false} onActivate={() => {}} onSplit={() => {}} onClose={() => {}} />);
+  const view = render(pane(hidden));
   await waitFor(() => expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "chat_snapshot")).toBe(true));
   await act(async () => {});
+  return view;
 }
 
 describe("artifact panel beside a conversation", () => {
@@ -77,13 +82,23 @@ describe("artifact panel beside a conversation", () => {
     expect(useTermStore.getState().dockDocs).toEqual({});
   });
 
-  it("leaves other sessions' pages and hidden panes to open as tabs", async () => {
+  it("leaves other sessions' pages to tabs and keeps a background pane's page for its return", async () => {
     await mountPane();
     expect(openBesideSession("other", PAGE)).toBe(false);
     cleanup();
-    await mountPane(true);
-    expect(openBesideSession("s", PAGE)).toBe(false);
-    expect(document.querySelector(".artifact-dock")).toBeNull();
+
+    const view = await mountPane(true);
+    let taken = false;
+    await act(async () => { taken = openBesideSession("s", PAGE); });
+    // A background conversation still claims the page: nothing is forced into a new tab while the reader
+    // is elsewhere, and the panel is waiting when they switch back.
+    expect(taken).toBe(true);
+    await waitFor(() => expect(document.querySelector(".artifact-dock iframe")).toBeTruthy());
+    expect((document.querySelector(".term-mount") as HTMLElement).style.display).toBe("none");
+
+    view.rerender(pane(false));
+    await waitFor(() => expect((document.querySelector(".term-mount") as HTMLElement).style.display).toBe("block"));
+    expect(document.querySelector(".artifact-dock iframe")).toBeTruthy();
   });
 
   it("puts a console report in the composer without sending it", async () => {

@@ -1,3 +1,22 @@
+## v0.3.1 — 2026-11-16
+
+- 🪐 Die Antigravity-Gesprächsansicht unterstützt jetzt den Wechsel von Modell und Denkaufwand, die Verfolgung von Unteragenten und Hintergrundaufgaben, interaktive `ask_question`-Abfragen, fünf Berechtigungsstufen, KI-Umbenennung sowie Rundenstatistiken, Ausgabegeschwindigkeit und Kontingentverbrauch im Info-Bereich.
+- 🐋 DeepSeek-Sitzungen unterstützen jetzt Hintergrundaufgaben, modellabhängige Bildeingabe, Kontextverbrauch, KI-Umbenennung, die Konfiguration von API-URL und -Schlüssel neben dem Eingabefeld sowie die schreibgeschützte Ansicht früherer `dsh`-Verläufe.
+- 🤖 Agenten können jetzt mit `vapp` VelaTerm-App-Aktionen vorschlagen (einschließlich der Organisation von Seitenleistenbäumen mit `$name`-Referenzen), wobei jede Aktion oder Gruppe als Bestätigungskarte in der Gesprächsansicht erscheint.
+- 📁 Aufgaben und Chats in der linken Seitenleiste unterstützen das Erstellen von Gruppen, das Hinzufügen von Einträgen über das Kontextmenü im leeren Bereich sowie das Herausziehen von Einträgen auf die oberste Ebene.
+- 📦 Windows-Releases enthalten jetzt portable ZIP-Pakete für Voll- und Minimal-Builds, und portable Kopien aktualisieren sich über die Download-Seite.
+- 🇨🇳 In den Einstellungen lässt sich der Update- und Download-Server auf den Festlandchina-Mirror `velaterm.cn` umschalten.
+- 🔍 Die Statusleiste erhält eine Steuerung für die Oberflächenskalierung mit direkter Prozenteingabe, und in den Einstellungen lassen sich getrennte, durchsuchbare Schriftarten für Oberfläche und Gespräche wählen.
+- 📎 Dateien aus dem Finder oder Datei-Explorer lassen sich jetzt direkt in Terminals, Gespräche und den Projekt-Dateibaum ziehen.
+- 🍴 ZCode-Sitzungen unterstützen das Abzweigen ab der letzten Antwort ohne Änderung des Arbeitsbereichs, das Zurücksetzen ab der letzten Nachricht sowie KI-Umbenennung, während Pi- und OMP-Sitzungen die Vervollständigung von Slash-Befehlen unterstützen.
+- 📋 Gesprächsnachrichten bieten „Gesamte Nachricht kopieren“ im Kontextmenü, das Eingabefeld bietet ein Kontextmenü für Ausschneiden/Kopieren/Einfügen/Alles auswählen mit Tastenkürzeln, und die Suche im Gespräch durchsucht zuerst das vollständige Transkript.
+- 📊 Der Bereich „Usage“ im Info-Bereich zeigt Kontingentbalken gruppiert nach Rücksetzfenster mit 20-teiliger Skala und separaten Rücksetzzeiten an und klappt Nicht-Gemini-Kontingente von Antigravity standardmäßig ein.
+- 🏷️ Sitzungen bieten „Status festlegen“ (Angesehen / Ausstehend) im Kontextmenü, neu erstellte Sitzungen bleiben bei aktiven Statusfiltern sichtbar, und `vspawn --title` setzt eigene Titel für abgeleitete und Planungssitzungen.
+- 🪟 `vartifact` dockt Dateien auch beim Öffnen aus Hintergrund-Tabs an, das Dropdown für das Hintergrund-Tab-Limit reicht bis 512, und Besucher öffentlicher Freigaben können den linken Baum lokal auf- und zuklappen.
+- ⌨️ Das Bestätigen einer IME-Eingabe mit Enter unter macOS sendet Antworten oder Suchen nicht mehr vorzeitig ab, die Remote-Terminaleingabe blendet Zsh-Inline-Verlaufsvorschläge aus, und synchronisierte Terminalaktualisierungen lassen den Anzeigebereich nicht mehr flackern.
+- 🔔 Ein Klick auf die Benachrichtigung eines Remote-Fensters unter macOS holt dieses Fenster direkt in den Vordergrund, ohne zuvor das Hauptfenster aufblitzen zu lassen, und beim erneuten Öffnen der App wird das Hauptfenster auch dann wiederhergestellt, wenn nur Remote-Fenster geöffnet sind.
+- 🔧 Beim Projektwechsel wird der Dateibaum-Filter geleert, Berechtigungsauswahlen speichern Standards sofort über Set as default, die KI-Umbenennung funktioniert auch bei sehr langen Sitzungen, und die erste Nachricht einer neuen Sitzung flackert vor dem Start der Sitzung nicht mehr.
+
 ## v0.3.0 — 2026-11-08
 
 - 🔏 Die macOS-Version wird jetzt mit dem Zertifikat von Vlinx Software, Inc. statt mit dem bisherigen signiert. Nach dem Update müssen Sie einige macOS-Berechtigungen möglicherweise erneut erteilen, und im Schlüsselbund gespeicherte Einträge wie Passwörter für Remote-Verbindungen müssen noch einmal freigegeben werden: Geben Sie bei der Abfrage Ihr Anmeldepasswort ein und wählen Sie „Immer erlauben“.

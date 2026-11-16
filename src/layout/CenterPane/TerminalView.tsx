@@ -11,6 +11,8 @@ import { AGENT_KIND_LABEL, kindIconEl } from "../sessionViewers/sessionMeta";
 import { useT } from "../../i18n";
 import { TermScrollbar } from "./TermScrollbar";
 import { RunStrip } from "./RunStrip";
+import { AssistRequests } from "../Assist/AssistRequests";
+import { isShareSurface } from "../../ipc/shareBase";
 import { usePtySession } from "../../hooks/usePtySession";
 import { CompletionTipLabel } from "../../terminal/completion/CompletionTipLabel";
 import { useGitBranch } from "../../hooks/useGitBranch";
@@ -27,6 +29,7 @@ import {
 import { flushNow as flushSettingsSync } from "../../ipc/settingsSync";
 import { isMac } from "../../ipc/transport";
 import { platform } from "../../platform";
+import { pathsExcept, terminalDropText } from "../../terminal/dropPaths";
 import { ClipboardUnresponsiveError } from "../../platform/clipboardStall";
 import { env } from "../../platform/env";
 import {
@@ -353,6 +356,8 @@ export const TerminalView = memo(function TerminalView({
 
         {/* Commands this session started with vrun, shown while they run; the terminal below shrinks to fit. */}
         {!hidden && <RunStrip sessionId={session.id} />}
+        {/* App actions the agent asked for with vapp; the terminal below shrinks to fit them. */}
+        {!hidden && !isShareSurface && <AssistRequests sessionId={session.id} className="assist-term-lane" />}
 
         {/* The xterm container fills its parent through absolute positioning so it has a definite size.
             It deliberately does not rely on height:100% inside a flex parent: WebKit resolves that
@@ -414,11 +419,28 @@ export const TerminalView = memo(function TerminalView({
             if (e.dataTransfer?.types?.includes("Files")) e.preventDefault();
           }}
           onDrop={(e) => {
+            if (!e.dataTransfer?.files?.length) return;
+            e.preventDefault();
+            // Images keep their upload flow, which Codex and Claude turn into attachments. Everything else is
+            // typed in as its path, the way a native terminal does; the paths must be requested inside this
+            // handler because the drop's data is gone once it returns.
             const imgs = imagesFromDrop(e.dataTransfer);
-            if (imgs.length) {
-              e.preventDefault();
-              injectImages(imgs);
+            if (imgs.length) injectImages(imgs);
+            if (e.dataTransfer.files.length <= imgs.length) return;
+            // Browsers and remote windows never learn local paths, and the files are not on the server anyway.
+            if (env.isBrowser) {
+              showImageError(t("drop.browserFilesHint"));
+              return;
             }
+            void platform.dialog
+              .droppedPaths(e.dataTransfer)
+              .then((dropped) => {
+                const paths = pathsExcept(dropped.map((d) => d.path), imgs);
+                if (!paths.length) return;
+                void ptyWrite(session.id, terminalDropText(paths));
+                focusTerminal(session.id);
+              })
+              .catch(() => {});
           }}
         >
           <div ref={containerRef} style={{ position: "absolute", top: 2, left: 5, right: 5, bottom: 2 }} />

@@ -75,7 +75,7 @@ pub fn run(args: &[String]) -> ! {
     let result = (|| -> Result<Value> {
         let base = std::env::var("VLX_SPAWN_URL").map_err(|_|"Run vkb inside a VelaTerm session.")?;
         let sid = std::env::var("VLX_SESSION_ID").map_err(|_|"Missing VelaTerm session.")?;
-        let token = std::env::var("VLX_TOKEN").map_err(|_|"Missing VelaTerm session credentials.")?;
+        let token = crate::agent::session_env::token().ok_or("Missing VelaTerm session credentials.")?;
         let url = url::Url::parse(&base).map_err(|_|"Invalid VelaTerm endpoint.")?;
         if url.scheme()!="http" || !matches!(url.host_str(),Some("127.0.0.1" | "localhost")) { return Err("Invalid VelaTerm endpoint.".into()); }
         let cwd = std::env::current_dir().map_err(|_|"Cannot resolve current directory.")?;

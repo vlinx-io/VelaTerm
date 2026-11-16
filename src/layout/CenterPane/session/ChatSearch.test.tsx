@@ -26,6 +26,20 @@ it("finds literal matches across history, tool inputs and nested output, and wra
   expect(screen.getByRole("status").textContent).toBe("No results");
   expect(onLocate).toHaveBeenLastCalledWith(-1, "");
 });
+it("leaves the Enter that confirms IME composition to the input method", () => {
+  render(<ChatSearch entries={[
+    { kind: "row", id: "a", row: { kind: "user", id: "a", text: "needle one" } },
+    { kind: "row", id: "b", row: { kind: "user", id: "b", text: "needle two" } },
+  ]} onLocate={vi.fn()} onClose={vi.fn()} />);
+  const input = screen.getByRole("textbox");
+  fireEvent.change(input, { target: { value: "needle" } });
+  expect(screen.getByRole("status").textContent).toBe("2/2");
+  // WebKit reports the confirming Enter with isComposing false and keyCode 229.
+  expect(fireEvent.keyDown(input, { key: "Enter", keyCode: 229 })).toBe(true);
+  expect(screen.getByRole("status").textContent).toBe("2/2");
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(screen.getByRole("status").textContent).toBe("1/2");
+});
 it("stays on the selected match while older history loads above it", () => {
   const onLocate = vi.fn();
   const recent = [

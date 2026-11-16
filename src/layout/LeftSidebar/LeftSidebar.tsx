@@ -27,7 +27,7 @@ import {
   type NodeKind,
 } from "../../types";
 import { MARK_LABEL_KEYS, NODE_MARKS, normalizeMark } from "../../marks";
-import { useSessionMenu } from "../sessionMenu";
+import { sessionStatusItem, useSessionMenu } from "../sessionMenu";
 import { GRID_MAX } from "../CenterPane/paneTree";
 import { labelWithCombo } from "../../hooks/shortcutRegistry";
 import {
@@ -227,7 +227,7 @@ function SidebarTreePane({
   onSplitDown: () => void;
   onClose: () => void;
   onNewCollection: () => void;
-  treeHandlers: Omit<TreeHandlers, "view" | "isPrimary" | "onNewCollection">;
+  treeHandlers: Omit<TreeHandlers, "view" | "isPrimary" | "active" | "onNewCollection">;
 }) {
   const t = useT();
   const setTreeFilter = useTermStore((s) => s.setSidebarTreeViewFilter);
@@ -321,6 +321,7 @@ function SidebarTreePane({
           view={view}
           section={section}
           isPrimary={isPrimary}
+          active={active}
           onNewCollection={onNewCollection}
           {...treeHandlers}
         />
@@ -515,7 +516,7 @@ export function LeftSidebar() {
   // The shown pane group belongs to one section; the header names it and offers what can be created in it.
   const section = sidebarTabSection(activeTab);
   const typedRoot = fixedLayout && section === "tasks" ? SYSTEM_TASKS : fixedLayout && section === "chat" ? SYSTEM_CHAT : null;
-  const newSessionLabel = t(typedRoot === SYSTEM_TASKS ? "newSession.newTask" : typedRoot === SYSTEM_CHAT ? "newSession.newChat" : "newSession.heading");
+  const newSessionLabel = t(typedRoot === SYSTEM_TASKS ? "newSession.newTask" : typedRoot === SYSTEM_CHAT ? "newSession.newChat" : "tree.newSession");
   const showProjectActions = !fixedLayout || section === "projects";
   const knowledgeSection = fixedLayout && section === "knowledge";
   const archiveSection = fixedLayout && section === "archive";
@@ -711,6 +712,11 @@ export function LeftSidebar() {
             },
           });
         }
+        // Set Status applies to every selected session at once.
+        const statusItem = sessionStatusItem(
+          selection.filter((s) => s.kind === "session").map((s) => s.id),
+        );
+        if (statusItem) items.push(statusItem);
         // Offer Move Selected To only when every selected session belongs to one project.
         const moveItem = buildMoveToMany(
           selection.filter((s) => s.kind === "session").map((s) => s.id),
@@ -755,6 +761,15 @@ export function LeftSidebar() {
           onClick: (event: React.MouseEvent) => {
             if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
             event.preventDefault(); openNewSession({ projectId: node.id });
+          },
+        }, {
+          // Groups let the user sort task and chat sessions; the section stays limited to its session type.
+          label: t("tree.newGroup"),
+          icon: <Icons.newGroup size={14} />,
+          href: newGroupDialogUrl(node.id),
+          onClick: (event: React.MouseEvent) => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault(); openDialog({ type: "newGroup", projectId: node.id, parentGroupId: null });
           },
         }] : collectionCreationItems(SYSTEM_PROJECTS)),
         sep,
@@ -958,9 +973,9 @@ export function LeftSidebar() {
       e.stopPropagation();
       setFolderDropOver(false);
       void platform.dialog
-        .droppedFolders(e.dataTransfer)
+        .droppedPaths(e.dataTransfer)
         .then(async (paths) => {
-          for (const path of paths) await openProjectPath(path);
+          for (const { path, isDir } of paths) if (isDir) await openProjectPath(path);
         })
         // Failures are already reported by the request error banner.
         .catch(() => {});
@@ -1010,6 +1025,19 @@ export function LeftSidebar() {
           }}
         >
           <Icons.plus size={14} />
+        </a>}
+        {typedRoot && <a
+          href={newGroupDialogUrl(typedRoot)}
+          className="icon-btn sm"
+          title={t("tree.newGroup")}
+          aria-label={t("tree.newGroup")}
+          onClick={(event) => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            openDialog({ type: "newGroup", projectId: typedRoot, parentGroupId: null });
+          }}
+        >
+          <Icons.newGroup size={14} />
         </a>}
         {showProjectActions && <>
         <a

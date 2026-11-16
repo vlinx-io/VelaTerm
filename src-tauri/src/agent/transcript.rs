@@ -72,11 +72,19 @@ pub fn context_info(kind: SessionKind, agent_session_id: &str) -> Result<AgentCo
     if matches!(kind, SessionKind::Grok) {
         return grok_context_info(agent_session_id);
     }
-    if matches!(kind, SessionKind::Opencode) {
+    if kind.uses_opencode() {
+        if kind == SessionKind::Deepseek
+            && crate::agent::history_store::deepseek_legacy::is_legacy(agent_session_id)
+        {
+            return crate::agent::chat::deepseek_stats::context_info(agent_session_id);
+        }
         return opencode_context_info(agent_session_id);
     }
     if matches!(kind, SessionKind::Pi | SessionKind::Omp) {
         return pi_context_info(kind, agent_session_id);
+    }
+    if matches!(kind, SessionKind::Antigravity) {
+        return crate::agent::antigravity_stats::context_info(agent_session_id);
     }
     if !matches!(kind, SessionKind::Claude) {
         return Err("This session kind does not record model context information".to_string());
@@ -389,7 +397,7 @@ fn widen_to_usage(limit: u64, tokens: Option<u64>) -> u64 {
 }
 
 mod turn_stats;
-pub use turn_stats::{current_turn_stats, TurnStats};
+pub use turn_stats::{current_turn_stats, ChangedFile, TurnStats};
 #[cfg(test)]
 use turn_stats::turn_stats_from_text;
 
@@ -799,6 +807,10 @@ pub fn source_path(kind: SessionKind, agent_session_id: &str) -> Option<std::pat
         SessionKind::Grok => resume::find_grok_updates(agent_session_id),
         SessionKind::Antigravity => crate::agent::antigravity::transcript_path(agent_session_id),
         SessionKind::Pi | SessionKind::Omp => resume::find_pi_session(kind, agent_session_id),
+        // A DeepSeek conversation recorded before OpenCode took over lives only in its dsh log, which
+        // search stats like any other recording.
+        SessionKind::Deepseek if crate::agent::history_store::deepseek_legacy::is_legacy(agent_session_id) =>
+            crate::agent::chat::deepseek_history::find(agent_session_id),
         // Kiro uses identity-aware multi-source reads; other non-file stores and plain terminals have no path.
         _ => None,
     }
@@ -895,7 +907,10 @@ pub fn read(kind: SessionKind, agent_session_id: &str) -> Result<Vec<TranscriptM
             let (_, content) = resume::read_codex_rollout_chain(agent_session_id)?;
             Ok(merge(content.lines().filter_map(parse_codex_line)))
         }
-        SessionKind::Opencode => {
+        SessionKind::Opencode | SessionKind::Deepseek => {
+            if kind == SessionKind::Deepseek && crate::agent::history_store::deepseek_legacy::is_legacy(agent_session_id) {
+                return crate::agent::chat::deepseek_history::transcript(agent_session_id);
+            }
             let messages = crate::agent::opencode_store::messages(agent_session_id)?;
             Ok(merge(opencode_pieces(&messages).into_iter()))
         }
@@ -927,7 +942,6 @@ pub fn read(kind: SessionKind, agent_session_id: &str) -> Result<Vec<TranscriptM
         SessionKind::Kimi => {
             Err("Transcript view is not supported for kimi sessions yet".to_string())
         }
-        SessionKind::Deepseek => crate::agent::chat::deepseek_history::transcript(agent_session_id),
         SessionKind::Kiro => {
             Ok(super::kiro_store::read(agent_session_id)?.messages?.into_iter().map(|message| TranscriptMessage {
                 role: message.role.into(), text: message.text, timestamp: message.timestamp, tools: Vec::new(),

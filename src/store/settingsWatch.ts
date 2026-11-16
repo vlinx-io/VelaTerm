@@ -11,6 +11,7 @@
 //! authority and the code path stay identical; only the trigger is new.
 
 import { onSettingsChanged } from "../ipc/events";
+import { notifyServerRegionChanged, SERVER_REGION_KEY } from "../ipc/serverRegion";
 import { flushNow, reconcileSettings } from "../ipc/settingsSync";
 import type { UnlistenFn } from "../ipc/transport";
 import { loadLangChoice, setLang } from "../i18n";
@@ -49,6 +50,7 @@ export async function refreshSettingsFromBackend(): Promise<void> {
     const changed = await reconcileSettings();
     if (changed.size === 0) return;
     if (changed.has("vlx-lang")) setLang(loadLangChoice());
+    if (changed.has(SERVER_REGION_KEY)) notifyServerRegionChanged();
     if (
       changed.has("vlx-theme") ||
       changed.has("vlx-sound") ||

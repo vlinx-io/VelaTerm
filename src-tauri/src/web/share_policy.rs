@@ -177,7 +177,8 @@ pub fn dispatch_shared(
         // Locations and host-side UI writes do not belong to a visitor. Neutral values keep the shared shell
         // rendering instead of surfacing errors for data it does not need.
         "get_git_status" | "get_git_branch_info" | "get_session_cwd" => return Ok(Value::Null),
-        "set_app_settings" => return Ok(Value::Null),
+        // Collapsing a row is a view choice: the page keeps it locally and the host's sidebar stays as it was.
+        "set_app_settings" | "set_collapsed" => return Ok(Value::Null),
         "mirror_get" => {
             return Ok(json!({"enabled":false,"rev":0,"source":Value::Null,"state":Value::Null}))
         }
@@ -702,6 +703,16 @@ mod shared_surface_tests {
             dispatch_shared(&app, &scope, "set_app_settings", &json!({"key": "x", "value": "y"}), "ws-test", origin).unwrap(),
             Value::Null
         );
+        let collapsed = |app: &AppCtx| {
+            let conn = app.db().conn.lock().unwrap();
+            repo::list_tree(&conn).unwrap().sessions.iter().find(|s| s.id == session.id).unwrap().collapsed
+        };
+        let before = collapsed(&app);
+        assert_eq!(
+            dispatch_shared(&app, &scope, "set_collapsed", &json!({"kind": "session", "id": session.id, "collapsed": !before}), "ws-test", origin).unwrap(),
+            Value::Null
+        );
+        assert_eq!(collapsed(&app), before);
         assert_eq!(
             dispatch_shared(&app, &scope, "get_session_cwd", &json!({"sessionId": session.id}), "ws-test", origin).unwrap(),
             Value::Null

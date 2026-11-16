@@ -40,6 +40,7 @@ import { CommandFindings, parseCommandFindings } from "./CommandFindings";
 import { runSummaryText, type ToolRow, type TurnFold } from "./toolRuns";
 import { copyAttributes } from "./selectionCopy";
 import { handleMessageCopy, useMessageCopyMenu } from "./useMessageCopyMenu";
+import { useTextFieldMenu } from "./useTextFieldMenu";
 
 /**
  * What to show for the instant a message was written.
@@ -285,6 +286,15 @@ export function TurnHead({
   );
 }
 
+/** Guidance shown when an agent handles rewind in its terminal view rather than in conversation view. */
+export interface RewindGuide {
+  title: string;
+  tooltip: string;
+  description: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}
+
 /**
  * A message from the person or from the agent, with whatever was attached to it.
  *
@@ -314,6 +324,7 @@ export function MessageBubble({
   rewindDisabledReason,
   editDisabledReason,
   rewindScopes,
+  rewindGuide,
   openRewindToken,
   onRewindMenuOpened,
 }: {
@@ -342,6 +353,7 @@ export function MessageBubble({
   rewindDisabledReason?: string;
   editDisabledReason?: string;
   rewindScopes?: ChatRewindScope[];
+  rewindGuide?: RewindGuide;
   /** A new token asks this already-rendered message to open its normal rewind scope menu. */
   openRewindToken?: number;
   /** Acknowledge the one-shot request after the target message has opened its menu. */
@@ -349,16 +361,32 @@ export function MessageBubble({
 }) {
   text = useOriginalMessage(rowId, text);
   const t = useT();
-  const [rewindMenu, setRewindMenu] = useState(false);
+  const [rewindMenu, setRewindMenu] = useState<"rewind" | "edit" | false>(false);
   const [editing, setEditing] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const { onContextMenu: onBodyContextMenu, copyMenu } = useMessageCopyMenu();
+  const toolsRef = useRef<HTMLDivElement | null>(null);
+  const { onContextMenu: onBodyContextMenu, copyMenu } = useMessageCopyMenu(copyAvailable && !editing ? text : undefined);
   useEffect(() => {
     if (openRewindToken === undefined) return;
-    setRewindMenu(true);
+    setRewindMenu("rewind");
     window.requestAnimationFrame(() => rootRef.current?.scrollIntoView({ block: "center" }));
     onRewindMenuOpened?.(openRewindToken);
   }, [openRewindToken, onRewindMenuOpened]);
+  useEffect(() => {
+    if (!rewindMenu) return;
+    const onDown = (event: MouseEvent) => {
+      if (!toolsRef.current?.contains(event.target as Node)) setRewindMenu(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setRewindMenu(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [rewindMenu]);
   // Pictures come before the words, the way they sit above the input while being written.
   const pictures =
     images && images.length > 0 ? (
@@ -378,20 +406,33 @@ export function MessageBubble({
 
   if (isUser) {
     const rewind =
-      onRewind ? (
+      rewindGuide ? (
+        <span className="sv-rewind">
+          <button
+            type="button"
+            className="sv-rewind-button"
+            title={rewindGuide.tooltip}
+            aria-label={t("chat.rewind.title")}
+            aria-expanded={rewindMenu === "rewind"}
+            onClick={() => setRewindMenu((open) => (open === "rewind" ? false : "rewind"))}
+          >
+            <Icons.restart size={16} />
+          </button>
+        </span>
+      ) : onRewind ? (
         <span className="sv-rewind">
           <button
             className="sv-rewind-button"
             title={rewindDisabledReason || t("chat.rewind.title")}
             disabled={!!rewindDisabledReason || !rewindScopes?.length}
             aria-label={t("chat.rewind.title")}
-            aria-expanded={rewindMenu}
-            onClick={() => setRewindMenu((open) => !open)}
+            aria-expanded={rewindMenu === "rewind"}
+            onClick={() => setRewindMenu((open) => (open === "rewind" ? false : "rewind"))}
           >
             <Icons.restart size={16} />
           </button>
-          {rewindMenu && !rewindDisabledReason ? (
-            <span className="sv-rewind-menu">
+          {rewindMenu === "rewind" && !rewindDisabledReason ? (
+            <span className="sv-rewind-menu sv-popover">
               {rewindScopes?.map((scope) => (
                 <button
                   key={scope}
@@ -408,15 +449,63 @@ export function MessageBubble({
           ) : null}
         </span>
       ) : null;
+    const edit = rewindGuide ? (
+      onEditSend || copyAvailable !== false ? (
+        <button
+          type="button"
+          className="sv-message-edit-button"
+          title={rewindGuide.tooltip}
+          aria-label={t("chat.rewind.edit")}
+          aria-expanded={rewindMenu === "edit"}
+          onClick={() => setRewindMenu((open) => (open === "edit" ? false : "edit"))}
+        >
+          <Icons.rename size={16} />
+        </button>
+      ) : null
+    ) : onEditSend ? (
+      <button
+        className="sv-message-edit-button"
+        disabled={!!editDisabledReason}
+        title={editDisabledReason || t("chat.rewind.edit")}
+        aria-label={t("chat.rewind.edit")}
+        onClick={() => setEditing(true)}
+      >
+        <Icons.rename size={16} />
+      </button>
+    ) : null;
     return (
       <div className="sv-msg sv-msg-user" ref={rootRef}>
         <div className="sv-msg-turn">
           <MessageHead who={who} icon={icon ?? <span className="sv-user-sail">{velaSailMarkEl(14)}</span>} at={at} />
           <div className="sv-msg-body" onCopy={handleMessageCopy} onContextMenu={onBodyContextMenu}>
-            {!editing && (text || rewind || onEditSend) ? <div className="sv-message-tools" {...copyAttributes.ignore}>
+            {!editing && (text || rewind || edit || rewindGuide) ? <div className="sv-message-tools" ref={toolsRef} {...copyAttributes.ignore}>
               {rewind}
-              {onEditSend ? <button className="sv-message-edit-button" disabled={!!editDisabledReason} title={editDisabledReason || t("chat.rewind.edit")} aria-label={t("chat.rewind.edit")} onClick={() => setEditing(true)}><Icons.rename size={16} /></button> : null}
+              {edit}
               {text && copyAvailable ? <MessageCopyButton text={text} /> : null}
+              {rewindGuide && rewindMenu !== false ? (
+                <div className="sv-rewind-menu sv-rewind-guide sv-popover" role="dialog" aria-label={rewindGuide.title}>
+                  <div className="sv-rewind-guide-head">
+                    <Icons.restart size={13} />
+                    <strong>{rewindGuide.title}</strong>
+                  </div>
+                  <div className="sv-rewind-guide-body">{rewindGuide.description}</div>
+                  {rewindGuide.onAction && rewindGuide.actionLabel ? (
+                    <div className="sv-rewind-guide-actions">
+                      <button
+                        type="button"
+                        className="sv-allow sv-rewind-guide-btn"
+                        onClick={() => {
+                          setRewindMenu(false);
+                          rewindGuide.onAction?.();
+                        }}
+                      >
+                        <Icons.terminal size={13} />
+                        <span>{rewindGuide.actionLabel}</span>
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div> : null}
             <div className="sv-message-content">
             {editing ? <MessageEditor text={text} images={images} disabled={!!editDisabledReason}
@@ -502,7 +591,9 @@ function MessageEditor({ text, images = [], disabled, onCancel, onSend }: {
     setAttachments(current.current);
     setNote(null);
   };
+  const { onContextMenu, textFieldMenu } = useTextFieldMenu({ onImage: file => enqueue(() => Promise.resolve([file])), onCopyFailed: setNote });
   return <div className="sv-message-editor" aria-busy={busy}>
+    {textFieldMenu}
     {attachments.length > 0 ? <div className="sv-attach">
       {attachments.map((image, index) => <div className="sv-attach-item" key={"attachmentId" in image ? image.attachmentId : index}>
         <ChatImageView image={image} className="sv-attach-thumb" alt="" />
@@ -512,7 +603,7 @@ function MessageEditor({ text, images = [], disabled, onCancel, onSend }: {
     </div> : null}
     {note ? <div className="sv-attach-note" role="status">{note}</div> : null}
     <textarea aria-label={t("chat.rewind.edit")} value={editedText} disabled={disabled}
-      onChange={event => setEditedText(event.target.value)} onPaste={onPaste} rows={5} />
+      onChange={event => setEditedText(event.target.value)} onPaste={onPaste} onContextMenu={onContextMenu} rows={5} />
     <p>{t("chat.rewind.editWarning")}</p>
     <div className="sv-rewind-actions">
       <button type="button" className="vlx-btn" onClick={onCancel}>{t("chat.rewind.cancel")}</button>

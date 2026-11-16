@@ -23,6 +23,14 @@
   --accent-line: oklch(0.72 0.15 158 / 0.5);
   /* Official monochrome Grok mark; the light-scheme fallback below reverses it before React mounts. */
   --grok-brand-color: #ffffff;
+  /* Session-tree blues. Dark mode makes OpenCode monochrome and enables the Antigravity
+     gradient; the light-scheme overrides below restore the original flat brand blues. */
+  --opencode-brand-color: #c7cbd1;
+  --antigravity-stop-1: #4285f4;
+  --antigravity-stop-2: #4285f4;
+  --antigravity-stop-3: #34a853;
+  --antigravity-stop-4: #fbbc05;
+  --antigravity-stop-5: #ea4335;
   /* density (overridden by [data-density]) */
   --row-h: 28px;
   --ui-fs: 12.5px;
@@ -46,7 +54,12 @@
 /* Light startup fallback used only before data-theme is written. Equal specificity lets the later
    [data-theme] rules override it after initialization. */
 @media (prefers-color-scheme: light) {
-  :root { --bg-0: #ffffff; --text: oklch(0.28 0.008 260); --text-on-accent: #fff; --grok-brand-color: #000000; }
+  :root {
+    --bg-0: #ffffff; --text: oklch(0.28 0.008 260); --text-on-accent: #fff; --grok-brand-color: #000000;
+    --opencode-brand-color: #3b82f6;
+    --antigravity-stop-1: #4285f4; --antigravity-stop-2: #4285f4; --antigravity-stop-3: #4285f4;
+    --antigravity-stop-4: #4285f4; --antigravity-stop-5: #4285f4;
+  }
 }
 [data-accent="green"]  { --accent: oklch(0.74 0.15 158); --accent-soft: oklch(0.74 0.15 158/.14); --accent-line: oklch(0.74 0.15 158/.5); }
 [data-accent="blue"]   { --accent: oklch(0.7 0.15 250);  --accent-soft: oklch(0.7 0.15 250/.16);  --accent-line: oklch(0.7 0.15 250/.5); }
@@ -60,6 +73,12 @@
 [data-theme="dark"] {
   --grok-brand-color: #ffffff;
   --codex-brand-color: #c4c9d1;
+  --opencode-brand-color: #c7cbd1;
+  --antigravity-stop-1: #4285f4;
+  --antigravity-stop-2: #4285f4;
+  --antigravity-stop-3: #34a853;
+  --antigravity-stop-4: #fbbc05;
+  --antigravity-stop-5: #ea4335;
   /* Classic dark surfaces retain the brighter auxiliary text approved for the dark scheme. */
   --bg-0: oklch(0.2 0.006 260);                 /* app frame */
   --bg-1: oklch(0.205 0.006 260);                 /* sidebars */
@@ -89,6 +108,12 @@
 /* ---- LIGHT ---- */
 [data-theme="light"] {
   --grok-brand-color: #000000;
+  --opencode-brand-color: #3b82f6;
+  --antigravity-stop-1: #4285f4;
+  --antigravity-stop-2: #4285f4;
+  --antigravity-stop-3: #4285f4;
+  --antigravity-stop-4: #4285f4;
+  --antigravity-stop-5: #4285f4;
   --text-on-accent: #fff;
   /* Pure white chrome/terminal base so light mode matches Codex-style white panels (not cool gray). */
   --bg-0: #ffffff;
@@ -300,6 +325,8 @@ svg { display: block; }
 
 /* ============================ TREE ================================== */
 .tree { height: 100%; overflow-y: scroll; padding: 4px 6px 16px; }
+/* Dragging over the blank space of Tasks or Chats takes the item out of its group. */
+.tree.drop-root { background: var(--accent-soft); }
 .row { display: flex; align-items: center; gap: 6px; height: var(--row-h); padding-right: 6px; border-radius: var(--r-sm); cursor: pointer; position: relative; color: var(--text-mid); white-space: nowrap; user-select: none; -webkit-user-select: none; }
 .row:hover { background: var(--bg-hover); }
 .row.sel { background: var(--accent-soft); color: var(--text); }
@@ -359,7 +386,9 @@ svg { display: block; }
 .sidebar-rail-tool.on, .sidebar-rail-tool.account-on, .sidebar-rail-tool.account-on:hover { color: var(--accent); }
 .sidebar-rail-tool.account-on svg { filter: drop-shadow(0 0 4px color-mix(in oklch, var(--accent) 60%, transparent)); }
 .sidebar-rail-count { position: absolute; right: -2px; bottom: 0; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--bg-2); border: 1px solid var(--border); color: var(--text-dim); font-size: 9px; line-height: 12px; text-align: center; font-variant-numeric: tabular-nums; }
-.sidebar-section-empty { padding: 16px 14px; display: flex; flex-direction: column; align-items: center; gap: 10px; font-size: 12px; color: var(--text-faint); text-align: center; line-height: 1.6; }
+.sidebar-section-empty { padding: 24px 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; color: var(--text-dim); text-align: center; line-height: 1.5; }
+.sidebar-section-empty-title { color: var(--text); font-size: 13px; font-weight: 600; }
+.sidebar-section-empty-desc { margin-bottom: 12px; text-wrap: pretty; }
 .row.session .nm { font-weight: 400; }
 .row .meta { flex: none; min-width: 18px; justify-content: flex-end; color: var(--text-faint); font-size: 10px; opacity: 0; transition: opacity .1s; display: flex; gap: 2px; }
 .row:hover .meta { opacity: 1; }
@@ -427,6 +456,13 @@ svg { display: block; }
 .divider:hover::before, .divider.dragging::before { background: var(--accent-line); box-shadow: 0 0 0 1px var(--accent-line); }
 [data-divider="visible"] .divider::before { background: var(--border-strong); }
 
+/* The splitter is only 5px wide; the overlay widens the grab area without moving anything. */
+.vlx-splitter::after { content:""; position:absolute; top:0; bottom:0; left:-3px; right:-3px; }
+/* While a divider is dragged, previews must not take the pointer: an iframe swallows mousemove and
+   the drag freezes as soon as the cursor crosses it. */
+body.splitting { user-select: none; }
+body.splitting iframe { pointer-events: none; }
+
 .pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg-term); border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; transition: border-color .12s; }
 .pane.focus { border-color: var(--accent-line); }
 .pane.focus .pane-head { background: var(--accent-soft); }
@@ -478,14 +514,32 @@ svg { display: block; }
 .empty { flex: 1; display: grid; place-items: center; color: var(--text-faint); }
 .empty .inner { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 14px; }
 .empty .glyph { font-size: 30px; opacity: .5; }
+/* Start screen: accent tile, title, one-line hint, then the actions. */
+.empty .empty-tile { width: 52px; height: 52px; margin-bottom: 4px; border-radius: 14px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.empty .empty-title { margin-top: 0; color: var(--text); font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+.empty .empty-sub { margin-top: -8px; color: var(--text-dim); font-size: 13px; }
+.empty .empty-actions { margin-top: 4px; }
 /* Use the system UI face so keyboard symbols retain their familiar proportions. */
 .empty kbd, .hint-kbd { font-family: var(--font-prose); padding: 2px 7px; border: 1px solid var(--border-strong); border-radius: 5px; color: var(--text-dim); font-size: 12px; letter-spacing: .04em; white-space: nowrap; }
-.empty-split-hints { display: flex; flex-direction: column; gap: var(--space-2, 8px); max-width: min(480px, 100%); color: var(--text-dim); }
+.empty-split-hints { display: flex; flex-direction: column; gap: var(--space-2, 8px); max-width: min(480px, 100%); margin-top: 10px; padding-top: 16px; border-top: 1px solid var(--border); color: var(--text-faint); font-size: 12px; }
 .empty-split-keys { display: flex; justify-content: center; flex-wrap: wrap; gap: var(--space-3, 12px) var(--space-4, 16px); }
 .empty-split-keys > span { display: inline-flex; align-items: center; gap: var(--space-2, 8px); }
-/* Shared empty-state primary action. A neutral outline blends in until hover adds accent feedback. */
-.empty-action { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border: 1px solid var(--border-strong); border-radius: var(--r-md); color: var(--text-mid); font-size: var(--ui-fs); transition: background .12s, color .12s, border-color .12s; }
-.empty-action:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
+/* Shared empty-state actions. Each view gets one solid .primary; the others stay outlined, and .ghost is
+   the quiet text-only variant. Light themes darken the accent so white text stays readable; dark themes
+   keep the bright accent and switch to dark text. */
+.empty-action { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 34px; padding: 6px 15px; border: 0; border-radius: var(--r-md); background: var(--bg-2); color: var(--text); font-size: 13px; font-weight: 500; line-height: 1.3; text-decoration: none; cursor: pointer; box-shadow: inset 0 0 0 1px var(--border-strong), 0 1px 2px oklch(0 0 0 / .06); transition: background .12s, box-shadow .12s, transform .12s; }
+.empty-action:hover { background: color-mix(in oklch, var(--bg-2), var(--text) 4%); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--border-strong), var(--text) 12%), 0 2px 6px oklch(0 0 0 / .08); }
+.empty-action:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.empty-action kbd { padding: 1px 6px; font-size: 11px; font-weight: 400; }
+.empty-action.primary { --empty-fill: color-mix(in oklch, var(--accent) 86%, black); background: var(--empty-fill); color: var(--text-on-accent); box-shadow: inset 0 1px 0 oklch(1 0 0 / .2), 0 1px 2px oklch(0 0 0 / .2), 0 6px 14px -6px color-mix(in oklch, var(--empty-fill) 60%, transparent); }
+.empty-action.primary:hover { background: color-mix(in oklch, var(--accent) 80%, black); transform: translateY(-1px); box-shadow: inset 0 1px 0 oklch(1 0 0 / .2), 0 1px 2px oklch(0 0 0 / .2), 0 10px 20px -8px color-mix(in oklch, var(--empty-fill) 65%, transparent); }
+[data-theme="dark"] .empty-action.primary { --empty-fill: var(--accent); color: var(--bg-0); font-weight: 600; }
+[data-theme="dark"] .empty-action.primary:hover { background: color-mix(in oklch, var(--accent) 88%, white); }
+.empty-action.primary:active { transform: none; }
+.empty-action.ghost { min-height: 30px; padding: 4px 10px; background: transparent; color: var(--text-mid); box-shadow: none; }
+.empty-action.ghost:hover { background: var(--bg-hover); color: var(--text); box-shadow: none; }
+.empty-action.sm { min-height: 30px; padding: 5px 12px; font-size: var(--ui-fs); }
+.empty-action.block { align-self: stretch; }
 .empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
 .project-empty-actions { display: grid; grid-template-columns: minmax(0, 1fr); width: max-content; max-width: 100%; gap: var(--space-3, 12px); }
 .project-empty-actions .empty-action { min-width: 0; justify-content: center; overflow-wrap: anywhere; }
@@ -805,6 +859,14 @@ svg { display: block; }
 /* Active aggregate-status filter uses a subtle fill to identify the current state. */
 .statusbar .seg.on { background: var(--bg-active); }
 .statusbar .sp { flex: 1; }
+.statusbar .seg.zoom { gap: 0; margin: 0 -4px; }
+.statusbar .zoom-btn { display: grid; place-items: center; height: 18px; min-width: 18px; padding: 0 3px; border: none; border-radius: 4px; background: none; color: inherit; font: inherit; font-variant-numeric: tabular-nums; cursor: pointer; }
+.statusbar .zoom-btn.zoom-value { min-width: 40px; }
+.statusbar .zoom-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.statusbar .zoom-btn:disabled { opacity: 0.4; cursor: default; }
+/* Editable zoom level; the width matches the value button so the +/- steps do not shift when editing. */
+.statusbar .zoom-input { box-sizing: border-box; width: 40px; height: 18px; padding: 0 2px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--bg-1); color: var(--text); font: inherit; font-variant-numeric: tabular-nums; text-align: center; outline: none; }
+.statusbar .zoom-input:focus { border-color: var(--accent); }
 .statusbar .accent { color: var(--accent); }
 /* While remote access runs, light the status-bar port segment to match the `.remote-on` globe. */
 .statusbar .seg.web-on { color: var(--accent); }

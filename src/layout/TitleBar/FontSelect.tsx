@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Select from "../../components/Select";
 import { useT } from "../../i18n";
 import { platform } from "../../platform";
@@ -77,7 +77,8 @@ export function isKnownFontSelection(value: string | null, catalog: FontCatalog 
   return matched;
 }
 
-/** Only enumerated families are suggested. Preserve saved/custom names even when enumeration fails. */
+/** Only enumerated families are suggested. Typing filters them, and text matching no family becomes a row
+ *  that commits the name as-is, so saved/custom stacks never need a separate editing mode. */
 export function FontSelect({ value, onChange, label, fonts }: {
   value: string | null;
   onChange: (value: string | null) => void;
@@ -85,25 +86,14 @@ export function FontSelect({ value, onChange, label, fonts }: {
   fonts: FontCatalogState;
 }) {
   const t = useT();
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState("");
-  const committed = useRef(false);
   const { catalog, loading } = fonts;
   const families = catalog?.families ?? [];
   const listed = value != null && families.includes(value);
-  const CUSTOM = "\u0000custom";
   const options = [
     { value: "", label: t("settings.fontDefault") },
-    { value: CUSTOM, label: t("settings.fontCustom") },
     ...(value != null && !listed ? [{ value, label: value, separatorBefore: true }] : []),
     ...families.map((family, index) => ({ value: family, label: family, separatorBefore: index === 0 })),
   ];
-  const finish = (save: boolean) => {
-    if (committed.current) return;
-    committed.current = true;
-    if (save) onChange(draft.trim() || null);
-    setEditing(false);
-  };
   const message = loading ? t("common.loading")
     : !catalog?.systemFontsAvailable ? t("settings.fontListUnavailable")
     : !isKnownFontSelection(value, catalog) ? t("settings.fontUnconfirmed")
@@ -111,44 +101,23 @@ export function FontSelect({ value, onChange, label, fonts }: {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4, width: 160 }}>
-      {editing ? (
-        <input
-          autoFocus
-          aria-label={label}
-          value={draft}
-          placeholder="Fira Code"
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              finish(true);
-            } else if (event.key === "Escape") {
-              event.stopPropagation();
-              finish(false);
-            }
-          }}
-          onBlur={() => finish(true)}
-          style={{ width: "100%", boxSizing: "border-box", height: 26, padding: "0 8px", background: "var(--bg-active)", color: "var(--text)", border: "1px solid var(--accent)", borderRadius: 6, fontSize: 11.5, fontFamily: "inherit", outline: "none" }}
-        />
-      ) : (
-        <Select
-          value={value ?? ""}
-          onChange={(next) => {
-            if (next === CUSTOM) {
-              setDraft(value ?? "");
-              committed.current = false;
-              setEditing(true);
-            } else onChange(next || null);
-          }}
-          options={options}
-          size="sm"
-          width={160}
-          menuWidth={280}
-          menuPortal
-          align="right"
-          ariaLabel={label}
-        />
-      )}
+      <Select
+        value={value ?? ""}
+        onChange={(next) => onChange(next || null)}
+        options={options}
+        size="sm"
+        width={160}
+        menuWidth={280}
+        menuPortal
+        align="right"
+        searchable
+        searchPlaceholder={t("settings.fontSearch")}
+        customEntry={{
+          label: (query) => t("settings.fontUseCustom", query),
+          onSelect: (query) => onChange(query.trim() || null),
+        }}
+        ariaLabel={label}
+      />
       {message && <div role="status" style={{ fontSize: 10.5, color: "var(--text-muted)", lineHeight: 1.5 }}>{message}</div>}
     </div>
   );

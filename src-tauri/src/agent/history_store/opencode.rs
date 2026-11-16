@@ -50,13 +50,13 @@ fn layout(path:&Path,native:&str) -> Result<Vec<u8>,String> {
     Ok(bytes)
 }
 
-pub(super) fn register(store:&Store,path:PathBuf,native:&str) -> Result<RegisteredSource,String> {
+pub(super) fn register(store:&Store,kind:SessionKind,path:PathBuf,native:&str) -> Result<RegisteredSource,String> {
     if native.is_empty() || native.len()>200 {return Err("detail_unavailable: native database session identity is invalid".into());}
     if !path.is_file() {return Err("source_missing: OpenCode database is unavailable".into());}
     let fingerprint=stamp(&path)?;
     let key=format!("sqlite:opencode:{}:{native}",path.to_string_lossy());
     let layout_path=path.clone();
-    store.register_virtual(SessionKind::Opencode,&key,&path,native,fingerprint,||layout(&layout_path,native))
+    store.register_virtual(kind,&key,&path,native,fingerprint,||layout(&layout_path,native))
 }
 
 pub(super) fn body_paths(record:&Record,role:&str) -> Vec<String> {
@@ -152,7 +152,7 @@ pub(super) fn walk_user(source:&RegisteredSource,message:&str,cancel:&AtomicBool
     Ok(())
 }
 
-pub(super) fn store_record(state:&mut State,scanned:&Scanned,record:&Record,refs:&Refs) -> Result<(),String> {
+pub(super) fn store_record(state:&mut State,kind:SessionKind,scanned:&Scanned,record:&Record,refs:&Refs) -> Result<(),String> {
     let source=scanned.source;
     let value=&record.value;
     if let Some(id)=value.pointer("/info/id").and_then(Value::as_str) {
@@ -188,7 +188,7 @@ pub(super) fn store_record(state:&mut State,scanned:&Scanned,record:&Record,refs
             }
             row["bodySizeBytes"]=json!(size);if size>PREVIEW_BYTES as u64 {row["bodyAvailable"]=json!(true);}
         }
-        super::children::annotate(SessionKind::Opencode,record,&mut row)?;
+        super::children::annotate(kind,record,&mut row)?;
         adapter::write_row(state,scanned,record,local,value.pointer("/part/callID").and_then(Value::as_str),&row,refs);
         adapter::attach(state,&id,label,&paths,refs);
         if row["kind"]=="user" {

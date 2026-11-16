@@ -9,7 +9,11 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("../i18n", () => ({ useT: () => (key: string, n?: number) => n == null ? key : `${key}:${n}` }));
 vi.mock("../hooks/nativeViewSuspend", () => ({ useSuspendNativeViews: () => {} }));
-vi.mock("../ipc/transport", () => ({ isTauri: true, listen: (_name: string, callback: typeof mocks.event) => { mocks.event = callback; return Promise.resolve(() => {}); } }));
+vi.mock("../ipc/transport", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../ipc/transport")>()),
+  isTauri: true,
+  listen: (_name: string, callback: typeof mocks.event) => { mocks.event = callback; return Promise.resolve(() => {}); },
+}));
 vi.mock("../ipc/wsClient", () => ({ wsClient: {} }));
 vi.mock("../store/termStore", () => ({ useTermStore: Object.assign((selector: (state: typeof mocks.store) => unknown) => selector(mocks.store), { getState: () => mocks.store }) }));
 vi.mock("../ipc/launch", () => ({
@@ -47,13 +51,15 @@ it.each(["none", "shared", "each"] as const)("restores a %s proposal and keeps t
   expect(screen.getByText(mode === "each" ? "launch.workflowDirectoryEachHint" : "launch.splitSharedDirectory")).toBeTruthy();
   expect(mocks.confirm).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText("orch.promptLabel"), { target: { value: "Edited parser assignment" } });
-  fireEvent.change(screen.getByLabelText("spawn.modelLabel"), { target: { value: "approved-model" } });
+  fireEvent.click(screen.getByLabelText("spawn.modelLabel"));
+  fireEvent.change(screen.getByPlaceholderText("chat.filterPlaceholder"), { target: { value: "approved-model" } });
+  fireEvent.click(screen.getAllByRole("option")[0]);
   fireEvent.click(screen.getByRole("link", { name: "2. Settings" }));
   expect(new URLSearchParams(window.location.search).get("splitTask")).toBe("1");
   fireEvent.change(screen.getByLabelText("orch.promptLabel"), { target: { value: "Edited settings assignment" } });
   fireEvent.click(screen.getByRole("link", { name: "1. Parser" }));
   expect((screen.getByLabelText("orch.promptLabel") as HTMLTextAreaElement).value).toBe("Edited parser assignment");
-  expect((screen.getByLabelText("spawn.modelLabel") as HTMLInputElement).value).toBe("approved-model");
+  expect(screen.getByLabelText("spawn.modelLabel").textContent).toContain("approved-model");
   fireEvent.click(screen.getByRole("button", { name: "orch.launch:2" }));
   await waitFor(() => expect(mocks.confirm).toHaveBeenCalledOnce());
   expect(mocks.confirm.mock.calls[0][0]).toEqual({ runId: "run", proposalId: "proposal", tasks: [

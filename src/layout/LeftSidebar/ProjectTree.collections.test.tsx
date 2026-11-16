@@ -333,3 +333,56 @@ describe("dragging projects", () => {
     expect(fireEvent.dragOver(rowOf("Payments"), overData(["text/plain", PROJECT_DRAG_MIME]))).toBe(false);
   });
 });
+
+describe("groups in Tasks", () => {
+  const tasksState = () => {
+    mocks.state.projects = [collection(SYSTEM_PROJECTS, "Projects", 0), collection(SYSTEM_TASKS, "Tasks", 1)];
+    mocks.state.groups = [
+      { id: "g1", projectId: SYSTEM_TASKS, parentGroupId: null, name: "reading", sortOrder: 0, collapsed: false, createdAt: 0 },
+    ];
+    mocks.state.sessions = [
+      { id: "s1", projectId: SYSTEM_TASKS, groupId: "g1", name: "inner", kind: "terminal", sortOrder: 0, collapsed: false },
+    ];
+  };
+
+  it("offers a new group next to a new task when Tasks is empty", () => {
+    mocks.state.projects = [collection(SYSTEM_PROJECTS, "Projects", 0), collection(SYSTEM_TASKS, "Tasks", 1)];
+    const onAddGroup = vi.fn();
+    render(<ProjectTree {...handlers({ onAddGroup })} section="tasks" />);
+    fireEvent.click(screen.getByText("tree.newGroup"));
+    expect(onAddGroup).toHaveBeenCalledWith(expect.objectContaining({ kind: "project", id: SYSTEM_TASKS }));
+  });
+
+  it("takes a task out of its group when dropped on the blank space", () => {
+    tasksState();
+    const { container } = render(<ProjectTree {...handlers()} section="tasks" />);
+    const tree = container.querySelector(".tree") as HTMLElement;
+    fireEvent.drop(tree, dropData({ kind: "session", id: "s1", projectId: SYSTEM_TASKS }));
+    expect(mocks.state.moveNode).toHaveBeenCalledWith("session", "s1", SYSTEM_TASKS, null, null, expect.any(Number));
+  });
+
+  it("ignores blank-space drops of sessions from another collection", () => {
+    tasksState();
+    const { container } = render(<ProjectTree {...handlers()} section="tasks" />);
+    const tree = container.querySelector(".tree") as HTMLElement;
+    fireEvent.drop(tree, dropData({ kind: "session", id: "s9", projectId: "p-web" }));
+    expect(mocks.state.moveNode).not.toHaveBeenCalled();
+  });
+
+  it("opens the Tasks menu on a right-click in the blank space", () => {
+    tasksState();
+    const onContext = vi.fn();
+    const { container } = render(<ProjectTree {...handlers({ onContext })} section="tasks" />);
+    // The app cancels the native menu in the capture phase before any React handler runs (bootstrap.tsx).
+    const cancelNative = (event: Event) => event.preventDefault();
+    document.addEventListener("contextmenu", cancelNative, { capture: true });
+    try {
+      fireEvent.contextMenu(container.querySelector(".tree") as HTMLElement);
+    } finally {
+      document.removeEventListener("contextmenu", cancelNative, { capture: true });
+    }
+    expect(onContext).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "project", id: SYSTEM_TASKS }), expect.any(Number), expect.any(Number),
+    );
+  });
+});

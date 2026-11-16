@@ -47,8 +47,8 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-async function mountPane() {
-  render(<ChatPane session={{ id: "s", projectId: "p", name: "Claude", kind: "claude", engine: "chat", collapsed: false, sortOrder: 0, createdAt: 0 }}
+async function mountPane(kind: "claude" | "deepseek" = "claude") {
+  render(<ChatPane session={{ id: "s", projectId: "p", name: kind === "deepseek" ? "DeepSeek" : "Claude", kind, engine: "chat", collapsed: false, sortOrder: 0, createdAt: 0 }}
     area={{}} hidden={false} focused multi={false} onActivate={() => {}} onSplit={() => {}} onClose={() => {}} />);
   await waitFor(() => expect(vi.mocked(invoke).mock.calls.some(([command]) => command === "chat_snapshot")).toBe(true));
   await act(async () => {});
@@ -222,5 +222,19 @@ describe("shell mode in the composer", () => {
     expect(preview.disabled).toBe(true);
     expect(commands()).not.toContain("chat_queue_update");
     expect(commands()).not.toContain("chat_queue_remove");
+  });
+
+  it("takes images for DeepSeek until its handshake names a model that only reads text", async () => {
+    const input = await mountPane("deepseek");
+    const paste = () => fireEvent.paste(input, { clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => new File(["shot"], "shot.png", { type: "image/png" }) }] } });
+    paste();
+    await waitFor(() => expect(document.querySelector(".sv-attach-item")).toBeTruthy());
+    // dsh reports per model. A text-only model keeps what was already picked but refuses any more.
+    act(() => eventCallback({ type: "capabilities", images: false }));
+    expect(await screen.findByText("The selected model does not accept images.")).toBeTruthy();
+    fireEvent.click(document.querySelector<HTMLButtonElement>(".sv-attach-drop")!);
+    paste();
+    await waitFor(() => expect(screen.getByText("The selected model does not accept images.")).toBeTruthy());
+    expect(document.querySelector(".sv-attach-item")).toBeNull();
   });
 });

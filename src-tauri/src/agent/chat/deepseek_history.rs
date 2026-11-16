@@ -18,15 +18,18 @@
 //! reasoning, answers and tool calls, tool results, failed turns and compaction. Runtime context, system
 //! prompts, request headers and bookkeeping events are the harness talking to the model and stay hidden.
 //!
-//! Verified against the logs dsh 0.2.1-rc.2 and rc.3 write (session format v4).
+//! Verified against the logs dsh 0.2.1-rc.2 and rc.3 write (session format v4); prompt images were verified
+//! against rc.5, which stores them under `attachments/v1/objects`.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
+use base64::Engine as _;
 use serde_json::{json, Value};
 
 use super::engine::ChatRow;
+use super::protocol::ChatImage;
 use crate::agent::transcript::TranscriptMessage;
 
 /// Decompressed bytes read from one log at most. A log is mostly tool schemas and results; past this a
@@ -48,7 +51,7 @@ pub fn home() -> Option<PathBuf> {
 }
 
 /// A session id is a directory name under the log root, so anything that could leave it is refused.
-fn valid_id(id: &str) -> bool {
+pub(crate) fn valid_id(id: &str) -> bool {
     !id.is_empty() && !id.starts_with('.') && id.len() <= 200
         && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
@@ -109,6 +112,25 @@ pub fn read_events(path: &Path) -> Result<Vec<Value>, String> {
         true
     })?;
     Ok(events)
+}
+
+/// Feed the complete events of the named types to `visit` until it returns false or the log ends.
+///
+/// Logs interleave small state events with multi-megabyte system prompts and tool schemas, so a line
+/// whose leading type is readable is declined before the JSON is decoded.
+pub(crate) fn each_event_of(path: &Path, kinds: &[&str], mut visit: impl FnMut(Value) -> bool) -> Result<(), String> {
+    each_line(path, |line| {
+        let head = &line[..line.len().min(48)];
+        if let Some(rest) = head.strip_prefix(br#"{"type":""#) {
+            let known = kinds.iter().any(|kind| rest.starts_with(kind.as_bytes()) && rest.get(kind.len()) == Some(&b'"'));
+            if !known { return true; }
+        }
+        let Ok(event) = serde_json::from_slice::<Value>(line) else { return true };
+        if event.get("type").and_then(Value::as_str).is_none_or(|kind| !kinds.contains(&kind)) {
+            return true;
+        }
+        visit(event)
+    })
 }
 
 /// Feed each complete line of a log, decoded, to `visit` until it returns false or the log ends.
@@ -287,6 +309,35 @@ fn text_of(content: Option<&Value>) -> String {
     out
 }
 
+/// Inline the images of one prompt from dsh's content-addressed attachment store.
+///
+/// The log names each image by `sha256:<hex>` and stores its bytes at
+/// `<harness home>/attachments/v1/objects/<first two hex>/<hex>`. A missing, malformed or oversized file is
+/// skipped: the text of the message still replays, and one unreadable image must not hide the conversation.
+fn images_of(content: Option<&Value>, attachments: Option<&Path>) -> Vec<ChatImage> {
+    let Some(root) = attachments else { return Vec::new() };
+    let mut out = Vec::new();
+    for block in content.and_then(Value::as_array).into_iter().flatten() {
+        if out.len() >= crate::command_core::MAX_IMAGES_PER_MESSAGE { break; }
+        if block.get("type").and_then(Value::as_str) != Some("image") { continue; }
+        let Some(attachment) = block.get("attachment") else { continue };
+        let Some(id) = attachment.get("attachmentId").and_then(Value::as_str) else { continue };
+        let Some(hash) = id.strip_prefix("sha256:") else { continue };
+        if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) { continue; }
+        let path = root.join(&hash[..2]).join(hash);
+        if std::fs::metadata(&path).is_ok_and(|meta| meta.len() > crate::command_core::MAX_IMAGE_BYTES as u64) { continue; }
+        let Ok(bytes) = std::fs::read(&path) else { continue };
+        let media = attachment.get("mediaType").and_then(Value::as_str).unwrap_or("image/png");
+        out.push(ChatImage { mime_type: media.to_string(), data: base64::engine::general_purpose::STANDARD.encode(bytes) });
+    }
+    out
+}
+
+/// Where dsh keeps prompt images, if the harness home is known.
+pub fn attachment_root() -> Option<PathBuf> {
+    Some(home()?.join("attachments/v1/objects"))
+}
+
 /// Rows in timeline order, addressed by id so a later event can update an earlier row.
 #[derive(Default)]
 struct Rows {
@@ -308,8 +359,8 @@ impl Rows {
     }
 }
 
-/// The timeline a sequence of log events replays to.
-pub fn rows(events: &[Value]) -> Vec<ChatRow> {
+/// The timeline a sequence of log events replays to. `attachments` is dsh's image object store, when known.
+pub fn rows(events: &[Value], attachments: Option<&Path>) -> Vec<ChatRow> {
     let mut out = Rows::default();
     // Tool calls of the open turn still waiting for a result.
     let mut running: Vec<String> = Vec::new();
@@ -324,9 +375,10 @@ pub fn rows(events: &[Value]) -> Vec<ChatRow> {
             "user/message" => {
                 if data.pointer("/source/kind").and_then(Value::as_str) != Some("user") { continue; }
                 let text = text_of(data.get("content"));
-                if text.is_empty() { continue; }
+                let images = images_of(data.get("content"), attachments);
+                if text.is_empty() && images.is_empty() { continue; }
                 let id = data.get("id").and_then(Value::as_str).map(|id| format!("dsh-u-{id}")).unwrap_or_else(|| format!("dsh-u{seq}"));
-                out.place(ChatRow::User { id, text, images: Vec::new(), at: time });
+                out.place(ChatRow::User { id, text, images, at: time });
             }
             "turn/start" => {
                 turn_started = time;
@@ -434,10 +486,37 @@ fn turn_failure(data: &Value) -> Option<String> {
     }
 }
 
-/// History rows of a DeepSeek conversation, read from its log.
-pub fn replay(id: &str) -> Result<Vec<ChatRow>, String> {
+/// The conversation as Markdown export events, replayed from the log.
+pub fn export_events(id: &str) -> Result<Vec<crate::agent::export::Event>, String> {
+    use crate::agent::export::Event;
     let path = find(id).ok_or("source_missing: The DeepSeek conversation log could not be found")?;
-    let mut rows = rows(&read_events(&path)?);
+    let timestamp = |at: Option<i64>| at.map(|ms| crate::agent::usage::unix_to_rfc3339_utc((ms.max(0) / 1000) as u64));
+    let mut out = Vec::new();
+    for row in rows(&read_events(&path)?, None) {
+        match row {
+            ChatRow::User { text, at, .. } => out.push(Event::User { text, ts: timestamp(at) }),
+            ChatRow::Assistant { text, at, .. } => out.push(Event::AssistantText { text, ts: timestamp(at) }),
+            ChatRow::Reasoning { text, .. } => out.push(Event::Thinking { text, ts: None }),
+            ChatRow::Tool { id, name, input, output, is_error, .. } => {
+                out.push(Event::ToolUse { id: Some(id.clone()), name: name.clone(), input, ts: None });
+                if let Some(text) = output {
+                    out.push(Event::ToolResult { id: Some(id), name: Some(name), text, is_error });
+                }
+            }
+            ChatRow::Shell { command, stdout, status, exit_code, .. } => out.push(Event::Shell {
+                id: None, command, output: stdout, exit_code,
+                cancelled: status == "cancelled", truncated: false, ts: None,
+            }),
+            _ => {}
+        }
+    }
+    Ok(out)
+}
+
+/// History rows of a DeepSeek conversation, read from its log.
+pub fn replay(id: &str) -> Result<Vec<ChatRow>, String> {    let path = find(id).ok_or("source_missing: The DeepSeek conversation log could not be found")?;
+    let attachments = attachment_root();
+    let mut rows = rows(&read_events(&path)?, attachments.as_deref());
     super::shell::map_replayed_rows(&mut rows);
     Ok(rows)
 }
@@ -447,7 +526,8 @@ pub fn transcript(id: &str) -> Result<Vec<TranscriptMessage>, String> {
     let path = find(id).ok_or("source_missing: The DeepSeek conversation log could not be found")?;
     let timestamp = |at: Option<i64>| at.map(|ms| crate::agent::usage::unix_to_rfc3339_utc((ms.max(0) / 1000) as u64));
     let mut out: Vec<TranscriptMessage> = Vec::new();
-    for row in rows(&read_events(&path)?) {
+    // The plain transcript carries text only, so it does not read every prompt image from disk.
+    for row in rows(&read_events(&path)?, None) {
         match row {
             ChatRow::User { text, at, .. } => out.push(TranscriptMessage { role: "user".into(), text, timestamp: timestamp(at), tools: Vec::new() }),
             ChatRow::Assistant { text, at, .. } => match out.last_mut() {
@@ -511,7 +591,7 @@ mod tests {
 
     #[test]
     fn a_turn_replays_to_the_rows_the_live_view_draws() {
-        assert_eq!(summary(&rows(&turn())), vec![
+        assert_eq!(summary(&rows(&turn(), None)), vec![
             "dsh-u-u-1 user Create hello.txt",
             "acp-a-m1 answer I'll create it. None",
             "acp-t-call_1 Write completed Created file",
@@ -520,7 +600,7 @@ mod tests {
             "acp-r-m3 reasoning Answer briefly.",
             "acp-a-m3 answer Created hello.txt. Some(2000)",
         ]);
-        let replayed = rows(&turn());
+        let replayed = rows(&turn(), None);
         let ChatRow::Tool { input, .. } = &replayed[2] else { panic!() };
         assert_eq!((input["file_path"].as_str(), input["content"].as_str()), (Some("/w/hello.txt"), Some("hi")));
         let ChatRow::Assistant { model, at, .. } = &replayed[6] else { panic!() };
@@ -528,15 +608,34 @@ mod tests {
     }
 
     #[test]
+    fn a_prompt_image_replays_from_the_attachment_store() {
+        let root = std::env::temp_dir().join(format!("dsh-attachments-{}", uuid::Uuid::new_v4()));
+        let hash = "c414cd0e204de974f73753c7e28d7638e7b3691bb8b1a2bab6b25bb7fed7ce77";
+        std::fs::create_dir_all(root.join(&hash[..2])).unwrap();
+        std::fs::write(root.join(&hash[..2]).join(hash), [1u8, 2, 3]).unwrap();
+        let events = vec![json!({"type":"user/message","seq":1,"time":10,"data":{"id":"u-1","source":{"kind":"user"},
+            "content":[{"type":"text","text":"Look"},{"type":"image","attachment":{
+                "attachmentId":format!("sha256:{hash}"),"mediaType":"image/png","width":1,"height":1,"bytes":3}}]}})];
+        let replayed = rows(&events, Some(&root));
+        let ChatRow::User { text, images, .. } = &replayed[0] else { panic!() };
+        assert_eq!(text, "Look");
+        assert_eq!((images.len(), images[0].mime_type.as_str(), images[0].data.as_str()), (1, "image/png", "AQID"));
+        // A missing object leaves the text and only drops the picture; it must not hide the message.
+        let missing = rows(&events, Some(&root.join("absent")));
+        assert!(matches!(&missing[0], ChatRow::User { text, images, .. } if text == "Look" && images.is_empty()));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn a_stopped_turn_cancels_its_open_calls_and_a_failed_one_says_why() {
         let mut events = turn();
         events.truncate(8);
         events.push(json!({"type":"turn/end","seq":25,"time":2_200,"data":{"reason":{"kind":"aborted","reason":{"kind":"user"}}}}));
-        let replayed = summary(&rows(&events));
+        let replayed = summary(&rows(&events, None));
         assert_eq!(replayed.last().unwrap(), "acp-t-call_2 Bash canceled ");
         events.push(json!({"type":"turn/start","seq":26,"time":3_000,"data":{"turn":2}}));
         events.push(json!({"type":"turn/end","seq":27,"time":3_100,"data":{"reason":{"kind":"error","error":{"message":"rate limited","code":"RATE"}}}}));
-        assert_eq!(summary(&rows(&events)).last().unwrap(), "dsh-e27 error The turn failed: rate limited");
+        assert_eq!(summary(&rows(&events, None)).last().unwrap(), "dsh-e27 error The turn failed: rate limited");
     }
 
     #[test]
@@ -548,7 +647,7 @@ mod tests {
             json!({"type":"compaction/start","seq":4,"data":{"compactionId":"d","turn":2}}),
             json!({"type":"compaction/end","seq":5,"data":{"compactionId":"d","turn":2,"error":"failed"}}),
         ];
-        assert_eq!(summary(&rows(&events)), vec!["dsh-c1 compaction completed Some(9000)"]);
+        assert_eq!(summary(&rows(&events, None)), vec!["dsh-c1 compaction completed Some(9000)"]);
     }
 
     #[test]

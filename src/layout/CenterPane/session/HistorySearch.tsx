@@ -69,7 +69,7 @@ export function HistorySearch({ sessionId, onLocate, onClose }: {
   return <div className="sv-search" role="search" onKeyDown={event => {
     event.stopPropagation();
     if (event.key === "Escape") { event.preventDefault(); onClose(); }
-    if (event.key === "Enter" && !event.nativeEvent.isComposing && hits.length) {
+    if (event.key === "Enter" && !event.nativeEvent.isComposing && event.keyCode !== 229 && hits.length) {
       event.preventDefault(); void move((selected + (event.shiftKey ? -1 : 1) + hits.length) % hits.length);
     }
   }}>

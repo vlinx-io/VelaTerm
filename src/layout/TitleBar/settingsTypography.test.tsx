@@ -17,7 +17,7 @@ import { setLang } from "../../i18n";
 import { pushSetting } from "../../ipc/settingsSync";
 import { loadSettings, SETTINGS_KEY, visualOf } from "../../store/settings";
 import { useTermStore } from "../../store/termStore";
-import { applyVisual, fontStack } from "../../theme";
+import { applyVisual, fontStack, uiFontStack } from "../../theme";
 import { SettingsModal } from "./SettingsModal";
 
 beforeEach(() => {
@@ -109,4 +109,62 @@ it("provides separate controls and resets only the selected conversation value",
 it("normalizes malformed or out-of-range saved typography", () => {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({ chatFontSize: 999, chatLineHeight: null, chatFontFamily: 123, termLineHeight: 0 }));
   expect(loadSettings()).toMatchObject({ chatFontSize: 24, chatLineHeight: 1.2, chatFontFamily: null, termLineHeight: 1 });
+});
+
+it("applies interface fonts to the base stacks and restores them together", () => {
+  const store = useTermStore.getState();
+  const root = document.documentElement.style;
+  store.setUiFontFamily("Avenir Next");
+  store.setUiMonoFontFamily("Menlo");
+  store.setUiFontSize(14);
+  expect(root.getPropertyValue("--font-ui")).toBe(uiFontStack("Avenir Next"));
+  expect(root.getPropertyValue("--font-ui")).toMatch(/^"Avenir Next", .*sans-serif/);
+  expect(root.getPropertyValue("--font-mono")).toBe(fontStack("Menlo"));
+  // The default conversation text follows the interface face, so Inter's tracking no longer applies.
+  expect(root.getPropertyValue("--chat-tracking")).toBe("0px");
+  expect(loadSettings()).toMatchObject({ uiFontFamily: "Avenir Next", uiMonoFontFamily: "Menlo", uiFontSize: 14 });
+  store.resetUiTypography();
+  expect(loadSettings()).toMatchObject({ uiFontFamily: null, uiMonoFontFamily: null, uiFontSize: null });
+  expect(root.getPropertyValue("--font-ui")).toBe("");
+  expect(root.getPropertyValue("--font-mono")).toBe("");
+  expect(root.getPropertyValue("--chat-tracking")).toBe("");
+});
+
+it("applies the conversation code font and letter spacing, and resets every conversation value", () => {
+  const store = useTermStore.getState();
+  const root = document.documentElement.style;
+  store.setChatCodeFontFamily("Fira Code");
+  store.setChatLetterSpacing(0.55);
+  store.setChatFontSize(16);
+  expect(root.getPropertyValue("--chat-code-font")).toBe(fontStack("Fira Code"));
+  expect(root.getPropertyValue("--chat-tracking")).toBe("0.6px");
+  store.setChatLetterSpacing(9);
+  expect(useTermStore.getState().chatLetterSpacing).toBe(2);
+  store.setChatLetterSpacing(null);
+  expect(root.getPropertyValue("--chat-tracking")).toBe("");
+  store.resetChatTypography();
+  expect(loadSettings()).toMatchObject({ chatFontFamily: null, chatCodeFontFamily: null, chatFontSize: 13.5, chatLineHeight: 1.2, chatLetterSpacing: null });
+  expect(root.getPropertyValue("--chat-code-font")).toBe("");
+});
+
+it("steps letter spacing from the automatic value and offers group resets in the dialog", async () => {
+  await act(async () => render(<SettingsModal onClose={() => {}} />));
+  fireEvent.click(screen.getByRole("link", { name: "Appearance" }));
+  expect(screen.getByRole("combobox", { name: "Interface font" })).toBeTruthy();
+  expect(screen.getByRole("combobox", { name: "Monospace font" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("link", { name: "Conversation view" }));
+  document.documentElement.style.setProperty("--chat-tracking", "0.2px");
+  const spacing = within(screen.getByRole("group", { name: "Conversation letter spacing" }));
+  expect(spacing.getByTitle("Reset").textContent).toBe("Auto");
+  fireEvent.click(spacing.getByTitle("Larger"));
+  expect(useTermStore.getState().chatLetterSpacing).toBe(0.3);
+  useTermStore.getState().setChatFontSize(18);
+  fireEvent.click(screen.getByRole("button", { name: "Restore default fonts" }));
+  expect(useTermStore.getState()).toMatchObject({ chatLetterSpacing: null, chatFontSize: 13.5 });
+  expect(screen.getAllByRole("group", { name: "Preview" })).toHaveLength(1);
+});
+
+it("drops malformed saved interface and code fonts", () => {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify({ uiFontFamily: "  ", uiMonoFontFamily: 7, chatCodeFontFamily: " Menlo ", chatLetterSpacing: "wide" }));
+  expect(loadSettings()).toMatchObject({ uiFontFamily: null, uiMonoFontFamily: null, chatCodeFontFamily: "Menlo", chatLetterSpacing: null });
 });

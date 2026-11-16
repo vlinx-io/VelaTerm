@@ -2,6 +2,8 @@
 
 Created: 2026-09-25 10:12
 
+Updated: 2026-11-09 21:17
+
 > A planning and execution workflow splits one piece of work between two roles: a planner that prepares and reviews the work, and one or more executors that carry it out. This chapter covers starting a workflow from the menu or from a session, reviewing a task split, choosing working directories, and following the workflow's progress.
 
 ## 1. How the workflow runs
@@ -52,6 +54,7 @@ The new planner is created under the session that ran the command. The request f
 | `--split-tasks` | Let the planner propose several tasks (§4) |
 | `--worktree-mode none\|shared\|each` | Directory mode for all roles (§5); overrides `--worktree` |
 | `--cwd <path>` | Working directory and repository for the workflow |
+| `--title <text>` | Name of the planner session, instead of the default `Plan · Execute`; executors keep their own names |
 | `--yes` | Skip the initial confirmation card; a task split is still shown for review |
 
 Without an explicit agent, a planner started from a Claude, Codex, OpenCode, Pi or OMP session uses the same agent; from any other session it uses Claude Code. A model or effort that the selected agent does not support is rejected before anything starts.

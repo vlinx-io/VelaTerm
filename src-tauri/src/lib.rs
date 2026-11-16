@@ -4,6 +4,8 @@
 
 mod agent;
 mod artifact;
+// `vapp`: validates and records app actions a session's agent asks the user to confirm.
+mod assist;
 // Undoes the AppImage launcher's environment rewrite for child processes on Linux.
 pub mod appimage;
 // Built-in browser tabs require desktop Tauri child windows and are absent from the minimal server.
@@ -64,6 +66,8 @@ mod screenshot;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 mod server_supply;
 pub use server_supply::run_verify_update;
+// International (velaterm.com) or China mirror (velaterm.cn) for updates, downloads and website links.
+mod server_region;
 // vela-server host subcommands: account linking, full access, service install and self-update.
 mod host_cli;
 // GUI-only client-side SSH orchestration, provisioning, serve, forwarding, and auto-login.
@@ -86,6 +90,9 @@ mod notify_linux;
 // Windows self-update installed from VelaTerm's own data folder instead of the updater plugin's Temp folder.
 #[cfg(feature = "gui")]
 mod updater_win;
+// Update check against the selected server region; the plugin's own check only knows tauri.conf.json.
+#[cfg(feature = "gui")]
+mod updater_check;
 
 use agent::server::HookServer;
 use db::Db;
@@ -346,7 +353,7 @@ pub fn run_codex_hook(args: &[String]) {
     let Ok(sid) = std::env::var("VLX_SESSION_ID") else {
         return;
     };
-    let Ok(token) = std::env::var("VLX_TOKEN") else {
+    let Some(token) = crate::agent::session_env::token() else {
         return;
     };
     if base.is_empty() || sid.is_empty() || token.is_empty() {
@@ -392,7 +399,7 @@ pub fn run_grok_hook(args: &[String]) {
     let Ok(sid) = std::env::var("VLX_SESSION_ID") else {
         return;
     };
-    let Ok(token) = std::env::var("VLX_TOKEN") else {
+    let Some(token) = crate::agent::session_env::token() else {
         return;
     };
     if base.is_empty() || sid.is_empty() || token.is_empty() {
@@ -418,6 +425,11 @@ pub fn run_spawn(args: &[String]) -> ! {
 
 pub fn run_tell(args: &[String]) -> ! {
     agent::tell::run_cli(args)
+}
+
+/// `vapp`: lets a session's agent operate VelaTerm, with each action confirmed by the user.
+pub fn run_app(args: &[String]) -> ! {
+    agent::app_cli::run_cli(args)
 }
 
 pub fn run_flow(args: &[String]) -> ! {
@@ -666,6 +678,8 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 .build(),
         )
         .plugin(fonts::plugin())
+        // Dropping a file where the page does not take it must never navigate a window to that file.
+        .plugin(native_drop::nav_guard())
         .plugin(local_download::plugin())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -916,12 +930,12 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                         "visit-website" => {
                             let _ = app_handle
                                 .opener()
-                                .open_url("https://velaterm.com", None::<&str>);
+                                .open_url(server_region::current().site_origin(), None::<&str>);
                         }
                         "send-feedback" => {
                             let _ = app_handle
                                 .opener()
-                                .open_url("https://velaterm.com/feedback", None::<&str>);
+                                .open_url(format!("{}/feedback", server_region::current().site_origin()), None::<&str>);
                         }
                         _ => {}
                     }
@@ -946,6 +960,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             diagnostics::init(&data_dir, VERSION);
             let db = Db::open(&data_dir.join("vlx-term.db"))?;
             db::system_collections::ensure(&db.conn.lock().unwrap())?;
+            server_region::load(&db);
 
             // When cleanup is enabled, remove pasted images older than 24h left by crashes. Normal exit
             // removes this process's files precisely; disabling the setting skips both paths.
@@ -1222,6 +1237,10 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             commands::desktop_call,
             // Windows final update step: download through the plugin, install from VelaTerm's own folder.
             updater_win::updater_install_windows,
+            // Windows: a portable copy (no uninstall.exe beside the exe) is updated from the download page.
+            updater_win::updater_windows_portable,
+            // Update check that honors the selected server region (velaterm.com or velaterm.cn).
+            updater_check::updater_check,
             commands::record_split_trace,
             commands::take_open_project_request,
             commands::quit_prompt_ack,
@@ -1339,9 +1358,15 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                         app.state::<QuitState>().confirmed.store(true, Ordering::SeqCst);
                         app.exit(0);
                     }
-                    // Dock icon click with no window on screen opens a main window, as in VS Code.
+                    // Dock icon click or relaunching the .app opens a main window when none is on screen, as in
+                    // VS Code. A remote window left open after the main window closed counts as visible, so also
+                    // reopen whenever the main window is gone; otherwise only the remote window would come back.
                     #[cfg(target_os = "macos")]
-                    tauri::RunEvent::Reopen { has_visible_windows: false, .. } => open_main_window(app),
+                    tauri::RunEvent::Reopen { has_visible_windows, .. }
+                        if !*has_visible_windows || app.get_webview_window("main").is_none() =>
+                    {
+                        open_main_window(app)
+                    }
                     // Window activation leaves keyboard focus on the top-level HWND under the `unstable`
                     // child-webview path; hand it back to the webview the user was typing in.
                     #[cfg(target_os = "windows")]
@@ -1873,6 +1898,7 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
     diagnostics::init(&data_dir, VERSION);
     let db = Db::open(&data_dir.join("vlx-term.db"))?;
     db::system_collections::ensure(&db.conn.lock().unwrap())?;
+    server_region::load(&db);
 
     // Match GUI cleanup of stale pasted images from abnormal exits when enabled.
     if pasted_image_cleanup_enabled(&db) {

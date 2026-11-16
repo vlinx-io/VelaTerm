@@ -13,7 +13,7 @@ import Icons from "../../components/Icons";
 import { SELECT_PANEL } from "../../components/Select";
 import { SessionStatusBadge } from "../../components/SessionStatusBadge";
 import { useGitBranchInfo } from "../../hooks/useGitBranch";
-import { t, useT } from "../../i18n";
+import { dateLocale, t, useT } from "../../i18n";
 import { invoke, isTauri } from "../../ipc/transport";
 import {
   getEffectiveNotifyPermission,
@@ -24,6 +24,7 @@ import { checkVelaSkills, openVelaSkillsModal, useVelaSkillsState } from "../../
 import { isShareSurface } from "../../ipc/shareBase";
 import { webServerStatus, type WebServerStatus } from "../../ipc/webServer";
 import { env } from "../../platform";
+import { parseUiZoomPercent, setUiZoom, stepUiZoom, uiZoomSupported, UI_ZOOM_MAX, UI_ZOOM_MIN, useUiZoom } from "../../platform/uiZoom";
 import { useTermStore } from "../../store/termStore";
 import { effectivePermissionMode } from "../../store/settings";
 import {
@@ -198,6 +199,7 @@ export function StatusBar() {
       </span>
       <PermissionSeg />
       <NotifySeg />
+      {uiZoomSupported && <ZoomSeg />}
       <span className="sp" />
       <StatusSegs />
       {liveTabs.length > 0 && <BackgroundTabsSeg />}
@@ -333,6 +335,102 @@ function NotifySeg() {
     >
       <Icon size={11} />
       {notifyEnabled ? t("statusbar.notifyOn") : t("statusbar.notifyOff")}
+    </span>
+  );
+}
+
+/** Whole-interface zoom: minus and plus step through the presets, and the percentage itself is a
+ * direct input. Typing a valid level and pressing Enter (or leaving the field) applies it; invalid
+ * text leaves the current level untouched. The `%` sign is optional.
+ * Native page zoom scales the status bar too, so the control stays reachable at every level. */
+export function ZoomSeg() {
+  const t = useT();
+  const zoom = useUiZoom();
+  const pct = new Intl.NumberFormat(dateLocale(), { style: "percent", maximumFractionDigits: 0 }).format(zoom);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  // Escape must not commit the draft through the blur handler that follows.
+  const cancelled = useRef(false);
+
+  // Select the whole value on entry so a typed level replaces it instead of appending.
+  useEffect(() => {
+    if (!editing) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [editing]);
+
+  const beginEdit = () => {
+    cancelled.current = false;
+    setDraft(String(Math.round(zoom * 100)));
+    setEditing(true);
+  };
+  const finishEdit = () => {
+    const next = cancelled.current ? null : parseUiZoomPercent(draft);
+    cancelled.current = false;
+    setEditing(false);
+    if (next !== null) setUiZoom(next);
+  };
+
+  return (
+    <span className="seg zoom" role="group" aria-label={t("statusbar.zoomGroup")}>
+      <button
+        type="button"
+        className="zoom-btn"
+        title={t("statusbar.zoomOut")}
+        aria-label={t("statusbar.zoomOut")}
+        disabled={zoom <= UI_ZOOM_MIN}
+        onClick={() => setUiZoom(stepUiZoom(-1))}
+      >
+        <Icons.minus size={11} />
+      </button>
+      {editing ? (
+        <input
+          ref={inputRef}
+          className="zoom-input"
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
+          spellCheck={false}
+          value={draft}
+          title={t("statusbar.zoomEdit")}
+          aria-label={t("statusbar.zoomInput")}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={finishEdit}
+          onKeyDown={(e) => {
+            // An IME uses Enter to confirm its composition; do not commit on that key press.
+            if (e.nativeEvent.isComposing) return;
+            if (e.key === "Enter") {
+              e.preventDefault();
+              e.currentTarget.blur();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancelled.current = true;
+              e.currentTarget.blur();
+            }
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          className="zoom-btn zoom-value"
+          title={t("statusbar.zoomEdit")}
+          aria-label={t("statusbar.zoomInput")}
+          onClick={beginEdit}
+        >
+          {pct}
+        </button>
+      )}
+      <button
+        type="button"
+        className="zoom-btn"
+        title={t("statusbar.zoomIn")}
+        aria-label={t("statusbar.zoomIn")}
+        disabled={zoom >= UI_ZOOM_MAX}
+        onClick={() => setUiZoom(stepUiZoom(1))}
+      >
+        <Icons.plus size={11} />
+      </button>
     </span>
   );
 }
@@ -532,7 +630,7 @@ export function PermissionSeg() {
   if (session.engine === "chat") return null;
 
   const isSkip = ["skip", "bypassPermissions", "full-access"].includes(permissionMode ?? "");
-  const catalogued = ["claude", "codex", "opencode"].includes(session.kind);
+  const catalogued = ["claude", "codex", "opencode", "antigravity"].includes(session.kind);
 
   const close = () => {
     setOpen(false);

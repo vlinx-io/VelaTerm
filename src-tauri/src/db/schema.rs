@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   agent_path  TEXT,
   hotkey      TEXT,
   agent_session_id TEXT,
+  legacy_agent_session_id TEXT,
   parent_session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
   collapsed   INTEGER NOT NULL DEFAULT 0,
   worktree_path TEXT,

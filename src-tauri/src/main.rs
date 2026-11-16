@@ -85,6 +85,7 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("--spawn") => velaterm_lib::run_spawn(&args),
         Some("--tell") => velaterm_lib::run_tell(&args),
+        Some("--app") => velaterm_lib::run_app(&args),
         Some("--run") => velaterm_lib::run_wait(&args),
         Some("--flow") => velaterm_lib::run_flow(&args),
         Some("--view") => velaterm_lib::run_view(&args),
