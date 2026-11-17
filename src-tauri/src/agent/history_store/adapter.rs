@@ -108,7 +108,9 @@ pub fn preview(text:&str,bytes:usize) -> String {
 /// every compaction record; indexing those copies again made a long session's index several times
 /// its own size. The record projection still carries the record for classification. A reasoning
 /// item's `encrypted_content` is opaque ciphertext no view shows; it can be a third of a long session.
-const UNADDRESSED_SUBTREES:[&str;2]=["/payload/replacement_history","/payload/encrypted_content"];
+/// Grok repeats a tool call's full output in `rawOutput`, which only the live view reads straight from
+/// the stream; the paged readers take a tool's text from the update's content instead.
+const UNADDRESSED_SUBTREES:[&str;3]=["/payload/replacement_history","/payload/encrypted_content","/params/update/rawOutput"];
 pub(super) fn addressed(path:&str) -> bool {!UNADDRESSED_SUBTREES.iter().any(|subtree|path.starts_with(subtree))}
 
 /// Codex records that only carry usage, settings or lifecycle state. Readers take them from the
