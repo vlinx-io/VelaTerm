@@ -1654,11 +1654,18 @@ pub(super) fn chat_models(app: &AppCtx, proc: &Arc<ChatProcess>) -> Option<Vec<V
 }
 
 fn catalog_models(catalog: &Catalog) -> Vec<Value> {
-    let efforts: Vec<&str> = catalog.efforts.iter().map(|choice| choice.id.as_str()).collect();
-    catalog.models.iter().map(|model| json!({
-        "id": model.id, "label": model.name, "description": model.description.clone().unwrap_or_default(),
-        "effortLevels": efforts,
-    })).collect()
+    let shared: Vec<&str> = catalog.efforts.iter().map(|choice| choice.id.as_str()).collect();
+    catalog.models.iter().map(|model| {
+        // Prefer the ladder the model stated for itself; fall back to the session-wide one.
+        let efforts: Vec<&str> = match catalog.model_efforts.get(&model.id) {
+            Some(levels) => levels.iter().map(String::as_str).collect(),
+            None => shared.clone(),
+        };
+        json!({
+            "id": model.id, "label": model.name, "description": model.description.clone().unwrap_or_default(),
+            "effortLevels": efforts,
+        })
+    }).collect()
 }
 
 #[cfg(test)]
@@ -1691,6 +1698,20 @@ mod tests {
 
     fn notify(app: &AppCtx, proc: &Arc<ChatProcess>, update: Value) {
         handle_line(app, "s", proc, &json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":update}}).to_string());
+    }
+
+    #[test]
+    fn catalog_models_report_each_models_own_ladder() {
+        let mut catalog = Catalog::default();
+        catalog.models = vec![
+            wire::Choice { id: "a".into(), name: "A".into(), description: None },
+            wire::Choice { id: "b".into(), name: "B".into(), description: None },
+        ];
+        catalog.efforts = vec![wire::Choice { id: "low".into(), name: "low".into(), description: None }];
+        catalog.model_efforts.insert("a".into(), vec!["none".into(), "high".into()]);
+        let models = catalog_models(&catalog);
+        assert_eq!(models[0]["effortLevels"], json!(["none", "high"]));
+        assert_eq!(models[1]["effortLevels"], json!(["low"]));
     }
 
     #[test]
