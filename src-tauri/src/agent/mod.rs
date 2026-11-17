@@ -20,6 +20,7 @@ pub mod export;
 pub mod executable;
 pub mod gitbash;
 pub mod grok;
+pub mod grok_models;
 pub mod headless;
 pub mod health;
 pub mod history;

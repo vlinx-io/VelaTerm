@@ -7,6 +7,7 @@ import type { WorktreeMode } from "../ipc/events";
 import { LevelBar } from "../layout/CenterPane/session/controls";
 import {
   EFFORTS,
+  THINKING_NONE,
   THINKING_OFF,
   chipToSelectOption,
   effortChipLabel,
@@ -142,7 +143,7 @@ export function buildEffortChips(
 ) {
   const raw = rawEffortLevelsForModel(kind, spec, catalog, modelsFailed, targetModel, conversationEfforts);
   const allowed = conversationEfforts ? levelsOf(raw, kind) : [...raw];
-  const includeOff = (conversationEfforts && kind === "claude") || allowed.includes(THINKING_OFF);
+  const includeOff = (conversationEfforts && kind === "claude") || allowed.includes(THINKING_OFF) || allowed.includes(THINKING_NONE);
   const chips = effortChipOptions(t, allowed, true, includeOff);
   return defaultEffortLabel
     ? chips.map((c) => (c.value === "" ? { ...c, label: defaultEffortLabel } : c))
