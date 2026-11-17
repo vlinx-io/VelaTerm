@@ -171,6 +171,30 @@ fn grok_context_info(agent_session_id: &str) -> Result<AgentContextInfo, String>
     })
 }
 
+/// Grok's own conversation title, read from the `summary.json` beside its `updates.jsonl`.
+///
+/// Grok refreshes this as the conversation develops: `generated_title` is the current title and
+/// `session_summary` the fallback for partial or older recordings. None means Grok has not written a
+/// title yet, so the caller keeps the session's provisional name rather than clearing it.
+pub fn grok_generated_title(agent_session_id: &str) -> Option<String> {
+    let updates = resume::find_grok_updates(agent_session_id)?;
+    grok_title_in(updates.parent()?)
+}
+
+/// The title `summary.json` in one Grok session directory carries, capped to the AI title length.
+fn grok_title_in(dir: &Path) -> Option<String> {
+    let summary = read_json_file(&dir.join("summary.json"))?;
+    let field = |name: &str| {
+        summary
+            .get(name)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+    };
+    let title = field("generated_title").or_else(|| field("session_summary"))?;
+    Some(title.chars().take(80).collect())
+}
+
 /// Reads the model and current context from OpenCode's own store.
 ///
 /// OpenCode does not record the model's context window, so the limit comes from the catalogue the CLI
@@ -1510,6 +1534,23 @@ printf '%s\n' '{"id":1,"result":{"outcome":"alreadyRedeemed"}}'
         assert!(!messages
             .iter()
             .any(|m| m.text.contains("private reasoning")));
+    }
+
+    #[test]
+    fn grok_title_comes_from_summary_json_and_falls_back_to_the_session_summary() {
+        let dir = std::env::temp_dir().join(format!("vlx-grok-title-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(grok_title_in(&dir), None, "no summary yet leaves the name alone");
+        std::fs::write(dir.join("summary.json"), r#"{"generated_title":"  Fix the login page  "}"#).unwrap();
+        assert_eq!(grok_title_in(&dir).as_deref(), Some("Fix the login page"));
+        std::fs::write(dir.join("summary.json"), r#"{"session_summary":"Older recording"}"#).unwrap();
+        assert_eq!(grok_title_in(&dir).as_deref(), Some("Older recording"));
+        std::fs::write(dir.join("summary.json"), r#"{"generated_title":"   "}"#).unwrap();
+        assert_eq!(grok_title_in(&dir), None);
+        // Grok's titles can run long; the sidebar title is capped like a generated one.
+        std::fs::write(dir.join("summary.json"), format!(r#"{{"generated_title":"{}"}}"#, "长".repeat(200))).unwrap();
+        assert_eq!(grok_title_in(&dir).map(|title| title.chars().count()), Some(80));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
