@@ -100,7 +100,7 @@ import { imageFromNativeClipboard, imagesFromClipboard, imagesFromDrop } from ".
 import { IS_MAC, IS_PLAIN_BROWSER, labelWithCombo } from "../../../hooks/shortcutRegistry";
 import { useMentionFiles } from "./fileMentions";
 import { ControlChip, type ChipOption } from "./controls";
-import { EFFORTS, THINKING_OFF, effortChipLabel, effortChipOptions, levelsOf, modelChipOptions } from "./modelChips";
+import { EFFORTS, THINKING_NONE, THINKING_OFF, effortChipLabel, effortChipOptions, levelsOf, modelChipOptions } from "./modelChips";
 import { AutoContinueBar, FastModeChip, McpChip, NotificationBar, RetryLine, TasksChip, UsageMeter } from "./extras";
 import { DeepSeekApiChip } from "./DeepSeekApiChip";
 import { AgentAccountMenu, AgentAuth, needsAttention } from "./AgentAuth";
@@ -2467,7 +2467,7 @@ export function ChatPane({
     t,
     allowed,
     false,
-    session.kind === "claude" || allowed.includes(THINKING_OFF),
+    session.kind === "claude" || allowed.includes(THINKING_OFF) || allowed.includes(THINKING_NONE),
   );
   // The permission chip shows the mode that was chosen; whether that choice is already the running
   // mode is carried by the chip's mark and by the menu's row notes. Only Codex defers the change to

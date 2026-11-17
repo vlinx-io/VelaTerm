@@ -1718,6 +1718,96 @@ pub fn chat_set_effort(ctx: &AppCtx, session_id: &str, effort: Option<&str>) -> 
     Ok(())
 }
 
+/// Grok's model picker: what the running session offers first, then every model the CLI names, then any
+/// model only the config file describes. Each entry carries that model's own reasoning ladder.
+fn grok_chat_models(ctx: &AppCtx, session_id: &str, bin: &str) -> serde_json::Value {
+    let live = ctx.chat().acp_models(ctx, session_id).unwrap_or_default();
+    let ids = grok_cli_models(bin);
+    let config = crate::agent::grok_models::load();
+    serde_json::Value::Array(assemble_grok_catalog(&live, &ids, &config))
+}
+
+/// Merge the live session's choices with the CLI listing and Grok's config file.
+///
+/// A running Grok session reports only the model it started with, while `grok models` names every model
+/// the account can switch to and `config.toml` says which reasoning levels each one offers. A live
+/// ladder wins over the config, since it describes the session that is actually running.
+fn assemble_grok_catalog(
+    live: &[serde_json::Value],
+    ids: &[String],
+    config: &std::collections::HashMap<String, crate::agent::grok_models::ConfigModel>,
+) -> Vec<serde_json::Value> {
+    let mut order: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for model in live {
+        if let Some(id) = model.get("id").and_then(serde_json::Value::as_str) {
+            if !id.is_empty() && seen.insert(id.to_string()) { order.push(id.to_string()); }
+        }
+    }
+    for id in ids {
+        if !id.is_empty() && seen.insert(id.clone()) { order.push(id.clone()); }
+    }
+    // Config-only models go last, in a stable order so the menu does not shuffle between reads.
+    let mut config_only: Vec<&String> = config.keys().filter(|id| !seen.contains(*id)).collect();
+    config_only.sort();
+    order.extend(config_only.into_iter().cloned());
+    let live_by: std::collections::HashMap<&str, &serde_json::Value> = live.iter()
+        .filter_map(|model| model.get("id").and_then(serde_json::Value::as_str).map(|id| (id, model)))
+        .collect();
+    order.into_iter().map(|id| {
+        let live_model = live_by.get(id.as_str()).copied();
+        let configured = config.get(&id);
+        let live_levels = levels_of(live_model, "effortLevels");
+        let effort_levels = if !live_levels.is_empty() {
+            live_levels
+        } else {
+            configured.map(|model| model.effort_levels.clone()).unwrap_or_default()
+        };
+        let label = text_field(live_model, "label")
+            .or_else(|| configured.map(|model| model.label.as_str()))
+            .unwrap_or(id.as_str());
+        let description = text_field(live_model, "description").unwrap_or_default();
+        serde_json::json!({"id":id,"label":label,"description":description,"effortLevels":effort_levels})
+    }).collect()
+}
+
+/// A non-empty string field of one catalogue entry.
+fn text_field<'a>(model: Option<&'a serde_json::Value>, key: &str) -> Option<&'a str> {
+    model
+        .and_then(|model| model.get(key))
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| !value.is_empty())
+}
+
+/// A catalogue entry's string array field, such as `effortLevels`.
+fn levels_of(model: Option<&serde_json::Value>, key: &str) -> Vec<String> {
+    model
+        .and_then(|model| model.get(key))
+        .and_then(serde_json::Value::as_array)
+        .map(|values| values.iter().filter_map(|value| value.as_str()).map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// Asking `grok models` starts a CLI that answers on its own timeout, and the picker re-reads the
+/// catalogue after every model or reasoning change. Keep the last answer briefly so one session does not
+/// pay for the same listing on every refresh.
+fn grok_cli_models(bin: &str) -> Vec<String> {
+    const TTL: std::time::Duration = std::time::Duration::from_secs(300);
+    type Cached = (String, std::time::Instant, Vec<String>);
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<Option<Cached>>> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Ok(cache) = cache.lock() {
+        if let Some((cached_bin, at, models)) = cache.as_ref() {
+            if cached_bin == bin && at.elapsed() < TTL { return models.clone(); }
+        }
+    }
+    let models = crate::agent::model_catalog::list_models_at("grok", bin).unwrap_or_default();
+    if let Ok(mut cache) = cache.lock() {
+        *cache = Some((bin.to_string(), std::time::Instant::now(), models.clone()));
+    }
+    models
+}
+
 pub fn chat_models(ctx: &AppCtx, session_id: &str) -> Result<serde_json::Value, String> {
     let session = {
         let conn = ctx.db().conn.lock().unwrap();
@@ -1801,6 +1891,11 @@ pub fn chat_models(ctx: &AppCtx, session_id: &str) -> Result<serde_json::Value, 
         // A running ACP session lists the models it can switch to. Without one, the CLI's own catalogue is
         // what its next launch can be given.
         kind if crate::agent::chat::acp_protocol::supported(kind) => {
+            // Grok's picker merges three sources, so it answers as one list rather than the live one.
+            if kind == SessionKind::Grok {
+                let bin = crate::agent::executable::for_session(ctx, &session);
+                return Ok(grok_chat_models(ctx, session_id, &bin));
+            }
             if let Some(models) = ctx.chat().acp_models(ctx, session_id) {
                 return Ok(serde_json::Value::Array(models));
             }
@@ -2482,11 +2577,73 @@ pub fn web_server_autostart(ctx: &AppCtx) -> Result<Option<crate::web::WebServer
 #[cfg(test)]
 mod tests {
     use super::{
-        autostart_config, check_images, get_app_settings, install_id,
+        assemble_grok_catalog, autostart_config, check_images, get_app_settings, install_id,
         set_app_settings, web_server_autostart,
         web_server_status, web_server_stop, ChatImage, MAX_IMAGES_PER_MESSAGE, MAX_IMAGE_BYTES,
     };
     use std::collections::HashMap;
+
+    /// A running Grok session reports one model; the picker must still offer the CLI catalogue, and a
+    /// model the CLI names without levels falls back to the ladder `config.toml` declares for it.
+    #[test]
+    fn grok_picker_keeps_live_choices_and_adds_cli_models() {
+        let live = vec![serde_json::json!({
+            "id":"magpie/workbuddy-ai/deepseek-v4.1-flash-sg","label":"deepseek",
+            "description":"","effortLevels":["none","low","high","max"],
+        })];
+        let config = HashMap::from([("grok-4.6".to_string(), crate::agent::grok_models::ConfigModel {
+            label: "Grok 4.6".into(), effort_levels: vec!["xhigh".into(), "high".into()],
+        })]);
+        let models = assemble_grok_catalog(&live, &["grok-4.6".to_string()], &config);
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0]["id"], "magpie/workbuddy-ai/deepseek-v4.1-flash-sg");
+        assert_eq!(models[0]["effortLevels"], serde_json::json!(["none", "low", "high", "max"]));
+        assert_eq!(models[1]["id"], "grok-4.6");
+        assert_eq!(models[1]["label"], "Grok 4.6");
+        assert_eq!(models[1]["effortLevels"], serde_json::json!(["xhigh", "high"]));
+    }
+
+    /// Before Grok has ever opened a conversation, the config file's `reasoning_efforts` fill each
+    /// model's ladder, which is what makes the thinking chip work on first open.
+    #[test]
+    fn grok_config_file_fills_the_ladder_before_the_agent_runs() {
+        let config = HashMap::from([
+            ("magpie/auto/deepseek-v4.1-flash".to_string(), crate::agent::grok_models::ConfigModel {
+                label: "DeepSeek V4.1 Flash".into(),
+                effort_levels: vec!["none".into(), "low".into(), "high".into(), "max".into()],
+            }),
+            ("magpie/group/free".to_string(), crate::agent::grok_models::ConfigModel {
+                label: "free".into(),
+                effort_levels: vec!["high".into()],
+            }),
+        ]);
+        let ids = vec!["magpie/auto/deepseek-v4.1-flash".to_string(), "grok-4.6".to_string()];
+        let models = assemble_grok_catalog(&[], &ids, &config);
+        assert_eq!(models.len(), 3);
+        assert_eq!(models[0]["label"], "DeepSeek V4.1 Flash");
+        assert_eq!(models[0]["effortLevels"], serde_json::json!(["none", "low", "high", "max"]));
+        // A model with neither a live nor a configured ladder keeps an empty list rather than inventing one.
+        assert_eq!(models[1]["id"], "grok-4.6");
+        assert_eq!(models[1]["effortLevels"], serde_json::json!([]));
+        // Models only the config describes come last, so the CLI order is what people see first.
+        assert_eq!(models[2]["id"], "magpie/group/free");
+    }
+
+    /// A live ladder wins over the config file, so switching models shows what the running session
+    /// actually offers.
+    #[test]
+    fn live_grok_levels_win_over_config() {
+        let live = vec![serde_json::json!({
+            "id":"grok-4.6","label":"Grok 4.6","description":"","effortLevels":["xhigh","high","medium","low"],
+        })];
+        let config = HashMap::from([("grok-4.6".to_string(), crate::agent::grok_models::ConfigModel {
+            label: "Config".into(), effort_levels: vec!["low".into()],
+        })]);
+        let models = assemble_grok_catalog(&live, &[], &config);
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0]["label"], "Grok 4.6");
+        assert_eq!(models[0]["effortLevels"], serde_json::json!(["xhigh", "high", "medium", "low"]));
+    }
 
     fn image(bytes: usize) -> ChatImage {
         // Four base64 characters per three bytes, which is what the check reads back.
