@@ -289,7 +289,9 @@ pub struct Catalog {
     pub models_from_state: bool,
     /// Raw `models.availableModels` reported on session open, kept even when `configOptions` replaces `models`.
     pub state_models: Vec<Choice>,
-    /// Live `thought_level` option ids observed per active model id during this session.
+    /// Reasoning levels each model states for itself, by model id. Grok declares a different ladder per
+    /// model under `_meta.reasoningEfforts`; the flat `efforts` below can only name the active one's.
+    /// Entries filled from a live `thought_level` option are the same idea from the other source.
     pub model_efforts: HashMap<String, Vec<String>>,
     pub efforts: Vec<Choice>,
     pub effort: Option<String>,
@@ -312,12 +314,23 @@ impl Catalog {
             self.mode = modes.get("currentModeId").and_then(Value::as_str).map(str::to_string);
         }
         if let Some(models) = result.get("models").filter(|models| models.is_object()) {
-            let listed: Vec<Choice> = distinct(models.get("availableModels").and_then(Value::as_array).into_iter().flatten()
+            let available = models.get("availableModels").and_then(Value::as_array);
+            let listed: Vec<Choice> = distinct(available.into_iter().flatten()
                 .filter_map(|model| choice(model, "modelId")).collect());
             if !listed.is_empty() {
                 self.state_models = listed.clone();
                 self.models = listed;
                 self.models_from_state = true;
+            }
+            // Keep each model's own ladder, so the picker offers the levels of the model actually chosen
+            // instead of one borrowed from whatever the session started with.
+            for model in available.into_iter().flatten() {
+                let Some(id) = model.get("modelId").and_then(Value::as_str) else { continue };
+                let levels = distinct_levels(model.pointer("/_meta/reasoningEfforts").and_then(Value::as_array)
+                    .into_iter().flatten()
+                    .filter_map(|level| level.get("id").or_else(|| level.get("value")).and_then(Value::as_str))
+                    .map(str::to_string).collect());
+                if !levels.is_empty() { self.model_efforts.insert(id.to_string(), levels); }
             }
             self.model = models.get("currentModelId").and_then(Value::as_str).map(str::to_string).or(self.model.take());
         }
@@ -362,7 +375,12 @@ impl Catalog {
         }
         if saw_model || saw_effort {
             if let Some(model) = &self.model {
-                self.model_efforts.insert(model.clone(), self.efforts.iter().map(|c| c.id.clone()).collect());
+                let levels: Vec<String> = self.efforts.iter().map(|c| c.id.clone()).collect();
+                // A ladder the model stated under `_meta` survives an option that names no levels: that
+                // means this model offers none to switch here, not that its ladder is unknown.
+                if !levels.is_empty() || !self.model_efforts.contains_key(model) {
+                    self.model_efforts.insert(model.clone(), levels);
+                }
             }
         }
     }
@@ -386,6 +404,15 @@ fn distinct(choices: Vec<Choice>) -> Vec<Choice> {
     let mut out: Vec<Choice> = Vec::new();
     for choice in choices {
         if !out.iter().any(|seen| seen.id == choice.id) { out.push(choice); }
+    }
+    out
+}
+
+/// Keep the first of each reasoning level, in the order the model listed them.
+fn distinct_levels(levels: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for level in levels {
+        if !out.contains(&level) { out.push(level); }
     }
     out
 }
@@ -1637,6 +1664,29 @@ mod tests {
         let mut mapper = Mapper::replay();
         assert!(mapper.update(&json!({"sessionUpdate":"tool_call","toolCallId":"c9","title":"report_intent","kind":"other","rawInput":{"intent":"Count"}})).is_empty());
         assert!(mapper.update(&json!({"sessionUpdate":"tool_call_update","toolCallId":"c9","status":"completed"})).is_empty());
+    }
+
+    #[test]
+    fn each_model_keeps_its_own_reasoning_ladder() {
+        let mut catalog = Catalog::default();
+        catalog.absorb_session(&json!({
+            "models":{"currentModelId":"a","availableModels":[
+                {"modelId":"a","name":"A","_meta":{"reasoningEfforts":[{"id":"none"},{"id":"low"},{"id":"high"},{"id":"max"}]}},
+                {"modelId":"b","name":"B","_meta":{"reasoningEfforts":[{"id":"high"},{"id":"medium"},{"id":"low"},{"id":"high"}]}},
+                {"modelId":"c","name":"C"}
+            ]},
+            "configOptions":[{"type":"select","id":"reasoning_effort","category":"thought_level","currentValue":"low",
+                "options":[{"value":"none","name":"None"},{"value":"low","name":"Low"}]}]
+        }));
+        assert_eq!(catalog.model_efforts["b"], ["high", "medium", "low"]);
+        assert!(!catalog.model_efforts.contains_key("c"));
+        // The opening `thought_level` option is what this session can actually switch for its own model,
+        // so it wins over the model's wider `_meta` ladder.
+        assert_eq!(catalog.model_efforts["a"], ["none", "low"]);
+        // Switching models without a `thought_level` option leaves the stated ladders alone.
+        catalog.absorb_options(&[json!({"type":"select","id":"model","category":"model","currentValue":"b",
+            "options":[{"value":"a","name":"A"},{"value":"b","name":"B"}]})]);
+        assert_eq!(catalog.model_efforts["b"], ["high", "medium", "low"]);
     }
 
     #[test]
