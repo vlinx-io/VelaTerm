@@ -292,7 +292,7 @@ fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: 
     let dir = WorkDir::new(app)?;
     let cwd = session.cwd.clone().or_else(|| app.pty().cwd(id))
         .or(repo::get_project_root(&app.db().conn.lock().unwrap(), &session.project_id)?);
-    let cwd = cwd.as_deref().filter(|path| !path.is_empty()).map(std::path::Path::new);
+    let cwd = usable_cwd(cwd.as_deref());
     let env = if kind == SessionKind::Deepseek {
         // OpenCode only reaches the DeepSeek API when the endpoint and key entered in Settings travel
         // with this one-shot run too; otherwise a configured key would fix conversations but not titles.
@@ -324,16 +324,7 @@ fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: 
     };
     let (mut command, stdin) = title_command(&bin, kind, &dir, raw_args.as_deref(), env.as_deref(), cwd,
         selection.model.as_deref(), selection.effort.as_deref())?;
-    // Keep prompt markers after model flags so a value-taking flag cannot consume another option.
-    let flags = super::inject::split_extra_args(extra.as_deref());
-    if stdin {
-        command.args(&flags);
-        if kind == SessionKind::Codex { command.arg("-"); }
-    } else {
-        command.args(&flags);
-        if kind == SessionKind::Grok { command.arg("-p"); }
-        command.arg(&prompt);
-    }
+    deliver_prompt(&mut command, kind, &dir, &super::inject::split_extra_args(extra.as_deref()), &prompt, stdin)?;
     let count = prompt.chars().count();
     crate::diagnostics::record("INFO", "session_title", json!({
         "sessionId":id,"step":"ai_request","method":"AI",
@@ -347,7 +338,24 @@ fn generate_and_save(app: &AppCtx, id: &str, agent: Option<SessionKind>, model: 
     }));
     let started = Instant::now();
     let stdin_payload = stdin.then(|| stdin_input(kind, &prompt));
-    let output = match headless::run_command_with_cancel(command, stdin_payload.as_deref(), TIMEOUT, Some(&task.cancelled)) {
+    let mut result = headless::run_command_with_cancel(command, stdin_payload.as_deref(), TIMEOUT, Some(&task.cancelled));
+    // A model can offer a narrower ladder than the configured default, and Grok refuses the flag before
+    // it calls the model. Retry once with the model's own default rather than reporting the agent down.
+    if effort_refused(kind, &selection, &result) {
+        crate::diagnostics::record("INFO", "session_title", json!({
+            "sessionId":id,"step":"ai_retry","method":"AI","agent":kind.as_str(),
+            "reason":"effort_unsupported","inputCount":messages.len(),"outputCount":0,
+            "durationMs":started.elapsed().as_millis() as u64
+        }));
+        let mut retry = selection.clone();
+        let retry_extra = selection_args_with(kind, opencode_v2, &mut retry, model, Some(""))?;
+        let (mut command, stdin) = title_command(&bin, kind, &dir, raw_args.as_deref(), env.as_deref(), cwd,
+            retry.model.as_deref(), retry.effort.as_deref())?;
+        deliver_prompt(&mut command, kind, &dir, &super::inject::split_extra_args(retry_extra.as_deref()), &prompt, stdin)?;
+        let stdin_payload = stdin.then(|| stdin_input(kind, &prompt));
+        result = headless::run_command_with_cancel(command, stdin_payload.as_deref(), TIMEOUT, Some(&task.cancelled));
+    }
+    let output = match result {
         Ok(output) => output,
         Err(error) => {
             let code = title_error_code(&error);
@@ -430,6 +438,55 @@ fn build_prompt(messages: &[TranscriptMessage]) -> Result<String, String> {
     Ok(prompt)
 }
 
+/// The session directory is only a working context; a removed project or worktree must not turn into a
+/// spawn failure before the agent has even run. An unusable path leaves the private work directory in
+/// charge.
+fn usable_cwd(cwd: Option<&str>) -> Option<&std::path::Path> {
+    cwd
+        .filter(|path| !path.is_empty())
+        .map(std::path::Path::new)
+        .filter(|path| path.is_dir())
+}
+
+/// Hand the conversation to the one-shot command. Grok reads it from a file, which keeps a conversation
+/// too long for an argument off the command line; agents that read stdin get it through the pipe.
+fn deliver_prompt(
+    command: &mut std::process::Command,
+    kind: SessionKind,
+    dir: &WorkDir,
+    flags: &[String],
+    prompt: &str,
+    stdin: bool,
+) -> Result<(), String> {
+    // Keep prompt markers after model flags so a value-taking flag cannot consume another option.
+    command.args(flags);
+    if stdin {
+        if kind == SessionKind::Codex { command.arg("-"); }
+        return Ok(());
+    }
+    if kind == SessionKind::Grok {
+        let path = dir.0.join("prompt.txt");
+        std::fs::write(&path, prompt).map_err(|_| "session_title:failed")?;
+        command.arg("--prompt-file").arg(path);
+    } else {
+        command.arg(prompt);
+    }
+    Ok(())
+}
+
+/// Whether Grok refused the reasoning level before it called the model, so the same task deserves one
+/// retry with the model's own default instead of an "agent unavailable" report.
+fn effort_refused(
+    kind: SessionKind,
+    selection: &super::session_settings::Selection,
+    result: &Result<String, HeadlessError>,
+) -> bool {
+    kind == SessionKind::Grok
+        && selection.effort.as_deref().is_some_and(|effort| !effort.is_empty())
+        && matches!(result, Err(HeadlessError::Failed { stderr, .. })
+            if stderr.contains("unknown effort level") || stderr.contains("unknown reasoning effort"))
+}
+
 pub(crate) fn available_binary(app: &AppCtx, kind: SessionKind, path: Option<&str>) -> Option<String> {
     super::executable::resolve_cached(app, kind, path)
         .filter(|bin| super::executable::is_executable_file(std::path::Path::new(bin)))
@@ -470,7 +527,9 @@ fn pick_agent(app: &AppCtx, session: &Session, bytes: usize, chosen: Option<Sess
 
 /// Whether this one-shot adapter can read a prompt too large for an argument.
 fn accepts_long_prompt(kind: SessionKind) -> bool {
+    // Grok receives the conversation through `--prompt-file`.
     kind == SessionKind::Antigravity
+        || kind == SessionKind::Grok
         || headless::spec(kind).is_some_and(|spec| spec.accepts_long_prompt())
 }
 
@@ -628,8 +687,11 @@ pub(crate) fn isolated_command(bin: &str, kind: SessionKind, dir: &std::path::Pa
                 false
             }
             SessionKind::Grok => {
-                command.args(["--permission-mode", "plan", "--tools", "", "--no-memory", "--no-plan",
-                    "--no-subagents", "--no-web", "--output-format", "plain"]);
+                // `--tools=` (empty) plus a schema makes Grok answer with a JSON object instead of prose;
+                // `--prompt-file` carries the conversation, which can be longer than an argument allows.
+                command.args(["--permission-mode", "plan", "--tools=", "--no-memory", "--no-plan",
+                    "--no-subagents", "--no-web", "--output-format", "json", "--json-schema"])
+                    .arg(schema.to_string());
                 false
             }
             SessionKind::Antigravity => {
@@ -663,6 +725,26 @@ fn command_env(command: &std::process::Command, key: &str) -> Option<String> {
 }
 
 pub(crate) fn answer_text(kind: SessionKind, output: &str) -> Result<(String, Value), String> {
+    if kind == SessionKind::Grok {
+        let value: Value = serde_json::from_str(output.trim()).map_err(|_| "session_title:invalid")?;
+        if value.get("is_error").and_then(Value::as_bool) == Some(true) {
+            return Err("session_title:failed".into());
+        }
+        let answer = value.get("structuredOutput").filter(|output| !output.is_null()).cloned()
+            .or_else(|| value.get("text").and_then(Value::as_str).map(|text| Value::String(text.to_string())))
+            .ok_or("session_title:invalid")?;
+        // Some models answer with the title itself rather than the requested object.
+        let text = match answer {
+            Value::Object(_) => answer.to_string(),
+            Value::String(title) => match serde_json::from_str::<Value>(title.trim()) {
+                Ok(Value::Object(_)) => title,
+                Ok(Value::String(inner)) => json!({"title": inner}).to_string(),
+                _ => json!({"title": title}).to_string(),
+            },
+            _ => return Err("session_title:invalid".into()),
+        };
+        return Ok((text, value.get("usage").cloned().unwrap_or(Value::Null)));
+    }
     if kind == SessionKind::Claude {
         let value: Value = serde_json::from_str(output).map_err(|_| "session_title:invalid")?;
         if value["is_error"] == true { return Err("session_title:failed".into()); }
@@ -1187,6 +1269,73 @@ mod tests {
         assert_eq!(cross_agy["model"], "gemini-4-hydrogen");
         assert_eq!(cross_agy["effort"], "low");
         assert!(accepts_long_prompt(SessionKind::Antigravity));
+    }
+
+    #[test]
+    fn grok_one_shot_asks_for_a_schema_and_reads_the_conversation_from_a_file() {
+        let (_root, app, _) = fixture();
+        let dir = WorkDir::new(&app).unwrap();
+        let (mut command, stdin) = title_command("grok", SessionKind::Grok, &dir, None, None, None, None, None).unwrap();
+        assert!(!stdin, "Grok takes the conversation as an argument or a file, never on stdin");
+        let args: Vec<_> = command.get_args().map(|arg| arg.to_string_lossy().to_string()).collect();
+        for expected in ["--tools=", "--output-format", "json", "--json-schema", "--no-web"] {
+            assert!(args.iter().any(|arg| arg == expected), "missing {expected}");
+        }
+        deliver_prompt(&mut command, SessionKind::Grok, &dir, &[], &"conversation".repeat(1), false).unwrap();
+        let args: Vec<_> = command.get_args().map(|arg| arg.to_string_lossy().to_string()).collect();
+        let at = args.iter().position(|arg| arg == "--prompt-file").expect("Grok reads the conversation from a file");
+        assert_eq!(std::fs::read_to_string(&args[at + 1]).unwrap(), "conversation");
+        assert_eq!(Some(std::path::Path::new(&args[at + 1])), Some(dir.0.join("prompt.txt").as_path()));
+    }
+
+    /// A conversation past the argument limit is delivered through `--prompt-file` instead of failing
+    /// the title as "agent unavailable".
+    #[test]
+    fn grok_titles_accept_a_conversation_too_large_for_an_argument() {
+        assert!(accepts_long_prompt(SessionKind::Grok));
+        assert!(!accepts_long_prompt(SessionKind::Zcode));
+    }
+
+    #[test]
+    fn grok_answers_arrive_as_json_and_a_bare_title_is_accepted() {
+        let (text, _) = answer_text(SessionKind::Grok, r#"{"structuredOutput":{"title":"Grok picker"}}"#).unwrap();
+        assert_eq!(parse_title(&text).unwrap(), "Grok picker");
+        // A model that ignores the schema and answers with the title alone still names the session.
+        let (text, _) = answer_text(SessionKind::Grok, r#"{"text":"Grok picker"}"#).unwrap();
+        assert_eq!(parse_title(&text).unwrap(), "Grok picker");
+        let (text, _) = answer_text(SessionKind::Grok, r#"{"structuredOutput":"{\"title\":\"Grok picker\"}"}"#).unwrap();
+        assert_eq!(parse_title(&text).unwrap(), "Grok picker");
+        assert_eq!(answer_text(SessionKind::Grok, r#"{"is_error":true}"#).unwrap_err(), "session_title:failed");
+        assert_eq!(answer_text(SessionKind::Grok, "not json").unwrap_err(), "session_title:invalid");
+    }
+
+    /// Grok refuses a reasoning level the selected model does not offer before it calls the model; that
+    /// deserves one retry with the model's own default rather than an "agent unavailable" report.
+    #[test]
+    fn a_refused_reasoning_level_is_retried_and_other_failures_are_not() {
+        let selection = |effort: Option<&str>| super::super::session_settings::Selection {
+            model: None,
+            effort: effort.map(str::to_string),
+            ..Default::default()
+        };
+        let refused = Err(HeadlessError::Failed {
+            code: Some(2),
+            stderr: "error: unknown effort level 'medium'; use one of: none, low, high, max".into(),
+        });
+        assert!(effort_refused(SessionKind::Grok, &selection(Some("medium")), &refused));
+        assert!(!effort_refused(SessionKind::Grok, &selection(None), &refused));
+        assert!(!effort_refused(SessionKind::Claude, &selection(Some("medium")), &refused));
+        let other = Err(HeadlessError::Failed { code: Some(1), stderr: "no api key".into() });
+        assert!(!effort_refused(SessionKind::Grok, &selection(Some("medium")), &other));
+    }
+
+    /// A project directory that no longer exists must not become a spawn failure.
+    #[test]
+    fn a_removed_working_directory_falls_back_to_the_private_one() {
+        assert_eq!(usable_cwd(None), None);
+        assert_eq!(usable_cwd(Some("")), None);
+        assert_eq!(usable_cwd(Some("/definitely/not/here")), None);
+        assert_eq!(usable_cwd(Some("/")), Some(std::path::Path::new("/")));
     }
 
     #[test]
