@@ -415,6 +415,10 @@ pub fn rename_node(ctx: &AppCtx, kind: NodeKind, id: &str, name: &str) -> Result
         let conn = ctx.db().conn.lock().unwrap();
         repo::rename_node(&conn, kind, id, name)?;
     }
+    // The person chose this name; stop an agent-written title from replacing it later.
+    if matches!(kind, NodeKind::Session) {
+        crate::agent::server::forget_adopted_title(ctx, id);
+    }
     ctx.emit(TREE_CHANGED, ());
     Ok(())
 }
