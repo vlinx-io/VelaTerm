@@ -46,6 +46,8 @@ const STOP_POLL_INTERVAL: Duration = Duration::from_millis(500);
 pub(super) enum PendingRequest {
     Permission { id: Value, params: Value },
     Elicitation { id: Value, params: Value, card_payload: Value },
+    /// One of Grok's own `_x.ai/...` dialogs, which takes its own method's answer shape.
+    GrokDialog { id: Value, method: String, params: Value },
     DetachedRecovery { row_id: String, tool_name: String, args: Value, card_payload: Value },
 }
 
@@ -308,6 +310,30 @@ fn handle_response(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: 
             None => on_initialize(app, session_id, proc, &result.unwrap_or(Value::Null)),
         },
         Some("acp_session_new") | Some("acp_session_load") | Some("acp_session_resume") => match error {
+            // The recorded conversation is gone: its directory, its recording, or the session itself.
+            // Start a fresh native conversation instead of leaving the pane unusable, and say so — the
+            // rows on screen come from VelaTerm's own recording, which the agent no longer has.
+            Some(error) if kind != Some("acp_session_new") && wire::conversation_missing(&error) => {
+                crate::diagnostics::record("WARN", "agent_chat", json!({
+                    "sessionId":session_id,"event":"native_conversation_missing",
+                    "agent":proc.kind.as_str(),"reason":wire::error_text(&error)
+                }));
+                let cwd = {
+                    let mut state = proc.acp.lock().unwrap();
+                    state.loading = None;
+                    state.resume = None;
+                    state.mapper = Mapper::for_kind(proc.kind);
+                    state.cwd.clone()
+                };
+                emit(app, session_id, json!({"type":"error","message":format!(
+                    "{} could not reopen that conversation; a new one has been started. Earlier messages stay in this view.",
+                    wire::label(proc.kind))}));
+                let id = proc.request_id("acp_session_new");
+                if proc.write(&wire::session_new(&id, &cwd)).is_err() {
+                    proc.acp.lock().unwrap().loading = None;
+                    fail_start(app, session_id, proc, &error);
+                }
+            }
             Some(error) => {
                 proc.acp.lock().unwrap().loading = None;
                 fail_start(app, session_id, proc, &error);
@@ -783,6 +809,22 @@ fn handle_request(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: V
             emit(app, session_id, json!({"type":"permission","request":payload}));
             emit_state(app, session_id, AgentState::Asking);
         }
+        wire::EXIT_PLAN_MODE | wire::ASK_USER_QUESTION | wire::MCP_ELICIT => {
+            // These wait for the person even in bypass, as in Grok's own terminal: an error answer would
+            // cancel a plan, a question, or a form the model is waiting on.
+            let card = format!("acp-grok-{}", wire::id_key(&id));
+            let Some(payload) = wire::grok_dialog(proc.kind, &card, method, &params) else {
+                let _ = proc.write(&wire::error_response(&id, -32601, &format!("{method} is not supported by this client")));
+                return;
+            };
+            proc.acp.lock().unwrap().requests.insert(
+                card.clone(),
+                PendingRequest::GrokDialog { id, method: method.to_string(), params },
+            );
+            proc.permissions.lock().unwrap().insert(card, payload.clone());
+            emit(app, session_id, json!({"type":"permission","request":payload}));
+            emit_state(app, session_id, AgentState::Asking);
+        }
         _ => {
             // Neither file system nor terminal access was offered; anything else is unknown to this client.
             let _ = proc.write(&wire::error_response(&id, -32601, &format!("{method} is not supported by this client")));
@@ -822,6 +864,10 @@ pub(super) fn respond(
             if let Some(row) = updated_row {
                 proc.timeline.lock().unwrap().upsert(row);
             }
+            resolve(app, session_id, proc, card);
+        }
+        PendingRequest::GrokDialog { id, method, .. } => {
+            proc.write(&wire::grok_dialog_answer(&id, &method, allow, updated_input, message))?;
             resolve(app, session_id, proc, card);
         }
         PendingRequest::DetachedRecovery { row_id, tool_name, args, card_payload } => {
@@ -992,6 +1038,9 @@ fn cancel_pending(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
             }
             PendingRequest::Elicitation { id, params, card_payload } => {
                 let _ = proc.write(&wire::elicitation_outcome(&id, &card_payload, &params, false, None, Some("cancel")));
+            }
+            PendingRequest::GrokDialog { id, method, .. } => {
+                let _ = proc.write(&wire::grok_cancelled_outcome(&id, &method));
             }
             PendingRequest::DetachedRecovery { row_id, .. } => {
                 super::antigravity_tasks::settle_rows(proc, std::slice::from_ref(&row_id));
@@ -1540,6 +1589,9 @@ pub(super) fn cancel(proc: &Arc<ChatProcess>) -> Result<(), String> {
             PendingRequest::Elicitation { id, params, card_payload } => {
                 let _ = proc.write(&wire::elicitation_outcome(&id, &card_payload, &params, false, None, Some("cancel")));
             }
+            PendingRequest::GrokDialog { id, method, .. } => {
+                let _ = proc.write(&wire::grok_cancelled_outcome(&id, &method));
+            }
             PendingRequest::DetachedRecovery { row_id, .. } => {
                 super::antigravity_tasks::settle_rows(proc, std::slice::from_ref(&row_id));
             }
@@ -1728,6 +1780,35 @@ mod tests {
         assert_eq!(models[1]["effortLevels"], json!(["low"]));
     }
 
+    /// A conversation whose native recording is gone opens a fresh one, and says so; anything else is
+    /// still reported as the failure it is instead of silently replacing the conversation.
+    #[test]
+    fn a_missing_native_conversation_opens_a_fresh_one_and_other_failures_still_fail() {
+        let app = ctx("acp-load-missing");
+        let (proc, mut agent) = wired(SessionKind::Grok);
+        bootstrap(&app, &proc, Some("native-lost"), Some("/w"), None);
+        let initialize = written(&mut agent);
+        reply(&app, &proc, &initialize, json!({"agentCapabilities":{"loadSession":true}}));
+        let load = written(&mut agent);
+        assert_eq!(load["method"], "session/load");
+        handle_line(&app, "s", &proc, &json!({"jsonrpc":"2.0","id":load["id"],
+            "error":{"code":-32603,"message":"Path not found.","data":{"code":"FS_NOT_FOUND"}}}).to_string());
+        let fresh = written(&mut agent);
+        assert_eq!(fresh["method"], "session/new");
+        assert_eq!(fresh["params"]["cwd"], "/w");
+        assert!(proc.ready.load(Ordering::Relaxed) || !proc.released.load(Ordering::Relaxed));
+
+        // A protocol error is not a lost conversation: the start fails as before.
+        let (other, mut other_agent) = wired(SessionKind::Grok);
+        bootstrap(&app, &other, Some("native-broken"), Some("/w"), None);
+        let initialize = written(&mut other_agent);
+        reply(&app, &other, &initialize, json!({"agentCapabilities":{"loadSession":true}}));
+        let load = written(&mut other_agent);
+        handle_line(&app, "s", &other, &json!({"jsonrpc":"2.0","id":load["id"],
+            "error":{"code":-32602,"message":"Invalid params"}}).to_string());
+        assert!(other.released.load(Ordering::Relaxed));
+    }
+
     #[test]
     fn a_resumed_conversation_is_replaced_by_its_replay_and_keeps_recorded_times() {
         let app = ctx("acp-resume");
@@ -1832,6 +1913,68 @@ mod tests {
         assert!(!proc.turn.lock().unwrap().running);
         assert!(proc.acp.lock().unwrap().prompt.is_none());
         assert!(proc.acp.lock().unwrap().steers.is_empty());
+    }
+
+    /// Grok asks for plan approval through its own request; the card is VelaTerm's plan card, and the
+    /// answer has to come back in Grok's shape rather than as an ACP permission outcome.
+    #[test]
+    fn grok_plan_approval_is_a_plan_card_answered_with_its_outcome() {
+        let app = ctx("acp-grok-plan");
+        let (proc, mut agent) = wired(SessionKind::Grok);
+        *proc.agent_session_id.lock().unwrap() = Some("s1".into());
+        *proc.mode.lock().unwrap() = "bypassPermissions".into();
+        let ask = |id: i64| json!({"jsonrpc":"2.0","id":id,"method":"_x.ai/exit_plan_mode",
+            "params":{"sessionId":"s1","toolCallId":"t1","planContent":"1. Do it"}}).to_string();
+        handle_line(&app, "s", &proc, &ask(0));
+        let card = proc.permissions.lock().unwrap().get("acp-grok-0").cloned().expect("the plan waits for the person");
+        assert_eq!((card["tool_name"].as_str(), card["input"]["plan"].as_str()), (Some("ExitPlanMode"), Some("1. Do it")));
+        // Bypass approves tool permissions, never a plan: the person still has to say yes.
+        approve_pending(&app, "s", &proc);
+        assert!(proc.permissions.lock().unwrap().contains_key("acp-grok-0"));
+        respond(&app, "s", &proc, "acp-grok-0", true, None, None, None).unwrap();
+        assert_eq!(written(&mut agent), json!({"jsonrpc":"2.0","id":0,"result":{"outcome":"approved"}}));
+        handle_line(&app, "s", &proc, &ask(1));
+        respond(&app, "s", &proc, "acp-grok-1", false, None, None, None).unwrap();
+        assert_eq!(written(&mut agent), json!({"jsonrpc":"2.0","id":1,"result":{"outcome":"rejected"}}));
+        assert!(proc.permissions.lock().unwrap().is_empty());
+    }
+
+    /// Questions and MCP forms arrive as Grok's own requests and are answered in its three shapes.
+    #[test]
+    fn grok_questions_and_mcp_forms_are_cards_answered_in_grok_shape() {
+        let app = ctx("acp-grok-dialogs");
+        let (proc, mut agent) = wired(SessionKind::Grok);
+        *proc.agent_session_id.lock().unwrap() = Some("s1".into());
+        handle_line(&app, "s", &proc, &json!({"jsonrpc":"2.0","id":2,"method":"_x.ai/ask_user_question","params":{"sessionId":"s1",
+            "toolCallId":"t1","questions":[{"question":"Pick a color?","options":[{"label":"Red"},{"label":"Blue"}],"multiSelect":null}],
+            "mode":"default"}}).to_string());
+        let card = proc.permissions.lock().unwrap().get("acp-grok-2").cloned().expect("the question waits for the person");
+        assert_eq!((card["tool_name"].as_str(), card["input"]["questions"][0]["header"].as_str()),
+            (Some("AskUserQuestion"), Some("Q1")));
+        let answered = json!({"questions":card["input"]["questions"],"answers":{"Pick a color?":"Red"}});
+        respond(&app, "s", &proc, "acp-grok-2", true, Some(&answered), None, None).unwrap();
+        assert_eq!(written(&mut agent), json!({"jsonrpc":"2.0","id":2,
+            "result":{"outcome":"accepted","answers":{"Pick a color?":"Red"}}}));
+        let elicit = |id: i64| json!({"jsonrpc":"2.0","id":id,"method":"_x.ai/mcp/elicit","params":{"sessionId":"s1","toolCallId":"m1",
+            "serverName":"srv","message":"Name?","mode":"form","requestedSchema":{"type":"object","properties":{"name":{"type":"string"}}}}}).to_string();
+        handle_line(&app, "s", &proc, &elicit(3));
+        let card = proc.permissions.lock().unwrap().get("acp-grok-3").cloned().expect("the form waits for the person");
+        assert_eq!((card["subtype"].as_str(), card["mcp_server_name"].as_str()), (Some("elicitation"), Some("srv")));
+        respond(&app, "s", &proc, "acp-grok-3", true, Some(&json!({"name":"Kai"})), None, None).unwrap();
+        assert_eq!(written(&mut agent), json!({"jsonrpc":"2.0","id":3,"result":{"outcome":"accept","content":{"name":"Kai"}}}));
+        handle_line(&app, "s", &proc, &elicit(4));
+        respond(&app, "s", &proc, "acp-grok-4", false, None, Some("cancel"), None).unwrap();
+        assert_eq!(written(&mut agent), json!({"jsonrpc":"2.0","id":4,"result":{"outcome":"cancel"}}));
+        // A dismissed question skips the interview rather than failing the turn.
+        handle_line(&app, "s", &proc, &json!({"jsonrpc":"2.0","id":5,"method":"_x.ai/ask_user_question","params":{"sessionId":"s1",
+            "questions":[{"question":"Pick a color?","options":[]}]}}).to_string());
+        respond(&app, "s", &proc, "acp-grok-5", false, None, None, None).unwrap();
+        assert_eq!(written(&mut agent), json!({"jsonrpc":"2.0","id":5,"result":{"outcome":"skip_interview"}}));
+        // A turn that ends with a form still open answers it as cancelled, so the agent is never left waiting.
+        handle_line(&app, "s", &proc, &elicit(6));
+        cancel_pending(&app, "s", &proc);
+        assert_eq!(written(&mut agent), json!({"jsonrpc":"2.0","id":6,"result":{"outcome":"cancel"}}));
+        assert!(proc.permissions.lock().unwrap().is_empty());
     }
 
     #[test]
