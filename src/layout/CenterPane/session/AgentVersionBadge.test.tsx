@@ -12,7 +12,7 @@ vi.mock("../../../ipc/agentVersion", () => ({ agentVersion: vi.fn(), agentUpdate
 vi.mock("../../../ipc/chat", () => ({ chatDetach: vi.fn() }));
 vi.mock("../../../ipc/info", () => ({ copyText: vi.fn() }));
 vi.mock("../../../platform", () => ({ platform: { opener: { openExternal: vi.fn() } } }));
-vi.mock("../../../ipc/transport", () => ({ onTransportReconnect: () => () => {} }));
+vi.mock("../../../ipc/transport", () => ({ onTransportReconnect: () => () => {}, isTauri: false, isElectronShell: false }));
 import { agentUpdateStart, agentUpdateStatus, agentVersion, type AgentUpdateStatus } from "../../../ipc/agentVersion";
 import { chatDetach } from "../../../ipc/chat";
 import { setLang } from "../../../i18n";

@@ -3,6 +3,7 @@
 //! shown hides or shows the sidebar. Settings, account, feedback, share, and game center sit at the bottom of the bar.
 
 import { Fragment, useEffect, useState } from "react";
+import { ContextMenu, type MenuItem } from "../../components/ContextMenu";
 import { GameCenterLink } from "../../components/GameCenterLink";
 import Icons from "../../components/Icons";
 import { getLocale, useT } from "../../i18n";
@@ -18,11 +19,13 @@ import { memoryNavigate, memoryUrl } from "../Memory/navigation";
 import { knowledgeSelection } from "../Notebook/knowledgeSelection";
 import { sidebarTabOfView, sidebarTabSection } from "./sidebarTreeLayout";
 import {
+  isDefaultViewSection,
   liveTerminalIds,
   RAIL_SECTIONS,
   SYSTEM_PROJECTS,
   SystemCollectionIcon,
   systemLabel,
+  type DefaultViewSection,
 } from "./systemCollections";
 
 export function SidebarRail() {
@@ -38,6 +41,16 @@ export function SidebarRail() {
   const fixedLayout = useTermStore((s) => s.projects.some((p) => p.id === SYSTEM_PROJECTS));
   // A number, so runtime updates that keep the same count do not re-render the bar.
   const terminals = useTermStore((s) => liveTerminalIds(s.sessions, s.ephemeralSessions, s.runtimes).length);
+  const defaultView = useTermStore((s) => s.defaultSidebarSection);
+  const setDefaultView = useTermStore((s) => s.setDefaultSidebarSection);
+  const [menu, setMenu] = useState<{ x: number; y: number; section: DefaultViewSection } | null>(null);
+
+  /** The default view only has to be chosen once, so it lives in a right-click menu rather than a dialog. */
+  const defaultViewMenu = (target: DefaultViewSection): MenuItem[] => [
+    defaultView === target
+      ? { label: t("sidebarSection.clearDefaultView"), onClick: () => setDefaultView(null) }
+      : { label: t("sidebarSection.setDefaultView"), onClick: () => setDefaultView(target) },
+  ];
 
   return (
     <nav className="sidebar-rail" aria-label={t("sidebarSection.nav")}>
@@ -54,6 +67,12 @@ export function SidebarRail() {
             title={label}
             aria-label={count > 0 ? `${label} (${count})` : label}
             aria-pressed={active}
+            onContextMenu={(event) => {
+              // Archive and Knowledge open their own pages, so they cannot be a default view.
+              if (!isDefaultViewSection(id)) return;
+              event.preventDefault();
+              setMenu({ x: event.clientX, y: event.clientY, section: id });
+            }}
             onClick={() => {
               pick(id);
               // Archive and Knowledge are pages as well as sidebar sections; showing one opens its page.
@@ -70,6 +89,14 @@ export function SidebarRail() {
           </Fragment>
         );
       })}
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          items={defaultViewMenu(menu.section)}
+          onClose={() => setMenu(null)}
+        />
+      )}
       <span className="sidebar-rail-sp" />
       <RailFooter />
     </nav>

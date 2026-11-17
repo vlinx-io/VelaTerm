@@ -2,6 +2,7 @@
 //! types. Extracted from termStore because settings I/O and defaults are self-contained. This lets
 //! SettingsModal and the store share types while reducing the size of the main store.
 
+import { parseDefaultViewSection, type DefaultViewSection } from "../layout/LeftSidebar/systemCollections";
 import { pushSetting } from "../ipc/settingsSync";
 import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, SETTINGS_TABS, normalizeFontFamily, normalizeLetterSpacing, normalizeTextSize, normalizeTextLineHeight } from "../theme";
 import type {
@@ -53,7 +54,7 @@ export interface AgentDefaultConfig {
    * user enters in the card's path field. */
   path?: string;
   /** View a new session of this agent opens in. Missing uses the agent's built-in default
-   * (`defaultEngineFor`): conversation for Claude/Codex, terminal for other agents. */
+   * (`defaultEngineFor`): conversation for Claude/Codex/Antigravity, terminal for other agents. */
   engine?: SessionEngine;
 }
 
@@ -64,7 +65,7 @@ export function defaultEngineFor(
   agentDefaults: Record<string, AgentDefaultConfig>,
 ): SessionEngine {
   if (!hasTerminalInterface(kind)) return "chat";
-  return agentDefaults[kind]?.engine ?? (kind === "claude" || kind === "codex" ? "chat" : "tui");
+  return agentDefaults[kind]?.engine ?? (kind === "claude" || kind === "codex" || kind === "antigravity" ? "chat" : "tui");
 }
 
 /** The permission a session launches with: its own choice, or the agent kind's global default when it has
@@ -237,6 +238,8 @@ export interface PersistedSettings {
   /** The revision of the default inline set that the saved list has been brought up to. A list saved
    * before a revision gains that revision's chips once; removing them again in the settings sticks. */
   composerInlineChipsRevision: number;
+  /** Sidebar section a fresh launch opens on, chosen from the activity bar. `null` opens Projects. */
+  defaultSidebarSection: DefaultViewSection | null;
 }
 
 /** Every composer chip the toolbar can show, in the order the toolbar used before the list became
@@ -324,6 +327,7 @@ export const SETTINGS_DEFAULTS: PersistedSettings = {
   infoCollapsed: {},
   composerInlineChips: DEFAULT_COMPOSER_INLINE_CHIPS,
   composerInlineChipsRevision: COMPOSER_INLINE_CHIPS_REVISION,
+  defaultSidebarSection: null,
 };
 
 /** Keeps only known chip ids, once each and in the saved order. A missing or malformed value falls back
@@ -443,6 +447,8 @@ export function loadSettings(): PersistedSettings {
       merged.composerInlineChips = [...merged.composerInlineChips, "tasks"];
     }
     merged.composerInlineChipsRevision = COMPOSER_INLINE_CHIPS_REVISION;
+    // An unknown or corrupted section name simply means no default was chosen, which opens Projects.
+    merged.defaultSidebarSection = parseDefaultViewSection(parsed.defaultSidebarSection) ?? null;
     // Migrate boolean gpuRender to termRenderer only when the new key is absent, preserving WebGL for
     // existing users. Future saves write only the new structure and naturally discard the old field.
     if (parsed.termRenderer === undefined && typeof parsed.gpuRender === "boolean") {

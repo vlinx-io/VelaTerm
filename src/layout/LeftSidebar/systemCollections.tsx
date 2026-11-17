@@ -39,6 +39,16 @@ export const RAIL_SECTIONS: RailSection[] = [
   "knowledge",
 ];
 
+/** A section that fills the sidebar with its own pane group, so a launch can open on it. Archive and
+ * Knowledge are pages instead, which is why they cannot be the default view. */
+export type DefaultViewSection = Exclude<RailSection, "archive" | "knowledge">;
+export const isDefaultViewSection = (section: RailSection): section is DefaultViewSection =>
+  section !== "archive" && section !== "knowledge";
+export const DEFAULT_VIEW_SECTIONS: DefaultViewSection[] = RAIL_SECTIONS.filter(isDefaultViewSection);
+/** Validate a stored default view; anything else means no default was chosen. */
+export const parseDefaultViewSection = (candidate: unknown): DefaultViewSection | undefined =>
+  DEFAULT_VIEW_SECTIONS.find((section) => section === candidate);
+
 /** Sections whose contents start expanded. A pane showing one ignores the collapse state shared with Projects, so
  * only what the user collapses in that pane stays collapsed. */
 export const sectionStartsExpanded = (section: RailSection): boolean =>

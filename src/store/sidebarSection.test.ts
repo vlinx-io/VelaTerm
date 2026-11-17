@@ -132,6 +132,30 @@ describe("sidebar section groups", () => {
     }
   });
 
+  it("opens on the default view, and on Projects when none was chosen", async () => {
+    vi.useFakeTimers();
+    try {
+      // Tasks was the last section shown when the application was closed.
+      useTermStore.getState().pickSidebarSection("tasks");
+      vi.advanceTimersByTime(250);
+
+      vi.resetModules();
+      let restarted = (await import("./termStore")).useTermStore.getState();
+      expect(sidebarTabSection(sidebarTabOfView(restarted.sidebarTreeTabs, restarted.activeSidebarTreeViewId))).toBe("projects");
+
+      // A chosen default wins over the section used last, and a section never opened gets its own group.
+      localStorage.setItem("vlx-settings", JSON.stringify({ defaultSidebarSection: "chat" }));
+      vi.resetModules();
+      restarted = (await import("./termStore")).useTermStore.getState();
+      expect(sidebarTabSection(sidebarTabOfView(restarted.sidebarTreeTabs, restarted.activeSidebarTreeViewId))).toBe("chat");
+      const chatTab = restarted.sidebarTreeTabs.find((tab) => sidebarTabSection(tab) === "chat");
+      expect(chatTab && collectSidebarViewIds(chatTab.root)).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+      localStorage.removeItem("vlx-settings");
+    }
+  });
+
   it("toggles the sidebar when the shown section is picked again", () => {
     useTermStore.getState().pickSidebarSection("projects");
     expect(useTermStore.getState().leftCollapsed).toBe(true);

@@ -5,7 +5,7 @@ import type { useTranslationSession } from "./state";
 const mocks = vi.hoisted(() => ({ state: null as ReturnType<typeof useTranslationSession> | null, save: vi.fn(), refresh: vi.fn(), copy: vi.fn() }));
 vi.mock("./state", () => ({ useConversationTranslation: () => mocks.state }));
 vi.mock("./SettingsSection", () => ({ translationError: () => "Translation unavailable" }));
-vi.mock("../platform", () => ({ platform: { clipboard: { writeText: mocks.copy } } }));
+vi.mock("../platform", () => ({ env: { isBrowser: false, isRemoteWindow: false }, platform: { clipboard: { writeText: mocks.copy } } }));
 import { setLang } from "../i18n";
 import { TranslationComposerControl } from "./ComposerControl";
 import { ReplyTranslation } from "./Message";

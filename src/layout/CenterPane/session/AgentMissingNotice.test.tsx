@@ -3,7 +3,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-vi.mock("../../../ipc/transport", () => ({ invoke: vi.fn(), listen: vi.fn() }));
+vi.mock("../../../ipc/transport", () => ({ invoke: vi.fn(), listen: vi.fn(), isTauri: false, isElectronShell: false }));
 vi.mock("../../../platform", () => ({ platform: { opener: { openExternal: vi.fn() } } }));
 vi.mock("../../../store/termStore", () => ({ useTermStore: { getState: () => ({}) } }));
 import { invoke } from "../../../ipc/transport";

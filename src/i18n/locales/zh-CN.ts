@@ -997,19 +997,19 @@ const zhCN: typeof en = {
   "remote.mirror": "多端界面镜像", // Mirror layout across devices
   "remote.mirrorHint":
     "标签、分屏和当前会话在所有已连接设备上保持一致，各端的键盘焦点互不打扰。", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
-  "remote.listenLabel": "Listen on", // TODO translate
-  "remote.listenAll": "All networks", // TODO translate
-  "remote.listenLoopback": "This computer only (tunnel)", // TODO translate
-  "remote.listenUnavailable": (ip: string) => `${ip} (not available)`, // TODO translate
-  "remote.reachAll": "Reachable from every network this computer is connected to.", // TODO translate
-  "remote.reachOnly": (addr: string) => `Reachable only at ${addr}.`, // TODO translate
-  "remote.reachTunnel": "Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.", // TODO translate
-  "remote.pairingHostLabel": "Address for pairing links", // TODO translate
-  "remote.pairingHostPlaceholder": "host.tailnet.ts.net", // TODO translate
-  "remote.pairingHostNeeded": "Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.", // TODO translate
-  "remote.bindInvalid": (value: string) => `"${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.`, // TODO translate
-  "remote.bindUnavailable": (ip: string) => `The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.`, // TODO translate
-  "remote.pairingHostInvalid": (value: string) => `"${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.`, // TODO translate
+  "remote.listenLabel": "监听地址", // Listen on
+  "remote.listenAll": "所有网络", // All networks
+  "remote.listenLoopback": "仅本机（隧道）", // This computer only (tunnel)
+  "remote.listenUnavailable": (ip: string) => `${ip}（不可用）`, // ${ip} (not available)
+  "remote.reachAll": "可通过此电脑连接的任意网络访问。", // Reachable from every network this computer is connected to.
+  "remote.reachOnly": (addr: string) => `仅可通过 ${addr} 访问。`, // Reachable only at ${addr}.
+  "remote.reachTunnel": "仅可通过此电脑上的隧道或代理访问，例如 tailscale serve 或 ssh -L。", // Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.
+  "remote.pairingHostLabel": "配对链接使用的地址", // Address for pairing links
+  "remote.pairingHostPlaceholder": "host.tailnet.ts.net", // host.tailnet.ts.net
+  "remote.pairingHostNeeded": "客户端通过隧道访问此电脑。请输入它们使用的主机名或 IP。不填写时，配对链接会指向 127.0.0.1，仅在使用 ssh -L 时有效。", // Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.
+  "remote.bindInvalid": (value: string) => `“${value}” 不是有效的监听地址。请选择所有网络、仅本机，或此电脑上的一个 IPv4 地址。`, // "${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.
+  "remote.bindUnavailable": (ip: string) => `地址 ${ip} 在此电脑上不可用。请连接对应网络或 VPN，或选择其他地址。远程访问不会回退到所有网络。`, // The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.
+  "remote.pairingHostInvalid": (value: string) => `“${value}” 不是有效的配对链接地址。请输入主机名或 IPv4 地址，不要包含协议、端口或路径。`, // "${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.
 
   // ── Remote connection panel ──
   "connect.wslUpgrade": "此工作区正在运行其他版本的服务端。重启服务端会结束此 WSL 工作区中的所有运行中会话。",
@@ -2604,6 +2604,8 @@ const zhCN: typeof en = {
   "sidebarSection.nav": "侧边栏分区",
   "sidebarSection.noTasks": "还没有任务会话。",
   "sidebarSection.noChats": "还没有聊天会话。",
+  "sidebarSection.setDefaultView": "设为默认视图",
+  "sidebarSection.clearDefaultView": "取消默认视图",
   "artifact.comment": "评论",
   "artifact.commentTitle": "点选页面元素，给智能体留评论",
   "artifact.pickHint": "点击页面中的元素来评论，按 Esc 退出。",

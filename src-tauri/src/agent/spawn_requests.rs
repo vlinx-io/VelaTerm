@@ -269,7 +269,7 @@ fn launch_defaults(app: &AppCtx, conn: &Connection, parent: Option<&Session>, ki
         else if let Some(parent) = parent.filter(|p| p.kind.supports_chat()) {
             let candidate = parent.engine.trim();
             if candidate.is_empty() {
-                if matches!(kind, SessionKind::Claude | SessionKind::Codex) { "chat" } else { "tui" }
+                if matches!(kind, SessionKind::Claude | SessionKind::Codex | SessionKind::Antigravity) { "chat" } else { "tui" }
             } else {
                 candidate
             }
@@ -278,7 +278,7 @@ fn launch_defaults(app: &AppCtx, conn: &Connection, parent: Option<&Session>, ki
                 .as_str()
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
-                .unwrap_or(if matches!(kind, SessionKind::Claude | SessionKind::Codex) { "chat" } else { "tui" })
+                .unwrap_or(if matches!(kind, SessionKind::Claude | SessionKind::Codex | SessionKind::Antigravity) { "chat" } else { "tui" })
         };
     let _ = app;
     if !matches!(engine, "tui" | "chat") { return Err("Invalid default session engine".into()); }
@@ -1456,7 +1456,7 @@ mod tests {
         let mut req = selector(&f);
         req.kind = Some("antigravity".into());
         let agy = create_agent_session(&f.app, &req).unwrap();
-        assert_eq!(agy.engine, "tui");
+        assert_eq!(agy.engine, "chat");
         assert_eq!(agy.permission_mode.as_deref(), Some("acceptEdits"));
         assert_eq!(agy.collaboration_mode.as_deref(), Some("accept-edits"));
 
@@ -1501,6 +1501,13 @@ mod tests {
         let planned = create_agent_session(&f.app, &plan_req).unwrap();
         assert_eq!(planned.permission_mode.as_deref(), Some("plan"));
         assert_eq!(planned.collaboration_mode.as_deref(), Some("plan"));
+
+        // An explicit per-agent default still wins over the built-in conversation default.
+        repo::set_app_settings(&f.app.db().conn.lock().unwrap(), &std::collections::HashMap::from([("vlx-settings".into(),
+            json!({"agentDefaults":{"antigravity":{"engine":"tui"}}}).to_string())])).unwrap();
+        let mut tui_req = selector(&f);
+        tui_req.kind = Some("antigravity".into());
+        assert_eq!(create_agent_session(&f.app, &tui_req).unwrap().engine, "tui");
     }
 }
 

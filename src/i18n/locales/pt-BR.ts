@@ -1012,19 +1012,19 @@ const ptBR: typeof en = {
   "remote.mirror": "Espelhar o layout em todos os dispositivos", // Mirror layout across devices
   "remote.mirrorHint":
     "Abas, divisões e a sessão ativa ficam iguais em todos os dispositivos conectados. O foco do teclado permanece onde está em cada um.", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
-  "remote.listenLabel": "Listen on", // TODO translate
-  "remote.listenAll": "All networks", // TODO translate
-  "remote.listenLoopback": "This computer only (tunnel)", // TODO translate
-  "remote.listenUnavailable": (ip: string) => `${ip} (not available)`, // TODO translate
-  "remote.reachAll": "Reachable from every network this computer is connected to.", // TODO translate
-  "remote.reachOnly": (addr: string) => `Reachable only at ${addr}.`, // TODO translate
-  "remote.reachTunnel": "Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.", // TODO translate
-  "remote.pairingHostLabel": "Address for pairing links", // TODO translate
-  "remote.pairingHostPlaceholder": "host.tailnet.ts.net", // TODO translate
-  "remote.pairingHostNeeded": "Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.", // TODO translate
-  "remote.bindInvalid": (value: string) => `"${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.`, // TODO translate
-  "remote.bindUnavailable": (ip: string) => `The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.`, // TODO translate
-  "remote.pairingHostInvalid": (value: string) => `"${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.`, // TODO translate
+  "remote.listenLabel": "Escutar em", // Listen on
+  "remote.listenAll": "Todas as redes", // All networks
+  "remote.listenLoopback": "Somente este computador (túnel)", // This computer only (tunnel)
+  "remote.listenUnavailable": (ip: string) => `${ip} (indisponível)`, // ${ip} (not available)
+  "remote.reachAll": "Acessível a partir de todas as redes às quais este computador está conectado.", // Reachable from every network this computer is connected to.
+  "remote.reachOnly": (addr: string) => `Acessível somente em ${addr}.`, // Reachable only at ${addr}.
+  "remote.reachTunnel": "Acessível somente por um túnel ou proxy neste computador, como tailscale serve ou ssh -L.", // Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.
+  "remote.pairingHostLabel": "Endereço para links de pareamento", // Address for pairing links
+  "remote.pairingHostPlaceholder": "host.tailnet.ts.net", // host.tailnet.ts.net
+  "remote.pairingHostNeeded": "Os clientes chegam a este computador por um túnel. Informe o nome de host ou IP que eles usam. Sem isso, os links de pareamento apontam para 127.0.0.1, o que só funciona com ssh -L.", // Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.
+  "remote.bindInvalid": (value: string) => `“${value}” não é um endereço de escuta válido. Escolha todas as redes, somente este computador, ou um endereço IPv4 deste computador.`, // "${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.
+  "remote.bindUnavailable": (ip: string) => `O endereço ${ip} não está disponível neste computador. Conecte a rede ou a VPN, ou escolha outro endereço. O acesso remoto nunca recorre a todas as redes.`, // The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.
+  "remote.pairingHostInvalid": (value: string) => `“${value}” não é um endereço válido para links de pareamento. Informe um nome de host ou endereço IPv4, sem esquema, porta ou caminho.`, // "${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.
 
   // ── Remote connection panel ──
   "connect.wslUpgrade": "Este espaço de trabalho está executando outra versão do servidor. Reiniciar o servidor encerra todas as sessões ativas neste espaço de trabalho WSL.",
@@ -2665,6 +2665,8 @@ const ptBR: typeof en = {
   "sidebarSection.nav": "Seções da barra lateral",
   "sidebarSection.noTasks": "Ainda não há sessões de tarefa.",
   "sidebarSection.noChats": "Ainda não há sessões de chat.",
+  "sidebarSection.setDefaultView": "Definir como visualização padrão",
+  "sidebarSection.clearDefaultView": "Remover a visualização padrão",
   "artifact.comment": "Comentar", // Comment
   "artifact.commentTitle": "Clique em elementos da página para deixar comentários para o agente", // Click elements in the page to leave comments for the agent
   "artifact.pickHint": "Clique em um elemento da página para comentá-lo. Pressione Esc para parar.", // Click an element in the page to comment on it. Press Esc to stop.

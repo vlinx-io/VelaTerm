@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-vi.mock("../../../platform", () => ({ platform: { opener: { openExternal: vi.fn() } } }));
+vi.mock("../../../platform", () => ({ env: { isBrowser: false, isRemoteWindow: false }, platform: { opener: { openExternal: vi.fn() } } }));
 vi.mock("../../../store/termStore", () => ({ useTermStore: { getState: () => ({ openDocTab }) } }));
 const { openDocTab } = vi.hoisted(() => ({ openDocTab: vi.fn() }));
 

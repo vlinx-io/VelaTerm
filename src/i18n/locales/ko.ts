@@ -1008,19 +1008,19 @@ const ko: typeof en = {
   "remote.mirror": "기기 간 레이아웃 미러링", // Mirror layout across devices
   "remote.mirrorHint":
     "탭, 분할, 활성 세션이 연결된 모든 기기에서 동일하게 유지됩니다. 키보드 포커스는 기기마다 그대로 유지됩니다.", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
-  "remote.listenLabel": "Listen on", // TODO translate
-  "remote.listenAll": "All networks", // TODO translate
-  "remote.listenLoopback": "This computer only (tunnel)", // TODO translate
-  "remote.listenUnavailable": (ip: string) => `${ip} (not available)`, // TODO translate
-  "remote.reachAll": "Reachable from every network this computer is connected to.", // TODO translate
-  "remote.reachOnly": (addr: string) => `Reachable only at ${addr}.`, // TODO translate
-  "remote.reachTunnel": "Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.", // TODO translate
-  "remote.pairingHostLabel": "Address for pairing links", // TODO translate
-  "remote.pairingHostPlaceholder": "host.tailnet.ts.net", // TODO translate
-  "remote.pairingHostNeeded": "Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.", // TODO translate
-  "remote.bindInvalid": (value: string) => `"${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.`, // TODO translate
-  "remote.bindUnavailable": (ip: string) => `The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.`, // TODO translate
-  "remote.pairingHostInvalid": (value: string) => `"${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.`, // TODO translate
+  "remote.listenLabel": "수신 주소", // Listen on
+  "remote.listenAll": "모든 네트워크", // All networks
+  "remote.listenLoopback": "이 컴퓨터만 (터널)", // This computer only (tunnel)
+  "remote.listenUnavailable": (ip: string) => `${ip}(사용 불가)`, // ${ip} (not available)
+  "remote.reachAll": "이 컴퓨터가 연결된 모든 네트워크에서 접속할 수 있습니다.", // Reachable from every network this computer is connected to.
+  "remote.reachOnly": (addr: string) => `${addr}에서만 접속할 수 있습니다.`, // Reachable only at ${addr}.
+  "remote.reachTunnel": "이 컴퓨터의 터널이나 프록시를 통해서만 접속할 수 있습니다(예: tailscale serve, ssh -L).", // Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.
+  "remote.pairingHostLabel": "페어링 링크 주소", // Address for pairing links
+  "remote.pairingHostPlaceholder": "host.tailnet.ts.net", // host.tailnet.ts.net
+  "remote.pairingHostNeeded": "클라이언트가 터널을 통해 이 컴퓨터에 접속합니다. 클라이언트가 사용하는 호스트 이름 또는 IP를 입력하세요. 입력하지 않으면 페어링 링크가 127.0.0.1을 가리키며 ssh -L에서만 동작합니다.", // Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.
+  "remote.bindInvalid": (value: string) => `“${value}”은(는) 올바른 수신 주소가 아닙니다. 모든 네트워크, 이 컴퓨터만, 또는 이 컴퓨터의 IPv4 주소를 선택하세요.`, // "${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.
+  "remote.bindUnavailable": (ip: string) => `${ip} 주소는 이 컴퓨터에서 사용할 수 없습니다. 네트워크나 VPN에 연결하거나 다른 주소를 선택하세요. 원격 접속이 모든 네트워크로 대체되는 일은 없습니다.`, // The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.
+  "remote.pairingHostInvalid": (value: string) => `“${value}”은(는) 올바른 페어링 링크 주소가 아닙니다. 스킴, 포트, 경로 없이 호스트 이름 또는 IPv4 주소를 입력하세요.`, // "${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.
 
   // ── Remote connection panel ──
   "connect.wslUpgrade": "이 작업 공간에서 다른 버전의 서버가 실행 중입니다. 서버를 다시 시작하면 이 WSL 작업 공간의 모든 실행 중인 세션이 종료됩니다.",
@@ -2637,6 +2637,8 @@ const ko: typeof en = {
   "sidebarSection.nav": "사이드바 섹션",
   "sidebarSection.noTasks": "아직 작업 세션이 없습니다.",
   "sidebarSection.noChats": "아직 채팅 세션이 없습니다.",
+  "sidebarSection.setDefaultView": "기본 보기로 설정",
+  "sidebarSection.clearDefaultView": "기본 보기 해제",
   "artifact.comment": "댓글", // Comment
   "artifact.commentTitle": "페이지 요소를 선택해 에이전트에게 댓글을 남깁니다", // Click elements in the page to leave comments for the agent
   "artifact.pickHint": "페이지에서 요소를 클릭해 댓글을 답니다. Esc로 종료합니다.", // Click an element in the page to comment on it. Press Esc to stop.

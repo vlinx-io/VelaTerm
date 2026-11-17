@@ -134,7 +134,7 @@ import {
 } from "./settings";
 import { docKindOf, makeChangesTab, makeDiffTab, makeDocTab, sameComparison, type ChangesTarget, type DocTab } from "./docTab";
 import { traceSplit, type SplitSource } from "./splitTrace";
-import { parseRailSection, sectionStartsExpanded, SYSTEM_CHAT, SYSTEM_PROJECTS, SYSTEM_TASKS, type RailSection } from "../layout/LeftSidebar/systemCollections";
+import { parseRailSection, sectionStartsExpanded, SYSTEM_CHAT, SYSTEM_PROJECTS, SYSTEM_TASKS, type DefaultViewSection, type RailSection } from "../layout/LeftSidebar/systemCollections";
 
 // Re-export the public API after moving implementations to settings/docTab, preserving existing import paths.
 export { DEFAULT_MAX_LIVE_TABS } from "./settings";
@@ -537,6 +537,34 @@ function loadSidebarViews() {
   } catch {
     return fallback;
   }
+}
+
+/**
+ * Land a fresh page load on the user's default view instead of the section used last. A section that already owns
+ * a pane group shows that group as it was left; one the user never opened gets the same unfiltered group a first
+ * visit from the activity bar creates.
+ */
+function landingSidebarViews(
+  loaded: ReturnType<typeof loadSidebarViews>,
+  section: DefaultViewSection,
+) {
+  const target = loaded.tabs.find((tab) => sidebarTabSection(tab) === section);
+  if (target) return { ...loaded, activeId: target.activeViewId };
+  const view: SidebarTreeView = {
+    id: `tree-view-${genId()}`,
+    name: nextSidebarViewName(loaded.views),
+    treeFilter: "",
+    statusFilter: null,
+    statusFilterIds: null,
+    markFilter: null,
+    collapsedOverrides: null,
+  };
+  return {
+    views: [...loaded.views, view],
+    tabs: [...loaded.tabs, makeSidebarTreeTab(view.id, section)],
+    primaryId: loaded.primaryId,
+    activeId: view.id,
+  };
 }
 
 /** Debounce timers for persisting browser-node URLs, keyed by node ID. */
@@ -1050,6 +1078,8 @@ interface TermStore {
    * sidebar instead.
    */
   pickSidebarSection: (section: RailSection) => void;
+  /** Choose the section a fresh launch opens on; `null` goes back to Projects. */
+  setDefaultSidebarSection: (section: DefaultViewSection | null) => void;
   /**
    * Show the section a session belongs to (Projects, Tasks or Chat) without hiding the sidebar, then scroll the
    * section's active pane to the session, expanding its collapsed ancestors there.
@@ -1234,6 +1264,8 @@ interface TermStore {
   composerInlineChips: ComposerChipId[];
   /** Revision of the default inline set the saved list has been migrated to. */
   composerInlineChipsRevision: number;
+  /** Sidebar section a fresh launch opens on; `null` opens Projects. */
+  defaultSidebarSection: DefaultViewSection | null;
 
   /** Saved agent launch configurations shown in the new-session menu, in menu order. */
   agentPresets: AgentPreset[];
@@ -1894,6 +1926,7 @@ function persistAndApplyVisual(getState: () => TermStore) {
     infoCollapsed: s.infoCollapsed,
     composerInlineChips: s.composerInlineChips,
     composerInlineChipsRevision: s.composerInlineChipsRevision,
+    defaultSidebarSection: s.defaultSidebarSection,
   };
   saveSettings(ps);
   applyVisual(visualOf(ps));
@@ -2101,7 +2134,12 @@ function nextTerminalName(
   return `${label} ${maxN + 1}`;
 }
 
-const initialSidebarViews = loadSidebarViews();
+/** Settings are read once per page load; the store spreads this instead of reading local storage a second time. */
+const initialSettings = loadSettings();
+const initialSidebarViews = landingSidebarViews(
+  loadSidebarViews(),
+  initialSettings.defaultSidebarSection ?? "projects",
+);
 const initialPrimarySidebarView =
   initialSidebarViews.views.find(
     (view) => view.id === initialSidebarViews.primaryId,
@@ -2212,7 +2250,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
   shells: [],
   usage: null,
 
-  ...loadSettings(),
+  ...initialSettings,
 
   agentPresets: [],
 
@@ -4514,6 +4552,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
       });
     }
     saveSidebarViewsTick(get);
+  },
+  setDefaultSidebarSection: (section) => {
+    set({ defaultSidebarSection: section });
+    persistAndApplyVisual(get);
   },
   revealSession: (id) => {
     const s = get();

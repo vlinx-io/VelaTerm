@@ -25,7 +25,7 @@ vi.mock("../../ipc/notebook", () => ({
   notebookDroppedFiles: vi.fn(),
 }));
 vi.mock("../../ipc/memory", () => ({ memoryAttention: () => Promise.resolve(0), memoryList: api.list, memoryGet: api.get, memoryCollections: api.collections }));
-vi.mock("../../platform", () => ({ platform: { env: api.env, dialog: { pickDirectory: vi.fn() } } }));
+vi.mock("../../platform", () => ({ env: api.env, platform: { env: api.env, dialog: { pickDirectory: vi.fn() } } }));
 vi.mock("../../remote/ServerFileBrowser", () => ({
   cardStyle: {},
   joinPath: (parent: string, name: string) => `${parent.replace(/\/$/, "")}/${name}`,

@@ -1020,19 +1020,19 @@ const ru: typeof en = {
   "remote.mirror": "Зеркалировать раскладку на всех устройствах", // Mirror layout across devices
   "remote.mirrorHint":
     "Вкладки, разделения и активная сессия одинаковы на всех подключённых устройствах. Фокус клавиатуры на каждом остаётся на месте.", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
-  "remote.listenLabel": "Listen on", // TODO translate
-  "remote.listenAll": "All networks", // TODO translate
-  "remote.listenLoopback": "This computer only (tunnel)", // TODO translate
-  "remote.listenUnavailable": (ip: string) => `${ip} (not available)`, // TODO translate
-  "remote.reachAll": "Reachable from every network this computer is connected to.", // TODO translate
-  "remote.reachOnly": (addr: string) => `Reachable only at ${addr}.`, // TODO translate
-  "remote.reachTunnel": "Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.", // TODO translate
-  "remote.pairingHostLabel": "Address for pairing links", // TODO translate
-  "remote.pairingHostPlaceholder": "host.tailnet.ts.net", // TODO translate
-  "remote.pairingHostNeeded": "Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.", // TODO translate
-  "remote.bindInvalid": (value: string) => `"${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.`, // TODO translate
-  "remote.bindUnavailable": (ip: string) => `The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.`, // TODO translate
-  "remote.pairingHostInvalid": (value: string) => `"${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.`, // TODO translate
+  "remote.listenLabel": "Прослушивать на", // Listen on
+  "remote.listenAll": "Все сети", // All networks
+  "remote.listenLoopback": "Только этот компьютер (туннель)", // This computer only (tunnel)
+  "remote.listenUnavailable": (ip: string) => `${ip} (недоступно)`, // ${ip} (not available)
+  "remote.reachAll": "Доступно из любой сети, к которой подключён этот компьютер.", // Reachable from every network this computer is connected to.
+  "remote.reachOnly": (addr: string) => `Доступно только по адресу ${addr}.`, // Reachable only at ${addr}.
+  "remote.reachTunnel": "Доступно только через туннель или прокси на этом компьютере, например tailscale serve или ssh -L.", // Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.
+  "remote.pairingHostLabel": "Адрес для ссылок сопряжения", // Address for pairing links
+  "remote.pairingHostPlaceholder": "host.tailnet.ts.net", // host.tailnet.ts.net
+  "remote.pairingHostNeeded": "Клиенты подключаются к этому компьютеру через туннель. Укажите имя хоста или IP-адрес, которые они используют. Без этого ссылки сопряжения указывают на 127.0.0.1, что работает только с ssh -L.", // Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.
+  "remote.bindInvalid": (value: string) => `«${value}» — недопустимый адрес прослушивания. Выберите все сети, только этот компьютер или IPv4-адрес этого компьютера.`, // "${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.
+  "remote.bindUnavailable": (ip: string) => `Адрес ${ip} недоступен на этом компьютере. Подключите сеть или VPN либо выберите другой адрес. Удалённый доступ никогда не переключается на все сети.`, // The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.
+  "remote.pairingHostInvalid": (value: string) => `«${value}» — недопустимый адрес для ссылок сопряжения. Укажите имя хоста или IPv4-адрес без схемы, порта и пути.`, // "${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.
 
   // ── Remote connection panel ──
   "connect.wslUpgrade": "В этом рабочем пространстве запущена другая версия сервера. Перезапуск сервера завершит все активные сессии в этом рабочем пространстве WSL.",
@@ -2678,6 +2678,8 @@ const ru: typeof en = {
   "sidebarSection.nav": "Разделы боковой панели",
   "sidebarSection.noTasks": "Сессий задач пока нет.",
   "sidebarSection.noChats": "Сессий чата пока нет.",
+  "sidebarSection.setDefaultView": "Сделать видом по умолчанию",
+  "sidebarSection.clearDefaultView": "Снять вид по умолчанию",
   "artifact.comment": "Комментировать", // Comment
   "artifact.commentTitle": "Выберите элементы страницы, чтобы оставить комментарии для агента", // Click elements in the page to leave comments for the agent
   "artifact.pickHint": "Нажмите на элемент страницы, чтобы прокомментировать его. Esc — завершить.", // Click an element in the page to comment on it. Press Esc to stop.

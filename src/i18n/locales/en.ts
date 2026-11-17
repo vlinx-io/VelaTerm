@@ -2667,6 +2667,8 @@ const en = {
   "sidebarSection.nav": "Sidebar sections",
   "sidebarSection.noTasks": "No task sessions yet.",
   "sidebarSection.noChats": "No chat sessions yet.",
+  "sidebarSection.setDefaultView": "Set as default view",
+  "sidebarSection.clearDefaultView": "Clear default view",
   "artifact.comment": "Comment",
   "artifact.commentTitle": "Click elements in the page to leave comments for the agent",
   "artifact.pickHint": "Click an element in the page to comment on it. Press Esc to stop.",

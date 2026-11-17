@@ -1,3 +1,23 @@
+## v0.3.3 — 2026-11-17
+
+- 🌐 L’accès distant peut désormais écouter sur tous les réseaux, sur une adresse IPv4 précise comme une adresse Tailscale, ou uniquement sur cet ordinateur derrière un tunnel ou un proxy inverse ; `vela-server --serve` accepte le même choix avec `--bind`.
+- 🔒 Le mot de passe d’accès de `vela-server --serve` n’est plus transmis aux terminaux, agents et autres processus enfants, et `--password-file` le lit depuis un fichier lisible par son seul propriétaire.
+- 🪐 Les nouvelles sessions Antigravity s’ouvrent dans la vue conversation, tandis que les sessions créées avant la mise à jour conservent leur vue.
+- 🧭 Un clic droit sur une section de la barre d’activité permet de la définir comme vue par défaut ; sans cela, la barre latérale s’ouvre désormais sur Projets au lieu de la section consultée en dernier.
+- 🤖 Les conversations Grok proposent tous les modèles accessibles au compte et les niveaux de raisonnement propres à chacun, `none` apparaissant sous l’échelle.
+- 💬 Les approbations de plan, questions et formulaires MCP de Grok s’affichent maintenant sous forme de cartes habituelles et peuvent recevoir une réponse, et une conversation que Grok ne peut plus rouvrir en démarre une nouvelle au lieu de bloquer chaque message.
+- 🏷️ Les sessions Grok suivent le titre que Grok donne à leur conversation, et les conversations très longues ou celles dont le projet a été supprimé démarrent à nouveau normalement.
+- 🧱 Les connexions SSH sous Windows respectent désormais `~/.ssh/config` pour les alias d’hôte, ports, utilisateurs, fichiers d’identité et méthodes d’authentification préférées.
+- 🗂️ Les projets peuvent être réordonnés en faisant glisser une ligne de projet sur la moitié supérieure ou inférieure d’une autre.
+- ⚙️ Les Paramètres se rouvrent sur la section consultée en dernier.
+- 💡 Les réglages de comportement difficiles à déduire de leur libellé s’expliquent désormais via une icône d’information.
+- 📁 Fichiers gagne « Tout réduire » pour fermer d’un coup tous les dossiers ouverts sous la racine.
+- ⌨️ `Cmd/Ctrl+Tab` et `Cmd/Ctrl+Shift+Tab` passent à l’onglet suivant ou précédent et bouclent aux extrémités.
+- ⌨️ La saisie de `/` au terminal n’est plus envoyée deux fois.
+- ⌨️ La saisie au terminal après déplacement du curseur avec les flèches puis composition IME n’est plus corrompue.
+- 🖥️ Une fenêtre miroir qui a manqué un changement de taille se réaligne sur la taille du terminal au lieu d’afficher une invite brouillée.
+- 🧩 Les puces désactivées dans les réglages de la barre d’outils de saisie n’apparaissent plus derrière More.
+
 ## v0.3.2 — 2026-11-16
 
 - 🤖 Les sessions OpenCode v2 peuvent de nouveau utiliser le renommage par IA et la traduction, et un échec du renommage par IA signale désormais l'échec au lieu d'indiquer que l'agent est indisponible.

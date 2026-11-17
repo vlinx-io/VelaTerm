@@ -998,19 +998,19 @@ const zhTW: typeof en = {
   "remote.mirror": "多端介面鏡像", // Mirror layout across devices
   "remote.mirrorHint":
     "分頁、分割與目前會話在所有已連線裝置上保持一致，各端的鍵盤焦點互不打擾。", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
-  "remote.listenLabel": "Listen on", // TODO translate
-  "remote.listenAll": "All networks", // TODO translate
-  "remote.listenLoopback": "This computer only (tunnel)", // TODO translate
-  "remote.listenUnavailable": (ip: string) => `${ip} (not available)`, // TODO translate
-  "remote.reachAll": "Reachable from every network this computer is connected to.", // TODO translate
-  "remote.reachOnly": (addr: string) => `Reachable only at ${addr}.`, // TODO translate
-  "remote.reachTunnel": "Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.", // TODO translate
-  "remote.pairingHostLabel": "Address for pairing links", // TODO translate
-  "remote.pairingHostPlaceholder": "host.tailnet.ts.net", // TODO translate
-  "remote.pairingHostNeeded": "Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.", // TODO translate
-  "remote.bindInvalid": (value: string) => `"${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.`, // TODO translate
-  "remote.bindUnavailable": (ip: string) => `The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.`, // TODO translate
-  "remote.pairingHostInvalid": (value: string) => `"${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.`, // TODO translate
+  "remote.listenLabel": "監聽位址", // Listen on
+  "remote.listenAll": "所有網路", // All networks
+  "remote.listenLoopback": "僅限本機（通道）", // This computer only (tunnel)
+  "remote.listenUnavailable": (ip: string) => `${ip}（無法使用）`, // ${ip} (not available)
+  "remote.reachAll": "可透過此電腦連線的任一網路存取。", // Reachable from every network this computer is connected to.
+  "remote.reachOnly": (addr: string) => `僅可透過 ${addr} 存取。`, // Reachable only at ${addr}.
+  "remote.reachTunnel": "僅可透過此電腦上的通道或代理存取，例如 tailscale serve 或 ssh -L。", // Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.
+  "remote.pairingHostLabel": "配對連結使用的位址", // Address for pairing links
+  "remote.pairingHostPlaceholder": "host.tailnet.ts.net", // host.tailnet.ts.net
+  "remote.pairingHostNeeded": "用戶端透過通道存取此電腦。請輸入它們使用的主機名稱或 IP。未填寫時，配對連結會指向 127.0.0.1，僅在使用 ssh -L 時有效。", // Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.
+  "remote.bindInvalid": (value: string) => `「${value}」不是有效的監聽位址。請選擇所有網路、僅限本機，或此電腦上的一個 IPv4 位址。`, // "${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.
+  "remote.bindUnavailable": (ip: string) => `位址 ${ip} 在此電腦上無法使用。請連線對應網路或 VPN，或選擇其他位址。遠端存取不會退回所有網路。`, // The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.
+  "remote.pairingHostInvalid": (value: string) => `「${value}」不是有效的配對連結位址。請輸入主機名稱或 IPv4 位址，不要包含通訊協定、連接埠或路徑。`, // "${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.
 
   // ── Remote connection panel ──
   "connect.wslUpgrade": "此工作區正在執行其他版本的伺服器。重新啟動伺服器將結束此 WSL 工作區中所有執行中的會話。",
@@ -2605,6 +2605,8 @@ const zhTW: typeof en = {
   "sidebarSection.nav": "側邊欄分區",
   "sidebarSection.noTasks": "目前還沒有任務會話。",
   "sidebarSection.noChats": "目前還沒有聊天會話。",
+  "sidebarSection.setDefaultView": "設為預設檢視",
+  "sidebarSection.clearDefaultView": "取消預設檢視",
   "artifact.comment": "評論", // Comment
   "artifact.commentTitle": "點選頁面元素，給智慧體留下評論", // Click elements in the page to leave comments for the agent
   "artifact.pickHint": "點選頁面中的元素來評論，按 Esc 結束。", // Click an element in the page to comment on it. Press Esc to stop.

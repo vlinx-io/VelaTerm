@@ -1,3 +1,23 @@
+## v0.3.3 — 2026-11-17
+
+- 🌐 Der Fernzugriff kann jetzt auf allen Netzwerken, auf einer bestimmten IPv4-Adresse wie einer Tailscale-Adresse oder nur auf diesem Computer hinter einem Tunnel oder Reverse-Proxy lauschen; `vela-server --serve` nimmt dieselbe Auswahl mit `--bind` entgegen.
+- 🔒 Das Zugriffspasswort von `vela-server --serve` wird nicht mehr an Terminals, Agenten und andere Kindprozesse weitergegeben, und `--password-file` liest es aus einer Datei, auf die nur der Eigentümer zugreifen kann.
+- 🪐 Neue Antigravity-Sitzungen öffnen sich in der Gesprächsansicht, während vor dem Update erstellte Sitzungen ihre bisherige Ansicht behalten.
+- 🧭 Ein Rechtsklick auf einen Bereich der Aktivitätsleiste legt ihn als Standardansicht fest; ohne eine solche öffnet sich die Seitenleiste jetzt bei Projekte statt beim zuletzt angesehenen Bereich.
+- 🤖 Grok-Gespräche bieten jetzt alle Modelle, die das Konto nutzen kann, und die eigenen Denkstufen jedes Modells; `none` erscheint unter der Stufenliste.
+- 💬 Planfreigaben, Fragen und MCP-Formulare von Grok erscheinen jetzt als die gewohnten Karten und lassen sich beantworten; ein Gespräch, das Grok nicht mehr öffnen kann, startet ein neues, statt jede Nachricht zu blockieren.
+- 🏷️ Grok-Sitzungen übernehmen den Titel, den Grok ihrem Gespräch gibt, und sehr lange Gespräche oder solche unter einem gelöschten Projekt starten wieder normal.
+- 🧱 SSH-Verbindungen unter Windows beachten jetzt `~/.ssh/config` für Host-Aliase, Ports, Benutzer, Identitätsdateien und bevorzugte Authentifizierung.
+- 🗂️ Projekte lassen sich neu anordnen, indem eine Projektzeile auf die obere oder untere Hälfte einer anderen gezogen wird.
+- ⚙️ Die Einstellungen öffnen sich wieder im zuletzt angesehenen Bereich.
+- 💡 Verhaltenseinstellungen, deren Wirkung sich nicht aus der Bezeichnung ergibt, erklären sich jetzt über ein Info-Symbol.
+- 📁 Dateien erhält „Alle einklappen“, um alle geöffneten Ordner unterhalb des Stammverzeichnisses auf einmal zu schließen.
+- ⌨️ `Cmd/Ctrl+Tab` und `Cmd/Ctrl+Shift+Tab` wechseln zum nächsten bzw. vorherigen Tab und springen am Ende wieder zum Anfang.
+- ⌨️ Die Eingabe von `/` im Terminal wird nicht mehr doppelt gesendet.
+- ⌨️ Die Eingabe im Terminal nach dem Verschieben des Cursors mit den Pfeiltasten und einer IME-Komposition wird nicht mehr verfälscht.
+- 🖥️ Ein Spiegel-Fenster, das eine Größenänderung verpasst hat, gleicht sich wieder an die Terminalgröße an, statt eine verzerrte Eingabeaufforderung zu zeichnen.
+- 🧩 Im Eingabebereich deaktivierte Chips erscheinen nicht mehr hinter More.
+
 ## v0.3.2 — 2026-11-16
 
 - 🤖 OpenCode-v2-Sitzungen können KI-Umbenennung und Übersetzung wieder nutzen, und eine fehlgeschlagene KI-Umbenennung meldet jetzt den Fehler, statt den Agenten als nicht verfügbar zu bezeichnen.

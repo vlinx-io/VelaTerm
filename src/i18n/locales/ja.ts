@@ -1011,19 +1011,19 @@ const ja: typeof en = {
   "remote.mirror": "デバイス間でレイアウトを同期", // Mirror layout across devices
   "remote.mirrorHint":
     "タブ・分割・アクティブなセッションが接続中のすべての端末で一致します。キーボードフォーカスは各端末でそのまま保たれます。", // Tabs, splits, and the active session stay the same on every connected device. Keyboard focus stays put on each one.
-  "remote.listenLabel": "Listen on", // TODO translate
-  "remote.listenAll": "All networks", // TODO translate
-  "remote.listenLoopback": "This computer only (tunnel)", // TODO translate
-  "remote.listenUnavailable": (ip: string) => `${ip} (not available)`, // TODO translate
-  "remote.reachAll": "Reachable from every network this computer is connected to.", // TODO translate
-  "remote.reachOnly": (addr: string) => `Reachable only at ${addr}.`, // TODO translate
-  "remote.reachTunnel": "Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.", // TODO translate
-  "remote.pairingHostLabel": "Address for pairing links", // TODO translate
-  "remote.pairingHostPlaceholder": "host.tailnet.ts.net", // TODO translate
-  "remote.pairingHostNeeded": "Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.", // TODO translate
-  "remote.bindInvalid": (value: string) => `"${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.`, // TODO translate
-  "remote.bindUnavailable": (ip: string) => `The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.`, // TODO translate
-  "remote.pairingHostInvalid": (value: string) => `"${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.`, // TODO translate
+  "remote.listenLabel": "待ち受け先", // Listen on
+  "remote.listenAll": "すべてのネットワーク", // All networks
+  "remote.listenLoopback": "このコンピューターのみ（トンネル）", // This computer only (tunnel)
+  "remote.listenUnavailable": (ip: string) => `${ip}（利用不可）`, // ${ip} (not available)
+  "remote.reachAll": "このコンピューターが接続しているすべてのネットワークからアクセスできます。", // Reachable from every network this computer is connected to.
+  "remote.reachOnly": (addr: string) => `${addr} からのみアクセスできます。`, // Reachable only at ${addr}.
+  "remote.reachTunnel": "このコンピューター上のトンネルまたはプロキシ経由でのみアクセスできます（tailscale serve や ssh -L など）。", // Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.
+  "remote.pairingHostLabel": "ペアリングリンクのアドレス", // Address for pairing links
+  "remote.pairingHostPlaceholder": "host.tailnet.ts.net", // host.tailnet.ts.net
+  "remote.pairingHostNeeded": "クライアントはトンネル経由でこのコンピューターに接続します。クライアントが使うホスト名または IP を入力してください。未入力の場合、ペアリングリンクは 127.0.0.1 を指し、ssh -L でのみ機能します。", // Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.
+  "remote.bindInvalid": (value: string) => `「${value}」は有効な待ち受けアドレスではありません。すべてのネットワーク、このコンピューターのみ、またはこのコンピューターの IPv4 アドレスを選択してください。`, // "${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.
+  "remote.bindUnavailable": (ip: string) => `アドレス ${ip} はこのコンピューターでは利用できません。ネットワークまたは VPN に接続するか、別のアドレスを選択してください。リモートアクセスがすべてのネットワークに切り替わることはありません。`, // The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.
+  "remote.pairingHostInvalid": (value: string) => `「${value}」は有効なペアリングリンクのアドレスではありません。スキーム、ポート、パスを含めず、ホスト名または IPv4 アドレスを入力してください。`, // "${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.
 
   // ── Remote connection panel ──
   "connect.wslUpgrade": "このワークスペースでは別のバージョンのサーバーが動作しています。サーバーを再起動すると、この WSL ワークスペースで実行中のすべてのセッションが終了します。",
@@ -2654,6 +2654,8 @@ const ja: typeof en = {
   "sidebarSection.nav": "サイドバーのセクション",
   "sidebarSection.noTasks": "タスクセッションはまだありません。",
   "sidebarSection.noChats": "チャットセッションはまだありません。",
+  "sidebarSection.setDefaultView": "既定のビューに設定",
+  "sidebarSection.clearDefaultView": "既定のビューを解除",
   "artifact.comment": "コメント", // Comment
   "artifact.commentTitle": "ページの要素を選んで、エージェントへのコメントを残します", // Click elements in the page to leave comments for the agent
   "artifact.pickHint": "ページ内の要素をクリックしてコメントします。Esc で終了します。", // Click an element in the page to comment on it. Press Esc to stop.

@@ -97,7 +97,7 @@ describe("defaultEngineFor", () => {
     expect(defaultEngineFor("opencode", {})).toBe("tui");
     expect(defaultEngineFor("pi", {})).toBe("tui");
     expect(defaultEngineFor("omp", {})).toBe("tui");
-    expect(defaultEngineFor("antigravity", {})).toBe("tui");
+    expect(defaultEngineFor("antigravity", {})).toBe("chat");
   });
 
   it("prefers the saved per-agent choice over the built-in default", () => {
@@ -265,6 +265,36 @@ describe("composer inline chips", () => {
     useTermStore.setState({ composerInlineChips: [] });
     useTermStore.getState().hydrateSettingsFromCache();
     expect(useTermStore.getState().composerInlineChips).toEqual(["permission", "model", "mcp"]);
+  });
+});
+
+describe("default sidebar view preference", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("opens Projects when nothing was chosen and keeps a saved section", () => {
+    expect(loadSettings().defaultSidebarSection).toBeNull();
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ defaultSidebarSection: "tasks" }));
+    expect(loadSettings().defaultSidebarSection).toBe("tasks");
+  });
+
+  it.each([["archive"], ["knowledge"], ["agents"], ["unknown"], [7], [null]])(
+    "rejects %s because only a section with its own pane group can be opened by default",
+    (candidate) => {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ defaultSidebarSection: candidate }));
+      expect(loadSettings().defaultSidebarSection).toBeNull();
+    },
+  );
+
+  it("round-trips through the store setter", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    try {
+      useTermStore.getState().setDefaultSidebarSection("chat");
+      expect(loadSettings().defaultSidebarSection).toBe("chat");
+      useTermStore.getState().setDefaultSidebarSection(null);
+      expect(loadSettings().defaultSidebarSection).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 

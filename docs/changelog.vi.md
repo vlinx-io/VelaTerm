@@ -1,3 +1,23 @@
+## v0.3.3 — 2026-11-17
+
+- 🌐 Truy cập từ xa giờ có thể lắng nghe trên mọi mạng, một địa chỉ IPv4 cụ thể như địa chỉ Tailscale, hoặc chỉ máy này khi đặt sau đường hầm hay proxy ngược; `vela-server --serve` nhận lựa chọn tương tự qua `--bind`.
+- 🔒 Mật khẩu truy cập của `vela-server --serve` không còn được truyền cho terminal, agent và các tiến trình con khác, và `--password-file` đọc mật khẩu từ tệp chỉ chủ sở hữu mới truy cập được.
+- 🪐 Các phiên Antigravity mới mở ở chế độ xem hội thoại, còn các phiên tạo trước khi cập nhật vẫn giữ chế độ xem cũ.
+- 🧭 Bấm chuột phải vào một mục trên thanh hoạt động để đặt làm chế độ xem mặc định; nếu chưa đặt, thanh bên giờ mở ở Dự án thay vì mục xem gần nhất.
+- 🤖 Hội thoại Grok giờ hiển thị mọi mô hình mà tài khoản có thể dùng cùng các mức suy luận riêng của từng mô hình, với `none` nằm dưới danh sách mức.
+- 💬 Phê duyệt kế hoạch, câu hỏi và biểu mẫu MCP của Grok giờ hiện thành các thẻ quen thuộc và có thể trả lời; hội thoại mà Grok không thể mở lại sẽ bắt đầu hội thoại mới thay vì chặn mọi tin nhắn.
+- 🏷️ Phiên Grok theo tiêu đề mà Grok đặt cho hội thoại, và các hội thoại rất dài hoặc thuộc dự án đã xóa lại khởi động bình thường.
+- 🧱 Kết nối SSH trên Windows giờ tuân theo `~/.ssh/config` cho bí danh máy chủ, cổng, người dùng, tệp khóa và phương thức xác thực ưu tiên.
+- 🗂️ Có thể sắp xếp lại dự án bằng cách kéo một dòng dự án lên nửa trên hoặc nửa dưới của dòng khác.
+- ⚙️ Cài đặt mở lại tại mục bạn xem gần nhất.
+- 💡 Các mục cài đặt Hành vi khó hiểu từ tên giờ có biểu tượng thông tin giải thích khi di chuột.
+- 📁 Mục Tệp có thêm Thu gọn tất cả để đóng mọi thư mục đang mở dưới thư mục gốc cùng lúc.
+- ⌨️ `Cmd/Ctrl+Tab` và `Cmd/Ctrl+Shift+Tab` chuyển sang thẻ tiếp theo và trước đó, quay vòng ở hai đầu.
+- ⌨️ Nhập `/` trong terminal không còn bị gửi hai lần.
+- ⌨️ Nhập trong terminal sau khi di chuyển con trỏ bằng phím mũi tên rồi dùng IME không còn bị lỗi ký tự.
+- 🖥️ Cửa sổ phản chiếu bỏ lỡ thay đổi kích thước nay khớp lại với kích thước terminal thay vì vẽ dấu nhắc bị lệch.
+- 🧩 Các chip đã tắt trong cài đặt thanh công cụ soạn tin không còn xuất hiện sau nút More.
+
 ## v0.3.2 — 2026-11-16
 
 - 🤖 Các phiên OpenCode v2 có thể dùng lại đổi tên bằng AI và dịch, và khi đổi tên bằng AI thất bại, thông báo sẽ nêu rõ lỗi thay vì báo agent không khả dụng.

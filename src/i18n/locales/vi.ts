@@ -1016,19 +1016,19 @@ const vi: typeof en = {
   "connect.wslSetup": "Khi kết nối, phiên bản máy chủ VelaTerm tương ứng sẽ được tải xuống và khởi chạy trong WSL nếu cần. Không cần cấu hình SSH.",
   "conn.wslReconnecting": "Đang kết nối lại với không gian làm việc WSL…",
   "conn.wslDown": "Không gian làm việc WSL hiện không khả dụng. Chọn “Kết nối lại ngay” để thử lại.",
-  "remote.listenLabel": "Listen on", // TODO translate
-  "remote.listenAll": "All networks", // TODO translate
-  "remote.listenLoopback": "This computer only (tunnel)", // TODO translate
-  "remote.listenUnavailable": (ip: string) => `${ip} (not available)`, // TODO translate
-  "remote.reachAll": "Reachable from every network this computer is connected to.", // TODO translate
-  "remote.reachOnly": (addr: string) => `Reachable only at ${addr}.`, // TODO translate
-  "remote.reachTunnel": "Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.", // TODO translate
-  "remote.pairingHostLabel": "Address for pairing links", // TODO translate
-  "remote.pairingHostPlaceholder": "host.tailnet.ts.net", // TODO translate
-  "remote.pairingHostNeeded": "Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.", // TODO translate
-  "remote.bindInvalid": (value: string) => `"${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.`, // TODO translate
-  "remote.bindUnavailable": (ip: string) => `The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.`, // TODO translate
-  "remote.pairingHostInvalid": (value: string) => `"${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.`, // TODO translate
+  "remote.listenLabel": "Lắng nghe trên", // Listen on
+  "remote.listenAll": "Mọi mạng", // All networks
+  "remote.listenLoopback": "Chỉ máy này (đường hầm)", // This computer only (tunnel)
+  "remote.listenUnavailable": (ip: string) => `${ip} (không khả dụng)`, // ${ip} (not available)
+  "remote.reachAll": "Truy cập được từ mọi mạng mà máy này đang kết nối.", // Reachable from every network this computer is connected to.
+  "remote.reachOnly": (addr: string) => `Chỉ truy cập được tại ${addr}.`, // Reachable only at ${addr}.
+  "remote.reachTunnel": "Chỉ truy cập được qua đường hầm hoặc proxy trên máy này, ví dụ tailscale serve hoặc ssh -L.", // Reachable only through a tunnel or proxy on this computer, for example tailscale serve or ssh -L.
+  "remote.pairingHostLabel": "Địa chỉ cho liên kết ghép nối", // Address for pairing links
+  "remote.pairingHostPlaceholder": "host.tailnet.ts.net", // host.tailnet.ts.net
+  "remote.pairingHostNeeded": "Máy khách kết nối tới máy này qua đường hầm. Hãy nhập tên máy chủ hoặc IP mà chúng sử dụng. Nếu để trống, liên kết ghép nối sẽ trỏ tới 127.0.0.1, chỉ dùng được với ssh -L.", // Clients reach this computer through a tunnel. Enter the host name or IP they use. Without it, pairing links point to 127.0.0.1, which only works with ssh -L.
+  "remote.bindInvalid": (value: string) => `“${value}” không phải địa chỉ lắng nghe hợp lệ. Hãy chọn mọi mạng, chỉ máy này, hoặc một địa chỉ IPv4 của máy này.`, // "${value}" is not a valid listen address. Choose all networks, this computer only, or an IPv4 address of this computer.
+  "remote.bindUnavailable": (ip: string) => `Địa chỉ ${ip} không khả dụng trên máy này. Hãy kết nối mạng hoặc VPN, hoặc chọn địa chỉ khác. Truy cập từ xa không bao giờ tự chuyển sang mọi mạng.`, // The address ${ip} is not available on this computer. Connect the network or VPN, or choose another address. Remote access never falls back to all networks.
+  "remote.pairingHostInvalid": (value: string) => `“${value}” không phải địa chỉ hợp lệ cho liên kết ghép nối. Hãy nhập tên máy chủ hoặc địa chỉ IPv4, không kèm giao thức, cổng hay đường dẫn.`, // "${value}" is not a valid address for pairing links. Enter a host name or an IPv4 address, without scheme, port, or path.
   "connect.title": "Kết nối máy chủ từ xa",
   "connect.pairingPlaceholder": "Dán liên kết ghép đôi",
   "connect.confirmConnect": "Dấu vân tay khớp, kết nối",
@@ -2615,6 +2615,8 @@ const vi: typeof en = {
   "sidebarSection.nav": "Các mục thanh bên",
   "sidebarSection.noTasks": "Chưa có phiên nhiệm vụ nào.",
   "sidebarSection.noChats": "Chưa có phiên trò chuyện nào.",
+  "sidebarSection.setDefaultView": "Đặt làm chế độ xem mặc định",
+  "sidebarSection.clearDefaultView": "Bỏ chế độ xem mặc định",
   "artifact.comment": "Bình luận",
   "artifact.commentTitle": "Chọn các phần tử trên trang để để lại bình luận cho tác nhân",
   "artifact.pickHint": "Nhấp vào một phần tử trên trang để bình luận. Nhấn Esc để dừng.",

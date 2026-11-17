@@ -1,3 +1,23 @@
+## v0.3.3 — 2026-11-17
+
+- 🌐 El acceso remoto ahora puede escuchar en todas las redes, en una dirección IPv4 concreta como una de Tailscale, o solo en este equipo cuando está detrás de un túnel o proxy inverso; `vela-server --serve` acepta la misma opción con `--bind`.
+- 🔒 La contraseña de acceso de `vela-server --serve` ya no se pasa a terminales, agentes y otros procesos hijos, y `--password-file` la lee de un archivo al que solo puede acceder su propietario.
+- 🪐 Las sesiones nuevas de Antigravity se abren en la vista de conversación, mientras que las creadas antes de la actualización mantienen la vista que tenían.
+- 🧭 Haz clic derecho en una sección de la barra de actividad para establecerla como vista predeterminada; sin ninguna, la barra lateral ahora se abre en Proyectos en lugar de la sección que viste por última vez.
+- 🤖 Las conversaciones de Grok ahora ofrecen todos los modelos que puede usar la cuenta y los niveles de razonamiento propios de cada modelo, con `none` bajo la escala.
+- 💬 Las aprobaciones de plan, preguntas y formularios MCP de Grok aparecen ahora como las tarjetas habituales y se pueden responder, y una conversación que Grok ya no puede reabrir inicia una nueva en lugar de bloquear cada mensaje.
+- 🏷️ Las sesiones de Grok siguen el título que Grok da a su conversación, y las conversaciones muy largas o las de un proyecto eliminado vuelven a iniciarse con normalidad.
+- 🧱 Las conexiones SSH en Windows ahora respetan `~/.ssh/config` para alias de host, puertos, usuarios, archivos de identidad y autenticación preferida.
+- 🗂️ Los proyectos se pueden reordenar arrastrando una fila de proyecto sobre la mitad superior o inferior de otra.
+- ⚙️ Ajustes se reabre en la sección que viste por última vez.
+- 💡 Los ajustes de comportamiento difíciles de deducir por su nombre ahora se explican mediante un icono de información.
+- 📁 Archivos incorpora «Contraer todo» para cerrar de una vez todas las carpetas abiertas bajo la raíz.
+- ⌨️ `Cmd/Ctrl+Tab` y `Cmd/Ctrl+Shift+Tab` pasan a la pestaña siguiente y anterior, con vuelta al principio y al final.
+- ⌨️ Escribir `/` en el terminal ya no lo envía dos veces.
+- ⌨️ La entrada en el terminal después de mover el cursor con las flechas y usar el IME ya no se corrompe.
+- 🖥️ Una ventana reflejada que se perdió un cambio de tamaño vuelve a ajustarse al tamaño del terminal en lugar de dibujar un símbolo del sistema dañado.
+- 🧩 Los chips desactivados en los ajustes de la barra de herramientas del editor ya no aparecen detrás de More.
+
 ## v0.3.2 — 2026-11-16
 
 - 🤖 Las sesiones de OpenCode v2 vuelven a admitir el renombrado con IA y la traducción, y un renombrado con IA fallido ahora informa del fallo en lugar de indicar que el agente no está disponible.

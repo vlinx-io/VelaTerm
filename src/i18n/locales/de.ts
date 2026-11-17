@@ -2661,6 +2661,8 @@ const de: typeof en = {
   "sidebarSection.nav": "Seitenleistenbereiche",
   "sidebarSection.noTasks": "Noch keine Aufgabensitzungen.",
   "sidebarSection.noChats": "Noch keine Chatsitzungen.",
+  "sidebarSection.setDefaultView": "Als Standardansicht festlegen",
+  "sidebarSection.clearDefaultView": "Standardansicht aufheben",
   "artifact.comment": "Kommentieren", // Comment
   "artifact.commentTitle": "Elemente der Seite anklicken und Kommentare für den Agenten hinterlassen", // Click elements in the page to leave comments for the agent
   "artifact.pickHint": "Klicken Sie auf ein Element der Seite, um es zu kommentieren. Esc beendet die Auswahl.", // Click an element in the page to comment on it. Press Esc to stop.

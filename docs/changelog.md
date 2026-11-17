@@ -1,11 +1,31 @@
 # Changelog
 
-> Created: 2026-07-09 16:10 · Updated: 2026-11-16
+> Created: 2026-07-09 16:10 · Updated: 2026-11-17
 
 All notable changes to VelaTerm are documented here, newest first.
 v0.1.91 is the first public release; earlier version numbers were internal iterations and are not covered.
 
 ---
+
+## v0.3.3 — 2026-11-17
+
+- 🌐 Remote access can now listen on all networks, a single IPv4 address such as a Tailscale address, or this computer only for use behind a tunnel or reverse proxy; `vela-server --serve` takes the same choice with `--bind`.
+- 🔒 The access password for `vela-server --serve` is no longer inherited by terminals, agents and other child processes, and `--password-file` reads it from a file only its owner can read.
+- 🪐 New Antigravity sessions open in the conversation view, while sessions created before the update keep the view they had.
+- 🧭 Right-click a section on the activity bar to make it the default view; without one, the sidebar now opens on Projects instead of the section you last viewed.
+- 🤖 Grok conversations offer every model the account can use and each model's own reasoning levels, with `none` shown below the ladder.
+- 💬 Grok's plan approvals, questions and MCP forms now appear as the usual cards and can be answered, and a conversation Grok can no longer reopen starts a fresh one instead of blocking every message.
+- 🏷️ Grok sessions follow the title Grok gives their conversation, and long conversations or ones filed under a deleted project start normally again.
+- 🧱 SSH connections on Windows now honor `~/.ssh/config` for host aliases, ports, users, identity files and preferred authentication.
+- 🗂️ Projects can be reordered by dragging one project row onto the upper or lower half of another.
+- ⚙️ Settings reopens on the section you last viewed.
+- 💡 Behavior settings that are hard to infer from their labels now explain themselves through an info icon.
+- 📁 Files gains Collapse All to close every open folder below the root at once.
+- ⌨️ `Cmd/Ctrl+Tab` and `Cmd/Ctrl+Shift+Tab` move to the next and previous tab and wrap around.
+- ⌨️ Typing `/` in the terminal no longer sends it twice.
+- ⌨️ Terminal input after moving the cursor and then using an IME is no longer corrupted.
+- 🖥️ A mirrored window that missed a size change now matches the terminal's size instead of drawing a garbled prompt.
+- 🧩 Chips switched off in the Composer toolbar settings no longer appear behind More.
 
 ## v0.3.2 — 2026-11-16
 
