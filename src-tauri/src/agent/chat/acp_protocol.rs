@@ -519,6 +519,102 @@ pub fn permission_outcome(id: &Value, option: Option<&str>) -> Value {
     })
 }
 
+/// Whether the agent reports that the conversation it was asked to reopen is gone — its directory, its
+/// recording, or the session itself no longer exists there.
+///
+/// Deliberately narrow: a protocol error, a crashed server, or a missing binary all mean something else,
+/// and treating those as "gone" would silently replace a conversation the agent still has.
+pub fn conversation_missing(error: &Value) -> bool {
+    let code = error.pointer("/data/code").and_then(Value::as_str).unwrap_or_default().to_ascii_uppercase();
+    if ["NOT_FOUND", "ENOENT", "NO_SUCH"].iter().any(|token| code.contains(token)) { return true; }
+    let text = error_text(error).to_ascii_lowercase();
+    ["path not found", "no such file", "session not found", "conversation not found",
+        "session does not exist", "unknown session", "session is not known"]
+        .iter().any(|token| text.contains(token))
+}
+
+// Grok asks the client for its dialogs through `_x.ai/...` requests, which its own terminal draws and
+// answers in a shape of its own. Each request is kept with the method that sent it, so the answer can
+// take that method's form.
+
+/// The plan Grok wants approved before it leaves plan mode.
+pub const EXIT_PLAN_MODE: &str = "_x.ai/exit_plan_mode";
+/// Questions the model asked through its `ask_user_question` tool.
+pub const ASK_USER_QUESTION: &str = "_x.ai/ask_user_question";
+/// An MCP server asking for input while one of its tools runs.
+pub const MCP_ELICIT: &str = "_x.ai/mcp/elicit";
+
+/// The card one of Grok's dialog requests shows, or `None` when the method is not one of them.
+pub fn grok_dialog(kind: SessionKind, card: &str, method: &str, params: &Value) -> Option<Value> {
+    match method {
+        EXIT_PLAN_MODE => Some(json!({
+            "id": card,
+            "tool_name": "ExitPlanMode",
+            "display_name": label(kind),
+            "input": {"plan": params.get("planContent").and_then(Value::as_str).unwrap_or("")},
+        })),
+        ASK_USER_QUESTION => Some(json!({
+            "id": card,
+            "tool_name": "AskUserQuestion",
+            "display_name": label(kind),
+            "input": {"questions": grok_questions(params)},
+        })),
+        MCP_ELICIT => Some(elicitation_payload(kind, card, params)),
+        _ => None,
+    }
+}
+
+/// Grok's questions in the shape the question form reads: a header per question and an options array,
+/// both of which Grok omits for a plain free-text question.
+fn grok_questions(params: &Value) -> Vec<Value> {
+    params.get("questions").and_then(Value::as_array).into_iter().flatten().enumerate()
+        .map(|(index, question)| {
+            let mut question = question.clone();
+            if question.get("header").and_then(Value::as_str).is_none_or(str::is_empty) {
+                question["header"] = json!(format!("Q{}", index + 1));
+            }
+            if !question.get("options").is_some_and(Value::is_array) {
+                question["options"] = json!([]);
+            }
+            question
+        })
+        .collect()
+}
+
+/// The answer to one of Grok's dialogs, in that method's own shape.
+///
+/// A plan is `approved` (Grok leaves plan mode by itself) or `rejected`. Questions are `accepted` with
+/// the answers keyed by question text, or `skip_interview` when the person dismissed them. An MCP form is
+/// `accept` with its content, `decline`, or `cancel`.
+pub fn grok_dialog_answer(
+    id: &Value,
+    method: &str,
+    allow: bool,
+    updated_input: Option<&Value>,
+    message: Option<&str>,
+) -> Value {
+    response(id, match method {
+        EXIT_PLAN_MODE => json!({"outcome": if allow { "approved" } else { "rejected" }}),
+        ASK_USER_QUESTION if allow => json!({"outcome": "accepted",
+            "answers": updated_input.and_then(|input| input.get("answers")).cloned().unwrap_or_else(|| json!({}))}),
+        ASK_USER_QUESTION => json!({"outcome": "skip_interview"}),
+        _ if !allow => json!({"outcome": if message == Some("cancel") { "cancel" } else { "decline" }}),
+        // A URL elicitation asks the person to finish something in the browser and say so; there is no
+        // content to send back, only the acknowledgement.
+        _ if updated_input.is_none() => json!({"outcome": "accept"}),
+        _ => json!({"outcome": "accept", "content": updated_input.cloned().unwrap_or_else(|| json!({}))}),
+    })
+}
+
+/// The answer to one of Grok's dialogs left open when its turn ended: nothing approved or answered.
+pub fn grok_cancelled_outcome(id: &Value, method: &str) -> Value {
+    response(id, match method {
+        EXIT_PLAN_MODE => json!({"outcome": "rejected"}),
+        ASK_USER_QUESTION => json!({"outcome": "skip_interview"}),
+        _ => json!({"outcome": "cancel"}),
+    })
+}
+
 /// Convert an ACP `elicitation/create` request into a VelaTerm interactive card.
 ///
 /// Antigravity sends `ask_question` prompts as form elicitations whose schema uses `q1`, `q1_other`,
@@ -1664,6 +1760,19 @@ mod tests {
         let mut mapper = Mapper::replay();
         assert!(mapper.update(&json!({"sessionUpdate":"tool_call","toolCallId":"c9","title":"report_intent","kind":"other","rawInput":{"intent":"Count"}})).is_empty());
         assert!(mapper.update(&json!({"sessionUpdate":"tool_call_update","toolCallId":"c9","status":"completed"})).is_empty());
+    }
+
+    #[test]
+    fn only_a_missing_conversation_counts_as_one() {
+        // Grok reports the lost session directory this way.
+        assert!(conversation_missing(&json!({"code":-32603,"message":"Path not found.","data":{"code":"FS_NOT_FOUND"}})));
+        assert!(conversation_missing(&json!({"code":-32000,"message":"Session not found"})));
+        assert!(conversation_missing(&json!({"code":-32603,"message":"no such file or directory","data":{"code":"ENOENT"}})));
+        // Everything else is a real failure, not a conversation to replace.
+        assert!(!conversation_missing(&json!({"code":-32602,"message":"Invalid params"})));
+        assert!(!conversation_missing(&json!({"code":-32603,"message":"Authentication required"})));
+        assert!(!conversation_missing(&json!({"code":-32000,"message":"command not found"})));
+        assert!(!conversation_missing(&json!({"code":-32000,"message":"model not found"})));
     }
 
     #[test]
