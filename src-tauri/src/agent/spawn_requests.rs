@@ -350,7 +350,7 @@ fn insert_session(conn: &Connection, id: &str, launch: &Launch) -> Result<Sessio
     let mut session = repo::create_session_identified(conn, id, &launch.project_id, launch.group_id.as_deref(), &launch.name, launch.kind,
         None, launch.cwd.as_deref(), None, launch.parent_id.as_deref(), launch.worktree.as_deref(), launch.args.as_deref(), launch.permission.as_deref(),
         launch.base.as_deref(), launch.preset_id.as_deref(), launch.agent_path.as_deref(), Some(&launch.engine))?;
-    if matches!(launch.kind, SessionKind::Zoo | SessionKind::Grok) {
+    if launch.kind.accepts_caller_session_id(&launch.engine) {
         repo::set_agent_session_id(conn, id, id, launch.kind)?;
         session.agent_session_id = Some(id.to_string());
     }
@@ -797,6 +797,26 @@ mod tests {
         host.set_hooks(super::super::server::HookServer { port: 0, token: "fixture".into() });
         AppCtx::Headless(host)
     }
+    /// `insert_session` seeds its own id only for engines that accept a caller-provided session id:
+    /// Grok/Zoo in the terminal, never Grok chat (ACP assigns the id via `session/new`).
+    #[test]
+    fn insert_session_seeds_a_caller_id_only_for_terminal_engine() {
+        let f = fixture();
+        let launch = |kind: SessionKind, engine: &str| Launch {
+            project_id: f.parent.project_id.clone(), group_id: None, parent_id: None,
+            name: "child".into(), kind, cwd: None, args: None, permission: None,
+            engine: engine.into(), preset_id: None, agent_path: None, worktree: None, base: None,
+            selection: session_settings::Selection::default(),
+        };
+        let conn = f.app.db().conn.lock().unwrap();
+        let chat = insert_session(&conn, "grok-chat", &launch(SessionKind::Grok, "chat")).unwrap();
+        assert_eq!(chat.agent_session_id, None, "Grok chat must not pre-seed a resume id");
+        let tui = insert_session(&conn, "grok-tui", &launch(SessionKind::Grok, "tui")).unwrap();
+        assert_eq!(tui.agent_session_id.as_deref(), Some("grok-tui"));
+        let zoo = insert_session(&conn, "zoo-tui", &launch(SessionKind::Zoo, "tui")).unwrap();
+        assert_eq!(zoo.agent_session_id.as_deref(), Some("zoo-tui"));
+    }
+
     fn request(f: &Fixture, worktree: bool) -> SpawnRequest {
         serde_json::from_value(json!({"requestId":uuid::Uuid::new_v4().to_string(),"parentSessionId":f.parent.id,
             "prompt":"Investigate the task","worktree":worktree})).unwrap()

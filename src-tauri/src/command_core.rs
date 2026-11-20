@@ -307,11 +307,9 @@ pub fn create_session(
         let seeded_agent_id = agent_session_id
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
-            // Zoo and Grok accept caller-provided UUIDs. Reuse the VelaTerm session ID so parallel sessions in
-            // one directory never attach to each other's most recent conversation; first launch creates it.
-            .or_else(|| {
-                matches!(kind, SessionKind::Zoo | SessionKind::Grok).then(|| session.id.clone())
-            });
+            // Only the terminal engine can seed a caller-provided id; the chat engine lets the agent assign
+            // it (see `SessionKind::accepts_caller_session_id`).
+            .or_else(|| kind.accepts_caller_session_id(&session.engine).then(|| session.id.clone()));
         if let Some(aid) = seeded_agent_id {
             // Reuse the kind-guarded update so only the newly created matching session is persisted.
             repo::set_agent_session_id(&conn, &session.id, &aid, kind)?;
@@ -1156,6 +1154,16 @@ pub fn chat_start(
     let resume = session.agent_session_id.as_deref().filter(|id| {
         session.kind != SessionKind::Deepseek
             || !crate::agent::resume::confirmed_missing(session.kind, id)
+    });
+    // A Grok session seeded with its own VelaTerm session id (see `create_session`/`insert_session`) has no
+    // agent conversation until first launch. If that id was never created — a row written before chat
+    // sessions stopped pre-seeding, or a tui session switched to chat before it ran — the chat engine must
+    // not resume it: ACP assigns the id via `session/new`, so `session/load` would only fail and report a
+    // missing conversation. Drop it so the first launch starts fresh. The id is stored once the agent opens.
+    let resume = resume.filter(|id| {
+        !(session.kind == SessionKind::Grok
+            && *id == session.id.as_str()
+            && crate::agent::resume::confirmed_missing(session.kind, id))
     });
     ctx.chat().start(
         ctx,
@@ -2785,6 +2793,60 @@ mod tests {
         let db = crate::db::Db::open(&dir.join("t.db")).unwrap();
         let host = std::sync::Arc::new(crate::host::HeadlessHost::new(dir.to_path_buf(), db));
         crate::host::AppCtx::Headless(host)
+    }
+
+    /// The Grok terminal engine accepts `--session-id`, so a new terminal session seeds its own id for a
+    /// deterministic first launch. The chat engine (ACP) cannot choose the id — `session/new` assigns it —
+    /// so seeding one there makes the first launch try to reopen a conversation that was never created,
+    /// which surfaced as "could not reopen that conversation; a new one has been started".
+    #[test]
+    fn a_new_grok_chat_session_does_not_seed_a_resume_anchor() {
+        let dir = std::env::temp_dir().join(format!("vlx-create-seed-{}", std::process::id()));
+        let ctx = headless_ctx(&dir);
+        ctx.db()
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO projects (id, name, root_path, sort_order, created_at) VALUES ('p','P','/tmp',0,0)",
+                [],
+            )
+            .unwrap();
+
+        let create = |name: &str, engine: &str| {
+            super::create_session(
+                &ctx, "p", None, name, crate::models::SessionKind::Grok, None, None, None, None,
+                None, None, None, None, None, None, None, Some(engine),
+            )
+            .unwrap()
+        };
+
+        let chat = create("grok chat", "chat");
+        assert_eq!(
+            chat.agent_session_id, None,
+            "a new Grok chat session must not pre-seed a resume id"
+        );
+
+        let tui = create("grok tui", "tui");
+        assert_eq!(
+            tui.agent_session_id.as_deref(),
+            Some(tui.id.as_str()),
+            "a Grok terminal session seeds its own id for --session-id"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Seeding a caller-provided session id is a terminal-engine capability, independent of the specific
+    /// session-creation path (`create_session` vs `insert_session`).
+    #[test]
+    fn caller_id_seeding_is_terminal_only_and_grok_specific() {
+        use crate::models::SessionKind::*;
+        assert!(Grok.accepts_caller_session_id("tui"));
+        assert!(!Grok.accepts_caller_session_id("chat"));
+        assert!(Zoo.accepts_caller_session_id("tui"));
+        assert!(!Claude.accepts_caller_session_id("tui"));
+        assert!(!Claude.accepts_caller_session_id("chat"));
     }
 
     /// A preference written by one client must reach the others while they run, so the broadcast fires
