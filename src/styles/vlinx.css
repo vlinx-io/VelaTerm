@@ -364,6 +364,30 @@ svg { display: block; }
 .sys-collection-ic.is-knowledge { color: var(--mag); }
 .sys-collection-ic.is-archive { color: oklch(0.5 0.06 62); }
 [data-theme="dark"] .sys-collection-ic.is-archive { color: oklch(0.76 0.05 65); }
+.sys-collection-ic.is-plugin { color: oklch(0.66 0.16 58); }
+[data-theme="dark"] .sys-collection-ic.is-plugin { color: oklch(0.78 0.14 64); }
+.plugin-center-state {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  background: var(--bg-1);
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.plugin-center-error {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 480px;
+  padding: 16px 20px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--red) 45%, transparent);
+  background: var(--bg-2);
+  color: var(--red);
+  text-align: center;
+}
 .sidebar-rail-sep { width: 16px; height: 1px; flex: none; margin: 4px 0; background: var(--border-strong); }
 .row .live-count { flex: none; margin-left: auto; padding: 0 6px; font-size: 10.5px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 /* Activity bar left of the sidebar: one button per fixed section. The current one carries a straight accent line
@@ -567,11 +591,12 @@ body.splitting iframe { pointer-events: none; }
 .files-filter input::placeholder { color: var(--text-faint); }
 .files-filter-clear { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: var(--r-sm); color: var(--text-faint); }
 .files-filter-clear:hover { color: var(--text); background: var(--bg-hover); }
+.files-filter-truncated { padding: 4px 10px 6px; font-size: 11px; color: var(--text-faint); }
 /* Dismissible file-operation error banner for collisions, permissions, and similar failures. */
 .files-err { flex: none; padding: 6px 10px; font-size: 11px; line-height: 1.4; color: var(--red); background: var(--accent-soft); border-bottom: 1px solid var(--border); cursor: pointer; white-space: normal; word-break: break-word; }
 
 .files-tree { padding: 4px 0; }
-.file-row { position: relative; display: flex; align-items: center; gap: 6px; height: var(--row-h); padding: 0 10px 0 8px; cursor: pointer; color: var(--text-mid); white-space: nowrap; }
+.file-row { position: relative; display: flex; align-items: center; gap: 6px; height: var(--row-h); padding: 0 10px 0 8px; cursor: pointer; color: var(--text-mid); white-space: nowrap; user-select: none; -webkit-user-select: none; }
 .file-row:hover { background: var(--bg-hover); }
 .file-row.sel { background: var(--accent-soft); color: var(--text); }
 /* Two-pixel accent rail on selected rows, matching sidebar session rows. */
@@ -579,6 +604,9 @@ body.splitting iframe { pointer-events: none; }
 /* Dim dot-prefixed hidden items when their visibility toggle is enabled. */
 .file-row.hidden-entry { opacity: 0.55; }
 .file-row.hidden-entry:hover, .file-row.hidden-entry.sel { opacity: 1; }
+/* Dim cut items while waiting for paste to finish or another clipboard change to replace them. */
+.file-row.cut-entry { opacity: 0.45; }
+.file-row.cut-entry:hover, .file-row.cut-entry.sel { opacity: 0.6; }
 /* Indentation guides: each level uses a 13 px slot with a faint full-height vertical line. */
 .file-row .inds { display: flex; align-self: stretch; margin-right: -6px; }
 .file-row .ind { width: 13px; align-self: stretch; position: relative; }

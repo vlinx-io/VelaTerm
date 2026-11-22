@@ -97,13 +97,22 @@ echo "   Ports     : Vite ${VITE_PORT} / backend ${BACKEND_PORT} (random unless 
 echo " Ctrl+C stops both the backend and Vite; elsewhere, use pnpm dev:stop ${LABEL}"
 echo "============================================================"
 
-# On exit or interruption, terminate backend/Vite children and remove the registry entry.
+# On exit or interruption, terminate backend/Vite children (including cargo's child binary) and remove registry entry.
 pids=()
-cleanup() { trap - INT TERM EXIT; for p in "${pids[@]}"; do kill "$p" 2>/dev/null || true; done; dev_remove_instance; }
+cleanup() {
+  trap - INT TERM EXIT
+  for p in "${pids[@]}"; do
+    for c in $(pgrep -P "$p" 2>/dev/null || true); do kill "$c" 2>/dev/null || true; done
+    kill "$p" 2>/dev/null || true
+  done
+  dev_remove_instance
+}
 trap cleanup INT TERM EXIT
 
-# 1. Start the debug backend on a random plaintext port and isolated database. Pass password by environment.
+# 1. Start the debug backend on a random plaintext port and isolated database. Pass password by environment,
+#    and default VLX_COLAB_NO_KEYRING=1 so unsigned debug rebuilds do not hang on macOS Keychain prompts.
 VELA_SERVE_PASSWORD="$PASSWORD" \
+  VLX_COLAB_NO_KEYRING="${VLX_COLAB_NO_KEYRING:-1}" \
   cargo run --manifest-path src-tauri/Cargo.toml -- \
     --serve "$HTTP_FLAG" --port "$BACKEND_PORT" --data-dir "$DATA_DIR" &
 pids+=($!)

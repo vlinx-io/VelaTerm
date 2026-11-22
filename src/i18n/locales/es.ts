@@ -493,6 +493,7 @@ const es: typeof en = {
   "settings.catTerminal": "Terminal", // Terminal
   "settings.catBehavior": "Comportamiento", // Behavior
   "settings.catAgents": "Agentes", // Agents
+  "settings.catPlugins": "Complementos",
   "settings.agentDefaultsTitle": "Valores predeterminados de nuevas sesiones",
   "settings.referSummaryTitle": "Contexto de referencias de sesión",
   "settings.referSummaryMode": "Modo de contexto",
@@ -865,6 +866,10 @@ const es: typeof en = {
   "settings.fontPreviewText": "El veloz murciélago hindú comía feliz cardillo y kiwi. 0123456789",
   "settings.fontPreviewChat": "He actualizado la página de ajustes. Cada ajuste de fuente se aplica de inmediato y puede restablecer los valores predeterminados en cualquier momento.",
   "settings.fontResetGroup": "Restablecer las fuentes predeterminadas",
+  "settings.chatImages": "Imágenes",
+  "settings.chatImageMaxMb": "Tamaño máx. de imagen",
+  "settings.chatImageMaxMbHint": "Antes de enviarlas, las imágenes que superen los 1568 píxeles de lado largo o este límite se redimensionan y comprimen automáticamente. Solo se omiten si no se pueden decodificar o si siguen superando el límite.",
+  "settings.chatImageSizeMb": (mb: number) => `${mb} MB`,
   "settings.composerChips": "Barra de herramientas del editor",
   "settings.composerChipsHint": "Los elementos activados aparecen junto al mensaje en el orden indicado. Si una función no está disponible temporalmente (el agente no se está ejecutando, no hay tareas en segundo plano o el inicio de sesión está pendiente), su elemento sigue visible, pero vacío o desactivado. Se omiten las funciones que el agente actual no admite. Los elementos que no caben pasan al menú Más. Los elementos desactivados aquí no se muestran en ningún lugar hasta que los vuelva a activar.",
   "settings.composerChipUp": (chip: string) => `Subir ${chip}`,
@@ -1646,9 +1651,22 @@ const es: typeof en = {
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
+  "files.filterTruncated": "Solo se muestran las primeras coincidencias. Escriba más para acotar los resultados.",
   "files.dblClickOpen": "Doble clic para abrir",
   "files.deleteConfirm": (name) =>
     `¿Eliminar "${name}"? Esto no se puede deshacer.`, // Delete "{name}"? This can't be undone.
+  "files.deleteManyConfirm": (count) =>
+    count === 1
+      ? "¿Eliminar 1 elemento? Esto no se puede deshacer."
+      : `¿Eliminar ${count} elementos? Esto no se puede deshacer.`, // Delete {count} items? This can't be undone.
+  "files.pasteConflictTitle": "El elemento ya existe", // Item already exists
+  "files.pasteConflictBody": (name) =>
+    `Ya existe un elemento llamado "${name}" en la carpeta de destino.`, // An item named "{name}" already exists in the destination folder.
+  "files.pasteConflictProgress": (current, total) => `${current} de ${total}`, // {current} of {total}
+  "files.pasteConflictApplyAll": "Aplicar a todos los conflictos restantes", // Apply to all remaining conflicts
+  "files.pasteReplace": "Reemplazar", // Replace
+  "files.pasteSkip": "Omitir", // Skip
+  "files.pasteKeepBoth": "Conservar ambos", // Keep Both
 
   // ── File transfer (remote access) ──
   "transfer.title": "Transferencias", // Transfers
@@ -1664,6 +1682,7 @@ const es: typeof en = {
   "transfer.foldersUnsupported": "No se pueden subir carpetas.", // Folders can't be uploaded.
   "drop.browserFilesHint": "En el navegador, aquí solo se pueden soltar imágenes. Para usar otros archivos, súbalos primero al proyecto.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
   "files.copyFailed": "No se pudieron copiar algunos archivos. Compruebe que todavía existen y que tiene permiso de escritura en esta carpeta.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
+  "files.pasteFailed": "No se pudieron pegar algunos elementos. Compruebe que el origen existe y que tiene permiso de escritura en esta carpeta.", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => (n === 1 ? "1 sesión" : `${n} sesiones`), // {n} sessions
@@ -2336,6 +2355,10 @@ const es: typeof en = {
   "chat.auth.claude.submit": "Enviar código",
   "chat.auth.claude.invalidCode": "Pega el código completo de este intento de autorización, incluida la parte que aparece después de #.",
   "chat.auth.claude.externalAuth": "Las claves de API y los demás métodos de autenticación configurados no se modificarán.",
+  "chat.auth.antigravity.pending": "Abre la página de autorización, inicia sesión con Google y pega el código de autorización o la URL de redirección que aparece.",
+  "chat.auth.antigravity.failed": "No se pudo completar el inicio de sesión. Inténtalo de nuevo y comprueba que tu versión de Antigravity CLI admita la autorización de cuentas.",
+  "chat.auth.antigravity.code": "Código de autorización o URL de redirección",
+  "chat.auth.antigravity.invalidCode": "Pega el código de autorización o la URL de redirección de este intento de inicio de sesión, sin espacios.",
   "chat.auth.open": "Abrir página de autorización",
   "chat.auth.zcode.required": "Inicia sesión en ZCode con tu cuenta de Z.ai o BigModel para usar esta conversación.",
   "chat.auth.zcode.pending": "Abre la página de autorización y concede el acceso. Esta vista se actualizará cuando finalice el inicio de sesión.",
@@ -2551,6 +2574,7 @@ const es: typeof en = {
   "chat.attach.modelTextOnly": "El modelo seleccionado no admite imágenes.",
   "chat.signInRequired": (agent: string) => `Inicia sesión en ${agent} para usar la vista de conversación. Cambia a la vista de terminal para iniciar sesión y luego vuelve a enviar tu mensaje.`,
   "chat.apiKeyRequired": "DeepSeek necesita una clave de API. Abre «API» junto al cuadro de mensaje e introdúcela, o define la variable de entorno `DEEPSEEK_API_KEY`; después, vuelve a enviar tu mensaje.",
+  "chat.codex.activeWriter": "Otro proceso de Codex está usando esta conversación en este momento. Cierra la otra pestaña de terminal o instancia de Codex que la mantiene abierta, o espera un momento y vuelve a intentarlo.",
   "chat.antigravity.permissionsHint": "Las herramientas que requieren aprobación deben autorizarse previamente en la configuración de Antigravity o utilizarse en la vista de terminal.",
   "chat.antigravity.settingsHint": "Cambie el modelo, el nivel de razonamiento o los permisos entre turnos.",
   "chat.antigravity.rewindTitle": "Retroceder en la vista de terminal",
@@ -2736,7 +2760,30 @@ const es: typeof en = {
   "kb.updatedOn": (date: string) => `Actualizado el ${date}`,
   "archive.sessionsCount": (count: string) => `${count} ${count === "1" ? "sesión" : "sesiones"}`,
 
+
   ...assist,
+  "plugins.title": "Complementos",
+  "plugins.subtitle": "Instala, vincula, activa o recarga complementos externos de VelaTerm. Cada complemento se ejecuta en su propio proceso backend aislado y carga su interfaz de forma dinámica.",
+  "plugins.installArchive": "Instalar desde archivo…",
+  "plugins.linkDev": "Vincular complemento local…",
+  "plugins.localOnlyHint": "La instalación, vinculación y activación de complementos solo están disponibles en el equipo local.",
+  "plugins.archivePathPrompt": "Introduce la ruta completa a un archivo .vlxplugin o .zip:",
+  "plugins.devPathPrompt": "Introduce la ruta completa a una carpeta de complemento local que contenga manifest.json:",
+  "plugins.empty": "Aún no hay complementos instalados. Instala un paquete .vlxplugin o vincula una carpeta local para empezar.",
+  "plugins.sourceInstalled": "Instalado",
+  "plugins.sourceDev": "Desarrollo local",
+  "plugins.statusRunning": "En ejecución",
+  "plugins.statusStarting": "Iniciando…",
+  "plugins.statusDisabled": "Desactivado",
+  "plugins.statusStopped": "Detenido",
+  "plugins.statusError": "Error",
+  "plugins.enable": "Activar",
+  "plugins.disable": "Desactivar",
+  "plugins.reload": "Recargar",
+  "plugins.uninstall": "Desinstalar",
+  "plugins.uninstallConfirm": (name: string) => `¿Desinstalar el complemento «${name}»?`,
+  "plugins.removeData": "Eliminar también el directorio de datos local de este complemento",
+  "plugins.loadFailed": "No se pudo cargar la interfaz del complemento",
 };
 
 export default es;

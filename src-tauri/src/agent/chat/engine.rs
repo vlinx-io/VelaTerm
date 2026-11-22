@@ -962,6 +962,12 @@ pub(crate) fn agent_environment_in_shell(app: &AppCtx, session_id: &str, cmd: &m
     // still reach this instance; see agent/session_env.rs.
     cmd.env("VLX_AUTH", &hook.token);
     cmd.env("VLX_SPAWN_URL", format!("http://127.0.0.1:{}", hook.port));
+    // Tell global user-level hooks (such as Grok) that this process is driven by the chat protocol,
+    // so status hooks can exit immediately without waiting on stdin or posting ignored callbacks.
+    cmd.env(
+        crate::agent::hook_bridge::CHAT_ENGINE_ENV,
+        crate::agent::hook_bridge::CHAT_ENGINE_VALUE,
+    );
     // Give a spawned session the id of whoever spawned it, matching pty/manager.rs. Absent for
     // top-level sessions; `vself` expands the id into the full ancestry when more than the parent is
     // needed.
@@ -1759,7 +1765,11 @@ impl ChatManager {
             kind,
             bin: bin.to_string(),
             version,
-            auth_settings_args: auth::claude::settings_args(extra_args),
+            auth_settings_args: match kind {
+                SessionKind::Claude => auth::claude::settings_args(extra_args),
+                SessionKind::Antigravity => auth::antigravity::settings_args(extra_args),
+                _ => Vec::new(),
+            },
             auth_restart: AtomicBool::new(false),
             action: Mutex::new(()),
             cwd: cwd.map(str::to_string),
@@ -1839,12 +1849,12 @@ impl ChatManager {
             compactions: AtomicU64::new(0),
         });
 
-        let restored_auth = self.sessions.lock().unwrap().get(session_id)
-            .is_some_and(|previous| auth::claude::restore(previous, &proc));
-
         if let Some(native) = resume.filter(|_| acp_protocol::supported(kind)) {
             acp::prefill(app, &proc, native);
         }
+
+        let restored_auth = self.sessions.lock().unwrap().get(session_id)
+            .is_some_and(|previous| auth::claude::restore(previous, &proc) || auth::antigravity::restore(previous, &proc));
 
         self.sessions
             .lock()
@@ -2000,6 +2010,23 @@ impl ChatManager {
         crate::agent::antigravity_models::remember_acp(app, &catalog);
         if catalog.model_switchable() {
             emit(app, session_id, json!({"type":"models"}));
+        }
+    }
+
+    /// Tell every running Antigravity conversation to re-read its model catalogue.
+    pub fn notify_antigravity_models_changed(&self, app: &AppCtx) {
+        let ids: Vec<String> = self
+            .sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_, proc)| {
+                proc.kind == SessionKind::Antigravity && proc.alive.load(Ordering::Relaxed)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            emit(app, &id, json!({"type":"models"}));
         }
     }
 
@@ -2610,6 +2637,26 @@ impl ChatManager {
 
     /// Change the model of the running conversation. `None` restores the default.
     pub fn set_model(&self, session_id: &str, model: Option<&str>) -> Result<(), String> {
+        self.set_model_inner(None, session_id, model)
+    }
+
+    /// Change the model of the running conversation, restarting an idle Antigravity process when a
+    /// newly discovered model is unknown to the older process.
+    pub fn set_model_with_app(
+        &self,
+        app: &AppCtx,
+        session_id: &str,
+        model: Option<&str>,
+    ) -> Result<(), String> {
+        self.set_model_inner(Some(app), session_id, model)
+    }
+
+    fn set_model_inner(
+        &self,
+        app: Option<&AppCtx>,
+        session_id: &str,
+        model: Option<&str>,
+    ) -> Result<(), String> {
         let proc = self.get(session_id)?;
         let model = if proc.kind == SessionKind::Claude {
             model.map(crate::agent::claude_models::normalize_id)
@@ -2628,7 +2675,37 @@ impl ChatManager {
         } else if acp_protocol::supported(proc.kind) {
             if let Some(model) = model {
                 if proc.ready.load(Ordering::Relaxed) {
-                    acp::set_model(&proc, model)?;
+                    if let Err(err) = acp::set_model(&proc, model) {
+                        if let Some(app) = app.filter(|ctx| {
+                            proc.kind == SessionKind::Antigravity
+                                && err.contains("Unknown model ID")
+                                && crate::agent::antigravity_models::cached(ctx)
+                                    .iter()
+                                    .any(|entry| entry.id == model)
+                        }) {
+                            // Keep lock acquisition order consistent with `restart_claude_bypass_inner`:
+                            // `action` before `settings_change` before `turn`.
+                            drop(_change);
+                            let _action = proc.action.lock().unwrap();
+                            let _change = proc.settings_change.lock().unwrap();
+                            let turn = proc.turn.lock().unwrap();
+                            if turn.running
+                                || !turn.waiting.is_empty()
+                                || proc.shell_running.load(Ordering::Relaxed)
+                                || crate::security::session_active(session_id)
+                                || crate::agent::plan_execute::active(app, session_id)
+                            {
+                                return Err(
+                                    "Wait for the agent to finish before switching to this newly added model"
+                                        .into(),
+                                );
+                            }
+                            *proc.model.lock().unwrap() = Some(model.to_string());
+                            release_process(app, session_id, &proc);
+                            return Ok(());
+                        }
+                        return Err(err);
+                    }
                 }
             }
         }
@@ -2703,12 +2780,17 @@ impl ChatManager {
 
     fn account_process(&self, session_id: &str) -> Result<Arc<ChatProcess>, String> {
         let proc = self.get(session_id)?;
-        if !matches!(proc.kind, SessionKind::Claude | SessionKind::Codex | SessionKind::Zcode) {
-            return Err("Account operations require a Claude, Codex or ZCode conversation.".into());
+        if !matches!(proc.kind, SessionKind::Claude | SessionKind::Codex | SessionKind::Zcode | SessionKind::Antigravity) {
+            return Err("Account operations require a Claude, Codex, ZCode or Antigravity conversation.".into());
         }
         if proc.kind == SessionKind::Codex {
             for _ in 0..500 {
                 if proc.codex_initialized.load(Ordering::Relaxed) || !proc.alive.load(Ordering::Relaxed) { break; }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        } else if proc.kind == SessionKind::Antigravity {
+            for _ in 0..500 {
+                if proc.acp.lock().unwrap().initialized || !proc.alive.load(Ordering::Relaxed) { break; }
                 std::thread::sleep(Duration::from_millis(20));
             }
         }
@@ -2729,6 +2811,7 @@ impl ChatManager {
             return Err("An account operation for this provider is already in progress in another conversation.".into());
         }
         match proc.kind {
+            SessionKind::Antigravity => auth::antigravity::start(app, session_id, &proc),
             SessionKind::Claude => auth::claude::start(app, session_id, &proc),
             SessionKind::Zcode => auth::zcode::start(app, session_id, &proc, provider),
             _ => auth::start(app, session_id, &proc),
@@ -2743,6 +2826,7 @@ impl ChatManager {
             return Err("An account operation for this provider is already in progress in another conversation.".into());
         }
         match proc.kind {
+            SessionKind::Antigravity => auth::antigravity::logout(app, session_id, &proc),
             SessionKind::Claude => auth::claude::logout(app, session_id, &proc),
             SessionKind::Zcode => auth::zcode::logout(app, session_id, &proc),
             _ => auth::logout(app, session_id, &proc),
@@ -2753,6 +2837,7 @@ impl ChatManager {
         let proc = self.account_process(session_id)?;
         let _action = proc.action.lock().unwrap();
         match proc.kind {
+            SessionKind::Antigravity => auth::antigravity::cancel(app, session_id, &proc),
             SessionKind::Claude => auth::claude::cancel(app, session_id, &proc),
             SessionKind::Zcode => auth::zcode::cancel(app, session_id, &proc),
             _ => auth::cancel(app, session_id, &proc),
@@ -2760,9 +2845,13 @@ impl ChatManager {
     }
 
     pub fn auth_submit(&self, app: &AppCtx, session_id: &str, code: &str) -> Result<(), String> {
-        let proc = self.claude(session_id)?;
+        let proc = self.account_process(session_id)?;
         let _action = proc.action.lock().unwrap();
-        auth::claude::submit(app, session_id, &proc, code)
+        match proc.kind {
+            SessionKind::Claude => auth::claude::submit(app, session_id, &proc, code),
+            SessionKind::Antigravity => auth::antigravity::submit(app, session_id, &proc, code),
+            _ => Err("Authorization code submission is not supported for this agent.".into()),
+        }
     }
 
     /// `/compact`: ask the agent to summarize the conversation now.
@@ -3481,6 +3570,7 @@ impl ChatManager {
         proc.released.store(true, Ordering::Relaxed);
         if acp_protocol::supported(proc.kind) {
             acp::release_parked_stop(&proc, "allow");
+            auth::antigravity::abort_login(&proc);
         }
         emit_queue(app, session_id, &proc);
         end_background_tasks(&mut proc.extras.lock().unwrap());
@@ -3845,6 +3935,7 @@ fn release_process(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
     proc.alive.store(false, Ordering::Relaxed);
     if acp_protocol::supported(proc.kind) {
         acp::release_parked_stop(proc, "allow");
+        auth::antigravity::abort_login(proc);
     }
     crate::session_state::set_alive(app, session_id, false);
     *proc.stdin.lock().unwrap() = None;
@@ -4385,6 +4476,43 @@ fn spawn_stderr_reader(proc: Arc<ChatProcess>, stderr: std::process::ChildStderr
     });
 }
 
+/// Strip ANSI/VT escape sequences from raw agent stderr or RPC error text while preserving UTF-8.
+fn strip_ansi_text(input: &str) -> String {
+    if !input.as_bytes().contains(&0x1b) { return input.to_string(); }
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != 0x1b {
+            out.push(bytes[i]);
+            i += 1;
+            continue;
+        }
+        i += 1;
+        if i >= bytes.len() { break; }
+        match bytes[i] {
+            b'[' => {
+                i += 1;
+                while i < bytes.len() && !(0x40..=0x7e).contains(&bytes[i]) { i += 1; }
+                if i < bytes.len() { i += 1; }
+            }
+            b']' | b'P' | b'_' | b'^' | b'X' => {
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == 0x07 { i += 1; break; }
+                    if bytes[i] == 0x1b && i + 1 < bytes.len() && bytes[i + 1] == b'\\' { i += 2; break; }
+                    i += 1;
+                }
+            }
+            b'(' | b')' | b'*' | b'+' | b'-' | b'.' | b'/' | b' ' | b'#' | b'%' => {
+                i = (i + 2).min(bytes.len());
+            }
+            _ => { i += 1; }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 fn drain_stderr(mut reader:impl std::io::Read,limit:usize,mut publish:impl FnMut(String)) -> std::io::Result<()> {
     let mut retained=Vec::with_capacity(limit);let mut block=[0;16*1024];
     loop {
@@ -4393,7 +4521,7 @@ fn drain_stderr(mut reader:impl std::io::Read,limit:usize,mut publish:impl FnMut
         let keep=count.min(limit.saturating_sub(retained.len()));
         if keep==0 {continue;}
         retained.extend_from_slice(&block[..keep]);
-        let mut text=String::from_utf8_lossy(&retained).replace("\r\n","\n");
+        let mut text=strip_ansi_text(&String::from_utf8_lossy(&retained).replace("\r\n","\n"));
         let mut end=text.len().min(limit.saturating_sub(1));while !text.is_char_boundary(end) {end-=1;}text.truncate(end);
         if !text.is_empty() && !text.ends_with('\n') {text.push('\n');}publish(text);
     }
@@ -4936,7 +5064,21 @@ fn handle_codex_response(
             proc.commands.lock().unwrap().clear();
             emit(app, session_id, json!({"type":"commands","commands":[]}));
         }
-        emit(app, session_id, json!({"type":"error","message":message,"request":kind}));
+        let clean_message = strip_ansi_text(&message);
+        let emitted = if matches!(kind, Some("thread_start" | "thread_resume" | "thread_fork_open"))
+            && {
+                let lower = clean_message.to_ascii_lowercase();
+                lower.contains("already has an active writer") || lower.contains("thread-store conflict")
+            }
+        {
+            match proc.agent_session_id.lock().unwrap().as_deref() {
+                Some(thread_id) if !thread_id.is_empty() => format!("codex_thread_active_writer:{thread_id}"),
+                _ => "codex_thread_active_writer".to_string(),
+            }
+        } else {
+            clean_message
+        };
+        emit(app, session_id, json!({"type":"error","message":emitted,"request":kind}));
         if matches!(kind, Some("initialize" | "thread_start" | "thread_resume" | "thread_fork_open")) {
             if matches!(kind, Some("thread_start" | "thread_resume" | "thread_fork_open"))
                 && auth::is_auth_error(&json!(message))
@@ -8380,6 +8522,36 @@ mod tests {
     }
 
     #[test]
+    fn drain_stderr_strips_ansi_escape_sequences() {
+        let raw = "\x1b[2m2026-11-22T06:13:11Z\x1b[0m \x1b[31mERROR\x1b[0m \x1b[2mcodex_core::session\x1b[0m: thread-store conflict\r\n";
+        let mut updates = Vec::new();
+        drain_stderr(raw.as_bytes(), 8192, |text| updates.push(text)).unwrap();
+        assert_eq!(updates.last().unwrap(), "2026-11-22T06:13:11Z ERROR codex_core::session: thread-store conflict\n");
+    }
+
+    #[test]
+    fn codex_active_writer_resume_failure_emits_stable_error_code() {
+        let app = ctx("codex-active-writer");
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let seen = events.clone();
+        let _un = app.listen("chat://event/s", move |payload| {
+            if let Ok(value) = serde_json::from_str::<Value>(payload) { seen.lock().unwrap().push(value); }
+        });
+        let proc = inert_process(SessionKind::Codex);
+        *proc.agent_session_id.lock().unwrap() = Some("01a1d769-830a-75a1-a110-67e01b00387e".into());
+        proc.pending.lock().unwrap().insert("resume-1".into(), "thread_resume");
+        handle_codex_line(
+            &app,
+            "s",
+            &proc,
+            &json!({"id":"resume-1","error":{"message":"\x1b[31mFailed to create session: thread-store conflict: thread 01a1d769-830a-75a1-a110-67e01b00387e already has an active writer\x1b[0m"}}).to_string(),
+        );
+        let emitted = events.lock().unwrap();
+        assert!(emitted.iter().any(|e| e["type"] == "error" && e["message"] == "codex_thread_active_writer:01a1d769-830a-75a1-a110-67e01b00387e"));
+        let _ = proc.child.lock().unwrap().wait();
+    }
+
+    #[test]
     fn control_snapshot_does_not_copy_rows_or_build_the_message_directory() {
         let proc = inert_process(SessionKind::Claude);
         let manager = ChatManager::new();
@@ -10992,6 +11164,161 @@ mod tests {
             proc.child.lock().unwrap().kill().unwrap();
             proc.child.lock().unwrap().wait().unwrap();
         }
+    }
+
+    fn antigravity_auth_fixture(tag: &str, bin: &str) -> (AppCtx, Arc<ChatProcess>, BufReader<std::process::ChildStdout>) {
+        let app = ctx(tag);
+        {
+            let conn = app.db().conn.lock().unwrap();
+            conn.execute("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','test','/tmp',0)", []).unwrap();
+            conn.execute("INSERT INTO sessions(id,project_id,name,kind,created_at) VALUES ('s','p','Antigravity','antigravity',0)", []).unwrap();
+        }
+        let (mut proc, stdout) = cat_process();
+        {
+            let inner = Arc::get_mut(&mut proc).unwrap();
+            inner.kind = SessionKind::Antigravity;
+            inner.bin = bin.into();
+        }
+        {
+            let mut acp = proc.acp.lock().unwrap();
+            acp.initialized = true;
+            acp.auth_logout_supported = true;
+        }
+        *proc.agent_session_id.lock().unwrap() = Some("agy-original".into());
+        proc.timeline.lock().unwrap().upsert(ChatRow::User { id: "history".into(), text: "Keep this Antigravity conversation".into(), images: vec![], at: None });
+        app.chat().sessions.lock().unwrap().insert("s".into(), proc.clone());
+        (app, proc, BufReader::new(stdout))
+    }
+
+    #[test]
+    fn antigravity_auth_required_keeps_process_alive_and_hands_back_queued_messages() {
+        let (app, proc, mut reader) = antigravity_auth_fixture("agy-auth-required", "true");
+        proc.acp.lock().unwrap().initialized = false;
+        proc.acp.lock().unwrap().auth_logout_supported = false;
+        proc.turn.lock().unwrap().waiting.push(QueuedMessage { id: "q1".into(), text: "Pending turn".into(), images: vec![] });
+        let init_id = proc.request_id("acp_initialize");
+        acp::handle_line(&app, "s", &proc, &json!({
+            "jsonrpc":"2.0",
+            "id":init_id,
+            "result":{
+                "protocolVersion":1,
+                "agentCapabilities":{"loadSession":true,"auth":{"logout":{}}}
+            }
+        }).to_string());
+        assert!(proc.acp.lock().unwrap().initialized);
+        assert!(proc.acp.lock().unwrap().auth_logout_supported);
+        let open_req = read_codex_request(&mut reader);
+        assert_eq!(open_req["method"], "session/new");
+        acp::handle_line(&app, "s", &proc, &json!({
+            "jsonrpc":"2.0",
+            "id":open_req["id"],
+            "error":{"code":-32000,"message":"Authentication required"}
+        }).to_string());
+        assert!(proc.alive.load(Ordering::Relaxed));
+        assert_eq!(app.chat().snapshot("s").extras.auth.unwrap().status, "required");
+        assert!(proc.turn.lock().unwrap().waiting.is_empty());
+        proc.child.lock().unwrap().kill().unwrap();
+        proc.child.lock().unwrap().wait().unwrap();
+    }
+
+    #[test]
+    fn antigravity_auth_logout_uses_acp_logout_and_restores_history() {
+        let (app, proc, mut reader) = antigravity_auth_fixture("agy-auth-logout", "true");
+        let app_bg = app.clone();
+        let proc_bg = proc.clone();
+        let responder = std::thread::spawn(move || {
+            let req = read_codex_request(&mut reader);
+            assert_eq!(req["method"], "logout");
+            acp::handle_line(&app_bg, "s", &proc_bg, &json!({
+                "jsonrpc":"2.0","id":req["id"],"result":{}
+            }).to_string());
+        });
+        app.chat().auth_logout(&app, "s").unwrap();
+        responder.join().unwrap();
+        assert_eq!(app.chat().snapshot("s").extras.auth.unwrap().status, "signedOut");
+        assert!(!proc.alive.load(Ordering::Relaxed));
+        let next = inert_process(SessionKind::Antigravity);
+        assert!(auth::antigravity::restore(&proc, &next));
+        assert_eq!(next.timeline.lock().unwrap().rows[0].id(), "history");
+        assert_eq!(next.agent_session_id.lock().unwrap().as_deref(), Some("agy-original"));
+        assert!(auth::blocks_queue(&next));
+        proc.child.lock().unwrap().wait().unwrap();
+    }
+
+    #[test]
+    fn antigravity_auth_logout_fails_when_server_does_not_advertise_logout() {
+        let (app, proc, _reader) = antigravity_auth_fixture("agy-auth-logout-unsupported", "true");
+        proc.acp.lock().unwrap().auth_logout_supported = false;
+        assert_eq!(app.chat().auth_logout(&app, "s"), Err("antigravity_auth_logout_failed".into()));
+        assert_eq!(app.chat().snapshot("s").extras.auth.unwrap().status, "logoutFailed");
+        assert!(auth::blocks_queue(&proc));
+        proc.child.lock().unwrap().wait().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn antigravity_auth_login_helper_handles_submit_and_cancel() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("vlx-agy-auth-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("fake-agy.sh");
+        let oauth_url = "https://accounts.google.com/o/oauth2/auth?client_id=test&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&state=ok";
+        std::fs::write(&script, format!(
+            "#!/bin/sh\nif [ \"$1\" = \"acp\" ] && [ \"$2\" = \"--login\" ]; then\n  printf '%s\\n\\n  %s\\n\\n%s\\n' 'Open this link in a browser to log in with Google:' '{oauth_url}' 'Then paste the authorization code:'\n  read code\n  if [ \"$code\" = \"valid-code\" ]; then exit 0; else exit 1; fi\nfi\nexit 1\n"
+        )).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let (app, proc, _reader) = antigravity_auth_fixture("agy-auth-submit", script.to_str().unwrap());
+        app.chat().auth_start(&app, "s", None).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if app.chat().snapshot("s").extras.auth.as_ref().is_some_and(|a| a.status == "pending") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let pending = app.chat().snapshot("s").extras.auth.unwrap();
+        assert_eq!(pending.status, "pending");
+        assert_eq!(pending.verification_url.as_deref(), Some(oauth_url));
+        assert_eq!(app.chat().auth_submit(&app, "s", "bad code"), Err("antigravity_auth_invalid_code".into()));
+        app.chat().auth_submit(&app, "s", " valid-code ").unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if app.chat().snapshot("s").extras.auth.as_ref().is_some_and(|a| a.status == "success") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(app.chat().snapshot("s").extras.auth.unwrap().status, "success");
+        assert!(!proc.alive.load(Ordering::Relaxed));
+        let next = inert_process(SessionKind::Antigravity);
+        assert!(auth::antigravity::restore(&proc, &next));
+        assert_eq!(next.agent_session_id.lock().unwrap().as_deref(), Some("agy-original"));
+        proc.child.lock().unwrap().wait().unwrap();
+
+        // Cancel flow kills the login helper and transitions cleanly to canceled.
+        let (app2, proc2, _reader2) = antigravity_auth_fixture("agy-auth-cancel", script.to_str().unwrap());
+        app2.chat().auth_start(&app2, "s", None).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if app2.chat().snapshot("s").extras.auth.as_ref().is_some_and(|a| a.status == "pending") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        app2.chat().auth_cancel(&app2, "s").unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if app2.chat().snapshot("s").extras.auth.as_ref().is_some_and(|a| a.status == "canceled") {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(app2.chat().snapshot("s").extras.auth.unwrap().status, "canceled");
+        proc2.child.lock().unwrap().kill().unwrap();
+        proc2.child.lock().unwrap().wait().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

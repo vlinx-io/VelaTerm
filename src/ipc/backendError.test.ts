@@ -10,7 +10,7 @@ vi.mock("../i18n", () => ({
   t: (key: string, ...args: unknown[]) => [key, ...args].join("|"),
 }));
 
-import { handshakeFailureReason, isAgentNotInstalledError, mapBackendError } from "./backendError";
+import { formatSubmissionError, handshakeFailureReason, isAgentNotInstalledError, mapBackendError, stripAnsi } from "./backendError";
 
 describe("mapBackendError", () => {
   it("localizes history errors while retaining the code used for revision recovery", () => {
@@ -76,12 +76,32 @@ describe("mapBackendError", () => {
     );
   });
 
-  it("passes unknown backend errors through unchanged", () => {
+  it("maps Codex active-writer lock conflicts from both stable codes and raw ANSI stderr", () => {
+    expect(mapBackendError("codex_thread_active_writer:01a1d769-830a-75a1-a110-67e01b00387e")).toBe("chat.codex.activeWriter");
+    expect(mapBackendError("codex_thread_active_writer")).toBe("chat.codex.activeWriter");
+    const ansiStderr =
+      "\x1b[2m2026-11-22T06:13:11.211255Z\x1b[0m \x1b[31mERROR\x1b[0m \x1b[2mcodex_core::session::session\x1b[0m\x1b[2m:\x1b[0m failed to initialize thread persistence: thread-store conflict: thread 01a1d769-830a-75a1-a110-67e01b00387e already has an active writer";
+    expect(mapBackendError(ansiStderr)).toBe("chat.codex.activeWriter");
+  });
+
+  it("strips ANSI escape codes from unknown errors without rewriting plain prose", () => {
+    expect(stripAnsi("\x1b[2m2026-11-22\x1b[0m \x1b[31mERROR\x1b[0m boom")).toBe("2026-11-22 ERROR boom");
+    expect(mapBackendError("\x1b[31mUnexpected CLI failure\x1b[0m")).toBe("Unexpected CLI failure");
     expect(mapBackendError("Session has been deleted")).toBe("Session has been deleted");
     expect(mapBackendError("Failed to open file: no such file")).toBe(
       "Failed to open file: no such file",
     );
     expect(mapBackendError("")).toBe("");
+  });
+});
+
+describe("formatSubmissionError", () => {
+  it("drops the Error prefix for mapped codes and strips ANSI from unrecognized failures", () => {
+    expect(formatSubmissionError("Error: codex_thread_active_writer:01a1d769")).toBe("chat.codex.activeWriter");
+    expect(formatSubmissionError("Error: \x1b[31mthread-store conflict: thread 01a1 already has an active writer\x1b[0m"))
+      .toBe("chat.codex.activeWriter");
+    expect(formatSubmissionError("Error: \x1b[31mSomething broke\x1b[0m")).toBe("Error: Something broke");
+    expect(formatSubmissionError("Error: Submission failed")).toBe("Error: Submission failed");
   });
 });
 

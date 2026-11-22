@@ -105,9 +105,9 @@ export interface OpenerCapability {
   revealPath(path: string): Promise<void>;
 }
 
-/** Dock/taskbar badge capability. */
+/** Per-window title count and Dock/taskbar badge capability. */
 export interface BadgeCapability {
-  /** Set the badge count; zero/undefined clears it. Browsers have no badge, so they silently no-op. */
+  /** Report this window's pending count; zero/undefined clears it. Browsers silently no-op. */
   setCount(count: number | undefined): Promise<void>;
 }
 

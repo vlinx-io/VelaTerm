@@ -8,7 +8,8 @@
 //!
 //! The level is a per-device preference kept in localStorage only and never mirrored to the backend: the
 //! right size depends on this machine's displays, not on the server a client connects to. Plain browsers
-//! have their own zoom, so the control is offered only where a native host exists.
+//! have their own zoom, so the control is offered only where a native host exists (Electron, the local
+//! Tauri main window, and Tauri remote-connection windows).
 
 import { useSyncExternalStore } from "react";
 // The unified environment view rather than named exports: test doubles provide the `env` object, and a
@@ -30,8 +31,8 @@ function electronBridge(): ElectronZoomBridge | undefined {
   return (window as unknown as { vlxNative?: ElectronZoomBridge }).vlxNative;
 }
 
-/** Whether this window can apply native zoom: the local Tauri main window or the Electron shell. */
-export const uiZoomSupported: boolean = env.isElectron || (env.isTauri && !env.isRemoteWindow);
+/** Whether this window can apply native zoom: Electron, the local Tauri main window, or a Tauri remote window. */
+export const uiZoomSupported: boolean = !!(env.isElectron || env.isTauri || env.isRemoteWindow);
 
 /** Clamp to the supported range and round to two decimals; anything unreadable becomes 1. */
 export function normalizeUiZoom(value: unknown): number {
@@ -75,7 +76,7 @@ async function applyNative(factor: number): Promise<void> {
     electronBridge()?.setZoomFactor?.(factor);
     return;
   }
-  if (env.isTauri && !env.isRemoteWindow) {
+  if (env.isTauri || env.isRemoteWindow) {
     const { getCurrentWebview } = await import("@tauri-apps/api/webview");
     await getCurrentWebview().setZoom(factor);
   }

@@ -492,6 +492,7 @@ const en = {
   "settings.catTerminal": "Terminal",
   "settings.catBehavior": "Behavior",
   "settings.catAgents": "Agents",
+  "settings.catPlugins": "Plugins",
   "settings.agentDefaultsTitle": "New session defaults",
   "settings.referSummaryTitle": "Session reference context",
   "settings.referSummaryMode": "Context mode",
@@ -865,6 +866,10 @@ const en = {
   "settings.fontPreviewText": "The quick brown fox jumps over the lazy dog. 0123456789",
   "settings.fontPreviewChat": "I updated the settings page. Each font setting takes effect immediately, and you can restore the defaults at any time.",
   "settings.fontResetGroup": "Restore default fonts",
+  "settings.chatImages": "Images",
+  "settings.chatImageMaxMb": "Max image size",
+  "settings.chatImageMaxMbHint": "Images wider than 1568 pixels or larger than this limit are resized and compressed before sending. Only images that cannot be decoded or still exceed the limit are skipped.",
+  "settings.chatImageSizeMb": (mb: number) => `${mb} MB`,
   "settings.composerChips": "Composer toolbar",
   "settings.composerChipsHint": "Enabled items appear beside the message in the order shown here. If a feature is temporarily unavailable (the agent is not running, there are no background tasks, or sign-in is pending), its item remains visible but empty or disabled. Features the current agent does not support are omitted. Items that do not fit move to the More menu. Items switched off here are not shown anywhere until you switch them on again.",
   "settings.composerChipUp": (chip: string) => `Move ${chip} up`,
@@ -1652,9 +1657,20 @@ const en = {
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
+  "files.filterTruncated": "Only the first matches are shown. Type more to narrow results.",
   "files.dblClickOpen": "Double-click to open",
   "files.deleteConfirm": (name: string) =>
     `Delete "${name}"? This can't be undone.`,
+  "files.deleteManyConfirm": (count: number) =>
+    count === 1 ? "Delete 1 item? This can't be undone." : `Delete ${count} items? This can't be undone.`,
+  "files.pasteConflictTitle": "Item already exists",
+  "files.pasteConflictBody": (name: string) =>
+    `An item named "${name}" already exists in the destination folder.`,
+  "files.pasteConflictProgress": (current: number, total: number) => `${current} of ${total}`,
+  "files.pasteConflictApplyAll": "Apply to all remaining conflicts",
+  "files.pasteReplace": "Replace",
+  "files.pasteSkip": "Skip",
+  "files.pasteKeepBoth": "Keep Both",
 
   // ── File transfer (remote access) ──
   "transfer.title": "Transfers",
@@ -1670,6 +1686,7 @@ const en = {
   "transfer.foldersUnsupported": "Folders can't be uploaded.",
   "drop.browserFilesHint": "In the browser, only images can be dropped here. To use other files, upload them to the project first.",
   "files.copyFailed": "Some files could not be copied. Check that they still exist and that you can write to this folder.",
+  "files.pasteFailed": "Some items could not be pasted. Check that the sources exist and that you can write to this folder.",
 
   // ── Status bar ──
   "statusbar.sessions": (n: number) =>
@@ -2332,6 +2349,10 @@ const en = {
   "chat.auth.claude.submit": "Submit code",
   "chat.auth.claude.invalidCode": "Paste the full code from this authorization attempt, including the part after #.",
   "chat.auth.claude.externalAuth": "API keys and other configured authentication methods are not changed.",
+  "chat.auth.antigravity.pending": "Open the authorization page, sign in with Google, then paste the authorization code or callback URL shown there.",
+  "chat.auth.antigravity.failed": "Sign-in could not be completed. Try again and check that your Antigravity CLI supports account authorization.",
+  "chat.auth.antigravity.code": "Authorization code or callback URL",
+  "chat.auth.antigravity.invalidCode": "Paste the authorization code or callback URL from this sign-in attempt, with no spaces.",
   "chat.auth.open": "Open authorization page",
   "chat.auth.zcode.required": "Sign in to ZCode to use this conversation, with your Z.ai or BigModel account.",
   "chat.auth.zcode.pending": "Open the authorization page and allow access. This view updates when sign-in finishes.",
@@ -2549,6 +2570,7 @@ const en = {
   "chat.attach.modelTextOnly": "The selected model does not accept images.",
   "chat.signInRequired": (agent: string) => `Sign in to ${agent} to use the conversation view. Switch to terminal view to sign in, then send your message again.`,
   "chat.apiKeyRequired": "DeepSeek needs an API key. Select API beside the message box and enter one, or set the `DEEPSEEK_API_KEY` environment variable, then send your message again.",
+  "chat.codex.activeWriter": "Another Codex process is currently using this conversation. Close the other terminal tab or Codex instance holding it, or wait a moment, then try again.",
   "chat.antigravity.permissionsHint": "Tools that require approval must be allowed in Antigravity settings or used in terminal view.",
   "chat.antigravity.settingsHint": "Change the model, reasoning effort, or permissions between turns.",
   "chat.antigravity.rewindTitle": "Rewind in terminal view",
@@ -2734,7 +2756,30 @@ const en = {
   "kb.updatedOn": (date: string) => `Updated ${date}`,
   "archive.sessionsCount": (count: string) => `${count} ${count === "1" ? "session" : "sessions"}`,
 
+
   ...assist,
+  "plugins.title": "Plugins",
+  "plugins.subtitle": "Install, link, enable, or reload external VelaTerm plugins. Each plugin runs in its own isolated backend process and loads its interface dynamically.",
+  "plugins.installArchive": "Install from Archive…",
+  "plugins.linkDev": "Link Local Plugin…",
+  "plugins.localOnlyHint": "Installing, linking, or toggling plugins is only available on the local host.",
+  "plugins.archivePathPrompt": "Enter the full path to a .vlxplugin or .zip archive:",
+  "plugins.devPathPrompt": "Enter the full path to a local plugin directory containing manifest.json:",
+  "plugins.empty": "No plugins installed yet. Install a .vlxplugin archive or link a local plugin directory to get started.",
+  "plugins.sourceInstalled": "Installed",
+  "plugins.sourceDev": "Local Dev",
+  "plugins.statusRunning": "Running",
+  "plugins.statusStarting": "Starting…",
+  "plugins.statusDisabled": "Disabled",
+  "plugins.statusStopped": "Stopped",
+  "plugins.statusError": "Error",
+  "plugins.enable": "Enable",
+  "plugins.disable": "Disable",
+  "plugins.reload": "Reload",
+  "plugins.uninstall": "Uninstall",
+  "plugins.uninstallConfirm": (name: string) => `Uninstall plugin "${name}"?`,
+  "plugins.removeData": "Also delete this plugin's local data directory",
+  "plugins.loadFailed": "Failed to load plugin interface",
 };
 
 export default en;

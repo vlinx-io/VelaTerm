@@ -118,11 +118,13 @@ import {
   loadRecordSessions,
   loadSettings,
   loadSoundEnabled,
+  normalizeChatImageMaxMb,
   normalizeInputLatencyThreshold,
   sanitizeComposerInlineChips,
   saveSettings,
   visualOf,
   type AgentDefaultConfig,
+  type ChatImageMaxMb,
   type ComposerChipId,
   type ImagePasteMode,
   type MemoryPrefs,
@@ -1210,6 +1212,8 @@ interface TermStore {
   chatLineHeight: number;
   /** Conversation letter spacing in pixels, or `null` for automatic. */
   chatLetterSpacing: number | null;
+  /** Maximum size in MB that conversation images are compressed down to before sending. */
+  chatImageMaxMb: ChatImageMaxMb;
   /** Custom global shortcut overrides by action ID. */
   shortcutOverrides: Record<string, string>;
   /** Default arguments and permission mode by agent type, applied when new sessions omit them. */
@@ -1735,6 +1739,8 @@ interface TermStore {
   setChatCodeFontFamily: (v: string | null) => void;
   /** Conversation letter spacing in pixels, clamped to -1–2; `null` is automatic. */
   setChatLetterSpacing: (v: number | null) => void;
+  /** Maximum size in MB that conversation images are compressed down to before sending. */
+  setChatImageMaxMb: (v: ChatImageMaxMb) => void;
   /** Restores every conversation font setting together. */
   resetChatTypography: () => void;
   /** Persists a global shortcut override for one action. */
@@ -1902,6 +1908,7 @@ function persistAndApplyVisual(getState: () => TermStore) {
     chatFontSize: s.chatFontSize,
     chatLineHeight: s.chatLineHeight,
     chatLetterSpacing: s.chatLetterSpacing,
+    chatImageMaxMb: s.chatImageMaxMb,
     shortcutOverrides: s.shortcutOverrides,
     agentDefaults: s.agentDefaults,
     spawnConfirm: s.spawnConfirm,
@@ -5230,6 +5237,10 @@ export const useTermStore = create<TermStore>((set, get) => ({
   },
   setChatLetterSpacing: (v) => {
     set({ chatLetterSpacing: normalizeLetterSpacing(v) });
+    persistAndApplyVisual(get);
+  },
+  setChatImageMaxMb: (v) => {
+    set({ chatImageMaxMb: normalizeChatImageMaxMb(v) });
     persistAndApplyVisual(get);
   },
   resetChatTypography: () => {

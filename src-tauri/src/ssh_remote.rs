@@ -672,16 +672,36 @@ fn parse_uname(raw: &str) -> Option<RemoteSystem> {
 
 // ─────────────────────────── Host fingerprints (TOFU) ───────────────────────────
 
-/// Probe with ssh-keyscan, calculate SHA-256, and compare known_hosts without modifying it. trust_host
-/// writes only after frontend confirmation.
-pub fn probe_host_key(host: &str) -> Result<HostKeyProbe, String> {
+/// Resolve `[user@]host[:port]` through `~/.ssh/config` under `home` into the `(hostname, port)` pair
+/// used by `ssh-keyscan` and `known_hosts`. Port 22 maps to `None` because `known_hosts` stores
+/// default-port entries without `[host]:port` brackets.
+fn resolve_probe_endpoint_in(host: &str, home: Option<&Path>) -> Result<(String, Option<String>), String> {
     if !valid_ssh_target(host) {
         return Err(format!("Invalid SSH target: {host}"));
     }
-    let (target, port) = split_ssh_target(host);
-    // ssh-keyscan accepts hostnames without a user@ prefix.
-    let hostname = target.rsplit('@').next().unwrap_or(target);
+    let resolved = crate::ssh_config::resolve_target(host, home);
+    // HostName comes from ~/.ssh/config; reject empty, whitespace, or leading `-` so it cannot act
+    // as a CLI flag to ssh-keyscan or ssh-keygen.
+    if resolved.hostname.is_empty()
+        || resolved.hostname.starts_with('-')
+        || resolved.hostname.chars().any(char::is_whitespace)
+    {
+        return Err(format!("Invalid SSH hostname: {}", resolved.hostname));
+    }
+    let port = (resolved.port != 22).then(|| resolved.port.to_string());
+    Ok((resolved.hostname, port))
+}
 
+/// Format a host+port lookup key as OpenSSH `known_hosts` expects (`[host]:port` only when non-22).
+fn known_hosts_needle(hostname: &str, port: Option<&str>) -> String {
+    match port {
+        Some(p) => format!("[{hostname}]:{p}"),
+        None => hostname.to_string(),
+    }
+}
+
+/// Run `ssh-keyscan` against `hostname` and optional non-22 `port`.
+fn keyscan_host_keys(hostname: &str, port: Option<&str>, what: &str) -> Result<String, String> {
     let mut cmd = ssh_command("ssh-keyscan");
     cmd.args(["-T", "8"]);
     if let Some(p) = port {
@@ -690,12 +710,21 @@ pub fn probe_host_key(host: &str) -> Result<HostKeyProbe, String> {
     // Prefer stronger key types among all results.
     cmd.args(["-t", "ed25519,ecdsa,rsa"]);
     cmd.arg(hostname);
-    let scanned = run_capture(cmd, "ssh-keyscan host key probe", None)?;
+    run_capture(cmd, what, None)
+}
+
+/// Probe with ssh-keyscan, calculate SHA-256, and compare known_hosts without modifying it. trust_host
+/// writes only after frontend confirmation.
+pub fn probe_host_key(host: &str) -> Result<HostKeyProbe, String> {
+    let (hostname, port) = resolve_probe_endpoint_in(host, host::home_dir().as_deref())?;
+    let port_ref = port.as_deref();
+
+    let scanned = keyscan_host_keys(&hostname, port_ref, "ssh-keyscan host key probe")?;
     let (key_type, key_b64) = first_host_key(&scanned)
         .ok_or_else(|| format!("ssh-keyscan returned no usable host key: {scanned:?}"))?;
     let fingerprint = sha256_fingerprint(&key_b64)?;
 
-    let status = known_hosts_status(hostname, port, &fingerprint);
+    let status = known_hosts_status(&hostname, port_ref, &fingerprint);
     Ok(HostKeyProbe {
         status,
         target: host.to_string(),
@@ -734,11 +763,7 @@ fn sha256_fingerprint(key_b64: &str) -> Result<String, String> {
 
 /// Query known_hosts with ssh-keygen and classify the fingerprint as Known/New/Changed.
 fn known_hosts_status(hostname: &str, port: Option<&str>, fingerprint: &str) -> HostKeyStatus {
-    // known_hosts represents nondefault ports as `[host]:port`.
-    let needle = match port {
-        Some(p) => format!("[{hostname}]:{p}"),
-        None => hostname.to_string(),
-    };
+    let needle = known_hosts_needle(hostname, port);
     // `-F` finds entries and `-l` prints their SHA-256 fingerprints.
     let mut cmd = ssh_command("ssh-keygen");
     cmd.args(["-F", &needle, "-l"]);
@@ -808,28 +833,15 @@ fn known_hosts_file() -> Result<PathBuf, String> {
 /// After confirmation, write the host key to known_hosts. Remove a changed old entry first so later
 /// connections can use StrictHostKeyChecking=yes without prompts.
 pub fn trust_host(host: &str, was_changed: bool) -> Result<(), String> {
-    if !valid_ssh_target(host) {
-        return Err(format!("Invalid SSH target: {host}"));
-    }
-    let (target, port) = split_ssh_target(host);
-    let hostname = target.rsplit('@').next().unwrap_or(target);
+    let (hostname, port) = resolve_probe_endpoint_in(host, host::home_dir().as_deref())?;
+    let port_ref = port.as_deref();
 
     if was_changed {
-        let needle = match port {
-            Some(p) => format!("[{hostname}]:{p}"),
-            None => hostname.to_string(),
-        };
+        let needle = known_hosts_needle(&hostname, port_ref);
         let _ = ssh_command("ssh-keygen").args(["-R", &needle]).output();
     }
 
-    let mut cmd = ssh_command("ssh-keyscan");
-    cmd.args(["-T", "8"]);
-    if let Some(p) = port {
-        cmd.args(["-p", p]);
-    }
-    cmd.args(["-t", "ed25519,ecdsa,rsa"]);
-    cmd.arg(hostname);
-    let scanned = run_capture(cmd, "ssh-keyscan (trust write)", None)?;
+    let scanned = keyscan_host_keys(&hostname, port_ref, "ssh-keyscan (trust write)")?;
 
     let kh = known_hosts_file()?;
     if let Some(dir) = kh.parent() {
@@ -2500,6 +2512,46 @@ mod tests {
             shell_join(&cyg, &desktop_data_dir_expr(&cyg), "vlx-term.db"),
             "$(cygpath -u \"$APPDATA\")/io.vlinx.vlxterm.release/vlx-term.db"
         );
+    }
+
+    /// Probe and trust must resolve HostName and Port from ~/.ssh/config the same way as the transport.
+    #[test]
+    fn probe_endpoint_honors_ssh_config_and_normalizes_port_22() {
+        let dir = std::env::temp_dir().join(format!("vlx-ssh-probe-{}", uuid::Uuid::new_v4().simple()));
+        let ssh_dir = dir.join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+        std::fs::write(
+            ssh_dir.join("config"),
+            "Host mybox\n  HostName 192.168.1.50\n  Port 2222\n  User alice\n\n\
+             Host stdbox\n  HostName 10.0.0.8\n  Port 22\n\n\
+             Host badopt\n  HostName -oProxyCommand=evil\n",
+        )
+        .unwrap();
+
+        let (host, port) = resolve_probe_endpoint_in("mybox", Some(&dir)).unwrap();
+        assert_eq!(host, "192.168.1.50");
+        assert_eq!(port.as_deref(), Some("2222"));
+        assert_eq!(known_hosts_needle(&host, port.as_deref()), "[192.168.1.50]:2222");
+
+        // Explicit port on the target overrides config; port 22 omits brackets to match known_hosts.
+        let (host, port) = resolve_probe_endpoint_in("bob@mybox:22", Some(&dir)).unwrap();
+        assert_eq!(host, "192.168.1.50");
+        assert_eq!(port, None);
+        assert_eq!(known_hosts_needle(&host, port.as_deref()), "192.168.1.50");
+
+        let (host, port) = resolve_probe_endpoint_in("stdbox", Some(&dir)).unwrap();
+        assert_eq!(host, "10.0.0.8");
+        assert_eq!(port, None);
+
+        // Missing config keeps the literal host.
+        let (host, port) = resolve_probe_endpoint_in("alice@plain.example:2200", Some(&dir)).unwrap();
+        assert_eq!(host, "plain.example");
+        assert_eq!(port.as_deref(), Some("2200"));
+
+        // Option-shaped HostName values from ~/.ssh/config are rejected before invoking ssh-keyscan.
+        assert!(resolve_probe_endpoint_in("badopt", Some(&dir)).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

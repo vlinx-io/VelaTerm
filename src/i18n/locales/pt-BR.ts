@@ -493,6 +493,7 @@ const ptBR: typeof en = {
   "settings.catTerminal": "Terminal", // Terminal
   "settings.catBehavior": "Comportamento", // Behavior
   "settings.catAgents": "Agentes", // Agents
+  "settings.catPlugins": "Plugins",
   "settings.agentDefaultsTitle": "Padrões de novas sessões",
   "settings.referSummaryTitle": "Contexto de referências de sessão",
   "settings.referSummaryMode": "Modo de contexto",
@@ -865,6 +866,10 @@ const ptBR: typeof en = {
   "settings.fontPreviewText": "Um pequeno jabuti xereta viu dez cegonhas felizes. 0123456789",
   "settings.fontPreviewChat": "Atualizei a página de configurações. Cada configuração de fonte entra em vigor imediatamente, e você pode restaurar os padrões a qualquer momento.",
   "settings.fontResetGroup": "Restaurar as fontes padrão",
+  "settings.chatImages": "Imagens",
+  "settings.chatImageMaxMb": "Tamanho máx. da imagem",
+  "settings.chatImageMaxMbHint": "Antes do envio, imagens com mais de 1568 pixels no lado maior ou acima desse limite são redimensionadas e comprimidas automaticamente. Apenas imagens que não puderem ser decodificadas ou que ainda excedam o limite são ignoradas.",
+  "settings.chatImageSizeMb": (mb: number) => `${mb} MB`,
   "settings.composerChips": "Barra de ferramentas de mensagens",
   "settings.composerChipsHint": "Os itens ativados aparecem ao lado da mensagem na ordem indicada. Se um recurso estiver temporariamente indisponível (o agente não está em execução, não há tarefas em segundo plano ou o login está pendente), seu item continua visível, mas vazio ou desabilitado. Os recursos não compatíveis com o agente atual são omitidos. Os itens que não couberem vão para o menu Mais. Os itens desativados aqui não aparecem em lugar nenhum até que você os ative novamente.",
   "settings.composerChipUp": (chip: string) => `Mover ${chip} para cima`,
@@ -1643,9 +1648,22 @@ const ptBR: typeof en = {
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
+  "files.filterTruncated": "Apenas os primeiros resultados são exibidos. Digite mais para refinar a busca.",
   "files.dblClickOpen": "Clique duas vezes para abrir",
   "files.deleteConfirm": (name) =>
     `Excluir "${name}"? Isso não pode ser desfeito.`, // Delete "{name}"? This can't be undone.
+  "files.deleteManyConfirm": (count) =>
+    count === 1
+      ? "Excluir 1 item? Isso não pode ser desfeito."
+      : `Excluir ${count} itens? Isso não pode ser desfeito.`, // Delete {count} items? This can't be undone.
+  "files.pasteConflictTitle": "O item já existe", // Item already exists
+  "files.pasteConflictBody": (name) =>
+    `Já existe um item chamado "${name}" na pasta de destino.`, // An item named "{name}" already exists in the destination folder.
+  "files.pasteConflictProgress": (current, total) => `${current} de ${total}`, // {current} of {total}
+  "files.pasteConflictApplyAll": "Aplicar a todos os conflitos restantes", // Apply to all remaining conflicts
+  "files.pasteReplace": "Substituir", // Replace
+  "files.pasteSkip": "Ignorar", // Skip
+  "files.pasteKeepBoth": "Manter ambos", // Keep Both
 
   // ── File transfer (remote access) ──
   "transfer.title": "Transferências", // Transfers
@@ -1661,6 +1679,7 @@ const ptBR: typeof en = {
   "transfer.foldersUnsupported": "Não é possível enviar pastas.", // Folders can't be uploaded.
   "drop.browserFilesHint": "No navegador, só é possível soltar imagens aqui. Para usar outros arquivos, envie-os primeiro para o projeto.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
   "files.copyFailed": "Não foi possível copiar alguns arquivos. Verifique se eles ainda existem e se você tem permissão de gravação nesta pasta.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
+  "files.pasteFailed": "Não foi possível colar alguns itens. Verifique se a origem ainda existe e se você tem permissão de gravação nesta pasta.", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => (n === 1 ? "1 sessão" : `${n} sessões`), // {n} sessions
@@ -2332,6 +2351,10 @@ const ptBR: typeof en = {
   "chat.auth.claude.submit": "Enviar código",
   "chat.auth.claude.invalidCode": "Cole o código completo desta tentativa de autorização, incluindo a parte após #.",
   "chat.auth.claude.externalAuth": "As chaves de API e os outros métodos de autenticação configurados não serão alterados.",
+  "chat.auth.antigravity.pending": "Abra a página de autorização, entre com sua conta Google e cole o código de autorização ou a URL de retorno exibida.",
+  "chat.auth.antigravity.failed": "Não foi possível concluir o login. Tente novamente e verifique se sua versão do Antigravity CLI oferece suporte à autorização de contas.",
+  "chat.auth.antigravity.code": "Código de autorização ou URL de retorno",
+  "chat.auth.antigravity.invalidCode": "Cole o código de autorização ou a URL de retorno desta tentativa de login, sem espaços.",
   "chat.auth.open": "Abrir página de autorização",
   "chat.auth.zcode.required": "Entre no ZCode com sua conta da Z.ai ou da BigModel para usar esta conversa.",
   "chat.auth.zcode.pending": "Abra a página de autorização e permita o acesso. Esta tela será atualizada quando o login for concluído.",
@@ -2547,6 +2570,7 @@ const ptBR: typeof en = {
   "chat.attach.modelTextOnly": "O modelo selecionado não aceita imagens.",
   "chat.signInRequired": (agent: string) => `Entre no ${agent} para usar a visualização de conversa. Mude para a visualização de terminal para entrar e depois envie sua mensagem novamente.`,
   "chat.apiKeyRequired": "O DeepSeek precisa de uma chave de API. Abra «API» ao lado da caixa de mensagem e informe a chave, ou defina a variável de ambiente `DEEPSEEK_API_KEY`; depois, envie sua mensagem novamente.",
+  "chat.codex.activeWriter": "Outro processo do Codex está usando esta conversa no momento. Feche a outra aba de terminal ou instância do Codex que a mantém aberta, ou aguarde um momento e tente novamente.",
   "chat.antigravity.permissionsHint": "Ferramentas que exigem aprovação devem ser autorizadas nas configurações do Antigravity ou usadas na visualização de terminal.",
   "chat.antigravity.settingsHint": "Altere o modelo, o nível de raciocínio ou as permissões entre os turnos.",
   "chat.antigravity.rewindTitle": "Reverter na visão de terminal",
@@ -2732,7 +2756,30 @@ const ptBR: typeof en = {
   "kb.updatedOn": (date: string) => `Atualizado em ${date}`,
   "archive.sessionsCount": (count: string) => `${count} ${count === "1" ? "sessão" : "sessões"}`,
 
+
   ...assist,
+  "plugins.title": "Plugins",
+  "plugins.subtitle": "Instale, vincule, ative ou recarregue plugins externos do VelaTerm. Cada plugin executa em seu próprio processo de backend isolado e carrega sua interface dinamicamente.",
+  "plugins.installArchive": "Instalar de arquivo…",
+  "plugins.linkDev": "Vincular plugin local…",
+  "plugins.localOnlyHint": "Instalar, vincular ou alternar plugins está disponível apenas no host local.",
+  "plugins.archivePathPrompt": "Informe o caminho completo para um arquivo .vlxplugin ou .zip:",
+  "plugins.devPathPrompt": "Informe o caminho completo de um diretório de plugin local contendo manifest.json:",
+  "plugins.empty": "Nenhum plugin instalado ainda. Instale um pacote .vlxplugin ou vincule um diretório local para começar.",
+  "plugins.sourceInstalled": "Instalado",
+  "plugins.sourceDev": "Dev local",
+  "plugins.statusRunning": "Em execução",
+  "plugins.statusStarting": "Iniciando…",
+  "plugins.statusDisabled": "Desativado",
+  "plugins.statusStopped": "Parado",
+  "plugins.statusError": "Erro",
+  "plugins.enable": "Ativar",
+  "plugins.disable": "Desativar",
+  "plugins.reload": "Recarregar",
+  "plugins.uninstall": "Desinstalar",
+  "plugins.uninstallConfirm": (name: string) => `Desinstalar o plugin "${name}"?`,
+  "plugins.removeData": "Excluir também o diretório de dados local deste plugin",
+  "plugins.loadFailed": "Falha ao carregar a interface do plugin",
 };
 
 export default ptBR;

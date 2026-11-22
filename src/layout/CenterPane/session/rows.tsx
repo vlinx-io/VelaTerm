@@ -14,6 +14,7 @@ import { dateLocale, useT } from "../../../i18n";
 import { platform } from "../../../platform";
 import { env } from "../../../platform/env";
 import { imageFromNativeClipboard, imagesFromClipboard } from "../../../terminal/imageInput";
+import { stripAnsi } from "../../../ipc/backendError";
 import {
   resolveChatImage,
   loadChatTool,
@@ -26,7 +27,8 @@ import {
   type ChatRewindScope,
   type SubagentInfo,
 } from "../../../ipc/chat";
-import { attachImages, dataUrl, MAX_IMAGES, MAX_IMAGE_BYTES } from "./attachments";
+import { useTermStore } from "../../../store/termStore";
+import { attachImages, attachmentRejectionNote, dataUrl, MAX_IMAGES } from "./attachments";
 import { useImageMenu } from "./useImageMenu";
 import { ChatImagePreview } from "./ChatImagePreview";
 import { Markdown } from "./markdown";
@@ -561,14 +563,12 @@ function MessageEditor({ text, images = [], disabled, onCancel, onSend }: {
       if (!active.current) return;
       const files = await load();
       if (!active.current) return;
-      const result = await attachImages(current.current, files);
+      const maxMb = useTermStore.getState().chatImageMaxMb;
+      const result = await attachImages(current.current, files, { maxBytes: maxMb * 1024 * 1024 });
       if (!active.current) return;
       current.current = result.attachments;
       setAttachments(result.attachments);
-      const first = result.rejected[0];
-      setNote(!first ? null : first.reason === "tooMany" ? t("chat.attach.tooMany", MAX_IMAGES)
-        : first.reason === "tooLarge" ? t("chat.attach.tooLarge", first.name, MAX_IMAGE_BYTES / (1024 * 1024))
-        : t("chat.attach.unreadable", first.name));
+      setNote(attachmentRejectionNote(result.rejected, maxMb, t));
     }).catch(() => {
       if (active.current) setNote(t("chat.attach.unreadable", "clipboard"));
     }).finally(() => {
@@ -856,7 +856,7 @@ export function ToolRunCard({
 
 /** Something went wrong in the conversation itself, rather than inside a tool. */
 export function ErrorRow({ message }: { message: string }): ReactNode {
-  return <div className="sv-row-error">{message}</div>;
+  return <div className="sv-row-error">{stripAnsi(message)}</div>;
 }
 
 /**

@@ -492,6 +492,7 @@ const ko: typeof en = {
   "settings.catTerminal": "터미널", // Terminal
   "settings.catBehavior": "동작", // Behavior
   "settings.catAgents": "에이전트", // Agents
+  "settings.catPlugins": "플러그인",
   "settings.agentDefaultsTitle": "새 세션 기본값",
   "settings.referSummaryTitle": "세션 참조 컨텍스트",
   "settings.referSummaryMode": "컨텍스트 방식",
@@ -863,6 +864,10 @@ const ko: typeof en = {
   "settings.fontPreviewText": "다람쥐 헌 쳇바퀴에 타고파. The quick brown fox 0123456789",
   "settings.fontPreviewChat": "설정 화면을 업데이트했습니다. 각 글꼴 설정은 즉시 적용되며 언제든지 기본값으로 되돌릴 수 있습니다.",
   "settings.fontResetGroup": "글꼴 기본값 복원",
+  "settings.chatImages": "이미지",
+  "settings.chatImageMaxMb": "이미지 크기 상한",
+  "settings.chatImageMaxMbHint": "전송하기 전에 긴 변이 1568픽셀을 넘거나 이 한도를 초과하는 이미지는 자동으로 크기를 조절하고 압축합니다. 디코딩할 수 없거나 압축 후에도 한도를 넘는 경우에만 첨부하지 않습니다.",
+  "settings.chatImageSizeMb": (mb: number) => `${mb} MB`,
   "settings.composerChips": "메시지 입력 도구 모음",
   "settings.composerChipsHint": "켜진 항목은 여기에 표시된 순서대로 메시지 옆에 나타납니다. 에이전트가 실행 중이 아니거나, 백그라운드 작업이 없거나, 로그인이 완료되지 않아 기능을 일시적으로 사용할 수 없을 때도 해당 항목은 비어 있거나 비활성화된 상태로 표시됩니다. 현재 에이전트가 지원하지 않는 기능은 표시하지 않습니다. 공간이 부족한 항목은 더 보기 메뉴로 이동합니다. 여기서 끈 항목은 다시 켤 때까지 어디에도 표시되지 않습니다.",
   "settings.composerChipUp": (chip: string) => `${chip} 위로 이동`,
@@ -1623,9 +1628,20 @@ const ko: typeof en = {
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
+  "files.filterTruncated": "일부 상위 결과만 표시됩니다. 검색어를 더 입력해 범위를 좁히세요.",
   "files.dblClickOpen": "두 번 클릭하여 열기",
   "files.deleteConfirm": (name) =>
     `"${name}"을(를) 삭제할까요? 이 작업은 되돌릴 수 없습니다.`, // Delete "{name}"? This can't be undone.
+  "files.deleteManyConfirm": (count) =>
+    `항목 ${count}개를 삭제할까요? 이 작업은 되돌릴 수 없습니다.`, // Delete {count} items? This can't be undone.
+  "files.pasteConflictTitle": "항목이 이미 존재합니다", // Item already exists
+  "files.pasteConflictBody": (name) =>
+    `대상 폴더에 "${name}" 항목이 이미 있습니다.`, // An item named "{name}" already exists in the destination folder.
+  "files.pasteConflictProgress": (current, total) => `${current} / ${total}`, // {current} of {total}
+  "files.pasteConflictApplyAll": "남은 충돌 항목에 모두 적용", // Apply to all remaining conflicts
+  "files.pasteReplace": "바꾸기", // Replace
+  "files.pasteSkip": "건너뛰기", // Skip
+  "files.pasteKeepBoth": "둘 다 유지", // Keep Both
 
   // ── File transfer (remote access) ──
   "transfer.title": "전송", // Transfers
@@ -1641,6 +1657,7 @@ const ko: typeof en = {
   "transfer.foldersUnsupported": "폴더는 업로드할 수 없습니다.", // Folders can't be uploaded.
   "drop.browserFilesHint": "브라우저에서는 여기에 이미지만 놓을 수 있습니다. 다른 파일은 먼저 프로젝트에 업로드하세요.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
   "files.copyFailed": "일부 파일을 복사하지 못했습니다. 파일이 아직 있는지, 이 폴더에 쓰기 권한이 있는지 확인하세요.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
+  "files.pasteFailed": "일부 항목을 붙여넣지 못했습니다. 원본 항목이 있는지, 이 폴더에 쓰기 권한이 있는지 확인하세요.", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => `세션 ${n}개`, // {n} sessions
@@ -2305,6 +2322,10 @@ const ko: typeof en = {
   "chat.auth.claude.submit": "코드 제출",
   "chat.auth.claude.invalidCode": "이번 인증 페이지에 표시된 코드를 # 뒤의 내용까지 모두 붙여 넣으세요.",
   "chat.auth.claude.externalAuth": "API 키와 그 밖에 설정된 인증 방식은 변경되지 않습니다.",
+  "chat.auth.antigravity.pending": "인증 페이지를 열어 Google 계정으로 로그인한 다음, 표시된 인증 코드 또는 콜백 URL을 붙여 넣으세요.",
+  "chat.auth.antigravity.failed": "로그인을 완료하지 못했습니다. 현재 Antigravity CLI가 계정 인증을 지원하는지 확인하고 다시 시도하세요.",
+  "chat.auth.antigravity.code": "인증 코드 또는 콜백 URL",
+  "chat.auth.antigravity.invalidCode": "이번 로그인에서 받은 인증 코드 또는 콜백 URL을 공백 없이 붙여 넣으세요.",
   "chat.auth.open": "인증 페이지 열기",
   "chat.auth.zcode.required": "현재 대화를 사용하려면 Z.ai 또는 BigModel 계정으로 ZCode에 로그인하세요.",
   "chat.auth.zcode.pending": "인증 페이지를 열고 접근을 허용하세요. 로그인이 완료되면 이 화면이 자동으로 업데이트됩니다.",
@@ -2519,6 +2540,7 @@ const ko: typeof en = {
   "chat.attach.modelTextOnly": "선택한 모델은 이미지를 지원하지 않습니다.",
   "chat.signInRequired": (agent: string) => `대화 보기를 사용하려면 ${agent}에 로그인해야 합니다. 터미널 보기로 전환해 로그인한 다음 메시지를 다시 보내세요.`,
   "chat.apiKeyRequired": "DeepSeek에는 API 키가 필요합니다. 입력란 옆의 'API'를 열어 입력하거나 `DEEPSEEK_API_KEY` 환경 변수를 설정한 다음 메시지를 다시 보내세요.",
+  "chat.codex.activeWriter": "다른 Codex 프로세스가 현재 이 대화를 사용 중입니다. 이 대화를 열고 있는 다른 터미널 탭이나 Codex 프로세스를 종료하거나 잠시 기다린 후 다시 시도하세요.",
   "chat.antigravity.permissionsHint": "승인이 필요한 도구는 Antigravity 설정에서 미리 허용하거나 터미널 보기에서 사용해야 합니다.",
   "chat.antigravity.settingsHint": "모델, 추론 강도 또는 권한은 턴 사이에 변경하세요.",
   "chat.antigravity.rewindTitle": "터미널 보기에서 되돌리기",
@@ -2704,7 +2726,30 @@ const ko: typeof en = {
   "kb.updatedOn": (date: string) => `${date} 업데이트`,
   "archive.sessionsCount": (count: string) => `세션 ${count}개`,
 
+
   ...assist,
+  "plugins.title": "플러그인",
+  "plugins.subtitle": "외부 VelaTerm 플러그인을 설치, 연결, 활성화 또는 다시 로드합니다. 각 플러그인은 독립된 백엔드 프로세스에서 실행되며 인터페이스를 동적으로 불러옵니다.",
+  "plugins.installArchive": "아카이브에서 설치…",
+  "plugins.linkDev": "로컬 플러그인 연결…",
+  "plugins.localOnlyHint": "플러그인 설치, 연결 및 상태 전환은 로컬 호스트에서만 사용할 수 있습니다.",
+  "plugins.archivePathPrompt": ".vlxplugin 또는 .zip 아카이브의 전체 경로를 입력하세요:",
+  "plugins.devPathPrompt": "manifest.json이 포함된 로컬 플러그인 디렉터리의 전체 경로를 입력하세요:",
+  "plugins.empty": "설치된 플러그인이 없습니다. .vlxplugin 아카이브를 설치하거나 로컬 플러그인 디렉터리를 연결해 시작하세요.",
+  "plugins.sourceInstalled": "설치됨",
+  "plugins.sourceDev": "로컬 개발",
+  "plugins.statusRunning": "실행 중",
+  "plugins.statusStarting": "시작 중…",
+  "plugins.statusDisabled": "비활성화됨",
+  "plugins.statusStopped": "중지됨",
+  "plugins.statusError": "오류",
+  "plugins.enable": "활성화",
+  "plugins.disable": "비활성화",
+  "plugins.reload": "다시 로드",
+  "plugins.uninstall": "제거",
+  "plugins.uninstallConfirm": (name: string) => `"${name}" 플러그인을 제거하시겠습니까?`,
+  "plugins.removeData": "이 플러그인의 로컬 데이터 디렉터리도 함께 삭제",
+  "plugins.loadFailed": "플러그인 인터페이스를 불러오지 못했습니다",
 };
 
 export default ko;

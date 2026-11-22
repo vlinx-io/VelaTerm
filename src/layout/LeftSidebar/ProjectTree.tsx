@@ -1621,6 +1621,10 @@ export function ProjectTree(h: TreeHandlers) {
             style={{ paddingLeft: 6 + row.indent * 13, ...dragStyle(p.id) }}
             draggable={!renaming && !isShareSurface && !fixed}
             onDragStart={onDragStart({ kind: "project", id: p.id, projectId: p.id })}
+            onDragEnd={() => {
+              draggedProject.current = null;
+              setDragOver(null);
+            }}
             onDragOver={(e) =>
               hasProjectDrag(e.dataTransfer.types) ? allowProjectRowDrag(e, p.id) : allowDrop(e, p.id, true)
             }

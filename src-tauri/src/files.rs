@@ -2,10 +2,12 @@
 //! session cwd. Directory traversal is lazy, one level at a time.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Read;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// One direct child of a directory.
 #[derive(Debug, Clone, Serialize)]
@@ -20,11 +22,62 @@ pub struct DirEntryInfo {
     pub git_badge: Option<String>,
 }
 
+/// One node in a recursive file-name filter result, including ancestor directories required to render the tree.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchFileEntry {
+    /// Path relative to the searched root using `/` separators.
+    pub path: String,
+    pub is_dir: bool,
+    pub is_hidden: bool,
+    pub git_badge: Option<String>,
+}
+
+/// Bounded recursive search result for the right-hand Files filter.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchFilesResult {
+    pub entries: Vec<SearchFileEntry>,
+    pub truncated: bool,
+}
+
+const SEARCH_MAX_MATCHES: usize = 500;
+const SEARCH_MAX_DIRS: usize = 10_000;
+const SEARCH_TIMEOUT: Duration = Duration::from_millis(2000);
+
+/// Dependency, VCS, and cache folders whose contents are never traversed during recursive file filtering.
+/// Matching directory names themselves are still reported so users can locate the folder itself.
+const SEARCH_SKIPPED_DIRS: &[&str] = &[
+    "node_modules", ".hg", ".svn", ".vlx-worktrees",
+    "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    ".next", ".nuxt", ".turbo", ".parcel-cache", ".cache",
+    ".venv", "venv", ".gradle", ".tox", ".cargo",
+];
+
+/// Build-output and vendor folders scanned only after all primary source directories finish.
+const SEARCH_DEFERRED_DIRS: &[&str] = &[
+    "target", "dist", "build", "out", "vendor", "coverage",
+];
+
+fn entry_is_hidden(name: &str, ent: &std::fs::DirEntry) -> bool {
+    name.starts_with('.') || has_hidden_attribute(ent)
+}
+
+fn entry_kind(ent: &std::fs::DirEntry) -> (bool, bool) {
+    match ent.file_type() {
+        // DirEntry::file_type does not follow symlinks. Path::is_dir lets directory links remain expandable and
+        // selectable while file links and broken links remain non-directories.
+        Ok(ft) if ft.is_symlink() => (ent.path().is_dir(), true),
+        Ok(ft) => (ft.is_dir(), false),
+        Err(_) => (ent.path().is_dir(), false),
+    }
+}
+
 /// Lists direct children with directories (including symlinks to directories) first, then case-insensitive names,
 /// skipping `.git`. Dotfiles are returned with `is_hidden`. Changed files and directories receive Git badges; non-repositories
 /// produce none.
 pub fn list_dir(path: &str) -> Result<Vec<DirEntryInfo>, String> {
-    let badges = git_badges(path)?;
+    let badges = git_badges_under(path)?;
 
     let mut entries: Vec<DirEntryInfo> = Vec::new();
     let rd = std::fs::read_dir(path).map_err(|e| format!("Failed to read directory: {e}"))?;
@@ -33,14 +86,8 @@ pub fn list_dir(path: &str) -> Result<Vec<DirEntryInfo>, String> {
         if name == ".git" {
             continue;
         }
-        let is_hidden = name.starts_with('.') || has_hidden_attribute(&ent);
-        let is_dir = match ent.file_type() {
-            // DirEntry::file_type does not follow symlinks. Path::is_dir lets directory links remain expandable and
-            // selectable while file links and broken links remain non-directories.
-            Ok(ft) if ft.is_symlink() => ent.path().is_dir(),
-            Ok(ft) => ft.is_dir(),
-            Err(_) => ent.path().is_dir(),
-        };
+        let is_hidden = entry_is_hidden(&name, &ent);
+        let (is_dir, _) = entry_kind(&ent);
         let git_badge = badges.get(&name).cloned();
         entries.push(DirEntryInfo {
             name,
@@ -58,9 +105,160 @@ pub fn list_dir(path: &str) -> Result<Vec<DirEntryInfo>, String> {
     Ok(entries)
 }
 
-/// Resolve root-relative porcelain paths against the listed directory, aggregating descendant changes.
-/// The backend owns badge precedence; clients only display these decorations.
-fn git_badges(path: &str) -> Result<HashMap<String, String>, String> {
+fn matches_search_query(name: &str, rel_path: &str, query: &str, is_path_query: bool) -> bool {
+    if is_path_query {
+        let rel_lower = rel_path.to_lowercase();
+        if rel_lower.contains(query) {
+            return true;
+        }
+        query.starts_with('/') && format!("/{rel_lower}").contains(query)
+    } else {
+        name.to_lowercase().contains(query)
+    }
+}
+
+/// Recursively finds files and folders below `path` matching `query`, including ancestor directories needed to render
+/// the matching paths as a tree. Skips `.git`, avoids following symlinked directories, skips dependency/cache folders,
+/// and enforces match, directory, and wall-clock bounds so large workspaces stay responsive.
+pub fn search_files(path: &str, query: &str, include_hidden: bool) -> Result<SearchFilesResult, String> {
+    search_files_with_limits(path, query, include_hidden, SEARCH_MAX_MATCHES, SEARCH_MAX_DIRS, SEARCH_TIMEOUT)
+}
+
+fn search_files_with_limits(
+    path: &str,
+    query: &str,
+    include_hidden: bool,
+    max_matches: usize,
+    max_dirs: usize,
+    timeout: Duration,
+) -> Result<SearchFilesResult, String> {
+    // Verify the searched root itself is readable before any early return, matching `list_dir`.
+    let root_rd = std::fs::read_dir(path).map_err(|e| format!("Failed to read directory: {e}"))?;
+    let normalized = query.trim().replace('\\', "/").to_lowercase();
+    if normalized.is_empty() || normalized.chars().all(|c| c == '/') {
+        return Ok(SearchFilesResult { entries: Vec::new(), truncated: false });
+    }
+    let is_path_query = normalized.contains('/');
+    let badges = git_badges_under(path)?;
+
+    let started = Instant::now();
+    let mut primary_queue: VecDeque<(PathBuf, String, Option<std::fs::ReadDir>)> =
+        VecDeque::from([(PathBuf::from(path), String::new(), Some(root_rd))]);
+    let mut deferred_queue: VecDeque<(PathBuf, String)> = VecDeque::new();
+    let mut dir_hidden: HashMap<String, bool> = HashMap::new();
+    let mut matches: Vec<SearchFileEntry> = Vec::new();
+    let mut visited_dirs = 0usize;
+    let mut hit_match_cap = false;
+
+    while visited_dirs < max_dirs && started.elapsed() < timeout && !hit_match_cap {
+        let (dir_path, rel_dir, preopened) = if let Some(item) = primary_queue.pop_front() {
+            item
+        } else if let Some((deferred_path, deferred_rel)) = deferred_queue.pop_front() {
+            (deferred_path, deferred_rel, None)
+        } else {
+            break;
+        };
+        visited_dirs += 1;
+        let rd = match preopened {
+            Some(rd) => rd,
+            None => match std::fs::read_dir(&dir_path) {
+                Ok(rd) => rd,
+                Err(_) => continue,
+            },
+        };
+
+        let mut children: Vec<(String, bool, bool, bool, PathBuf)> = Vec::new();
+        for ent in rd.flatten() {
+            let name = ent.file_name().to_string_lossy().to_string();
+            if name == ".git" {
+                continue;
+            }
+            let is_hidden = entry_is_hidden(&name, &ent);
+            if !include_hidden && is_hidden {
+                continue;
+            }
+            let (is_dir, is_symlink) = entry_kind(&ent);
+            children.push((name, is_dir, is_symlink, is_hidden, ent.path()));
+        }
+        children.sort_by(|a, b| match (a.1, b.1) {
+            (true, false) => Ordering::Less,
+            (false, true) => Ordering::Greater,
+            _ => a.0.to_lowercase().cmp(&b.0.to_lowercase()),
+        });
+
+        for (name, is_dir, is_symlink, is_hidden, child_path) in children {
+            let rel = if rel_dir.is_empty() {
+                name.clone()
+            } else {
+                format!("{rel_dir}/{name}")
+            };
+            if matches_search_query(&name, &rel, &normalized, is_path_query) {
+                if matches.len() >= max_matches {
+                    hit_match_cap = true;
+                    break;
+                }
+                matches.push(SearchFileEntry {
+                    path: rel.clone(),
+                    is_dir,
+                    is_hidden,
+                    git_badge: badges.get(&rel).cloned(),
+                });
+            }
+            if is_dir && !is_symlink {
+                let is_cached_dir = child_path.join("CACHEDIR.TAG").symlink_metadata().is_ok();
+                if SEARCH_SKIPPED_DIRS.contains(&name.as_str()) || is_cached_dir {
+                    continue;
+                }
+                dir_hidden.insert(rel.clone(), is_hidden);
+                if SEARCH_DEFERRED_DIRS.contains(&name.as_str()) {
+                    deferred_queue.push_back((child_path, rel));
+                } else {
+                    primary_queue.push_back((child_path, rel, None));
+                }
+            }
+        }
+    }
+
+    let truncated = hit_match_cap || !primary_queue.is_empty() || !deferred_queue.is_empty();
+    let mut entries = Vec::with_capacity(matches.len());
+    let mut seen = HashSet::new();
+    for m in matches {
+        let mut cursor = 0usize;
+        while let Some(slash) = m.path[cursor..].find('/') {
+            let end = cursor + slash;
+            let ancestor = &m.path[..end];
+            if seen.insert(ancestor.to_string()) {
+                entries.push(SearchFileEntry {
+                    path: ancestor.to_string(),
+                    is_dir: true,
+                    is_hidden: *dir_hidden.get(ancestor).unwrap_or(&false),
+                    git_badge: badges.get(ancestor).cloned(),
+                });
+            }
+            cursor = end + 1;
+        }
+        if seen.insert(m.path.clone()) {
+            entries.push(m);
+        }
+    }
+
+    Ok(SearchFilesResult { entries, truncated })
+}
+
+fn badge_priority(badge: &str) -> u8 {
+    match badge { "!" => 6, "M" => 5, "D" => 4, "R" => 3, "A" => 2, _ => 1 }
+}
+
+fn set_badge(map: &mut HashMap<String, String>, key: String, mark: &str) {
+    let previous = map.entry(key).or_insert_with(|| mark.to_string());
+    if badge_priority(mark) > badge_priority(previous) {
+        *previous = mark.to_string();
+    }
+}
+
+/// Resolve root-relative porcelain paths against `path`, keyed by `/`-separated relative paths
+/// including every ancestor directory. The backend owns badge precedence; clients only display these decorations.
+fn git_badges_under(path: &str) -> Result<HashMap<String, String>, String> {
     let mut map = HashMap::new();
     let out = crate::host::command("git")
         .args(["--no-optional-locks", "-C", path, "rev-parse", "--show-toplevel"])
@@ -72,22 +270,50 @@ fn git_badges(path: &str) -> Result<HashMap<String, String>, String> {
     let root = std::fs::canonicalize(String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']))
         .map_err(|e| format!("Failed to resolve Git root: {e}"))?;
     let directory = std::fs::canonicalize(path).map_err(|e| format!("Failed to resolve directory: {e}"))?;
-    let priority = |badge: &str| match badge { "!" => 6, "M" => 5, "D" => 4, "R" => 3, "A" => 2, _ => 1 };
-    let child_name = |relative: &str| {
-        let absolute = root.join(relative);
+    let rel_parts = |relative: &str| -> Option<Vec<String>> {
+        let trimmed = relative.trim_end_matches('/');
+        if trimmed.is_empty() {
+            return None;
+        }
+        let absolute = root.join(trimmed);
         let local = absolute.strip_prefix(&directory).ok()?;
-        Some(local.components().next()?.as_os_str().to_string_lossy().into_owned())
+        let parts: Vec<String> = local
+            .components()
+            .filter_map(|c| match c {
+                std::path::Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+                _ => None,
+            })
+            .collect();
+        (!parts.is_empty()).then_some(parts)
     };
     for entry in crate::git::path_status(path, true)? {
         let badge = crate::git::status_badge(&entry.xy);
-        let destination = child_name(&entry.path);
-        // Moving between child directories also decorates the source; a rename within one child stays R.
-        let source = entry.original_path.as_deref().filter(|_| entry.xy.contains('R'))
-            .and_then(child_name).filter(|name| Some(name) != destination.as_ref());
-        for (name, mark) in destination.into_iter().map(|name| (name, badge))
-            .chain(source.into_iter().map(|name| (name, "D"))) {
-            let previous = map.entry(name).or_insert_with(|| mark.to_string());
-            if priority(mark) > priority(previous) { *previous = mark.to_string(); }
+        let destination = rel_parts(&entry.path);
+        let source = entry.original_path.as_deref()
+            .filter(|_| entry.xy.contains('R'))
+            .and_then(&rel_parts);
+        if let Some(ref dest) = destination {
+            let mut prefix = String::new();
+            for part in dest {
+                if !prefix.is_empty() { prefix.push('/'); }
+                prefix.push_str(part);
+                set_badge(&mut map, prefix.clone(), badge);
+            }
+        }
+        if let Some(ref src) = source {
+            // Only source ancestors below the lowest common directory with destination carry "D";
+            // a rename inside one directory keeps "R" on that shared parent.
+            let common = destination.as_ref()
+                .map(|dest| src.iter().zip(dest.iter()).take_while(|(a, b)| a == b).count())
+                .unwrap_or(0);
+            let mut prefix = String::new();
+            for (idx, part) in src[..src.len().saturating_sub(1)].iter().enumerate() {
+                if !prefix.is_empty() { prefix.push('/'); }
+                prefix.push_str(part);
+                if idx >= common {
+                    set_badge(&mut map, prefix.clone(), "D");
+                }
+            }
         }
     }
     Ok(map)
@@ -145,6 +371,33 @@ mod git_badge_tests {
         let moved = list_dir(&root.to_string_lossy()).unwrap();
         assert_eq!(moved.iter().find(|e| e.name == "src").unwrap().git_badge.as_deref(), Some("D"));
         assert_eq!(moved.iter().find(|e| e.name == "destination").unwrap().git_badge.as_deref(), Some("R"));
+    }
+
+    #[test]
+    fn search_files_includes_nested_matches_ancestors_and_git_badges() {
+        let repo = Repository(std::env::temp_dir().join(format!("vlx-files-search-badges-{}", uuid::Uuid::new_v4())));
+        let root = &repo.0;
+        let nested = root.join("src/nested/deep");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("target_item.rs"), "fn a() {}\n").unwrap();
+        std::fs::write(root.join("src/other.rs"), "fn b() {}\n").unwrap();
+        git(root, &["init"]);
+        git(root, &["config", "user.name", "Test"]);
+        git(root, &["config", "user.email", "test@example.test"]);
+        git(root, &["add", "."]);
+        git(root, &["commit", "-m", "Initial"]);
+        std::fs::write(nested.join("target_item.rs"), "fn a() { let x = 1; }\n").unwrap();
+
+        let res = search_files(&root.to_string_lossy(), "target_item", false).unwrap();
+        assert!(!res.truncated);
+        let paths: Vec<&str> = res.entries.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["src", "src/nested", "src/nested/deep", "src/nested/deep/target_item.rs"]
+        );
+        for entry in &res.entries {
+            assert_eq!(entry.git_badge.as_deref(), Some("M"), "missing M badge on {}", entry.path);
+        }
     }
 }
 
@@ -448,6 +701,420 @@ fn copy_entry_followed(src: &std::path::Path, dest: &std::path::Path, meta: &std
     let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(dest)?;
     std::io::copy(&mut std::fs::File::open(src)?, &mut out)?;
     std::fs::set_permissions(dest, meta.permissions())
+}
+
+// Files-panel clipboard paste (copy / move with conflict inspection and cross-volume fallback).
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PasteMode {
+    Copy,
+    Move,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConflictResolution {
+    Replace,
+    Skip,
+    KeepBoth,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PasteItemStatus {
+    Ready,
+    Conflict,
+    KeepBoth,
+    SkipSelf,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PasteCheckItem {
+    pub source: String,
+    pub name: String,
+    pub is_dir: bool,
+    pub status: PasteItemStatus,
+    pub existing_is_dir: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PasteResult {
+    pub created: Vec<String>,
+    pub replaced: Vec<String>,
+    pub skipped: Vec<String>,
+}
+
+struct PreparedSource {
+    raw: String,
+    path: std::path::PathBuf,
+    meta: std::fs::Metadata,
+    name: std::ffi::OsString,
+    real: std::path::PathBuf,
+    same_parent: bool,
+    is_dir: bool,
+}
+
+fn is_cross_device(err: &std::io::Error) -> bool {
+    if err.kind() == std::io::ErrorKind::CrossesDevices {
+        return true;
+    }
+    #[cfg(windows)]
+    if err.raw_os_error() == Some(17) {
+        return true;
+    }
+    #[cfg(unix)]
+    if err.raw_os_error() == Some(libc::EXDEV) {
+        return true;
+    }
+    false
+}
+
+fn prepare_paste_sources(
+    sources: &[String],
+    dir_real: &std::path::Path,
+    mode: PasteMode,
+) -> Result<Vec<PreparedSource>, String> {
+    use std::path::Path;
+    let mut items = Vec::with_capacity(sources.len());
+    let mut seen = std::collections::HashSet::new();
+    for source in sources {
+        let src = Path::new(source);
+        let meta = std::fs::symlink_metadata(src)
+            .map_err(|e| format!("Failed to read {source}: {e}"))?;
+        let name = src
+            .file_name()
+            .ok_or_else(|| format!("Cannot paste {source}"))?
+            .to_os_string();
+        let real = src.canonicalize().unwrap_or_else(|_| src.to_path_buf());
+        if !seen.insert(real.clone()) {
+            continue;
+        }
+        let is_symlink = meta.file_type().is_symlink();
+        let effective_is_dir = meta.is_dir() || (is_symlink && src.is_dir());
+        let checks_containment = meta.is_dir() || (cfg!(not(unix)) && effective_is_dir);
+        if checks_containment && dir_real.starts_with(&real) {
+            return Err(match mode {
+                PasteMode::Copy => "Cannot copy a folder into itself".to_string(),
+                PasteMode::Move => "Cannot move a folder into itself".to_string(),
+            });
+        }
+        let parent_real = src.parent().and_then(|p| p.canonicalize().ok());
+        let same_parent = parent_real.as_deref() == Some(dir_real);
+        items.push(PreparedSource {
+            raw: source.clone(),
+            path: src.to_path_buf(),
+            meta,
+            name,
+            real,
+            same_parent,
+            is_dir: effective_is_dir,
+        });
+    }
+    // Drop entries whose strict ancestor folder is also in the selection so folders are not duplicated.
+    let selected_dirs: Vec<std::path::PathBuf> = items
+        .iter()
+        .filter(|item| item.is_dir)
+        .map(|item| item.real.clone())
+        .collect();
+    items.retain(|item| {
+        !selected_dirs
+            .iter()
+            .any(|dir| dir != &item.real && item.real.starts_with(dir))
+    });
+    Ok(items)
+}
+
+fn unique_destination_for(
+    dir: &std::path::Path,
+    name: &std::ffi::OsStr,
+    is_dir: bool,
+) -> std::path::PathBuf {
+    let first = dir.join(name);
+    if std::fs::symlink_metadata(&first).is_err() {
+        return first;
+    }
+    if is_dir {
+        let base = name.to_string_lossy();
+        return (2u32..)
+            .map(|n| dir.join(format!("{base} ({n})")))
+            .find(|p| std::fs::symlink_metadata(p).is_err())
+            .expect("an unused name exists");
+    }
+    unique_destination(dir, name)
+}
+
+fn unique_temp_sibling(dir: &std::path::Path, prefix: &str) -> std::path::PathBuf {
+    loop {
+        let candidate = dir.join(format!("{prefix}-{}", uuid::Uuid::new_v4()));
+        if std::fs::symlink_metadata(&candidate).is_err() {
+            return candidate;
+        }
+    }
+}
+
+fn remove_entry_raw(path: &std::path::Path) -> std::io::Result<()> {
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    if meta.file_type().is_symlink() {
+        #[cfg(windows)]
+        if path.is_dir() {
+            return std::fs::remove_dir(path).or_else(|_| std::fs::remove_file(path));
+        }
+        return std::fs::remove_file(path);
+    }
+    if meta.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    }
+}
+
+/// Moves `src` to `dest`, falling back to staging copy + source removal when crossing volumes.
+fn move_entry_with<F>(
+    src: &std::path::Path,
+    dest: &std::path::Path,
+    meta: &std::fs::Metadata,
+    mut rename_fn: F,
+) -> Result<(), String>
+where
+    F: FnMut(&std::path::Path, &std::path::Path) -> std::io::Result<()>,
+{
+    match rename_fn(src, dest) {
+        Ok(()) => Ok(()),
+        Err(e) if is_cross_device(&e) => {
+            let parent = dest
+                .parent()
+                .ok_or_else(|| "Destination has no parent folder".to_string())?;
+            let staging = unique_temp_sibling(parent, ".vlx-move");
+            if let Err(copy_err) = copy_entry(src, &staging, meta) {
+                let _ = remove_entry_raw(&staging);
+                return Err(format!("Failed to copy across drives: {copy_err}"));
+            }
+            if let Err(rename_err) = std::fs::rename(&staging, dest) {
+                let _ = remove_entry_raw(&staging);
+                return Err(format!("Failed to place moved item: {rename_err}"));
+            }
+            remove_entry_raw(src)
+                .map_err(|del_err| format!("Moved item, but failed to remove source: {del_err}"))
+        }
+        Err(e) => Err(format!("Failed to move: {e}")),
+    }
+}
+
+fn move_entry(src: &std::path::Path, dest: &std::path::Path, meta: &std::fs::Metadata) -> Result<(), String> {
+    move_entry_with(src, dest, meta, |from, to| std::fs::rename(from, to))
+}
+
+fn replace_entry(
+    src: &std::path::Path,
+    src_real: &std::path::Path,
+    dest: &std::path::Path,
+    dir_path: &std::path::Path,
+    meta: &std::fs::Metadata,
+    mode: PasteMode,
+) -> Result<(), String> {
+    let dest_real = dest.canonicalize().unwrap_or_else(|_| dest.to_path_buf());
+    if src_real == dest_real || src_real.starts_with(&dest_real) || dest_real.starts_with(src_real) {
+        return Err("Cannot replace an item with itself or a related folder".to_string());
+    }
+    let staging = unique_temp_sibling(dir_path, ".vlx-paste-new");
+    let mut moved_src_to_staging = false;
+    match mode {
+        PasteMode::Copy => {
+            if let Err(e) = copy_entry(src, &staging, meta) {
+                let _ = remove_entry_raw(&staging);
+                return Err(format!("Failed to copy replacement: {e}"));
+            }
+        }
+        PasteMode::Move => match std::fs::rename(src, &staging) {
+            Ok(()) => moved_src_to_staging = true,
+            Err(e) if is_cross_device(&e) => {
+                if let Err(copy_err) = copy_entry(src, &staging, meta) {
+                    let _ = remove_entry_raw(&staging);
+                    return Err(format!("Failed to copy replacement across drives: {copy_err}"));
+                }
+            }
+            Err(e) => return Err(format!("Failed to move replacement: {e}")),
+        },
+    }
+
+    let backup = unique_temp_sibling(dir_path, ".vlx-paste-old");
+    if let Err(e) = std::fs::rename(dest, &backup) {
+        if moved_src_to_staging {
+            let _ = std::fs::rename(&staging, src);
+        } else {
+            let _ = remove_entry_raw(&staging);
+        }
+        return Err(format!("Failed to replace existing item: {e}"));
+    }
+    if let Err(e) = std::fs::rename(&staging, dest) {
+        let _ = std::fs::rename(&backup, dest);
+        if moved_src_to_staging {
+            let _ = std::fs::rename(&staging, src);
+        } else {
+            let _ = remove_entry_raw(&staging);
+        }
+        return Err(format!("Failed to place replacement: {e}"));
+    }
+
+    let _ = remove_entry_raw(&backup);
+    if mode == PasteMode::Move && !moved_src_to_staging {
+        remove_entry_raw(src)
+            .map_err(|e| format!("Replaced destination, but failed to remove source: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Inspects sources and destination before pasting so conflicts can be resolved upfront.
+pub fn check_paste_into_dir(
+    sources: &[String],
+    dir: &str,
+    mode: PasteMode,
+) -> Result<Vec<PasteCheckItem>, String> {
+    use std::io::ErrorKind;
+    use std::path::Path;
+    let dir_path = Path::new(dir);
+    if !dir_path.is_dir() {
+        return Err("The destination folder does not exist".to_string());
+    }
+    let dir_real = dir_path
+        .canonicalize()
+        .map_err(|e| format!("Failed to read destination folder: {e}"))?;
+    let items = prepare_paste_sources(sources, &dir_real, mode)?;
+    let mut plan = Vec::with_capacity(items.len());
+    for item in items {
+        let name_str = item.name.to_string_lossy().into_owned();
+        if item.same_parent {
+            let status = match mode {
+                PasteMode::Move => PasteItemStatus::SkipSelf,
+                PasteMode::Copy => PasteItemStatus::KeepBoth,
+            };
+            plan.push(PasteCheckItem {
+                source: item.raw,
+                name: name_str,
+                is_dir: item.is_dir,
+                status,
+                existing_is_dir: None,
+            });
+            continue;
+        }
+        let dest = dir_path.join(&item.name);
+        match std::fs::symlink_metadata(&dest) {
+            Ok(existing_meta) => {
+                let existing_is_dir = existing_meta.is_dir()
+                    || (existing_meta.file_type().is_symlink() && dest.is_dir());
+                plan.push(PasteCheckItem {
+                    source: item.raw,
+                    name: name_str,
+                    is_dir: item.is_dir,
+                    status: PasteItemStatus::Conflict,
+                    existing_is_dir: Some(existing_is_dir),
+                });
+            }
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                plan.push(PasteCheckItem {
+                    source: item.raw,
+                    name: name_str,
+                    is_dir: item.is_dir,
+                    status: PasteItemStatus::Ready,
+                    existing_is_dir: None,
+                });
+            }
+            Err(e) => {
+                return Err(format!("Failed to inspect destination {name_str}: {e}"));
+            }
+        }
+    }
+    Ok(plan)
+}
+
+/// Executes copy or move paste into `dir` using per-source conflict resolutions.
+pub fn paste_into_dir(
+    sources: &[String],
+    dir: &str,
+    mode: PasteMode,
+    resolutions: &HashMap<String, ConflictResolution>,
+) -> Result<PasteResult, String> {
+    use std::io::ErrorKind;
+    use std::path::Path;
+    let dir_path = Path::new(dir);
+    if !dir_path.is_dir() {
+        return Err("The destination folder does not exist".to_string());
+    }
+    let dir_real = dir_path
+        .canonicalize()
+        .map_err(|e| format!("Failed to read destination folder: {e}"))?;
+    let items = prepare_paste_sources(sources, &dir_real, mode)?;
+    let mut created = Vec::new();
+    let mut replaced = Vec::new();
+    let mut skipped = Vec::new();
+
+    for item in items {
+        if item.same_parent {
+            if mode == PasteMode::Move {
+                skipped.push(item.raw);
+                continue;
+            }
+            let dest = unique_destination_for(dir_path, &item.name, item.is_dir);
+            copy_entry(&item.path, &dest, &item.meta)
+                .map_err(|e| format!("Failed to copy {}: {e}", item.raw))?;
+            created.push(dest.to_string_lossy().into_owned());
+            continue;
+        }
+
+        let dest = dir_path.join(&item.name);
+        match std::fs::symlink_metadata(&dest) {
+            Ok(_) => {
+                let resolution = resolutions.get(&item.raw).copied().ok_or_else(|| {
+                    format!(
+                        "A file or folder named \"{}\" already exists",
+                        item.name.to_string_lossy()
+                    )
+                })?;
+                match resolution {
+                    ConflictResolution::Skip => {
+                        skipped.push(item.raw);
+                    }
+                    ConflictResolution::KeepBoth => {
+                        let unique = unique_destination_for(dir_path, &item.name, item.is_dir);
+                        match mode {
+                            PasteMode::Copy => copy_entry(&item.path, &unique, &item.meta)
+                                .map_err(|e| format!("Failed to copy {}: {e}", item.raw))?,
+                            PasteMode::Move => move_entry(&item.path, &unique, &item.meta)?,
+                        }
+                        created.push(unique.to_string_lossy().into_owned());
+                    }
+                    ConflictResolution::Replace => {
+                        replace_entry(&item.path, &item.real, &dest, dir_path, &item.meta, mode)?;
+                        replaced.push(dest.to_string_lossy().into_owned());
+                    }
+                }
+            }
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                match mode {
+                    PasteMode::Copy => copy_entry(&item.path, &dest, &item.meta)
+                        .map_err(|e| format!("Failed to copy {}: {e}", item.raw))?,
+                    PasteMode::Move => move_entry(&item.path, &dest, &item.meta)?,
+                }
+                created.push(dest.to_string_lossy().into_owned());
+            }
+            Err(e) => {
+                return Err(format!("Failed to inspect destination: {e}"));
+            }
+        }
+    }
+
+    Ok(PasteResult {
+        created,
+        replaced,
+        skipped,
+    })
 }
 
 // Document editor read/write/stat.
@@ -1204,6 +1871,138 @@ mod tests {
     }
 
     #[test]
+    fn paste_into_dir_handles_same_parent_copy_vs_move_and_dedups_ancestors() {
+        use super::{check_paste_into_dir, paste_into_dir, PasteItemStatus, PasteMode};
+        use std::collections::HashMap;
+
+        let base = std::env::temp_dir().join(format!("vlx-paste-same-{}", uuid::Uuid::new_v4()));
+        let src = base.join("src");
+        let dest = base.join("dest");
+        std::fs::create_dir_all(src.join("folder")).unwrap();
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(src.join("note.txt"), "hello").unwrap();
+        std::fs::write(src.join("folder/inner.txt"), "nested").unwrap();
+        let s = |p: std::path::PathBuf| p.to_string_lossy().to_string();
+
+        // Copy inside the same folder keeps both without raising a conflict.
+        let plan = check_paste_into_dir(&[s(src.join("note.txt"))], &s(src.clone()), PasteMode::Copy).unwrap();
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].status, PasteItemStatus::KeepBoth);
+        let out = paste_into_dir(&[s(src.join("note.txt"))], &s(src.clone()), PasteMode::Copy, &HashMap::new()).unwrap();
+        assert_eq!(out.created.len(), 1);
+        assert_eq!(std::fs::read_to_string(src.join("note (2).txt")).unwrap(), "hello");
+
+        // Moving into the same folder is a no-op.
+        let move_plan = check_paste_into_dir(&[s(src.join("note.txt"))], &s(src.clone()), PasteMode::Move).unwrap();
+        assert_eq!(move_plan[0].status, PasteItemStatus::SkipSelf);
+        let move_out = paste_into_dir(&[s(src.join("note.txt"))], &s(src.clone()), PasteMode::Move, &HashMap::new()).unwrap();
+        assert!(move_out.created.is_empty());
+        assert_eq!(move_out.skipped.len(), 1);
+        assert!(src.join("note.txt").exists());
+
+        // Passing both a folder and its descendant copies the folder once without duplicating the child at root.
+        let dedup = paste_into_dir(
+            &[s(src.join("folder")), s(src.join("folder/inner.txt"))],
+            &s(dest.clone()),
+            PasteMode::Copy,
+            &HashMap::new(),
+        )
+        .unwrap();
+        assert_eq!(dedup.created.len(), 1);
+        assert!(dest.join("folder/inner.txt").exists());
+        assert!(!dest.join("inner.txt").exists());
+
+        // Reject copying or moving a folder into itself or a descendant.
+        let err = check_paste_into_dir(&[s(src.clone())], &s(src.join("folder")), PasteMode::Move).unwrap_err();
+        assert!(err.contains("into itself"), "got: {err}");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn paste_into_dir_resolves_conflicts_with_replace_skip_and_keep_both() {
+        use super::{check_paste_into_dir, paste_into_dir, ConflictResolution, PasteItemStatus, PasteMode};
+        use std::collections::HashMap;
+
+        let base = std::env::temp_dir().join(format!("vlx-paste-conflict-{}", uuid::Uuid::new_v4()));
+        let src = base.join("src");
+        let dest = base.join("dest");
+        std::fs::create_dir_all(src.join("dir_r")).unwrap();
+        std::fs::create_dir_all(dest.join("dir_r")).unwrap();
+        std::fs::write(src.join("rep.txt"), "new-rep").unwrap();
+        std::fs::write(dest.join("rep.txt"), "old-rep").unwrap();
+        std::fs::write(src.join("skip.txt"), "new-skip").unwrap();
+        std::fs::write(dest.join("skip.txt"), "old-skip").unwrap();
+        std::fs::write(src.join("both.txt"), "new-both").unwrap();
+        std::fs::write(dest.join("both.txt"), "old-both").unwrap();
+        std::fs::write(src.join("dir_r/fresh.txt"), "fresh").unwrap();
+        std::fs::write(dest.join("dir_r/stale.txt"), "stale").unwrap();
+        let s = |p: std::path::PathBuf| p.to_string_lossy().to_string();
+
+        let sources = vec![
+            s(src.join("rep.txt")),
+            s(src.join("skip.txt")),
+            s(src.join("both.txt")),
+            s(src.join("dir_r")),
+        ];
+        let plan = check_paste_into_dir(&sources, &s(dest.clone()), PasteMode::Move).unwrap();
+        assert!(plan.iter().all(|item| item.status == PasteItemStatus::Conflict));
+
+        let mut resolutions = HashMap::new();
+        resolutions.insert(s(src.join("rep.txt")), ConflictResolution::Replace);
+        resolutions.insert(s(src.join("skip.txt")), ConflictResolution::Skip);
+        resolutions.insert(s(src.join("both.txt")), ConflictResolution::KeepBoth);
+        resolutions.insert(s(src.join("dir_r")), ConflictResolution::Replace);
+
+        let result = paste_into_dir(&sources, &s(dest.clone()), PasteMode::Move, &resolutions).unwrap();
+        assert_eq!(result.replaced.len(), 2);
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.created.len(), 1);
+
+        // Replaced file & folder removed old contents and consumed sources.
+        assert_eq!(std::fs::read_to_string(dest.join("rep.txt")).unwrap(), "new-rep");
+        assert!(!src.join("rep.txt").exists());
+        assert!(dest.join("dir_r/fresh.txt").exists());
+        assert!(!dest.join("dir_r/stale.txt").exists());
+        assert!(!src.join("dir_r").exists());
+
+        // Skipped item left both destination and source intact.
+        assert_eq!(std::fs::read_to_string(dest.join("skip.txt")).unwrap(), "old-skip");
+        assert_eq!(std::fs::read_to_string(src.join("skip.txt")).unwrap(), "new-skip");
+
+        // Keep Both created a numbered copy and consumed source.
+        assert_eq!(std::fs::read_to_string(dest.join("both.txt")).unwrap(), "old-both");
+        assert_eq!(std::fs::read_to_string(dest.join("both (2).txt")).unwrap(), "new-both");
+        assert!(!src.join("both.txt").exists());
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn move_entry_falls_back_to_copy_and_delete_on_cross_device_error() {
+        use super::move_entry_with;
+
+        let base = std::env::temp_dir().join(format!("vlx-cross-dev-{}", uuid::Uuid::new_v4()));
+        let src_dir = base.join("src_dir");
+        let dest_dir = base.join("dest_dir");
+        std::fs::create_dir_all(src_dir.join("nested")).unwrap();
+        std::fs::create_dir_all(&dest_dir).unwrap();
+        std::fs::write(src_dir.join("nested/data.txt"), "cross-volume").unwrap();
+        let dest_target = dest_dir.join("moved_dir");
+        let meta = std::fs::symlink_metadata(&src_dir).unwrap();
+
+        move_entry_with(&src_dir, &dest_target, &meta, |_from, _to| {
+            Err(std::io::Error::from(std::io::ErrorKind::CrossesDevices))
+        })
+        .expect("cross-device fallback should copy and delete");
+
+        assert!(!src_dir.exists(), "source should be deleted after cross-device copy");
+        assert_eq!(std::fs::read_to_string(dest_target.join("nested/data.txt")).unwrap(), "cross-volume");
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
     fn create_dir_creates_and_rejects_existing() {
         use super::create_dir;
         let base = std::env::temp_dir().join(format!("vlx-mkdir-{}", uuid::Uuid::new_v4()));
@@ -1358,6 +2157,113 @@ mod tests {
         // Persist identical content in the document's sibling assets directory.
         let got = std::fs::read(base.join(&rel)).expect("should be readable again");
         assert_eq!(got, data);
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn search_files_recurses_skips_noise_and_respects_hidden_and_path_queries() {
+        let base = tmp_path("search-recurse");
+        std::fs::create_dir_all(base.join("src/components")).unwrap();
+        std::fs::create_dir_all(base.join(".git/objects")).unwrap();
+        std::fs::create_dir_all(base.join(".hidden_dir/sub")).unwrap();
+        std::fs::create_dir_all(base.join("node_modules/pkg")).unwrap();
+        std::fs::create_dir_all(base.join("cached_out/sub")).unwrap();
+        std::fs::create_dir_all(base.join("dist")).unwrap();
+        std::fs::write(base.join("src/components/Button.tsx"), "").unwrap();
+        std::fs::write(base.join("src/other.ts"), "").unwrap();
+        std::fs::write(base.join(".git/objects/Button.git"), "").unwrap();
+        std::fs::write(base.join(".hidden_dir/sub/Button.hidden"), "").unwrap();
+        std::fs::write(base.join("node_modules/pkg/Button.js"), "").unwrap();
+        std::fs::write(base.join("cached_out/CACHEDIR.TAG"), "").unwrap();
+        std::fs::write(base.join("cached_out/sub/Button.cache"), "").unwrap();
+        std::fs::write(base.join("dist/Button.bundle.js"), "").unwrap();
+
+        let root_str = base.to_string_lossy().to_string();
+
+        // Hidden directories and dependency/cache directories are skipped; deferred `dist` still resolves.
+        let res = super::search_files(&root_str, "button", false).unwrap();
+        let paths: Vec<&str> = res.entries.iter().map(|e| e.path.as_str()).collect();
+        assert!(paths.contains(&"src/components/Button.tsx"));
+        assert!(paths.contains(&"src/components"));
+        assert!(paths.contains(&"src"));
+        assert!(paths.contains(&"dist/Button.bundle.js"));
+        assert!(!paths.iter().any(|p| p.contains(".git")));
+        assert!(!paths.iter().any(|p| p.contains(".hidden_dir")));
+        assert!(!paths.iter().any(|p| p.contains("node_modules")));
+        assert!(!paths.iter().any(|p| p.contains("cached_out")));
+
+        // Enabling include_hidden surfaces hidden matches with accurate ancestor is_hidden metadata.
+        let res_hidden = super::search_files(&root_str, "button", true).unwrap();
+        let hidden_dir = res_hidden.entries.iter().find(|e| e.path == ".hidden_dir").unwrap();
+        assert!(hidden_dir.is_hidden);
+        assert!(res_hidden.entries.iter().any(|e| e.path == ".hidden_dir/sub/Button.hidden"));
+        assert!(!res_hidden.entries.iter().any(|e| e.path.contains(".git")));
+
+        // Searching for a skipped directory's own name still reports that directory itself.
+        let nm = super::search_files(&root_str, "node_modules", false).unwrap();
+        assert_eq!(nm.entries.len(), 1);
+        assert_eq!(nm.entries[0].path, "node_modules");
+        assert!(nm.entries[0].is_dir);
+
+        // Name-only query "src" matches the directory `src`, not unrelated children inside it.
+        let src_only = super::search_files(&root_str, "src", false).unwrap();
+        assert_eq!(src_only.entries.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(), vec!["src"]);
+
+        // Path query containing `/` matches across nested path segments.
+        let path_match = super::search_files(&root_str, "components/button", false).unwrap();
+        assert_eq!(
+            path_match.entries.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(),
+            vec!["src", "src/components", "src/components/Button.tsx"]
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn search_files_prioritizes_primary_dirs_and_reports_truncation() {
+        let base = tmp_path("search-limits");
+        std::fs::create_dir_all(base.join("dist")).unwrap();
+        std::fs::create_dir_all(base.join("src")).unwrap();
+        for i in 0..5 {
+            std::fs::write(base.join(format!("dist/item_{i}.ts")), "").unwrap();
+        }
+        std::fs::write(base.join("src/item_primary.ts"), "").unwrap();
+
+        let res = super::search_files_with_limits(
+            &base.to_string_lossy(),
+            "item",
+            false,
+            3,
+            100,
+            std::time::Duration::from_secs(5),
+        )
+        .unwrap();
+        assert!(res.truncated);
+        // `dist` comes alphabetically before `src`, yet primary `src` is searched before deferred `dist`.
+        assert!(res.entries.iter().any(|e| e.path == "src/item_primary.ts"));
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn search_files_does_not_loop_on_symlink_cycles() {
+        use std::os::unix::fs::symlink;
+
+        let base = tmp_path("search-symlink-loop");
+        std::fs::create_dir_all(base.join("sub")).unwrap();
+        std::fs::write(base.join("sub/target.txt"), "").unwrap();
+        symlink(&base, base.join("sub/loop_back")).unwrap();
+
+        let res = super::search_files(&base.to_string_lossy(), "loop_back", false).unwrap();
+        assert!(!res.truncated);
+        let link = res.entries.iter().find(|e| e.path == "sub/loop_back").unwrap();
+        assert!(link.is_dir);
+
+        let res2 = super::search_files(&base.to_string_lossy(), "target", false).unwrap();
+        assert!(!res2.truncated);
+        assert!(res2.entries.iter().any(|e| e.path == "sub/target.txt"));
 
         let _ = std::fs::remove_dir_all(&base);
     }

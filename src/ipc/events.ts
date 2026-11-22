@@ -405,3 +405,8 @@ export function onGitbashDownloadError(
 ): Promise<UnlistenFn> {
   return listen<string>("gitbash://download-error", (msg) => cb(msg));
 }
+
+/** Listen for Antigravity model catalogue updates discovered in the background or by another session. */
+export function onAntigravityModelsChanged(cb: () => void): Promise<UnlistenFn> {
+  return listen("antigravity://models-changed", () => cb());
+}

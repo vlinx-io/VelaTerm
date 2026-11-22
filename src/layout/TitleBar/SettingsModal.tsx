@@ -27,7 +27,13 @@ import { pushSetting } from "../../ipc/settingsSync";
 import { installVelaSkills } from "../../ipc/velaSkills";
 import { env, platform } from "../../platform";
 import type { VelaCommandStatus } from "../../platform/types";
-import { COMPOSER_CHIP_IDS, INPUT_LATENCY_THRESHOLDS, type ComposerChipId } from "../../store/settings";
+import {
+  CHAT_IMAGE_MAX_MB_CHOICES,
+  COMPOSER_CHIP_IDS,
+  INPUT_LATENCY_THRESHOLDS,
+  type ChatImageMaxMb,
+  type ComposerChipId,
+} from "../../store/settings";
 import { useTermStore, type TermRenderer } from "../../store/termStore";
 import {
   DEFAULT_CHAT_TRACKING,
@@ -54,6 +60,8 @@ import {
   SHOW_GITEA_INTEGRATION,
   ShortcutsPanel,
 } from "./settingsPanels";
+import { PluginsPanel } from "./PluginsPanel";
+import { PLUGINS_ENABLED } from "../../plugins/host";
 import {
   CleanImagesField,
   ImagePasteModeField,
@@ -157,6 +165,31 @@ function ShellSelect() {
         ariaLabel={t("settings.defaultShell")}
       />
     </Field>
+  );
+}
+
+/** Target compressed byte budget for images sent in conversation view. */
+function ChatImagesSection() {
+  const t = useT();
+  const chatImageMaxMb = useTermStore((s) => s.chatImageMaxMb);
+  const setChatImageMaxMb = useTermStore((s) => s.setChatImageMaxMb);
+  return (
+    <div style={{ marginTop: 20 }}>
+      <SectionTitle>{t("settings.chatImages")}</SectionTitle>
+      <p style={{ color: "var(--text-dim)", fontSize: 12, lineHeight: 1.5, margin: "0 0 12px" }}>
+        {t("settings.chatImageMaxMbHint")}
+      </p>
+      <Field label={t("settings.chatImageMaxMb")}>
+        <Seg<string>
+          value={String(chatImageMaxMb)}
+          options={CHAT_IMAGE_MAX_MB_CHOICES.map((mb) => [
+            String(mb),
+            t("settings.chatImageSizeMb", mb),
+          ] as [string, string])}
+          onChange={(v) => setChatImageMaxMb(Number(v) as ChatImageMaxMb)}
+        />
+      </Field>
+    </div>
   );
 }
 
@@ -386,6 +419,7 @@ const CATS = new Set<Cat>([
   "behavior",
   "advanced",
   "agents",
+  ...(PLUGINS_ENABLED ? (["plugins"] as const) : []),
   "shortcuts",
 ]);
 
@@ -470,7 +504,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   // show a panel with no entry in the list.
   const savedTab = useTermStore((s) => s.settingsTab);
   const setSettingsTab = useTermStore((s) => s.setSettingsTab);
-  const [cat, setCatLocal] = useState<Cat>((requestedCategory as Cat) || savedTab);
+  const initialCat: Cat = requestedCategory ?? (CATS.has(savedTab) ? savedTab : "appearance");
+  const [cat, setCatLocal] = useState<Cat>(initialCat);
   const setCat = (v: Cat) => {
     setCatLocal(v);
     if ((SETTINGS_TABS as readonly string[]).includes(v)) setSettingsTab(v as SettingsTab);
@@ -497,6 +532,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     { key: "behavior", label: t("settings.catBehavior") },
     { key: "advanced", label: t("settings.catAdvanced") },
     { key: "agents", label: t("settings.catAgents") },
+    ...(PLUGINS_ENABLED ? [{ key: "plugins" as const, label: t("settings.catPlugins") }] : []),
     { key: "shortcuts", label: t("settings.catShortcuts") },
   ];
 
@@ -749,6 +785,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 </Field>
                 <TypographyPreview variant="chat" />
                 <FontResetRow onReset={resetChatTypography} />
+                <ChatImagesSection />
                 <ComposerChipsSection />
               </>
             )}
@@ -933,6 +970,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             )}
 
             {cat === "agents" && <AgentsPanel />}
+
+            {PLUGINS_ENABLED && cat === "plugins" && <PluginsPanel />}
 
             {cat === "shortcuts" && <ShortcutsPanel />}
 

@@ -10,8 +10,8 @@ use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
 use super::monitor::{OutputScanner, ScanEvent};
 use super::session::{
-    KillInfo, KillReason, OutputCoalescer, OutputSink, OutputStream, PtySession, Recorder,
-    INPUT_QUEUE_CAP,
+    KillInfo, KillReason, OutputCoalescer, OutputSink, OutputStream, PtyMaster, PtySession,
+    Recorder, INPUT_QUEUE_CAP,
 };
 use super::{AgentState, StatusSignal};
 use crate::agent::inject;
@@ -397,6 +397,26 @@ impl PtyManager {
             resume_id
         };
 
+        // Virtual `<scheme>://<target>` shells delegate to an enabled plugin declaring that PTY scheme.
+        if let Some((scheme, target)) = shell.as_deref().and_then(|s| s.split_once("://")) {
+            if let Some((plugin_id, proc_ref)) = app.plugins().find_pty_provider(scheme)? {
+                return self.spawn_plugin_session(
+                    app,
+                    id,
+                    &plugin_id,
+                    proc_ref,
+                    scheme,
+                    target,
+                    cols,
+                    rows,
+                    permission_mode,
+                    source,
+                    first_sink,
+                    &mut diagnostic,
+                );
+            }
+        }
+
         diagnostic.step("openpty");
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -596,6 +616,8 @@ impl PtyManager {
         // still reach this instance; see agent/session_env.rs.
         cmd.env("VLX_AUTH", &hook.token);
         cmd.env("VLX_SPAWN_URL", format!("http://127.0.0.1:{}", hook.port));
+        // Clear any inherited chat-engine marker so a PTY session launched from a chat shell keeps reporting hooks.
+        cmd.env_remove(crate::agent::hook_bridge::CHAT_ENGINE_ENV);
         // A spawned session also learns who spawned it, so an agent can reach its parent with
         // `vrefer`/`vtell` without guessing. Absent for top-level sessions. `vself` resolves the full
         // chain from the id; this env var is the cheap, always-present shortcut to the immediate parent.
@@ -1024,7 +1046,7 @@ impl PtyManager {
                 launch_permission_mode: permission_mode.clone(),
                 completion: Arc::clone(&completion),
                 terminated: terminated.clone(),
-                master: pair.master,
+                master: PtyMaster::Portable(pair.master),
                 input: input_tx,
                 killer,
                 pid,
@@ -1533,6 +1555,161 @@ impl PtyManager {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn spawn_plugin_session(
+        &self,
+        app: AppCtx,
+        id: String,
+        plugin_id: &str,
+        proc_ref: Arc<crate::plugins::process::PluginProcess>,
+        scheme: &str,
+        target: &str,
+        cols: u16,
+        rows: u16,
+        permission_mode: Option<String>,
+        source: &str,
+        first_sink: OutputSink,
+        diagnostic: &mut crate::diagnostics::Span,
+    ) -> Result<SpawnResult, String> {
+        diagnostic.step("plugin_pty_open");
+        let (input_tx, input_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(INPUT_QUEUE_CAP);
+
+        let first_sub_id = NEXT_SUB_ID.fetch_add(1, Ordering::SeqCst);
+        let stream = Arc::new(Mutex::new(OutputStream::new(SCROLLBACK_CAP)));
+        stream.lock().unwrap().attach(first_sub_id, first_sink);
+
+        let completion = Arc::new(Mutex::new(super::completion::State::default()));
+        let terminated = Arc::new((Mutex::new(0u8), std::sync::Condvar::new()));
+        let intentional = Arc::new(AtomicBool::new(false));
+        let kill_info: Arc<Mutex<Option<KillInfo>>> = Arc::new(Mutex::new(None));
+
+        let killer = Box::new(PluginPtyKiller {
+            process: Arc::clone(&proc_ref),
+            pty_id: id.clone(),
+        });
+
+        let last_activity = Arc::new(Mutex::new(Instant::now()));
+        let alive = Arc::new(AtomicBool::new(true));
+        let status_event = StatusSignal::event_name(&id);
+        let exit_event = format!("pty://exit/{id}");
+        let killed_event = format!("pty://killed/{id}");
+
+        let sessions_ref = Arc::clone(&self.sessions);
+        let status_cache_ref = Arc::clone(&self.status_cache);
+        let stream_ref = Arc::clone(&stream);
+        let id_ref = id.clone();
+        let app_ref = app.clone();
+        let last_ref = Arc::clone(&last_activity);
+        let alive_ref = Arc::clone(&alive);
+        let intentional_ref = Arc::clone(&intentional);
+        let kill_info_ref = Arc::clone(&kill_info);
+        let terminated_ref = Arc::clone(&terminated);
+        let completion_ref = Arc::clone(&completion);
+
+        let mut scanner = OutputScanner::default();
+        let mut completion_filter = super::completion::Filter::default();
+        let mut last_title: Option<String> = None;
+        let app_out = app.clone();
+        let status_event_out = status_event.clone();
+
+        let sink = crate::plugins::process::PluginPtySink {
+            on_output: Box::new(move |bytes| {
+                let filtered = completion_filter.feed(bytes, &mut completion_ref.lock().unwrap());
+                stream_ref.lock().unwrap().ingest(&filtered);
+                *last_ref.lock().unwrap() = Instant::now();
+                scanner.feed(bytes, |ev| match ev {
+                    ScanEvent::Bell => {
+                        app_out.emit(&status_event_out, StatusSignal::Bell);
+                    }
+                    ScanEvent::Title(title) => {
+                        if last_title.as_deref() != Some(title.as_str()) {
+                            last_title = Some(title.clone());
+                            app_out.emit(&status_event_out, StatusSignal::Title { title });
+                        }
+                    }
+                    ScanEvent::Notify { title, body } => {
+                        app_out.emit(&status_event_out, StatusSignal::Notify { title, body });
+                    }
+                });
+            }),
+            on_exit: Box::new(move |_code, _reason| {
+                alive_ref.store(false, Ordering::SeqCst);
+                sessions_ref.lock().unwrap().remove(&id_ref);
+                status_cache_ref.lock().unwrap().remove(&id_ref);
+                if !intentional_ref.load(Ordering::SeqCst) {
+                    app_ref.emit(&exit_event, ());
+                } else {
+                    let info = kill_info_ref.lock().unwrap().clone().unwrap_or(KillInfo {
+                        source: String::new(),
+                        reason: KillReason::Close,
+                    });
+                    app_ref.emit(&killed_event, info);
+                }
+                crate::session_state::set_alive(&app_ref, &id_ref, false);
+                *terminated_ref.0.lock().unwrap() += 2;
+                terminated_ref.1.notify_all();
+            }),
+        };
+
+        proc_ref.open_pty(&id, scheme, target, cols, rows, sink)?;
+
+        // Forward non-blocking PTY input channel to the plugin sidecar's NDJSON stream.
+        {
+            let proc_in = Arc::clone(&proc_ref);
+            let pty_id_in = id.clone();
+            let pname = plugin_id.to_string();
+            std::thread::Builder::new()
+                .name(format!("plugin-pty-in-{pname}-{id}"))
+                .spawn(move || {
+                    while let Ok(bytes) = input_rx.recv() {
+                        if proc_in.write_pty(&pty_id_in, &bytes).is_err() {
+                            break;
+                        }
+                    }
+                })
+                .map_err(|e| format!("Failed starting plugin PTY input forwarder: {e}"))?;
+        }
+
+        self.sessions.lock().unwrap().insert(
+            id.clone(),
+            PtySession {
+                launch_permission_mode: permission_mode,
+                completion,
+                terminated,
+                master: PtyMaster::Plugin {
+                    process: proc_ref,
+                    pty_id: id.clone(),
+                },
+                input: input_tx,
+                killer,
+                pid: 0,
+                intentional,
+                kill_info,
+                stream,
+                size: Mutex::new((cols, rows)),
+                size_owner: Mutex::new(Some(source.to_string())),
+            },
+        );
+        crate::session_state::set_alive(&app, &id, true);
+        spawn_status_monitor(
+            app,
+            status_event,
+            last_activity,
+            alive,
+            None,
+        );
+        diagnostic.success();
+        Ok(SpawnResult {
+            pid: 0,
+            launch: None,
+            sub_id: first_sub_id,
+            attached: false,
+            cols,
+            rows,
+            owner: Some(source.to_string()),
+        })
+    }
+
     /// Writes keyboard data to a session's PTY. Input is global across viewers and does not participate in
     /// size ownership, so no source ID is required. `remote` says whether the typist is on another device,
     /// which decides whether the shell may draw its inline hint for this keystroke.
@@ -1727,7 +1904,7 @@ impl PtyManager {
                 return Ok(());
             }
             timed_resize(
-                session.master.as_ref(),
+            &session.master,
                 id,
                 PtySize { rows, cols, pixel_width: 0, pixel_height: 0 },
                 "resize",
@@ -1919,13 +2096,13 @@ fn scrub_color_suppressors(cmd: &mut portable_pty::CommandBuilder) {
 /// Both callers hold the global session lock across it, and `pty_write` waits on that lock from the UI
 /// thread, so a slow resize presents as a frozen window rather than as a slow resize.
 fn timed_resize(
-    master: &(dyn portable_pty::MasterPty + Send),
+    master: &PtyMaster,
     id: &str,
     size: PtySize,
     step: &'static str,
 ) -> Result<(), String> {
     let started = Instant::now();
-    let outcome = master.resize(size).map_err(|e| e.to_string());
+    let outcome = master.resize(size);
     let elapsed = started.elapsed();
     if elapsed >= RESIZE_REPORT_THRESHOLD {
         crate::diagnostics::record(
@@ -1961,7 +2138,7 @@ fn nudge_winch(sessions: &Arc<SessionMap>, id: &str) {
             return;
         }
         let _ = timed_resize(
-            session.master.as_ref(),
+            &session.master,
             id,
             PtySize { rows: bump, cols, pixel_width: 0, pixel_height: 0 },
             "nudge",
@@ -1976,7 +2153,7 @@ fn nudge_winch(sessions: &Arc<SessionMap>, id: &str) {
         let Some(session) = map.get(&id) else { return };
         let (cols, rows) = *session.size.lock().unwrap();
         let _ = timed_resize(
-            session.master.as_ref(),
+            &session.master,
             &id,
             PtySize { rows, cols, pixel_width: 0, pixel_height: 0 },
             "nudge_restore",
@@ -2075,6 +2252,31 @@ fn recording_enabled(app: &AppCtx) -> bool {
 impl Default for PtyManager {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[derive(Clone)]
+struct PluginPtyKiller {
+    process: Arc<crate::plugins::process::PluginProcess>,
+    pty_id: String,
+}
+
+impl std::fmt::Debug for PluginPtyKiller {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PluginPtyKiller")
+            .field("pty_id", &self.pty_id)
+            .finish()
+    }
+}
+
+impl portable_pty::ChildKiller for PluginPtyKiller {
+    fn kill(&mut self) -> std::io::Result<()> {
+        self.process.close_pty(&self.pty_id);
+        Ok(())
+    }
+
+    fn clone_killer(&self) -> Box<dyn portable_pty::ChildKiller + Send + Sync> {
+        Box::new(self.clone())
     }
 }
 

@@ -58,6 +58,15 @@ const commands = new Set([
   "chat_permission",
   "chat_queue_remove",
   "chat_queue_read",
+  "plugin_capabilities",
+  "plugin_install_archive",
+  "plugin_invoke",
+  "plugin_link_dev",
+  "plugin_list",
+  "plugin_read_asset",
+  "plugin_reload",
+  "plugin_set_enabled",
+  "plugin_uninstall",
   "chat_queue_steer",
   "chat_queue_update",
   "chat_restart_permission_mode",
@@ -93,6 +102,10 @@ const commands = new Set([
   "claude",
   "clean_pasted_images",
   "clear_node_worktree",
+  "clipboard_clear_files",
+  "clipboard_file_state",
+  "clipboard_read_files",
+  "clipboard_write_files",
   "clone_project",
   "close",
   "cmd",
@@ -211,6 +224,8 @@ const commands = new Set([
   "multi_b",
   "name",
   "network_interfaces_list",
+  "paste_files",
+  "paste_files_check",
   "persist_session",
   "plain",
   "process_stats",
@@ -309,6 +324,11 @@ const commands = new Set([
   "write_file_chunk",
   "write_text_file"
 ]);
+export function registerDiagnosticCommands(names: readonly string[]): void {
+  for (const name of names) {
+    if (name && /^[a-z0-9_:-]+$/i.test(name)) commands.add(name);
+  }
+}
 export function safeCommand(command: string): string { return commands.has(command) ? command : "unknown"; }
 export function safeError(error: unknown): string {
   const message = (error instanceof Error ? error.message : typeof error === "string" ? error : "").slice(0, 4096).toLowerCase();

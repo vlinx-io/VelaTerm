@@ -27,23 +27,32 @@ const SECTION_BY_ID: Record<string, SystemSection> = {
   [SYSTEM_CHAT]: "chat",
 };
 const ORDER: SystemSection[] = ["projects", "agents", "terminals", "tasks", "chat"];
-/** A section the activity bar switches to. Agents is not one: it sits inside Terminals, below the terminal list.
- * Archive and Knowledge are sections without being collections. */
-export type RailSection = Exclude<SystemSection, "agents"> | "archive" | "knowledge";
+/** Built-in activity bar sections (Agents sits inside Terminals, below the terminal list). */
+export type BuiltinRailSection = Exclude<SystemSection, "agents"> | "archive" | "knowledge";
+/** Dynamic activity bar section owned by an enabled plugin (`plugin:<id>`). */
+export type PluginRailSection = `plugin:${string}`;
+/** A section the activity bar switches to. */
+export type RailSection = BuiltinRailSection | PluginRailSection;
 /** Anything the sidebar can name and draw an icon for. */
-export type SidebarSection = SystemSection | "archive" | "knowledge";
-/** Sections in activity bar order. */
-export const RAIL_SECTIONS: RailSection[] = [
+export type SidebarSection = SystemSection | "archive" | "knowledge" | PluginRailSection;
+/** Built-in sections in activity bar order. */
+export const RAIL_SECTIONS: BuiltinRailSection[] = [
   ...ORDER.filter((section): section is Exclude<SystemSection, "agents"> => section !== "agents"),
   "archive",
   "knowledge",
 ];
 
-/** A section that fills the sidebar with its own pane group, so a launch can open on it. Archive and
- * Knowledge are pages instead, which is why they cannot be the default view. */
-export type DefaultViewSection = Exclude<RailSection, "archive" | "knowledge">;
+export const isPluginRailSection = (section: unknown): section is PluginRailSection =>
+  typeof section === "string" && section.startsWith("plugin:") && section.length > "plugin:".length;
+export const pluginIdFromSection = (section: unknown): string | null =>
+  isPluginRailSection(section) ? section.slice("plugin:".length) : null;
+export const pluginRailSection = (pluginId: string): PluginRailSection => `plugin:${pluginId}`;
+
+/** A section that fills the sidebar with its own pane group, so a launch can open on it. Archive,
+ * Knowledge, and plugin pages cannot be the default view. */
+export type DefaultViewSection = Exclude<BuiltinRailSection, "archive" | "knowledge">;
 export const isDefaultViewSection = (section: RailSection): section is DefaultViewSection =>
-  section !== "archive" && section !== "knowledge";
+  section !== "archive" && section !== "knowledge" && !isPluginRailSection(section);
 export const DEFAULT_VIEW_SECTIONS: DefaultViewSection[] = RAIL_SECTIONS.filter(isDefaultViewSection);
 /** Validate a stored default view; anything else means no default was chosen. */
 export const parseDefaultViewSection = (candidate: unknown): DefaultViewSection | undefined =>
@@ -56,7 +65,8 @@ export const sectionStartsExpanded = (section: RailSection): boolean =>
 
 /** Validate a stored or mirrored section name; anything else means no section was given. */
 export const parseRailSection = (candidate: unknown): RailSection | undefined =>
-  RAIL_SECTIONS.find((section) => section === candidate);
+  RAIL_SECTIONS.find((section) => section === candidate) ??
+  (isPluginRailSection(candidate) ? candidate : undefined);
 
 /** The stored collection behind a section; Terminals, Archive and Knowledge have none. */
 export const sectionCollection = (section: RailSection): string | null =>
@@ -89,7 +99,8 @@ const HINT_KEYS = {
   chat: "systemCollection.chatHint",
 } as const;
 
-export const systemLabel = (t: typeof translate, section: SidebarSection) => t(LABEL_KEYS[section]);
+export const systemLabel = (t: typeof translate, section: SidebarSection) =>
+  isPluginRailSection(section) ? pluginIdFromSection(section) ?? section : t(LABEL_KEYS[section]);
 export const systemHint = (t: typeof translate, section: SystemSection) => t(HINT_KEYS[section]);
 
 /** Display name of a project row: fixed collections use the interface language, others their own name. */
@@ -105,8 +116,9 @@ export function SystemCollectionIcon({ section, size = 15 }: { section: SidebarS
     : section === "tasks" ? <Icons.tasks size={size} />
     : section === "archive" ? <Icons.archive size={size} />
     : section === "knowledge" ? <MemoryIcon size={size} />
+    : isPluginRailSection(section) ? <Icons.puzzle size={size} />
     : <Icons.chat size={size} />;
-  return <span className={`sys-collection-ic is-${section}`}>{icon}</span>;
+  return <span className={`sys-collection-ic is-${isPluginRailSection(section) ? "plugin" : section}`}>{icon}</span>;
 }
 
 /** Session type chosen in the New Session tab. Only project sessions belong to a project; task and chat

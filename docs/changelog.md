@@ -1,11 +1,26 @@
 # Changelog
 
-> Created: 2026-07-09 16:10 · Updated: 2026-11-17
+> Created: 2026-07-09 16:10 · Updated: 2026-11-22
 
 All notable changes to VelaTerm are documented here, newest first.
 v0.1.91 is the first public release; earlier version numbers were internal iterations and are not covered.
 
 ---
+
+## v0.3.4 — 2026-11-22
+
+- 🪐 Antigravity conversations now ship with a built-in model list including Gemini 4 Neon and Orchestrator (Neon), refresh available models in the background when opened, and seamlessly switch long-running sessions to newly released models.
+- 🔑 Antigravity conversations now let you sign in with Google and sign out directly from the conversation view.
+- 🛡️ Antigravity conversations now keep Bypass permissions reliably on startup, wait for the model list on cold starts instead of failing on the first message, and no longer freeze the app when opening a session.
+- 📁 The Files panel now supports multi-select, batch delete, and cutting, copying and pasting files with Finder and File Explorer, including conflict resolution.
+- 🔎 Filtering in the Files panel now searches recursively across collapsed folders and expands matching paths automatically.
+- 🖼️ Oversized images pasted or dropped into conversations are now automatically resized and compressed instead of rejected, with a 1, 2 or 4 MB limit option in Settings.
+- 🔔 Main and remote windows now show their own pending count in the window title, and the Dock or taskbar badge shows the total across all open windows.
+- 🔍 SSH, WSL and paired URL remote windows now include the interface zoom control in the status bar.
+- 🧱 SSH host-key probing and trust now honor aliases, hostnames and custom ports in `~/.ssh/config`.
+- 🪟 On macOS, clicking the Dock icon while only remote windows are open raises them instead of opening a new main window, and the Dock context menu adds New Window.
+- 💬 Conversation errors now strip raw terminal escape codes, show a clear message when another Codex process is holding the same conversation, and no longer duplicate startup errors.
+- 🔧 Cancelling a project drag in the sidebar clears the drop indicator immediately, and conversation-view sessions no longer receive conflicting status updates from terminal hooks.
 
 ## v0.3.3 — 2026-11-17
 

@@ -16,11 +16,15 @@ import { SharingLink } from "../../sharing/navigation";
 import { navigateTranslation, translationUrl } from "../../translation/navigation";
 import { useTermStore } from "../../store/termStore";
 import { memoryNavigate, memoryUrl } from "../Memory/navigation";
+import { clearPluginSearchParams, pluginNavigate, pluginUrl, readPluginRoute } from "../../plugins/navigation";
+import { translatePluginKey, useRailPlugins } from "../../plugins/host";
+import { PluginIcon } from "../../plugins/PluginViews";
 import { knowledgeSelection } from "../Notebook/knowledgeSelection";
 import { sidebarTabOfView, sidebarTabSection } from "./sidebarTreeLayout";
 import {
   isDefaultViewSection,
   liveTerminalIds,
+  pluginRailSection,
   RAIL_SECTIONS,
   SYSTEM_PROJECTS,
   SystemCollectionIcon,
@@ -43,6 +47,7 @@ export function SidebarRail() {
   const terminals = useTermStore((s) => liveTerminalIds(s.sessions, s.ephemeralSessions, s.runtimes).length);
   const defaultView = useTermStore((s) => s.defaultSidebarSection);
   const setDefaultView = useTermStore((s) => s.setDefaultSidebarSection);
+  const railPlugins = useRailPlugins();
   const [menu, setMenu] = useState<{ x: number; y: number; section: DefaultViewSection } | null>(null);
 
   /** The default view only has to be chosen once, so it lives in a right-click menu rather than a dialog. */
@@ -79,13 +84,50 @@ export function SidebarRail() {
               if (active) return;
               const route = new URLSearchParams(window.location.search).get("memory") ?? "";
               const onArchive = route === "collections" || route.startsWith("collection/");
-              if (id === "archive" && !onArchive) memoryNavigate(memoryUrl("collections", knowledgeSelection));
-              if (id === "knowledge" && (!route || onArchive)) memoryNavigate(memoryUrl("notebooks", knowledgeSelection));
+              if (id === "archive" && !onArchive) {
+                clearPluginSearchParams();
+                memoryNavigate(memoryUrl("collections", knowledgeSelection));
+              }
+              if (id === "knowledge" && (!route || onArchive)) {
+                clearPluginSearchParams();
+                memoryNavigate(memoryUrl("notebooks", knowledgeSelection));
+              }
             }}
           >
             <SystemCollectionIcon section={id} size={16} />
             {count > 0 && <span className="sidebar-rail-count" aria-hidden="true">{count > 99 ? "99+" : count}</span>}
           </button>
+          </Fragment>
+        );
+      })}
+      {fixedLayout && railPlugins.map((plugin, idx) => {
+        const rail = plugin.ui?.rail;
+        if (!rail) return null;
+        const secId = pluginRailSection(plugin.id);
+        const active = section === secId && !collapsed;
+        const translated = translatePluginKey(plugin.id, rail.labelKey);
+        const label = translated === rail.labelKey ? plugin.name : translated;
+        const showSep = idx === 0 || rail.separatorBefore;
+        return (
+          <Fragment key={secId}>
+            {showSep && <span className="sidebar-rail-sep" aria-hidden="true" />}
+            <button
+              type="button"
+              className={"sidebar-rail-btn" + (active ? " active" : "")}
+              title={label}
+              aria-label={label}
+              aria-pressed={active}
+              onClick={() => {
+                pick(secId);
+                if (active) return;
+                const current = readPluginRoute(window.location.search);
+                if (!current || current.pluginId !== plugin.id) {
+                  pluginNavigate(pluginUrl(plugin.id, rail.defaultRoute || "overview"));
+                }
+              }}
+            >
+              <PluginIcon plugin={plugin} size={16} />
+            </button>
           </Fragment>
         );
       })}

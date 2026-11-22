@@ -8,7 +8,7 @@
 import { t } from "../i18n";
 
 /** Product names for the agents whose sign-in requirement the backend reports by kind. */
-const SIGN_IN_AGENT_LABEL: Record<string, string> = { copilot: "Copilot", cursor: "Cursor", kimi: "Kimi Code", grok: "Grok Build" };
+const SIGN_IN_AGENT_LABEL: Record<string, string> = { antigravity: "Antigravity", copilot: "Copilot", cursor: "Cursor", kimi: "Kimi Code", grok: "Grok Build" };
 
 /** Reason the E2EE WebSocket handshake failed, derived from the server's `e2ee_error` code. */
 export type HandshakeFailure = "rate_limited" | "unauthorized";
@@ -22,14 +22,32 @@ export function handshakeFailureReason(msg: { type?: string; code?: string }): H
   return msg.type === "e2ee_error" && msg.code === "rate_limited" ? "rate_limited" : "unauthorized";
 }
 
+/** Strip ANSI/VT escape sequences so raw CLI tracing logs never leak control codes into UI errors. */
+export function stripAnsi(text: string): string {
+  if (!text.includes("\x1b")) return text;
+  return text
+    // eslint-disable-next-line no-control-regex
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/\x1b[@-Z\\-_]/g, "");
+}
+
+/** Whether a Codex handshake or stderr message reports an active writer lock conflict on the thread. */
+function isCodexActiveWriterError(text: string): boolean {
+  return /\bthread-store conflict\b|\balready has an active writer\b/i.test(text);
+}
+
 /**
  * Map a backend invoke error to a localized message. Stable codes carry their detail after the
  * first colon (`remote_cmd_forbidden:web_server_start`); anything unrecognized is returned as-is
  * so genuine backend prose and legacy errors keep surfacing unchanged.
  */
 export function mapBackendError(raw: string): string {
-  const idx = raw.indexOf(":");
-  const code = idx > 0 ? raw.slice(0, idx) : raw;
+  const clean = stripAnsi(raw);
+  const idx = clean.indexOf(":");
+  const code = idx > 0 ? clean.slice(0, idx) : clean;
   const historyKey = {
     source_changed: "chat.history.contentChanged",
     cursor_expired: "chat.history.contentChanged",
@@ -48,10 +66,15 @@ export function mapBackendError(raw: string): string {
   } as const;
   if (Object.hasOwn(historyKey,code)) return `${code}: ${t(historyKey[code as keyof typeof historyKey])}`;
   // DeepSeek's API panel validates the endpoint and key, with no detail worth echoing.
-  if (raw === "deepseek_invalid_url" || raw === "deepseek_invalid_key") return t("settings.deepseekInvalid");
-  if (idx <= 0) return raw;
-  const detail = raw.slice(idx + 1);
-  switch (raw.slice(0, idx)) {
+  if (clean === "deepseek_invalid_url" || clean === "deepseek_invalid_key") return t("settings.deepseekInvalid");
+  // Codex refuses to resume a thread whose writer lock is still held by another process. Match both
+  // the stable backend code and raw CLI/stderr output so older remote servers render cleanly too.
+  if (clean === "codex_thread_active_writer" || code === "codex_thread_active_writer" || isCodexActiveWriterError(clean)) {
+    return t("chat.codex.activeWriter");
+  }
+  if (idx <= 0) return clean;
+  const detail = clean.slice(idx + 1);
+  switch (code) {
     case "remote_cmd_forbidden":
       return t("transport.remoteCmdForbidden", detail);
     case "remote_setting_forbidden":
@@ -70,14 +93,14 @@ export function mapBackendError(raw: string): string {
       const sep = detail.indexOf(":");
       const platform = sep < 0 ? detail : detail.slice(0, sep);
       const said = sep < 0 ? "" : detail.slice(sep + 1).trim();
-      if (platform !== "zai" && platform !== "bigmodel") return raw;
+      if (platform !== "zai" && platform !== "bigmodel") return clean;
       const message = t(platform === "zai" ? "chat.auth.zcode.noPlan.zai" : "chat.auth.zcode.noPlan.bigmodel");
       return said ? `${message} (${said})` : message;
     }
     // Signed in to ZCode, but ZCode lists no model: no plan of that platform was found in the sign-in
     // (`zcode_no_models:<zai|bigmodel>`). Unlike the case above, the platform has not refused anything.
     case "zcode_no_models":
-      if (detail !== "zai" && detail !== "bigmodel") return raw;
+      if (detail !== "zai" && detail !== "bigmodel") return clean;
       return t(detail === "zai" ? "chat.auth.zcode.noModels.zai" : "chat.auth.zcode.noModels.bigmodel");
     case "remote_bind_invalid":
       return t("remote.bindInvalid", detail);
@@ -86,8 +109,19 @@ export function mapBackendError(raw: string): string {
     case "remote_pairing_host_invalid":
       return t("remote.pairingHostInvalid", detail);
     default:
-      return raw;
+      return clean;
   }
+}
+
+/**
+ * Format an outbox submission failure for inline display. Strips ANSI control codes and drops the
+ * JS `Error: ` wrapper whenever the underlying message matches a localized backend error.
+ */
+export function formatSubmissionError(raw: string): string {
+  const clean = stripAnsi(raw);
+  const unwrapped = clean.startsWith("Error: ") ? clean.slice("Error: ".length) : clean;
+  const mapped = mapBackendError(unwrapped);
+  return mapped !== unwrapped ? mapped : clean;
 }
 
 /**

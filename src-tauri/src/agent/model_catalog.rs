@@ -74,6 +74,15 @@ pub fn list_models(app: &crate::host::AppCtx, agent: &str) -> Result<Vec<String>
 
 /// Run the configured model-list command for `agent` and return its raw stdout.
 pub(crate) fn run_list_command(agent: &str, bin: &str) -> Result<String, String> {
+    run_list_command_with_timeout(agent, bin, LIST_TIMEOUT)
+}
+
+/// Run the configured model-list command for `agent` with an explicit timeout.
+pub(crate) fn run_list_command_with_timeout(
+    agent: &str,
+    bin: &str,
+    timeout: Duration,
+) -> Result<String, String> {
     let Some(args) = list_args(agent) else { return Ok(String::new()); };
     let mut cmd = crate::host::command(bin);
     crate::login_env::refresh_command(&mut cmd);
@@ -83,7 +92,7 @@ pub(crate) fn run_list_command(agent: &str, bin: &str) -> Result<String, String>
     // line otherwise. Capturing through a pipe already puts them in the plain mode; NO_COLOR removes
     // any remaining escape sequences.
     cmd.env("NO_COLOR", "1");
-    run_capture(cmd)
+    run_capture(cmd, timeout)
 }
 
 /// Use the session's selected executable for both model discovery and conversation launches.
@@ -93,12 +102,12 @@ pub fn list_models_at(agent: &str, bin: &str) -> Result<Vec<String>, String> {
     Ok(parse(agent, &text))
 }
 
-/// Run a prepared command and return its stdout, killing it once LIST_TIMEOUT elapses.
+/// Run a prepared command and return its stdout, killing it once `timeout` elapses.
 ///
 /// stdout is drained on a helper thread rather than after waiting: a CLI that fills the pipe buffer
 /// while the parent waits would deadlock. stderr is discarded because these commands print
 /// authentication hints there that are not part of the catalogue.
-fn run_capture(mut cmd: Command) -> Result<String, String> {
+fn run_capture(mut cmd: Command, timeout: Duration) -> Result<String, String> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -115,7 +124,7 @@ fn run_capture(mut cmd: Command) -> Result<String, String> {
         let _ = out.read_to_string(&mut buf);
         let _ = tx.send(buf);
     });
-    match rx.recv_timeout(LIST_TIMEOUT) {
+    match rx.recv_timeout(timeout) {
         Ok(text) => {
             let _ = child.wait();
             Ok(text)

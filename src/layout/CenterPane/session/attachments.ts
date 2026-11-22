@@ -5,21 +5,28 @@
 //! because a terminal can only carry text. What the two share is how an image is fished out of a paste or a
 //! drop, and that part is reused rather than written twice.
 //!
-//! An image wider or taller than `MAX_IMAGE_EDGE` is redrawn smaller before it is sent. See that constant
-//! for why.
+//! An image wider or taller than `MAX_IMAGE_EDGE` or larger than the configured size cap is redrawn
+//! and compressed before it is sent. See `MAX_IMAGE_EDGE` and `DEFAULT_IMAGE_BYTES` for why.
 
 import { genId } from "../../../genId";
 import type { ChatImage, ChatImageValue } from "../../../ipc/chat";
+import { DEFAULT_CHAT_IMAGE_MAX_MB } from "../../../store/settings";
 
 /**
  * How much can ride along with one message.
  *
- * The same numbers are enforced in `command_core::chat_send`. They are here as well so that a file too
- * large is refused before it is read, and refused in words the reader can act on rather than as a failure
- * coming back from the backend.
+ * `MAX_IMAGE_BYTES` is the hard ceiling enforced in `command_core::chat_send` (5 MB), while
+ * `DEFAULT_IMAGE_BYTES` is the default target that images are compressed down to on attachment.
  */
 export const MAX_IMAGES = 20;
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+export const DEFAULT_IMAGE_BYTES = DEFAULT_CHAT_IMAGE_MAX_MB * 1024 * 1024;
+/** Safety cap on raw input size before decoding so giant images cannot stall or exhaust WebView memory. */
+export const MAX_RAW_IMAGE_BYTES = 50 * 1024 * 1024;
+
+const JPEG_INITIAL_QUALITIES = [0.92, 0.84, 0.74, 0.62, 0.5] as const;
+const JPEG_SMALL_EDGES = [1280, 1024, 768, 512, 384] as const;
+const JPEG_SMALL_QUALITIES = [0.82, 0.68, 0.54] as const;
 
 /**
  * The longest edge an image is sent at.
@@ -88,14 +95,50 @@ export function fitInside(width: number, height: number, edge = MAX_IMAGE_EDGE):
   return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) };
 }
 
+/** Draw `bitmap` at `(width, height)`, optionally filling white underneath for opaque JPEG output. */
+function drawBitmap(
+  canvas: HTMLCanvasElement,
+  bitmap: ImageBitmap,
+  width: number,
+  height: number,
+  opaqueBackground: boolean,
+): boolean {
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) return false;
+  if (opaqueBackground && typeof context.fillRect === "function") {
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+  }
+  context.drawImage(bitmap, 0, 0, width, height);
+  return true;
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, mimeType: string, quality?: number): Promise<Blob | null> {
+  return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, mimeType, quality));
+}
+
+/** Try descending JPEG quality levels on the current canvas until the output fits within `maxBytes`. */
+async function fitJpeg(
+  canvas: HTMLCanvasElement,
+  qualities: readonly number[],
+  maxBytes: number,
+): Promise<ChatImage | null> {
+  for (const quality of qualities) {
+    const blob = await canvasToBlob(canvas, "image/jpeg", quality);
+    if (blob && blob.size <= maxBytes) {
+      return { mimeType: "image/jpeg", data: await readBase64(blob) };
+    }
+  }
+  return null;
+}
+
 /**
- * An oversized image redrawn small enough to send, or `null` to send the file's own bytes instead.
- *
- * `null` covers an image that already fits and an image this browser will not decode or draw — an SVG, a
- * damaged file, a canvas that refuses a context. Sending the original in those cases is what happened
- * before this step existed, so nothing an agent used to accept becomes unattachable here.
+ * Resize and compress an oversized image to fit inside `MAX_IMAGE_EDGE` and `maxBytes`, or return
+ * `null` when the original already fits or the browser cannot decode/draw it (SVG, damaged file).
  */
-async function shrink(file: File): Promise<ChatImage | null> {
+async function shrink(file: File, maxBytes: number): Promise<ChatImage | null> {
   if (typeof createImageBitmap !== "function") return null;
   let bitmap: ImageBitmap;
   try {
@@ -104,19 +147,36 @@ async function shrink(file: File): Promise<ChatImage | null> {
     return null;
   }
   try {
-    const size = fitInside(bitmap.width, bitmap.height);
-    if (!size) return null;
+    const initial = fitInside(bitmap.width, bitmap.height) ?? { width: bitmap.width, height: bitmap.height };
+    const resized = initial.width !== bitmap.width || initial.height !== bitmap.height;
+    if (!resized && file.size <= maxBytes) return null;
+
     const canvas = document.createElement("canvas");
-    canvas.width = size.width;
-    canvas.height = size.height;
-    const context = canvas.getContext("2d");
-    if (!context) return null;
-    context.drawImage(bitmap, 0, 0, size.width, size.height);
-    // A photograph stays a photograph; anything else becomes PNG, which is where the flat colour and the
-    // small text of a screenshot survive being redrawn. The quality figure only reaches the JPEG branch.
-    const mimeType = file.type === "image/jpeg" ? "image/jpeg" : "image/png";
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, mimeType, 0.92));
-    return blob ? { mimeType, data: await readBase64(blob) } : null;
+    const isJpeg = file.type === "image/jpeg";
+    if (!drawBitmap(canvas, bitmap, initial.width, initial.height, false)) return null;
+
+    if (!isJpeg) {
+      // Keep PNG for non-JPEG inputs when it fits within `maxBytes` so screenshots stay crisp.
+      const png = await canvasToBlob(canvas, "image/png");
+      if (png && png.size <= maxBytes) {
+        return { mimeType: "image/png", data: await readBase64(png) };
+      }
+      // Transparent pixels turn black when encoded as JPEG unless painted over a solid background first.
+      if (!drawBitmap(canvas, bitmap, initial.width, initial.height, true)) return null;
+    }
+
+    const jpeg = await fitJpeg(canvas, JPEG_INITIAL_QUALITIES, maxBytes);
+    if (jpeg) return jpeg;
+
+    const longest = Math.max(initial.width, initial.height);
+    for (const edge of JPEG_SMALL_EDGES) {
+      if (edge >= longest) continue;
+      const smaller = fitInside(bitmap.width, bitmap.height, edge);
+      if (!smaller || !drawBitmap(canvas, bitmap, smaller.width, smaller.height, !isJpeg)) continue;
+      const candidate = await fitJpeg(canvas, JPEG_SMALL_QUALITIES, maxBytes);
+      if (candidate) return candidate;
+    }
+    return null;
   } catch {
     return null;
   } finally {
@@ -124,14 +184,25 @@ async function shrink(file: File): Promise<ChatImage | null> {
   }
 }
 
+export interface AttachOptions {
+  /** Target maximum byte size per attachment before base64 encoding; capped at `MAX_IMAGE_BYTES`. */
+  maxBytes?: number;
+}
+
 /**
- * Read files into attachments, refusing what does not fit.
+ * Read files into attachments, resizing and compressing images to fit the size limit and refusing
+ * anything that still does not fit.
  *
  * A file that is too large, or one file too many, is left out while the rest are taken: dropping a folder
  * of screenshots should attach what it can and say what it could not, rather than fail as a whole.
  * Retained history references keep their object identity so their snapshot context remains available.
  */
-export async function attachImages<T extends ChatImageValue = Attachment>(current: T[], files: File[]): Promise<AttachResult<T>> {
+export async function attachImages<T extends ChatImageValue = Attachment>(
+  current: T[],
+  files: File[],
+  options?: AttachOptions,
+): Promise<AttachResult<T>> {
+  const maxBytes = Math.max(1, Math.min(options?.maxBytes ?? DEFAULT_IMAGE_BYTES, MAX_IMAGE_BYTES));
   const attachments: (T | Attachment)[] = current.slice();
   const rejected: Rejection[] = [];
   for (const file of files) {
@@ -139,18 +210,41 @@ export async function attachImages<T extends ChatImageValue = Attachment>(curren
       rejected.push({ reason: "tooMany" });
       continue;
     }
-    if (file.size > MAX_IMAGE_BYTES) {
+    if (file.size > MAX_RAW_IMAGE_BYTES) {
       rejected.push({ reason: "tooLarge", name: file.name });
       continue;
     }
     try {
-      const image = await shrink(file) ?? { mimeType: file.type || "image/png", data: await readBase64(file) };
-      attachments.push({ id: genId(), name: file.name, ...image, bytes: decodedBytes(image.data) });
+      const shrunk = await shrink(file, maxBytes);
+      if (!shrunk && file.size > maxBytes) {
+        rejected.push({ reason: "tooLarge", name: file.name });
+        continue;
+      }
+      const image = shrunk ?? { mimeType: file.type || "image/png", data: await readBase64(file) };
+      const bytes = decodedBytes(image.data);
+      if (bytes > maxBytes) {
+        rejected.push({ reason: "tooLarge", name: file.name });
+        continue;
+      }
+      attachments.push({ id: genId(), name: file.name, ...image, bytes });
     } catch {
       rejected.push({ reason: "unreadable", name: file.name });
     }
   }
   return { attachments, rejected };
+}
+
+/** Format the first attachment rejection for display beside the composer. */
+export function attachmentRejectionNote(
+  rejected: Rejection[],
+  maxMb: number,
+  translate: typeof import("../../../i18n").t,
+): string | null {
+  const first = rejected[0];
+  if (!first) return null;
+  if (first.reason === "tooMany") return translate("chat.attach.tooMany", MAX_IMAGES);
+  if (first.reason === "tooLarge") return translate("chat.attach.tooLarge", first.name, maxMb);
+  return translate("chat.attach.unreadable", first.name);
 }
 
 /**

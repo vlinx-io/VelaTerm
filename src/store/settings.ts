@@ -169,6 +169,8 @@ export interface PersistedSettings {
   chatLineHeight: number;
   /** Conversation letter spacing in pixels; null is automatic. */
   chatLetterSpacing: number | null;
+  /** Maximum size in MB that pasted or dropped conversation images are compressed down to before sending. */
+  chatImageMaxMb: ChatImageMaxMb;
   /** Global shortcut overrides from action ID to chord; missing entries use shortcutRegistry defaults. */
   shortcutOverrides: Record<string, string>;
   /** Defaults by agent type, serving as global templates for new local-agent sessions. Explicit
@@ -269,6 +271,17 @@ export function normalizeInputLatencyThreshold(value: unknown): number {
     ? (value as number) : DEFAULT_INPUT_LATENCY_THRESHOLD_MS;
 }
 
+/** Maximum attachment size choices for compressed conversation images, in megabytes. */
+export const CHAT_IMAGE_MAX_MB_CHOICES = [1, 2, 4] as const;
+export type ChatImageMaxMb = (typeof CHAT_IMAGE_MAX_MB_CHOICES)[number];
+export const DEFAULT_CHAT_IMAGE_MAX_MB: ChatImageMaxMb = 2;
+
+/** Keeps a stored conversation image size limit within the offered choices, falling back to the default. */
+export function normalizeChatImageMaxMb(value: unknown): ChatImageMaxMb {
+  return (CHAT_IMAGE_MAX_MB_CHOICES as readonly number[]).includes(value as number)
+    ? (value as ChatImageMaxMb) : DEFAULT_CHAT_IMAGE_MAX_MB;
+}
+
 /** The chips that sat beside the message before the list became configurable, plus Tasks. */
 export const DEFAULT_COMPOSER_INLINE_CHIPS: ComposerChipId[] = ["model", "effort", "collaboration", "permission", "tasks"];
 /** Revision 1 made Tasks an inline chip by default. */
@@ -303,6 +316,7 @@ export const SETTINGS_DEFAULTS: PersistedSettings = {
   chatFontSize: DEFAULT_CONVERSATION_FONT_SIZE,
   chatLineHeight: DEFAULT_TERMINAL_LINE_HEIGHT,
   chatLetterSpacing: null,
+  chatImageMaxMb: DEFAULT_CHAT_IMAGE_MAX_MB,
   shortcutOverrides: {},
   agentDefaults: {},
   spawnConfirm: true,
@@ -410,6 +424,7 @@ export function loadSettings(): PersistedSettings {
     merged.chatLetterSpacing = normalizeLetterSpacing(merged.chatLetterSpacing);
     merged.chatFontSize = normalizeTextSize(merged.chatFontSize, DEFAULT_CONVERSATION_FONT_SIZE);
     merged.chatLineHeight = normalizeTextLineHeight(merged.chatLineHeight);
+    merged.chatImageMaxMb = normalizeChatImageMaxMb(parsed.chatImageMaxMb);
     merged.termLineHeight = normalizeTextLineHeight(merged.termLineHeight);
     // A section that no longer exists would open Settings on an empty panel.
     if (!SETTINGS_TABS.includes(merged.settingsTab)) merged.settingsTab = "appearance";

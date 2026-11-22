@@ -6,10 +6,15 @@ import { platform } from "../../../platform";
 import Icons from "../../../components/Icons";
 import { ChipPopover } from "./extras";
 
-type AuthProps = { provider: "Claude" | "Codex" | "ZCode"; sessionId: string; state?: ChatAuthState; busy: boolean };
+type AuthProps = { provider: "Claude" | "Codex" | "ZCode" | "Antigravity"; sessionId: string; state?: ChatAuthState; busy: boolean };
 
 /** Statuses whose wording differs per agent; the rest read the same for every provider. */
-const OWN_WORDING = { Claude: ["pending", "failed"], Codex: [], ZCode: ["required", "pending", "failed"] } as const;
+const OWN_WORDING = {
+  Claude: ["pending", "failed"],
+  Codex: [],
+  ZCode: ["required", "pending", "failed"],
+  Antigravity: ["pending", "failed"],
+} as const;
 
 /** True while a sign-in or sign-out is unresolved; the account chip yields to the inline panel then. */
 export function needsAttention(state?: ChatAuthState) {
@@ -56,15 +61,25 @@ function AuthPanel({ provider, sessionId, state, busy }: AuthProps) {
     try { await action(); }
     catch (err) {
       const message = String(err);
-      setError(message === "codex_auth_logout_failed" || message === "claude_auth_logout_failed" || message === "zcode_auth_logout_failed" ? t("chat.auth.logoutFailed")
-        : message === "claude_auth_invalid_code" ? t("chat.auth.claude.invalidCode") : message);
+      setError(
+        message === "codex_auth_logout_failed"
+          || message === "claude_auth_logout_failed"
+          || message === "zcode_auth_logout_failed"
+          || message === "antigravity_auth_logout_failed"
+          ? t("chat.auth.logoutFailed")
+          : message === "claude_auth_invalid_code"
+            ? t("chat.auth.claude.invalidCode")
+            : message === "antigravity_auth_invalid_code"
+              ? t("chat.auth.antigravity.invalidCode")
+              : message
+      );
     }
     finally { inFlight.current = false; setSending(false); }
   }
 
   return <section className={`sv-auth${state ? " sv-auth-panel" : ""}`} aria-label={t("chat.auth.title", provider)}>
     {state && <p role="status">{(OWN_WORDING[provider] as readonly string[]).includes(state.status)
-      ? t(`chat.auth.${provider === "Claude" ? "claude" : "zcode"}.${state.status}` as "chat.auth.claude.pending")
+      ? t(`chat.auth.${provider.toLowerCase()}.${state.status}` as "chat.auth.claude.pending")
       : state.status === "required" || state.status === "signedOut" ? t(`chat.auth.${state.status}`, provider)
         : t(`chat.auth.${state.status}`)}</p>}
     {(state?.status === "required" || active || !state) && <p className="sv-auth-hint">{t("chat.auth.scope", provider)}</p>}
@@ -79,14 +94,14 @@ function AuthPanel({ provider, sessionId, state, busy }: AuthProps) {
       }}>{t("chat.auth.open")}</a>
     </div>}
     {provider === "Claude" && <p className="sv-auth-hint">{t("chat.auth.claude.externalAuth")}</p>}
-    {provider === "Claude" && state?.status === "pending" && <form className="sv-auth-form" onSubmit={(event) => {
+    {(provider === "Claude" || provider === "Antigravity") && state?.status === "pending" && <form className="sv-auth-form" onSubmit={(event) => {
       event.preventDefault();
       if (!code.trim() || sending) return;
       const submitted = code.trim();
       setCode("");
       void run(() => chatAuthSubmit(sessionId, submitted));
     }}>
-      <label htmlFor={`auth-code-${sessionId}`}>{t("chat.auth.claude.code")}</label>
+      <label htmlFor={`auth-code-${sessionId}`}>{t(provider === "Antigravity" ? "chat.auth.antigravity.code" : "chat.auth.claude.code")}</label>
       <div className="sv-auth-actions">
         <input id={`auth-code-${sessionId}`} type="password" autoComplete="off" spellCheck={false}
           value={code} disabled={sending} onChange={(event) => setCode(event.target.value)} />

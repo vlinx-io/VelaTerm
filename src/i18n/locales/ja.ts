@@ -492,6 +492,7 @@ const ja: typeof en = {
   "settings.catTerminal": "ターミナル", // Terminal
   "settings.catBehavior": "動作", // Behavior
   "settings.catAgents": "エージェント", // Agents
+  "settings.catPlugins": "プラグイン",
   "settings.agentDefaultsTitle": "新規セッションの既定値",
   "settings.referSummaryTitle": "セッション参照のコンテキスト",
   "settings.referSummaryMode": "コンテキスト方式",
@@ -863,6 +864,10 @@ const ja: typeof en = {
   "settings.fontPreviewText": "いろはにほへと ちりぬるを。The quick brown fox 0123456789",
   "settings.fontPreviewChat": "設定画面を更新しました。各フォント設定はすぐに反映され、いつでもデフォルトに戻せます。",
   "settings.fontResetGroup": "フォントをデフォルトに戻す",
+  "settings.chatImages": "画像",
+  "settings.chatImageMaxMb": "画像サイズの上限",
+  "settings.chatImageMaxMbHint": "送信前に、長辺が 1568 ピクセルを超える画像やこの上限を超える画像は自動的に縮小・圧縮されます。デコードできない場合や、圧縮後も上限を超える場合のみ添付されません。",
+  "settings.chatImageSizeMb": (mb: number) => `${mb} MB`,
   "settings.composerChips": "メッセージ入力ツールバー",
   "settings.composerChipsHint": "有効にした項目は、この順序でメッセージの横に表示されます。エージェントが起動していない、バックグラウンドタスクがない、ログインが未完了など、機能が一時的に利用できない場合も、項目は空または無効の状態で表示されます。現在のエージェントが対応していない機能は表示されません。収まらない項目は「その他」メニューに移動します。ここでオフにした項目は、再びオンにするまでどこにも表示されません。",
   "settings.composerChipUp": (chip: string) => `${chip}を上へ移動`,
@@ -1636,9 +1641,20 @@ const ja: typeof en = {
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
+  "files.filterTruncated": "先頭の一致結果のみ表示しています。さらに文字を入力して絞り込んでください。",
   "files.dblClickOpen": "ダブルクリックで開く",
   "files.deleteConfirm": (name) =>
     `「${name}」を削除しますか？この操作は元に戻せません。`, // Delete "{name}"? This can't be undone.
+  "files.deleteManyConfirm": (count) =>
+    `${count} 件の項目を削除しますか？この操作は元に戻せません。`, // Delete {count} items? This can't be undone.
+  "files.pasteConflictTitle": "同名の項目が既に存在します", // Item already exists
+  "files.pasteConflictBody": (name) =>
+    `貼り付け先のフォルダーには「${name}」という名前の項目が既に存在します。`, // An item named "{name}" already exists in the destination folder.
+  "files.pasteConflictProgress": (current, total) => `${current} / ${total}`, // {current} of {total}
+  "files.pasteConflictApplyAll": "残りの競合すべてに適用", // Apply to all remaining conflicts
+  "files.pasteReplace": "置き換える", // Replace
+  "files.pasteSkip": "スキップ", // Skip
+  "files.pasteKeepBoth": "両方とも残す", // Keep Both
 
   // ── File transfer (remote access) ──
   "transfer.title": "転送", // Transfers
@@ -1654,6 +1670,7 @@ const ja: typeof en = {
   "transfer.foldersUnsupported": "フォルダーはアップロードできません。", // Folders can't be uploaded.
   "drop.browserFilesHint": "ブラウザでは、ここにドロップできるのは画像だけです。その他のファイルは、先にプロジェクトへアップロードしてください。", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
   "files.copyFailed": "一部のファイルをコピーできませんでした。ファイルがまだ存在するか、このフォルダーへの書き込み権限があるかを確認してください。", // Some files could not be copied. Check that they still exist and that you can write to this folder.
+  "files.pasteFailed": "一部の項目を貼り付けできませんでした。元の項目が存在するか、貼り付け先フォルダーへの書き込み権限があるかを確認してください。", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => `${n} セッション`, // {n} sessions
@@ -2322,6 +2339,10 @@ const ja: typeof en = {
   "chat.auth.claude.submit": "コードを送信",
   "chat.auth.claude.invalidCode": "今回の認証ページに表示されたコードを、# 以降も含めて貼り付けてください。",
   "chat.auth.claude.externalAuth": "API キーやその他の設定済みの認証方法は変更されません。",
+  "chat.auth.antigravity.pending": "認証ページを開いて Google アカウントでログインし、表示された認証コードまたはコールバック URL を貼り付けてください。",
+  "chat.auth.antigravity.failed": "ログインを完了できませんでした。Antigravity CLI がアカウント認証に対応していることを確認し、もう一度お試しください。",
+  "chat.auth.antigravity.code": "認証コードまたはコールバック URL",
+  "chat.auth.antigravity.invalidCode": "今回のログインで取得した認証コードまたはコールバック URL を、空白を含めずに貼り付けてください。",
   "chat.auth.open": "認証ページを開く",
   "chat.auth.zcode.required": "この会話を使うには、Z.ai または BigModel のアカウントで ZCode にログインしてください。",
   "chat.auth.zcode.pending": "認証ページを開き、アクセスを許可してください。ログインが完了すると、この画面が自動的に更新されます。",
@@ -2536,6 +2557,7 @@ const ja: typeof en = {
   "chat.attach.modelTextOnly": "選択中のモデルは画像に対応していません。",
   "chat.signInRequired": (agent: string) => `会話ビューを使うには ${agent} へのログインが必要です。ターミナルビューに切り替えてログインしてから、メッセージをもう一度送信してください。`,
   "chat.apiKeyRequired": "DeepSeek には API キーが必要です。メッセージ入力欄の「API」を開いて入力するか、環境変数 `DEEPSEEK_API_KEY` を設定してから、もう一度メッセージを送信してください。",
+  "chat.codex.activeWriter": "別の Codex プロセスがこの会話を使用中です。この会話を開いている他のターミナルタブや Codex プロセスを閉じるか、しばらく待ってからもう一度お試しください。",
   "chat.antigravity.permissionsHint": "承認が必要なツールは、Antigravity の設定で事前に許可するか、ターミナルビューで使用してください。",
   "chat.antigravity.settingsHint": "モデル、推論の強度、権限はターンの合間に変更してください。",
   "chat.antigravity.rewindTitle": "ターミナルビューで巻き戻す",
@@ -2721,7 +2743,30 @@ const ja: typeof en = {
   "kb.updatedOn": (date: string) => `${date} に更新`,
   "archive.sessionsCount": (count: string) => `${count} セッション`,
 
+
   ...assist,
+  "plugins.title": "プラグイン",
+  "plugins.subtitle": "外部の VelaTerm プラグインをインストール、リンク、有効化、または再読み込みします。各プラグインは独立したバックエンドプロセスで動作し、UI を動的に読み込みます。",
+  "plugins.installArchive": "アーカイブからインストール…",
+  "plugins.linkDev": "ローカルプラグインをリンク…",
+  "plugins.localOnlyHint": "プラグインのインストール、リンク、有効・無効の切り替えはローカルホストでのみ実行できます。",
+  "plugins.archivePathPrompt": ".vlxplugin または .zip アーカイブのフルパスを入力してください:",
+  "plugins.devPathPrompt": "manifest.json を含むローカルプラグインディレクトリのフルパスを入力してください:",
+  "plugins.empty": "インストールされているプラグインはまだありません。.vlxplugin アーカイブをインストールするか、ローカルプラグインディレクトリをリンクしてください。",
+  "plugins.sourceInstalled": "インストール済み",
+  "plugins.sourceDev": "ローカル開発",
+  "plugins.statusRunning": "実行中",
+  "plugins.statusStarting": "起動中…",
+  "plugins.statusDisabled": "無効",
+  "plugins.statusStopped": "停止",
+  "plugins.statusError": "エラー",
+  "plugins.enable": "有効化",
+  "plugins.disable": "無効化",
+  "plugins.reload": "再読み込み",
+  "plugins.uninstall": "アンインストール",
+  "plugins.uninstallConfirm": (name: string) => `プラグイン「${name}」をアンインストールしますか？`,
+  "plugins.removeData": "このプラグインのローカルデータディレクトリも削除する",
+  "plugins.loadFailed": "プラグイン UI の読み込みに失敗しました",
 };
 
 export default ja;

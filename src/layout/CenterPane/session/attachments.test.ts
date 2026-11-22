@@ -1,6 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { attachImages, dataUrl, fitInside, restoreAttachment, MAX_IMAGE_BYTES, MAX_IMAGE_EDGE, MAX_IMAGES } from "./attachments";
+import {
+  attachImages,
+  attachmentRejectionNote,
+  dataUrl,
+  fitInside,
+  restoreAttachment,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGE_EDGE,
+  MAX_IMAGES,
+  MAX_RAW_IMAGE_BYTES,
+} from "./attachments";
+import { t } from "../../../i18n";
 
 /** A file of `size` bytes whose contents are known, so the base64 can be checked against them. */
 function png(name: string, size: number): File {
@@ -13,22 +24,34 @@ function png(name: string, size: number): File {
  * The bitmap reports `width` by `height`; the canvas hands back three bytes spelling `PNG`, which is
  * enough to tell what was sent from what was read off the file.
  */
-function stubBrowser(width: number, height: number) {
+function stubBrowser(
+  width: number,
+  height: number,
+  encode?: (type: string, quality: number | undefined, canvasWidth: number, canvasHeight: number) => Uint8Array,
+) {
   const drawn: { width: number; height: number }[] = [];
+  const fills: string[] = [];
+  const calls: { type: string; quality: number | undefined; width: number; height: number }[] = [];
   const canvas = {
     width: 0,
     height: 0,
     getContext: () => ({
+      fillStyle: "",
+      fillRect: (_x: number, _y: number, _w: number, _h: number) => void fills.push("filled"),
       drawImage: (_image: unknown, _x: number, _y: number, w: number, h: number) => void drawn.push({ width: w, height: h }),
     }),
-    toBlob: (done: (blob: Blob) => void, type: string) => done(new Blob([new Uint8Array([0x50, 0x4e, 0x47])], { type })),
+    toBlob: (done: (blob: Blob) => void, type: string, quality?: number) => {
+      calls.push({ type, quality, width: canvas.width, height: canvas.height });
+      const bytes = encode ? encode(type, quality, canvas.width, canvas.height) : new Uint8Array([0x50, 0x4e, 0x47]);
+      done(new Blob([bytes], { type }));
+    },
   };
   vi.stubGlobal("createImageBitmap", vi.fn(async () => ({ width, height, close: () => {} })));
   const real = document.createElement.bind(document);
   vi.spyOn(document, "createElement").mockImplementation(
     (tag: string) => (tag === "canvas" ? (canvas as unknown as HTMLElement) : real(tag)),
   );
-  return { canvas, drawn };
+  return { canvas, drawn, fills, calls };
 }
 
 afterEach(() => {
@@ -101,6 +124,67 @@ describe("attachImages", () => {
   it("gives each attachment its own id, so removing one removes only that one", async () => {
     const { attachments } = await attachImages([], [png("a.png", 2), png("a.png", 2)]);
     expect(attachments[0].id).not.toBe(attachments[1].id);
+  });
+
+  it("compresses an oversized image above the limit instead of rejecting it outright", async () => {
+    const { drawn, calls } = stubBrowser(3000, 2000);
+    const large = png("retina.png", 6 * 1024 * 1024);
+    const { attachments, rejected } = await attachImages([], [large], { maxBytes: 2 * 1024 * 1024 });
+    expect(rejected).toEqual([]);
+    expect(drawn).toEqual([{ width: MAX_IMAGE_EDGE, height: 1045 }]);
+    expect(calls[0]?.type).toBe("image/png");
+    expect(attachments[0]).toMatchObject({ name: "retina.png", mimeType: "image/png", bytes: 3 });
+  });
+
+  it("falls back to JPEG quality steps with an opaque background when compressed PNG still exceeds maxBytes", async () => {
+    const limit = 2 * 1024 * 1024;
+    const { fills, calls } = stubBrowser(1400, 900, (type, quality) => {
+      if (type === "image/png") return new Uint8Array(limit + 100);
+      return new Uint8Array(quality && quality > 0.85 ? limit + 50 : 1024);
+    });
+    const dense = png("dense.png", limit + 500_000);
+    const { attachments, rejected } = await attachImages([], [dense], { maxBytes: limit });
+    expect(rejected).toEqual([]);
+    expect(fills).toEqual(["filled"]);
+    expect(calls.map((c) => [c.type, c.quality])).toEqual([
+      ["image/png", undefined],
+      ["image/jpeg", 0.92],
+      ["image/jpeg", 0.84],
+    ]);
+    expect(attachments[0]).toMatchObject({ mimeType: "image/jpeg", bytes: 1024 });
+  });
+
+  it("steps down dimensions when JPEG quality reduction alone still exceeds maxBytes", async () => {
+    const limit = 1024 * 1024;
+    const { calls } = stubBrowser(2400, 1600, (_type, _quality, w) => new Uint8Array(w > 1280 ? limit + 10 : 512));
+    const huge = new File([new Uint8Array(3 * 1024 * 1024)], "photo.jpg", { type: "image/jpeg" });
+    const { attachments, rejected } = await attachImages([], [huge], { maxBytes: limit });
+    expect(rejected).toEqual([]);
+    expect(calls.some((c) => c.width === 1280 && c.type === "image/jpeg")).toBe(true);
+    expect(attachments[0]).toMatchObject({ mimeType: "image/jpeg", bytes: 512 });
+  });
+
+  it("rejects files that exceed the raw cap or stay above maxBytes after compression", async () => {
+    const limit = 1024 * 1024;
+    stubBrowser(1200, 800, () => new Uint8Array(limit + 10));
+    const stubborn = png("stubborn.png", limit + 100);
+    const gigantic = png("gigantic.png", 64);
+    Object.defineProperty(gigantic, "size", { value: MAX_RAW_IMAGE_BYTES + 1 });
+    const { attachments, rejected } = await attachImages([], [stubborn, gigantic], { maxBytes: limit });
+    expect(attachments).toEqual([]);
+    expect(rejected).toEqual([
+      { reason: "tooLarge", name: "stubborn.png" },
+      { reason: "tooLarge", name: "gigantic.png" },
+    ]);
+  });
+});
+
+describe("attachmentRejectionNote", () => {
+  it("formats the configured limit for oversized rejections", () => {
+    expect(attachmentRejectionNote([], 2, t)).toBeNull();
+    expect(attachmentRejectionNote([{ reason: "tooLarge", name: "shot.png" }], 1, t)).toBe("shot.png exceeds 1 MB and was not attached");
+    expect(attachmentRejectionNote([{ reason: "tooMany" }], 4, t)).toBe(`A message can include up to ${MAX_IMAGES} images`);
+    expect(attachmentRejectionNote([{ reason: "unreadable", name: "bad.png" }], 2, t)).toBe("bad.png could not be read");
   });
 });
 

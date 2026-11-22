@@ -69,7 +69,7 @@ beforeEach(() => {
   });
   // Every chip inline: jsdom reports no widths, so nothing folds into a More row and the assertions below
   // can reach every chip directly.
-  useTermStore.setState({ chatModel: "old-model", chatModelByKind: { claude: "old-model" }, chatEffortByModel: {}, runtimes: {}, agentDefaults: {}, composerInlineChips: [...COMPOSER_CHIP_IDS] });
+  useTermStore.setState({ chatModel: "old-model", chatModelByKind: { claude: "old-model" }, chatEffortByModel: {}, runtimes: {}, agentDefaults: {}, composerInlineChips: [...COMPOSER_CHIP_IDS], chatImageMaxMb: 2 });
   vi.mocked(invoke).mockImplementation((command, args) => {
     if (command === "agent_permission_catalog") {
       const agent = (args as { agent: string }).agent;
@@ -2038,6 +2038,59 @@ it("shows Claude-specific login failures and folds a confirmed cancellation", as
   expect(screen.getByRole("button", { name: "Claude account" })).toBeTruthy();
 });
 
+it("offers Antigravity account actions, submits a Google code or callback URL, and confirms sign-out", async () => {
+  snapshotOverrides = { rows: [{ kind: "user", id: "history", text: "Antigravity history" }] };
+  await mountPane("antigravity");
+  expect(screen.queryByRole("region", { name: "Antigravity account" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Antigravity account" }));
+  expect(screen.getByText(/Sign-in updates the Antigravity account/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+  expect(invoke).not.toHaveBeenCalledWith("chat_auth_logout", { sessionId: "s" });
+  fireEvent.click(screen.getByRole("button", { name: "Confirm sign-out" }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_auth_logout", { sessionId: "s" }));
+  act(() => eventCallback({ type: "extras", extras: { auth: { status: "signedOut" } } }));
+  expect(screen.getByText("Signed out of Antigravity. Sign in to continue this conversation.")).toBeTruthy();
+  expect(screen.getByText("Antigravity history")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_auth_start", { sessionId: "s" }));
+  const oauthUrl = "https://accounts.google.com/o/oauth2/auth?client_id=test&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback";
+  act(() => eventCallback({ type: "extras", extras: { auth: { status: "pending", verificationUrl: oauthUrl } } }));
+  expect(screen.getByRole("link", { name: "Open authorization page" }).getAttribute("href")).toBe(oauthUrl);
+  const input = screen.getByLabelText("Authorization code or callback URL") as HTMLInputElement;
+  expect(input.type).toBe("password");
+  const callbackUrl = "https://antigravity.google/oauth-callback?state=s&code=test-code";
+  fireEvent.change(input, { target: { value: callbackUrl } });
+  fireEvent.click(screen.getByRole("button", { name: "Submit code" }));
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_auth_submit", { sessionId: "s", code: callbackUrl }));
+  expect(input.value).toBe("");
+  act(() => eventCallback({ type: "extras", extras: { auth: { status: "submitting" } } }));
+  expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
+  act(() => eventCallback({ type: "extras", extras: { auth: { status: "success" } } }));
+  expect(screen.queryByRole("region", { name: "Antigravity account" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Antigravity account" }).getAttribute("aria-expanded")).toBe("false");
+});
+
+it("shows Antigravity-specific login failures and maps invalid code errors", async () => {
+  snapshotOverrides = { auth: { status: "failed" } };
+  await mountPane("antigravity");
+  expect(screen.getByText(/your Antigravity CLI supports account authorization/)).toBeTruthy();
+  expect(screen.queryByText(/Device code authentication/)).toBeNull();
+  act(() => eventCallback({
+    type: "extras",
+    extras: { auth: { status: "pending", verificationUrl: "https://accounts.google.com/o/oauth2/auth?state=s" } },
+  }));
+  const baseImpl = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation(async (cmd, args) => {
+    if (cmd === "chat_auth_submit") throw "antigravity_auth_invalid_code";
+    return baseImpl(cmd, args);
+  });
+  const input = screen.getByLabelText("Authorization code or callback URL") as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "bad code" } });
+  fireEvent.click(screen.getByRole("button", { name: "Submit code" }));
+  await screen.findByText(/with no spaces/);
+});
+
 it("renders only the chips that are on and follows the inline preference at runtime", async () => {
   // Chips that are off are not rendered anywhere, not even behind More.
   useTermStore.setState({ composerInlineChips: [...DEFAULT_COMPOSER_INLINE_CHIPS] });
@@ -2382,4 +2435,106 @@ it("shows the Antigravity /rewind guide on mobile without offering a terminal sw
   expect(screen.queryByRole("button", { name: "Switch to terminal view" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Close" }));
   expect(screen.queryByRole("region", { name: "Rewind in terminal view" })).toBeNull();
+});
+
+it("applies the configured image size cap to pasted images in Antigravity conversations", async () => {
+  useTermStore.setState({ chatImageMaxMb: 1 });
+  const { container } = await mountPane("antigravity", null);
+  const input = container.querySelector<HTMLTextAreaElement>(".sv-box textarea")!;
+  const first = new File([new Uint8Array(64)], "a.png", { type: "image/png" });
+  const second = new File([new Uint8Array(64)], "b.png", { type: "image/png" });
+  const overOneMb = new File([new Uint8Array(16)], "huge.png", { type: "image/png" });
+  Object.defineProperty(overOneMb, "size", { value: 1024 * 1024 + 1 });
+  fireEvent.paste(input, { clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => first }] } });
+  fireEvent.paste(input, { clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => second }] } });
+  await waitFor(() => expect(container.querySelectorAll(".sv-attach-thumb")).toHaveLength(2));
+  fireEvent.paste(input, { clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => overOneMb }] } });
+  await waitFor(() => expect(screen.getByText("huge.png exceeds 1 MB and was not attached")).toBeTruthy());
+});
+
+it("refreshes Antigravity model catalogue on models-changed events and when revealing a hidden tab", async () => {
+  const listeners = new Map<string, Set<() => void>>();
+  vi.mocked(listen).mockImplementation((name, callback) => {
+    let set = listeners.get(name);
+    if (!set) {
+      set = new Set();
+      listeners.set(name, set);
+    }
+    const fn = callback as () => void;
+    set.add(fn);
+    return Promise.resolve(() => { set?.delete(fn); });
+  });
+  let phase = 0;
+  const previous = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    if (command === "chat_models") {
+      return Promise.resolve(
+        phase === 0
+          ? [{ id: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen", description: "", effortLevels: ["high"] }]
+          : [
+              { id: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen", description: "", effortLevels: ["high"] },
+              { id: "gemini-4-neon", label: "Gemini 4 Neon", description: "", effortLevels: ["low", "medium", "high", "xhigh"] },
+            ],
+      ) as Promise<never>;
+    }
+    return previous(command, args);
+  });
+  snapshotOverrides = { running: false, rows: [], model: "gemini-4-hydrogen" };
+  useTermStore.setState({ chatModelByKind: { antigravity: "gemini-4-hydrogen" } });
+
+  const view = render(
+    <ChatPane session={{ id: "s", projectId: "p", name: "Antigravity", kind: "antigravity", engine: "chat", collapsed: false, sortOrder: 0, createdAt: 0 }}
+      area={{}} hidden={true} focused={false} multi={false} onActivate={() => {}} onSplit={() => {}} onClose={() => {}} />,
+  );
+  await waitFor(() => expect(screen.queryByRole("option", { name: "Gemini 4 Neon" })).toBeNull());
+  const callsAfterMount = vi.mocked(invoke).mock.calls.filter(([c]) => c === "chat_models").length;
+
+  // Revealing the hidden Antigravity tab triggers a fresh model lookup.
+  phase = 1;
+  view.rerender(
+    <ChatPane session={{ id: "s", projectId: "p", name: "Antigravity", kind: "antigravity", engine: "chat", collapsed: false, sortOrder: 0, createdAt: 0 }}
+      area={{}} hidden={false} focused={true} multi={false} onActivate={() => {}} onSplit={() => {}} onClose={() => {}} />,
+  );
+  await waitFor(() => expect(screen.getByRole("option", { name: "Gemini 4 Neon" })).toBeTruthy());
+  expect(vi.mocked(invoke).mock.calls.filter(([c]) => c === "chat_models").length).toBeGreaterThan(callsAfterMount);
+
+  // Global background updates also refresh the open Antigravity session immediately.
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    if (command === "chat_models") {
+      return Promise.resolve([
+        { id: "gemini-4-hydrogen", label: "Gemini 4 Hydrogen", description: "", effortLevels: ["high"] },
+        { id: "gemini-4-neon", label: "Gemini 4 Neon", description: "", effortLevels: ["low", "medium", "high", "xhigh"] },
+        { id: "gemini-5-alpha", label: "Gemini 5 Alpha", description: "", effortLevels: ["high"] },
+      ]) as Promise<never>;
+    }
+    return previous(command, args);
+  });
+  await act(async () => {
+    listeners.get("antigravity://models-changed")?.forEach((cb) => cb());
+  });
+  await waitFor(() => expect(screen.getByRole("option", { name: "Gemini 5 Alpha" })).toBeTruthy());
+});
+
+it("shows a clean localized error without ANSI codes or duplication when Codex fails to resume an active-writer thread", async () => {
+  snapshotOverrides = { running: false, rows: [] };
+  const { container } = await mountPane("codex");
+  const input = container.querySelector<HTMLTextAreaElement>(".sv-box textarea")!;
+  fireEvent.change(input, { target: { value: "Check collector status" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_start", expect.anything()));
+  act(() => {
+    eventCallback({ type: "process", pid: 1234, startedAt: 1 });
+    eventCallback({ type: "error", message: "codex_thread_active_writer:01a1d769-830a-75a1-a110-67e01b00387e" });
+    eventCallback({
+      type: "exited",
+      code: -1,
+      stderr: "\x1b[2m2026-11-22T06:13:11Z\x1b[0m \x1b[31mERROR\x1b[0m codex_core::session: thread-store conflict: thread 01a1d769-830a-75a1-a110-67e01b00387e already has an active writer\n",
+      released: false,
+    });
+  });
+  const localized = "Another Codex process is currently using this conversation. Close the other terminal tab or Codex instance holding it, or wait a moment, then try again.";
+  await waitFor(() => expect(screen.getAllByText(localized)).toHaveLength(1));
+  expect(container.textContent).not.toContain("\x1b[");
+  expect(container.textContent).not.toContain("thread-store conflict");
+  expect(container.textContent).not.toContain("Error: Another Codex");
 });

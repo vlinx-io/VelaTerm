@@ -877,13 +877,13 @@ mod tests {
             std::fs::create_dir_all(&dir).unwrap();
             let expected = std::fs::canonicalize(&dir).unwrap();
             let (tx, rx) = mpsc::channel();
-            let _run = spawn_run(&app("cwd"), "s-env", SessionKind::Claude, Some("/bin/sh"), Some(dir.to_str().unwrap()), "sh-1", "pwd; echo \"$VLX_SESSION_ID\"", |_| {}, move |_, ctx| {
+            let _run = spawn_run(&app("cwd"), "s-env", SessionKind::Claude, Some("/bin/sh"), Some(dir.to_str().unwrap()), "sh-1", "pwd; echo \"$VLX_SESSION_ID:$VLX_ENGINE\"", |_| {}, move |_, ctx| {
                 let _ = tx.send(ctx);
             })
             .unwrap();
             let ctx = rx.recv_timeout(Duration::from_secs(20)).unwrap();
             assert_eq!(ctx.exit_code, Some(0), "{ctx:?}");
-            assert!(ctx.stdout.ends_with(&format!("{}\ns-env\n", expected.display())), "{ctx:?}");
+            assert!(ctx.stdout.ends_with(&format!("{}\ns-env:chat\n", expected.display())), "{ctx:?}");
             let _ = std::fs::remove_dir_all(&dir);
         }
 

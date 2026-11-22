@@ -492,6 +492,7 @@ const vi: typeof en = {
   "settings.catTerminal": "Terminal",
   "settings.catBehavior": "Hành vi",
   "settings.catAgents": "Tác nhân",
+  "settings.catPlugins": "Plugin",
   "settings.agentDefaultsTitle": "Mặc định cho phiên mới",
   "settings.referSummaryTitle": "Ngữ cảnh tham chiếu phiên",
   "settings.referSummaryMode": "Chế độ ngữ cảnh",
@@ -861,6 +862,10 @@ const vi: typeof en = {
   "settings.fontPreviewText": "Con cáo nâu nhanh nhẹn nhảy qua chú chó lười. 0123456789",
   "settings.fontPreviewChat": "Trang cài đặt đã được cập nhật. Mỗi thiết lập phông chữ có hiệu lực ngay và bạn có thể khôi phục giá trị mặc định bất cứ lúc nào.",
   "settings.fontResetGroup": "Khôi phục phông chữ mặc định",
+  "settings.chatImages": "Hình ảnh",
+  "settings.chatImageMaxMb": "Giới hạn kích thước ảnh",
+  "settings.chatImageMaxMbHint": "Trước khi gửi, hình ảnh có cạnh dài hơn 1568 pixel hoặc vượt quá giới hạn này sẽ được tự động thu nhỏ và nén lại. Chỉ bỏ qua những ảnh không thể giải mã hoặc vẫn vượt giới hạn sau khi nén.",
+  "settings.chatImageSizeMb": (mb: number) => `${mb} MB`,
   "settings.composerChips": "Thanh công cụ soạn tin",
   "settings.composerChipsHint": "Các mục được bật xuất hiện cạnh tin nhắn theo thứ tự hiển thị ở đây. Khi một tính năng tạm thời không dùng được (tác nhân chưa chạy, không có tác vụ nền hoặc chưa đăng nhập xong), mục đó vẫn hiển thị nhưng trống hoặc bị vô hiệu hóa. Các tính năng mà tác nhân hiện tại không hỗ trợ sẽ không xuất hiện. Những mục không đủ chỗ sẽ chuyển vào menu Thêm. Các mục được tắt ở đây sẽ không hiển thị ở bất kỳ đâu cho đến khi bạn bật lại.",
   "settings.composerChipUp": (chip: string) => `Đưa ${chip} lên trên`,
@@ -1617,8 +1622,18 @@ const vi: typeof en = {
   "files.copyPath": "Sao chép đường dẫn",
   "files.copyRelPath": "Sao chép đường dẫn tương đối",
   "files.filterPlaceholder": "Lọc tệp…",
+  "files.filterTruncated": "Chỉ hiển thị những kết quả đầu tiên. Hãy nhập thêm để thu hẹp phạm vi.",
   "files.dblClickOpen": "Nhấp đúp để mở",
   "files.deleteConfirm": (name: string) => `Xóa “${name}”? Không thể hoàn tác.`,
+  "files.deleteManyConfirm": (count: number) => `Xóa ${count} mục? Không thể hoàn tác.`,
+  "files.pasteConflictTitle": "Mục đã tồn tại",
+  "files.pasteConflictBody": (name: string) =>
+    `Mục có tên “${name}” đã tồn tại trong thư mục đích.`,
+  "files.pasteConflictProgress": (current: number, total: number) => `${current} / ${total}`,
+  "files.pasteConflictApplyAll": "Áp dụng cho tất cả xung đột còn lại",
+  "files.pasteReplace": "Thay thế",
+  "files.pasteSkip": "Bỏ qua",
+  "files.pasteKeepBoth": "Giữ cả hai",
 
   // ── File transfer (remote access) ──
   "transfer.title": "Truyền tệp", // Transfers
@@ -1634,6 +1649,7 @@ const vi: typeof en = {
   "transfer.foldersUnsupported": "Không thể tải thư mục lên.", // Folders can't be uploaded.
   "drop.browserFilesHint": "Trong trình duyệt, bạn chỉ có thể thả hình ảnh vào đây. Với các tệp khác, hãy tải chúng lên dự án trước.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
   "files.copyFailed": "Không thể sao chép một số tệp. Hãy kiểm tra xem các tệp vẫn còn tồn tại và bạn có quyền ghi vào thư mục này.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
+  "files.pasteFailed": "Không thể dán một số mục. Hãy kiểm tra xem nguồn vẫn còn tồn tại và bạn có quyền ghi vào thư mục này.", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 
   // Thanh trạng thái
   "statusbar.sessions": (n: number) => `${n} phiên`,
@@ -2282,6 +2298,10 @@ const vi: typeof en = {
   "chat.auth.claude.submit": "Gửi mã",
   "chat.auth.claude.invalidCode": "Dán toàn bộ mã của lần ủy quyền này, bao gồm cả phần sau dấu #.",
   "chat.auth.claude.externalAuth": "Khóa API và các phương thức xác thực khác đã cấu hình sẽ không thay đổi.",
+  "chat.auth.antigravity.pending": "Mở trang ủy quyền, đăng nhập bằng tài khoản Google rồi dán mã ủy quyền hoặc đường dẫn chuyển hướng đầy đủ hiển thị trên trang đó.",
+  "chat.auth.antigravity.failed": "Không thể hoàn tất đăng nhập. Hãy thử lại và kiểm tra xem phiên bản Antigravity CLI hiện tại có hỗ trợ ủy quyền tài khoản hay không.",
+  "chat.auth.antigravity.code": "Mã ủy quyền hoặc URL chuyển hướng",
+  "chat.auth.antigravity.invalidCode": "Dán mã ủy quyền hoặc URL chuyển hướng của lần đăng nhập này, không chứa khoảng trắng.",
   "chat.auth.open": "Mở trang cấp quyền",
   "chat.auth.zcode.required": "Hãy đăng nhập ZCode bằng tài khoản Z.ai hoặc BigModel để dùng cuộc hội thoại này.",
   "chat.auth.zcode.pending": "Mở trang cấp quyền và cho phép truy cập. Giao diện sẽ tự động cập nhật khi đăng nhập hoàn tất.",
@@ -2497,6 +2517,7 @@ const vi: typeof en = {
   "chat.attach.modelTextOnly": "Mô hình đã chọn không hỗ trợ hình ảnh.",
   "chat.signInRequired": (agent: string) => `Bạn cần đăng nhập ${agent} để dùng chế độ hội thoại. Hãy chuyển sang chế độ thiết bị đầu cuối để đăng nhập, sau đó gửi lại tin nhắn.`,
   "chat.apiKeyRequired": "DeepSeek cần khóa API. Mở «API» bên cạnh ô tin nhắn và nhập khóa, hoặc đặt biến môi trường `DEEPSEEK_API_KEY`, sau đó gửi lại tin nhắn.",
+  "chat.codex.activeWriter": "Một tiến trình Codex khác hiện đang sử dụng cuộc hội thoại này. Hãy đóng tab thiết bị đầu cuối hoặc tiến trình Codex khác đang giữ cuộc hội thoại này, hoặc đợi một lát rồi thử lại.",
   "chat.antigravity.permissionsHint": "Các công cụ cần phê duyệt phải được cho phép trước trong cài đặt Antigravity hoặc sử dụng ở chế độ thiết bị đầu cuối.",
   "chat.antigravity.settingsHint": "Thay đổi mô hình, mức độ suy luận hoặc quyền giữa các lượt.",
   "chat.antigravity.rewindTitle": "Quay lại trong chế độ terminal",
@@ -2682,7 +2703,30 @@ const vi: typeof en = {
   "kb.updatedOn": (date: string) => `Cập nhật ${date}`,
   "archive.sessionsCount": (count: string) => `${count} phiên`,
 
+
   ...assist,
+  "plugins.title": "Plugin",
+  "plugins.subtitle": "Cài đặt, liên kết, bật hoặc tải lại các plugin bên ngoài cho VelaTerm. Mỗi plugin chạy trong tiến trình backend độc lập và tải giao diện động.",
+  "plugins.installArchive": "Cài đặt từ gói nén…",
+  "plugins.linkDev": "Liên kết plugin cục bộ…",
+  "plugins.localOnlyHint": "Việc cài đặt, liên kết hoặc bật/tắt plugin chỉ khả dụng trên máy chủ cục bộ.",
+  "plugins.archivePathPrompt": "Nhập đường dẫn đầy đủ đến tệp .vlxplugin hoặc .zip:",
+  "plugins.devPathPrompt": "Nhập đường dẫn đầy đủ đến thư mục plugin cục bộ chứa manifest.json:",
+  "plugins.empty": "Chưa có plugin nào được cài đặt. Hãy cài gói .vlxplugin hoặc liên kết thư mục plugin cục bộ để bắt đầu.",
+  "plugins.sourceInstalled": "Đã cài đặt",
+  "plugins.sourceDev": "Phát triển cục bộ",
+  "plugins.statusRunning": "Đang chạy",
+  "plugins.statusStarting": "Đang khởi động…",
+  "plugins.statusDisabled": "Đã tắt",
+  "plugins.statusStopped": "Đã dừng",
+  "plugins.statusError": "Lỗi",
+  "plugins.enable": "Bật",
+  "plugins.disable": "Tắt",
+  "plugins.reload": "Tải lại",
+  "plugins.uninstall": "Gỡ cài đặt",
+  "plugins.uninstallConfirm": (name: string) => `Gỡ cài đặt plugin "${name}"?`,
+  "plugins.removeData": "Đồng thời xóa thư mục dữ liệu cục bộ của plugin này",
+  "plugins.loadFailed": "Không thể tải giao diện plugin",
 };
 
 export default vi;

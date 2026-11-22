@@ -163,6 +163,16 @@ pub fn session_resume(id: &str, session: &str, cwd: &str) -> Value {
     request(id, "session/resume", json!({"sessionId": session, "cwd": cwd, "mcpServers": []}))
 }
 
+/// List conversations to probe whether the server is authenticated without creating a session.
+pub fn session_list(id: &str) -> Value {
+    request(id, "session/list", json!({}))
+}
+
+/// Clear the ACP agent's saved credentials when the server advertises `agentCapabilities.auth.logout`.
+pub fn logout(id: &str) -> Value {
+    request(id, "logout", json!({}))
+}
+
 /// A turn: the text block first, then any images.
 pub fn prompt(id: &str, session: &str, text: &str, images: &[super::protocol::ChatImage]) -> Value {
     let mut blocks = Vec::new();
@@ -242,6 +252,25 @@ pub fn auth_required(error: &Value) -> bool {
 /// Whether an error says the agent has no API key to call its model with.
 pub fn api_key_missing(error: &Value) -> bool {
     error_text(error).to_ascii_lowercase().contains("no api key")
+}
+
+/// Whether a prompt error means Antigravity's in-memory model catalogue has not finished loading
+/// right after `agy acp` booted (e.g., `FetchAvailableModels` is still in flight).
+pub fn antigravity_model_not_ready(error: &Value) -> bool {
+    let text = error_text(error).to_ascii_lowercase();
+    if !text.contains("failed to construct executor") {
+        return false;
+    }
+    text.contains("unknown model key")
+        || text.contains("plan model not specified")
+        || (text.contains("model not found") && text.contains("model_placeholder_"))
+}
+
+/// Whether a cold-start Antigravity prompt failed specifically because the new session has no
+/// active plan model assigned yet.
+pub fn antigravity_plan_model_missing(error: &Value) -> bool {
+    let text = error_text(error).to_ascii_lowercase();
+    text.contains("failed to construct executor") && text.contains("plan model not specified")
 }
 
 /// The readable part of a JSON-RPC error, preferring the detail an agent puts in `data`.
@@ -340,13 +369,13 @@ impl Catalog {
     }
 
     /// Fold in a `config_option_update`, which always carries the complete set.
-    pub fn absorb_options(&mut self, options: &[Value]) {
+    pub fn absorb_options(&mut self, options: &[Value]) -> bool {
         // A model without thinking support omits `thought_level`, so stale levels from the previous
         // model must be cleared rather than left active.
         self.effort_option = None;
         self.efforts.clear();
         self.effort = None;
-        let (mut saw_model, mut saw_effort) = (false, false);
+        let (mut saw_mode, mut saw_model, mut saw_effort) = (false, false, false);
         for option in options {
             if option.get("type").and_then(Value::as_str) != Some("select") { continue; }
             let Some(id) = option.get("id").and_then(Value::as_str) else { continue };
@@ -356,7 +385,10 @@ impl Catalog {
                 Some("mode") => {
                     self.mode_option = Some(id.into());
                     if !choices.is_empty() { self.modes = choices; }
-                    if current.is_some() { self.mode = current; }
+                    if current.is_some() {
+                        saw_mode = true;
+                        self.mode = current;
+                    }
                 }
                 Some("model") => {
                     saw_model = true;
@@ -383,6 +415,7 @@ impl Catalog {
                 }
             }
         }
+        saw_mode
     }
 
     /// Whether the running session can change its model without a restart.
@@ -1773,6 +1806,31 @@ mod tests {
         assert!(!conversation_missing(&json!({"code":-32603,"message":"Authentication required"})));
         assert!(!conversation_missing(&json!({"code":-32000,"message":"command not found"})));
         assert!(!conversation_missing(&json!({"code":-32000,"message":"model not found"})));
+    }
+
+    #[test]
+    fn antigravity_cold_model_errors_are_recognized_narrowly() {
+        assert!(antigravity_model_not_ready(&json!({
+            "code": -32603,
+            "message": "failed to construct executor: unknown model key MODEL_PLACEHOLDER_M532: model not found"
+        })));
+        assert!(antigravity_model_not_ready(&json!({
+            "code": -32603,
+            "message": "failed to construct executor: unknown model key MODEL_PLACEHOLDER_M528: model not found"
+        })));
+        let plan_missing = json!({
+            "code": -32603,
+            "message": "failed to construct executor: plan model not specified; you must specify a valid model"
+        });
+        assert!(antigravity_model_not_ready(&plan_missing));
+        assert!(antigravity_plan_model_missing(&plan_missing));
+        assert!(!antigravity_plan_model_missing(&json!({
+            "code": -32603,
+            "message": "failed to construct executor: unknown model key MODEL_PLACEHOLDER_M532: model not found"
+        })));
+        assert!(!antigravity_model_not_ready(&json!({"code": -32602, "message": "Unknown model ID: gemini-99"})));
+        assert!(!antigravity_model_not_ready(&json!({"code": -32000, "message": "Authentication required"})));
+        assert!(!antigravity_model_not_ready(&json!({"code": -32603, "message": "failed to construct executor: permission denied"})));
     }
 
     #[test]

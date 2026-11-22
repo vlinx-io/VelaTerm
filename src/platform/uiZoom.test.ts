@@ -1,5 +1,23 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { normalizeUiZoom, parseUiZoomPercent, stepUiZoom, UI_ZOOM_MAX, UI_ZOOM_MIN } from "./uiZoom";
+
+afterEach(() => {
+  vi.resetModules();
+  vi.doUnmock("./env");
+  vi.doUnmock("@tauri-apps/api/webview");
+  window.localStorage.clear();
+});
+
+async function loadUiZoomWithEnv(envMock: { isElectron: boolean; isTauri: boolean; isRemoteWindow: boolean }) {
+  vi.resetModules();
+  const setZoom = vi.fn().mockResolvedValue(undefined);
+  vi.doMock("./env", () => ({ env: envMock }));
+  vi.doMock("@tauri-apps/api/webview", () => ({
+    getCurrentWebview: () => ({ setZoom }),
+  }));
+  const mod = await import("./uiZoom");
+  return { ...mod, setZoom };
+}
 
 describe("ui zoom", () => {
   it("clamps and rounds stored values, falling back to 1 for junk", () => {
@@ -35,5 +53,29 @@ describe("ui zoom", () => {
     expect(parseUiZoomPercent("")).toBeNull();
     expect(parseUiZoomPercent("  %  ")).toBeNull();
     expect(parseUiZoomPercent("abc")).toBeNull();
+  });
+
+  it("supports native zoom in Tauri remote-connection windows", async () => {
+    const { uiZoomSupported, setUiZoom, getUiZoom, setZoom } = await loadUiZoomWithEnv({
+      isElectron: false,
+      isTauri: false,
+      isRemoteWindow: true,
+    });
+    expect(uiZoomSupported).toBe(true);
+    setUiZoom(1.25);
+    expect(getUiZoom()).toBe(1.25);
+    await vi.waitFor(() => expect(setZoom).toHaveBeenCalledWith(1.25));
+  });
+
+  it("keeps native zoom disabled in plain browsers", async () => {
+    const { uiZoomSupported, setUiZoom, getUiZoom, setZoom } = await loadUiZoomWithEnv({
+      isElectron: false,
+      isTauri: false,
+      isRemoteWindow: false,
+    });
+    expect(uiZoomSupported).toBe(false);
+    setUiZoom(1.25);
+    expect(getUiZoom()).toBe(1);
+    expect(setZoom).not.toHaveBeenCalled();
   });
 });

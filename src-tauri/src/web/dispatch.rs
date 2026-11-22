@@ -64,6 +64,15 @@ const MANAGEMENT_CMDS: &[&str] = &[
     "web_server_set_listen",
 ];
 
+/// Local-only file clipboard commands: remote clients operate on a remote host filesystem and must
+/// not read or mutate the desktop operator's local OS clipboard.
+const LOCAL_CLIPBOARD_CMDS: &[&str] = &[
+    "clipboard_file_state",
+    "clipboard_write_files",
+    "clipboard_read_files",
+    "clipboard_clear_files",
+];
+
 /// Commands that read or write stored secrets and are therefore gated to local origins — the class
 /// behind the protected-settings ACL, swept across every dispatch arm:
 /// - `gitea_set_config` writes the Gitea token (keyring, or the plaintext `gitea.token` app-settings
@@ -91,16 +100,22 @@ const SECRET_CMDS: &[&str] = &[
     "url_host_record",
     "ssh_host_forget",
     "url_host_forget",
+    "plugin_install_archive",
+    "plugin_link_dev",
+    "plugin_set_enabled",
+    "plugin_reload",
+    "plugin_uninstall",
 ];
 
 /// Whether an app-settings key is security-relevant and therefore hidden from and unwritable by remote
 /// clients: the `remoteAccess.*` namespace carries the Argon2id password verifier (an offline-bruteforce
 /// target) and the autostart port/enabled keys the next restart trusts; `gitea.token` is a plaintext
-/// credential fallback when no keyring is available.
+/// credential fallback when no keyring is available; `colab.secret.*` retains protection for legacy keys.
 fn is_protected_setting(key: &str) -> bool {
     key.starts_with("remoteAccess.")
         || key == "gitea.token"
         || key == crate::agent::deepseek_config::KEY_API_KEY_FALLBACK
+        || key.starts_with("colab.secret.")
 }
 
 /// Deny remote clients direct file access inside the app data directory, which holds the secret files
@@ -218,12 +233,18 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
     // devices are trusted with a shell (threat model), but not with rotating/revoking the credentials
     // that admit other devices, nor with reading/writing stored secrets. The machine-readable
     // `code:detail` error format is mapped to a localized message in the frontend (wsClient.ts).
-    if origin == CallOrigin::Remote && (MANAGEMENT_CMDS.contains(&cmd) || SECRET_CMDS.contains(&cmd))
+    if origin == CallOrigin::Remote
+        && (MANAGEMENT_CMDS.contains(&cmd)
+            || SECRET_CMDS.contains(&cmd)
+            || LOCAL_CLIPBOARD_CMDS.contains(&cmd))
     {
         return Err(format!("remote_cmd_forbidden:{cmd}"));
     }
     if cmd.starts_with("security_") {
         return crate::security::dispatch(app, cmd, args);
+    }
+    if cmd.starts_with("plugin_") {
+        return crate::plugins::dispatch(app, origin, cmd, args);
     }
     if cmd.starts_with("assist_") {
         return crate::assist::dispatch(app, cmd, args, origin);
@@ -1263,7 +1284,7 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         // hand-maintained claim: `remote_path_acl_has_no_ungated_path_arm` below mechanically
         // enumerates every dispatch arm extracting a path-like argument and fails on any arm that is
         // neither gated nor listed as a justified exception. Deliberately NOT gated:
-        // - `list_dir` / `stat_file`: metadata only (names, sizes, mtimes) — no content, no mutation.
+        // - `list_dir` / `search_files` / `stat_file`: metadata only (names, sizes, mtimes) — no content, no mutation.
         // - `git_discover_repos`: metadata only — the paths of repositories below a directory.
         // - `get_git_status` / `git_changed_files` / `git_recent_commits` / `git_branch_list` /
         //   `git_merge_*` / `create_worktree` / `list_worktrees` / `commit_worktree` /
@@ -1274,6 +1295,11 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         //   filesystem, independent of repo status — and is therefore gated above.
         // - `save_pasted_image`: writes only into a temp directory it picks itself — no caller path.
         "list_dir" => to_value(files::list_dir(&req_str(args, "path")?)?),
+        "search_files" => to_value(files::search_files(
+            &req_str(args, "path")?,
+            &req_str(args, "query")?,
+            args.get("includeHidden").and_then(Value::as_bool).unwrap_or(false),
+        )?),
         // Drive letters or `/` plus the OS name; no paths below the roots.
         "list_roots" => to_value(files::list_roots()),
         "preview_destination" => {
@@ -1321,6 +1347,47 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
                 guard_remote_path(app, origin, source)?;
             }
             to_value(files::copy_into_dir(&sources, &dir)?)
+        }
+        "paste_files_check" => {
+            // Both ends are gated like copy_into_dir: inspecting sources or destination inside the data dir is denied.
+            let dir = req_str(args, "dir")?;
+            let sources = req_str_vec(args, "sources")?;
+            let mode: files::PasteMode = req_kind(args, "mode")?;
+            guard_remote_path(app, origin, &dir)?;
+            for source in &sources {
+                guard_remote_path(app, origin, source)?;
+            }
+            to_value(files::check_paste_into_dir(&sources, &dir, mode)?)
+        }
+        "paste_files" => {
+            let dir = req_str(args, "dir")?;
+            let sources = req_str_vec(args, "sources")?;
+            let mode: files::PasteMode = req_kind(args, "mode")?;
+            let resolutions: std::collections::HashMap<String, files::ConflictResolution> =
+                match args.get("resolutions") {
+                    Some(v) if !v.is_null() => serde_json::from_value(v.clone())
+                        .map_err(|e| format!("Invalid conflict resolutions: {e}"))?,
+                    _ => std::collections::HashMap::new(),
+                };
+            guard_remote_path(app, origin, &dir)?;
+            for source in &sources {
+                guard_remote_path(app, origin, source)?;
+            }
+            to_value(files::paste_into_dir(&sources, &dir, mode, &resolutions)?)
+        }
+        "clipboard_file_state" => to_value(crate::file_clipboard::status()),
+        "clipboard_write_files" => {
+            let paths = req_str_vec(args, "paths")?;
+            for path in &paths {
+                guard_remote_path(app, origin, path)?;
+            }
+            let mode: crate::file_clipboard::FileClipboardMode = req_kind(args, "mode")?;
+            to_value(crate::file_clipboard::write_files(&paths, mode)?)
+        }
+        "clipboard_read_files" => to_value(crate::file_clipboard::read_files()?),
+        "clipboard_clear_files" => {
+            crate::file_clipboard::clear_if_sequence(opt_u64(args, "expectedSequence"))?;
+            Ok(Value::Null)
         }
         // The generic full-content read/write arms are the ones that could hand a remote client the
         // secret files in the data directory (DB with the PHC verifier, pairing/E2EE/TLS keys), so they
@@ -1665,11 +1732,17 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
         "install_spawn_skills" => {
             crate::agent::spawn_cli::install_skills()
                 .map_err(|e| format!("Failed to install spawn skills: {e}"))?;
+            if let Ok(data_dir) = app.data_dir() {
+                app.plugins().sync_artifacts_for(&data_dir);
+            }
             Ok(Value::Null)
         }
         "uninstall_spawn_skills" => {
             crate::agent::spawn_cli::uninstall_skills()
                 .map_err(|e| format!("Failed to uninstall spawn skills: {e}"))?;
+            if let Ok(data_dir) = app.data_dir() {
+                crate::plugins::cli_skills::remove_all_plugin_skills(&data_dir);
+            }
             Ok(Value::Null)
         }
 
@@ -2210,6 +2283,11 @@ mod tests {
             "url_host_record",
             "ssh_host_forget",
             "url_host_forget",
+            "plugin_install_archive",
+            "plugin_link_dev",
+            "plugin_set_enabled",
+            "plugin_reload",
+            "plugin_uninstall",
         ];
         assert_eq!(
             SECRET_CMDS, EXPECTED_SECRET,
@@ -2554,6 +2632,10 @@ mod tests {
             // Copy is gated on both ends, like rename: into the data dir, and a secret out of it.
             ("copy_into_dir", json!({ "dir": dd.clone(), "sources": [] }), dd.clone()),
             ("copy_into_dir", json!({ "dir": std::env::temp_dir().to_string_lossy(), "sources": [secret_str.clone()] }), secret_str.clone()),
+            ("paste_files_check", json!({ "dir": dd.clone(), "sources": [], "mode": "copy" }), dd.clone()),
+            ("paste_files_check", json!({ "dir": std::env::temp_dir().to_string_lossy(), "sources": [secret_str.clone()], "mode": "move" }), secret_str.clone()),
+            ("paste_files", json!({ "dir": dd.clone(), "sources": [], "mode": "copy" }), dd.clone()),
+            ("paste_files", json!({ "dir": std::env::temp_dir().to_string_lossy(), "sources": [secret_str.clone()], "mode": "move" }), secret_str.clone()),
             ("save_doc_image", json!({ "docPath": format!("{dd}/doc.md"), "bytesB64": "aGk=", "ext": "png" }), format!("{dd}/doc.md")),
             // Planting direction through clone: a remote client must not clone a fresh repository
             // into the data dir; the gate fires on parentDir before any git/network work starts.
@@ -2582,6 +2664,14 @@ mod tests {
         // of them ever starts returning content, gate it and update this assertion consciously.
         dispatch(&app, "list_dir", &json!({ "path": dd.clone() }), "ws-1", CallOrigin::Remote)
             .expect("list_dir must stay ungated for remote origins (metadata only)");
+        dispatch(
+            &app,
+            "search_files",
+            &json!({ "path": dd.clone(), "query": "vlx-web-access", "includeHidden": false }),
+            "ws-1",
+            CallOrigin::Remote,
+        )
+        .expect("search_files must stay ungated for remote origins (metadata only)");
         dispatch(&app, "stat_file", &json!({ "path": secret_str }), "ws-1", CallOrigin::Remote)
             .expect("stat_file must stay ungated for remote origins (metadata only)");
 
@@ -2764,6 +2854,8 @@ mod tests {
         "args, \"docPath\")",
         // The Git panel's batch arms take repository-relative paths under this key.
         "args, \"paths\")",
+        "args, \"dir\")",
+        "args, \"sources\")",
         "args, \"repoRoot\")",
         "args, \"wtPath\")",
         "args, \"repo\")",
@@ -2785,6 +2877,7 @@ mod tests {
     /// raw bytes of a caller-named file, mutations refused by git on the non-repo data dir.
     const UNGATED_JUSTIFIED: &[&str] = &[
         "list_dir",        // metadata only (names, sizes, mtimes)
+        "search_files",    // metadata only (relative paths and Git badges)
         "stat_file",       // metadata only
         "get_git_status",  // derived repo status, no file content
         "get_git_branch_info", // branch/worktree metadata only, no file content
@@ -3296,5 +3389,19 @@ mod tests {
         assert_eq!(err, "Missing string parameter bind");
         let settings = crate::command_core::get_app_settings(&app).unwrap();
         assert_eq!(settings.get("remoteAccess.bind").map(String::as_str), Some("loopback"));
+    }
+
+    #[test]
+    fn file_clipboard_commands_require_local_origin() {
+        let app = test_ctx();
+        for cmd in [
+            "clipboard_file_state",
+            "clipboard_write_files",
+            "clipboard_read_files",
+            "clipboard_clear_files",
+        ] {
+            let err = dispatch(&app, cmd, &json!({}), "ws-1", CallOrigin::Remote).unwrap_err();
+            assert_eq!(err, format!("remote_cmd_forbidden:{cmd}"));
+        }
     }
 }

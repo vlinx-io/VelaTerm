@@ -1,3 +1,18 @@
+## v0.3.4 — 2026-11-22
+
+- 🪐 Antigravity-Gespräche enthalten jetzt eine integrierte Modellliste mit Gemini 4 Neon und Orchestrator (Neon), aktualisieren verfügbare Modelle beim Öffnen im Hintergrund und wechseln auch bei länger laufenden Sitzungen nahtlos zu neu veröffentlichten Modellen.
+- 🔑 In Antigravity-Gesprächen können Sie sich jetzt direkt in der Gesprächsansicht mit Google an- und abmelden.
+- 🛡️ Antigravity-Gespräche behalten Bypass-Berechtigungen beim Start zuverlässig bei, warten bei einem Kaltstart auf die Modellliste statt bei der ersten Nachricht fehlzuschlagen und frieren die App beim Öffnen einer Sitzung nicht mehr ein.
+- 📁 Der Bereich „Dateien“ unterstützt jetzt Mehrfachauswahl, Stapellöschung sowie Ausschneiden, Kopieren und Einfügen mit Finder und Datei-Explorer einschließlich Konfliktlösung.
+- 🔎 Der Filter im Bereich „Dateien“ sucht jetzt rekursiv auch in eingeklappten Ordnern und klappt passende Pfade automatisch auf.
+- 🖼️ Zu große Bilder, die in ein Gespräch eingefügt oder gezogen werden, werden jetzt automatisch skaliert und komprimiert statt abgelehnt; in den Einstellungen lässt sich ein Limit von 1, 2 oder 4 MB wählen.
+- 🔔 Das Hauptfenster und Remote-Fenster zeigen jetzt jeweils ihre eigene Anzahl ausstehender Einträge im Fenstertitel an, und das Dock- oder Taskleisten-Badge zeigt die Summe über alle geöffneten Fenster.
+- 🔍 Remote-Fenster für SSH, WSL und gekoppelte URLs zeigen jetzt die Zoom-Steuerung der Oberfläche in der Statusleiste an.
+- 🧱 Das Abfragen und Vertrauen von SSH-Hostschlüsseln berücksichtigt jetzt Aliase, Hostnamen und benutzerdefinierte Ports aus `~/.ssh/config`.
+- 🪟 Unter macOS bringt ein Klick auf das Dock-Symbol bei ausschließlich geöffneten Remote-Fenstern diese in den Vordergrund, statt ein neues Hauptfenster zu öffnen, und das Dock-Kontextmenü erhält New Window.
+- 💬 Gesprächsfehler entfernen jetzt rohe Terminal-Steuersequenzen, zeigen eine klare Meldung an, wenn ein anderer Codex-Prozess dasselbe Gespräch verwendet, und duplizieren Startfehler nicht mehr.
+- 🔧 Das Abbrechen des Ziehens eines Projekts in der Seitenleiste entfernt die Einfügemarkierung sofort, und Sitzungen in der Gesprächsansicht erhalten keine widersprüchlichen Statusmeldungen mehr von Terminal-Hooks.
+
 ## v0.3.3 — 2026-11-17
 
 - 🌐 Der Fernzugriff kann jetzt auf allen Netzwerken, auf einer bestimmten IPv4-Adresse wie einer Tailscale-Adresse oder nur auf diesem Computer hinter einem Tunnel oder Reverse-Proxy lauschen; `vela-server --serve` nimmt dieselbe Auswahl mit `--bind` entgegen.

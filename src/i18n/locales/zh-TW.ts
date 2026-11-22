@@ -490,6 +490,7 @@ const zhTW: typeof en = {
   "settings.catTerminal": "終端機", // Terminal
   "settings.catBehavior": "行為", // Behavior
   "settings.catAgents": "智慧體", // Agents
+  "settings.catPlugins": "外掛",
   "settings.agentDefaultsTitle": "新工作階段預設值",
   "settings.referSummaryTitle": "工作階段引用內容",
   "settings.referSummaryMode": "內容處理方式",
@@ -855,6 +856,10 @@ const zhTW: typeof en = {
   "settings.fontPreviewText": "敏捷的棕色狐狸跳過了那隻懶狗。The quick brown fox 0123456789",
   "settings.fontPreviewChat": "設定頁面已更新。每項字型設定都會立即生效，你也可以隨時恢復預設值。",
   "settings.fontResetGroup": "恢復預設字型",
+  "settings.chatImages": "圖片",
+  "settings.chatImageMaxMb": "圖片大小上限",
+  "settings.chatImageMaxMbHint": "傳送前會將長邊超過 1568 像素或大小超過此上限的圖片自動縮放並壓縮。僅當圖片無法解碼或壓縮後仍超過上限時才會略過。",
+  "settings.chatImageSizeMb": (mb: number) => `${mb} MB`,
   "settings.composerChips": "輸入工具列",
   "settings.composerChipsHint": "已開啟的項目會依此處順序顯示在訊息旁。功能暫時無法使用時，例如智慧代理未執行、沒有背景工作或尚未完成登入，項目仍會顯示，但為空白或無法操作。目前智慧代理不支援的功能不顯示。空間不足時，無法容納的項目會移至「更多」選單。在此關閉的項目在重新開啟前不會顯示於任何位置。",
   "settings.composerChipUp": (chip: string) => `將${chip}上移`,
@@ -1598,8 +1603,17 @@ const zhTW: typeof en = {
   "files.copyPath": "複製路徑", // Copy Path
   "files.copyRelPath": "複製相對路徑", // Copy Relative Path
   "files.filterPlaceholder": "篩選檔案…", // Filter files
+  "files.filterTruncated": "僅顯示前段符合項目，請繼續輸入以縮小範圍。",
   "files.dblClickOpen": "雙擊開啟", // Double-click to open
   "files.deleteConfirm": (name) => `確定刪除「${name}」？此操作無法復原。`, // Delete "{name}"? This can't be undone.
+  "files.deleteManyConfirm": (count) => `確定刪除這 ${count} 個項目？此操作無法復原。`, // Delete {count} items? This can't be undone.
+  "files.pasteConflictTitle": "項目已存在", // Item already exists
+  "files.pasteConflictBody": (name) => `目標資料夾中已存在名為「${name}」的項目。`, // An item named "{name}" already exists in the destination folder.
+  "files.pasteConflictProgress": (current, total) => `第 ${current} / ${total} 項`, // {current} of {total}
+  "files.pasteConflictApplyAll": "套用至所有剩餘衝突", // Apply to all remaining conflicts
+  "files.pasteReplace": "取代", // Replace
+  "files.pasteSkip": "略過", // Skip
+  "files.pasteKeepBoth": "保留兩者", // Keep Both
 
   // ── File transfer (remote access) ──
   "transfer.title": "傳輸", // Transfers
@@ -1615,6 +1629,7 @@ const zhTW: typeof en = {
   "transfer.foldersUnsupported": "資料夾傳不了。", // Folders can't be uploaded.
   "drop.browserFilesHint": "在瀏覽器中，這裡只能拖入圖片。其他檔案請先上傳到專案中。", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
   "files.copyFailed": "部分檔案未能複製。請確認這些檔案仍然存在，並且你有權限寫入這個目錄。", // Some files could not be copied. Check that they still exist and that you can write to this folder.
+  "files.pasteFailed": "部分項目未能貼上。請確認來源項目仍然存在，並且您有權限寫入目標資料夾。", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => `${n} 會話`, // {n} sessions
@@ -2273,6 +2288,10 @@ const zhTW: typeof en = {
   "chat.auth.claude.submit": "提交授權碼",
   "chat.auth.claude.invalidCode": "請貼上本次授權頁面提供的完整授權碼，包括 # 後面的內容。",
   "chat.auth.claude.externalAuth": "API 金鑰及其他已設定的驗證方式不會變更。",
+  "chat.auth.antigravity.pending": "開啟授權頁面並使用 Google 帳號登入，然後將頁面提供的授權碼或完整回呼網址貼到下方。",
+  "chat.auth.antigravity.failed": "無法完成登入，請重試，並確認目前的 Antigravity CLI 支援帳號授權。",
+  "chat.auth.antigravity.code": "授權碼或回呼網址",
+  "chat.auth.antigravity.invalidCode": "請貼上本次登入提供的授權碼或完整回呼網址，且不要包含空白字元。",
   "chat.auth.open": "開啟授權頁面",
   "chat.auth.zcode.required": "登入 ZCode 後才能使用目前的對話，請使用你的 Z.ai 或智譜 BigModel 帳號。",
   "chat.auth.zcode.pending": "請開啟授權頁面並同意授權。登入完成後，此處會自動更新。",
@@ -2487,6 +2506,7 @@ const zhTW: typeof en = {
   "chat.attach.modelTextOnly": "目前選取的模型不支援圖片。",
   "chat.signInRequired": (agent: string) => `使用會話檢視前需要先登入 ${agent}。請切換到終端機檢視完成登入，然後重新送出訊息。`,
   "chat.apiKeyRequired": "DeepSeek 需要 API 金鑰。請點擊輸入框旁的「API」填寫金鑰，或設定環境變數 `DEEPSEEK_API_KEY`，然後重新送出訊息。",
+  "chat.codex.activeWriter": "另一個 Codex 處理程序正在佔用此會話。請先關閉佔用該會話的其他終端機分頁或 Codex 處理程序，或稍候片刻再重試。",
   "chat.antigravity.permissionsHint": "需要核准的工具必須先在 Antigravity 設定中獲准使用，或在終端機檢視中使用。",
   "chat.antigravity.settingsHint": "請在回合之間變更模型、思考程度或權限。",
   "chat.antigravity.rewindTitle": "在終端機檢視中回退",
@@ -2672,7 +2692,30 @@ const zhTW: typeof en = {
   "kb.updatedOn": (date: string) => `更新於 ${date}`,
   "archive.sessionsCount": (count: string) => `${count} 個會話`,
 
+
   ...assist,
+  "plugins.title": "外掛",
+  "plugins.subtitle": "安裝、連結、啟用或重新載入外部 VelaTerm 外掛。每個外掛皆在獨立的後端程序執行，並動態載入介面。",
+  "plugins.installArchive": "從壓縮檔安裝…",
+  "plugins.linkDev": "連結本機外掛目錄…",
+  "plugins.localOnlyHint": "僅允許於本機主機安裝、連結或切換外掛狀態。",
+  "plugins.archivePathPrompt": "請輸入 .vlxplugin 或 .zip 外掛封裝檔的完整路徑：",
+  "plugins.devPathPrompt": "請輸入包含 manifest.json 的本機外掛目錄完整路徑：",
+  "plugins.empty": "尚未安裝任何外掛。請安裝 .vlxplugin 封裝檔或連結本機外掛目錄以開始使用。",
+  "plugins.sourceInstalled": "已安裝",
+  "plugins.sourceDev": "本機開發",
+  "plugins.statusRunning": "執行中",
+  "plugins.statusStarting": "啟動中…",
+  "plugins.statusDisabled": "已停用",
+  "plugins.statusStopped": "已停止",
+  "plugins.statusError": "錯誤",
+  "plugins.enable": "啟用",
+  "plugins.disable": "停用",
+  "plugins.reload": "重新載入",
+  "plugins.uninstall": "解除安裝",
+  "plugins.uninstallConfirm": (name: string) => `確定要解除安裝外掛「${name}」嗎？`,
+  "plugins.removeData": "同時刪除此外掛的本機資料目錄",
+  "plugins.loadFailed": "外掛介面載入失敗",
 };
 
 export default zhTW;

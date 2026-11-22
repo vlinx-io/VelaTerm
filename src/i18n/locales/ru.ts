@@ -502,6 +502,7 @@ const ru: typeof en = {
   "settings.catTerminal": "Терминал", // Terminal
   "settings.catBehavior": "Поведение", // Behavior
   "settings.catAgents": "Агенты", // Agents
+  "settings.catPlugins": "Плагины",
   "settings.agentDefaultsTitle": "Настройки новых сеансов по умолчанию",
   "settings.referSummaryTitle": "Контекст ссылок на сеансы",
   "settings.referSummaryMode": "Режим контекста",
@@ -873,6 +874,10 @@ const ru: typeof en = {
   "settings.fontPreviewText": "Съешь же ещё этих мягких французских булок да выпей чаю. 0123456789",
   "settings.fontPreviewChat": "Страница настроек обновлена. Каждый параметр шрифта применяется сразу, а значения по умолчанию можно восстановить в любой момент.",
   "settings.fontResetGroup": "Восстановить шрифты по умолчанию",
+  "settings.chatImages": "Изображения",
+  "settings.chatImageMaxMb": "Макс. размер изображения",
+  "settings.chatImageMaxMbHint": "Перед отправкой изображения больше 1568 пикселей по длинной стороне или превышающие этот лимит автоматически уменьшаются и сжимаются. Пропускаются только файлы, которые не удаётся декодировать или которые всё равно превышают лимит.",
+  "settings.chatImageSizeMb": (mb: number) => `${mb} МБ`,
   "settings.composerChips": "Панель инструментов ввода",
   "settings.composerChipsHint": "Включённые элементы отображаются рядом с сообщением в указанном порядке. Если функция временно недоступна (агент не запущен, нет фоновых задач или вход в аккаунт ещё не завершён), её элемент остаётся видимым, но пустым или неактивным. Функции, которые текущий агент не поддерживает, не отображаются. Элементы, для которых не хватает места, перемещаются в меню «Ещё». Выключенные здесь элементы нигде не отображаются, пока вы снова их не включите.",
   "settings.composerChipUp": (chip: string) => `Переместить «${chip}» вверх`,
@@ -1651,9 +1656,20 @@ const ru: typeof en = {
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
+  "files.filterTruncated": "Показаны только первые совпадения. Введите больше символов, чтобы уточнить фильтр.",
   "files.dblClickOpen": "Двойной клик, чтобы открыть",
   "files.deleteConfirm": (name) =>
     `Удалить «${name}»? Это действие нельзя отменить.`, // Delete "{name}"? This can't be undone.
+  "files.deleteManyConfirm": (count) =>
+    `Удалить ${count} ${plural(count, "элемент", "элемента", "элементов")}? Это действие нельзя отменить.`, // Delete {count} items? This can't be undone.
+  "files.pasteConflictTitle": "Элемент уже существует", // Item already exists
+  "files.pasteConflictBody": (name) =>
+    `Элемент с именем «${name}» уже существует в целевой папке.`, // An item named "{name}" already exists in the destination folder.
+  "files.pasteConflictProgress": (current, total) => `${current} из ${total}`, // {current} of {total}
+  "files.pasteConflictApplyAll": "Применить ко всем оставшимся конфликтам", // Apply to all remaining conflicts
+  "files.pasteReplace": "Заменить", // Replace
+  "files.pasteSkip": "Пропустить", // Skip
+  "files.pasteKeepBoth": "Оставить оба", // Keep Both
 
   // ── File transfer (remote access) ──
   "transfer.title": "Передача файлов", // Transfers
@@ -1669,6 +1685,7 @@ const ru: typeof en = {
   "transfer.foldersUnsupported": "Папки загрузить нельзя.", // Folders can't be uploaded.
   "drop.browserFilesHint": "В браузере сюда можно перетащить только изображения. Другие файлы сначала загрузите в проект.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
   "files.copyFailed": "Не удалось скопировать некоторые файлы. Убедитесь, что они ещё существуют и что у вас есть права на запись в эту папку.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
+  "files.pasteFailed": "Не удалось вставить некоторые элементы. Убедитесь, что исходные файлы существуют и у вас есть права на запись в эту папку.", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 
   // ── Status bar ──
   "statusbar.sessions": (n) =>
@@ -2345,6 +2362,10 @@ const ru: typeof en = {
   "chat.auth.claude.submit": "Отправить код",
   "chat.auth.claude.invalidCode": "Вставьте полный код текущей попытки авторизации, включая часть после #.",
   "chat.auth.claude.externalAuth": "Ключи API и другие настроенные способы аутентификации не изменятся.",
+  "chat.auth.antigravity.pending": "Откройте страницу авторизации, войдите через Google и вставьте показанный код авторизации или полный URL перенаправления.",
+  "chat.auth.antigravity.failed": "Не удалось завершить вход. Повторите попытку и убедитесь, что ваша версия Antigravity CLI поддерживает авторизацию аккаунта.",
+  "chat.auth.antigravity.code": "Код авторизации или URL перенаправления",
+  "chat.auth.antigravity.invalidCode": "Вставьте код авторизации или URL перенаправления из этой попытки входа без пробелов.",
   "chat.auth.open": "Открыть страницу авторизации",
   "chat.auth.zcode.required": "Чтобы пользоваться этим разговором, войдите в ZCode с учётной записью Z.ai или BigModel.",
   "chat.auth.zcode.pending": "Откройте страницу авторизации и разрешите доступ. После завершения входа это представление обновится автоматически.",
@@ -2560,6 +2581,7 @@ const ru: typeof en = {
   "chat.attach.modelTextOnly": "Выбранная модель не поддерживает изображения.",
   "chat.signInRequired": (agent: string) => `Чтобы пользоваться режимом диалога, войдите в ${agent}. Перейдите в режим терминала, выполните вход и отправьте сообщение ещё раз.`,
   "chat.apiKeyRequired": "Для DeepSeek нужен ключ API. Откройте «API» рядом с полем сообщения и укажите его либо задайте переменную окружения `DEEPSEEK_API_KEY`, затем отправьте сообщение ещё раз.",
+  "chat.codex.activeWriter": "Этот диалог сейчас используется другим процессом Codex. Закройте другую вкладку терминала или экземпляр Codex, удерживающий его, либо подождите немного и повторите попытку.",
   "chat.antigravity.permissionsHint": "Инструменты, требующие одобрения, необходимо заранее разрешить в настройках Antigravity или использовать в режиме терминала.",
   "chat.antigravity.settingsHint": "Изменяйте модель, уровень рассуждений или разрешения между ходами.",
   "chat.antigravity.rewindTitle": "Откат в виде терминала",
@@ -2745,7 +2767,30 @@ const ru: typeof en = {
   "kb.updatedOn": (date: string) => `Обновлено ${date}`,
   "archive.sessionsCount": (count: string) => `Сессий: ${count}`,
 
+
   ...assist,
+  "plugins.title": "Плагины",
+  "plugins.subtitle": "Устанавливайте, подключайте, включайте и перезагружайте внешние плагины VelaTerm. Каждый плагин работает в изолированном фоновом процессе и динамически загружает интерфейс.",
+  "plugins.installArchive": "Установить из архива…",
+  "plugins.linkDev": "Подключить локальный плагин…",
+  "plugins.localOnlyHint": "Установка, подключение и переключение плагинов доступны только на локальном хосте.",
+  "plugins.archivePathPrompt": "Введите полный путь к архиву .vlxplugin или .zip:",
+  "plugins.devPathPrompt": "Введите полный путь к локальной папке плагина с файлом manifest.json:",
+  "plugins.empty": "Плагины ещё не установлены. Установите архив .vlxplugin или подключите локальный каталог плагина.",
+  "plugins.sourceInstalled": "Установлен",
+  "plugins.sourceDev": "Локальная разработка",
+  "plugins.statusRunning": "Работает",
+  "plugins.statusStarting": "Запуск…",
+  "plugins.statusDisabled": "Отключён",
+  "plugins.statusStopped": "Остановлен",
+  "plugins.statusError": "Ошибка",
+  "plugins.enable": "Включить",
+  "plugins.disable": "Отключить",
+  "plugins.reload": "Перезагрузить",
+  "plugins.uninstall": "Удалить",
+  "plugins.uninstallConfirm": (name: string) => `Удалить плагин «${name}»?`,
+  "plugins.removeData": "Также удалить локальный каталог данных этого плагина",
+  "plugins.loadFailed": "Не удалось загрузить интерфейс плагина",
 };
 
 export default ru;

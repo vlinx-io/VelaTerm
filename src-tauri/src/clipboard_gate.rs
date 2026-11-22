@@ -12,6 +12,9 @@
 //! later main-thread copy or paste. Killing the helper also ends the wait cleanly.
 
 #[cfg(target_os = "macos")]
+#[cfg_attr(test, allow(unused_imports))]
+pub use platform::probe_is_ready;
+#[cfg(target_os = "macos")]
 pub use platform::{request_paste, run_probe};
 
 /// Waits until the clipboard can be read without blocking. Returns false when its source is not responding.

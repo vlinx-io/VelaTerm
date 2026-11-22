@@ -41,10 +41,12 @@ describe("fixed collections", () => {
     );
   });
 
-  it("ends the activity bar with Knowledge, which has no collection behind it", () => {
-    expect(RAIL_SECTIONS[RAIL_SECTIONS.length - 1]).toBe("knowledge");
+  it("ends the built-in activity bar with Knowledge and parses dynamic plugin sections", () => {
+    expect(RAIL_SECTIONS.slice(-2)).toEqual(["archive", "knowledge"]);
     expect(parseRailSection("knowledge")).toBe("knowledge");
+    expect(parseRailSection("plugin:colab")).toBe("plugin:colab");
     expect(sectionCollection("knowledge")).toBeNull();
+    expect(sectionCollection("plugin:colab")).toBeNull();
   });
 
   it("never moves a fixed collection or puts a project into Tasks or Chat", () => {

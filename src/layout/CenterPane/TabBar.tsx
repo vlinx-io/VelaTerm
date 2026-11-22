@@ -21,6 +21,7 @@ import { effectiveStatus, type Session } from "../../types";
 import { type TreeNodeRef } from "../LeftSidebar/ProjectTree";
 import { useSessionMenu } from "../sessionMenu";
 import { MemoryTab } from "../Memory/MemoryTab";
+import { PluginTab } from "../../plugins/PluginViews";
 import { SessionKindIcon } from "../sessionViewers/sessionMeta";
 import { taskUrl } from "./session/taskNavigation";
 import { newSessionUrl, openNewSessionHere } from "../NewSession/navigation";
@@ -574,6 +575,10 @@ export function TabBar() {
         );
       })}
       <MemoryTab
+        otherTabCount={openTabs.length}
+        onCloseOthers={() => { for (const id of openTabs) closeAnyTab(id); }}
+      />
+      <PluginTab
         otherTabCount={openTabs.length}
         onCloseOthers={() => { for (const id of openTabs) closeAnyTab(id); }}
       />

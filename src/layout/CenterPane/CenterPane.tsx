@@ -4,6 +4,8 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMemoryTab } from "../Memory/useMemoryTab";
+import { usePluginTab } from "../../plugins/navigation";
+import { PluginCenterRoute } from "../../plugins/PluginViews";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
 import { effectiveCombo, formatCombo } from "../../hooks/shortcutRegistry";
@@ -160,6 +162,7 @@ function Divider({
 
 export function CenterPane() {
   useMemoryTab();
+  usePluginTab();
   useEffect(preloadPaneViews, []);
   const t = useT();
   const projects = useTermStore((s) => s.projects);
@@ -332,6 +335,7 @@ export function CenterPane() {
       >
         <Suspense fallback={null}>
           <MemoryRoute />
+          <PluginCenterRoute />
         </Suspense>
         {searchOpen && activeSessionId && (sessionsById.get(activeSessionId) ?? ephemeralSessions[activeSessionId])?.engine !== "chat" && <SearchBar />}
 

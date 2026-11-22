@@ -1,3 +1,18 @@
+## v0.3.4 — 2026-11-22
+
+- 🪐 Les conversations Antigravity incluent désormais une liste de modèles intégrée comprenant Gemini 4 Neon et Orchestrator (Neon), actualisent les modèles disponibles en arrière-plan à l’ouverture et basculent sans friction les sessions de longue durée vers les nouveaux modèles.
+- 🔑 Les conversations Antigravity permettent désormais de se connecter avec Google et de se déconnecter directement depuis la vue conversation.
+- 🛡️ Les conversations Antigravity conservent désormais de manière fiable les permissions Bypass au démarrage, attendent que la liste des modèles soit prête lors d’un démarrage à froid au lieu d’échouer au premier message, et ne figent plus l’application à l’ouverture d’une session.
+- 📁 Le panneau Fichiers prend désormais en charge la sélection multiple, la suppression par lots ainsi que le couper, copier et coller avec le Finder et l’Explorateur de fichiers, y compris la résolution des conflits.
+- 🔎 Le filtre du panneau Fichiers recherche désormais récursivement dans les dossiers repliés et déplie automatiquement les chemins correspondants.
+- 🖼️ Les images trop volumineuses collées ou déposées dans une conversation sont désormais redimensionnées et compressées automatiquement au lieu d’être refusées, avec une limite réglable sur 1, 2 ou 4 Mo dans les Paramètres.
+- 🔔 La fenêtre principale et les fenêtres distantes affichent désormais chacune leur propre compteur en attente dans leur titre, et le badge du Dock ou de la barre des tâches indique le total de toutes les fenêtres ouvertes.
+- 🔍 Les fenêtres distantes SSH, WSL et URL appairée affichent désormais le contrôle de zoom de l’interface dans la barre d’état.
+- 🧱 La détection et la mise en confiance des clés d’hôte SSH respectent désormais les alias, noms d’hôte et ports personnalisés définis dans `~/.ssh/config`.
+- 🪟 Sur macOS, cliquer sur l’icône du Dock lorsque seules des fenêtres distantes sont ouvertes les met au premier plan au lieu d’ouvrir une nouvelle fenêtre principale, et le menu contextuel du Dock ajoute New Window.
+- 💬 Les erreurs de conversation suppriment désormais les séquences d’échappement brutes du terminal, affichent un message clair lorsqu’un autre processus Codex utilise déjà la même conversation et ne dupliquent plus les erreurs de démarrage.
+- 🔧 Annuler le glisser-déposer d’un projet dans la barre latérale efface immédiatement l’indicateur d’insertion, et les sessions en vue conversation ne reçoivent plus de mises à jour d’état contradictoires des hooks de terminal.
+
 ## v0.3.3 — 2026-11-17
 
 - 🌐 L’accès distant peut désormais écouter sur tous les réseaux, sur une adresse IPv4 précise comme une adresse Tailscale, ou uniquement sur cet ordinateur derrière un tunnel ou un proxy inverse ; `vela-server --serve` accepte le même choix avec `--bind`.

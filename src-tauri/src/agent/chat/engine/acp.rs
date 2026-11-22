@@ -42,6 +42,64 @@ const RETIRE_WAIT_TIMEOUT: Duration = Duration::from_secs(3);
 /// Wake interval for a parked `Stop` hook checking `.system_generated/messages/` for deliveries.
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
+/// Backoff delays when retrying an Antigravity prompt rejected during cold-start model loading.
+fn cold_model_retry_delays() -> &'static [Duration] {
+    #[cfg(not(test))]
+    const DELAYS: &[Duration] = &[
+        Duration::from_secs(1),
+        Duration::from_secs(2),
+        Duration::from_secs(3),
+        Duration::from_secs(4),
+        Duration::from_secs(5),
+        Duration::from_secs(5),
+        Duration::from_secs(5),
+    ];
+    #[cfg(test)]
+    const DELAYS: &[Duration] = &[
+        Duration::from_millis(25),
+        Duration::from_millis(25),
+        Duration::from_millis(25),
+    ];
+    DELAYS
+}
+
+#[derive(Default)]
+struct RetryWait {
+    woken: Mutex<bool>,
+    cv: Condvar,
+}
+
+impl RetryWait {
+    fn wake(&self) {
+        let mut woken = self.woken.lock().unwrap();
+        *woken = true;
+        self.cv.notify_all();
+    }
+
+    fn wait_for(&self, duration: Duration) {
+        let deadline = Instant::now() + duration;
+        let mut woken = self.woken.lock().unwrap();
+        while !*woken {
+            let Some(left) = deadline.checked_duration_since(Instant::now()) else {
+                break;
+            };
+            let (next, timed_out) = self.cv.wait_timeout(woken, left).unwrap();
+            woken = next;
+            if timed_out.timed_out() {
+                break;
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ActivePrompt {
+    text: String,
+    images: Vec<ChatImage>,
+    attempts: usize,
+    had_output: bool,
+}
+
 #[derive(Clone)]
 pub(super) enum PendingRequest {
     Permission { id: Value, params: Value },
@@ -82,6 +140,12 @@ pub(super) struct AcpState {
     pub(super) images: bool,
     /// Set once `initialize` has answered; before that the view cannot know.
     pub(super) images_known: bool,
+    /// Set once `initialize` has answered, so account operations know the server is listening.
+    pub(in crate::agent::chat::engine) initialized: bool,
+    /// Whether `initialize` advertised `agentCapabilities.auth.logout`.
+    pub(in crate::agent::chat::engine) auth_logout_supported: bool,
+    /// Running `agy acp --login` helper process while Antigravity sign-in is in progress.
+    pub(in crate::agent::chat::engine) login: Option<Arc<Mutex<super::auth::antigravity::AntigravityLogin>>>,
     load_session: bool,
     /// Whether the agent can reopen a conversation without replaying it (`session/resume`).
     resume_session: bool,
@@ -102,8 +166,24 @@ pub(super) struct AcpState {
     pending_journal: Vec<String>,
     /// The collaboration mode saved with the session, applied once the session reports its own.
     pub(super) desired_mode: Option<String>,
+    /// Target ACP mode id while an `acp_set_mode` request is in flight.
+    pending_mode: Option<String>,
+    /// Whether startup model/effort selection is waiting for the startup mode switch to finish.
+    pending_startup_model_sync: bool,
+    /// Whether an async startup `acp_set_model` request is still in flight.
+    pending_model_switch: bool,
+    /// Native session id waiting to finish Antigravity startup once mode/model sync settles.
+    startup_native: Option<String>,
+    /// Set when Antigravity opened before `FetchAvailableModels` populated its model list.
+    awaiting_initial_models: bool,
     /// Reasoning effort waiting for a startup model switch to publish the target model's options.
     pending_effort: Option<String>,
+    /// Active prompt payload kept so Antigravity cold-start model-not-ready errors can retry cleanly.
+    active_prompt: Option<ActivePrompt>,
+    /// True while a cold-start Antigravity prompt is sleeping before re-dispatching.
+    retrying_prompt: bool,
+    /// Wakes a sleeping cold-start retry early on `config_option_update`, cancel, or shutdown.
+    model_retry_wait: Option<Arc<RetryWait>>,
     /// Antigravity background task state read from `.system_generated/`.
     pub(super) tasks: super::antigravity_tasks::State,
     /// Whether an Antigravity `Stop` hook is currently keeping `session/prompt` open while idle.
@@ -124,7 +204,7 @@ pub(super) struct AcpState {
 
 impl AcpState {
     pub(super) fn prompt_active(&self) -> bool {
-        self.prompt.is_some() || !self.steers.is_empty()
+        self.prompt.is_some() || !self.steers.is_empty() || self.retrying_prompt
     }
 }
 
@@ -340,6 +420,7 @@ fn handle_response(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: 
             }
             None => on_open(app, session_id, proc, &result.unwrap_or(Value::Null), kind != Some("acp_session_new")),
         },
+        Some("acp_set_mode") => on_mode_switched(app, session_id, proc, result, error),
         Some("acp_set_model") => on_model_switched(app, session_id, proc, result, error),
         Some("prompt") => on_prompt_end(app, session_id, proc, id, result, error),
         _ => {}
@@ -350,6 +431,8 @@ fn on_initialize(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, result
     let capabilities = result.get("agentCapabilities").cloned().unwrap_or(Value::Null);
     let (resume, cwd, images) = {
         let mut state = proc.acp.lock().unwrap();
+        state.initialized = true;
+        state.auth_logout_supported = capabilities.pointer("/auth/logout").is_some_and(|v| !v.is_null());
         state.load_session = capabilities.get("loadSession").and_then(Value::as_bool).unwrap_or(false);
         state.resume_session = capabilities.pointer("/sessionCapabilities/resume").is_some_and(|resume| !resume.is_null());
         let images = capabilities.pointer("/promptCapabilities/image").and_then(Value::as_bool).unwrap_or(false);
@@ -411,6 +494,7 @@ fn on_open(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, result: &Val
         (state.catalog.clone(), presets, current)
     };
     if proc.kind == SessionKind::Antigravity {
+        proc.acp.lock().unwrap().awaiting_initial_models = !catalog_snapshot.model_switchable();
         crate::agent::antigravity_models::remember_acp(app, &catalog_snapshot);
         super::antigravity_tasks::on_open(app, session_id, proc, &native);
     }
@@ -421,7 +505,34 @@ fn on_open(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, result: &Val
     };
     emit(app, session_id, json!({"type":"settingsChanged","model":proc.model.lock().unwrap().clone(),
         "effort":proc.effort.lock().unwrap().clone(), "images":images}));
-    finish_startup(app, session_id, proc, &native);
+    // Hold Antigravity's ready announcement until startup mode/model switches have written their
+    // final config request, so the first queued prompt cannot race ahead of them on stdin.
+    let defer_startup = proc.kind == SessionKind::Antigravity && {
+        let mut state = proc.acp.lock().unwrap();
+        if state.pending_startup_model_sync || state.pending_model_switch {
+            state.startup_native = Some(native.clone());
+            true
+        } else {
+            false
+        }
+    };
+    if !defer_startup {
+        finish_startup(app, session_id, proc, &native);
+    }
+}
+
+fn maybe_finish_deferred_startup(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
+    let ready_native = {
+        let mut state = proc.acp.lock().unwrap();
+        if state.pending_startup_model_sync || state.pending_model_switch {
+            None
+        } else {
+            state.startup_native.take()
+        }
+    };
+    if let Some(native) = ready_native {
+        finish_startup(app, session_id, proc, &native);
+    }
 }
 
 /// Mark the engine ready and then announce the native session.
@@ -507,6 +618,14 @@ fn presets(catalog: &Catalog) -> Vec<CollaborationModePreset> {
     }).collect()
 }
 
+/// Pick the ACP mode that backs Antigravity's Bypass mode when `auto` may be omitted.
+fn antigravity_bypass_acp_mode(modes: &[wire::Choice]) -> &'static str {
+    ["auto", "accept-edits", "default"]
+        .into_iter()
+        .find(|candidate| modes.iter().any(|choice| choice.id == *candidate))
+        .unwrap_or("auto")
+}
+
 /// Bring the opened session to the mode, model and reasoning level saved with this conversation.
 fn apply_saved_selection(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, presets: &[CollaborationModePreset], current: Option<String>) {
     if proc.kind == SessionKind::Antigravity {
@@ -529,16 +648,25 @@ fn apply_saved_selection(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>
         && proc.mode.lock().unwrap().as_str() == "bypassPermissions"
         && desired_mode.as_deref().is_some_and(|mode| !presets.iter().any(|preset| preset.mode == mode))
     {
-        ["auto", "accept-edits", "default"]
-            .into_iter()
-            .find(|candidate| presets.iter().any(|preset| preset.mode == *candidate))
-            .map(str::to_string)
+        let catalog_modes = proc.acp.lock().unwrap().catalog.modes.clone();
+        Some(antigravity_bypass_acp_mode(&catalog_modes).to_string())
     } else {
         desired_mode
     };
     let mut selected = current.clone();
+    let mut mode_switching = false;
     if let Some(mode) = desired_mode.filter(|mode| presets.iter().any(|preset| &preset.mode == mode)) {
-        if Some(&mode) != current.as_ref() && set_mode_request(proc, &mode, false).is_ok() { selected = Some(mode); }
+        if Some(&mode) != current.as_ref() {
+            // Wait for the mode switch to complete before sending model/effort changes so the agent
+            // cannot emit `config_option_update` with the pre-switch mode while both run concurrently.
+            proc.acp.lock().unwrap().pending_startup_model_sync = true;
+            if set_mode_request(proc, &mode, false).is_ok() {
+                selected = Some(mode);
+                mode_switching = true;
+            } else {
+                proc.acp.lock().unwrap().pending_startup_model_sync = false;
+            }
+        }
     }
     *proc.collaboration_mode.lock().unwrap() = selected.clone();
     if proc.kind != SessionKind::Antigravity {
@@ -546,6 +674,26 @@ fn apply_saved_selection(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>
         emit(app, session_id, json!({"type":"collaborationModes","modes":presets,"mode":selected}));
     }
 
+    if mode_switching {
+        let catalog = proc.acp.lock().unwrap().catalog.clone();
+        if catalog.model_switchable() {
+            let invalid_saved = {
+                let saved = proc.model.lock().unwrap();
+                saved.as_deref().is_none_or(|model| !catalog.models.iter().any(|choice| choice.id == model))
+            };
+            if invalid_saved {
+                *proc.model.lock().unwrap() = catalog.model.clone();
+                if !catalog.effort_switchable() {
+                    *proc.effort.lock().unwrap() = None;
+                }
+            }
+        }
+    } else {
+        apply_saved_model_and_effort(proc);
+    }
+}
+
+fn apply_saved_model_and_effort(proc: &Arc<ChatProcess>) {
     let catalog = proc.acp.lock().unwrap().catalog.clone();
     let mut model_switching = false;
     if catalog.model_switchable() {
@@ -556,7 +704,9 @@ fn apply_saved_selection(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>
                 // response before applying the saved effort.
                 let desired_effort = proc.effort.lock().unwrap().clone();
                 if set_model_request(proc, &model, false).is_ok() {
-                    proc.acp.lock().unwrap().pending_effort = desired_effort;
+                    let mut state = proc.acp.lock().unwrap();
+                    state.pending_effort = desired_effort;
+                    state.pending_model_switch = true;
                     model_switching = true;
                 } else {
                     *proc.model.lock().unwrap() = catalog.model.clone();
@@ -578,28 +728,76 @@ fn apply_saved_selection(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>
     }
 }
 
+/// Complete an asynchronous mode switch and resume deferred startup model/effort selection.
+fn on_mode_switched(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, result: Option<Value>, error: Option<Value>) {
+    let (expected, run_model_sync, fallback_mode, catalog) = {
+        let mut state = proc.acp.lock().unwrap();
+        let expected = state.pending_mode.take();
+        let run_model_sync = std::mem::take(&mut state.pending_startup_model_sync);
+        if error.is_none() {
+            if let Some(options) = result.as_ref().and_then(|res| res.get("configOptions")).and_then(Value::as_array) {
+                state.catalog.absorb_options(options);
+            }
+            if let Some(mode) = expected.as_ref() {
+                state.catalog.mode = Some(mode.clone());
+            }
+        }
+        let fallback_mode = error.as_ref().and_then(|_| state.catalog.mode.clone());
+        (expected, run_model_sync, fallback_mode, state.catalog.clone())
+    };
+    if proc.kind == SessionKind::Antigravity && error.is_none() {
+        crate::agent::antigravity_models::remember_acp(app, &catalog);
+    }
+    if let Some(actual) = fallback_mode {
+        adopt_mode(app, session_id, proc, &actual);
+    } else if let Some(mode) = expected {
+        adopt_mode(app, session_id, proc, &mode);
+    }
+    if run_model_sync {
+        let prev_model = proc.model.lock().unwrap().clone();
+        let prev_effort = proc.effort.lock().unwrap().clone();
+        apply_saved_model_and_effort(proc);
+        let next_model = proc.model.lock().unwrap().clone();
+        let next_effort = proc.effort.lock().unwrap().clone();
+        if next_model != prev_model || next_effort != prev_effort {
+            emit(app, session_id, json!({"type":"settingsChanged","model":next_model,"effort":next_effort}));
+        }
+    }
+    maybe_finish_deferred_startup(app, session_id, proc);
+}
+
 /// Complete a startup model switch after `session/set_config_option` returns the new model's options.
 fn on_model_switched(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, result: Option<Value>, error: Option<Value>) {
     if error.is_some() {
-        let model = {
+        let (model, retry_wait) = {
             let mut state = proc.acp.lock().unwrap();
+            state.pending_model_switch = false;
             state.pending_effort = None;
-            state.catalog.model.clone()
+            (state.catalog.model.clone(), state.model_retry_wait.clone())
         };
         *proc.model.lock().unwrap() = model.clone();
         emit(app, session_id, json!({"type":"settingsChanged","model":model,"effort":proc.effort.lock().unwrap().clone()}));
+        maybe_finish_deferred_startup(app, session_id, proc);
+        if let Some(wait) = retry_wait {
+            wait.wake();
+        }
         return;
     }
     let current_model = proc.model.lock().unwrap().clone();
-    let (catalog, desired_effort) = {
+    let (catalog, desired_effort, retry_wait) = {
         let mut state = proc.acp.lock().unwrap();
+        state.pending_model_switch = false;
+        let pending_mode = state.pending_mode.clone();
         if let Some(options) = result.as_ref().and_then(|res| res.get("configOptions")).and_then(Value::as_array) {
             state.catalog.absorb_options(options);
+            if let Some(expected) = pending_mode {
+                state.catalog.mode = Some(expected);
+            }
         } else if let Some(model) = current_model {
             state.catalog.model = Some(model);
         }
         let desired_effort = state.pending_effort.take();
-        (state.catalog.clone(), desired_effort)
+        (state.catalog.clone(), desired_effort, state.model_retry_wait.clone())
     };
     if proc.kind == SessionKind::Antigravity {
         crate::agent::antigravity_models::remember_acp(app, &catalog);
@@ -621,11 +819,29 @@ fn on_model_switched(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, re
     emit(app, session_id, json!({"type":"models"}));
     emit(app, session_id, json!({"type":"settingsChanged","model":proc.model.lock().unwrap().clone(),
         "effort":proc.effort.lock().unwrap().clone()}));
+    maybe_finish_deferred_startup(app, session_id, proc);
+    if let Some(wait) = retry_wait {
+        wait.wake();
+    }
 }
 
 /// The agent refused to start the conversation. Signing in is the one cause the person can act on, so it
 /// becomes a stable code the view explains; anything else is shown as the agent wrote it.
 fn fail_start(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, error: &Value) {
+    if proc.kind == SessionKind::Antigravity && wire::auth_required(error) {
+        let waiting: Vec<_> = proc.turn.lock().unwrap().waiting.drain(..).collect();
+        if !waiting.is_empty() {
+            let ids: Vec<String> = waiting.iter().map(|item| item.id.clone()).collect();
+            let _ = crate::agent::spawn_requests::cancel_queued_many(app, session_id, &ids);
+            super::emit_queue(app, session_id, proc);
+            for item in waiting.into_iter().rev() {
+                emit(app, session_id, json!({"type":"unsent","id":item.id,"text":item.text,"images":item.images}));
+            }
+        }
+        // Keep the initialized ACP process alive so the inline Antigravity account panel can drive sign-in.
+        super::auth::antigravity::require(app, session_id, proc);
+        return;
+    }
     let message = if wire::auth_required(error) {
         format!("agent_sign_in_required:{}", proc.kind.as_str())
     } else if wire::api_key_missing(error) {
@@ -650,32 +866,63 @@ fn handle_update(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, update
         }
         "current_mode_update" => {
             if let Some(mode) = update.get("currentModeId").and_then(Value::as_str) {
-                proc.acp.lock().unwrap().catalog.mode = Some(mode.to_string());
-                adopt_mode(app, session_id, proc, mode);
+                let stale = {
+                    let mut state = proc.acp.lock().unwrap();
+                    if state.pending_mode.as_deref().is_some_and(|expected| expected != mode) {
+                        true
+                    } else {
+                        state.catalog.mode = Some(mode.to_string());
+                        state.desired_mode.as_deref().is_some_and(|desired| desired != mode)
+                    }
+                };
+                if !stale {
+                    adopt_mode(app, session_id, proc, mode);
+                }
             }
             return;
         }
         "config_option_update" => {
             let options = update.get("configOptions").and_then(Value::as_array).cloned().unwrap_or_default();
-            let (changed_models, changed_modes, catalog, mode, model, effort, switching) = {
+            let (changed_models, changed_modes, catalog, mode, model, effort, deferring_model, switching, initial_models_arrived, retry_wait) = {
                 let mut state = proc.acp.lock().unwrap();
                 let prev_models = state.catalog.models.clone();
                 let prev_efforts = state.catalog.efforts.clone();
                 let prev_model_efforts = state.catalog.model_efforts.clone();
                 let prev_modes = state.catalog.modes.clone();
-                state.catalog.absorb_options(&options);
+                let saw_mode = state.catalog.absorb_options(&options);
+                let mut adopt = if saw_mode { state.catalog.mode.clone() } else { None };
+                if let Some(expected) = state.pending_mode.as_deref() {
+                    if state.catalog.mode.as_deref() != Some(expected) {
+                        adopt = None;
+                    }
+                }
+                if state.desired_mode.as_deref().is_some_and(|desired| Some(desired) != state.catalog.mode.as_deref()) {
+                    adopt = None;
+                }
                 let changed_models = state.catalog.models != prev_models
                     || state.catalog.efforts != prev_efforts
                     || state.catalog.model_efforts != prev_model_efforts;
                 let changed_modes = state.catalog.modes != prev_modes;
+                let initial_models_arrived = proc.kind == SessionKind::Antigravity
+                    && state.awaiting_initial_models
+                    && state.catalog.model_switchable();
+                if initial_models_arrived {
+                    state.awaiting_initial_models = false;
+                }
                 (
                     changed_models,
                     changed_modes,
                     state.catalog.clone(),
-                    state.catalog.mode.clone(),
+                    adopt,
                     state.catalog.model.clone(),
                     state.catalog.effort.clone(),
-                    state.pending_effort.is_some(),
+                    state.pending_startup_model_sync || initial_models_arrived,
+                    state.pending_effort.is_some()
+                        || state.pending_model_switch
+                        || state.pending_startup_model_sync
+                        || initial_models_arrived,
+                    initial_models_arrived,
+                    state.model_retry_wait.clone(),
                 )
             };
             if proc.kind == SessionKind::Antigravity {
@@ -688,13 +935,26 @@ fn handle_update(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, update
                 emit(app, session_id, json!({"type":"collaborationModes","modes":next_presets,
                     "mode":proc.collaboration_mode.lock().unwrap().clone()}));
             }
-            if catalog.model_switchable() && model.is_some() { *proc.model.lock().unwrap() = model; }
-            // Wait for `on_model_switched` while a startup model switch's effort is still pending.
-            if !switching {
-                if catalog.effort_switchable() {
-                    if effort.is_some() { *proc.effort.lock().unwrap() = effort; }
-                } else if catalog.model_switchable() {
-                    *proc.effort.lock().unwrap() = None;
+            if initial_models_arrived && !proc.acp.lock().unwrap().pending_startup_model_sync {
+                // `session/new` or `session/resume` returned before `FetchAvailableModels` finished;
+                // apply the conversation's saved model and effort now instead of keeping the default.
+                apply_saved_model_and_effort(proc);
+            } else {
+                if !deferring_model && catalog.model_switchable() && model.is_some() { *proc.model.lock().unwrap() = model; }
+                // Wait for `on_model_switched` while a startup model switch's effort is still pending.
+                if !switching {
+                    if catalog.effort_switchable() {
+                        if effort.is_some() { *proc.effort.lock().unwrap() = effort; }
+                    } else if catalog.model_switchable() {
+                        *proc.effort.lock().unwrap() = None;
+                    }
+                }
+            }
+            if (initial_models_arrived || (changed_models && catalog.model_switchable()))
+                && !proc.acp.lock().unwrap().pending_model_switch
+            {
+                if let Some(wait) = retry_wait {
+                    wait.wake();
                 }
             }
             if changed_models {
@@ -737,6 +997,11 @@ fn handle_update(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, update
         for row in rows { replay.place(row); }
         return;
     }
+    if !rows.is_empty() {
+        if let Some(active) = state.active_prompt.as_mut() {
+            active.had_output = true;
+        }
+    }
     if state.journal.is_some() {
         state.pending_journal.push(wire::journal_line(update, now_ms() as i64));
         if state.pending_journal.len() >= JOURNAL_BATCH { flush_journal_locked(&mut state); }
@@ -771,7 +1036,15 @@ fn adopt_mode(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, mode: &st
     }
     if proc.kind == SessionKind::Antigravity {
         let current_perm = proc.mode.lock().unwrap().clone();
-        let next_perm = permission_for_acp_mode(mode, &current_perm);
+        let bypass_backing = {
+            let state = proc.acp.lock().unwrap();
+            antigravity_bypass_acp_mode(&state.catalog.modes)
+        };
+        let next_perm = if current_perm == "bypassPermissions" && mode == bypass_backing {
+            "bypassPermissions"
+        } else {
+            permission_for_acp_mode(mode, &current_perm)
+        };
         if next_perm != current_perm {
             *proc.mode.lock().unwrap() = next_perm.to_string();
             let stored = if next_perm == "bypassPermissions" { "skip" } else { next_perm };
@@ -1067,6 +1340,7 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
         let turn = proc.turn.lock().unwrap();
         (turn.interrupted, turn.started_at)
     };
+    let mut cold_retry = None;
     let settled_while_parked = {
         let mut state = proc.acp.lock().unwrap();
         // A response can belong to the first prompt or to one sent into the running turn. Anything else is
@@ -1084,6 +1358,48 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
         let parked_flag = state.parked_idle;
         let was_settled_while_parked = state.settled_while_parked;
         state.parked_idle = false;
+        // Antigravity can answer `session/resume` or `session/new` before `FetchAvailableModels`
+        // finishes populating its in-memory model map, rejecting the first `session/prompt` with
+        // `failed to construct executor: unknown model key MODEL_PLACEHOLDER_...` or `plan model
+        // not specified`. Retry transparently while keeping the turn visibly active.
+        if proc.kind == SessionKind::Antigravity
+            && !canceled
+            && !was_settled_while_parked
+            && state.steers.is_empty()
+            && state.requests.is_empty()
+            && proc.alive.load(Ordering::Relaxed)
+            && !proc.released.load(Ordering::Relaxed)
+        {
+            if let Some(err) = error.as_ref().filter(|err| wire::antigravity_model_not_ready(err)) {
+                let delays = cold_model_retry_delays();
+                if let Some(active) = state.active_prompt.as_mut() {
+                    if !active.had_output && active.attempts < delays.len() {
+                        let delay = delays[active.attempts];
+                        active.attempts += 1;
+                        let attempt = active.attempts;
+                        let payload = (active.text.clone(), active.images.clone());
+                        let wait = Arc::new(RetryWait::default());
+                        if let Some(prev) = state.model_retry_wait.replace(wait.clone()) {
+                            prev.wake();
+                        }
+                        state.retrying_prompt = true;
+                        let _ = state.mapper.finish();
+                        cold_retry = Some((
+                            attempt,
+                            delay,
+                            payload.0,
+                            payload.1,
+                            wait,
+                            wire::antigravity_plan_model_missing(err),
+                            wire::error_text(err),
+                        ));
+                    }
+                }
+            }
+        }
+        if cold_retry.is_some() {
+            false
+        } else {
         // Antigravity answers the first prompt as soon as a steer is sent, while the turn keeps streaming.
         // Wait for every prompt that was sent into the turn before ending it. A cancellation or error is
         // terminal, so the remaining prompts are dropped instead of holding the turn open forever.
@@ -1095,6 +1411,11 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
                 state.parked_idle = true;
             }
             return;
+        }
+        state.active_prompt = None;
+        state.retrying_prompt = false;
+        if let Some(wait) = state.model_retry_wait.take() {
+            wait.wake();
         }
         state.settled_while_parked = false;
         let stop_park = state.stop_park.take();
@@ -1113,11 +1434,28 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
         let mut timeline = proc.timeline.lock().unwrap();
         for row in rows { timeline.upsert(row); }
         was_settled_while_parked
+        }
     };
+    if let Some((attempt, delay, text, images, wait, plan_model_missing, reason)) = cold_retry {
+        crate::diagnostics::record("WARN", "agent_chat", json!({
+            "sessionId": session_id,
+            "event": "antigravity_cold_model_retry",
+            "attempt": attempt,
+            "delayMs": delay.as_millis() as u64,
+            "planModelMissing": plan_model_missing,
+            "reason": reason,
+        }));
+        spawn_cold_model_retry(app.clone(), session_id.to_string(), proc.clone(), text, images, delay, wait, plan_model_missing);
+        return;
+    }
     cancel_pending(app, session_id, proc);
     let failure = match &error {
         Some(error) if wire::auth_required(error) => {
-            emit(app, session_id, json!({"type":"error","message":format!("agent_sign_in_required:{}", proc.kind.as_str())}));
+            if proc.kind == SessionKind::Antigravity {
+                super::auth::antigravity::require(app, session_id, proc);
+            } else {
+                emit(app, session_id, json!({"type":"error","message":format!("agent_sign_in_required:{}", proc.kind.as_str())}));
+            }
             Some(wire::error_text(error))
         }
         // The turn never reached the model; the view explains where the key goes instead of repeating the
@@ -1132,6 +1470,9 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
             wire::stop_reason_error(reason).map(str::to_string)
         }
     };
+    if error.is_none() && failure.is_none() {
+        super::auth::turn_succeeded(app, session_id, proc);
+    }
     if let Some(message) = failure.as_deref().filter(|_| !canceled) {
         let turn = proc.acp.lock().unwrap().mapper.turn();
         proc.timeline.lock().unwrap().upsert(ChatRow::Error { id: format!("e-acp-{turn}"), message: message.to_string() });
@@ -1155,6 +1496,125 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
         // it persisted beside its recording and let a placeholder or adopted name follow it.
         crate::agent::server::sync_grok_title_from_disk(app, session_id);
     }
+}
+
+/// Retry an Antigravity prompt after a short backoff (or immediately once `config_option_update`
+/// publishes the model list) without duplicating the user row or ending the turn.
+#[allow(clippy::too_many_arguments)]
+fn spawn_cold_model_retry(
+    app: AppCtx,
+    session_id: String,
+    proc: Arc<ChatProcess>,
+    text: String,
+    images: Vec<ChatImage>,
+    delay: Duration,
+    wait: Arc<RetryWait>,
+    plan_model_missing: bool,
+) {
+    std::thread::spawn(move || {
+        wait.wait_for(delay);
+        if !proc.alive.load(Ordering::Relaxed) || proc.released.load(Ordering::Relaxed) {
+            return;
+        }
+        let still_retrying = {
+            let state = proc.acp.lock().unwrap();
+            state.retrying_prompt
+                && state.model_retry_wait.as_ref().is_some_and(|cur| Arc::ptr_eq(cur, &wait))
+        };
+        if !still_retrying {
+            return;
+        }
+        if plan_model_missing {
+            try_sync_antigravity_plan_model(&app, &session_id, &proc);
+        }
+        let Some(native) = proc.agent_session_id.lock().unwrap().clone() else {
+            return;
+        };
+        // Follow the established `turn -> acp` lock order used by `interrupt_locked`.
+        let next_id = {
+            let turn = proc.turn.lock().unwrap();
+            if !turn.running || turn.interrupted || !proc.alive.load(Ordering::Relaxed) || proc.released.load(Ordering::Relaxed) {
+                let mut state = proc.acp.lock().unwrap();
+                if state.model_retry_wait.as_ref().is_some_and(|cur| Arc::ptr_eq(cur, &wait)) {
+                    state.retrying_prompt = false;
+                    state.model_retry_wait = None;
+                    state.active_prompt = None;
+                }
+                return;
+            }
+            let mut state = proc.acp.lock().unwrap();
+            if !state.retrying_prompt
+                || !state.model_retry_wait.as_ref().is_some_and(|cur| Arc::ptr_eq(cur, &wait))
+            {
+                return;
+            }
+            let id = proc.request_id("prompt");
+            state.retrying_prompt = false;
+            state.model_retry_wait = None;
+            state.prompt = Some(id.clone());
+            id
+        };
+        if let Err(error) = proc.write(&wire::prompt(&next_id, &native, &text, &images)) {
+            proc.pending.lock().unwrap().remove(&next_id);
+            let turn_num = {
+                let mut state = proc.acp.lock().unwrap();
+                if state.prompt.as_deref() == Some(next_id.as_str()) {
+                    state.prompt = None;
+                }
+                state.active_prompt = None;
+                state.mapper.turn()
+            };
+            proc.timeline.lock().unwrap().upsert(ChatRow::Error {
+                id: format!("e-acp-{turn_num}"),
+                message: error,
+            });
+            handle_turn_end(&app, &session_id, &proc, "success", None);
+        }
+    });
+}
+
+/// If a cold-started Antigravity session failed with `plan model not specified`, try pushing the
+/// conversation's saved model over `session/set_config_option` once models may have loaded.
+fn try_sync_antigravity_plan_model(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
+    let desired_model = proc.model.lock().unwrap().clone();
+    let Some(model) = desired_model else { return; };
+    let Some(native) = proc.agent_session_id.lock().unwrap().clone() else { return; };
+    let (option, already_ready) = {
+        let state = proc.acp.lock().unwrap();
+        let option = state.catalog.model_option.clone().unwrap_or_else(|| "model".to_string());
+        let already_ready = state.catalog.model_switchable() && state.catalog.model.as_deref() == Some(model.as_str());
+        (option, already_ready)
+    };
+    if already_ready {
+        return;
+    }
+    let Ok(result) = proc.request_and_wait("acp_set_model", |id| {
+        wire::set_config_option(id, &native, &option, &model)
+    }) else {
+        return;
+    };
+    let catalog = {
+        let mut state = proc.acp.lock().unwrap();
+        state.awaiting_initial_models = false;
+        state.catalog.model = Some(model);
+        if let Some(options) = result.get("configOptions").and_then(Value::as_array) {
+            state.catalog.absorb_options(options);
+        }
+        state.catalog.clone()
+    };
+    crate::agent::antigravity_models::remember_acp(app, &catalog);
+    if catalog.effort_switchable() {
+        let desired_effort = proc.effort.lock().unwrap().clone();
+        if let Some(eff) = desired_effort.filter(|eff| {
+            catalog.effort.as_deref() != Some(eff.as_str())
+                && catalog.efforts.iter().any(|c| &c.id == eff)
+        }) {
+            let _ = set_effort_request(proc, &eff, true);
+        }
+    }
+    emit(app, session_id, json!({"type":"models"}));
+    emit(app, session_id, json!({"type":"settingsChanged","model":proc.model.lock().unwrap().clone(),
+        "effort":proc.effort.lock().unwrap().clone()}));
 }
 
 /// Release any parked Antigravity `Stop` hook immediately so the underlying process can finish or exit.
@@ -1473,19 +1933,26 @@ pub(super) fn has_active_prompt(proc: &ChatProcess) -> bool {
 
 /// The process is gone: close whatever was streaming and keep the journal complete.
 pub(super) fn finish(proc: &Arc<ChatProcess>) {
-    let (rows, reactive_rows, park, waiter) = {
+    let (rows, reactive_rows, park, retry_wait, waiter) = {
         let mut state = proc.acp.lock().unwrap();
         state.parked_idle = false;
         state.settled_while_parked = false;
+        state.retrying_prompt = false;
+        state.active_prompt = None;
+        state.startup_native = None;
         let park = state.stop_park.take();
+        let retry_wait = state.model_retry_wait.take();
         let waiter = state.retire_waiter.clone();
         let rows: Vec<ChatRow> = state.mapper.finish().into_iter().chain(state.mapper.settle_running(true)).collect();
         let reactive_rows = state.tasks.take_aborted_reactive_rows();
         flush_journal_locked(&mut state);
-        (rows, reactive_rows, park, waiter)
+        (rows, reactive_rows, park, retry_wait, waiter)
     };
     if let Some(park) = park {
         park.release("allow");
+    }
+    if let Some(wait) = retry_wait {
+        wait.wake();
     }
     waiter.pending.lock().unwrap().clear();
     waiter.cv.notify_all();
@@ -1510,11 +1977,19 @@ pub(super) fn validate(proc: &ChatProcess, behavior: &str, image_count: usize) -
 pub(super) fn dispatch(proc: &Arc<ChatProcess>, text: &str, images: &[ChatImage]) -> Result<(), String> {
     let session = proc.agent_session_id.lock().unwrap().clone().ok_or("The agent has not opened its conversation yet")?;
     let id = proc.request_id("prompt");
-    let reactive_rows = {
+    let (reactive_rows, prev_retry_wait) = {
         let mut state = proc.acp.lock().unwrap();
         let reactive_rows = state.tasks.take_aborted_reactive_rows();
         state.parked_idle = false;
         state.settled_while_parked = false;
+        state.retrying_prompt = false;
+        let prev_retry_wait = state.model_retry_wait.take();
+        state.active_prompt = (proc.kind == SessionKind::Antigravity).then(|| ActivePrompt {
+            text: text.to_string(),
+            images: images.to_vec(),
+            attempts: 0,
+            had_output: false,
+        });
         state.mapper.begin_turn();
         state.prompt = Some(id.clone());
         state.steers.clear();
@@ -1522,13 +1997,18 @@ pub(super) fn dispatch(proc: &Arc<ChatProcess>, text: &str, images: &[ChatImage]
             state.pending_journal.push(wire::journal_prompt(text, now_ms() as i64));
             flush_journal_locked(&mut state);
         }
-        reactive_rows
+        (reactive_rows, prev_retry_wait)
     };
+    if let Some(wait) = prev_retry_wait {
+        wait.wake();
+    }
     super::antigravity_tasks::settle_rows(proc, &reactive_rows);
     let result = proc.write(&wire::prompt(&id, &session, text, images));
     if result.is_err() {
         proc.pending.lock().unwrap().remove(&id);
-        proc.acp.lock().unwrap().prompt = None;
+        let mut state = proc.acp.lock().unwrap();
+        state.prompt = None;
+        state.active_prompt = None;
     }
     result
 }
@@ -1543,6 +2023,9 @@ pub(super) fn steer(proc: &Arc<ChatProcess>, text: &str, images: &[ChatImage]) -
     let session = proc.agent_session_id.lock().unwrap().clone().ok_or("The agent has not opened its conversation yet")?;
     let (id, rows, reactive_rows) = {
         let mut state = proc.acp.lock().unwrap();
+        if state.retrying_prompt {
+            return Err("Antigravity is still loading models; queue the message instead".into());
+        }
         // The engine checks `turn.running` before choosing this path; a missing prompt here means the
         // agent already answered the turn (unless Antigravity is running a reactive wakeup turn).
         let reactive_rows = if state.prompt.is_none() && state.steers.is_empty() {
@@ -1557,6 +2040,7 @@ pub(super) fn steer(proc: &Arc<ChatProcess>, text: &str, images: &[ChatImage]) -
         };
         let id = proc.request_id("prompt");
         let rows: Vec<ChatRow> = state.mapper.finish().into_iter().collect();
+        state.active_prompt = None;
         state.steers.push(id.clone());
         if state.journal.is_some() {
             state.pending_journal.push(wire::journal_prompt(text, now_ms() as i64));
@@ -1579,6 +2063,15 @@ pub(super) fn steer(proc: &Arc<ChatProcess>, text: &str, images: &[ChatImage]) -
 pub(super) fn cancel(proc: &Arc<ChatProcess>) -> Result<(), String> {
     let session = proc.agent_session_id.lock().unwrap().clone().ok_or("The agent has not opened its conversation yet")?;
     release_parked_stop(proc, "allow");
+    let retry_wait = {
+        let mut state = proc.acp.lock().unwrap();
+        state.retrying_prompt = false;
+        state.active_prompt = None;
+        state.model_retry_wait.take()
+    };
+    if let Some(wait) = retry_wait {
+        wait.wake();
+    }
     proc.write(&wire::cancel(&session))?;
     let drained: Vec<PendingRequest> = proc.acp.lock().unwrap().requests.drain().map(|(_, entry)| entry).collect();
     for entry in drained {
@@ -1608,13 +2101,30 @@ fn session(proc: &ChatProcess) -> Result<String, String> {
 /// reader thread that would deliver the answer is the one running it.
 fn set_mode_request(proc: &Arc<ChatProcess>, mode: &str, wait: bool) -> Result<(), String> {
     let session = session(proc)?;
-    let option = proc.acp.lock().unwrap().catalog.mode_option.clone();
+    let option = {
+        let mut state = proc.acp.lock().unwrap();
+        state.pending_mode = Some(mode.to_string());
+        state.catalog.mode_option.clone()
+    };
     let make = |id: &str| match &option {
         Some(option) => wire::set_config_option(id, &session, option, mode),
         None => wire::set_mode(id, &session, mode),
     };
-    send(proc, "acp_set_mode", wait, make)?;
-    proc.acp.lock().unwrap().catalog.mode = Some(mode.to_string());
+    let result = match send(proc, "acp_set_mode", wait, make) {
+        Ok(result) => result,
+        Err(err) => {
+            proc.acp.lock().unwrap().pending_mode = None;
+            return Err(err);
+        }
+    };
+    if wait {
+        let mut state = proc.acp.lock().unwrap();
+        if let Some(options) = result.as_ref().and_then(|res| res.get("configOptions")).and_then(Value::as_array) {
+            state.catalog.absorb_options(options);
+        }
+        state.pending_mode = None;
+        state.catalog.mode = Some(mode.to_string());
+    }
     Ok(())
 }
 
@@ -1629,9 +2139,13 @@ fn set_model_request(proc: &Arc<ChatProcess>, model: &str, wait: bool) -> Result
     if wait {
         let effort = {
             let mut state = proc.acp.lock().unwrap();
+            let pending_mode = state.pending_mode.clone();
             state.catalog.model = Some(model.to_string());
             if let Some(options) = result.as_ref().and_then(|res| res.get("configOptions")).and_then(Value::as_array) {
                 state.catalog.absorb_options(options);
+                if let Some(expected) = pending_mode {
+                    state.catalog.mode = Some(expected);
+                }
             }
             if state.catalog.effort_switchable() { state.catalog.effort.clone() } else { None }
         };
@@ -1672,13 +2186,13 @@ pub(super) fn sync_antigravity_permission(proc: &Arc<ChatProcess>, permission_mo
     if permission_mode == "bypassPermissions" {
         let (modes, current) = {
             let state = proc.acp.lock().unwrap();
-            let modes: Vec<String> = state.catalog.modes.iter().map(|choice| choice.id.clone()).collect();
-            (modes, state.catalog.mode.clone())
+            (
+                state.catalog.modes.clone(),
+                state.pending_mode.clone().or_else(|| state.catalog.mode.clone()),
+            )
         };
-        if let Some(chosen) = ["auto", "accept-edits", "default"]
-            .into_iter()
-            .find(|candidate| modes.iter().any(|mode| mode == candidate))
-        {
+        let chosen = antigravity_bypass_acp_mode(&modes);
+        if modes.iter().any(|choice| choice.id == chosen) {
             if current.as_deref() != Some(chosen) {
                 set_mode_request(proc, chosen, true)?;
             }
@@ -1709,8 +2223,9 @@ pub(super) fn chat_models(app: &AppCtx, proc: &Arc<ChatProcess>) -> Option<Vec<V
     let catalog = proc.acp.lock().unwrap().catalog.clone();
     if !catalog.model_switchable() { return None; }
     if proc.kind == SessionKind::Antigravity {
+        let live = crate::agent::antigravity_models::models_from_acp(app, &catalog);
         return Some(
-            crate::agent::antigravity_models::models_from_acp(app, &catalog)
+            crate::agent::antigravity_models::merge_live_with_cached(app, live)
                 .into_iter()
                 .filter_map(|model| serde_json::to_value(model).ok())
                 .collect(),
@@ -2215,6 +2730,8 @@ mod tests {
         assert_eq!(startup_mode["method"], "session/set_mode");
         assert_eq!(startup_mode["params"]["modeId"], "default");
         reply(&app, &proc, &startup_mode, json!({}));
+        notify(&app, &proc, json!({"sessionUpdate":"current_mode_update","currentModeId":"default"}));
+        assert_eq!(proc.mode.lock().unwrap().as_str(), "bypassPermissions");
         assert!(proc.collaboration_modes.lock().unwrap().is_empty());
         assert!(!events.lock().unwrap().iter().any(|e| e["type"] == "collaborationModes"));
 
@@ -2245,6 +2762,149 @@ mod tests {
         let seen = events.lock().unwrap();
         assert!(seen.iter().any(|e| e["type"] == "settingsChanged" && e["mode"] == "plan"));
         assert!(!seen.iter().any(|e| e["type"] == "collaborationModeChanged"));
+    }
+
+    #[test]
+    fn antigravity_bypass_startup_serializes_mode_before_model_and_ignores_stale_default_updates() {
+        let app = ctx("acp-agy-bypass-startup");
+        app.db().conn.lock().unwrap().execute_batch(
+            "INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','Test','/w',0); \
+             INSERT INTO sessions(id,project_id,name,kind,engine,permission_mode,created_at) VALUES ('s','p','Antigravity 1','antigravity','chat','skip',0);"
+        ).unwrap();
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let captured = events.clone();
+        app.listen(&super::super::event_name("s"), move |payload| {
+            captured.lock().unwrap().push(serde_json::from_str(payload).unwrap());
+        });
+        let (proc, mut agent) = wired(SessionKind::Antigravity);
+        proc.ready.store(false, Ordering::Relaxed);
+        *proc.mode.lock().unwrap() = "bypassPermissions".into();
+        *proc.model.lock().unwrap() = Some("gemini-4-hydrogen-xhigh".into());
+        *proc.effort.lock().unwrap() = None;
+        bootstrap(&app, &proc, None, Some("/w"), Some("auto"));
+        let init = written(&mut agent);
+        reply(&app, &proc, &init, json!({"agentCapabilities":{"loadSession":true}}));
+        let open = written(&mut agent);
+        reply(&app, &proc, &open, json!({
+            "sessionId": "agy-bypass-1",
+            "models": {
+                "currentModelId": "gemini-4-argon-medium",
+                "availableModels": [
+                    {"modelId": "gemini-4-argon-low", "name": "Gemini 4 Argon (Low)"},
+                    {"modelId": "gemini-4-argon-medium", "name": "Gemini 4 Argon (Medium)"},
+                    {"modelId": "gemini-4-argon-high", "name": "Gemini 4 Argon (High)"},
+                    {"modelId": "gemini-4-hydrogen-low", "name": "Gemini 4 Hydrogen (Low)"},
+                    {"modelId": "gemini-4-hydrogen-medium", "name": "Gemini 4 Hydrogen (Medium)"},
+                    {"modelId": "gemini-4-hydrogen-high", "name": "Gemini 4 Hydrogen (High)"},
+                    {"modelId": "gemini-4-hydrogen-xhigh", "name": "Gemini 4 Hydrogen (Extra)"}
+                ]
+            },
+            "modes": {
+                "currentModeId": "default",
+                "availableModes": [
+                    {"id": "default", "name": "Default"},
+                    {"id": "accept-edits", "name": "Accept Edits"},
+                    {"id": "plan", "name": "Plan"},
+                    {"id": "auto", "name": "Auto"}
+                ]
+            },
+            "configOptions": [
+                {"type": "select", "id": "mode", "category": "mode", "currentValue": "default", "options": [
+                    {"value": "default", "name": "Default"},
+                    {"value": "accept-edits", "name": "Accept Edits"},
+                    {"value": "plan", "name": "Plan"},
+                    {"value": "auto", "name": "Auto"}
+                ]},
+                {"type": "select", "id": "model", "category": "model", "currentValue": "gemini-4-argon", "options": [
+                    {"value": "gemini-4-argon", "name": "Gemini 4 Argon"},
+                    {"value": "gemini-4-hydrogen", "name": "Gemini 4 Hydrogen"}
+                ]},
+                {"type": "select", "id": "thought_level", "category": "thought_level", "currentValue": "medium", "options": [
+                    {"value": "low", "name": "Low"},
+                    {"value": "medium", "name": "Medium"},
+                    {"value": "high", "name": "High"}
+                ]}
+            ]
+        }));
+
+        // Startup must switch mode to `auto` first and hold model/effort switches until it settles.
+        let mode_req = written(&mut agent);
+        assert_eq!(mode_req["method"], "session/set_config_option");
+        assert_eq!(mode_req["params"]["configId"], "mode");
+        assert_eq!(mode_req["params"]["value"], "auto");
+
+        // Stale `default` notifications arriving before the mode switch completes must not drop Bypass.
+        notify(&app, &proc, json!({"sessionUpdate":"current_mode_update","currentModeId":"default"}));
+        notify(&app, &proc, json!({
+            "sessionUpdate": "config_option_update",
+            "configOptions": [
+                {"type": "select", "id": "mode", "category": "mode", "currentValue": "default", "options": [
+                    {"value": "default", "name": "Default"},
+                    {"value": "accept-edits", "name": "Accept Edits"},
+                    {"value": "plan", "name": "Plan"},
+                    {"value": "auto", "name": "Auto"}
+                ]},
+                {"type": "select", "id": "model", "category": "model", "currentValue": "gemini-4-argon", "options": [
+                    {"value": "gemini-4-argon", "name": "Gemini 4 Argon"},
+                    {"value": "gemini-4-hydrogen", "name": "Gemini 4 Hydrogen"}
+                ]},
+                {"type": "select", "id": "thought_level", "category": "thought_level", "currentValue": "medium", "options": [
+                    {"value": "low", "name": "Low"},
+                    {"value": "medium", "name": "Medium"},
+                    {"value": "high", "name": "High"}
+                ]}
+            ]
+        }));
+        assert_eq!(proc.mode.lock().unwrap().as_str(), "bypassPermissions");
+        assert_eq!(
+            crate::db::repo::get_permission_mode(&app.db().conn.lock().unwrap(), "s").unwrap().as_deref(),
+            Some("skip")
+        );
+        assert_eq!(proc.model.lock().unwrap().as_deref(), Some("gemini-4-hydrogen"));
+        assert_eq!(proc.effort.lock().unwrap().as_deref(), Some("xhigh"));
+
+        // Completing the mode switch dispatches `set_model`.
+        reply(&app, &proc, &mode_req, json!({}));
+        let set_model_req = written(&mut agent);
+        assert_eq!(set_model_req["method"], "session/set_config_option");
+        assert_eq!(set_model_req["params"]["configId"], "model");
+        assert_eq!(set_model_req["params"]["value"], "gemini-4-hydrogen");
+
+        notify(&app, &proc, json!({"sessionUpdate":"current_mode_update","currentModeId":"auto"}));
+        reply(&app, &proc, &set_model_req, json!({
+            "configOptions": [
+                {"type": "select", "id": "mode", "category": "mode", "currentValue": "auto", "options": [
+                    {"value": "default", "name": "Default"},
+                    {"value": "accept-edits", "name": "Accept Edits"},
+                    {"value": "plan", "name": "Plan"},
+                    {"value": "auto", "name": "Auto"}
+                ]},
+                {"type": "select", "id": "model", "category": "model", "currentValue": "gemini-4-hydrogen", "options": [
+                    {"value": "gemini-4-argon", "name": "Gemini 4 Argon"},
+                    {"value": "gemini-4-hydrogen", "name": "Gemini 4 Hydrogen"}
+                ]},
+                {"type": "select", "id": "thought_level", "category": "thought_level", "currentValue": "medium", "options": [
+                    {"value": "low", "name": "Low"},
+                    {"value": "medium", "name": "Medium"},
+                    {"value": "high", "name": "High"},
+                    {"value": "xhigh", "name": "Extra"}
+                ]}
+            ]
+        }));
+        let set_effort_req = written(&mut agent);
+        assert_eq!(set_effort_req["method"], "session/set_config_option");
+        assert_eq!(set_effort_req["params"]["configId"], "thought_level");
+        assert_eq!(set_effort_req["params"]["value"], "xhigh");
+
+        assert_eq!(proc.mode.lock().unwrap().as_str(), "bypassPermissions");
+        assert_eq!(
+            crate::db::repo::get_permission_mode(&app.db().conn.lock().unwrap(), "s").unwrap().as_deref(),
+            Some("skip")
+        );
+        let seen = events.lock().unwrap();
+        assert!(!seen.iter().any(|e| {
+            e["type"] == "settingsChanged" && matches!(e["mode"].as_str(), Some("default") | Some("auto"))
+        }));
     }
 
     #[test]
@@ -2786,5 +3446,231 @@ sys.exit(0 if alive else 2)
         assert_eq!(input["answers"], json!({"Deploy?": "Yes"}));
         assert_eq!(input["_answerList"], json!(["Yes"]));
         assert_eq!(output.as_deref(), Some("A1: Yes"));
+    }
+
+    #[test]
+    fn antigravity_running_session_merges_newer_cached_models_and_restarts_idle_on_unknown_model() {
+        let app = ctx("acp-agy-merge-restart");
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+        let captured = events.clone();
+        app.listen(&super::super::event_name("s"), move |payload| {
+            captured.lock().unwrap().push(serde_json::from_str(payload).unwrap());
+        });
+        let (proc, mut agent) = wired(SessionKind::Antigravity);
+        proc.ready.store(false, Ordering::Relaxed);
+        bootstrap(&app, &proc, None, Some("/w"), None);
+        let init = written(&mut agent);
+        reply(&app, &proc, &init, json!({"agentCapabilities":{"loadSession":true}}));
+        let open = written(&mut agent);
+        reply(&app, &proc, &open, json!({
+            "sessionId": "agy-old-1",
+            "models": {
+                "currentModelId": "gemini-4-argon-medium",
+                "availableModels": [
+                    {"modelId": "gemini-4-argon-medium", "name": "Gemini 4 Argon (Medium)"},
+                    {"modelId": "gemini-4-hydrogen-high", "name": "Gemini 4 Hydrogen (High)"}
+                ]
+            },
+            "configOptions": [
+                {"type": "select", "id": "model", "category": "model", "currentValue": "gemini-4-argon", "options": [
+                    {"value": "gemini-4-argon", "name": "Gemini 4 Argon"},
+                    {"value": "gemini-4-hydrogen", "name": "Gemini 4 Hydrogen"}
+                ]}
+            ]
+        }));
+
+        // Register the live session in `app.chat()` so `remember_acp` notifies it immediately.
+        app.chat().sessions.lock().unwrap().insert("s".into(), proc.clone());
+
+        // Simulate a newer model (`gemini-4-neon`) discovered later by another session or background refresh.
+        let mut newer = Catalog::default();
+        newer.absorb_session(&json!({
+            "configOptions": [
+                {"type": "select", "id": "model", "category": "model", "currentValue": "gemini-4-neon", "options": [
+                    {"value": "gemini-4-neon", "name": "Gemini 4 Neon"},
+                    {"value": "gemini-4-argon", "name": "Gemini 4 Argon"},
+                    {"value": "gemini-4-hydrogen", "name": "Gemini 4 Hydrogen"}
+                ]}
+            ]
+        }));
+        crate::agent::antigravity_models::remember_acp(&app, &newer);
+
+        let models = chat_models(&app, &proc).unwrap();
+        assert!(models.iter().any(|m| m["id"] == "gemini-4-neon"));
+        assert!(events.lock().unwrap().iter().any(|e| e["type"] == "models"));
+
+        // Selecting `gemini-4-neon` on the stale running process releases it cleanly when the process
+        // replies with `Unknown model ID`, allowing the next turn to start a fresh `agy acp`.
+        let proc_t = proc.clone();
+        let app_t = app.clone();
+        let responder = std::thread::spawn(move || {
+            let req = written(&mut agent);
+            assert_eq!(req["method"], "session/set_config_option");
+            assert_eq!(req["params"]["value"], "gemini-4-neon");
+            handle_line(&app_t, "s", &proc_t, &json!({
+                "jsonrpc": "2.0",
+                "id": req["id"],
+                "error": {"code": -32602, "message": "Unknown model ID: gemini-4-neon"}
+            }).to_string());
+        });
+        app.chat().set_model_with_app(&app, "s", Some("gemini-4-neon")).unwrap();
+        responder.join().unwrap();
+        assert!(!proc.alive.load(Ordering::Relaxed));
+        assert!(proc.released.load(Ordering::Relaxed));
+        assert_eq!(proc.model.lock().unwrap().as_deref(), Some("gemini-4-neon"));
+    }
+
+    #[test]
+    fn antigravity_cold_model_error_retries_silently_and_recovers() {
+        let app = ctx("acp-agy-cold-retry");
+        let (proc, mut agent) = wired(SessionKind::Antigravity);
+        *proc.agent_session_id.lock().unwrap() = Some("s1".into());
+        proc.ready.store(true, Ordering::Relaxed);
+        proc.turn.lock().unwrap().running = true;
+
+        dispatch(&proc, "continue", &[]).unwrap();
+        let first = written(&mut agent);
+        assert_eq!(first["method"], "session/prompt");
+        assert_eq!(first["params"]["prompt"], json!([{"type":"text","text":"continue"}]));
+
+        // Simulate `agy acp` rejecting the prompt before `FetchAvailableModels` finishes.
+        handle_line(&app, "s", &proc, &json!({
+            "jsonrpc": "2.0",
+            "id": first["id"],
+            "error": {
+                "code": -32603,
+                "message": "failed to construct executor: unknown model key MODEL_PLACEHOLDER_M532: model not found"
+            }
+        }).to_string());
+        assert!(proc.turn.lock().unwrap().running);
+        assert!(has_active_prompt(&proc));
+        assert!(!proc.timeline.lock().unwrap().rows.iter().any(|r| matches!(r, ChatRow::Error { .. })));
+
+        // The retry thread re-dispatches `session/prompt` transparently after backoff.
+        let retry = written(&mut agent);
+        assert_eq!(retry["method"], "session/prompt");
+        assert_ne!(retry["id"], first["id"]);
+        assert_eq!(retry["params"]["prompt"], json!([{"type":"text","text":"continue"}]));
+
+        notify(&app, &proc, json!({"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Recovered"}}));
+        reply(&app, &proc, &retry, json!({"stopReason":"end_turn"}));
+        assert!(!proc.turn.lock().unwrap().running);
+        let rows = proc.timeline.lock().unwrap().rows.clone();
+        assert!(!rows.iter().any(|r| matches!(r, ChatRow::Error { .. })));
+        assert!(rows.iter().any(|r| matches!(r, ChatRow::Assistant { text, streaming: false, .. } if text == "Recovered")));
+    }
+
+    #[test]
+    fn antigravity_cold_model_retry_cancels_cleanly_and_surfaces_error_after_exhaustion() {
+        // Case 1: interrupting during retry backoff finishes the turn without an error row.
+        let app = ctx("acp-agy-cold-cancel");
+        let (proc, mut agent) = wired(SessionKind::Antigravity);
+        *proc.agent_session_id.lock().unwrap() = Some("s1".into());
+        proc.ready.store(true, Ordering::Relaxed);
+        proc.turn.lock().unwrap().running = true;
+
+        dispatch(&proc, "continue", &[]).unwrap();
+        let first = written(&mut agent);
+        handle_line(&app, "s", &proc, &json!({
+            "jsonrpc": "2.0",
+            "id": first["id"],
+            "error": {
+                "code": -32603,
+                "message": "failed to construct executor: unknown model key MODEL_PLACEHOLDER_M532: model not found"
+            }
+        }).to_string());
+        let ended = {
+            let mut turn = proc.turn.lock().unwrap();
+            super::super::interrupt_locked(&app, &proc, &mut turn).unwrap()
+        };
+        assert!(ended.is_some());
+        assert!(!proc.turn.lock().unwrap().running);
+        assert!(!has_active_prompt(&proc));
+        assert!(!proc.timeline.lock().unwrap().rows.iter().any(|r| matches!(r, ChatRow::Error { .. })));
+
+        // Case 2: if every retry keeps failing, the real error is surfaced once the budget runs out.
+        let app2 = ctx("acp-agy-cold-exhaust");
+        let (proc2, mut agent2) = wired(SessionKind::Antigravity);
+        *proc2.agent_session_id.lock().unwrap() = Some("s2".into());
+        proc2.ready.store(true, Ordering::Relaxed);
+        proc2.turn.lock().unwrap().running = true;
+
+        dispatch(&proc2, "continue", &[]).unwrap();
+        let mut current = written(&mut agent2);
+        for attempt in 0..=cold_model_retry_delays().len() {
+            handle_line(&app2, "s", &proc2, &json!({
+                "jsonrpc": "2.0",
+                "id": current["id"],
+                "error": {
+                    "code": -32603,
+                    "message": "failed to construct executor: unknown model key MODEL_PLACEHOLDER_M532: model not found"
+                }
+            }).to_string());
+            if attempt < cold_model_retry_delays().len() {
+                current = written(&mut agent2);
+            }
+        }
+        assert!(!proc2.turn.lock().unwrap().running);
+        assert!(proc2.timeline.lock().unwrap().rows.iter().any(|r| {
+            matches!(r, ChatRow::Error { message, .. } if message.contains("MODEL_PLACEHOLDER_M532"))
+        }));
+    }
+
+    #[test]
+    fn antigravity_startup_holds_ready_until_mode_and_model_settle_and_applies_late_models() {
+        let app = ctx("acp-agy-startup-hold");
+        let (proc, mut agent) = wired(SessionKind::Antigravity);
+        proc.ready.store(false, Ordering::Relaxed);
+        *proc.mode.lock().unwrap() = "bypassPermissions".into();
+        *proc.model.lock().unwrap() = Some("gemini-4-neon".into());
+        *proc.effort.lock().unwrap() = Some("high".into());
+
+        bootstrap(&app, &proc, None, Some("/w"), Some("auto"));
+        let init = written(&mut agent);
+        reply(&app, &proc, &init, json!({"agentCapabilities":{"loadSession":true}}));
+        let open = written(&mut agent);
+        // Simulate `session/new` returning before `FetchAvailableModels` has populated models.
+        reply(&app, &proc, &open, json!({
+            "sessionId": "agy-cold-1",
+            "modes": {
+                "currentModeId": "default",
+                "availableModes": [
+                    {"id": "default", "name": "Default"},
+                    {"id": "auto", "name": "Auto"}
+                ]
+            }
+        }));
+        // Startup must wait for `set_mode` before marking ready.
+        let mode_req = written(&mut agent);
+        assert_eq!(mode_req["method"], "session/set_mode");
+        assert!(!proc.ready.load(Ordering::Relaxed));
+        assert!(proc.acp.lock().unwrap().awaiting_initial_models);
+
+        reply(&app, &proc, &mode_req, json!({}));
+        assert!(proc.ready.load(Ordering::Relaxed));
+        // Saved model stays preserved while waiting for `config_option_update`.
+        assert_eq!(proc.model.lock().unwrap().as_deref(), Some("gemini-4-neon"));
+
+        // Late `config_option_update` arrives once `FetchAvailableModels` finishes: apply saved model
+        // instead of overwriting it with the agent's default `gemini-4-argon`.
+        notify(&app, &proc, json!({
+            "sessionUpdate": "config_option_update",
+            "configOptions": [
+                {"type": "select", "id": "model", "category": "model", "currentValue": "gemini-4-argon", "options": [
+                    {"value": "gemini-4-argon", "name": "Gemini 4 Argon"},
+                    {"value": "gemini-4-neon", "name": "Gemini 4 Neon"}
+                ]},
+                {"type": "select", "id": "thought_level", "category": "thought_level", "currentValue": "medium", "options": [
+                    {"value": "low", "name": "Low"},
+                    {"value": "medium", "name": "Medium"},
+                    {"value": "high", "name": "High"}
+                ]}
+            ]
+        }));
+        let set_model_req = written(&mut agent);
+        assert_eq!(set_model_req["method"], "session/set_config_option");
+        assert_eq!(set_model_req["params"]["configId"], "model");
+        assert_eq!(set_model_req["params"]["value"], "gemini-4-neon");
+        assert_eq!(proc.model.lock().unwrap().as_deref(), Some("gemini-4-neon"));
     }
 }

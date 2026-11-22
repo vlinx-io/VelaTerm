@@ -1260,11 +1260,11 @@ fn prepare_chat_account(ctx: &AppCtx, session_id: &str) -> Result<(), String> {
     {
         let conn = ctx.db().conn.lock().unwrap();
         let session = repo::get_session(&conn, session_id)?.ok_or("Session not found")?;
-        if !matches!(session.kind, SessionKind::Codex | SessionKind::Claude | SessionKind::Zcode)
+        if !matches!(session.kind, SessionKind::Codex | SessionKind::Claude | SessionKind::Zcode | SessionKind::Antigravity)
             || session.engine != "chat"
         {
             return Err(
-                "Account operations are available only in Claude, Codex or ZCode chat sessions.".into(),
+                "Account operations are available only in Claude, Codex, ZCode or Antigravity chat sessions.".into(),
             );
         }
     }
@@ -1669,14 +1669,18 @@ pub fn chat_set_model(ctx: &AppCtx, session_id: &str, model: Option<&str>) -> Re
     }
     if ctx.chat().is_alive(session_id) {
         ctx.chat()
-            .set_model(session_id, selection.model.as_deref())?;
-        let snap = ctx.chat().snapshot(session_id);
-        selection.model = snap.model;
-        if session.kind == SessionKind::Antigravity {
-            ctx.chat().sync_antigravity_catalog(ctx, session_id);
-            if snap.running {
-                selection.effort = snap.effort;
+            .set_model_with_app(ctx, session_id, selection.model.as_deref())?;
+        if ctx.chat().is_alive(session_id) {
+            let snap = ctx.chat().snapshot(session_id);
+            selection.model = snap.model;
+            if session.kind == SessionKind::Antigravity {
+                ctx.chat().sync_antigravity_catalog(ctx, session_id);
+                if snap.running {
+                    selection.effort = snap.effort;
+                }
+                crate::agent::antigravity_models::normalize_selection(ctx, &mut selection);
             }
+        } else if session.kind == SessionKind::Antigravity {
             crate::agent::antigravity_models::normalize_selection(ctx, &mut selection);
         }
     }
@@ -1908,13 +1912,17 @@ pub fn chat_models(ctx: &AppCtx, session_id: &str) -> Result<serde_json::Value, 
                 let bin = crate::agent::executable::for_session(ctx, &session);
                 return Ok(grok_chat_models(ctx, session_id, &bin));
             }
-            if let Some(models) = ctx.chat().acp_models(ctx, session_id) {
-                return Ok(serde_json::Value::Array(models));
-            }
             if kind == SessionKind::Antigravity {
                 let bin = crate::agent::executable::for_session(ctx, &session);
-                return serde_json::to_value(crate::agent::antigravity_models::list(ctx, &bin)?)
+                crate::agent::antigravity_models::schedule_refresh(ctx, &bin);
+                if let Some(models) = ctx.chat().acp_models(ctx, session_id) {
+                    return Ok(serde_json::Value::Array(models));
+                }
+                return serde_json::to_value(crate::agent::antigravity_models::cached(ctx))
                     .map_err(|e| format!("Failed to serialize model catalogue: {e}"));
+            }
+            if let Some(models) = ctx.chat().acp_models(ctx, session_id) {
+                return Ok(serde_json::Value::Array(models));
             }
             let efforts: &[&str] = if kind == SessionKind::Copilot {
                 crate::agent::chat::acp_protocol::COPILOT_EFFORTS
@@ -2198,6 +2206,19 @@ pub fn chat_auto_continue_cancel(ctx: &AppCtx, session_id: &str) -> Result<(), S
 /// A view started showing this conversation. Cancels a release a closed view asked for; starts nothing.
 pub fn chat_attach(ctx: &AppCtx, session_id: &str) -> Result<(), String> {
     ctx.chat().attach(session_id);
+    // Release the DB lock before resolving the executable, because `executable::for_session`
+    // locks `ctx.db().conn` again; in Rust 2021 an inline `if let` scrutinee holds the guard
+    // across the whole block and self-deadlocks the global SQLite connection.
+    let session = {
+        let conn = ctx.db().conn.lock().unwrap();
+        repo::get_session(&conn, session_id).ok().flatten()
+    };
+    if let Some(session) = session {
+        if session.kind == SessionKind::Antigravity {
+            let bin = crate::agent::executable::for_session(ctx, &session);
+            crate::agent::antigravity_models::schedule_refresh(ctx, &bin);
+        }
+    }
     Ok(())
 }
 
@@ -3385,6 +3406,67 @@ mod tests {
         assert_eq!(status.saved_bind.as_deref(), Some("loopback"), "a failed change is not persisted");
 
         ctx.remote_web().stop();
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn chat_attach_antigravity_does_not_deadlock_db() {
+        let tmp = std::env::temp_dir().join(format!(
+            "vlx-cc-chat-attach-agy-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        let ctx = headless_ctx(&tmp);
+        let project = super::create_virtual_project(&ctx, "P", None).unwrap();
+        let session = super::create_session(
+            &ctx,
+            &project.id,
+            None,
+            "Antigravity",
+            crate::models::SessionKind::Antigravity,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("/nonexistent/agy"),
+            Some("chat"),
+        )
+        .unwrap();
+
+        super::chat_attach(&ctx, &session.id).unwrap();
+
+        // Subsequent DB-backed commands must keep working without blocking.
+        let models = super::chat_models(&ctx, &session.id).unwrap();
+        assert!(models.as_array().is_some_and(|items| !items.is_empty()));
+        super::chat_set_model(&ctx, &session.id, Some("gemini-4-neon")).unwrap();
+        let term = super::create_session(
+            &ctx,
+            &project.id,
+            None,
+            "Terminal",
+            crate::models::SessionKind::Terminal,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(term.kind, crate::models::SessionKind::Terminal);
+
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

@@ -41,6 +41,26 @@ export function listDir(path: string): Promise<DirEntry[]> {
   return invoke<DirEntry[]>("list_dir", { path });
 }
 
+/** One node in a recursive file-name filter result, including ancestor directories needed to render the tree. */
+export interface SearchFileEntry {
+  /** Path relative to the searched root using `/` separators. */
+  path: string;
+  isDir: boolean;
+  isHidden: boolean;
+  gitBadge: string | null;
+}
+
+/** Bounded recursive search result for the right-hand Files filter. */
+export interface SearchFilesResult {
+  entries: SearchFileEntry[];
+  truncated: boolean;
+}
+
+/** Recursively find files and folders matching `query` under `path`, including ancestor directories. */
+export function searchFiles(path: string, query: string, includeHidden: boolean): Promise<SearchFilesResult> {
+  return invoke<SearchFilesResult>("search_files", { path, query, includeHidden });
+}
+
 /** Create an empty file from the Files context menu/+; the backend rejects existing paths without overwriting. */
 export function createFile(path: string): Promise<void> {
   return invoke<void>("create_file", { path });
@@ -73,6 +93,66 @@ export function renamePath(from: string, to: string): Promise<void> {
 /** Copy files and folders into a directory, keeping both on a name clash; returns the paths created. */
 export function copyIntoDir(sources: string[], dir: string): Promise<string[]> {
   return invoke<string[]>("copy_into_dir", { sources, dir });
+}
+
+export type FileClipboardMode = "copy" | "cut";
+
+export interface FileClipboardContent {
+  paths: string[];
+  mode: FileClipboardMode;
+  sequence: number;
+}
+
+export interface FileClipboardStatus {
+  supported: boolean;
+  hasFiles: boolean;
+  mode: FileClipboardMode | null;
+  sequence: number;
+}
+
+export type PasteConflictResolution = "replace" | "skip" | "keepBoth";
+
+export interface PasteCheckItem {
+  source: string;
+  name: string;
+  isDir: boolean;
+  status: "ready" | "conflict" | "keepBoth" | "skipSelf";
+  existingIsDir: boolean | null;
+}
+
+export interface PasteResult {
+  created: string[];
+  replaced: string[];
+  skipped: string[];
+}
+
+export function clipboardFileState(): Promise<FileClipboardStatus> {
+  return invoke<FileClipboardStatus>("clipboard_file_state", {});
+}
+
+export function clipboardWriteFiles(paths: string[], mode: FileClipboardMode): Promise<number> {
+  return invoke<number>("clipboard_write_files", { paths, mode });
+}
+
+export function clipboardReadFiles(): Promise<FileClipboardContent | null> {
+  return invoke<FileClipboardContent | null>("clipboard_read_files", {});
+}
+
+export function clipboardClearFiles(expectedSequence?: number): Promise<void> {
+  return invoke<void>("clipboard_clear_files", expectedSequence !== undefined ? { expectedSequence } : {});
+}
+
+export function pasteFilesCheck(sources: string[], dir: string, mode: FileClipboardMode): Promise<PasteCheckItem[]> {
+  return invoke<PasteCheckItem[]>("paste_files_check", { sources, dir, mode: mode === "cut" ? "move" : "copy" });
+}
+
+export function pasteFiles(
+  sources: string[],
+  dir: string,
+  mode: FileClipboardMode,
+  resolutions: Record<string, PasteConflictResolution>,
+): Promise<PasteResult> {
+  return invoke<PasteResult>("paste_files", { sources, dir, mode: mode === "cut" ? "move" : "copy", resolutions });
 }
 
 /** Delete a file or recursively delete a directory. */

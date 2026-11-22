@@ -846,6 +846,7 @@ pub fn antigravity_usage(bin: &str, cwd: &std::path::Path, log_file: &std::path:
     command.env_remove("VLX_SESSION_ID");
     command.env_remove("VLX_TOKEN");
     command.env_remove("VLX_AUTH");
+    command.env_remove(crate::agent::hook_bridge::CHAT_ENGINE_ENV);
     let out = crate::agent::headless::run_command(command, None, AGY_USAGE_TIMEOUT).map_err(|e| {
         FetchError::from(match e {
             HeadlessError::Start(e) => format!("Antigravity could not be started: {e}"),

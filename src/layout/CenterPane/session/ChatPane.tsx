@@ -33,6 +33,7 @@ import { cancelSubmissionTranslation, sendOriginalSubmission } from "./outbox";
 import { ModelCatalogStatus } from "./ModelCatalogStatus";
 import { useChatModels } from "./useChatModels";
 import { useT, type I18nKey } from "../../../i18n";
+import { onAntigravityModelsChanged } from "../../../ipc/events";
 import {
   chatAutoContinueCancel,
   chatInterrupt,
@@ -88,7 +89,7 @@ import {
   type QueuedMessage,
   type SendBehavior,
 } from "../../../ipc/chat";
-import { attachImages, restoreAttachment, MAX_IMAGE_BYTES, MAX_IMAGES, type Attachment } from "./attachments";
+import { attachImages, attachmentRejectionNote, restoreAttachment, MAX_IMAGES, type Attachment } from "./attachments";
 import { attachChatInputGuard } from "./inputGuard";
 import { useTextFieldMenu } from "./useTextFieldMenu";
 import { attachInputLatencyLog } from "./inputLatency";
@@ -111,7 +112,7 @@ import { ConversationViewHint } from "./ConversationViewHint";
 import { AgentMissingNotice } from "./AgentMissingNotice";
 import { AgentVersionBadge } from "./AgentVersionBadge";
 import { isShareSurface } from "../../../ipc/shareBase";
-import { isAgentNotInstalledError, mapBackendError } from "../../../ipc/backendError";
+import { formatSubmissionError, isAgentNotInstalledError, mapBackendError, stripAnsi } from "../../../ipc/backendError";
 import { usePermissionRestart } from "./permissionRestart";
 import { PermissionCard, type PermissionAnswer } from "./permissionCards";
 import { AssistRequests } from "../../Assist/AssistRequests";
@@ -359,7 +360,22 @@ export function ChatPane({
   }, []);
   // Images pasted or dropped into the composer, waiting to go out with whatever is being written. They
   // belong to this pane rather than to the session: nothing has been handed over until send is pressed.
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachments, setAttachmentsState] = useState<Attachment[]>([]);
+  const attachmentsRef = useRef(attachments);
+  const setAttachments = useCallback((next: SetStateAction<Attachment[]>) => {
+    const items = typeof next === "function" ? next(attachmentsRef.current) : next;
+    attachmentsRef.current = items;
+    setAttachmentsState(items);
+  }, []);
+  const attachEpoch = useRef(0);
+  const attachQueue = useRef(Promise.resolve());
+  useEffect(() => {
+    attachEpoch.current += 1;
+    const epoch = attachEpoch.current;
+    return () => {
+      if (attachEpoch.current === epoch) attachEpoch.current += 1;
+    };
+  }, [session.id]);
   /** Why the last paste or drop was not taken in full — shown above the thumbnails, not in the transcript. */
   const [attachNote, setAttachNote] = useState<string | null>(null);
   const [permissions, setPermissions] = useState<ChatPermission[]>([]);
@@ -423,6 +439,29 @@ export function ChatPane({
   const [autoContinue, setAutoContinue] = useState<ChatAutoContinue | null>(null);
   /** Bumped when the agent reports its own catalogue, so the model list is read again. */
   const [catalogueVersion, setCatalogueVersion] = useState(0);
+  const wasHidden = useRef(hidden);
+  useEffect(() => {
+    const previouslyHidden = wasHidden.current;
+    wasHidden.current = hidden;
+    if (!historyOnly && session.kind === "antigravity" && previouslyHidden && !hidden) {
+      setCatalogueVersion((v) => v + 1);
+    }
+  }, [hidden, historyOnly, session.kind, session.id]);
+  useEffect(() => {
+    if (historyOnly || session.kind !== "antigravity") return;
+    let active = true;
+    let stop: (() => void) | null = null;
+    void onAntigravityModelsChanged(() => {
+      if (active) setCatalogueVersion((v) => v + 1);
+    }).then((unlisten) => {
+      if (active) stop = unlisten;
+      else unlisten();
+    }).catch(() => {});
+    return () => {
+      active = false;
+      stop?.();
+    };
+  }, [historyOnly, session.kind]);
   const { models: catalogue, loading: modelsLoading, failed: modelsFailed, retry: retryModels } = useChatModels(session.id, catalogueVersion, !historyOnly);
   /** Backend-owned start of the logical turn currently in flight. */
   const [actionFeedback, setActionFeedback] = useState("");
@@ -639,6 +678,9 @@ export function ChatPane({
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let syncFailures = 0;
     let syncError: string | null = null;
+    // Remember a handshake error while a submission is waiting for the native session to open so
+    // the exit that follows rejects the waiter with the structured reason instead of raw stderr.
+    let startupError: string | null = null;
     let initialLocation = true;
     indexReader.current = undefined;
     setTurnStartedAt(undefined);
@@ -717,6 +759,7 @@ export function ChatPane({
           setConfigKeys(event.keys);
           break;
         case "session":
+          startupError = null;
           setCatalogueVersion(v => v + 1);
           sessionWaiters.current.splice(0).forEach((waiter) => waiter.resolve());
           if (event.model) setModel(event.model);
@@ -753,6 +796,7 @@ export function ChatPane({
         // the same runtime a terminal writes, which is why these two facts go there rather than staying
         // in this pane: without them it shows "—" for started, uptime, and this session's CPU.
         case "process":
+          startupError = null;
           setEngineRunning(true);
           setImageSupport(null);
           setRewindScopes(event.rewindScopes ?? []);
@@ -779,27 +823,39 @@ export function ChatPane({
           stopping.current = false;
           setTurnStartedAt(undefined);
           break;
-        case "exited":
+        case "exited": {
           stopping.current = false;
           setActionFeedback("");
           setEngineRunning(false);
           setImageSupport(null);
           setTurnStartedAt(undefined);
+          const cleanStderr = stripAnsi(event.stderr).trim();
+          const handedError = startupError;
+          startupError = null;
+          const rawReason = handedError ?? (cleanStderr || t("chat.exited", event.code));
+          const mappedReason = mapBackendError(rawReason);
+          const waiters = sessionWaiters.current.splice(0);
           // A process the application let go — its view closed here or on another device — is not
           // the agent failing; the next message simply starts it again. An agent that failed its
-          // handshake has already said why. That message is the one worth keeping; the exit that
-          // follows it only adds a code nobody can act on.
-          if (!event.released) {
-            setError((prev) => prev ?? (event.stderr.trim() || t("chat.exited", event.code)));
+          // handshake has already said why. When a submission was waiting on startup, that inline
+          // failure row owns the error so the same banner is not duplicated below it.
+          if (waiters.length > 0) {
+            if (handedError) {
+              const mappedHanded = mapBackendError(handedError);
+              setError((prev) => (prev === mappedHanded ? null : prev));
+            }
+            waiters.forEach((waiter) => waiter.reject(new Error(rawReason)));
+          } else if (!event.released) {
+            setError((prev) => prev ?? mappedReason);
           }
-          // No session will open now, so stop waiting for one instead of stalling until the timeout.
-          sessionWaiters.current.splice(0).forEach((waiter) => waiter.reject(new Error(event.stderr.trim() || t("chat.exited", event.code))));
           break;
+        }
         case "error":
           if (stopping.current) {
             stopping.current = false;
             setActionFeedback("");
           }
+          if (sessionWaiters.current.length > 0) startupError = event.message;
           // A late permission rejection arrives on this channel rather than as a command failure; it is
           // still a restart request, so it must open the confirmation instead of a bare error.
           if (!permissionRestart.handleError(event.message)) setError(mapBackendError(event.message));
@@ -2027,7 +2083,7 @@ export function ChatPane({
    * Files that do not fit are left out rather than failing the whole paste, and the note explains which —
    * a screenshot silently disappearing is worse than one that says why it did.
    */
-  const addFiles = async (files: File[]) => {
+  const addFiles = (files: File[]) => {
     if (!acceptsChatImages(session.kind) || imageSupport === false) {
       setAttachNote(
         imageSupport === false
@@ -2036,18 +2092,22 @@ export function ChatPane({
       );
       return;
     }
-    const { attachments: next, rejected } = await attachImages(attachments, files);
-    setAttachments(next);
-    const first = rejected[0];
-    setAttachNote(
-      !first
-        ? null
-        : first.reason === "tooMany"
-          ? t("chat.attach.tooMany", MAX_IMAGES)
-          : first.reason === "tooLarge"
-            ? t("chat.attach.tooLarge", first.name, MAX_IMAGE_BYTES / (1024 * 1024))
-            : t("chat.attach.unreadable", first.name),
-    );
+    const epoch = attachEpoch.current;
+    attachQueue.current = attachQueue.current.then(async () => {
+      if (epoch !== attachEpoch.current) return;
+      const base = attachmentsRef.current;
+      const maxMb = useTermStore.getState().chatImageMaxMb;
+      const { attachments: next, rejected } = await attachImages(base, files, { maxBytes: maxMb * 1024 * 1024 });
+      if (epoch !== attachEpoch.current) return;
+      const added = next.slice(base.length);
+      const latest = attachmentsRef.current;
+      const slots = Math.max(0, MAX_IMAGES - latest.length);
+      if (added.length > slots) rejected.push({ reason: "tooMany" });
+      if (slots > 0 && added.length > 0) {
+        setAttachments([...latest, ...added.slice(0, slots)]);
+      }
+      setAttachNote(attachmentRejectionNote(rejected, maxMb, t));
+    }).catch(() => {});
   };
 
   /** Put dropped file paths into the draft at the caret, spaced off from the text around them. */
@@ -2540,7 +2600,7 @@ export function ChatPane({
       {!readOnly && (item.status === "failed" || item.status === "unknown") && <button className="vlx-btn" disabled={submissionReceipts !== true} onClick={() => void retrySubmission(session.id, item, item.status === "failed" && !engineRunning ? startSubmissionAgent : undefined, () => translation.refresh(true)).then(receipt => finishSubmission(item, receipt))}>
         {t(item.status === "unknown" ? "chat.submission.check" : "common.retry")}
       </button>}
-      {item.error && item.status !== "canceled" && !isAgentNotInstalledError(item.error) && <ErrorRow message={item.translation ? translationError(item.error, t) : item.error} />}
+      {item.error && item.status !== "canceled" && !isAgentNotInstalledError(item.error) && <ErrorRow message={item.translation ? translationError(item.error, t) : formatSubmissionError(item.error)} />}
     </div>;
   };
 
@@ -2691,7 +2751,15 @@ export function ChatPane({
   // key one click away from the message box rather than in the app's Settings.
   if (session.kind === "deepseek") composerChips.push({ id: "deepseekApi", node: <DeepSeekApiChip /> });
   // The account menu disables itself while a sign-in is unresolved; the inline panel handles that flow.
-  const authProvider = session.kind === "claude" ? "Claude" : session.kind === "codex" ? "Codex" : session.kind === "zcode" ? "ZCode" : null;
+  const authProvider = session.kind === "claude"
+    ? "Claude"
+    : session.kind === "codex"
+      ? "Codex"
+      : session.kind === "zcode"
+        ? "ZCode"
+        : session.kind === "antigravity"
+          ? "Antigravity"
+          : null;
   // A check at open finds a missing sign-in before any process exists to report it. A sign-in under way wins.
   const authState: ChatAuthState | undefined = signInMissing && !needsAttention(extras.auth)
     ? { status: session.kind === "zcode" ? "required" : "signedOut" }

@@ -380,6 +380,7 @@ pub fn run(
     command.env_remove("VLX_SESSION_ID");
     command.env_remove("VLX_TOKEN");
     command.env_remove("VLX_AUTH");
+    command.env_remove(super::hook_bridge::CHAT_ENGINE_ENV);
     run_command(command, matches!(delivery, PromptDelivery::Stdin { .. }).then_some(prompt), timeout)
 }
 
@@ -591,7 +592,7 @@ pub(crate) fn run_selected_stream(
     if let Some(cwd)=cwd {command.current_dir(cwd);}
     crate::login_env::refresh_command(&mut command);
     super::executable::prepare_command(&mut command,&summarizer.bin);
-    command.env_remove("VLX_SPAWN_URL").env_remove("VLX_SESSION_ID").env_remove("VLX_TOKEN").env_remove("VLX_AUTH");
+    command.env_remove("VLX_SPAWN_URL").env_remove("VLX_SESSION_ID").env_remove("VLX_TOKEN").env_remove("VLX_AUTH").env_remove(super::hook_bridge::CHAT_ENGINE_ENV);
     decode_output(summarizer.spec.output,&run_command_source(command,source,timeout,Some(cancelled))?)
 }
 

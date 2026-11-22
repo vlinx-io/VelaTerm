@@ -493,6 +493,7 @@ const fr: typeof en = {
   "settings.catTerminal": "Terminal", // Terminal
   "settings.catBehavior": "Comportement", // Behavior
   "settings.catAgents": "Agents", // Agents
+  "settings.catPlugins": "Extensions",
   "settings.agentDefaultsTitle": "Valeurs par défaut des nouvelles sessions",
   "settings.referSummaryTitle": "Contexte des références de session",
   "settings.referSummaryMode": "Mode de contexte",
@@ -865,6 +866,10 @@ const fr: typeof en = {
   "settings.fontPreviewText": "Portez ce vieux whisky au juge blond qui fume. 0123456789",
   "settings.fontPreviewChat": "J'ai mis à jour la page des paramètres. Chaque réglage de police prend effet immédiatement, et vous pouvez rétablir les valeurs par défaut à tout moment.",
   "settings.fontResetGroup": "Rétablir les polices par défaut",
+  "settings.chatImages": "Images",
+  "settings.chatImageMaxMb": "Taille max. d’image",
+  "settings.chatImageMaxMbHint": "Avant l’envoi, les images dépassant 1568 pixels de côté ou cette limite sont automatiquement redimensionnées et compressées. Seules celles impossibles à décoder ou qui dépassent encore la limite après compression sont ignorées.",
+  "settings.chatImageSizeMb": (mb: number) => `${mb} Mo`,
   "settings.composerChips": "Barre d’outils de saisie",
   "settings.composerChipsHint": "Les éléments activés s’affichent à côté du message dans l’ordre indiqué. Si une fonction est temporairement indisponible (agent arrêté, aucune tâche en arrière-plan ou connexion au compte en attente), son élément reste visible, mais vide ou désactivé. Les fonctions non prises en charge par l’agent actuel sont omises. Les éléments qui ne tiennent pas dans la barre passent dans le menu Plus. Les éléments désactivés ici ne s’affichent nulle part tant que vous ne les réactivez pas.",
   "settings.composerChipUp": (chip: string) => `Monter ${chip}`,
@@ -1648,9 +1653,22 @@ const fr: typeof en = {
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
+  "files.filterTruncated": "Seuls les premiers résultats sont affichés. Saisissez davantage de caractères pour affiner.",
   "files.dblClickOpen": "Double-cliquer pour ouvrir",
   "files.deleteConfirm": (name) =>
     `Supprimer « ${name} » ? Cette action est irréversible.`, // Delete "{name}"? This can't be undone.
+  "files.deleteManyConfirm": (count) =>
+    count === 1
+      ? "Supprimer 1 élément ? Cette action est irréversible."
+      : `Supprimer ${count} éléments ? Cette action est irréversible.`, // Delete {count} items? This can't be undone.
+  "files.pasteConflictTitle": "L'élément existe déjà", // Item already exists
+  "files.pasteConflictBody": (name) =>
+    `Un élément nommé « ${name} » existe déjà dans le dossier de destination.`, // An item named "{name}" already exists in the destination folder.
+  "files.pasteConflictProgress": (current, total) => `${current} sur ${total}`, // {current} of {total}
+  "files.pasteConflictApplyAll": "Appliquer à tous les conflits restants", // Apply to all remaining conflicts
+  "files.pasteReplace": "Remplacer", // Replace
+  "files.pasteSkip": "Ignorer", // Skip
+  "files.pasteKeepBoth": "Conserver les deux", // Keep Both
 
   // ── File transfer (remote access) ──
   "transfer.title": "Transferts", // Transfers
@@ -1666,6 +1684,7 @@ const fr: typeof en = {
   "transfer.foldersUnsupported": "Les dossiers ne peuvent pas être envoyés.", // Folders can't be uploaded.
   "drop.browserFilesHint": "Dans le navigateur, seules les images peuvent être déposées ici. Pour utiliser d'autres fichiers, envoyez-les d'abord dans le projet.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
   "files.copyFailed": "Certains fichiers n'ont pas pu être copiés. Vérifiez qu'ils existent toujours et que vous pouvez écrire dans ce dossier.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
+  "files.pasteFailed": "Certains éléments n'ont pas pu être collés. Vérifiez que la source existe toujours et que vous pouvez écrire dans ce dossier.", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => (n === 1 ? "1 session" : `${n} sessions`), // {n} sessions
@@ -2338,6 +2357,10 @@ const fr: typeof en = {
   "chat.auth.claude.submit": "Envoyer le code",
   "chat.auth.claude.invalidCode": "Collez le code complet de cette tentative d’autorisation, y compris la partie après #.",
   "chat.auth.claude.externalAuth": "Les clés API et les autres méthodes d’authentification configurées restent inchangées.",
+  "chat.auth.antigravity.pending": "Ouvrez la page d’autorisation, connectez-vous avec Google, puis collez le code d’autorisation ou l’URL de redirection affichée.",
+  "chat.auth.antigravity.failed": "La connexion n’a pas pu aboutir. Réessayez et vérifiez que votre version d’Antigravity CLI prend en charge l’autorisation du compte.",
+  "chat.auth.antigravity.code": "Code d’autorisation ou URL de redirection",
+  "chat.auth.antigravity.invalidCode": "Collez le code d’autorisation ou l’URL de redirection de cette tentative de connexion, sans espaces.",
   "chat.auth.open": "Ouvrir la page d’autorisation",
   "chat.auth.zcode.required": "Connectez-vous à ZCode avec votre compte Z.ai ou BigModel pour utiliser cette conversation.",
   "chat.auth.zcode.pending": "Ouvrez la page d’autorisation et accordez l’accès. Cette vue sera mise à jour une fois la connexion terminée.",
@@ -2553,6 +2576,7 @@ const fr: typeof en = {
   "chat.attach.modelTextOnly": "Le modèle sélectionné n’accepte pas les images.",
   "chat.signInRequired": (agent: string) => `Connectez-vous à ${agent} pour utiliser la vue de conversation. Passez à la vue terminal pour vous connecter, puis renvoyez votre message.`,
   "chat.apiKeyRequired": "DeepSeek a besoin d'une clé API. Ouvrez « API » à côté du champ de message et saisissez-la, ou définissez la variable d'environnement `DEEPSEEK_API_KEY`, puis renvoyez votre message.",
+  "chat.codex.activeWriter": "Un autre processus Codex utilise actuellement cette conversation. Fermez l’autre onglet de terminal ou l’autre instance Codex qui l’occupe, ou patientez un instant avant de réessayer.",
   "chat.antigravity.permissionsHint": "Les outils nécessitant une autorisation doivent être autorisés dans les paramètres d’Antigravity ou utilisés dans la vue terminal.",
   "chat.antigravity.settingsHint": "Modifiez le modèle, le niveau de raisonnement ou les autorisations entre les tours.",
   "chat.antigravity.rewindTitle": "Revenir en arrière dans la vue terminal",
@@ -2738,7 +2762,30 @@ const fr: typeof en = {
   "kb.updatedOn": (date: string) => `Mise à jour le ${date}`,
   "archive.sessionsCount": (count: string) => `${count} ${count === "1" ? "session" : "sessions"}`,
 
+
   ...assist,
+  "plugins.title": "Extensions",
+  "plugins.subtitle": "Installez, liez, activez ou rechargez des extensions VelaTerm externes. Chaque extension s’exécute dans un processus backend isolé et charge son interface dynamiquement.",
+  "plugins.installArchive": "Installer depuis une archive…",
+  "plugins.linkDev": "Lier une extension locale…",
+  "plugins.localOnlyHint": "L’installation, la liaison et l’activation des extensions sont réservées à l’hôte local.",
+  "plugins.archivePathPrompt": "Saisissez le chemin complet vers une archive .vlxplugin ou .zip :",
+  "plugins.devPathPrompt": "Saisissez le chemin complet d’un dossier d’extension local contenant manifest.json :",
+  "plugins.empty": "Aucune extension installée. Installez une archive .vlxplugin ou liez un dossier d’extension local pour commencer.",
+  "plugins.sourceInstalled": "Installée",
+  "plugins.sourceDev": "Dév. local",
+  "plugins.statusRunning": "En cours",
+  "plugins.statusStarting": "Démarrage…",
+  "plugins.statusDisabled": "Désactivée",
+  "plugins.statusStopped": "Arrêtée",
+  "plugins.statusError": "Erreur",
+  "plugins.enable": "Activer",
+  "plugins.disable": "Désactiver",
+  "plugins.reload": "Recharger",
+  "plugins.uninstall": "Désinstaller",
+  "plugins.uninstallConfirm": (name: string) => `Désinstaller l’extension « ${name} » ?`,
+  "plugins.removeData": "Supprimer également le dossier de données local de cette extension",
+  "plugins.loadFailed": "Échec du chargement de l’interface de l’extension",
 };
 
 export default fr;

@@ -61,6 +61,15 @@ impl HostConfig {
     }
 }
 
+/// Target endpoint fields resolved by layering `[user@]host[:port]` with `~/.ssh/config`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedTarget {
+    pub hostname: String,
+    pub user: Option<String>,
+    pub port: u16,
+    pub config: HostConfig,
+}
+
 /// Read the standard SSH config path (`~/.ssh/config`) and return the effective `HostConfig` for
 /// `target`. A missing file yields `HostConfig::default()`, which is indistinguishable from a file that
 /// simply has no matching block; callers should treat both the same way.
@@ -73,6 +82,32 @@ pub fn lookup(target: &str, home: Option<&Path>) -> HostConfig {
         return HostConfig::default();
     };
     parse_lookup(&text, target, Some(home))
+}
+
+/// Resolve `[user@]host[:port]` against `~/.ssh/config` under `home`. Explicit `user` and `:port` in
+/// the target string take precedence over `User` / `Port` from the config, matching OpenSSH.
+pub fn resolve_target(host: &str, home: Option<&Path>) -> ResolvedTarget {
+    let (target, port_opt) = crate::agent::inject::split_ssh_target(host);
+    let port_from_target: Option<u16> = port_opt.and_then(|p| p.parse().ok());
+    let (user_from_target, host_from_target) = match target.rsplit_once('@') {
+        Some((u, h)) => (Some(u.to_string()), h.to_string()),
+        None => (None, target.to_string()),
+    };
+    let config = lookup(&host_from_target, home);
+    let hostname = config
+        .hostname
+        .as_deref()
+        .filter(|h| !h.is_empty())
+        .map(str::to_string)
+        .unwrap_or(host_from_target);
+    let user = user_from_target.or_else(|| config.user.clone());
+    let port = port_from_target.or(config.port).unwrap_or(22);
+    ResolvedTarget {
+        hostname,
+        user,
+        port,
+        config,
+    }
 }
 
 /// Parse `config` and return the effective `HostConfig` for `target`. `home` is used to expand a
@@ -346,5 +381,30 @@ Host       spaced-out # trailing comment
         let empty: HostConfig = lookup("anywhere", Some(Path::new("/nonexistent-dir")));
         assert_eq!(empty, HostConfig::default());
         assert!(empty.allows_password());
+    }
+
+    /// `resolve_target` layers target user/port overrides over `~/.ssh/config` HostName/User/Port.
+    #[test]
+    fn resolve_target_layers_cli_overrides_over_config() {
+        let dir = std::env::temp_dir().join(format!("vlx-ssh-cfg-{}", uuid::Uuid::new_v4().simple()));
+        let ssh_dir = dir.join(".ssh");
+        std::fs::create_dir_all(&ssh_dir).unwrap();
+        std::fs::write(
+            ssh_dir.join("config"),
+            "Host mybox\n  HostName 192.168.1.50\n  User alice\n  Port 2222\n",
+        )
+        .unwrap();
+
+        let from_alias = resolve_target("mybox", Some(&dir));
+        assert_eq!(from_alias.hostname, "192.168.1.50");
+        assert_eq!(from_alias.user.as_deref(), Some("alice"));
+        assert_eq!(from_alias.port, 2222);
+
+        let with_overrides = resolve_target("bob@mybox:2200", Some(&dir));
+        assert_eq!(with_overrides.hostname, "192.168.1.50");
+        assert_eq!(with_overrides.user.as_deref(), Some("bob"));
+        assert_eq!(with_overrides.port, 2200);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

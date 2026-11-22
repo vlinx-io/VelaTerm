@@ -4,7 +4,8 @@ import { useT } from "../i18n";
 import type { ChatImage } from "../ipc/chat";
 import { env } from "../platform/env";
 import { imagesFromClipboard, imageFromNativeClipboard } from "../terminal/imageInput";
-import { attachImages, restoreAttachment, MAX_IMAGES, MAX_IMAGE_BYTES, type Attachment } from "../layout/CenterPane/session/attachments";
+import { useTermStore } from "../store/termStore";
+import { attachImages, attachmentRejectionNote, restoreAttachment, type Attachment } from "../layout/CenterPane/session/attachments";
 
 export function useTaskImages(request: object | undefined, initial: ChatImage[] = []) {
   const t = useT();
@@ -30,13 +31,11 @@ export function useTaskImages(request: object | undefined, initial: ChatImage[] 
       if (epoch !== generation.current) return;
       const files = await load();
       if (epoch !== generation.current) return;
-      const result = await attachImages(current.current, files);
+      const maxMb = useTermStore.getState().chatImageMaxMb;
+      const result = await attachImages(current.current, files, { maxBytes: maxMb * 1024 * 1024 });
       if (epoch !== generation.current) return;
       current.current = result.attachments; setAttachments(result.attachments);
-      const first = result.rejected[0];
-      setNote(!first ? null : first.reason === "tooMany" ? t("chat.attach.tooMany", MAX_IMAGES)
-        : first.reason === "tooLarge" ? t("chat.attach.tooLarge", first.name, MAX_IMAGE_BYTES / (1024 * 1024))
-        : t("chat.attach.unreadable", first.name));
+      setNote(attachmentRejectionNote(result.rejected, maxMb, t));
     }).catch(() => { if (epoch === generation.current) setNote(t("chat.attach.unreadable", "clipboard")); })
       .finally(() => { if (epoch === generation.current) { pending.current -= 1; setBusy(pending.current > 0); } });
   };

@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { useT } from "../i18n";
+import { onAntigravityModelsChanged } from "../ipc/events";
 import { launchModels, launchOptions, type LaunchOption, type LaunchModelContext, type LaunchModelCatalog } from "../ipc/launch";
 import type { WorktreeMode } from "../ipc/events";
 import { LevelBar } from "../layout/CenterPane/session/controls";
@@ -91,6 +92,21 @@ export function useLaunchModels(kind: string | null | undefined, context: Launch
     : "";
   const [response, setResponse] = useState<{ key: string; catalog?: LaunchModelCatalog; error?: string } | null>(null);
   const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    if (kind !== "antigravity") return;
+    let active = true;
+    let stop: (() => void) | null = null;
+    void onAntigravityModelsChanged(() => {
+      if (active) setRevision((r) => r + 1);
+    }).then((unlisten) => {
+      if (active) stop = unlisten;
+      else unlisten();
+    }).catch(() => {});
+    return () => {
+      active = false;
+      stop?.();
+    };
+  }, [kind]);
   useEffect(() => {
     let live = true;
     setResponse(null);

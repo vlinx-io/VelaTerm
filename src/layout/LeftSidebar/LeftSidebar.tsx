@@ -10,6 +10,10 @@ import { env, platform } from "../../platform";
 import { knowledgeUrl } from "../Knowledge/navigation";
 import { securityUrl } from "../Security/navigation";
 import { memoryNavigate, COLLECTIONS_CHANGED, COLLECTIONS_COLLAPSE, MemoryLink } from "../Memory/navigation";
+import { PluginLink } from "../../plugins/navigation";
+import { translatePluginKey, usePlugins } from "../../plugins/host";
+import { PluginSidebarHost } from "../../plugins/PluginViews";
+import { isPluginRailSection, pluginIdFromSection } from "./systemCollections";
 import { knowledgeSelection } from "../Notebook/KnowledgeTreeRow";
 import { showVaultAction } from "../Notebook/VaultActions";
 import {
@@ -268,14 +272,23 @@ function SidebarTreePane({
     </button>
   );
 
-  if (fixedLayout && (section === "knowledge" || section === "archive")) {
+  const activePluginId = pluginIdFromSection(section);
+  if (fixedLayout && (section === "knowledge" || section === "archive" || activePluginId)) {
     return (
       <section
         className={"sidebar-tree-pane" + (split ? " split" : "") + (active ? " active" : "")}
         onMouseDown={onActivate}
       >
         <div className="sidebar-tree-body sidebar-knowledge-body">
-          <Suspense fallback={null}>{section === "archive" ? <ArchiveNavigation /> : <KnowledgeNavigation heading={false} />}</Suspense>
+          <Suspense fallback={null}>
+            {section === "archive" ? (
+              <ArchiveNavigation />
+            ) : activePluginId ? (
+              <PluginSidebarHost pluginId={activePluginId} />
+            ) : (
+              <KnowledgeNavigation heading={false} />
+            )}
+          </Suspense>
         </div>
         <div className="sidebar-tree-footer">
           {closeButton}
@@ -520,6 +533,18 @@ export function LeftSidebar() {
   const showProjectActions = !fixedLayout || section === "projects";
   const knowledgeSection = fixedLayout && section === "knowledge";
   const archiveSection = fixedLayout && section === "archive";
+  const pluginSectionId = fixedLayout && isPluginRailSection(section) ? pluginIdFromSection(section) : null;
+  const pluginSection = Boolean(pluginSectionId);
+  const pluginsList = usePlugins();
+  const activePlugin = pluginSectionId ? pluginsList.find((p) => p.id === pluginSectionId) ?? null : null;
+  const activePluginLabel = activePlugin
+    ? (() => {
+        const key = activePlugin.ui?.rail?.labelKey ?? "";
+        if (!key) return activePlugin.name;
+        const tr = translatePluginKey(activePlugin.id, key);
+        return tr === key ? activePlugin.name : tr;
+      })()
+    : pluginSectionId ?? "";
   const treeStageRef = useRef<HTMLDivElement>(null);
 
   // Three draft sets route context menus and inline rename to temporary actions and in-memory renameScratch.
@@ -993,7 +1018,9 @@ export function LeftSidebar() {
         {/* The Knowledge title opens the knowledge-base overview, like the heading of the right panel's knowledge tab. */}
         {knowledgeSection || archiveSection
           ? <MemoryLink className="title" route={archiveSection ? "collections" : "notebooks"} values={knowledgeSelection}>{systemLabel(t, section)}</MemoryLink>
-          : <span className="title">{fixedLayout ? systemLabel(t, section) : "Workspace"}</span>}
+          : pluginSectionId
+            ? <PluginLink className="title" pluginId={pluginSectionId} route={activePlugin?.ui?.rail?.defaultRoute || "overview"}>{activePluginLabel}</PluginLink>
+            : <span className="title">{fixedLayout ? systemLabel(t, section) : "Workspace"}</span>}
         <span className="sp" />
         {knowledgeSection && <>
         <button className="icon-btn sm" title={t("nb.openVault")} aria-label={t("nb.openVault")} onClick={() => showVaultAction("open")}>
@@ -1012,7 +1039,7 @@ export function LeftSidebar() {
           <Icons.restart size={14} />
         </button>
         </>}
-        {!knowledgeSection && !archiveSection && <a
+        {!knowledgeSection && !archiveSection && !pluginSection && <a
           href={newSessionHref({ projectId: typedRoot ?? "" })}
           className="icon-btn sm"
           title={newSessionLabel}
@@ -1067,7 +1094,7 @@ export function LeftSidebar() {
           <Icons.projectClone size={14} />
         </button>
         </>}
-        {!knowledgeSection && !archiveSection && <button
+        {!knowledgeSection && !archiveSection && !pluginSection && <button
           className="icon-btn sm"
           title={labelWithCombo(t("tree.globalSearch"), "globalSearch", shortcutOverrides)}
           onClick={() => setGlobalSearchOpen(true)}

@@ -431,6 +431,34 @@ impl OutputCoalescer {
 /// a dedicated waiter thread blocked on wait (see manager.rs).
 ///
 /// PtyManager::spawn starts a detached reader that continuously reads the master and fans out through `stream`.
+/// Master handle backing either a local portable PTY or a plugin-provided virtual PTY stream.
+pub enum PtyMaster {
+    Portable(Box<dyn MasterPty + Send>),
+    Plugin {
+        process: Arc<crate::plugins::process::PluginProcess>,
+        pty_id: String,
+    },
+}
+
+impl PtyMaster {
+    pub fn resize(&self, size: portable_pty::PtySize) -> Result<(), String> {
+        match self {
+            PtyMaster::Portable(m) => m.resize(size).map_err(|e| e.to_string()),
+            PtyMaster::Plugin { process, pty_id } => {
+                process.resize_pty(pty_id, size.cols, size.rows)
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    pub fn process_group_leader(&self) -> Option<libc::pid_t> {
+        match self {
+            PtyMaster::Portable(m) => m.process_group_leader(),
+            PtyMaster::Plugin { .. } => None,
+        }
+    }
+}
+
 pub struct PtySession {
     /// Session configuration captured at launch, not a claim about later native permission changes.
     pub launch_permission_mode: Option<String>,
@@ -438,7 +466,7 @@ pub struct PtySession {
     /// Reader completion and child reaping, both required before another engine takes over.
     pub terminated: Arc<(Mutex<u8>, std::sync::Condvar)>,
     #[allow(dead_code)]
-    pub master: Box<dyn MasterPty + Send>,
+    pub master: PtyMaster,
     /// Input queue makes `pty_write` return after enqueue without touching the fd. A dedicated FIFO writer isolates
     /// blocking write_all from the global sessions lock and other sessions. Removing the session drops Sender and
     /// naturally ends the writer's recv loop.

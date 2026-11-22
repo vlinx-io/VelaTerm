@@ -21,7 +21,6 @@ use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 
-use crate::agent::inject::split_ssh_target;
 use crate::ssh_remote::{
     pick_local_port, wait_port_healthy, Progress, SshAuth, SshTransport, AUTH_REQUIRED_TAG,
 };
@@ -73,30 +72,15 @@ impl RusshTransport {
         auth: SshAuth,
         _progress: Progress,
     ) -> Result<Self, String> {
-        let (target, port_opt) = split_ssh_target(host);
-        let port_from_target: Option<u16> = port_opt.and_then(|p| p.parse().ok());
-        let (user_from_target, host_from_target) = match target.rsplit_once('@') {
-            Some((u, h)) => (Some(u.to_string()), h.to_string()),
-            None => (None, target.to_string()),
-        };
-
         // Read ~/.ssh/config for the literal target host; missing file yields defaults so the previous
         // hard-coded behaviour is preserved when no config exists.
-        let host_key = host_from_target.as_str();
-        let ssh_cfg = crate::ssh_config::lookup(host_key, crate::host::home_dir().as_deref());
-        let hostname = ssh_cfg.hostname.clone().unwrap_or_else(|| host_from_target.clone());
-        let user = match user_from_target {
-            Some(u) => u,
-            None => match ssh_cfg.user.clone() {
-                Some(u) => u,
-                None => {
-                    return Err(format!(
-                        "SSH target must be user@host or set User in ~/.ssh/config: {host}"
-                    ))
-                }
-            },
-        };
-        let port: u16 = port_from_target.or(ssh_cfg.port).unwrap_or(22);
+        let resolved = crate::ssh_config::resolve_target(host, crate::host::home_dir().as_deref());
+        let hostname = resolved.hostname;
+        let user = resolved.user.ok_or_else(|| {
+            format!("SSH target must be user@host or set User in ~/.ssh/config: {host}")
+        })?;
+        let port = resolved.port;
+        let ssh_cfg = resolved.config;
 
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)

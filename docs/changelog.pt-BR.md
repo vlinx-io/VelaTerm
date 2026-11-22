@@ -1,3 +1,18 @@
+## v0.3.4 — 2026-11-22
+
+- 🪐 As conversas do Antigravity agora trazem uma lista integrada de modelos com Gemini 4 Neon e Orchestrator (Neon), atualizam os modelos disponíveis em segundo plano ao abrir e permitem que sessões de longa duração mudem sem atrito para modelos recém-lançados.
+- 🔑 As conversas do Antigravity agora permitem entrar com o Google e sair diretamente na visualização de conversa.
+- 🛡️ As conversas do Antigravity agora mantêm com confiabilidade as permissões Bypass na inicialização, aguardam a lista de modelos em inicializações a frio em vez de falhar na primeira mensagem e não congelam mais o aplicativo ao abrir uma sessão.
+- 📁 O painel Arquivos agora oferece seleção múltipla, exclusão em lote e recortar, copiar e colar arquivos com o Finder e o Explorador de Arquivos, incluindo resolução de conflitos.
+- 🔎 O filtro do painel Arquivos agora pesquisa recursivamente em pastas recolhidas e expande automaticamente os caminhos encontrados.
+- 🖼️ Imagens muito grandes coladas ou soltas em conversas agora são redimensionadas e comprimidas automaticamente em vez de rejeitadas, com limite configurável de 1, 2 ou 4 MB em Configurações.
+- 🔔 A janela principal e as janelas remotas agora exibem sua própria contagem pendente no título da janela, e o selo do Dock ou da barra de tarefas mostra o total de todas as janelas abertas.
+- 🔍 Janelas remotas de SSH, WSL e URL pareada agora exibem o controle de zoom da interface na barra de status.
+- 🧱 A verificação e a confiança de chaves de host SSH agora respeitam aliases, nomes de host e portas personalizadas definidos em `~/.ssh/config`.
+- 🪟 No macOS, clicar no ícone do Dock quando apenas janelas remotas estão abertas traz essas janelas para a frente em vez de abrir uma nova janela principal, e o menu de contexto do Dock adiciona New Window.
+- 💬 Os erros de conversa agora removem códigos de escape brutos do terminal, exibem uma mensagem clara quando outro processo do Codex está usando a mesma conversa e não duplicam mais erros de inicialização.
+- 🔧 Cancelar o arraste de um projeto na barra lateral limpa imediatamente o indicador de inserção, e as sessões na visualização de conversa não recebem mais atualizações de status conflitantes dos hooks de terminal.
+
 ## v0.3.3 — 2026-11-17
 
 - 🌐 O acesso remoto agora pode escutar em todas as redes, em um endereço IPv4 específico como um endereço do Tailscale, ou somente neste computador quando estiver atrás de um túnel ou proxy reverso; `vela-server --serve` aceita a mesma opção com `--bind`.

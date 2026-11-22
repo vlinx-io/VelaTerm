@@ -489,6 +489,7 @@ const zhCN: typeof en = {
   "settings.catTerminal": "终端",
   "settings.catBehavior": "行为",
   "settings.catAgents": "智能体",
+  "settings.catPlugins": "插件",
   "settings.agentDefaultsTitle": "新会话默认设置",
   "settings.referSummaryTitle": "会话引用上下文",
   "settings.referSummaryMode": "上下文方式",
@@ -854,6 +855,10 @@ const zhCN: typeof en = {
   "settings.fontPreviewText": "敏捷的棕色狐狸跳过了那只懒狗。The quick brown fox 0123456789",
   "settings.fontPreviewChat": "设置页面已更新。每项字体设置都会立即生效，你也可以随时恢复默认值。",
   "settings.fontResetGroup": "恢复默认字体",
+  "settings.chatImages": "图片",
+  "settings.chatImageMaxMb": "图片大小上限",
+  "settings.chatImageMaxMbHint": "发送前会将长边超过 1568 像素或体积超过该上限的图片自动缩放并压缩。仅当图片无法解码或压缩后仍超出上限时才会跳过。",
+  "settings.chatImageSizeMb": (mb: number) => `${mb} MB`,
   "settings.composerChips": "输入工具栏",
   "settings.composerChipsHint": "已开启的项目按此处顺序显示在消息旁。功能暂不可用时，例如智能体未运行、没有后台任务或尚未完成登录，项目仍会显示，但为空或不可操作。当前智能体不支持的功能不显示。空间不足时，放不下的项目会移入“更多”菜单。此处关闭的项目在重新开启前不会显示在任何位置。",
   "settings.composerChipUp": (chip: string) => `将${chip}上移`,
@@ -1597,8 +1602,17 @@ const zhCN: typeof en = {
   "files.copyPath": "复制路径", // Copy Path
   "files.copyRelPath": "复制相对路径", // Copy Relative Path
   "files.filterPlaceholder": "过滤文件…", // Filter files
+  "files.filterTruncated": "仅显示前一部分匹配结果，继续输入可缩小范围。",
   "files.dblClickOpen": "双击打开", // Double-click to open
   "files.deleteConfirm": (name) => `确定删除“${name}”？此操作不可撤销。`, // Delete "{name}"? This can't be undone.
+  "files.deleteManyConfirm": (count) => `确定删除这 ${count} 个项目？此操作不可撤销。`, // Delete {count} items? This can't be undone.
+  "files.pasteConflictTitle": "项目已存在", // Item already exists
+  "files.pasteConflictBody": (name) => `目标目录中已存在名为“${name}”的项目。`, // An item named "{name}" already exists in the destination folder.
+  "files.pasteConflictProgress": (current, total) => `第 ${current} / ${total} 项`, // {current} of {total}
+  "files.pasteConflictApplyAll": "应用于所有剩余冲突", // Apply to all remaining conflicts
+  "files.pasteReplace": "替换", // Replace
+  "files.pasteSkip": "跳过", // Skip
+  "files.pasteKeepBoth": "保留两者", // Keep Both
 
   // ── File transfer (remote access) ──
   "transfer.title": "传输", // Transfers
@@ -1614,6 +1628,7 @@ const zhCN: typeof en = {
   "transfer.foldersUnsupported": "文件夹传不了。", // Folders can't be uploaded.
   "drop.browserFilesHint": "在浏览器中，这里只能拖入图片。其他文件请先上传到项目中。", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
   "files.copyFailed": "部分文件未能复制。请确认这些文件仍然存在，并且你有权限写入这个目录。", // Some files could not be copied. Check that they still exist and that you can write to this folder.
+  "files.pasteFailed": "部分项目未能粘贴。请确认源项目仍然存在，并且你有权限写入目标目录。", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => `${n} 会话`,
@@ -2272,6 +2287,10 @@ const zhCN: typeof en = {
   "chat.auth.claude.submit": "提交授权码",
   "chat.auth.claude.invalidCode": "请粘贴本次授权页面提供的完整授权码，包括 # 后面的内容。",
   "chat.auth.claude.externalAuth": "API 密钥及其他已配置的认证方式不会更改。",
+  "chat.auth.antigravity.pending": "打开授权页面并使用 Google 账号登录，然后将页面提供的授权码或完整回调链接粘贴到下方。",
+  "chat.auth.antigravity.failed": "未能完成登录，请重试，并确认当前 Antigravity CLI 支持账号授权。",
+  "chat.auth.antigravity.code": "授权码或回调链接",
+  "chat.auth.antigravity.invalidCode": "请粘贴本次登录提供的授权码或完整回调链接，且不要包含空格。",
   "chat.auth.open": "打开授权页面",
   "chat.auth.zcode.required": "登录 ZCode 后才能使用当前会话，请使用你的 Z.ai 或智谱 BigModel 账号。",
   "chat.auth.zcode.pending": "请打开授权页面并同意授权。登录完成后，此处会自动更新。",
@@ -2486,6 +2505,7 @@ const zhCN: typeof en = {
   "chat.attach.modelTextOnly": "当前选择的模型不支持图片。",
   "chat.signInRequired": (agent: string) => `使用会话视图前需要先登录 ${agent}。请切换到终端视图完成登录，然后重新发送消息。`,
   "chat.apiKeyRequired": "DeepSeek 需要 API 密钥。请点击输入框旁的「API」填写密钥，或设置环境变量 `DEEPSEEK_API_KEY`，然后重新发送消息。",
+  "chat.codex.activeWriter": "另一个 Codex 进程正在占用此会话。请先关闭占用该会话的其他终端标签页或 Codex 进程，或稍等片刻后重试。",
   "chat.antigravity.permissionsHint": "需要批准的工具必须先在 Antigravity 设置中获准使用，或在终端视图中使用。",
   "chat.antigravity.settingsHint": "请在回合之间修改模型、推理强度或权限。",
   "chat.antigravity.rewindTitle": "在终端视图中回退",
@@ -2671,7 +2691,30 @@ const zhCN: typeof en = {
   "kb.updatedOn": (date: string) => `更新于 ${date}`,
   "archive.sessionsCount": (count: string) => `${count} 个会话`,
 
+
   ...assist,
+  "plugins.title": "插件",
+  "plugins.subtitle": "安装、链接、启用或重载外部 VelaTerm 插件。每个插件在独立的后端进程中运行，并动态加载其界面。",
+  "plugins.installArchive": "从压缩包安装…",
+  "plugins.linkDev": "链接本地插件目录…",
+  "plugins.localOnlyHint": "仅允许在本机安装、链接或启停插件。",
+  "plugins.archivePathPrompt": "请输入 .vlxplugin 或 .zip 插件包的完整路径：",
+  "plugins.devPathPrompt": "请输入包含 manifest.json 的本地插件目录路径：",
+  "plugins.empty": "尚未安装任何插件。请安装 .vlxplugin 插件包或链接本地插件目录。",
+  "plugins.sourceInstalled": "已安装",
+  "plugins.sourceDev": "本地开发",
+  "plugins.statusRunning": "运行中",
+  "plugins.statusStarting": "启动中…",
+  "plugins.statusDisabled": "已禁用",
+  "plugins.statusStopped": "已停止",
+  "plugins.statusError": "异常",
+  "plugins.enable": "启用",
+  "plugins.disable": "禁用",
+  "plugins.reload": "重载",
+  "plugins.uninstall": "卸载",
+  "plugins.uninstallConfirm": (name: string) => `确认卸载插件“${name}”？`,
+  "plugins.removeData": "同时删除该插件的本地数据目录",
+  "plugins.loadFailed": "插件界面加载失败",
 };
 
 export default zhCN;

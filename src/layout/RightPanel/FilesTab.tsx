@@ -2,14 +2,48 @@
 //! hidden-item filtering, search, file preview, and create/edit/delete context actions. Extracted from
 //! RightPanel; FileNodeT, FileRow, ConfirmModal, and related helpers remain private to this tab.
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Icons from "../../components/Icons";
 import { Backdrop } from "../../components/Backdrop";
 import { fileIcon } from "./fileIcons";
 import { highlight } from "./highlight";
-import { collapseAllBelow, directoriesToRefresh, hasOpenDescendant, reconcileChildren, toNode, updateFileNode, visibleDirectories, type FileNodeT } from "./fileTree";
+import {
+  buildSearchTree,
+  canExpandInFilter,
+  collapseAllBelow,
+  directoriesToRefresh,
+  flattenVisibleNodes,
+  hasOpenDescendant,
+  isNodeOpen,
+  openFilterDescendants,
+  reconcileChildren,
+  shouldRefreshSearch,
+  toNode,
+  updateFileNode,
+  visibleChildren,
+  visibleDirectories,
+  type FileNodeT,
+} from "./fileTree";
+import {
+  clearCutClipboard,
+  copyFilesToClipboard,
+  cutFilesToClipboard,
+  finishCutPaste,
+  getFileClipboardSnapshot,
+  isPathInList,
+  normalizeSourcePaths,
+  notifyTextCopied,
+  parentPathOf,
+  rangeBetweenPaths,
+  readFilesForPaste,
+  refreshFileClipboardStatus,
+  sameFilePath,
+  subscribeFileClipboard,
+  targetPasteDir,
+} from "./fileClipboard";
 import { ContextMenu, type MenuItem } from "../../components/ContextMenu";
 import { FormModal } from "../../components/FormModal";
+import { hasMod } from "../../hooks/shortcutRegistry";
 import { useT } from "../../i18n";
 import {
   copyIntoDir,
@@ -19,10 +53,16 @@ import {
   deletePath,
   fsWatch,
   listDir,
+  pasteFiles,
+  pasteFilesCheck,
   readFilePreview,
   renamePath,
   revealPath,
+  searchFiles,
+  type FileClipboardMode,
   type FilePreview,
+  type PasteCheckItem,
+  type PasteConflictResolution,
 } from "../../ipc/info";
 import {
   cancelTransfer,
@@ -35,47 +75,20 @@ import {
 } from "../../ipc/transfer";
 import { env, platform } from "../../platform";
 import { safeError } from "../../ipc/diagnosticSafety";
+import { baseName, detectFlavor } from "../../remote/serverPath";
 import { useTermStore } from "../../store/termStore";
 import { onFsChanged } from "../../ipc/events";
 /* ===================== Files: real tree, preview, and one-level lazy loading ===================== */
 
-/** Parent of an absolute path, used to target and refresh create/rename operations. */
-function parentPathOf(path: string): string {
-  const i = path.lastIndexOf("/");
-  return i <= 0 ? "/" : path.slice(0, i);
-}
-
-/** Find a tree node by absolute path to locate directories that need refreshing. */
+/** Find a tree node by path to locate directories that need refreshing. */
 function findNodeByPath(root: FileNodeT | null, path: string): FileNodeT | null {
   if (!root) return null;
-  if (root.path === path) return root;
+  if (sameFilePath(root.path, path)) return root;
   for (const c of root.children || []) {
     const f = findNodeByPath(c, path);
     if (f) return f;
   }
   return null;
-}
-
-/** Whether a node name or loaded descendant matches the lowercase query. */
-function nodeMatches(node: FileNodeT, q: string): boolean {
-  if (node.name.toLowerCase().includes(q)) return true;
-  return (node.children || []).some((c) => nodeMatches(c, q));
-}
-
-/** Flatten currently visible rows for keyboard navigation, using the renderer's expand/filter rules. */
-function flattenVisible(root: FileNodeT, showHidden: boolean, q: string): FileNodeT[] {
-  const out: FileNodeT[] = [];
-  const walk = (node: FileNodeT) => {
-    out.push(node);
-    if (!node.isDir) return;
-    const open = q ? true : !!node.open;
-    if (!open) return;
-    let kids = (node.children || []).filter((c) => showHidden || !c.isHidden);
-    if (q) kids = kids.filter((c) => nodeMatches(c, q));
-    kids.forEach(walk);
-  };
-  walk(root);
-  return out;
 }
 
 /** Render project outline icons with muted type colors from fileIcons.tsx. Strokes use currentColor,
@@ -109,11 +122,15 @@ function filesFromDrop(transfer: DataTransfer): { files: File[]; skippedFolders:
 
 function FileRow({
   node,
+  rootPath,
   depth,
-  selPath,
+  selPaths,
+  cutPaths,
+  ancestorCut = false,
   focusPath,
   showHidden,
   filter,
+  filterCollapsed,
   onFile,
   onOpen,
   onDir,
@@ -121,15 +138,19 @@ function FileRow({
   onDropFiles,
 }: {
   node: FileNodeT;
+  rootPath: string;
   depth: number;
-  selPath: string | null;
+  selPaths: string[];
+  cutPaths: string[];
+  ancestorCut?: boolean;
   focusPath: string | null;
   showHidden: boolean;
-  /** Lowercase trimmed query; forces matching directories open and hides nonmatching items. */
+  /** Lowercase trimmed query; shows matching items and their ancestors while respecting user collapse toggles. */
   filter: string;
-  onFile: (n: FileNodeT) => void;
+  filterCollapsed: ReadonlySet<string>;
+  onFile: (n: FileNodeT, e?: React.MouseEvent) => void;
   onOpen: (n: FileNodeT) => void;
-  onDir: (n: FileNodeT) => void;
+  onDir: (n: FileNodeT, e?: React.MouseEvent) => void;
   onContext: (e: React.MouseEvent, n: FileNodeT) => void;
   /** An external file drop onto this row; null disables the drop target. */
   onDropFiles: ((n: FileNodeT, transfer: DataTransfer) => void) | null;
@@ -167,23 +188,28 @@ function FileRow({
         ))}
       </span>
     ) : null;
-  // Filtering forces expansion; clearing the query restores node.open.
-  const open = filter ? true : !!node.open;
-  const focusCls = focusPath === node.path ? " kbd-focus" : "";
+  const focusCls = focusPath && sameFilePath(focusPath, node.path) ? " kbd-focus" : "";
+  const selected = isPathInList(selPaths, node.path);
+  const isCut = ancestorCut || isPathInList(cutPaths, node.path);
+  const selCls = selected ? " sel" : "";
+  const cutCls = isCut ? " cut-entry" : "";
   if (node.isDir) {
     // When hidden items are off, omit a dot-prefixed directory and its entire subtree.
-    let kids = (node.children || []).filter((c) => showHidden || !c.isHidden);
-    if (filter) kids = kids.filter((c) => nodeMatches(c, filter));
+    const kids = visibleChildren(node, rootPath, showHidden, filter);
+    const open = isNodeOpen(node, rootPath, filter, filterCollapsed, kids.length);
+    const expandable = !filter || node.path === rootPath || canExpandInFilter(node, kids.length);
     return (
       <div>
         <div
-          className={"file-row" + (node.isHidden ? " hidden-entry" : "") + focusCls + dropCls}
-          onClick={() => onDir(node)}
+          className={"file-row" + selCls + (node.isHidden ? " hidden-entry" : "") + cutCls + focusCls + dropCls}
+          onClick={(e) => onDir(node, e)}
           onContextMenu={(e) => onContext(e, node)}
           {...dragProps}
         >
           {inds}
-          <span className="tw">{open ? <Icons.chevD size={13} /> : <Icons.chevR size={13} />}</span>
+          <span className={"tw" + (expandable ? "" : " leaf")}>
+            {open ? <Icons.chevD size={13} /> : <Icons.chevR size={13} />}
+          </span>
           <span className="ic">{renderFileIcon(node.name, true, open)}</span>
           <span className="nm">{node.name}</span>
           {node.badge && <span className={"gb gb-" + node.badge}>{node.badge}</span>}
@@ -211,11 +237,15 @@ function FileRow({
               <FileRow
                 key={c.path}
                 node={c}
+                rootPath={rootPath}
                 depth={depth + 1}
-                selPath={selPath}
+                selPaths={selPaths}
+                cutPaths={cutPaths}
+                ancestorCut={isCut}
                 focusPath={focusPath}
                 showHidden={showHidden}
                 filter={filter}
+                filterCollapsed={filterCollapsed}
                 onFile={onFile}
                 onOpen={onOpen}
                 onDir={onDir}
@@ -231,13 +261,14 @@ function FileRow({
     <div
       className={
         "file-row" +
-        (selPath === node.path ? " sel" : "") +
+        selCls +
         (node.isHidden ? " hidden-entry" : "") +
+        cutCls +
         focusCls +
         dropCls
       }
       title={t("files.dblClickOpen")}
-      onClick={() => onFile(node)}
+      onClick={(e) => onFile(node, e)}
       onDoubleClick={() => onOpen(node)}
       onContextMenu={(e) => onContext(e, node)}
       {...dragProps}
@@ -258,7 +289,8 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
   rootRef.current = root;
   const treeGeneration = useRef(0);
   const treeRevision = useRef(0);
-  const [sel, setSel] = useState<FileNodeT | null>(null);
+  const [selPaths, setSelPaths] = useState<string[]>([]);
+  const anchorPath = useRef<string | null>(null);
   const [preview, setPreview] = useState<FilePreview | null>(null);
   // Preview is explicit: clicks only select; the context-menu Preview action loads the bottom pane.
   // previewNode is independent of selection, and null hides the preview pane.
@@ -273,14 +305,39 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
   const [dialog, setDialog] = useState<
     { mode: "newFile" | "newDir" | "rename"; dir: FileNodeT; node?: FileNodeT } | null
   >(null);
-  // Delete confirmation state and containing directory to refresh afterward.
-  const [del, setDel] = useState<{ node: FileNodeT; dir: FileNodeT } | null>(null);
+  // Delete confirmation state for single or multi-select removal.
+  const [del, setDel] = useState<{ paths: string[]; label: string } | null>(null);
+  // Conflict resolution prompt shown before executing a paste that collides with existing items.
+  const [conflictPrompt, setConflictPrompt] = useState<{
+    dirPath: string;
+    sources: string[];
+    mode: FileClipboardMode;
+    sequence?: number;
+    conflicts: PasteCheckItem[];
+    index: number;
+    resolutions: Record<string, PasteConflictResolution>;
+  } | null>(null);
+  const pastingRef = useRef(false);
+  const lastKeyClipboardRef = useRef<{ op: "copy" | "cut" | "paste"; at: number } | null>(null);
+  const clipboard = useSyncExternalStore(subscribeFileClipboard, getFileClipboardSnapshot);
   // Dismissible operation error such as a duplicate name or insufficient permission.
   const [err, setErr] = useState<string | null>(null);
   const [refreshErr, setRefreshErr] = useState<string | null>(null);
   // Quick filter state: filterOn controls visibility; q is the normalized value passed to the tree.
   const [filterOn, setFilterOn] = useState(false);
   const [filter, setFilter] = useState("");
+  // Directories manually collapsed while a filter is active (kept separate from `root`'s `open` flags).
+  const [filterCollapsed, setFilterCollapsed] = useState<Set<string>>(() => new Set());
+  // Latest recursive backend search result for the active query.
+  const [searchState, setSearchState] = useState<{
+    rootPath: string;
+    showHidden: boolean;
+    query: string;
+    root: FileNodeT;
+    truncated: boolean;
+  } | null>(null);
+  const [searching, setSearching] = useState(false);
+  const searchGen = useRef(0);
   // Keyboard focus row, independent of selected preview; focusing a file also previews it.
   const [focusPath, setFocusPath] = useState<string | null>(null);
   // File transfer is only meaningful when the server is a different machine from the browser: on the desktop
@@ -296,11 +353,49 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
   // Container for the tree and preview, whose height bounds preview resizing.
   const wrapRef = useRef<HTMLDivElement>(null);
   const q = filter.trim().toLowerCase();
+  const qRef = useRef(q);
+  qRef.current = q;
+  const showHiddenRef = useRef(showHidden);
+  showHiddenRef.current = showHidden;
+
+  const runSearch = async (targetRoot: string, queryText: string, includeHidden: boolean) => {
+    if (!targetRoot || !queryText) return;
+    const gen = ++searchGen.current;
+    setSearching(true);
+    try {
+      const res = await searchFiles(targetRoot, queryText, includeHidden);
+      if (gen !== searchGen.current) return;
+      if (rootRef.current?.path !== targetRoot || qRef.current !== queryText || showHiddenRef.current !== includeHidden) {
+        return;
+      }
+      const currentRoot = rootRef.current;
+      const name = currentRoot?.name || rootName || targetRoot.split("/").filter(Boolean).pop() || targetRoot;
+      const tree = buildSearchTree(targetRoot, name, currentRoot?.badge, res.entries);
+      setSearchState({
+        rootPath: targetRoot,
+        showHidden: includeHidden,
+        query: queryText,
+        root: tree,
+        truncated: res.truncated,
+      });
+      setRefreshErr(null);
+    } catch (e) {
+      if (gen !== searchGen.current) return;
+      setRefreshErr(String(e));
+    } finally {
+      if (gen === searchGen.current) setSearching(false);
+    }
+  };
+  const runSearchRef = useRef(runSearch);
+  runSearchRef.current = runSearch;
 
   // Rebuild the root and load its first level when the session root changes.
   useEffect(() => {
     treeGeneration.current++;
-    setSel(null);
+    searchGen.current++;
+    setSelPaths([]);
+    anchorPath.current = null;
+    setConflictPrompt(null);
     setPreview(null);
     setPreviewNode(null);
     setErr(null);
@@ -308,6 +403,9 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
     // A filter belongs to the tree it was typed for; don't carry it into another project's root.
     setFilter("");
     setFilterOn(false);
+    setFilterCollapsed(new Set());
+    setSearchState(null);
+    setSearching(false);
     setFocusPath(null);
     if (!rootPath) {
       setRoot(null);
@@ -344,6 +442,26 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
       cancelled = true;
     };
   }, [rootPath, rootName]);
+
+  // Reset manual filter collapses whenever the root or query changes so new search matches start expanded.
+  useEffect(() => {
+    setFilterCollapsed(new Set());
+  }, [rootPath, q]);
+
+  // Run debounced recursive backend filtering whenever the query, root, or hidden toggle changes.
+  useEffect(() => {
+    if (!rootPath || !q) {
+      searchGen.current++;
+      setSearchState(null);
+      setSearching(false);
+      return;
+    }
+    setSearching(true);
+    const timer = setTimeout(() => {
+      void runSearchRef.current(rootPath, q, showHidden);
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [rootPath, q, showHidden]);
 
   // Refresh visible directory facts without replacing expansion, selection, or loaded descendants.
   //
@@ -386,7 +504,13 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
         }
       }
     };
-    const refresh = () => { void sample(); };
+    const refresh = () => {
+      void sample();
+      if (!document.hidden) void refreshFileClipboardStatus();
+      if (rootPath && qRef.current) {
+        void runSearchRef.current(rootPath, qRef.current, showHiddenRef.current);
+      }
+    };
 
     let watchedRoot: string | null = null;
     let lastFull = Date.now();
@@ -397,6 +521,7 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
         .catch(() => { if (!cancelled) watchedRoot = null; });
     };
     renew();
+    void refreshFileClipboardStatus();
     // Events within a short window are merged so a build writing many files costs one read per
     // directory, not one per file.
     let pending: { dirs: Set<string> | null; git: boolean } | null = null;
@@ -414,8 +539,12 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
         pending = null;
         const current = rootRef.current;
         if (!batch || !current) return;
-        const paths = directoriesToRefresh(current, batch.dirs && [...batch.dirs], batch.git);
+        const batchDirs = batch.dirs && [...batch.dirs];
+        const paths = directoriesToRefresh(current, batchDirs, batch.git);
         if (paths.length) void sample(paths);
+        if (rootPath && qRef.current && shouldRefreshSearch(batchDirs, batch.git, showHiddenRef.current)) {
+          void runSearchRef.current(rootPath, qRef.current, showHiddenRef.current);
+        }
       }, 150);
     });
     const timer = setInterval(() => {
@@ -436,8 +565,82 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
     };
   }, [rootPath, rootName]);
 
-  // Toggle a directory, fetching its children before the first expansion.
-  const onDir = async (node: FileNodeT) => {
+  // Return selectable (non-root) visible node paths in top-to-bottom display order for range selection.
+  const visibleSelectablePaths = (): string[] => {
+    const activeTree = displayRoot ?? root;
+    if (!activeTree) return [];
+    return flattenVisibleNodes(activeTree, activeTree.path, showHidden, q, filterCollapsed)
+      .filter((n) => !sameFilePath(n.path, activeTree.path))
+      .map((n) => n.path);
+  };
+
+  // Update tree selection from a pointer click; returns true when modifiers consumed the click.
+  const applyClickSelection = (node: FileNodeT, e?: React.MouseEvent): boolean => {
+    const activeTree = displayRoot ?? root;
+    const isRootNode = !!activeTree && sameFilePath(node.path, activeTree.path);
+    setFocusPath(node.path);
+    if (isRootNode) {
+      if (e && (hasMod(e) || e.shiftKey)) return true;
+      setSelPaths([]);
+      anchorPath.current = null;
+      return false;
+    }
+    if (e?.shiftKey) {
+      const order = visibleSelectablePaths();
+      const anchor = anchorPath.current;
+      const range = anchor && isPathInList(order, anchor)
+        ? rangeBetweenPaths(order, anchor, node.path)
+        : [node.path];
+      setSelPaths(range);
+      if (!anchor || !isPathInList(order, anchor)) {
+        anchorPath.current = node.path;
+      }
+      return true;
+    }
+    if (e && hasMod(e)) {
+      setSelPaths((prev) =>
+        isPathInList(prev, node.path)
+          ? prev.filter((p) => !sameFilePath(p, node.path))
+          : [...prev, node.path],
+      );
+      anchorPath.current = node.path;
+      return true;
+    }
+    setSelPaths([node.path]);
+    anchorPath.current = node.path;
+    return false;
+  };
+
+  // Toggle a directory, fetching its children before the first expansion (or toggling filterCollapsed when filtering).
+  const onDir = async (node: FileNodeT, e?: React.MouseEvent) => {
+    if (applyClickSelection(node, e)) return;
+    if (q && root) {
+      if (node.path === root.path) return;
+      if (node.loaded) {
+        const kids = visibleChildren(node, root.path, showHidden, q);
+        if (!kids.length) return;
+        setFilterCollapsed((prev) => {
+          const next = new Set(prev);
+          if (next.has(node.path)) next.delete(node.path);
+          else next.add(node.path);
+          return next;
+        });
+        return;
+      }
+      const generation = treeGeneration.current;
+      treeRevision.current++;
+      setRoot((r) => r ? updateFileNode(r, node.path, (current) => ({ ...current, loading: true })) : r);
+      try {
+        const kids = await listDir(node.path);
+        if (generation !== treeGeneration.current) return;
+        setRoot((r) => r ? updateFileNode(r, node.path, (current) => reconcileChildren(current, kids)) : r);
+      } catch (err) {
+        if (generation !== treeGeneration.current) return;
+        setErr(String(err));
+        setRoot((r) => r ? updateFileNode(r, node.path, (current) => ({ ...current, loading: false })) : r);
+      }
+      return;
+    }
     if (node.loaded) {
       setRoot((r) => r ? updateFileNode(r, node.path, (current) => ({ ...current, open: !current.open })) : r);
       return;
@@ -449,22 +652,24 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
       const kids = await listDir(node.path);
       if (generation !== treeGeneration.current) return;
       setRoot((r) => r ? updateFileNode(r, node.path, (current) => reconcileChildren(current, kids)) : r);
-    } catch (e) {
+    } catch (err) {
       if (generation !== treeGeneration.current) return;
-      setErr(String(e));
+      setErr(String(err));
       setRoot((r) => r ? updateFileNode(r, node.path, (current) => ({ ...current, loading: false })) : r);
     }
   };
 
   // Clicking a file selects it without previewing; Preview is an explicit context-menu action.
-  const onFile = (node: FileNodeT) => {
-    setSel(node);
+  const onFile = (node: FileNodeT, e?: React.MouseEvent) => {
+    applyClickSelection(node, e);
   };
 
   // Preview selects a file and loads its contents into the bottom pane.
   const doPreview = async (node: FileNodeT) => {
     if (node.isDir) return;
-    setSel(node);
+    setSelPaths([node.path]);
+    anchorPath.current = node.path;
+    setFocusPath(node.path);
     setPreviewNode(node);
     setPreview(null);
     try {
@@ -508,17 +713,52 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
     if (!node.isDir) useTermStore.getState().openDocTab(node.path);
   };
 
-  // Reload a directory's immediate children after mutation while keeping it expanded.
-  const reloadDir = async (node: FileNodeT) => {
+  // Reload a batch of directories after mutations, expanding only explicit targets such as a paste destination.
+  const reloadDirs = async (dirPaths: string[], expandTargets: string[] = []) => {
     const generation = treeGeneration.current;
     treeRevision.current++;
+    const uniqueDirs: string[] = [];
+    for (const dirPath of dirPaths) {
+      if (!dirPath || isPathInList(uniqueDirs, dirPath)) continue;
+      uniqueDirs.push(dirPath);
+    }
+    if (!uniqueDirs.length) return;
     try {
-      const kids = await listDir(node.path);
+      const results = await Promise.allSettled(uniqueDirs.map((dirPath) => listDir(dirPath)));
       if (generation !== treeGeneration.current) return;
-      setRoot((r) => r ? updateFileNode(r, node.path, (current) => ({ ...reconcileChildren(current, kids), open: true })) : r);
+      setRoot((r) => {
+        if (!r) return r;
+        let next = r;
+        results.forEach((result, index) => {
+          if (result.status !== "fulfilled") return;
+          const dirPath = uniqueDirs[index];
+          const forceOpen = isPathInList(expandTargets, dirPath);
+          const target = findNodeByPath(next, dirPath);
+          if (!target) return;
+          // Preserve collapsed source parents on external cuts unless expansion was requested.
+          if (!forceOpen && !target.loaded) return;
+          next = updateFileNode(next, target.path, (current) => ({
+            ...reconcileChildren(current, result.value),
+            open: forceOpen ? true : current.open,
+          }));
+        });
+        return next;
+      });
+      const rejected = results.find((result) => result.status === "rejected");
+      if (rejected && rejected.status === "rejected") {
+        setErr(String(rejected.reason));
+      }
+      if (rootPath && qRef.current) {
+        await runSearchRef.current(rootPath, qRef.current, showHiddenRef.current);
+      }
     } catch (e) {
       if (generation === treeGeneration.current) setErr(String(e));
     }
+  };
+
+  // Reload a directory's immediate children after mutation while keeping it expanded.
+  const reloadDir = async (dirPath: string) => {
+    await reloadDirs([dirPath], [dirPath]);
   };
 
   // Upload one at a time rather than in parallel: several concurrent chunk streams on one connection would
@@ -530,8 +770,7 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
       landed = (await startUpload(f, dirPath)) || landed;
     }
     if (!landed) return;
-    const node = findNodeByPath(root, dirPath);
-    if (node) await reloadDir(node);
+    await reloadDir(dirPath);
   };
 
   // Copy files and folders dropped from the OS file manager on this machine; the backend never overwrites.
@@ -544,8 +783,7 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
       console.error("copy into folder failed", safeError(e));
       setErr(t("files.copyFailed"));
     }
-    const node = findNodeByPath(root, dirPath);
-    if (node) await reloadDir(node);
+    await reloadDir(dirPath);
   };
 
   // Dropping onto a file targets its containing directory, matching how the create actions resolve a target.
@@ -578,6 +816,18 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
     e.preventDefault();
     e.stopPropagation();
     setErr(null);
+    void refreshFileClipboardStatus();
+    if (root && sameFilePath(node.path, root.path)) {
+      setSelPaths([]);
+      anchorPath.current = null;
+      setFocusPath(node.path);
+    } else if (!isPathInList(selPaths, node.path)) {
+      setSelPaths([node.path]);
+      anchorPath.current = node.path;
+      setFocusPath(node.path);
+    } else {
+      setFocusPath(node.path);
+    }
     setMenu({ x: e.clientX, y: e.clientY, node });
   };
 
@@ -585,62 +835,344 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
   const onPlus = (e: React.MouseEvent) => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setErr(null);
+    void refreshFileClipboardStatus();
+    setSelPaths([]);
+    anchorPath.current = null;
     if (root) setMenu({ x: r.left, y: r.bottom + 4, node: root });
   };
 
-  // Display path relative to the root for Copy Relative Path.
-  const relativeTo = (p: string) =>
-    root && p === root.path
-      ? root.name
-      : root && p.startsWith(root.path + "/")
-        ? p.slice(root.path.length + 1)
-        : p;
+  // Display path relative to the root for Copy Relative Path across POSIX and Windows roots.
+  const relativeTo = (p: string) => {
+    if (!root) return p;
+    if (sameFilePath(p, root.path)) return root.name;
+    const isWin = detectFlavor(root.path) === "win";
+    const sep = isWin ? "\\" : "/";
+    const normRoot = (isWin ? root.path.replace(/\//g, "\\") : root.path).replace(/[\\/]+$/, "");
+    const normPath = isWin ? p.replace(/\//g, "\\") : p;
+    const cmpRoot = isWin ? normRoot.toLowerCase() : normRoot;
+    const cmpPath = isWin ? normPath.toLowerCase() : normPath;
+    if (cmpPath.startsWith(cmpRoot + sep)) return normPath.slice(normRoot.length + 1);
+    return p;
+  };
 
   // Open a scratch terminal at a directory or a file's parent by passing cwd to newScratchTab.
   const openInTerminal = (node: FileNodeT) => {
     const dir = node.isDir ? node.path : parentPathOf(node.path);
-    const nm = dir.split("/").filter(Boolean).pop() || dir;
+    const nm = baseName(dir, detectFlavor(dir)) || dir;
     useTermStore.getState().newScratchTab({ cwd: dir, name: nm });
   };
 
   // Scroll the keyboard-focused row into view.
   useEffect(() => {
     if (!focusPath) return;
-    treeRef.current?.querySelector(".kbd-focus")?.scrollIntoView({ block: "nearest" });
+    treeRef.current?.querySelector(".kbd-focus")?.scrollIntoView?.({ block: "nearest" });
   }, [focusPath]);
 
-  // Focus a row and preview it when it is a file.
+  // Focus a row and select it when it is not the workspace root.
   const focusRow = (n: FileNodeT) => {
     setFocusPath(n.path);
-    if (!n.isDir) void onFile(n);
+    if (root && sameFilePath(n.path, root.path)) return;
+    setSelPaths([n.path]);
+    anchorPath.current = n.path;
   };
 
-  // Tree keys: arrows navigate/expand/collapse, and Enter opens a file or expands a directory.
+  const displayRoot = useMemo(() => {
+    if (!root) return null;
+    if (!q) return root;
+    if (
+      searchState &&
+      searchState.rootPath === root.path &&
+      searchState.showHidden === showHidden &&
+      (searchState.query === q || (q.startsWith(searchState.query) && !searchState.truncated))
+    ) {
+      return searchState.root;
+    }
+    return root;
+  }, [root, q, searchState, showHidden]);
+
+  const openFilteredPaths = useMemo(
+    () => (displayRoot && q ? openFilterDescendants(displayRoot, displayRoot.path, showHidden, q, filterCollapsed) : []),
+    [displayRoot, q, showHidden, filterCollapsed],
+  );
+
+  const isSameOrDescendant = (candidate: string, ancestor: string) => {
+    if (sameFilePath(candidate, ancestor)) return true;
+    const isWin = detectFlavor(ancestor) === "win";
+    const normA = ancestor.replace(/[\\/]+$/, "").replace(/\\/g, "/");
+    const normC = candidate.replace(/\\/g, "/");
+    const prefix = normA + "/";
+    return isWin ? normC.toLowerCase().startsWith(prefix.toLowerCase()) : normC.startsWith(prefix);
+  };
+
+  // Resolve target paths for clipboard/copy-path/delete actions (right-clicked multi-selection, single node, or active selection).
+  const selectedActionPaths = (fallbackNode?: FileNodeT): string[] => {
+    if (fallbackNode) {
+      if (root && sameFilePath(fallbackNode.path, root.path)) return [];
+      if (isPathInList(selPaths, fallbackNode.path)) {
+        return selPaths.filter((p) => !(root && sameFilePath(p, root.path)));
+      }
+      return [fallbackNode.path];
+    }
+    const nonRoot = selPaths.filter((p) => !(root && sameFilePath(p, root.path)));
+    if (nonRoot.length) return nonRoot;
+    if (focusPath && !(root && sameFilePath(focusPath, root.path))) return [focusPath];
+    return [];
+  };
+
+  // Resolve the paste destination directory for keyboard/DOM paste based on current selection or focus.
+  const keyboardPasteDir = (): string | null => {
+    const activeTree = displayRoot ?? root;
+    const activePath = selPaths[selPaths.length - 1] ?? focusPath;
+    const node = activePath && activeTree ? findNodeByPath(activeTree, activePath) : null;
+    if (node) return targetPasteDir(node);
+    return root?.path ?? null;
+  };
+
+  const doCopy = async (rawPaths: string[]) => {
+    const paths = normalizeSourcePaths(rawPaths.filter((p) => !(root && sameFilePath(p, root.path))));
+    if (!paths.length) return;
+    setErr(null);
+    try {
+      await copyFilesToClipboard(paths);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const doCut = async (rawPaths: string[]) => {
+    const paths = normalizeSourcePaths(rawPaths.filter((p) => !(root && sameFilePath(p, root.path))));
+    if (!paths.length) return;
+    setErr(null);
+    try {
+      await cutFilesToClipboard(paths);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const executePaste = async ({
+    dirPath,
+    sources,
+    mode,
+    sequence,
+    resolutions,
+  }: {
+    dirPath: string;
+    sources: string[];
+    mode: FileClipboardMode;
+    sequence?: number;
+    resolutions: Record<string, PasteConflictResolution>;
+  }) => {
+    if (pastingRef.current) return;
+    pastingRef.current = true;
+    setErr(null);
+    try {
+      const result = await pasteFiles(sources, dirPath, mode, resolutions);
+      if (mode === "cut") {
+        await finishCutPaste(sequence);
+        const movedSources = sources.filter(
+          (src) => !isPathInList(result.skipped, src) && !sameFilePath(parentPathOf(src), dirPath),
+        );
+        if (previewNode && movedSources.some((src) => isSameOrDescendant(previewNode.path, src))) {
+          closePreview();
+        }
+      }
+      const landed = [...result.created, ...result.replaced];
+      if (landed.length) {
+        setSelPaths(landed);
+        anchorPath.current = landed[landed.length - 1];
+        setFocusPath(landed[landed.length - 1]);
+      } else if (mode === "cut") {
+        setSelPaths((prev) => prev.filter((p) => !sources.some((src) => isSameOrDescendant(p, src))));
+      }
+      const affectedDirs = [dirPath, ...(mode === "cut" ? sources.map(parentPathOf) : [])];
+      await reloadDirs(affectedDirs, [dirPath]);
+    } catch (e) {
+      console.error("paste files failed", safeError(e));
+      setErr(e instanceof Error && e.message ? e.message : t("files.pasteFailed"));
+    } finally {
+      pastingRef.current = false;
+    }
+  };
+
+  const doPaste = async (dirPath: string) => {
+    if (pastingRef.current || conflictPrompt) return;
+    pastingRef.current = true;
+    setErr(null);
+    let readyToExecute: {
+      dirPath: string;
+      sources: string[];
+      mode: FileClipboardMode;
+      sequence?: number;
+    } | null = null;
+    try {
+      const clip = await readFilesForPaste();
+      if (!clip || !clip.paths.length) return;
+      const checks = await pasteFilesCheck(clip.paths, dirPath, clip.mode);
+      const conflicts = checks.filter((c) => c.status === "conflict");
+      if (conflicts.length > 0) {
+        setConflictPrompt({
+          dirPath,
+          sources: clip.paths,
+          mode: clip.mode,
+          sequence: clip.sequence,
+          conflicts,
+          index: 0,
+          resolutions: {},
+        });
+        return;
+      }
+      readyToExecute = {
+        dirPath,
+        sources: clip.paths,
+        mode: clip.mode,
+        sequence: clip.sequence,
+      };
+    } catch (e) {
+      console.error("paste check failed", safeError(e));
+      setErr(e instanceof Error && e.message ? e.message : t("files.pasteFailed"));
+    } finally {
+      pastingRef.current = false;
+    }
+    if (readyToExecute) {
+      await executePaste({ ...readyToExecute, resolutions: {} });
+    }
+  };
+
+  const resolveConflict = (resolution: PasteConflictResolution, applyAll: boolean) => {
+    if (!conflictPrompt) return;
+    const { conflicts, index, resolutions, dirPath, sources, mode, sequence } = conflictPrompt;
+    const nextResolutions = { ...resolutions };
+    if (applyAll) {
+      for (let i = index; i < conflicts.length; i++) {
+        nextResolutions[conflicts[i].source] = resolution;
+      }
+      setConflictPrompt(null);
+      void executePaste({ dirPath, sources, mode, sequence, resolutions: nextResolutions });
+      return;
+    }
+    nextResolutions[conflicts[index].source] = resolution;
+    const nextIndex = index + 1;
+    if (nextIndex >= conflicts.length) {
+      setConflictPrompt(null);
+      void executePaste({ dirPath, sources, mode, sequence, resolutions: nextResolutions });
+      return;
+    }
+    setConflictPrompt({
+      ...conflictPrompt,
+      index: nextIndex,
+      resolutions: nextResolutions,
+    });
+  };
+
+  // Tree keys: clipboard shortcuts, Escape to cancel cut/multi-select, arrows navigate/extend/expand, and Enter opens.
   const onTreeKeyDown = (e: React.KeyboardEvent) => {
-    if (!root) return;
+    const activeRoot = displayRoot ?? root;
+    if (!activeRoot || conflictPrompt || del || dialog) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest("input, textarea, [contenteditable]")) return;
+
+    if (e.key === "Escape") {
+      if (clipboard.cutPaths.length > 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        void clearCutClipboard();
+        return;
+      }
+      if (selPaths.length > 1) {
+        const keep = anchorPath.current && isPathInList(selPaths, anchorPath.current)
+          ? anchorPath.current
+          : selPaths[selPaths.length - 1];
+        setSelPaths(keep ? [keep] : []);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    }
+
+    if (hasMod(e) && !e.shiftKey && !e.altKey) {
+      const key = e.key.toLowerCase();
+      if (key === "c") {
+        const paths = selectedActionPaths();
+        if (!paths.length) return;
+        e.preventDefault();
+        e.stopPropagation();
+        lastKeyClipboardRef.current = { op: "copy", at: Date.now() };
+        void doCopy(paths);
+        return;
+      }
+      if (key === "x") {
+        const paths = selectedActionPaths();
+        if (!paths.length) return;
+        e.preventDefault();
+        e.stopPropagation();
+        lastKeyClipboardRef.current = { op: "cut", at: Date.now() };
+        void doCut(paths);
+        return;
+      }
+      if (key === "v") {
+        const dir = keyboardPasteDir();
+        if (!dir) return;
+        e.preventDefault();
+        e.stopPropagation();
+        lastKeyClipboardRef.current = { op: "paste", at: Date.now() };
+        void doPaste(dir);
+        return;
+      }
+    }
+
     if (!["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Enter"].includes(e.key)) return;
-    const rows = flattenVisible(root, showHidden, q);
+    const rows = flattenVisibleNodes(activeRoot, activeRoot.path, showHidden, q, filterCollapsed);
     if (!rows.length) return;
     e.preventDefault();
     e.stopPropagation();
-    const idx = rows.findIndex((n) => n.path === focusPath);
+    const idx = rows.findIndex((n) => focusPath ? sameFilePath(n.path, focusPath) : false);
     const cur = idx >= 0 ? rows[idx] : null;
-    const isOpen = (n: FileNodeT) => (q ? true : !!n.open);
+    const curKids = cur?.isDir ? visibleChildren(cur, activeRoot.path, showHidden, q) : [];
+    const curOpen = cur ? isNodeOpen(cur, activeRoot.path, q, filterCollapsed, curKids.length) : false;
     switch (e.key) {
-      case "ArrowDown":
-        focusRow(rows[idx < 0 ? 0 : Math.min(rows.length - 1, idx + 1)]);
+      case "ArrowDown": {
+        const next = rows[idx < 0 ? 0 : Math.min(rows.length - 1, idx + 1)];
+        if (e.shiftKey && !sameFilePath(next.path, activeRoot.path)) {
+          const order = visibleSelectablePaths();
+          const anchor = anchorPath.current && isPathInList(order, anchorPath.current)
+            ? anchorPath.current
+            : next.path;
+          if (!anchorPath.current || !isPathInList(order, anchorPath.current)) {
+            anchorPath.current = next.path;
+          }
+          setFocusPath(next.path);
+          setSelPaths(rangeBetweenPaths(order, anchor, next.path));
+        } else {
+          focusRow(next);
+        }
         break;
-      case "ArrowUp":
-        focusRow(rows[idx <= 0 ? 0 : idx - 1]);
+      }
+      case "ArrowUp": {
+        const next = rows[idx <= 0 ? 0 : idx - 1];
+        if (e.shiftKey && !sameFilePath(next.path, activeRoot.path)) {
+          const order = visibleSelectablePaths();
+          const anchor = anchorPath.current && isPathInList(order, anchorPath.current)
+            ? anchorPath.current
+            : next.path;
+          if (!anchorPath.current || !isPathInList(order, anchorPath.current)) {
+            anchorPath.current = next.path;
+          }
+          setFocusPath(next.path);
+          setSelPaths(rangeBetweenPaths(order, anchor, next.path));
+        } else {
+          focusRow(next);
+        }
         break;
+      }
       case "ArrowRight":
-        if (cur?.isDir && !isOpen(cur)) void onDir(cur);
-        else if (cur?.isDir && idx + 1 < rows.length) focusRow(rows[idx + 1]);
+        if (cur?.isDir && !curOpen && (!q || canExpandInFilter(cur, curKids.length))) void onDir(cur);
+        else if (cur?.isDir && curOpen && idx + 1 < rows.length) focusRow(rows[idx + 1]);
         break;
       case "ArrowLeft":
-        if (cur?.isDir && isOpen(cur)) void onDir(cur);
+        if (cur?.isDir && curOpen && !sameFilePath(cur.path, activeRoot.path)) void onDir(cur);
         else if (cur) {
-          const parent = rows.find((n) => n.path === parentPathOf(cur.path));
+          const parent = rows.find((n) => sameFilePath(n.path, parentPathOf(cur.path)));
           if (parent) focusRow(parent);
         }
         break;
@@ -651,11 +1183,81 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
     }
   };
 
-  // Build node-specific actions for open, reveal, refresh, create, copy path, rename, and delete.
+  // Build node-specific or multi-selection context actions for clipboard, create, open, copy path, rename, and delete.
   const menuItems = (node: FileNodeT): MenuItem[] => {
-    const dir = node.isDir ? node : findNodeByPath(root, parentPathOf(node.path)) ?? root!;
-    const isRoot = !!root && node.path === root.path;
-    const parent = findNodeByPath(root, parentPathOf(node.path)) ?? root!;
+    const activeTree = displayRoot ?? root!;
+    const dir = node.isDir ? node : findNodeByPath(activeTree, parentPathOf(node.path)) ?? activeTree;
+    const isRoot = !!root && sameFilePath(node.path, root.path);
+    const parent = findNodeByPath(activeTree, parentPathOf(node.path)) ?? activeTree;
+    const targets = selectedActionPaths(node);
+    const many = targets.length > 1;
+    const modPrefix = env.isMac ? "⌘" : "Ctrl+";
+    const clipboardItems: MenuItem[] = [
+      {
+        label: t("common.cut"),
+        icon: <Icons.scissors size={14} />,
+        shortcut: `${modPrefix}X`,
+        disabled: isRoot || !targets.length,
+        onClick: () => void doCut(targets),
+      },
+      {
+        label: t("common.copy"),
+        icon: <Icons.copy size={14} />,
+        shortcut: `${modPrefix}C`,
+        disabled: isRoot || !targets.length,
+        onClick: () => void doCopy(targets),
+      },
+      {
+        label: t("common.paste"),
+        icon: <Icons.clipboard size={14} />,
+        shortcut: `${modPrefix}V`,
+        disabled: !clipboard.canPaste,
+        onClick: () => void doPaste(dir.path),
+      },
+    ];
+    const copyPathItems: MenuItem[] = [
+      {
+        label: t("files.copyPath"),
+        icon: <Icons.copy size={14} />,
+        onClick: () => {
+          notifyTextCopied();
+          void copyText(targets.length > 1 ? targets.join("\n") : node.path);
+        },
+      },
+      {
+        label: t("files.copyRelPath"),
+        icon: <Icons.copy size={14} />,
+        onClick: () => {
+          notifyTextCopied();
+          void copyText(targets.length > 1 ? targets.map(relativeTo).join("\n") : relativeTo(node.path));
+        },
+      },
+    ];
+    const deleteItem: MenuItem = {
+      label: t("common.delete"),
+      icon: <Icons.trash size={14} />,
+      danger: true,
+      disabled: isRoot || !targets.length,
+      onClick: () => {
+        setErr(null);
+        const deleteTargets = normalizeSourcePaths(targets);
+        if (!deleteTargets.length) return;
+        const single = deleteTargets.length === 1 ? (findNodeByPath(activeTree, deleteTargets[0]) ?? node) : null;
+        setDel({
+          paths: deleteTargets,
+          label: single ? t("files.deleteConfirm", single.name) : t("files.deleteManyConfirm", deleteTargets.length),
+        });
+      },
+    };
+    if (many) {
+      return [
+        ...clipboardItems,
+        { separator: true, label: "" },
+        ...copyPathItems,
+        { separator: true, label: "" },
+        deleteItem,
+      ];
+    }
     return [
       {
         label: t("files.newFile"),
@@ -725,19 +1327,12 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
       {
         label: t("common.refresh"),
         icon: <Icons.restart size={14} />,
-        onClick: () => void reloadDir(dir),
+        onClick: () => void reloadDir(dir.path),
       },
       { separator: true, label: "" },
-      {
-        label: t("files.copyPath"),
-        icon: <Icons.copy size={14} />,
-        onClick: () => void copyText(node.path),
-      },
-      {
-        label: t("files.copyRelPath"),
-        icon: <Icons.copy size={14} />,
-        onClick: () => void copyText(relativeTo(node.path)),
-      },
+      ...clipboardItems,
+      { separator: true, label: "" },
+      ...copyPathItems,
       { separator: true, label: "" },
       {
         label: t("common.rename"),
@@ -748,16 +1343,7 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
           setDialog({ mode: "rename", dir: parent, node });
         },
       },
-      {
-        label: t("common.delete"),
-        icon: <Icons.trash size={14} />,
-        danger: true,
-        disabled: isRoot,
-        onClick: () => {
-          setErr(null);
-          setDel({ node, dir: parent });
-        },
-      },
+      deleteItem,
     ];
   };
 
@@ -770,20 +1356,20 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
     try {
       if (d.mode === "rename" && d.node) {
         const to = `${parentPathOf(d.node.path)}/${name}`;
-        if (to === d.node.path) return; // The name did not change.
+        if (sameFilePath(to, d.node.path)) return; // The name did not change.
         await renamePath(d.node.path, to);
-        if (sel?.path === d.node.path) setSel(null);
-        if (previewNode?.path === d.node.path) closePreview();
-        await reloadDir(d.dir);
+        setSelPaths((prev) => prev.filter((p) => !sameFilePath(p, d.node!.path)));
+        if (previewNode && sameFilePath(previewNode.path, d.node.path)) closePreview();
+        await reloadDir(d.dir.path);
       } else {
         const path = `${d.dir.path}/${name}`;
         if (d.mode === "newFile") {
           await createFile(path);
-          await reloadDir(d.dir);
+          await reloadDir(d.dir.path);
           useTermStore.getState().openDocTab(path); // Open a new file immediately for editing.
         } else {
           await createDir(path);
-          await reloadDir(d.dir);
+          await reloadDir(d.dir.path);
         }
       }
     } catch (e) {
@@ -791,26 +1377,29 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
     }
   };
 
-  // Execute deletion after confirmation.
+  // Execute single or multi-item deletion after confirmation.
   const doDelete = async () => {
     if (!del) return;
     const d = del;
     setDel(null);
+    const affectedParents: string[] = [];
+    const deleted: string[] = [];
     try {
-      await deletePath(d.node.path);
-      // Clear selection and preview when they reference the deleted item or a descendant.
-      if (sel && (sel.path === d.node.path || sel.path.startsWith(d.node.path + "/"))) {
-        setSel(null);
+      for (const path of d.paths) {
+        await deletePath(path);
+        deleted.push(path);
+        affectedParents.push(parentPathOf(path));
       }
-      if (
-        previewNode &&
-        (previewNode.path === d.node.path || previewNode.path.startsWith(d.node.path + "/"))
-      ) {
-        closePreview();
-      }
-      await reloadDir(d.dir);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (deleted.length) {
+        setSelPaths((prev) => prev.filter((p) => !deleted.some((target) => isSameOrDescendant(p, target))));
+        if (previewNode && deleted.some((target) => isSameOrDescendant(previewNode.path, target))) {
+          closePreview();
+        }
+        await reloadDirs(affectedParents);
+      }
     }
   };
 
@@ -822,29 +1411,44 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
     );
   }
 
+  const activeRoot = displayRoot ?? root;
+  const lastSelNode = selPaths.length ? findNodeByPath(activeRoot, selPaths[selPaths.length - 1]) : null;
   const showPreview = !!previewNode;
-  const previewBadge = previewNode ? findNodeByPath(root, previewNode.path)?.badge : null;
+  const previewBadge = previewNode
+    ? (findNodeByPath(activeRoot, previewNode.path)?.badge ?? findNodeByPath(root, previewNode.path)?.badge)
+    : null;
   const visibleError = err ?? refreshErr;
+  const canCollapse = q ? openFilteredPaths.length > 0 : hasOpenDescendant(root);
+  const onCollapseAll = () => {
+    if (q) {
+      if (!openFilteredPaths.length) return;
+      setFilterCollapsed((prev) => new Set([...prev, ...openFilteredPaths]));
+      return;
+    }
+    setRoot((r) => (r ? collapseAllBelow(r) : r));
+  };
+  const showTruncated =
+    !!q &&
+    searchState?.rootPath === root.path &&
+    searchState.showHidden === showHidden &&
+    searchState.query === q &&
+    searchState.truncated;
 
   return (
     <div ref={wrapRef} style={{ display: "flex", flexDirection: "column", minHeight: 0, flex: 1 }}>
       <div className="files-head">
         <span className="files-path" title={root.path}>{root.name}</span>
-        {/* Hidden while a query is active: filtering force-expands the tree (`open = filter ? true`),
-            so collapsing during a filter changes state the user cannot see. When nothing is expanded
-            the button is disabled rather than hidden, since a freshly opened tree has every directory
-            closed and the control would otherwise be absent exactly when someone looks for it. */}
-        {!q && (
-          <button
-            className="files-toggle"
-            title={t("files.collapseAll")}
-            aria-label={t("files.collapseAll")}
-            disabled={!hasOpenDescendant(root)}
-            onClick={() => setRoot((r) => (r ? collapseAllBelow(r) : r))}
-          >
-            <Icons.collapse size={13} />
-          </button>
-        )}
+        {/* Disabled rather than hidden when nothing is expanded so the button stays discoverable and
+            keeps toolbar alignment steady; while filtering, collapses only the active filter view. */}
+        <button
+          className="files-toggle"
+          title={t("files.collapseAll")}
+          aria-label={t("files.collapseAll")}
+          disabled={!canCollapse}
+          onClick={onCollapseAll}
+        >
+          <Icons.collapse size={13} />
+        </button>
         <button
           className={"files-toggle" + (filterOn ? " on" : "")}
           title={t("files.filterPlaceholder")}
@@ -862,7 +1466,7 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
             className="files-toggle"
             title={t("transfer.uploadTooltip")}
             aria-label={t("transfer.uploadTooltip")}
-            onClick={() => pickUpload(sel?.isDir ? sel.path : root.path)}
+            onClick={() => pickUpload(lastSelNode?.isDir ? lastSelNode.path : root.path)}
           >
             <Icons.upload size={13} />
           </button>
@@ -879,7 +1483,13 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
       </div>
       {filterOn && (
         <div className="files-filter">
-          <Icons.search size={12} />
+          {searching ? (
+            <span className="spin" style={{ display: "inline-flex" }}>
+              <Icons.restart size={12} />
+            </span>
+          ) : (
+            <Icons.search size={12} />
+          )}
           <input
             autoFocus
             value={filter}
@@ -915,6 +1525,48 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
         className="files-tree"
         style={{ flex: "1 1 0", overflowY: "auto", minHeight: 0, outline: "none" }}
         onKeyDown={onTreeKeyDown}
+        onCopy={(e) => {
+          const target = e.target as HTMLElement | null;
+          if (target?.closest("input, textarea, [contenteditable]")) return;
+          if (lastKeyClipboardRef.current?.op === "copy" && Date.now() - lastKeyClipboardRef.current.at < 120) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+          const paths = selectedActionPaths();
+          if (!paths.length) return;
+          e.preventDefault();
+          e.stopPropagation();
+          void doCopy(paths);
+        }}
+        onCut={(e) => {
+          const target = e.target as HTMLElement | null;
+          if (target?.closest("input, textarea, [contenteditable]")) return;
+          if (lastKeyClipboardRef.current?.op === "cut" && Date.now() - lastKeyClipboardRef.current.at < 120) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+          const paths = selectedActionPaths();
+          if (!paths.length) return;
+          e.preventDefault();
+          e.stopPropagation();
+          void doCut(paths);
+        }}
+        onPaste={(e) => {
+          const target = e.target as HTMLElement | null;
+          if (target?.closest("input, textarea, [contenteditable]")) return;
+          if (lastKeyClipboardRef.current?.op === "paste" && Date.now() - lastKeyClipboardRef.current.at < 120) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+          const dir = keyboardPasteDir();
+          if (!dir) return;
+          e.preventDefault();
+          e.stopPropagation();
+          void doPaste(dir);
+        }}
         // Rows take drops themselves; a drop on the empty space below them goes to the root directory.
         onDragOver={(e) => {
           if (!canDropFiles || !e.dataTransfer.types.includes("Files")) return;
@@ -927,25 +1579,34 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
           onDropFiles(root, e.dataTransfer);
         }}
         onContextMenu={(e) => {
-          // Right-clicking empty tree space creates in the root directory.
+          // Right-clicking empty tree space creates or pastes in the root directory.
           e.preventDefault();
           setErr(null);
+          void refreshFileClipboardStatus();
+          setSelPaths([]);
+          anchorPath.current = null;
           if (root) setMenu({ x: e.clientX, y: e.clientY, node: root });
         }}
       >
         <FileRow
-          node={root}
+          node={activeRoot}
+          rootPath={activeRoot.path}
           depth={0}
-          selPath={sel?.path ?? null}
+          selPaths={selPaths}
+          cutPaths={clipboard.cutPaths}
           focusPath={focusPath}
           showHidden={showHidden}
           filter={q}
+          filterCollapsed={filterCollapsed}
           onFile={onFile}
           onOpen={onOpen}
           onDir={onDir}
           onContext={onContext}
           onDropFiles={canDropFiles ? onDropFiles : null}
         />
+        {showTruncated && (
+          <div className="files-filter-truncated">{t("files.filterTruncated")}</div>
+        )}
       </div>
       {canTransfer && (
         <input
@@ -1054,10 +1715,18 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
       )}
       {del && (
         <ConfirmModal
-          body={t("files.deleteConfirm", del.node.name)}
+          body={del.label}
           confirmLabel={t("common.delete")}
           onConfirm={() => void doDelete()}
           onCancel={() => setDel(null)}
+        />
+      )}
+      {conflictPrompt && (
+        <PasteConflictModal
+          conflicts={conflictPrompt.conflicts}
+          index={conflictPrompt.index}
+          onResolve={resolveConflict}
+          onCancel={() => setConflictPrompt(null)}
         />
       )}
     </div>
@@ -1190,6 +1859,91 @@ function ConfirmModal({
             onClick={onConfirm}
           >
             {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </Backdrop>
+  );
+}
+
+/** Prompt shown before executing a paste when one or more items already exist at the destination. */
+function PasteConflictModal({
+  conflicts,
+  index,
+  onResolve,
+  onCancel,
+}: {
+  conflicts: PasteCheckItem[];
+  index: number;
+  onResolve: (resolution: PasteConflictResolution, applyAll: boolean) => void;
+  onCancel: () => void;
+}) {
+  const t = useT();
+  const [applyAll, setApplyAll] = useState(false);
+  const current = conflicts[index];
+  if (!current) return null;
+  const remaining = conflicts.length - index;
+
+  return (
+    <Backdrop onClose={onCancel}>
+      <div
+        style={{
+          width: 420,
+          maxWidth: "calc(100vw - 32px)",
+          background: "var(--bg-panel)",
+          border: "1px solid var(--border)",
+          borderRadius: 10,
+          padding: 18,
+          boxShadow: "0 10px 40px rgba(0,0,0,0.5)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 10 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
+            {t("files.pasteConflictTitle")}
+          </div>
+          {conflicts.length > 1 && (
+            <span style={{ fontSize: 12, color: "var(--text-faint)" }}>
+              {t("files.pasteConflictProgress", index + 1, conflicts.length)}
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6, marginBottom: remaining > 1 ? 12 : 18 }}>
+          {t("files.pasteConflictBody", current.name)}
+        </div>
+        {remaining > 1 && (
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 12,
+              color: "var(--text-secondary)",
+              marginBottom: 16,
+              cursor: "pointer",
+              userSelect: "none",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={applyAll}
+              onChange={(e) => setApplyAll(e.target.checked)}
+            />
+            <span>{t("files.pasteConflictApplyAll")}</span>
+          </label>
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", flexWrap: "wrap", gap: 8 }}>
+          <button className="vlx-btn" onClick={onCancel}>
+            {t("common.cancel")}
+          </button>
+          <button className="vlx-btn" onClick={() => onResolve("skip", applyAll)}>
+            {t("files.pasteSkip")}
+          </button>
+          <button className="vlx-btn" autoFocus onClick={() => onResolve("keepBoth", applyAll)}>
+            {t("files.pasteKeepBoth")}
+          </button>
+          <button className="vlx-btn vlx-btn-primary" onClick={() => onResolve("replace", applyAll)}>
+            {t("files.pasteReplace")}
           </button>
         </div>
       </div>

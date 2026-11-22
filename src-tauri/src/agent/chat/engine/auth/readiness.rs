@@ -23,6 +23,8 @@ use std::time::Duration;
 const PROBE_LIMIT: Duration = Duration::from_secs(8);
 /// The request id of Codex's `account/read`, which marks the answer in its output.
 const CODEX_ACCOUNT_REQUEST: i64 = 2;
+/// The request id of Antigravity's `session/list` probe, which marks the answer in its output.
+const ANTIGRAVITY_LIST_REQUEST: &str = "2";
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -82,6 +84,7 @@ pub(in crate::agent::chat::engine) fn check(app: &AppCtx, session_id: &str) -> R
     let args = crate::agent::inject::split_extra_args(Some(&session_settings::without_selection_args(kind, session.agent_args.as_deref())));
     let cmd = prepared(&bin);
     let signed_in = match kind {
+        SessionKind::Antigravity => antigravity(cmd, &args),
         SessionKind::Zcode => zcode(&cmd, &bin, cwd.as_deref()),
         SessionKind::Claude => claude(cmd, &args),
         SessionKind::Codex => codex(cmd, &args),
@@ -212,6 +215,35 @@ fn cursor_signed_in(output: &str) -> Option<bool> {
     }
 }
 
+/// Ask `agy acp` for `session/list` without creating a conversation.
+///
+/// `session/list` runs through the same auth gate as `session/new`, returning JSON-RPC `-32000` when no
+/// credentials are active and a session list when signed in via OAuth, an API key, or ADC.
+fn antigravity(mut cmd: Command, args: &[String]) -> Option<bool> {
+    let launch = crate::agent::chat::acp_protocol::launch_args(SessionKind::Antigravity, None, None, args).ok()?;
+    cmd.args(launch);
+    let input = [
+        crate::agent::chat::acp_protocol::initialize("1"),
+        crate::agent::chat::acp_protocol::session_list(ANTIGRAVITY_LIST_REQUEST),
+    ];
+    let text = output(cmd, &input, is_antigravity_list_answer)?;
+    antigravity_signed_in(&text)
+}
+
+fn is_antigravity_list_answer(line: &str) -> bool {
+    serde_json::from_str::<Value>(line)
+        .is_ok_and(|value| value.get("id").and_then(Value::as_str) == Some(ANTIGRAVITY_LIST_REQUEST))
+}
+
+fn antigravity_signed_in(output: &str) -> Option<bool> {
+    let line = output.lines().find(|line| is_antigravity_list_answer(line))?;
+    let answer: Value = serde_json::from_str(line).ok()?;
+    if let Some(error) = answer.get("error").filter(|value| !value.is_null()) {
+        return crate::agent::chat::acp_protocol::auth_required(error).then_some(false);
+    }
+    answer.get("result").filter(|value| !value.is_null()).map(|_| true)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,5 +270,23 @@ mod tests {
         assert_eq!(cursor_signed_in("Not logged in\n"), Some(false));
         assert_eq!(cursor_signed_in("Logged in as someone\n"), Some(true));
         assert_eq!(cursor_signed_in("Checking...\n"), None);
+    }
+
+    #[test]
+    fn antigravity_session_list_probe_distinguishes_auth_required_from_other_errors() {
+        let answer = |payload: Value| format!("{}\n{}\n", json!({"id":"1","result":{}}), payload);
+        assert_eq!(
+            antigravity_signed_in(&answer(json!({"id":"2","error":{"code":-32000,"message":"Authentication required"}}))),
+            Some(false)
+        );
+        assert_eq!(
+            antigravity_signed_in(&answer(json!({"id":"2","result":{"sessions":[]}}))),
+            Some(true)
+        );
+        assert_eq!(
+            antigravity_signed_in(&answer(json!({"id":"2","error":{"code":-32603,"message":"Failed to start"}}))),
+            None
+        );
+        assert_eq!(antigravity_signed_in(&json!({"id":"1","result":{}}).to_string()), None);
     }
 }

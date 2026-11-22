@@ -67,7 +67,7 @@ const MOD_IS_CMD = IS_MAC && !IS_PLAIN_BROWSER;
  * swallowed the same way. Those are shell keys and must stay shell keys, so require exactly the
  * modifier the platform binds and reject the other one.
  */
-export function hasMod(e: KeyboardEvent): boolean {
+export function hasMod(e: Pick<KeyboardEvent, "metaKey" | "ctrlKey">): boolean {
   return MOD_IS_CMD ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
 }
 

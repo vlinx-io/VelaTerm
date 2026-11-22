@@ -39,6 +39,7 @@ export const SETTINGS_TABS = [
   "behavior",
   "advanced",
   "agents",
+  "plugins",
   "shortcuts",
   "general",
 ] as const;

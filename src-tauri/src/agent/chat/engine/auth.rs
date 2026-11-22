@@ -1,5 +1,6 @@
 //! Provider-managed authorization. Credentials remain inside the provider process.
 
+pub(super) mod antigravity;
 pub(super) mod claude;
 pub(super) mod readiness;
 pub(super) mod zcode;
@@ -203,6 +204,7 @@ fn finish(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, status: &'sta
     crate::diagnostics::record(
         "INFO",
         match proc.kind {
+            crate::models::SessionKind::Antigravity => "antigravity_account",
             crate::models::SessionKind::Claude => "claude_account",
             crate::models::SessionKind::Zcode => "zcode_account",
             _ => "codex_device_login",

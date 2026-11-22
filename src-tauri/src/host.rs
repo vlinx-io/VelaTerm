@@ -25,6 +25,7 @@ use tauri::{Emitter, Listener, Manager};
 use crate::agent::server::HookServer;
 use crate::db::Db;
 use crate::agent::chat::engine::ChatManager;
+use crate::plugins::PluginManager;
 use crate::pty::manager::PtyManager;
 use crate::web::WebServer;
 
@@ -163,6 +164,7 @@ pub struct HeadlessHost {
     db: Db,
     pty: PtyManager,
     chat: ChatManager,
+    plugins: PluginManager,
     /// HookServer::start itself needs AppCtx to emit and write the database, so construct the host first
     /// and fill this after startup. No hook traffic can access it beforehand.
     hooks: OnceLock<HookServer>,
@@ -180,6 +182,7 @@ impl HeadlessHost {
             db,
             pty: PtyManager::new(),
             chat: ChatManager::new(),
+            plugins: PluginManager::new(),
             hooks: OnceLock::new(),
             events: EventBus::new(),
             remote_web: WebServer::new(),
@@ -236,6 +239,15 @@ impl AppCtx {
             #[cfg(feature = "gui")]
             AppCtx::Tauri(app) => app.state::<ChatManager>().inner(),
             AppCtx::Headless(host) => &host.chat,
+        }
+    }
+
+    /// External dynamic plugin host managing sidecar processes, assets, virtual PTYs, and CLI/skills.
+    pub fn plugins(&self) -> &PluginManager {
+        match self {
+            #[cfg(feature = "gui")]
+            AppCtx::Tauri(app) => app.state::<PluginManager>().inner(),
+            AppCtx::Headless(host) => &host.plugins,
         }
     }
 

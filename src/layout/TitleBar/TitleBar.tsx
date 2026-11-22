@@ -19,6 +19,8 @@ import { navigateTranslation, translationUrl, useTranslationRoute } from "../../
 import { resolveTheme } from "../../theme";
 import { AppMenuBar } from "./AppMenuBar";
 import { memoryRouteHidesRightPanel, useMemoryLocation } from "../Memory/navigation";
+import { pluginRouteHidesRightPanel } from "../../plugins/host";
+import { usePluginLocation } from "../../plugins/navigation";
 
 // The dialogs opened from the title bar load on first use, keeping them out of what the window must load
 // before its first paint.
@@ -66,7 +68,9 @@ export function TitleBar() {
   const leftCollapsed = useTermStore((s) => s.leftCollapsed);
   const toggleLeft = useTermStore((s) => s.toggleLeft);
   const rightCollapsed = useTermStore((s) => s.rightCollapsed);
-  const noRightPanel = memoryRouteHidesRightPanel(useMemoryLocation());
+  const noRightPanel =
+    memoryRouteHidesRightPanel(useMemoryLocation()) ||
+    pluginRouteHidesRightPanel(usePluginLocation());
   const toggleRight = useTermStore((s) => s.toggleRight);
   // Mirror mode is switched on the host only. Without a marker, a followed client sees its tabs and
   // splits rearrange with no visible cause; the badge names where those changes come from.

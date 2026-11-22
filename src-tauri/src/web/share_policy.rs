@@ -191,7 +191,7 @@ pub fn dispatch_shared(
         }
         // Machine panels stay host-only; the shared session view has no use for them.
         "process_stats" | "system_stats" | "usage_refresh" | "model_catalog_refresh" | "list_dir"
-        | "search_session_content" => return Err(unavailable()),
+        | "search_files" | "search_session_content" => return Err(unavailable()),
         _ => {}
     }
     // Keystrokes, size changes and redraws for a terminal the owner opened; see `owner_terminal_session`.

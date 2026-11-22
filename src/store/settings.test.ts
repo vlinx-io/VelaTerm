@@ -277,7 +277,7 @@ describe("default sidebar view preference", () => {
     expect(loadSettings().defaultSidebarSection).toBe("tasks");
   });
 
-  it.each([["archive"], ["knowledge"], ["agents"], ["unknown"], [7], [null]])(
+  it.each([["archive"], ["knowledge"], ["plugin:colab"], ["agents"], ["unknown"], [7], [null]])(
     "rejects %s because only a section with its own pane group can be opened by default",
     (candidate) => {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify({ defaultSidebarSection: candidate }));
@@ -343,5 +343,36 @@ describe("settings dialog section", () => {
   it("round-trips the chosen section", () => {
     saveSettings({ ...loadSettings(), settingsTab: "behavior" });
     expect(loadSettings().settingsTab).toBe("behavior");
+  });
+});
+
+describe("conversation image size limit preference", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("defaults to 2 MB, keeps valid choices, and normalizes unknown values", () => {
+    expect(loadSettings().chatImageMaxMb).toBe(2);
+    for (const mb of [1, 2, 4] as const) {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ chatImageMaxMb: mb }));
+      expect(loadSettings().chatImageMaxMb).toBe(mb);
+    }
+    for (const bad of [0, 3, 5, "2", null]) {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({ chatImageMaxMb: bad }));
+      expect(loadSettings().chatImageMaxMb).toBe(2);
+    }
+  });
+
+  it("round-trips through the store setter and cache hydration", () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    const prev = useTermStore.getState().chatImageMaxMb;
+    try {
+      useTermStore.getState().setChatImageMaxMb(4);
+      expect(loadSettings().chatImageMaxMb).toBe(4);
+      useTermStore.setState({ chatImageMaxMb: 1 });
+      useTermStore.getState().hydrateSettingsFromCache();
+      expect(useTermStore.getState().chatImageMaxMb).toBe(4);
+    } finally {
+      useTermStore.setState({ chatImageMaxMb: prev });
+      vi.unstubAllGlobals();
+    }
   });
 });

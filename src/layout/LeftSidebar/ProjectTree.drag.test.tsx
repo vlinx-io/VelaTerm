@@ -273,4 +273,19 @@ describe("ProjectTree drag and drop", () => {
     dragTo(shell, rowOf("Beta"), 2);
     expect(storeState.moveNode).toHaveBeenCalledWith("session", "s1", "pb", null, null, expect.any(Number));
   });
+
+  it("clears drag highlight when a project drag is cancelled with dragend", () => {
+    render(<ProjectTree {...handlers} />);
+    const alpha = rowOf("Alpha");
+    const gamma = rowOf("Gamma");
+    const dataTransfer = makeDataTransfer();
+
+    fireEvent.dragStart(alpha, { dataTransfer });
+    fireEvent.dragOver(gamma, { dataTransfer, clientY: 2 });
+    expect(gamma.style.borderTop).not.toBe("");
+
+    fireEvent.dragEnd(alpha, { dataTransfer });
+    expect(gamma.style.borderTop).toBe("");
+    expect(storeState.moveNode).not.toHaveBeenCalled();
+  });
 });

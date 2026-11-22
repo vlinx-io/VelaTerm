@@ -297,7 +297,7 @@ async fn handle_socket(
         crate::host::SETTINGS_CHANGED,
         crate::session_state::STATE_EVENT,
     ];
-    let full_events: [&str; 20] = [
+    let full_events: [&str; 23] = [
         "spawn://request",
         "spawn://resolved",
         "plan-execute://proposal",
@@ -307,6 +307,8 @@ async fn handle_socket(
         // Some of those actions were decided, so every other view of that session drops them too.
         crate::assist::CHANGED_EVENT,
         "knowledge://changed",
+        crate::plugins::PLUGIN_EVENT,
+        crate::plugins::PLUGINS_CHANGED,
         crate::host::TREE_CHANGED,
         crate::host::PRESETS_CHANGED,
         // Preferences are backend-authoritative; this tells every client to re-read them mid-run.
@@ -325,6 +327,7 @@ async fn handle_socket(
         // Account usage is polled once per machine; every client is told when that copy changes.
         crate::agent::usage_store::USAGE_EVENT,
         crate::agent::remote_model_catalog::EVENT,
+        crate::agent::antigravity_models::EVENT,
         "translation://settings",
         "translation://defaults",
     ];

@@ -12,6 +12,7 @@ pub mod appimage;
 #[cfg(feature = "gui")]
 mod browser;
 mod command_core;
+pub mod plugins;
 // GUI-only Windows fix returning keyboard focus to the webview when a window is reactivated.
 #[cfg(all(feature = "gui", target_os = "windows"))]
 mod focus_win;
@@ -22,8 +23,11 @@ mod commands;
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 mod connect_cancel;
 #[cfg(feature = "gui")]
+mod window_badge;
+#[cfg(feature = "gui")]
 mod window_layout;
 mod db;
+mod file_clipboard;
 mod files;
 mod fonts;
 mod fs_watch;
@@ -321,10 +325,15 @@ pub fn run_notify(args: &[String]) {
             args.get(2).cloned().unwrap_or_default(),
             args.get(3).cloned().unwrap_or_default(),
         ),
-        "--notify-env" => (
-            std::env::var(agent::inject::CODEX_NOTIFY_URL_ENV).unwrap_or_default(),
-            args.get(2).cloned().unwrap_or_default(),
-        ),
+        "--notify-env" => {
+            if agent::hook_bridge::is_chat_session() {
+                return;
+            }
+            (
+                std::env::var(agent::inject::CODEX_NOTIFY_URL_ENV).unwrap_or_default(),
+                args.get(2).cloned().unwrap_or_default(),
+            )
+        }
         _ => return,
     };
     if !url.is_empty() {
@@ -341,37 +350,20 @@ pub fn run_notify(args: &[String]) {
 /// Build the URL from PTY-injected environment variables rather than hook configuration, avoiding
 /// per-session definitions/token leakage. Missing variables or invalid states are silent no-ops;
 /// forwarding never emits output or affects Codex.
-pub fn run_codex_hook(args: &[String]) {
-    use std::io::Read;
-
-    let Some(state) = args.get(2).map(String::as_str) else {
-        return;
-    };
-    if !matches!(state, "ready" | "working" | "tool" | "asking" | "waiting") {
-        return;
-    }
-    let Ok(base) = std::env::var("VLX_SPAWN_URL") else {
-        return;
-    };
-    let Ok(sid) = std::env::var("VLX_SESSION_ID") else {
-        return;
-    };
-    let Some(token) = crate::agent::session_env::token() else {
-        return;
-    };
-    if base.is_empty() || sid.is_empty() || token.is_empty() {
-        return;
-    }
-    let mut body = String::new();
-    let _ = std::io::stdin().read_to_string(&mut body);
-    let url = format!(
-        "{}/hook/{}?t={}&e=codex_{}",
-        base.trim_end_matches('/'),
-        sid,
-        token,
-        state
-    );
-    agent::server::forward_notify(&url, &body);
+pub fn run_codex_hook(args: &[String]) -> ! {
+    let event = args.get(2).and_then(|state| match state.as_str() {
+        "ready" => Some("codex_ready"),
+        "working" => Some("codex_working"),
+        "tool" => Some("codex_tool"),
+        "asking" => Some("codex_asking"),
+        "waiting" => Some("codex_waiting"),
+        _ => None,
+    });
+    agent::hook_bridge::run_allowing_empty_eof(
+        event,
+        &["codex_ready", "codex_working", "codex_tool", "codex_asking", "codex_waiting"],
+        b"",
+    )
 }
 
 /// Hidden Cursor status hook. Completes before GUI, database, or service initialization.
@@ -387,37 +379,12 @@ pub fn run_agent_hook(args: &[String]) -> ! {
 
 /// Hidden Grok lifecycle-hook entry. Static `~/.grok/hooks/vlx-term.json` commands call this
 /// executable, while all dynamic callback values remain scoped to the managed Grok process.
-pub fn run_grok_hook(args: &[String]) {
-    use std::io::Read;
-
-    let Some(state) = args.get(2).map(String::as_str) else {
-        return;
-    };
-    if !matches!(state, "boot" | "working" | "asking" | "waiting" | "idle") {
-        return;
-    }
-    let Ok(base) = std::env::var("VLX_SPAWN_URL") else {
-        return;
-    };
-    let Ok(sid) = std::env::var("VLX_SESSION_ID") else {
-        return;
-    };
-    let Some(token) = crate::agent::session_env::token() else {
-        return;
-    };
-    if base.is_empty() || sid.is_empty() || token.is_empty() {
-        return;
-    }
-    let mut body = String::new();
-    let _ = std::io::stdin().read_to_string(&mut body);
-    let url = format!(
-        "{}/hook/{}?t={}&e={}",
-        base.trim_end_matches('/'),
-        sid,
-        token,
-        state
-    );
-    agent::server::forward_notify(&url, &body);
+pub fn run_grok_hook(args: &[String]) -> ! {
+    agent::hook_bridge::run_allowing_empty_eof(
+        args.get(2).map(String::as_str),
+        &["boot", "working", "asking", "waiting", "idle"],
+        b"",
+    )
 }
 
 /// Hidden `--spawn` entry used by the PATH `vspawn` shim. POST injected session data to `/spawn`,
@@ -481,6 +448,10 @@ pub fn run_wait(args: &[String]) -> ! {
 
 pub fn run_knowledge(args: &[String]) -> ! {
     knowledge::agent::run(args)
+}
+
+pub fn run_plugin_cli(args: &[String]) -> ! {
+    plugins::cli_bridge::run_cli(args)
 }
 
 /// Build-time Git commit, or unknown, used by --version and SSH remote version pinning.
@@ -712,11 +683,13 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
         .manage(screenshot::ScreenshotState::default())
         .manage(PtyManager::new())
         .manage(agent::chat::engine::ChatManager::new())
+        .manage(plugins::PluginManager::new())
         .manage(WebServer::new())
         .manage(web::local_link::LocalLinkServer::new())
         .manage(browser::BrowserManager::new())
         .manage(QuitState::default())
         .manage(NativeTheme::default())
+        .manage(window_badge::WindowBadgeState::default())
         .manage(PendingOpenProject(std::sync::Mutex::new(
             initial_open_project.map(|p| p.to_string_lossy().into_owned()),
         )))
@@ -943,6 +916,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                         _ => {}
                     }
                 });
+                install_macos_dock_menu(app.handle());
             }
 
             // Register the Windows AppUserModelId so bare no-bundle releases can display toasts.
@@ -1096,6 +1070,10 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             // and browser client. It only touches providers whose account material exists on this
             // machine, and honours the usage settings live.
             agent::usage_store::start(AppCtx::Tauri(app.handle().clone()));
+            {
+                let ctx = AppCtx::Tauri(app.handle().clone());
+                ctx.plugins().start(ctx.clone());
+            }
             // Sends the continuation prompt to conversations waiting for a usage limit to reset.
             agent::chat::auto_continue::start(AppCtx::Tauri(app.handle().clone()));
             agent::remote_model_catalog::start(AppCtx::Tauri(app.handle().clone()));
@@ -1112,6 +1090,9 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             // Install macOS session-aware notification click handling; unsupported builds skip it.
             #[cfg(target_os = "macos")]
             notify_native::install(app.handle().clone());
+
+            // Relay per-window pending counts to update each window's title and the summed Dock badge.
+            window_badge::install_listener(app.handle());
 
             // Remote contexts cannot call native_notify directly, so relay vlx://remote-notify through
             // the backend with its window/session identity. Native channels target that window on click;
@@ -1318,6 +1299,17 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
         .run({
             use std::sync::atomic::Ordering;
             move |app, event| {
+                // Drop destroyed windows from the per-window badge table on every platform so closed
+                // windows immediately stop contributing to the summed Dock/taskbar badge.
+                if let tauri::RunEvent::WindowEvent {
+                    label,
+                    event: tauri::WindowEvent::Destroyed,
+                    ..
+                } = &event
+                {
+                    window_badge::remove(app, label);
+                }
+
                 match &event {
                     tauri::RunEvent::ExitRequested { code: None, api, .. }
                         if !app.state::<QuitState>().confirmed.load(Ordering::SeqCst) =>
@@ -1361,13 +1353,12 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                         app.state::<QuitState>().confirmed.store(true, Ordering::SeqCst);
                         app.exit(0);
                     }
-                    // Dock icon click or relaunching the .app opens a main window when none is on screen, as in
-                    // VS Code. A remote window left open after the main window closed counts as visible, so also
-                    // reopen whenever the main window is gone; otherwise only the remote window would come back.
+                    // Dock icon click or relaunching the .app opens a main window when no window is on screen, as in
+                    // VS Code. When remote windows remain open after the main window closed, clicking the Dock icon
+                    // activates them instead of reopening the main window; the user can reopen it from the Dock's
+                    // "New Window" menu item or the app menu.
                     #[cfg(target_os = "macos")]
-                    tauri::RunEvent::Reopen { has_visible_windows, .. }
-                        if !*has_visible_windows || app.get_webview_window("main").is_none() =>
-                    {
+                    tauri::RunEvent::Reopen { has_visible_windows, .. } if !*has_visible_windows => {
                         open_main_window(app)
                     }
                     // Window activation leaves keyboard focus on the top-level HWND under the `unstable`
@@ -1385,6 +1376,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 // images used by other instances.
                 if let tauri::RunEvent::Exit = event {
                     let ctx = host::AppCtx::Tauri(app.clone());
+                    ctx.plugins().shutdown_all();
                     ctx.chat().shutdown(&ctx);
                     diagnostics::record("INFO","runtime_stopping",serde_json::json!({}));
                     diagnostics::flush();
@@ -1489,6 +1481,12 @@ fn request_confirmation(app: &tauri::AppHandle, close_window: bool) {
 fn install_main_window_hooks(app: &tauri::AppHandle) {
     // Capture the paths of folders dropped from the OS file manager onto the main window.
     if let Some(win) = app.get_webview_window("main") {
+        let base_title = win
+            .title()
+            .ok()
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| "VelaTerm".to_string());
+        window_badge::register(app, "main", base_title);
         native_drop::install(&win);
     }
 
@@ -1694,6 +1692,87 @@ pub(crate) fn open_main_window(app: &tauri::AppHandle) {
         #[cfg(not(target_os = "macos"))]
         show_main_window(&app);
     });
+}
+
+#[cfg(all(feature = "gui", target_os = "macos"))]
+fn install_macos_dock_menu(app: &tauri::AppHandle) {
+    use std::sync::OnceLock;
+    use objc2::rc::Retained;
+    use objc2::runtime::{AnyClass, AnyObject, NSObject, Sel};
+    use objc2::{define_class, msg_send, AllocAnyThread};
+    use objc2_foundation::NSString;
+
+    static DOCK_APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+    static DOCK_TARGET: OnceLock<usize> = OnceLock::new();
+
+    define_class!(
+        #[unsafe(super(NSObject))]
+        #[thread_kind = AllocAnyThread]
+        #[name = "VlxDockMenuTarget"]
+        struct DockMenuTarget;
+
+        impl DockMenuTarget {
+            #[unsafe(method(newWindow:))]
+            fn new_window(&self, _sender: *mut AnyObject) {
+                if let Some(app) = DOCK_APP.get() {
+                    open_main_window(app);
+                }
+            }
+        }
+    );
+
+    extern "C" fn application_dock_menu(
+        _this: *mut AnyObject,
+        _cmd: Sel,
+        _sender: *mut AnyObject,
+    ) -> *mut AnyObject {
+        unsafe {
+            let menu: *mut AnyObject = msg_send![objc2::class!(NSMenu), alloc];
+            let empty = NSString::from_str("");
+            let menu: *mut AnyObject = msg_send![menu, initWithTitle: &*empty];
+            let title = NSString::from_str("New Window");
+            let item: *mut AnyObject = msg_send![objc2::class!(NSMenuItem), alloc];
+            let item: *mut AnyObject = msg_send![
+                item,
+                initWithTitle: &*title,
+                action: objc2::sel!(newWindow:),
+                keyEquivalent: &*empty
+            ];
+            if let Some(&target_ptr) = DOCK_TARGET.get() {
+                let target = target_ptr as *mut AnyObject;
+                let _: () = msg_send![item, setTarget: target];
+            }
+            let _: () = msg_send![menu, addItem: item];
+            let _: () = msg_send![item, release];
+            let menu: *mut AnyObject = msg_send![menu, autorelease];
+            menu
+        }
+    }
+
+    let _ = DOCK_APP.set(app.clone());
+    DOCK_TARGET.get_or_init(|| {
+        let target: Retained<DockMenuTarget> = unsafe { msg_send![DockMenuTarget::alloc(), init] };
+        Retained::into_raw(target) as usize
+    });
+
+    unsafe {
+        let ns_app: *mut AnyObject = msg_send![objc2::class!(NSApplication), sharedApplication];
+        let delegate: *mut AnyObject = msg_send![ns_app, delegate];
+        if !delegate.is_null() {
+            let cls: *const AnyClass = msg_send![delegate, class];
+            let imp: objc2::runtime::Imp = std::mem::transmute(
+                application_dock_menu
+                    as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject) -> *mut AnyObject,
+            );
+            // Objective-C type encoding for `NSMenu *applicationDockMenu:(NSApplication *)`: "@@:@".
+            let _ = objc2::ffi::class_addMethod(
+                cls as *mut AnyClass,
+                objc2::sel!(applicationDockMenu:),
+                imp,
+                c"@@:@".as_ptr(),
+            );
+        }
+    }
 }
 
 /// Return the build-time Tauri context from one macro expansion shared by GUI/headless, avoiding
@@ -2098,6 +2177,7 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
     let ctx = AppCtx::Headless(std::sync::Arc::clone(&host));
     host.set_hooks(HookServer::start(ctx.clone())?);
     agent::runs::start(ctx.clone());
+    ctx.plugins().start(ctx.clone());
     let _ = mobile_push::start(&ctx);
 
     let web = WebServer::new();
@@ -2277,6 +2357,7 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
     diagnostics::flush();
     web.stop();
     ctx.remote_web().stop();
+    ctx.plugins().shutdown_all();
     ctx.chat().shutdown(&ctx);
     ctx.pty().kill_all();
     // Match GUI removal of this process's pasted-image files when cleanup is enabled.

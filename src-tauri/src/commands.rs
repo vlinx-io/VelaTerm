@@ -711,9 +711,15 @@ pub async fn open_remote_window(
 }})();"#
     );
 
+    // Runtime-created loopback remote contexts are not covered by configured capabilities. Grant the
+    // minimal remote capability before building the window so startup zoom restoration cannot race load.
+    grant_remote_window_capability(&app, &format!("remote-caps-{label}"), &label)
+        .map_err(|e| format!("Failed to grant remote window capability: {e}"))?;
+
     let layout = crate::window_layout::policy();
+    let base_title = format!("VelaTerm · Remote: {display_addr}");
     let win = with_download_handler(tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::External(parsed)))
-        .title(format!("VelaTerm · Remote: {display_addr}"))
+        .title(&base_title)
         .inner_size(layout.fallback_width, layout.fallback_height)
         .min_inner_size(layout.min_width, layout.min_height)
         .visible(false)
@@ -725,32 +731,7 @@ pub async fn open_remote_window(
         .build()
         .map_err(|e| format!("Failed to create remote window: {e}"))?;
 
-    // Runtime-created loopback remote contexts are not covered by configured capabilities. Grant a
-    // minimal capability scoped to this window/URL: clipboard writes for OSC 52; native notifications;
-    // event listen/unlisten for reliable Tauri focus and notification clicks; event emit to relay
-    // remote notification requests to the local backend; set-focus after notification activation;
-    // and both opener command/default-URL permissions so links open in the operator's local browser.
-    // Both opener permissions are required because command access and URL scope are separate checks.
-    use tauri::ipc::CapabilityBuilder;
-    app.add_capability(
-        CapabilityBuilder::new(format!("remote-caps-{label}"))
-            .window(label.clone())
-            .remote("http://127.0.0.1:*".to_string())
-            .permission("local-fonts:allow-catalog")
-            .permission("local-download:allow-start")
-            .permission("local-download:allow-cancel")
-            .permission("clipboard-manager:allow-write-text")
-            .permission("clipboard-manager:allow-write-image")
-            .permission("notification:default")
-            .permission("opener:allow-open-url")
-            .permission("opener:allow-default-urls")
-            .permission("core:event:allow-listen")
-            .permission("core:event:allow-unlisten")
-            .permission("core:event:allow-emit")
-            .permission("core:window:allow-set-focus"),
-    )
-    .map_err(|e| format!("Failed to grant remote window capability: {e}"))?;
-
+    crate::window_badge::register(&app, &label, base_title);
     crate::window_layout::apply(&win);
     win.show().map_err(|e| format!("Failed to show remote window: {e}"))?;
     let _ = win.set_focus();
@@ -856,6 +837,7 @@ fn build_account_remote_window(app: &AppHandle, url: url::Url) -> Result<tauri::
         .disable_drag_drop_handler()
         .build()
         .map_err(|e| format!("Cannot open Remote window: {e}"))?;
+    crate::window_badge::register(app, &label, "VelaTerm · Remote");
     crate::window_layout::apply(&win);
     win.show().map_err(|e| format!("Cannot show Remote window: {e}"))?;
     let _ = win.set_focus();
@@ -1266,6 +1248,34 @@ impl RemoteWindowKind {
     }
 }
 
+/// Grant a loopback remote window (`remote-*`, `ssh-*`, `wsl-*`) its minimal runtime capability:
+/// local fonts and downloads, OSC 52 clipboard writes, native notifications, window/event routing,
+/// external link opening (command + URL scope), and native webview page zoom.
+fn grant_remote_window_capability<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    capability_id: &str,
+    label: &str,
+) -> tauri::Result<()> {
+    app.add_capability(
+        tauri::ipc::CapabilityBuilder::new(capability_id)
+            .window(label.to_string())
+            .remote("http://127.0.0.1:*".to_string())
+            .permission("local-fonts:allow-catalog")
+            .permission("local-download:allow-start")
+            .permission("local-download:allow-cancel")
+            .permission("clipboard-manager:allow-write-text")
+            .permission("clipboard-manager:allow-write-image")
+            .permission("notification:default")
+            .permission("opener:allow-open-url")
+            .permission("opener:allow-default-urls")
+            .permission("core:event:allow-listen")
+            .permission("core:event:allow-unlisten")
+            .permission("core:event:allow-emit")
+            .permission("core:window:allow-set-focus")
+            .permission("core:webview:allow-set-webview-zoom"),
+    )
+}
+
 /// Open a window on the local HTTP forwarding port and inject its random password for LoginGate.
 /// Unlike URL remote windows, SSH already encrypts transport, so no TLS-stripping tunnel or E2EE
 /// pairing fragment is needed.
@@ -1306,29 +1316,12 @@ fn open_login_window(
         format!("VelaTerm · {}: {host}", kind.name())
     };
     // Grant the same minimal runtime capability as open_remote_window, scoped to this loopback window.
-    use tauri::ipc::CapabilityBuilder;
-    app.add_capability(
-        CapabilityBuilder::new(format!("connection-caps-{label}"))
-            .window(label.clone())
-            .remote("http://127.0.0.1:*".to_string())
-            .permission("local-fonts:allow-catalog")
-            .permission("local-download:allow-start")
-            .permission("local-download:allow-cancel")
-            .permission("clipboard-manager:allow-write-text")
-            .permission("clipboard-manager:allow-write-image")
-            .permission("notification:default")
-            .permission("opener:allow-open-url")
-            .permission("opener:allow-default-urls")
-            .permission("core:event:allow-listen")
-            .permission("core:event:allow-unlisten")
-            .permission("core:event:allow-emit")
-            .permission("core:window:allow-set-focus"),
-    )
-    .map_err(|e| format!("Failed to grant connection window capability: {e}"))?;
+    grant_remote_window_capability(app, &format!("connection-caps-{label}"), &label)
+        .map_err(|e| format!("Failed to grant connection window capability: {e}"))?;
 
     let layout = crate::window_layout::policy();
     let win = with_download_handler(tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::External(parsed)))
-        .title(title)
+        .title(&title)
         .inner_size(layout.fallback_width, layout.fallback_height)
         .min_inner_size(layout.min_width, layout.min_height)
         .visible(false)
@@ -1338,6 +1331,8 @@ fn open_login_window(
         .disable_drag_drop_handler()
         .build()
         .map_err(|e| format!("Failed to create {} window: {e}", kind.name()))?;
+
+    crate::window_badge::register(app, &label, title);
 
     // On connection-window close, ask whether to stop or preserve the detached service for reuse.
     // A window attached to the remote desktop app has nothing to stop: drop the tunnel and close.
@@ -1416,4 +1411,62 @@ fn open_login_window(
     win.show().map_err(|e| format!("Failed to show {} window: {e}", kind.name()))?;
     let _ = win.set_focus();
     Ok(())
+}
+
+#[cfg(all(test, feature = "native-menu-tests"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_window_capability_allows_loopback_zoom_only_on_granted_window() {
+        let mut context = tauri::test::mock_context(tauri::test::noop_assets());
+        let mut native_context = crate::tauri_context();
+        std::mem::swap(
+            context.runtime_authority_mut(),
+            native_context.runtime_authority_mut(),
+        );
+        let app = tauri::test::mock_builder().build(context).unwrap();
+        let loopback: url::Url = "http://127.0.0.1:32718".parse().unwrap();
+        let external: url::Url = "https://example.com".parse().unwrap();
+        let granted_label = "ssh-zoom-test";
+        let remote = tauri::WebviewWindowBuilder::new(
+            &app,
+            granted_label,
+            tauri::WebviewUrl::External(loopback.clone()),
+        )
+        .build()
+        .unwrap();
+        let other = tauri::WebviewWindowBuilder::new(
+            &app,
+            "ssh-zoom-other",
+            tauri::WebviewUrl::External(loopback.clone()),
+        )
+        .build()
+        .unwrap();
+
+        let zoom_request = |window: &tauri::WebviewWindow<tauri::test::MockRuntime>, url: &url::Url| {
+            tauri::test::get_ipc_response(
+                window,
+                tauri::webview::InvokeRequest {
+                    cmd: "plugin:webview|set_webview_zoom".into(),
+                    callback: tauri::ipc::CallbackFn(0),
+                    error: tauri::ipc::CallbackFn(1),
+                    url: url.clone(),
+                    body: serde_json::json!({ "label": window.label(), "value": 1.25 }).into(),
+                    headers: Default::default(),
+                    invoke_key: tauri::test::INVOKE_KEY.into(),
+                },
+            )
+        };
+
+        // Denied before granting the window capability.
+        assert!(zoom_request(&remote, &loopback).is_err());
+
+        grant_remote_window_capability(app.handle(), "connection-caps-ssh-zoom-test", granted_label).unwrap();
+
+        // Allowed on the granted window for loopback URLs, and still denied elsewhere.
+        assert!(zoom_request(&remote, &loopback).is_ok());
+        assert!(zoom_request(&remote, &external).is_err());
+        assert!(zoom_request(&other, &loopback).is_err());
+    }
 }

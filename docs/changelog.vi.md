@@ -1,3 +1,18 @@
+## v0.3.4 — 2026-11-22
+
+- 🪐 Hội thoại Antigravity giờ đi kèm danh sách mô hình tích hợp gồm Gemini 4 Neon và Orchestrator (Neon), tự động làm mới danh sách mô hình khả dụng ở nền khi mở phiên và chuyển mượt các phiên đang chạy lâu sang mô hình mới phát hành.
+- 🔑 Hội thoại Antigravity giờ cho phép đăng nhập bằng Google và đăng xuất trực tiếp ngay trong chế độ xem hội thoại.
+- 🛡️ Hội thoại Antigravity giờ giữ ổn định quyền Bypass khi khởi động, chờ danh sách mô hình sẵn sàng khi khởi động nguội thay vì báo lỗi ngay tin nhắn đầu tiên, và không còn làm treo ứng dụng khi mở phiên.
+- 📁 Bảng Tệp giờ hỗ trợ chọn nhiều mục, xóa hàng loạt và cắt, sao chép, dán tệp đồng bộ với Finder và File Explorer, kèm xử lý xung đột trùng tên.
+- 🔎 Bộ lọc trong bảng Tệp giờ tìm kiếm đệ quy xuyên qua các thư mục đang thu gọn và tự động mở rộng đường dẫn khớp.
+- 🖼️ Ảnh quá lớn khi dán hoặc kéo thả vào hội thoại giờ được tự động thu nhỏ và nén thay vì bị từ chối, với tùy chọn giới hạn 1, 2 hoặc 4 MB trong Cài đặt.
+- 🔔 Cửa sổ chính và các cửa sổ từ xa giờ hiển thị số mục đang chờ riêng trên thanh tiêu đề từng cửa sổ, còn huy hiệu trên Dock hoặc thanh tác vụ hiển thị tổng số của mọi cửa sổ đang mở.
+- 🔍 Các cửa sổ từ xa qua SSH, WSL và URL ghép nối giờ có điều khiển thu phóng giao diện trên thanh trạng thái.
+- 🧱 Việc thăm dò và tin cậy khóa máy chủ SSH giờ tuân theo bí danh, tên máy chủ và cổng tùy chỉnh trong `~/.ssh/config`.
+- 🪟 Trên macOS, bấm biểu tượng Dock khi chỉ có cửa sổ từ xa đang mở sẽ đưa các cửa sổ đó lên trước thay vì mở cửa sổ chính mới, và menu chuột phải của Dock bổ sung New Window.
+- 💬 Thông báo lỗi trong hội thoại giờ loại bỏ mã điều khiển thô của terminal, hiển thị lời nhắc rõ ràng khi một tiến trình Codex khác đang giữ cùng hội thoại và không còn lặp lại lỗi khởi động.
+- 🔧 Hủy thao tác kéo dự án ở thanh bên sẽ xóa ngay đường chỉ báo chèn, và các phiên ở chế độ xem hội thoại không còn nhận cập nhật trạng thái xung đột từ hook của terminal.
+
 ## v0.3.3 — 2026-11-17
 
 - 🌐 Truy cập từ xa giờ có thể lắng nghe trên mọi mạng, một địa chỉ IPv4 cụ thể như địa chỉ Tailscale, hoặc chỉ máy này khi đặt sau đường hầm hay proxy ngược; `vela-server --serve` nhận lựa chọn tương tự qua `--bind`.

@@ -1,11 +1,15 @@
 //! Cached Antigravity model catalogue and per-model thinking effort levels.
 //!
-//! `agy acp` takes ~2.7s per session handshake, so UI views and pre-startup conversations read the
-//! latest grouped catalogue from `app_settings` and refresh it whenever an ACP session opens or
-//! reports updated options. On a cold install with no cache yet, `agy models` output is folded with
-//! the exact same grouping rule so raw variant slugs never reach the picker.
+//! `agy acp` takes ~2.7s per session handshake and `agy models` can take several seconds on a cold
+//! start, so VelaTerm ships a built-in initial catalogue in code and layers runtime updates in
+//! `app_settings` on top. Every session open / launch lookup returns the current catalogue
+//! immediately and triggers a background refresh (`agy models` / `agy acp`), broadcasting
+//! `antigravity://models-changed` whenever the available list changes.
 
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +20,12 @@ use crate::host::AppCtx;
 
 const CACHE_KEY: &str = "model-catalog.antigravity.v1";
 const SCHEMA_VERSION: u32 = 1;
+/// Bump whenever `bundled()` changes so older persisted caches are refreshed from the bundled list
+/// until a live refresh replaces them.
+const BUNDLED_REVISION: u32 = 1;
+const REFRESH_TIMEOUT: Duration = Duration::from_secs(30);
+const REFRESH_COOLDOWN: Duration = Duration::from_secs(5);
+pub const EVENT: &str = "antigravity://models-changed";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,32 +43,124 @@ pub struct AntigravityModel {
 struct CachedCatalog {
     schema_version: u32,
     #[serde(default)]
+    bundled_revision: u32,
+    #[serde(default)]
     models: Vec<AntigravityModel>,
 }
 
-/// Return the cached Antigravity models immediately, or fold `agy models` once on a cold install.
+#[derive(Default)]
+struct RefreshState {
+    in_flight: bool,
+    last_finished: Option<Instant>,
+}
+
+type RefreshKey = (Option<PathBuf>, String);
+static REFRESH_STATES: OnceLock<Mutex<HashMap<RefreshKey, RefreshState>>> = OnceLock::new();
+
+fn refresh_states() -> &'static Mutex<HashMap<RefreshKey, RefreshState>> {
+    REFRESH_STATES.get_or_init(Default::default)
+}
+
+/// Built-in initial Antigravity model catalogue so even a first run has an immediate picker list.
+pub fn bundled() -> Vec<AntigravityModel> {
+    let entries: &[(&str, &str, &[&str])] = &[
+        ("gemini-4-neon", "Gemini 4 Neon", &["low", "medium", "high", "xhigh"]),
+        ("gemini-4-carbon", "Gemini 4 Carbon", &["low", "medium", "high"]),
+        ("gemini-4-argon", "Gemini 4 Argon", &["low", "medium", "high"]),
+        ("gemini-4-hydrogen", "Gemini 4 Hydrogen", &["low", "medium", "high", "xhigh"]),
+        ("gemini-pro-orchestrator-neon", "Orchestrator (Neon)", &[]),
+        ("gemini-pro-orchestrator", "Orchestrator (Carbon)", &[]),
+        ("gemini-pro-orchestrator-argon", "Orchestrator (Argon)", &[]),
+        ("gemini-3.8-flash", "Gemini 3.8 Flash", &["low", "medium", "high"]),
+        ("claude-opus-5-5", "Claude Opus 5.5", &["low", "medium", "high"]),
+        ("claude-sonnet-5-5", "Claude Sonnet 5.5", &["low", "medium", "high"]),
+        ("gpt-oss-120b-medium", "GPT-OSS 120B (Medium)", &[]),
+    ];
+    entries
+        .iter()
+        .map(|(id, label, efforts)| AntigravityModel {
+            id: (*id).to_string(),
+            label: (*label).to_string(),
+            description: String::new(),
+            effort_levels: efforts.iter().map(|level| (*level).to_string()).collect(),
+        })
+        .collect()
+}
+
+/// Return the currently effective Antigravity models (persisted runtime cache or bundled list)
+/// without spawning any external process.
+pub fn cached(ctx: &AppCtx) -> Vec<AntigravityModel> {
+    let conn = ctx.db().conn.lock().unwrap();
+    effective_models_from_conn(&conn)
+}
+
+/// Return the cached/bundled Antigravity models immediately and schedule a background refresh via
+/// `agy models`.
 pub fn list(ctx: &AppCtx, bin: &str) -> Result<Vec<AntigravityModel>, String> {
-    if let Some(cached) = {
-        let conn = ctx.db().conn.lock().unwrap();
-        read_cached_from_conn(&conn)
-    } {
-        if !cached.models.is_empty() {
-            return Ok(cached.models);
-        }
-    }
-    let text = super::model_catalog::run_list_command("antigravity", bin)?;
-    let models = parse_cli_output(&text);
-    if !models.is_empty() {
-        let payload = CachedCatalog {
-            schema_version: SCHEMA_VERSION,
-            models: models.clone(),
-        };
-        if let Ok(json) = serde_json::to_string(&payload) {
-            let conn = ctx.db().conn.lock().unwrap();
-            let _ = repo::set_app_settings(&conn, &HashMap::from([(CACHE_KEY.to_string(), json)]));
-        }
-    }
+    let models = cached(ctx);
+    schedule_refresh(ctx, bin);
     Ok(models)
+}
+
+/// Schedule a background `agy models` refresh, coalescing concurrent calls and notifying open views
+/// whenever the catalogue changes.
+pub fn schedule_refresh(ctx: &AppCtx, bin: &str) {
+    let bin = bin.trim();
+    if bin.is_empty() {
+        return;
+    }
+    if (bin.contains('/') || bin.contains('\\')) && !Path::new(bin).is_file() {
+        return;
+    }
+    let key: RefreshKey = (ctx.data_dir().ok(), bin.to_string());
+    {
+        let mut map = refresh_states().lock().unwrap();
+        let entry = map.entry(key.clone()).or_default();
+        if entry.in_flight
+            || entry
+                .last_finished
+                .is_some_and(|at| at.elapsed() < REFRESH_COOLDOWN)
+        {
+            return;
+        }
+        entry.in_flight = true;
+    }
+    let ctx = ctx.clone();
+    let bin = bin.to_string();
+    std::thread::spawn(move || {
+        let parsed = super::model_catalog::run_list_command_with_timeout(
+            "antigravity",
+            &bin,
+            REFRESH_TIMEOUT,
+        )
+        .ok()
+        .map(|text| parse_cli_output(&text))
+        .filter(|models| !models.is_empty());
+        if let Some(models) = parsed {
+            save_and_notify(&ctx, &models);
+        }
+        let mut map = refresh_states().lock().unwrap();
+        if let Some(entry) = map.get_mut(&key) {
+            entry.in_flight = false;
+            entry.last_finished = Some(Instant::now());
+        }
+    });
+}
+
+/// Merge newly discovered cached/bundled models into a running ACP session's model list so
+/// long-lived sessions also see newly rolled-out models immediately.
+pub fn merge_live_with_cached(
+    ctx: &AppCtx,
+    mut live: Vec<AntigravityModel>,
+) -> Vec<AntigravityModel> {
+    let extras = cached(ctx);
+    let mut seen: HashSet<String> = live.iter().map(|m| m.id.clone()).collect();
+    for model in extras {
+        if seen.insert(model.id.clone()) {
+            live.push(model);
+        }
+    }
+    live
 }
 
 /// Convert a live ACP session's catalogue into grouped Antigravity models with per-model effort levels.
@@ -70,7 +172,8 @@ pub fn models_from_acp(ctx: &AppCtx, catalog: &acp_protocol::Catalog) -> Vec<Ant
     models_from_acp_with_previous(catalog, previous.as_ref())
 }
 
-/// Persist the live ACP session's models and per-model effort levels to SQLite.
+/// Persist the live ACP session's models and per-model effort levels to SQLite, and notify open
+/// sessions if the catalogue changed.
 pub fn remember_acp(ctx: &AppCtx, catalog: &acp_protocol::Catalog) {
     if !catalog.model_switchable() {
         return;
@@ -83,13 +186,30 @@ pub fn remember_acp(ctx: &AppCtx, catalog: &acp_protocol::Catalog) {
     if models.is_empty() {
         return;
     }
+    save_and_notify(ctx, &models);
+}
+
+fn save_and_notify(ctx: &AppCtx, models: &[AntigravityModel]) {
     let payload = CachedCatalog {
         schema_version: SCHEMA_VERSION,
-        models,
+        bundled_revision: BUNDLED_REVISION,
+        models: models.to_vec(),
     };
-    if let Ok(json) = serde_json::to_string(&payload) {
+    let Ok(json) = serde_json::to_string(&payload) else {
+        return;
+    };
+    let changed = {
         let conn = ctx.db().conn.lock().unwrap();
-        let _ = repo::set_app_settings(&conn, &HashMap::from([(CACHE_KEY.to_string(), json)]));
+        let previous_effective = effective_models_from_conn(&conn);
+        let previous_stored = read_cached_from_conn(&conn).map(|c| c.models);
+        if previous_stored.as_deref() != Some(models) {
+            let _ = repo::set_app_settings(&conn, &HashMap::from([(CACHE_KEY.to_string(), json)]));
+        }
+        previous_effective != models
+    };
+    if changed {
+        ctx.emit(EVENT, ());
+        ctx.chat().notify_antigravity_models_changed(ctx);
     }
 }
 
@@ -105,20 +225,15 @@ pub fn normalize_selection(ctx: &AppCtx, selection: &mut Selection) {
 }
 
 pub(crate) fn normalize_selection_with_conn(conn: &rusqlite::Connection, selection: &mut Selection) {
-    let cached = read_cached_from_conn(conn);
+    let models = effective_models_from_conn(conn);
     if let Some(raw) = selection.model.clone() {
-        let already_known = cached
-            .as_ref()
-            .is_some_and(|cat| cat.models.iter().any(|m| m.id == raw));
+        let already_known = models.iter().any(|m| m.id == raw);
         if !already_known {
             if let Some((base, level, _)) = split_effort_variant(&raw, &raw) {
-                let split_known = cached.as_ref().is_some_and(|cat| {
-                    cat.models
-                        .iter()
-                        .any(|m| m.id == base && !m.effort_levels.is_empty())
-                });
-                let split_uncached = cached.is_none() && !base.starts_with("gpt-oss-");
-                if split_known || split_uncached {
+                let split_known = models
+                    .iter()
+                    .any(|m| m.id == base && !m.effort_levels.is_empty());
+                if split_known {
                     selection.model = Some(base.to_string());
                     if selection.effort.is_none() {
                         selection.effort = Some(level.to_string());
@@ -127,8 +242,8 @@ pub(crate) fn normalize_selection_with_conn(conn: &rusqlite::Connection, selecti
             }
         }
     }
-    if let (Some(cat), Some(model_id)) = (cached.as_ref(), selection.model.as_deref()) {
-        if let Some(entry) = cat.models.iter().find(|m| m.id == model_id) {
+    if let Some(model_id) = selection.model.as_deref() {
+        if let Some(entry) = models.iter().find(|m| m.id == model_id) {
             if selection
                 .effort
                 .as_ref()
@@ -344,7 +459,16 @@ fn canonical_efforts(levels: &[String]) -> Vec<String> {
 fn read_cached_from_conn(conn: &rusqlite::Connection) -> Option<CachedCatalog> {
     let raw = repo::get_app_settings(conn).ok()?.remove(CACHE_KEY)?;
     let parsed: CachedCatalog = serde_json::from_str(&raw).ok()?;
-    (parsed.schema_version == SCHEMA_VERSION).then_some(parsed)
+    (parsed.schema_version == SCHEMA_VERSION
+        && parsed.bundled_revision >= BUNDLED_REVISION
+        && !parsed.models.is_empty())
+    .then_some(parsed)
+}
+
+fn effective_models_from_conn(conn: &rusqlite::Connection) -> Vec<AntigravityModel> {
+    read_cached_from_conn(conn)
+        .map(|cached| cached.models)
+        .unwrap_or_else(bundled)
 }
 
 #[cfg(test)]
@@ -505,6 +629,110 @@ gpt-oss-120b-medium                GPT-OSS 120B (Medium)
         assert_eq!(synthetic.model.as_deref(), Some("chosen-model"));
         assert_eq!(synthetic.effort.as_deref(), Some("high"));
 
+        drop(app);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cold_and_legacy_databases_return_bundled_catalogue_with_neon_immediately() {
+        let (app, dir) = test_ctx("bundled");
+        let cold = list(&app, "/nonexistent/agy").unwrap();
+        assert!(cold.iter().any(|m| m.id == "gemini-4-neon"
+            && m.label == "Gemini 4 Neon"
+            && m.effort_levels == ["low", "medium", "high", "xhigh"]));
+        assert!(cold.iter().any(|m| m.id == "gemini-pro-orchestrator-neon"));
+
+        // A legacy persisted entry lacking `bundledRevision` is superseded by the bundled list.
+        {
+            let conn = app.db().conn.lock().unwrap();
+            let legacy_json = json!({
+                "schemaVersion": SCHEMA_VERSION,
+                "models": [
+                    {"id": "gemini-4-argon", "label": "Gemini 4 Argon", "effortLevels": ["low", "medium", "high"]}
+                ]
+            })
+            .to_string();
+            repo::set_app_settings(&conn, &HashMap::from([(CACHE_KEY.to_string(), legacy_json)]))
+                .unwrap();
+        }
+        let upgraded = cached(&app);
+        assert!(upgraded.iter().any(|m| m.id == "gemini-4-neon"));
+
+        drop(app);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn merge_live_with_cached_appends_only_missing_models() {
+        let (app, dir) = test_ctx("merge");
+        let live = vec![AntigravityModel {
+            id: "gemini-4-argon".into(),
+            label: "Gemini 4 Argon".into(),
+            description: String::new(),
+            effort_levels: vec!["low".into(), "medium".into(), "high".into()],
+        }];
+        let merged = merge_live_with_cached(&app, live);
+        assert_eq!(
+            merged.iter().filter(|m| m.id == "gemini-4-argon").count(),
+            1
+        );
+        assert!(merged.iter().any(|m| m.id == "gemini-4-neon"));
+
+        drop(app);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn background_refresh_updates_cache_and_emits_only_when_changed() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let (app, dir) = test_ctx("bg-refresh");
+        let script = dir.join("agy");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\necho 'gemini-5-xenon-low\tGemini 5 Xenon (Low)'\necho 'gemini-5-xenon-high\tGemini 5 Xenon (High)'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let events = Arc::new(AtomicUsize::new(0));
+        let seen = events.clone();
+        app.listen(EVENT, move |_| {
+            seen.fetch_add(1, Ordering::Relaxed);
+        });
+
+        let initial = list(&app, script.to_str().unwrap()).unwrap();
+        assert!(initial.iter().any(|m| m.id == "gemini-4-neon"));
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while events.load(Ordering::Relaxed) == 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert_eq!(events.load(Ordering::Relaxed), 1);
+
+        let updated = cached(&app);
+        assert_eq!(updated.len(), 1);
+        assert_eq!(updated[0].id, "gemini-5-xenon");
+        assert_eq!(updated[0].effort_levels, ["low", "high"]);
+
+        // Saving the identical list again must not re-emit `EVENT`.
+        save_and_notify(&app, &updated);
+        assert_eq!(events.load(Ordering::Relaxed), 1);
+
+        // Wait for the background thread to clear `in_flight` before removing `dir`.
+        let key: RefreshKey = (app.data_dir().ok(), script.to_string_lossy().into_owned());
+        while refresh_states()
+            .lock()
+            .unwrap()
+            .get(&key)
+            .is_some_and(|s| s.in_flight)
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         drop(app);
         let _ = std::fs::remove_dir_all(dir);
     }

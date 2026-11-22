@@ -51,6 +51,8 @@ import { isArtifactPath, noteArtifactWriter, openBesideSession } from "./layout/
 import { startUsageSync } from "./store/usageSync";
 import { watchSystemTheme } from "./theme";
 import { memoryRouteHidesRightPanel, useMemoryLocation } from "./layout/Memory/navigation";
+import { initPluginHost, pluginRouteHidesRightPanel } from "./plugins/host";
+import { usePluginLocation } from "./plugins/navigation";
 
 // Full-screen surfaces driven entirely by query parameters. Each renders null until its parameter is
 // present, so importing them on demand keeps their code and dependencies out of the entry chunk.
@@ -102,7 +104,9 @@ function NotificationsManager() {
 function App() {
   const leftCollapsed = useTermStore((s) => s.leftCollapsed);
   const rightCollapsed = useTermStore((s) => s.rightCollapsed);
-  const noRightPanel = memoryRouteHidesRightPanel(useMemoryLocation());
+  const noRightPanel =
+    memoryRouteHidesRightPanel(useMemoryLocation()) ||
+    pluginRouteHidesRightPanel(usePluginLocation());
   const resizeLeft = useTermStore((s) => s.resizeLeft);
   const resizeRight = useTermStore((s) => s.resizeRight);
   const loadTree = useTermStore((s) => s.loadTree);
@@ -230,6 +234,7 @@ function App() {
     // Account usage: read the machine-wide snapshot once, then follow the backend's broadcast. Sessions
     // render from this one copy instead of each querying its provider.
     const stopUsageSync = startUsageSync();
+    initPluginHost();
     // Authoritative session records: read the whole set once, then follow the broadcast. This is a
     // connection-level subscription, so a session this client has never opened still shows its state.
     void useTermStore.getState().syncSessionStates();

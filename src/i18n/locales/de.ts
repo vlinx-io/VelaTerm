@@ -492,6 +492,7 @@ const de: typeof en = {
   "settings.catTerminal": "Terminal", // Terminal
   "settings.catBehavior": "Verhalten", // Behavior
   "settings.catAgents": "Agenten", // Agents
+  "settings.catPlugins": "Plugins",
   "settings.agentDefaultsTitle": "Standardeinstellungen für neue Sitzungen",
   "settings.referSummaryTitle": "Kontext für Sitzungsverweise",
   "settings.referSummaryMode": "Kontextmodus",
@@ -864,6 +865,10 @@ const de: typeof en = {
   "settings.fontPreviewText": "Victor jagt zwölf Boxkämpfer quer über den großen Sylter Deich. 0123456789",
   "settings.fontPreviewChat": "Ich habe die Einstellungsseite aktualisiert. Jede Schrifteinstellung wird sofort wirksam, und Sie können die Standardwerte jederzeit wiederherstellen.",
   "settings.fontResetGroup": "Standardschriften wiederherstellen",
+  "settings.chatImages": "Bilder",
+  "settings.chatImageMaxMb": "Maximale Bildgröße",
+  "settings.chatImageMaxMbHint": "Bilder mit mehr als 1568 Pixeln Kantenlänge oder über diesem Limit werden vor dem Senden automatisch verkleinert und komprimiert. Nur Bilder, die nicht dekodiert werden können oder das Limit weiterhin überschreiten, werden übersprungen.",
+  "settings.chatImageSizeMb": (mb: number) => `${mb} MB`,
   "settings.composerChips": "Symbolleiste im Eingabebereich",
   "settings.composerChipsHint": "Aktivierte Elemente erscheinen in dieser Reihenfolge neben der Nachricht. Ist eine Funktion vorübergehend nicht verfügbar (der Agent läuft nicht, es gibt keine Hintergrundaufgaben oder die Anmeldung steht noch aus), bleibt ihr Element sichtbar, aber leer oder deaktiviert. Funktionen, die der aktuelle Agent nicht unterstützt, werden ausgelassen. Elemente, für die der Platz nicht reicht, erscheinen im Menü „Mehr“. Hier ausgeschaltete Elemente werden nirgends angezeigt, bis Sie sie wieder einschalten.",
   "settings.composerChipUp": (chip: string) => `${chip} nach oben verschieben`,
@@ -1638,9 +1643,22 @@ const de: typeof en = {
   "files.copyPath": "Copy Path",
   "files.copyRelPath": "Copy Relative Path",
   "files.filterPlaceholder": "Filter files…",
+  "files.filterTruncated": "Es werden nur die ersten Treffer angezeigt. Geben Sie mehr Zeichen ein, um die Suche einzugrenzen.",
   "files.dblClickOpen": "Zum Öffnen doppelklicken",
   "files.deleteConfirm": (name) =>
     `„${name}" löschen? Dies kann nicht rückgängig gemacht werden.`, // Delete "{name}"? This can't be undone.
+  "files.deleteManyConfirm": (count) =>
+    count === 1
+      ? "1 Element löschen? Dies kann nicht rückgängig gemacht werden."
+      : `${count} Elemente löschen? Dies kann nicht rückgängig gemacht werden.`, // Delete {count} items? This can't be undone.
+  "files.pasteConflictTitle": "Element bereits vorhanden", // Item already exists
+  "files.pasteConflictBody": (name) =>
+    `Im Zielordner ist bereits ein Element mit dem Namen „${name}" vorhanden.`, // An item named "{name}" already exists in the destination folder.
+  "files.pasteConflictProgress": (current, total) => `${current} von ${total}`, // {current} of {total}
+  "files.pasteConflictApplyAll": "Auf alle verbleibenden Konflikte anwenden", // Apply to all remaining conflicts
+  "files.pasteReplace": "Ersetzen", // Replace
+  "files.pasteSkip": "Überspringen", // Skip
+  "files.pasteKeepBoth": "Beide behalten", // Keep Both
 
   // ── File transfer (remote access) ──
   "transfer.title": "Übertragungen", // Transfers
@@ -1656,6 +1674,7 @@ const de: typeof en = {
   "transfer.foldersUnsupported": "Ordner können nicht hochgeladen werden.", // Folders can't be uploaded.
   "drop.browserFilesHint": "Im Browser lassen sich hier nur Bilder ablegen. Laden Sie andere Dateien zuerst in das Projekt hoch.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
   "files.copyFailed": "Einige Dateien konnten nicht kopiert werden. Prüfen Sie, ob sie noch vorhanden sind und ob Sie in diesen Ordner schreiben dürfen.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
+  "files.pasteFailed": "Einige Elemente konnten nicht eingefügt werden. Prüfen Sie, ob die Quelle noch vorhanden ist und ob Sie in diesen Ordner schreiben dürfen.", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 
   // ── Status bar ──
   "statusbar.sessions": (n) => (n === 1 ? "1 Sitzung" : `${n} Sitzungen`), // {n} sessions
@@ -2328,6 +2347,10 @@ const de: typeof en = {
   "chat.auth.claude.submit": "Code senden",
   "chat.auth.claude.invalidCode": "Fügen Sie den vollständigen Code dieses Autorisierungsversuchs ein, einschließlich des Teils nach #.",
   "chat.auth.claude.externalAuth": "API-Schlüssel und andere konfigurierte Authentifizierungsmethoden bleiben unverändert.",
+  "chat.auth.antigravity.pending": "Öffnen Sie die Autorisierungsseite, melden Sie sich mit Google an und fügen Sie anschließend den dort angezeigten Autorisierungscode oder die vollständige Callback-URL ein.",
+  "chat.auth.antigravity.failed": "Die Anmeldung konnte nicht abgeschlossen werden. Versuchen Sie es erneut und prüfen Sie, ob Ihre Antigravity CLI die Kontoautorisierung unterstützt.",
+  "chat.auth.antigravity.code": "Autorisierungscode oder Callback-URL",
+  "chat.auth.antigravity.invalidCode": "Fügen Sie den Autorisierungscode oder die Callback-URL dieses Anmeldeversuchs ohne Leerzeichen ein.",
   "chat.auth.open": "Autorisierungsseite öffnen",
   "chat.auth.zcode.required": "Melden Sie sich mit Ihrem Z.ai- oder BigModel-Konto bei ZCode an, um diese Unterhaltung zu nutzen.",
   "chat.auth.zcode.pending": "Öffnen Sie die Autorisierungsseite und erlauben Sie den Zugriff. Diese Ansicht wird nach der Anmeldung automatisch aktualisiert.",
@@ -2543,6 +2566,7 @@ const de: typeof en = {
   "chat.attach.modelTextOnly": "Das ausgewählte Modell unterstützt keine Bilder.",
   "chat.signInRequired": (agent: string) => `Melden Sie sich bei ${agent} an, um die Konversationsansicht zu verwenden. Wechseln Sie zur Anmeldung in die Terminalansicht und senden Sie Ihre Nachricht anschließend erneut.`,
   "chat.apiKeyRequired": "DeepSeek benötigt einen API-Schlüssel. Öffnen Sie „API“ neben dem Eingabefeld und tragen Sie ihn ein, oder setzen Sie die Umgebungsvariable `DEEPSEEK_API_KEY`. Senden Sie Ihre Nachricht anschließend erneut.",
+  "chat.codex.activeWriter": "Ein anderer Codex-Prozess verwendet diese Konversation derzeit. Schließen Sie den anderen Terminal-Tab oder die andere Codex-Instanz, oder warten Sie einen Moment und versuchen Sie es erneut.",
   "chat.antigravity.permissionsHint": "Werkzeuge, die eine Genehmigung erfordern, müssen in den Antigravity-Einstellungen freigegeben oder in der Terminalansicht verwendet werden.",
   "chat.antigravity.settingsHint": "Ändern Sie Modell, Denkaufwand oder Berechtigungen zwischen den Gesprächsrunden.",
   "chat.antigravity.rewindTitle": "In der Terminalansicht zurückspulen",
@@ -2728,7 +2752,30 @@ const de: typeof en = {
   "kb.updatedOn": (date: string) => `Aktualisiert am ${date}`,
   "archive.sessionsCount": (count: string) => `${count} ${count === "1" ? "Sitzung" : "Sitzungen"}`,
 
+
   ...assist,
+  "plugins.title": "Plugins",
+  "plugins.subtitle": "Externe VelaTerm-Plugins installieren, verknüpfen, aktivieren oder neu laden. Jedes Plugin läuft in einem eigenen Backend-Prozess und lädt seine Oberfläche dynamisch.",
+  "plugins.installArchive": "Aus Archiv installieren…",
+  "plugins.linkDev": "Lokales Plugin verknüpfen…",
+  "plugins.localOnlyHint": "Das Installieren, Verknüpfen und Umschalten von Plugins ist nur auf dem lokalen Host möglich.",
+  "plugins.archivePathPrompt": "Vollständigen Pfad zu einem .vlxplugin- oder .zip-Archiv eingeben:",
+  "plugins.devPathPrompt": "Vollständigen Pfad zu einem lokalen Plugin-Verzeichnis mit manifest.json eingeben:",
+  "plugins.empty": "Noch keine Plugins installiert. Installieren Sie ein .vlxplugin-Archiv oder verknüpfen Sie ein lokales Plugin-Verzeichnis.",
+  "plugins.sourceInstalled": "Installiert",
+  "plugins.sourceDev": "Lokal (Entw.)",
+  "plugins.statusRunning": "Läuft",
+  "plugins.statusStarting": "Wird gestartet…",
+  "plugins.statusDisabled": "Deaktiviert",
+  "plugins.statusStopped": "Angehalten",
+  "plugins.statusError": "Fehler",
+  "plugins.enable": "Aktivieren",
+  "plugins.disable": "Deaktivieren",
+  "plugins.reload": "Neu laden",
+  "plugins.uninstall": "Deinstallieren",
+  "plugins.uninstallConfirm": (name: string) => `Plugin „${name}“ deinstallieren?`,
+  "plugins.removeData": "Lokales Datenverzeichnis dieses Plugins ebenfalls löschen",
+  "plugins.loadFailed": "Plugin-Oberfläche konnte nicht geladen werden",
 };
 
 export default de;

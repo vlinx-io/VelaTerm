@@ -110,3 +110,17 @@ it("lists every composer chip with a switch and arrows, persisting each change",
   const labels = [...document.querySelectorAll("button[aria-label^='Move '][aria-label$=' up']")].map((el) => el.getAttribute("aria-label"));
   expect(labels.slice(0, 4)).toEqual(["Move Thinking effort up", "Move Model up", "Move Account up", "Move Collaboration mode up"]);
 });
+
+it("offers 1 MB, 2 MB, and 4 MB image size choices in Conversation view and persists changes", async () => {
+  await act(async () => render(<SettingsModal onClose={() => {}} />));
+  fireEvent.click(screen.getByRole("link", { name: "Conversation view" }));
+  const imageRow = row("Max image size");
+  expect(imageRow.getByRole("button", { name: "2 MB" }).className).toContain("on");
+  fireEvent.click(imageRow.getByRole("button", { name: "1 MB" }));
+  expect(useTermStore.getState().chatImageMaxMb).toBe(1);
+  expect(pushSetting).toHaveBeenLastCalledWith(SETTINGS_KEY, expect.stringContaining('"chatImageMaxMb":1'));
+  expect(loadSettings().chatImageMaxMb).toBe(1);
+  fireEvent.click(imageRow.getByRole("button", { name: "4 MB" }));
+  expect(useTermStore.getState().chatImageMaxMb).toBe(4);
+  expect(loadSettings().chatImageMaxMb).toBe(4);
+});

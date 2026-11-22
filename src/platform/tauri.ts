@@ -113,10 +113,21 @@ const opener: OpenerCapability = {
 
 const badge: BadgeCapability = {
   async setCount(count) {
-    // Only Tauri desktop has Dock badges; remote windows and browsers skip them.
-    if (!env.isTauri) return;
-    const { getCurrentWindow } = await import("@tauri-apps/api/window");
-    await getCurrentWindow().setBadgeCount(count || undefined);
+    // Main and remote desktop windows report per-window pending counts to the local host so it
+    // updates each window's title (`<base> (N)`) and sets the Dock badge to the sum across windows.
+    // Plain browsers have no native window host, so they skip it.
+    if (!env.hasNativeHost) return;
+    const normalized = Math.max(0, Math.floor(Number(count) || 0));
+    try {
+      const { emit } = await import("@tauri-apps/api/event");
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await emit("vlx://window-badge", {
+        windowLabel: getCurrentWindow().label,
+        count: normalized,
+      });
+    } catch {
+      /* External-origin windows without core:event permission cannot emit; ignore silently. */
+    }
   },
 };
 
