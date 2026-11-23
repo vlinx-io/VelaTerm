@@ -405,6 +405,9 @@ fn handle_response(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: 
                     state.mapper = Mapper::for_kind(proc.kind);
                     state.cwd.clone()
                 };
+                // The recorded conversation is gone for good: stop expecting its id so the replacement the
+                // agent opens next passes the identity guard (and still claims its own writer lease).
+                *proc.expected_native.lock().unwrap() = None;
                 emit(app, session_id, json!({"type":"error","message":format!(
                     "{} could not reopen that conversation; a new one has been started. Earlier messages stay in this view.",
                     wire::label(proc.kind))}));
@@ -2322,6 +2325,48 @@ mod tests {
         handle_line(&app, "s", &other, &json!({"jsonrpc":"2.0","id":load["id"],
             "error":{"code":-32602,"message":"Invalid params"}}).to_string());
         assert!(other.released.load(Ordering::Relaxed));
+    }
+
+    /// A missing recorded conversation is deliberately replaced with a fresh one. On a resume
+    /// `expected_native` still names the lost conversation, so unless it is cleared the identity guard
+    /// rejects the replacement and tears the process down right after the "a new one has been started"
+    /// message.
+    #[test]
+    fn a_recovered_missing_conversation_survives_the_identity_guard() {
+        let app = ctx("acp-load-missing-identity");
+        let (mut proc, mut agent) = wired(SessionKind::Grok);
+        *Arc::get_mut(&mut proc).unwrap().expected_native.lock().unwrap() = Some("native-lost".into());
+        let errors = Arc::new(Mutex::new(Vec::<String>::new()));
+        {
+            let errors = errors.clone();
+            app.listen("chat://event/s", move |payload| {
+                let value: Value = serde_json::from_str(payload).unwrap_or(Value::Null);
+                if value["type"] == "error" {
+                    errors.lock().unwrap().push(value["message"].as_str().unwrap_or_default().to_string());
+                }
+            });
+        }
+
+        bootstrap(&app, &proc, Some("native-lost"), Some("/w"), None);
+        let initialize = written(&mut agent);
+        reply(&app, &proc, &initialize, json!({"agentCapabilities":{"loadSession":true}}));
+        let load = written(&mut agent);
+        assert_eq!(load["method"], "session/load");
+        handle_line(&app, "s", &proc, &json!({"jsonrpc":"2.0","id":load["id"],
+            "error":{"code":-32603,"message":"Path not found.","data":{"code":"FS_NOT_FOUND"}}}).to_string());
+        let fresh = written(&mut agent);
+        assert_eq!(fresh["method"], "session/new");
+
+        // The agent opens the replacement conversation.
+        reply(&app, &proc, &fresh, json!({"sessionId":"native-fresh"}));
+
+        let seen = errors.lock().unwrap().clone();
+        assert!(
+            !seen.iter().any(|m| m.contains("different native conversation")),
+            "the replacement conversation must not be vetoed by the identity guard; errors: {seen:?}"
+        );
+        assert!(proc.alive.load(Ordering::Relaxed), "the replacement conversation must stay alive");
+        assert_eq!(proc.agent_session_id.lock().unwrap().as_deref(), Some("native-fresh"));
     }
 
     #[test]

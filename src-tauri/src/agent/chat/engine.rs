@@ -996,7 +996,10 @@ pub(crate) fn agent_environment_in_shell(app: &AppCtx, session_id: &str, cmd: &m
 
 struct ChatProcess {
     callbacks: RwLock<()>,
-    expected_native: Option<String>,
+    /// The native conversation this process is expected to reopen. Cleared when the engine deliberately
+    /// abandons the recorded conversation (it turned out to be gone) and opens a fresh one, so the
+    /// identity guard accepts the replacement instead of vetoing it.
+    expected_native: Mutex<Option<String>>,
     identity_checked: AtomicBool,
     owner: Mutex<Option<super::ownership::Owner>>,
     kind: SessionKind,
@@ -1759,7 +1762,7 @@ impl ChatManager {
             && permission_restart::claude_bypass_capable(Some(&mode), extra_args);
         let proc = Arc::new(ChatProcess {
             callbacks: RwLock::new(()),
-            expected_native: resume.filter(|_| !fork && kind != SessionKind::Deepseek).map(str::to_owned),
+            expected_native: Mutex::new(resume.filter(|_| !fork && kind != SessionKind::Deepseek).map(str::to_owned)),
             identity_checked: AtomicBool::new(false),
             owner: Mutex::new(Some(owner)),
             kind,
@@ -6463,7 +6466,7 @@ fn terminate_owned(child: &mut std::process::Child) {
 
 fn verify_native_identity(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &str) -> bool {
     if proc.identity_checked.load(Ordering::Relaxed) { return true; }
-    if proc.expected_native.as_ref().is_some_and(|expected|expected!=id) {
+    if proc.expected_native.lock().unwrap().as_ref().is_some_and(|expected|expected!=id) {
         emit(app,session_id,json!({"type":"error","message":"The agent opened a different native conversation. Recovery was stopped to preserve the original history."}));
         fail_codex_start(app,session_id,proc);
         return false;
@@ -7324,7 +7327,7 @@ mod tests {
     pub(super) fn inert_process(kind: SessionKind) -> Arc<ChatProcess> {
         Arc::new(ChatProcess {
             callbacks: RwLock::new(()),
-            expected_native: None,
+            expected_native: Mutex::new(None),
             identity_checked: AtomicBool::new(false),
             owner: Mutex::new(None),
             kind,
@@ -8937,7 +8940,7 @@ mod tests {
         let stdout = child.stdout.take().unwrap();
         let proc = Arc::new(ChatProcess {
             callbacks: RwLock::new(()),
-            expected_native: None,
+            expected_native: Mutex::new(None),
             identity_checked: AtomicBool::new(false),
             owner: Mutex::new(None),
             kind: SessionKind::Claude,
