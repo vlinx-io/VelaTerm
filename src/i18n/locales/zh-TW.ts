@@ -1377,6 +1377,9 @@ const zhTW: typeof en = {
 
   // ── Global session-content search ──
   "search.allPlaceholder": "搜尋所有會話內容…", // Search across all session content…
+  "search.inLocationPlaceholder": (name) => `在 ${name} 中搜尋…`, // Search in {name}…
+  "search.allLocations": "所有專案與集合", // All projects & collections
+  "search.filterLocation": "依專案或集合篩選", // Filter by project or collection
   "search.hint":
     "搜尋會話內容。預設不含已封存會話，勾選「同時搜尋封存」可納入。", // Search session content. Archived sessions are excluded by default.
   "search.includeArchived": "同時搜尋封存", // Include archived

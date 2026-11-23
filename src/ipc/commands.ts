@@ -361,8 +361,13 @@ export type SearchScope = "live" | "all" | "archived";
 export function searchSessionContent(
   query: string,
   scope: SearchScope = "live",
+  projectId?: string,
 ): Promise<SessionSearchHit[]> {
-  return invoke<SessionSearchHit[]>("search_session_content", { query, scope });
+  return invoke<SessionSearchHit[]>("search_session_content", {
+    query,
+    scope,
+    ...(projectId ? { projectId } : {}),
+  });
 }
 
 export interface ContentSearchPage {
@@ -378,8 +383,16 @@ export interface ContentSearchPage {
   nextCursor?: number | null;
   previousCursor?: number | null;
 }
-export function startContentSearch(query: string, scope: SearchScope): Promise<ContentSearchPage> {
-  return invoke("search_content_start", { query, scope });
+export function startContentSearch(
+  query: string,
+  scope: SearchScope,
+  projectId?: string,
+): Promise<ContentSearchPage> {
+  return invoke("search_content_start", {
+    query,
+    scope,
+    ...(projectId ? { projectId } : {}),
+  });
 }
 export function contentSearchPage(jobId: string, cursor?: number, before?: number): Promise<ContentSearchPage> {
   return invoke("search_content_page", { jobId, cursor, before, limit: 10 });

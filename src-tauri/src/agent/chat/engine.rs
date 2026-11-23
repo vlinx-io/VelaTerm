@@ -435,6 +435,22 @@ impl Timeline {
         true
     }
 
+    /// Remove a single top-level row by id and force a full client-side replacement.
+    pub(super) fn remove_row(&mut self, id: &str) -> bool {
+        let Some(index) = self.at.remove(id) else { return false };
+        self.rows.remove(index);
+        self.at.clear();
+        for (idx, row) in self.rows.iter().enumerate() {
+            self.at.insert(row.id().to_string(), idx);
+        }
+        self.dirty.clear();
+        self.revision += 1;
+        self.reset_revision = self.revision;
+        self.row_versions.clear();
+        self.replace_pending = true;
+        true
+    }
+
     /// Replace every row with a fresh reading of the conversation, and require a full client-side
     /// replacement. Used when the agent's own record is the authority — after a restore, or on resume.
     fn replace_all(&mut self, rows: Vec<ChatRow>) {
@@ -996,10 +1012,7 @@ pub(crate) fn agent_environment_in_shell(app: &AppCtx, session_id: &str, cmd: &m
 
 struct ChatProcess {
     callbacks: RwLock<()>,
-    /// The native conversation this process is expected to reopen. Cleared when the engine deliberately
-    /// abandons the recorded conversation (it turned out to be gone) and opens a fresh one, so the
-    /// identity guard accepts the replacement instead of vetoing it.
-    expected_native: Mutex<Option<String>>,
+    expected_native: Option<String>,
     identity_checked: AtomicBool,
     owner: Mutex<Option<super::ownership::Owner>>,
     kind: SessionKind,
@@ -1276,6 +1289,10 @@ fn initial_mode(kind: SessionKind, stored: Option<&str>) -> String {
     .to_string()
 }
 
+/// Idle Antigravity ACP processes older than 50 minutes proactively rotate before starting a new
+/// user turn so they load freshly refreshed credentials instead of hitting Google's 60m token TTL.
+const ANTIGRAVITY_IDLE_ROTATE_MS: u64 = 50 * 60 * 1000;
+
 /// All chat-engine sessions, keyed by VelaTerm session id.
 #[derive(Default)]
 pub struct ChatManager {
@@ -1286,6 +1303,10 @@ pub struct ChatManager {
     closing: AtomicBool,
     /// The shell command running for each session, at most one per conversation.
     shell_runs: Mutex<HashMap<String, Arc<super::shell::ShellRun>>>,
+    /// Sessions that have already used their one automatic Antigravity 401 restart for the active turn.
+    antigravity_401_attempts: Mutex<HashSet<String>>,
+    /// Cancellation flags for in-flight Antigravity 401 process-restart recoveries.
+    antigravity_401_cancels: Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 
 #[derive(Debug)]
@@ -1571,6 +1592,11 @@ impl ChatManager {
         // Claude only: switch fast mode on once the handshake completes.
         fast_mode: bool,
     ) -> Result<(), String> {
+        let antigravity_auth_settings = (kind == SessionKind::Antigravity)
+            .then(|| auth::antigravity::settings_args(extra_args));
+        let mut antigravity_gate = antigravity_auth_settings
+            .as_ref()
+            .map(|args| crate::agent::antigravity::acquire_auth_gate(bin, args));
         let _start = self.starts.lock().unwrap();
         if self.closing.load(Ordering::Relaxed) { return Err("The application is shutting down.".into()); }
         {
@@ -1762,7 +1788,7 @@ impl ChatManager {
             && permission_restart::claude_bypass_capable(Some(&mode), extra_args);
         let proc = Arc::new(ChatProcess {
             callbacks: RwLock::new(()),
-            expected_native: Mutex::new(resume.filter(|_| !fork && kind != SessionKind::Deepseek).map(str::to_owned)),
+            expected_native: resume.filter(|_| !fork && kind != SessionKind::Deepseek).map(str::to_owned),
             identity_checked: AtomicBool::new(false),
             owner: Mutex::new(Some(owner)),
             kind,
@@ -1770,7 +1796,7 @@ impl ChatManager {
             version,
             auth_settings_args: match kind {
                 SessionKind::Claude => auth::claude::settings_args(extra_args),
-                SessionKind::Antigravity => auth::antigravity::settings_args(extra_args),
+                SessionKind::Antigravity => antigravity_auth_settings.unwrap_or_default(),
                 _ => Vec::new(),
             },
             auth_restart: AtomicBool::new(false),
@@ -1792,7 +1818,12 @@ impl ChatManager {
             opencode: Mutex::new(opencode::OpencodeState::default()),
             pi: Mutex::new(pi::PiState::default()),
             zcode: Mutex::new(zcode::ZcodeState::default()),
-            acp: Mutex::new(acp::AcpState::default()),
+            acp: Mutex::new(acp::AcpState::with_antigravity_launch(
+                antigravity_gate.take(),
+                (kind == SessionKind::Antigravity)
+                    .then(crate::agent::antigravity::auth_epoch)
+                    .unwrap_or(0),
+            )),
             service_tier: Mutex::new(service_tier),
             personality: Mutex::new(personality),
             codex_turn_error: Mutex::new(None),
@@ -2033,6 +2064,152 @@ impl ChatManager {
         }
     }
 
+    /// Whether any live Antigravity ACP session is currently running or starting.
+    pub(crate) fn has_live_antigravity(&self) -> bool {
+        self.sessions.lock().unwrap().values().any(|proc| {
+            proc.kind == SessionKind::Antigravity
+                && proc.alive.load(Ordering::Relaxed)
+                && !proc.released.load(Ordering::Relaxed)
+        })
+    }
+
+    /// Infer Antigravity sign-in state from an existing live ACP session sharing the same credential
+    /// store so multi-pane focus checks do not spawn redundant `agy acp` subprocesses.
+    pub(crate) fn antigravity_live_signed_in(&self, bin: &str, settings_args: &[String]) -> Option<bool> {
+        let target_scope = crate::agent::antigravity::auth_scope_key(bin, settings_args);
+        let current_epoch = crate::agent::antigravity::auth_epoch();
+        let now = now_ms();
+        let procs: Vec<Arc<ChatProcess>> = self
+            .sessions
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|proc| {
+                proc.kind == SessionKind::Antigravity
+                    && proc.alive.load(Ordering::Relaxed)
+                    && !proc.released.load(Ordering::Relaxed)
+                    && crate::agent::antigravity::auth_scope_key(&proc.bin, &proc.auth_settings_args)
+                        == target_scope
+            })
+            .cloned()
+            .collect();
+        let mut saw_healthy = false;
+        for proc in procs {
+            let auth_status = proc.extras.lock().unwrap().auth.as_ref().map(|s| s.status);
+            if matches!(auth_status, Some("required" | "signedOut")) {
+                return Some(false);
+            }
+            if auth_status.is_none()
+                && proc.ready.load(Ordering::Relaxed)
+                && now.saturating_sub(proc.started_at) < ANTIGRAVITY_IDLE_ROTATE_MS
+                && proc.acp.lock().unwrap().auth_epoch_at_launch == current_epoch
+            {
+                saw_healthy = true;
+            }
+        }
+        saw_healthy.then_some(true)
+    }
+
+    fn claim_antigravity_401_recovery(&self, session_id: &str) -> Option<Arc<AtomicBool>> {
+        if !self
+            .antigravity_401_attempts
+            .lock()
+            .unwrap()
+            .insert(session_id.to_string())
+        {
+            return None;
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        if let Some(prev) = self
+            .antigravity_401_cancels
+            .lock()
+            .unwrap()
+            .insert(session_id.to_string(), cancel.clone())
+        {
+            prev.store(true, Ordering::Relaxed);
+        }
+        Some(cancel)
+    }
+
+    fn clear_antigravity_401_recovery(&self, session_id: &str) {
+        self.antigravity_401_attempts.lock().unwrap().remove(session_id);
+        self.antigravity_401_cancels.lock().unwrap().remove(session_id);
+    }
+
+    fn cancel_antigravity_401_recovery(&self, session_id: &str) {
+        if let Some(cancel) = self.antigravity_401_cancels.lock().unwrap().remove(session_id) {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        if let Some(proc) = self.sessions.lock().unwrap().get(session_id).cloned() {
+            if proc.kind == SessionKind::Antigravity {
+                proc.acp.lock().unwrap().pending_401_continuation = None;
+            }
+        }
+    }
+
+    fn should_rotate_idle_antigravity(&self, proc: &Arc<ChatProcess>, now: u64) -> bool {
+        if proc.kind != SessionKind::Antigravity
+            || !proc.alive.load(Ordering::Relaxed)
+            || proc.released.load(Ordering::Relaxed)
+            || !proc.ready.load(Ordering::Relaxed)
+            || auth::active(proc)
+            || auth::blocks_queue(proc)
+            || proc.shell_running.load(Ordering::Relaxed)
+        {
+            return false;
+        }
+        if !proc.permissions.lock().unwrap().is_empty()
+            || proc.agent_session_id.lock().unwrap().is_none()
+        {
+            return false;
+        }
+        {
+            let turn = proc.turn.lock().unwrap();
+            if turn.running
+                || !turn.waiting.is_empty()
+                || !turn.active_tasks.is_empty()
+                || !turn.background_tasks.is_empty()
+            {
+                return false;
+            }
+        }
+        let needs_rotate = {
+            let acp = proc.acp.lock().unwrap();
+            acp.auth_epoch_at_launch != crate::agent::antigravity::auth_epoch()
+                || now.saturating_sub(proc.started_at) >= ANTIGRAVITY_IDLE_ROTATE_MS
+        };
+        needs_rotate && !acp::has_background_activity(proc)
+    }
+
+    fn try_rotate_idle_antigravity(
+        &self,
+        app: &AppCtx,
+        session_id: &str,
+        proc: &Arc<ChatProcess>,
+    ) -> Result<Arc<ChatProcess>, String> {
+        let (model, effort) = {
+            let _action = proc.action.lock().unwrap();
+            let _callbacks = proc.callbacks.read().unwrap();
+            if !self.owns_process(session_id, proc)
+                || !self.should_rotate_idle_antigravity(proc, now_ms())
+            {
+                return Ok(proc.clone());
+            }
+            let model = proc.model.lock().unwrap().clone();
+            let effort = proc.effort.lock().unwrap().clone();
+            proc.auth_restart.store(true, Ordering::Relaxed);
+            release_process(app, session_id, proc);
+            (model, effort)
+        };
+        crate::diagnostics::record(
+            "INFO",
+            "agent_chat",
+            json!({"sessionId": session_id, "event": "antigravity_idle_token_rotate"}),
+        );
+        crate::command_core::chat_start(app, session_id, model.as_deref(), effort.as_deref(), false)?;
+        self.get(session_id)
+    }
+
     /// Whether a running ACP session switches model and reasoning level itself. When it cannot, the choice
     /// is a launch setting that takes effect when the process next starts.
     pub fn acp_switchable(&self, session_id: &str) -> (bool, bool) {
@@ -2092,7 +2269,15 @@ impl ChatManager {
         &self, app: &AppCtx, session_id: &str, text: &str,
         images: Vec<ChatImage>, behavior: &str, message_id: Option<&str>,
     ) -> Result<&'static str, SubmissionFailure> {
-        let proc = self.get(session_id).map_err(SubmissionFailure::Rejected)?;
+        let mut proc = self.get(session_id).map_err(SubmissionFailure::Rejected)?;
+        if proc.kind == SessionKind::Antigravity && behavior != "steer" {
+            self.clear_antigravity_401_recovery(session_id);
+            if self.should_rotate_idle_antigravity(&proc, now_ms()) {
+                proc = self
+                    .try_rotate_idle_antigravity(app, session_id, &proc)
+                    .map_err(SubmissionFailure::Rejected)?;
+            }
+        }
         let mut attempted = false;
         self.send_on_process(app, session_id, &proc, text, images, behavior, message_id, &mut attempted)
             .map_err(|error| if attempted { SubmissionFailure::Uncertain(error) } else { SubmissionFailure::Rejected(error) })
@@ -2317,6 +2502,7 @@ impl ChatManager {
 
     /// Stop the turn in progress. The conversation stays open.
     pub fn interrupt(&self, app: &AppCtx, session_id: &str) -> Result<(), String> {
+        self.cancel_antigravity_401_recovery(session_id);
         let proc = self.get(session_id)?;
         // Ending the turn can send the next queued message, so this is serialized with sends.
         let _action = proc.action.lock().unwrap();
@@ -3544,6 +3730,8 @@ impl ChatManager {
     /// End the conversation and let the process go.
     pub fn stop(&self, app: &AppCtx, session_id: &str) -> Result<(), String> {
         self.check_permission_restart(session_id)?;
+        self.cancel_antigravity_401_recovery(session_id);
+        self.clear_antigravity_401_recovery(session_id);
         let proc = self.sessions.lock().unwrap().get(session_id).cloned();
         let Some(proc) = proc else {
             let _owner = super::ownership::idle_guard(app,session_id)?;
@@ -4533,7 +4721,7 @@ fn drain_stderr(mut reader:impl std::io::Read,limit:usize,mut publish:impl FnMut
 /// Replace the previous process's rows atomically, using the same bounded window as live replacements.
 fn reset_event(proc: &ChatProcess) -> Value {
     let timeline = proc.timeline.lock().unwrap();
-    let start = timeline.rows.len().saturating_sub(SNAPSHOT_PAGE_ROWS);
+    let start = bounded_window_start(&timeline.rows, timeline.rows.len());
     let rows = &timeline.rows[start..];
     let mut positions: HashMap<_, _> = rows.iter().enumerate()
         .map(|(index, row)| (row.id(), start + index)).collect();
@@ -4544,33 +4732,45 @@ fn reset_event(proc: &ChatProcess) -> Value {
         "positions":positions, "hasMore":start > 0 || proc.paged_history_exists()})
 }
 
+/// Emit any pending timeline replacement or dirty rows immediately instead of waiting for the 60 ms tick.
+fn flush_timeline_now(app: &AppCtx, session_id: &str, proc: &ChatProcess) {
+    let (flush, revision, positions, wire_rows, has_more) = {
+        let mut timeline = proc.timeline.lock().unwrap();
+        let flush = timeline.take_flush();
+        if matches!(flush, TimelineFlush::None) {
+            return;
+        }
+        timeline.revision += 1;
+        let rows = match &flush {
+            TimelineFlush::Rows(rows) => rows.as_slice(),
+            TimelineFlush::Replace(rows) => &rows[bounded_window_start(rows, rows.len())..],
+            TimelineFlush::None => &[],
+        };
+        let mut positions: HashMap<_, _> = rows.iter().filter_map(|row| timeline.at.get(row.id()).map(|index| (row.id().to_owned(), *index))).collect();
+        let wire_rows = timeline.wire_window(rows);
+        let has_more = rows.len() < timeline.rows.len() || wire_rows.len() < rows.len()
+            || proc.paged_history_exists();
+        positions.retain(|id, _| wire_rows.iter().any(|row| row["id"].as_str() == Some(id)));
+        (flush, timeline.revision, positions, wire_rows, has_more)
+    };
+    match flush {
+        TimelineFlush::None => {}
+        TimelineFlush::Rows(_) => {
+            emit(app, session_id, json!({"type":"rows","positions":positions,"rows":wire_rows,"protocolVersion":1,"revision":revision,"epoch":proc.started_at}));
+        }
+        TimelineFlush::Replace(rows) => {
+            emit(app, session_id, json!({"type":"replaceRows","userMessages":super::user_messages::outline(&rows),"positions":positions,"rows":wire_rows,"hasMore":has_more,"protocolVersion":1,"revision":revision,"epoch":proc.started_at}));
+        }
+    }
+}
+
 fn spawn_flusher(app: AppCtx, session_id: String, proc: Arc<ChatProcess>) {
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(FLUSH_INTERVAL);
             let _callback = proc.callbacks.read().unwrap();
             if proc.released.load(Ordering::Relaxed) || !app.chat().owns_process(&session_id,&proc) { return; }
-            let (flush, revision, positions,wire_rows,has_more) = {
-                let mut timeline = proc.timeline.lock().unwrap();
-                timeline.revision += 1;
-                let flush = timeline.take_flush();
-                let rows = match &flush { TimelineFlush::Rows(rows) => rows.as_slice(), TimelineFlush::Replace(rows) => &rows[rows.len().saturating_sub(SNAPSHOT_PAGE_ROWS)..], TimelineFlush::None => &[] };
-                let mut positions: HashMap<_, _> = rows.iter().filter_map(|row| timeline.at.get(row.id()).map(|index| (row.id().to_owned(), *index))).collect();
-                let wire_rows=timeline.wire_window(rows);let has_more=rows.len()<timeline.rows.len() || wire_rows.len()<rows.len()
-                    || proc.paged_history_exists();
-                positions.retain(|id,_|wire_rows.iter().any(|row|row["id"].as_str()==Some(id)));
-                (flush, timeline.revision, positions,wire_rows,has_more)
-            };
-            match flush {
-                TimelineFlush::None => {}
-                TimelineFlush::Rows(rows) => {
-                    let _=rows;
-                    emit(&app, &session_id, json!({"type":"rows","positions":positions,"rows":wire_rows,"protocolVersion":1,"revision":revision,"epoch":proc.started_at}));
-                }
-                TimelineFlush::Replace(rows) => {
-                    emit(&app, &session_id, json!({"type":"replaceRows","userMessages":super::user_messages::outline(&rows),"positions":positions,"rows":wire_rows,"hasMore":has_more,"protocolVersion":1,"revision":revision,"epoch":proc.started_at}));
-                }
-            }
+            flush_timeline_now(&app, &session_id, &proc);
             if !proc.alive.load(Ordering::Relaxed) {
                 // One last sweep has just run, so nothing written before exit is lost.
                 return;
@@ -6466,7 +6666,7 @@ fn terminate_owned(child: &mut std::process::Child) {
 
 fn verify_native_identity(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &str) -> bool {
     if proc.identity_checked.load(Ordering::Relaxed) { return true; }
-    if proc.expected_native.lock().unwrap().as_ref().is_some_and(|expected|expected!=id) {
+    if proc.expected_native.as_ref().is_some_and(|expected|expected!=id) {
         emit(app,session_id,json!({"type":"error","message":"The agent opened a different native conversation. Recovery was stopped to preserve the original history."}));
         fail_codex_start(app,session_id,proc);
         return false;
@@ -7327,7 +7527,7 @@ mod tests {
     pub(super) fn inert_process(kind: SessionKind) -> Arc<ChatProcess> {
         Arc::new(ChatProcess {
             callbacks: RwLock::new(()),
-            expected_native: Mutex::new(None),
+            expected_native: None,
             identity_checked: AtomicBool::new(false),
             owner: Mutex::new(None),
             kind,
@@ -8940,7 +9140,7 @@ mod tests {
         let stdout = child.stdout.take().unwrap();
         let proc = Arc::new(ChatProcess {
             callbacks: RwLock::new(()),
-            expected_native: Mutex::new(None),
+            expected_native: None,
             identity_checked: AtomicBool::new(false),
             owner: Mutex::new(None),
             kind: SessionKind::Claude,
@@ -9606,6 +9806,134 @@ mod tests {
         assert_eq!(app.db().conn.lock().unwrap().query_row("SELECT count(*) FROM session_tells",[],|r|r.get::<_,u32>(0)).unwrap(),1);
         app.chat().stop(&app,"executor").unwrap();
         let dir=app.data_dir().unwrap();drop(app);std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn tell_delivers_and_steers_antigravity_and_other_chat_agents() {
+        use crate::agent::tell;
+        let _epoch_guard = crate::agent::antigravity::test_auth_epoch_lock();
+        let tag = format!("tell-chat-kinds-{}", uuid::Uuid::new_v4());
+        let app = ctx(&tag);
+        {
+            let conn = app.db().conn.lock().unwrap();
+            conn.execute("INSERT INTO projects(id,name,root_path,created_at) VALUES ('p','test','/tmp',0)", []).unwrap();
+            for (id, kind, engine) in [
+                ("sender", "claude", "chat"),
+                ("agy", "antigravity", "chat"),
+                ("agy-tui", "antigravity", "tui"),
+                ("zcode", "zcode", "chat"),
+                ("deepseek", "deepseek", "chat"),
+                ("copilot", "copilot", "chat"),
+                ("cursor", "cursor", "chat"),
+                ("kimi", "kimi", "chat"),
+                ("grok", "grok", "chat"),
+                ("kiro", "kiro", "chat"),
+            ] {
+                conn.execute(
+                    "INSERT INTO sessions(id,project_id,name,kind,engine,permission_mode,created_at) VALUES (?1,'p',?1,?2,?3,'default',0)",
+                    rusqlite::params![id, kind, engine],
+                ).unwrap();
+            }
+        }
+        let (mut agy_proc, agy_stdout) = cat_process();
+        {
+            let proc_mut = Arc::get_mut(&mut agy_proc).unwrap();
+            proc_mut.kind = SessionKind::Antigravity;
+            proc_mut.started_at = now_ms();
+        }
+        agy_proc.acp.lock().unwrap().auth_epoch_at_launch = crate::agent::antigravity::auth_epoch();
+        *agy_proc.agent_session_id.lock().unwrap() = Some("agy-native-1".into());
+        agy_proc.ready.store(true, Ordering::Relaxed);
+        std::thread::spawn(move || {
+            let mut reader = std::io::BufReader::new(agy_stdout);
+            let mut line = String::new();
+            while reader.read_line(&mut line).unwrap_or(0) > 0 { line.clear(); }
+        });
+        app.chat().sessions.lock().unwrap().insert("agy".into(), agy_proc.clone());
+
+        // Ordinary send to an idle Antigravity chat session starts a turn and decorates sender origin.
+        let mut req = tell::Request {
+            session_id: "sender".into(),
+            target: Some("agy".into()),
+            text: "Inspect the ACP queue".into(),
+            message_id: format!("msg-{}", uuid::Uuid::new_v4()),
+            ..Default::default()
+        };
+        assert_eq!(tell::send(&app, &req).unwrap()["delivery"], "sent");
+        let raw = serde_json::to_value(app.chat().snapshot("agy")).unwrap();
+        let mut shown = raw.clone();
+        tell::decorate(&app, "agy", &mut shown);
+        assert_eq!(shown["rows"][0]["origin"]["sessionId"], "sender");
+        assert_eq!(shown["rows"][0]["text"], "Inspect the ACP queue");
+
+        // Steering an active Antigravity turn writes into it and reports blocked when waiting on a prompt.
+        req.steer = true;
+        req.text = "Include error paths".into();
+        req.message_id = format!("msg-{}", uuid::Uuid::new_v4());
+        assert_eq!(tell::send(&app, &req).unwrap()["delivery"], "steered");
+        agy_proc.permissions.lock().unwrap().insert("perm-1".into(), json!({"toolName": "confirm"}));
+        req.text = "Hold until answered".into();
+        req.message_id = format!("msg-{}", uuid::Uuid::new_v4());
+        assert_eq!(tell::send(&app, &req).unwrap()["delivery"], "blocked");
+        agy_proc.permissions.lock().unwrap().clear();
+
+        // Ordinary tell while Antigravity is busy queues instead of steering.
+        req.steer = false;
+        req.text = "Follow-up after turn".into();
+        req.message_id = format!("msg-{}", uuid::Uuid::new_v4());
+        assert_eq!(tell::send(&app, &req).unwrap()["delivery"], "queued");
+
+        // All other chat-capable agents accept ordinary tells (queued while handshaking).
+        for (id, kind) in [
+            ("zcode", SessionKind::Zcode),
+            ("deepseek", SessionKind::Deepseek),
+            ("copilot", SessionKind::Copilot),
+            ("cursor", SessionKind::Cursor),
+            ("kimi", SessionKind::Kimi),
+            ("grok", SessionKind::Grok),
+        ] {
+            let proc = inert_process(kind);
+            proc.ready.store(false, Ordering::Relaxed);
+            app.chat().sessions.lock().unwrap().insert(id.into(), proc);
+            let msg = tell::Request {
+                session_id: "sender".into(),
+                target: Some(id.into()),
+                text: format!("Hello {id}"),
+                message_id: format!("msg-{}", uuid::Uuid::new_v4()),
+                ..Default::default()
+            };
+            assert_eq!(tell::send(&app, &msg).unwrap()["delivery"], "queued", "{id}");
+        }
+
+        // ACP agents without native steering reject --steer cleanly.
+        let bad_steer = tell::Request {
+            session_id: "sender".into(),
+            target: Some("copilot".into()),
+            steer: true,
+            text: "Cannot steer".into(),
+            message_id: format!("msg-{}", uuid::Uuid::new_v4()),
+            ..Default::default()
+        };
+        assert!(tell::send(&app, &bad_steer).unwrap_err().contains("does not support steering"));
+
+        // Terminal-view Antigravity and non-chat agents remain rejected.
+        for rejected in ["agy-tui", "kiro"] {
+            let msg = tell::Request {
+                session_id: "sender".into(),
+                target: Some(rejected.into()),
+                text: "Rejected".into(),
+                message_id: format!("msg-{}", uuid::Uuid::new_v4()),
+                ..Default::default()
+            };
+            assert!(tell::send(&app, &msg).unwrap_err().contains("native chat session"), "{rejected}");
+        }
+
+        for id in ["agy", "zcode", "deepseek", "copilot", "cursor", "kimi", "grok"] {
+            let _ = app.chat().stop(&app, id);
+        }
+        let dir = app.data_dir().unwrap();
+        drop(app);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

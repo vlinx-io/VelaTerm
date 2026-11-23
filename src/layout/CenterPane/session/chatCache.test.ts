@@ -13,6 +13,9 @@ it("keeps authoritative order and ignores unseen updates before the loaded histo
   const result = mergeRows(loaded, [row("new", 101), row("old", 2), row("last", 100)], true);
   expect(result.map(item => item.id)).toEqual(["middle", "last", "new"]);
   expect(mergeRows([row("older", 89)], result).map(item => item.id)).toEqual(["older", "middle", "last", "new"]);
+  // A pending local submission whose replayed timeline shrank below the old window floor stays at the tail.
+  const preserved = mergeRows(loaded, [row("msg-pending", 12), row("old", 2)], true, new Set(["msg-pending"]));
+  expect(preserved.map(item => item.id)).toEqual(["middle", "last", "msg-pending"]);
 });
 
 it("retains recent events over a delayed snapshot without creating gaps in history", () => {

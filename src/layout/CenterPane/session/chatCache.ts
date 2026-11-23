@@ -84,25 +84,43 @@ export function limitHistoryWindow(rows: ChatRow[], edge: "older" | "newer") {
   return { rows: rows.slice(start, end), droppedBefore: start > 0, droppedAfter: end < rows.length };
 }
 
-export function mergeRows(base: ChatRow[], incoming: ChatRow[], retainWindow = false): ChatRow[] {
+export function mergeRows(base: ChatRow[], incoming: ChatRow[], retainWindow = false, preserveIds?: ReadonlySet<string>): ChatRow[] {
   const result = [...base];
   const indices = new Map(result.map((row, index) => [row.id, index]));
   const minimum = Math.min(...base.map(row => chatRowPosition(row) ?? Infinity));
+  const preservedTail = new Set<string>();
   for (const row of incoming) {
-    if (retainWindow && Number.isFinite(minimum) && !indices.has(row.id) && (chatRowPosition(row) ?? Infinity) < minimum) continue;
+    const position = chatRowPosition(row) ?? Infinity;
+    if (retainWindow && Number.isFinite(minimum) && !indices.has(row.id) && position < minimum) {
+      if (!preserveIds?.has(row.id)) continue;
+      preservedTail.add(row.id);
+    }
     const index = indices.get(row.id);
     if (index === undefined) { indices.set(row.id, result.length); result.push(row); }
     else result[index] = row;
   }
+  if (preservedTail.size === 0) {
+    return result.sort((a, b) => {
+      const left = chatRowPosition(a), right = chatRowPosition(b);
+      return left !== undefined && right !== undefined ? left - right : 0;
+    });
+  }
+  const order = new Map(result.map((row, index) => [row, index]));
+  const maxPos = result.reduce((max, row) => {
+    if (preservedTail.has(row.id)) return max;
+    const pos = chatRowPosition(row);
+    return pos !== undefined && pos > max ? pos : max;
+  }, 0);
+  const sortKey = (row: ChatRow) => preservedTail.has(row.id) ? maxPos + 1 + (order.get(row) ?? 0) : chatRowPosition(row);
   return result.sort((a, b) => {
-    const left = chatRowPosition(a), right = chatRowPosition(b);
+    const left = sortKey(a), right = sortKey(b);
     return left !== undefined && right !== undefined ? left - right : 0;
   });
 }
 
 /** Events are already visible. Replay their newer state over the late baseline in one commit. */
-export function reconcileChat(snapshot: ChatSnapshot, current: ChatRow[], events: ChatEvent[]): ChatSnapshot {
-  let result = { ...snapshot, rows: snapshot.pageKind === "delta" ? mergeRows(current, snapshot.rows) : snapshot.rows };
+export function reconcileChat(snapshot: ChatSnapshot, current: ChatRow[], events: ChatEvent[], preserveIds?: ReadonlySet<string>): ChatSnapshot {
+  let result = { ...snapshot, rows: snapshot.pageKind === "delta" ? mergeRows(current, snapshot.rows, false, preserveIds) : snapshot.rows };
   for (const event of events) {
     if (event.type === "extras") { result = { ...result, auth: event.extras.auth }; continue; }
     // A snapshot read just before a turn started or ended would otherwise put back the old turn clock:
@@ -115,12 +133,12 @@ export function reconcileChat(snapshot: ChatSnapshot, current: ChatRow[], events
     const epoch = event.epoch ?? result.startedAt;
     if (epoch !== undefined && result.startedAt !== undefined && epoch < result.startedAt) continue;
     if (epoch !== undefined && epoch !== result.startedAt) {
-      result = { ...result, userMessages: [], auth: undefined, startedAt: epoch, rows: [], queue: [], rowsRevision: 0, queueRevision: 0, hasMore: false };
+      result = { ...result, userMessages: [], auth: undefined, startedAt: epoch, rows: [], queue: [], rowsRevision: 0, queueRevision: 0, hasMore: false, hasNewer: false };
     }
     if (event.type === "reset") {
       result = { ...result, auth: undefined, turnStartedAt: undefined };
       if (event.rows && (event.revision === undefined || event.revision > (result.rowsRevision ?? -1))) {
-        result = { ...result, userMessages: event.userMessages ?? [], rows: event.rows, rowsRevision: event.revision, hasMore: event.hasMore ?? false };
+        result = { ...result, userMessages: event.userMessages ?? [], rows: event.rows, rowsRevision: event.revision, hasMore: event.hasMore ?? false, hasNewer: false };
       }
       continue;
     }
@@ -130,7 +148,13 @@ export function reconcileChat(snapshot: ChatSnapshot, current: ChatRow[], events
       }
     } else if (event.revision === undefined || event.revision > (result.rowsRevision ?? -1)) {
       if (event.type === "replaceRows") result = { ...result, userMessages: event.userMessages ?? [] };
-      result = { ...result, rows: event.type === "rows" ? mergeRows(result.rows, event.rows, result.hasMore ?? false) : event.rows, rowsRevision: event.revision, hasMore: event.type === "replaceRows" ? (event.hasMore ?? false) : result.hasMore };
+      result = {
+        ...result,
+        rows: event.type === "rows" ? mergeRows(result.rows, event.rows, result.hasMore ?? false, preserveIds) : event.rows,
+        rowsRevision: event.revision,
+        hasMore: event.type === "replaceRows" ? (event.hasMore ?? false) : result.hasMore,
+        hasNewer: event.type === "replaceRows" ? false : result.hasNewer,
+      };
     }
   }
   if (result.protocolVersion === 2) {

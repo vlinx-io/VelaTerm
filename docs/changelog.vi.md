@@ -1,3 +1,12 @@
+## v0.3.5 — 2026-11-23
+
+- 🔎 Tìm kiếm phiên toàn cục giờ cho phép lọc kết quả theo một dự án hoặc bộ sưu tập cụ thể, bao gồm cả các bộ sưu tập và dự án lồng nhau.
+- 🪐 Mở nhiều hội thoại Antigravity cùng lúc không còn gây xung đột thông tin đăng nhập hay hiện trùng lời nhắc đăng nhập, và các phiên nhàn rỗi lâu sẽ tự động gia hạn thông tin đăng nhập hết hạn thay vì báo lỗi giữa lượt.
+- 🔄 Hội thoại Antigravity giờ tự động khôi phục sau lỗi mô hình khi khởi động nguội và các lỗi tạm thời từ dịch vụ phía trên mà không làm gián đoạn lượt chạy hay mất kết quả công cụ đã hoàn thành.
+- 🤖 `vapp` giờ hỗ trợ `--yes` (`-y` / `--no-confirm`) để thực thi trực tiếp thao tác mà không cần thẻ xác nhận, đồng thời các thay đổi kho tri thức qua `vapp` sẽ tự động làm mới chế độ xem kho tri thức.
+- 💬 `vtell` giờ có thể gửi tin nhắn tới mọi phiên agent ở chế độ xem hội thoại — gồm Antigravity, ZCode, DeepSeek, Copilot, Cursor, Kimi và Grok — trong đó Antigravity hỗ trợ thêm chen ngang bằng `--steer`.
+- ✉️ Gửi tin nhắn khi đang xem lịch sử hội thoại cũ hơn hoặc sau khi bị lỡ cập nhật trực tiếp không còn khiến tin nhắn kẹt ở trạng thái «Đã gửi».
+
 ## v0.3.4 — 2026-11-22
 
 - 🪐 Hội thoại Antigravity giờ đi kèm danh sách mô hình tích hợp gồm Gemini 4 Neon và Orchestrator (Neon), tự động làm mới danh sách mô hình khả dụng ở nền khi mở phiên và chuyển mượt các phiên đang chạy lâu sang mô hình mới phát hành.

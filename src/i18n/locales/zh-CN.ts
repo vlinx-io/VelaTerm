@@ -1376,6 +1376,9 @@ const zhCN: typeof en = {
 
   // ── Global session-content search ──
   "search.allPlaceholder": "搜索所有会话内容…",
+  "search.inLocationPlaceholder": (name) => `在 ${name} 中搜索…`,
+  "search.allLocations": "全部项目和集合",
+  "search.filterLocation": "按项目或集合筛选",
   "search.hint":
     "搜索会话内容。默认不含已归档会话，勾选「同时搜索归档」可纳入。",
   "search.includeArchived": "同时搜索归档",

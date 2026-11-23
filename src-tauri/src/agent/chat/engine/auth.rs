@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 
 use super::{codex_protocol, emit_extras, now_ms, ChatProcess};
 use crate::host::AppCtx;
+use crate::models::SessionKind;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,6 +78,9 @@ pub(super) fn blocks_queue(proc: &ChatProcess) -> bool {
 
 /// A successful turn also confirms credentials refreshed outside this view, for example in the CLI.
 pub(super) fn turn_succeeded(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
+    if proc.kind == SessionKind::Antigravity {
+        app.chat().clear_antigravity_401_recovery(session_id);
+    }
     let cleared = {
         let mut extras = proc.extras.lock().unwrap();
         if extras

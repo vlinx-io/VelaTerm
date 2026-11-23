@@ -1,6 +1,6 @@
 //! `vapp`: lets the agent in any session operate VelaTerm itself. The agent reads what the app can do and
-//! its current state, then submits actions; the session's view shows them to the user, and only confirmed
-//! actions run.
+//! its current state, then submits actions; by default the session's view shows them for confirmation, while
+//! `--yes` (`-y`, `--no-confirm`) runs validated actions directly (except folder choices).
 
 use std::io::{IsTerminal, Read};
 use std::time::{Duration, Instant};
@@ -21,10 +21,11 @@ do       Submit a JSON array of actions (as an argument or on stdin) as one requ
 status   Print the outcome of an earlier request.
 Areas: projects, files, knowledge, settings.
 Items are named by id, an id prefix of at least 6 characters, or a unique exact name.
-Actions wait for the user to confirm them in the session's view in VelaTerm. Options for submitting:
-  --summary TEXT   shown to the user above the changes
-  --no-wait        return at once instead of waiting for the decision
-  --timeout SECS   how long to wait (default 900)";
+By default, actions wait for the user to confirm them in the session's view in VelaTerm. Options for submitting:
+  --yes, -y, --no-confirm   run validated actions without waiting for confirmation (folder choices still ask)
+  --summary TEXT            shown to the user above the changes
+  --no-wait                 return at once instead of waiting for the decision
+  --timeout SECS            how long to wait (default 900)";
 
 /// Default wait for the user's decision; past it the command reports that the request is still pending.
 const WAIT: Duration = Duration::from_secs(900);
@@ -53,7 +54,13 @@ fn dispatch(app: &AppCtx, args: &Value) -> Result<Value, String> {
     match args["op"].as_str() {
         Some("catalog") => crate::assist::catalog(app, args["area"].as_str()),
         Some("list") => crate::assist::list(app, args["project"].as_str(), args["sessionId"].as_str().unwrap_or_default()),
-        Some("submit") => crate::assist::submit(app, args["sessionId"].as_str().unwrap_or_default(), args["summary"].as_str().unwrap_or_default(), &args["actions"]),
+        Some("submit") => crate::assist::submit(
+            app,
+            args["sessionId"].as_str().unwrap_or_default(),
+            args["summary"].as_str().unwrap_or_default(),
+            &args["actions"],
+            args["noConfirm"].as_bool().unwrap_or(false),
+        ),
         Some("status") => crate::assist::outcome(app, args["id"].as_str().ok_or("id is required")?),
         _ => Err("Unknown vapp operation".into()),
     }
@@ -68,16 +75,27 @@ fn parse_actions(text: &str) -> Result<Value, String> {
 fn print(value: &Value) { println!("{}", serde_json::to_string_pretty(value).unwrap_or_default()); }
 
 /// Options shared by every command that submits changes.
-struct Submit { summary: String, wait: bool, timeout: Duration }
+struct Submit { summary: String, wait: bool, no_confirm: bool, timeout: Duration }
 
-/// Splits `--flag value` options from positional arguments. `flags` lists options without a value.
+/// Splits `--flag value` (or `--flag=value`) options from positional arguments. `flags` lists options without a value.
 fn split(args: &[String], flags: &[&str]) -> Result<(Vec<String>, Vec<(String, Option<String>)>), String> {
     let (mut positional, mut options) = (Vec::new(), Vec::new());
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
+        if arg == "-y" && flags.contains(&"yes") {
+            options.push(("yes".to_string(), None));
+            continue;
+        }
         match arg.strip_prefix("--") {
             Some(name) if flags.contains(&name) => options.push((name.to_string(), None)),
-            Some(name) if !name.is_empty() => options.push((name.to_string(), Some(rest.next().ok_or(format!("--{name} needs a value"))?.clone()))),
+            Some(name) if !name.is_empty() => {
+                if let Some((key, value)) = name.split_once('=') {
+                    if flags.contains(&key) { return Err(format!("--{key} does not take a value")); }
+                    options.push((key.to_string(), Some(value.to_string())));
+                } else {
+                    options.push((name.to_string(), Some(rest.next().ok_or(format!("--{name} needs a value"))?.clone())));
+                }
+            }
             _ => positional.push(arg.clone()),
         }
     }
@@ -85,12 +103,13 @@ fn split(args: &[String], flags: &[&str]) -> Result<(Vec<String>, Vec<(String, O
 }
 
 fn submit_options(options: &mut Vec<(String, Option<String>)>) -> Result<Submit, String> {
-    let mut submit = Submit { summary: String::new(), wait: true, timeout: WAIT };
+    let mut submit = Submit { summary: String::new(), wait: true, no_confirm: false, timeout: WAIT };
     let mut kept = Vec::new();
     for (name, value) in options.drain(..) {
         match name.as_str() {
             "summary" => submit.summary = value.unwrap_or_default(),
             "no-wait" => submit.wait = false,
+            "yes" | "no-confirm" => submit.no_confirm = true,
             "timeout" => submit.timeout = Duration::from_secs(value.and_then(|v| v.parse().ok()).ok_or("--timeout needs seconds")?),
             _ => kept.push((name, value)),
         }
@@ -101,14 +120,20 @@ fn submit_options(options: &mut Vec<(String, Option<String>)>) -> Result<Submit,
 
 fn post(body: Value) -> Result<Value, String> { super::tell::post_local("app", &body) }
 
-/// Submits actions and, unless told otherwise, waits for the user's decision. Returns the exit code.
+/// Submits actions and, unless already settled or told not to wait, waits for them to finish. Returns the exit code.
 fn submit(actions: Value, options: Submit) -> Result<i32, String> {
     let session = std::env::var("VLX_SESSION_ID").map_err(|_| "Run vapp inside a VelaTerm session")?;
-    let submitted = post(json!({"op": "submit", "sessionId": session, "summary": options.summary, "actions": actions}))?;
+    let mut body = json!({"op": "submit", "sessionId": session, "summary": options.summary, "actions": actions});
+    if options.no_confirm { body["noConfirm"] = json!(true); }
+    let submitted = post(body)?;
     if submitted["accepted"] == false {
         print(&submitted);
         eprintln!("vapp: nothing was submitted; fix the listed actions and submit the whole request again");
         return Ok(1);
+    }
+    if submitted["settled"] == true {
+        print(&submitted);
+        return Ok(0);
     }
     let id = submitted["id"].as_str().ok_or("Invalid VelaTerm response")?.to_string();
     if !options.wait {
@@ -116,10 +141,19 @@ fn submit(actions: Value, options: Submit) -> Result<i32, String> {
         print(&submitted);
         return Ok(0);
     }
-    eprintln!("vapp: submitted {id}; waiting for the user to confirm it in this session's view");
+    if options.no_confirm {
+        eprintln!("vapp: submitted {id}; waiting for remaining window or choice actions to finish");
+    } else {
+        eprintln!("vapp: submitted {id}; waiting for the user to confirm it in this session's view");
+    }
     let started = Instant::now();
     loop {
-        std::thread::sleep(Duration::from_millis(1500));
+        let interval = if options.no_confirm && started.elapsed() < Duration::from_secs(5) {
+            Duration::from_millis(250)
+        } else {
+            Duration::from_millis(1500)
+        };
+        std::thread::sleep(interval);
         let current = post(json!({"op": "status", "id": id}))?;
         if current["settled"] == true { print(&current); return Ok(0); }
         if started.elapsed() >= options.timeout {
@@ -160,7 +194,7 @@ fn render(list: &Value) -> String {
 
 fn session(args: &[String]) -> Result<i32, String> {
     let command = args.first().map(String::as_str).unwrap_or_default().replace('_', "-");
-    let (positional, mut options) = split(&args[args.len().min(1)..], &["json", "root", "no-wait"])?;
+    let (positional, mut options) = split(&args[args.len().min(1)..], &["json", "root", "no-wait", "yes", "no-confirm"])?;
     let option = |options: &[(String, Option<String>)], name: &str| options.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone().unwrap_or_default());
     let flag = |options: &[(String, Option<String>)], name: &str| options.iter().any(|(n, _)| n == name);
     let usage = |line: &str| format!("usage: vapp session {line}");
@@ -212,7 +246,7 @@ fn run(args: &[String]) -> Result<i32, String> {
         Some("status") => { print(&post(json!({"op": "status", "id": args.get(1).ok_or("usage: vapp status <id>")?}))?); Ok(0) }
         Some("session") => session(&args[1..]),
         Some("do") => {
-            let (positional, mut options) = split(&args[1..], &["no-wait"])?;
+            let (positional, mut options) = split(&args[1..], &["no-wait", "yes", "no-confirm"])?;
             let submit_with = submit_options(&mut options)?;
             if let Some((name, _)) = options.first() { return Err(format!("Unknown option: --{name}")); }
             let text = match positional.as_slice() {
@@ -256,6 +290,23 @@ mod tests {
         assert_eq!(positional, vec!["item"]);
         assert_eq!(options, vec![("group".into(), Some("g1".into())), ("root".into(), None), ("order".into(), Some("5".into()))]);
         assert!(split(&["--group".to_string()], &[]).is_err());
+    }
+
+    #[test]
+    fn yes_flags_and_inline_values_parse_into_submit_options() {
+        for flag in ["--yes", "-y", "--no-confirm"] {
+            let args = [flag, "--summary=Auto organize", "--no-wait", "[]"].map(String::from);
+            let (positional, mut options) = split(&args, &["no-wait", "yes", "no-confirm"]).unwrap();
+            let submit = submit_options(&mut options).unwrap();
+            assert_eq!(positional, vec!["[]"]);
+            assert!(options.is_empty());
+            assert!(submit.no_confirm, "{flag} should set no_confirm");
+            assert!(!submit.wait);
+            assert_eq!(submit.summary, "Auto organize");
+        }
+        let (_, mut default_opts) = split(&["[]".to_string()], &["no-wait", "yes", "no-confirm"]).unwrap();
+        assert!(!submit_options(&mut default_opts).unwrap().no_confirm);
+        assert!(split(&["--yes=true".to_string()], &["yes"]).is_err());
     }
 
     #[test]

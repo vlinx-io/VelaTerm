@@ -51,12 +51,12 @@ export interface ContentSearch {
 }
 
 /**
- * Debounced content-search hook. Query or scope changes search the current range after 250ms, with request
- * sequence numbers preventing stale overwrites. Empty queries clear immediately without a request. When
- * `externalQuery` is supplied the hook reads it instead of its internal state, letting a host keep the
- * query in the URL; the returned `setQuery` then has no effect on the search.
+ * Debounced content-search hook. Query, scope, or project/collection filter changes search the current
+ * range after 250ms, with request sequence numbers preventing stale overwrites. Empty queries clear
+ * immediately without a request. When `externalQuery` is supplied the hook reads it instead of its
+ * internal state, letting a host keep the query in the URL; the returned `setQuery` then has no effect.
  */
-export function useContentSearch(scope: SearchScope, externalQuery?: string): ContentSearch {
+export function useContentSearch(scope: SearchScope, externalQuery?: string, projectId?: string): ContentSearch {
   const [internalQuery, setQuery] = useState("");
   const query = externalQuery ?? internalQuery;
   const [results, setResults] = useState<SessionSearchHit[]>([]);
@@ -88,7 +88,7 @@ export function useContentSearch(scope: SearchScope, externalQuery?: string): Co
       } catch (reason) {if (!disposed && id===reqId.current) {setError(String(reason));setLoading(false);}}
     };
     timer=setTimeout(() => {
-      void startContentSearch(q,scope).then(result => {
+      void startContentSearch(q,scope,projectId || undefined).then(result => {
         owned=result.jobId;
         if (disposed || id!==reqId.current) {void cancelContentSearch(owned).catch(()=>{});return;}
         job.current=owned;setPage(result);void poll();
@@ -96,7 +96,7 @@ export function useContentSearch(scope: SearchScope, externalQuery?: string): Co
     },DEBOUNCE_MS);
     return () => {disposed=true;clearTimeout(timer);if (job.current===owned) job.current=null;
       if (owned) void cancelContentSearch(owned).catch(()=>{});};
-  }, [query, scope,retryCount]);
+  }, [query, scope, projectId, retryCount]);
   const move=async (cursor?: number,before?: number) => {
     const owner=job.current;if (!owner || loading) return;const id=++reqId.current;setLoading(true);setError(null);
     try {const result=await contentSearchPage(owner,cursor,before);
@@ -354,8 +354,11 @@ export function SearchConsole({
   // and recording viewer manage their own key handling.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (e.defaultPrevented) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (target?.getAttribute("role") === "combobox" || target?.closest('[role="listbox"]')) return;
       // Let a focused button handle Enter to avoid combining its click with two-hit navigation.
       if (e.key === "Enter" && tag === "BUTTON") return;
       if (e.key === "ArrowDown") {

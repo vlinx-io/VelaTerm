@@ -6,7 +6,7 @@
 //! yet, is reported as pending and left to that pass rather than holding the results back. Snippets are
 //! read only for the page a client asks for, so a common term never loads every matching fragment.
 
-use std::collections::HashMap;
+use std::collections::{HashMap,HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc,Mutex,OnceLock};
 use std::sync::atomic::{AtomicBool,AtomicU64,Ordering};
@@ -22,7 +22,7 @@ const JOBS_LIMIT:usize=8;
 struct Ready {query:Option<Query>,ranked:Vec<Ranked>,names:HashMap<String,(String,SessionKind,bool)>}
 enum State {Pending,Ready(Box<Ready>),Failed(String)}
 struct Job {cancel:Arc<AtomicBool>,state:Mutex<State>,touched:Mutex<Instant>,sessions:AtomicU64,bytes:AtomicU64,skipped:AtomicU64,pending:AtomicU64}
-struct Task {app:AppCtx,job:Arc<Job>,query:String,scope:SearchScope,session:Option<String>,budget:Duration}
+struct Task {app:AppCtx,job:Arc<Job>,query:String,scope:SearchScope,session:Option<String>,project:Option<String>,budget:Duration}
 static JOBS:OnceLock<Mutex<HashMap<(PathBuf,String),Arc<Job>>>>=OnceLock::new();
 static QUEUE:OnceLock<std::sync::mpsc::SyncSender<Task>>=OnceLock::new();
 
@@ -51,16 +51,18 @@ fn new_job() -> Arc<Job> {
     Arc::new(Job {cancel:Arc::new(AtomicBool::new(false)),state:Mutex::new(State::Pending),touched:Mutex::new(Instant::now()),
         sessions:AtomicU64::new(0),bytes:AtomicU64::new(0),skipped:AtomicU64::new(0),pending:AtomicU64::new(0)})
 }
-pub fn start(app:&AppCtx,query:&str,scope:SearchScope,session:Option<&str>) -> Result<Value,String> {start_within(app,query,scope,session,REFRESH_BUDGET)}
-fn start_within(app:&AppCtx,query:&str,scope:SearchScope,session:Option<&str>,budget:Duration) -> Result<Value,String> {
-    if query.len()>512 || session.is_some_and(|id|id.len()>128) {return Err("Search query exceeds its byte budget".into());}
+pub fn start(app:&AppCtx,query:&str,scope:SearchScope,session:Option<&str>,project:Option<&str>) -> Result<Value,String> {start_within(app,query,scope,session,project,REFRESH_BUDGET)}
+fn start_within(app:&AppCtx,query:&str,scope:SearchScope,session:Option<&str>,project:Option<&str>,budget:Duration) -> Result<Value,String> {
+    let session=session.map(str::trim).filter(|id|!id.is_empty());
+    let project=project.map(str::trim).filter(|id|!id.is_empty());
+    if query.len()>512 || session.is_some_and(|id|id.len()>128) || project.is_some_and(|id|id.len()>128) {return Err("Search query exceeds its byte budget".into());}
     let directory=app.data_dir()?;let mut jobs=jobs().lock().unwrap();
     jobs.retain(|_,job| {
         if job.touched.lock().unwrap().elapsed()>Duration::from_secs(600) {job.cancel.store(true,Ordering::Relaxed);false} else {true}
     });
     if jobs.len()>=JOBS_LIMIT {return Err("index_busy: too many active content searches".into());}
     let id=format!("search:{}",uuid::Uuid::new_v4());let job=new_job();
-    queue().try_send(Task {app:app.clone(),job:job.clone(),query:query.into(),scope,session:session.map(str::to_owned),budget}).map_err(|_|"index_busy: search queue is full")?;
+    queue().try_send(Task {app:app.clone(),job:job.clone(),query:query.into(),scope,session:session.map(str::to_owned),project:project.map(str::to_owned),budget}).map_err(|_|"index_busy: search queue is full")?;
     jobs.insert((directory,id.clone()),job);Ok(json!({"jobId":id,"status":"pending","scannedSessions":0,"scannedBytes":0}))
 }
 fn find(app:&AppCtx,id:&str) -> Result<Arc<Job>,String> {
@@ -111,12 +113,18 @@ pub fn page_window(app:&AppCtx,id:&str,after:Option<u64>,before:Option<u64>,limi
     value.as_object_mut().unwrap().extend(progress.as_object().unwrap().clone());Ok(value)
 }
 
-fn in_scope(session:&corpus::Session,task:&Task) -> bool {
-    task.session.as_ref().is_none_or(|id|id==&session.id) && match task.scope {SearchScope::All=>true,SearchScope::Live=>!session.archived,SearchScope::Archived=>session.archived}
+fn in_scope(session:&corpus::Session,task:&Task,allowed_projects:Option<&HashSet<String>>) -> bool {
+    task.session.as_ref().is_none_or(|id|id==&session.id)
+        && allowed_projects.is_none_or(|projects|projects.contains(&session.project_id))
+        && match task.scope {SearchScope::All=>true,SearchScope::Live=>!session.archived,SearchScope::Archived=>session.archived}
 }
 
 fn run(task:&Task) -> Result<State,String> {
     check(&task.job.cancel)?;
+    let allowed_projects=match task.project.as_deref() {
+        Some(project_id)=>{let db=task.app.db().conn.lock().unwrap();Some(corpus::resolve_project_ids(&db,project_id)?)},
+        None=>None,
+    };
     let conn=corpus::open(&task.app)?;corpus::attach_earlier(&task.app,&conn)?;
     let keys=task.query.split_whitespace().count();
     let mut after=None;let mut names=HashMap::new();
@@ -135,7 +143,7 @@ fn run(task:&Task) -> Result<State,String> {
         for session in sessions {
             check(&task.job.cancel)?;after=Some(session.id.clone());
             names.insert(session.id.clone(),(session.name.clone(),session.kind,session.archived));
-            if keys==0 || !in_scope(&session,task) {continue;}
+            if keys==0 || !in_scope(&session,task,allowed_projects.as_ref()) {continue;}
             // One conversation that cannot be read must not discard every other result. Only
             // cancellation and storage exhaustion end the whole search.
             match corpus::refresh_for_search(&task.app,&conn,&session,&task.job.cancel,&budget) {
@@ -157,7 +165,7 @@ fn run(task:&Task) -> Result<State,String> {
     refreshing.store(false,Ordering::Relaxed);drop(searching);
     if task.job.pending.load(Ordering::Relaxed)>0 {super::catch_up_later(&task.app);}
     check(&task.job.cancel)?;
-    let (query,ranked)=corpus::rank(&conn,&task.query,task.scope,task.session.as_deref())?;
+    let (query,ranked)=corpus::rank(&conn,&task.query,task.scope,task.session.as_deref(),task.project.as_deref())?;
     let ranked=ranked.into_iter().filter(|ranked|names.contains_key(&ranked.session)).collect();
     Ok(State::Ready(Box::new(Ready {query,ranked,names})))
 }
@@ -165,15 +173,18 @@ fn run(task:&Task) -> Result<State,String> {
 /// Old clients receive one bounded result batch and a clear upgrade response when
 /// they need pagination. CLI callers pass their limit before decoding any hits.
 pub fn blocking(app:&AppCtx,query:&str,scope:SearchScope,session:Option<&str>,limit:u64,transcripts_only:bool) -> Result<Value,String> {
-    let started=start(app,query,scope,session)?;let id=started["jobId"].as_str().unwrap();
+    blocking_in(app,query,scope,session,None,limit,transcripts_only)
+}
+fn blocking_in(app:&AppCtx,query:&str,scope:SearchScope,session:Option<&str>,project:Option<&str>,limit:u64,transcripts_only:bool) -> Result<Value,String> {
+    let started=start(app,query,scope,session,project)?;let id=started["jobId"].as_str().unwrap();
     let result=(||loop {
         let result=page(app,id,None,Some(limit),transcripts_only)?;
         if result["status"]=="complete" {return Ok(result);}
         std::thread::park_timeout(Duration::from_millis(100));
     })();let _=cancel(app,id);result
 }
-pub fn legacy(app:&AppCtx,query:&str,scope:SearchScope,session:Option<&str>) -> Result<Vec<SessionSearchHit>,String> {
-    let result=blocking(app,query,scope,session,50,false)?;
+pub fn legacy(app:&AppCtx,query:&str,scope:SearchScope,session:Option<&str>,project:Option<&str>) -> Result<Vec<SessionSearchHit>,String> {
+    let result=blocking_in(app,query,scope,session,project,50,false)?;
     if !result["nextCursor"].is_null() {return Err(crate::agent::history_store::compat::UPGRADE.into());}
     result["hits"].as_array().ok_or("Invalid search results")?.iter().map(|hit|Ok(SessionSearchHit {
         session_id:hit["sessionId"].as_str().ok_or("Invalid search session")?.into(),name:hit["name"].as_str().ok_or("Invalid search name")?.into(),
@@ -206,8 +217,11 @@ mod tests {
             let later=std::time::SystemTime::now()+Duration::from_secs(2);std::fs::File::options().write(true).open(&path).unwrap().set_modified(later).unwrap();
         }
         fn task(&self,query:&str,scope:SearchScope,session:Option<&str>) -> Task {
+            self.task_in(query,scope,session,None)
+        }
+        fn task_in(&self,query:&str,scope:SearchScope,session:Option<&str>,project:Option<&str>) -> Task {
             // Generous, so a slow machine never defers what a test expects to find; the budget test sets its own.
-            Task {app:self.app.clone(),query:query.into(),scope,session:session.map(str::to_owned),job:new_job(),budget:Duration::from_secs(60)}
+            Task {app:self.app.clone(),query:query.into(),scope,session:session.map(str::to_owned),project:project.map(str::to_owned),job:new_job(),budget:Duration::from_secs(60)}
         }
         fn hits(&self,task:&Task) -> Vec<Value> {
             let State::Ready(ready)=run(task).unwrap() else {panic!("Search must complete");};
@@ -331,7 +345,7 @@ mod tests {
     #[test]
     fn jobs_page_before_materialization_cancel_and_authorize_the_data_directory() {
         let fixture=Fixture::new();for index in 0..15 {fixture.session(&format!("s-{index:02}"),"search needle\n",false);}
-        let other=Fixture::new();let started=start_within(&fixture.app,"needle",SearchScope::All,None,Duration::from_secs(60)).unwrap();let id=started["jobId"].as_str().unwrap();
+        let other=Fixture::new();let started=start_within(&fixture.app,"needle",SearchScope::All,None,None,Duration::from_secs(60)).unwrap();let id=started["jobId"].as_str().unwrap();
         let began=Instant::now();let first=loop {let page=page(&fixture.app,id,None,Some(3),false).unwrap();if page["status"]=="complete" {break page;}
             assert!(began.elapsed()<Duration::from_secs(10));std::thread::sleep(Duration::from_millis(10));};
         assert_eq!(first["hits"].as_array().unwrap().len(),3);assert_eq!(first["totalSessions"],15);assert_eq!(first["recordingOnlySessions"],15);
@@ -339,8 +353,50 @@ mod tests {
         let second=page(&fixture.app,id,first["nextCursor"].as_u64(),Some(3),false).unwrap();assert_ne!(first["hits"][0]["sessionId"],second["hits"][0]["sessionId"]);
         assert!(page(&fixture.app,id,None,Some(3),true).unwrap()["hits"].as_array().unwrap().is_empty());
         cancel(&fixture.app,id).unwrap();assert!(page(&fixture.app,id,None,None,false).unwrap_err().starts_with("cursor_expired:"));
-        assert!(start(&fixture.app,&"x".repeat(513),SearchScope::All,None).is_err());
+        assert!(start(&fixture.app,&"x".repeat(513),SearchScope::All,None,None).is_err());
+        assert!(start(&fixture.app,"needle",SearchScope::All,None,Some(&"p".repeat(129))).is_err());
         let task=fixture.task("needle",SearchScope::All,None);task.job.cancel.store(true,Ordering::Relaxed);assert_eq!(run(&task).err().unwrap(),"read_canceled");
         assert!(corpus::path(&fixture.path).is_file());
+    }
+
+    #[test]
+    fn project_and_collection_filters_limit_scanning_and_results() {
+        let fixture=Fixture::new();
+        {
+            let conn=fixture.app.db().conn.lock().unwrap();
+            conn.execute_batch("
+                INSERT INTO projects(id,name,root_path,sort_order,created_at) VALUES
+                    ('col-root','Work','',0,0),
+                    ('col-sub','Frontend','',1,0),
+                    ('proj-a','App A','/a',2,0),
+                    ('proj-b','App B','/b',3,0),
+                    ('proj-other','Other','/other',4,0);
+                UPDATE projects SET collection_id='col-root' WHERE id IN ('col-sub','proj-a');
+                UPDATE projects SET collection_id='col-sub' WHERE id='proj-b';
+                INSERT INTO sessions(id,project_id,name,kind,sort_order,created_at) VALUES
+                    ('s-col','col-root','Direct','terminal',0,0),
+                    ('s-a','proj-a','A','terminal',0,0),
+                    ('s-b','proj-b','B','terminal',0,0),
+                    ('s-other','proj-other','Other','terminal',0,0);
+            ").unwrap();
+        }
+        for id in ["s-col","s-a","s-b","s-other"] {fixture.session_text(id,"shared needle\n");}
+        let sessions=|hits:Vec<Value>| {let mut out:Vec<_>=hits.iter().map(|hit|hit["sessionId"].as_str().unwrap().to_owned()).collect();out.sort();out};
+
+        let proj_task=fixture.task_in("needle",SearchScope::Live,None,Some("proj-a"));
+        assert_eq!(sessions(fixture.hits(&proj_task)),["s-a"]);
+        assert_eq!(proj_task.job.sessions.load(Ordering::Relaxed),1,"only sessions in the selected project are scanned");
+
+        let sub_task=fixture.task_in("needle",SearchScope::Live,None,Some("col-sub"));
+        assert_eq!(sessions(fixture.hits(&sub_task)),["s-b"]);
+        assert_eq!(sub_task.job.sessions.load(Ordering::Relaxed),1);
+
+        let root_task=fixture.task_in("needle",SearchScope::Live,None,Some("col-root"));
+        assert_eq!(sessions(fixture.hits(&root_task)),["s-a","s-b","s-col"]);
+        assert_eq!(root_task.job.sessions.load(Ordering::Relaxed),3,"a collection scans direct sessions, child projects, and nested collections");
+
+        let missing_task=fixture.task_in("needle",SearchScope::Live,None,Some("missing"));
+        assert!(fixture.hits(&missing_task).is_empty());
+        assert_eq!(missing_task.job.sessions.load(Ordering::Relaxed),0);
     }
 }

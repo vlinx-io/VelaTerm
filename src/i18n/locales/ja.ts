@@ -1401,6 +1401,9 @@ const ja: typeof en = {
 
   // ── Global session-content search ──
   "search.allPlaceholder": "すべてのセッション内容を検索…", // Search across all session content…
+  "search.inLocationPlaceholder": (name) => `${name} 内を検索…`, // Search in {name}…
+  "search.allLocations": "すべてのプロジェクトとコレクション", // All projects & collections
+  "search.filterLocation": "プロジェクトまたはコレクションで絞り込む", // Filter by project or collection
   "search.hint":
     "セッション内容を検索します。アーカイブ済みは既定で除外され、「アーカイブも検索」で追加できます。", // Search session content. Archived sessions are excluded by default.
   "search.includeArchived": "アーカイブも検索", // Include archived

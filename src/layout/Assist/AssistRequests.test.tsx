@@ -2,18 +2,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { setLang, t } from "../../i18n";
-import { assistGet, assistMark, assistPending, assistRun, assistRunAll, assistSkipAll, type AssistAction, type AssistPlan } from "../../ipc/assist";
+import { assistClaim, assistGet, assistMark, assistPending, assistRun, assistRunAll, assistSkipAll, type AssistAction, type AssistPlan } from "../../ipc/assist";
 import { takeCloneUrl } from "../../remote/dialogNavigation";
 import { useTermStore } from "../../store/termStore";
 import type { Session } from "../../types";
 import { AssistRequestListener, AssistRequests, cardGroups } from "./AssistRequests";
 import { describeAction, performAction } from "./actions";
 
-vi.mock("../../ipc/assist", () => ({ assistGet: vi.fn(), assistMark: vi.fn(), assistRun: vi.fn(), assistRunAll: vi.fn(), assistSkipAll: vi.fn(), assistPending: vi.fn() }));
-const requests: ((request: { id: string; sessionId: string }) => void)[] = [];
+vi.mock("../../ipc/assist", () => ({ assistClaim: vi.fn(), assistGet: vi.fn(), assistMark: vi.fn(), assistRun: vi.fn(), assistRunAll: vi.fn(), assistSkipAll: vi.fn(), assistPending: vi.fn() }));
+const requests: ((request: { id: string; sessionId: string; noConfirm?: boolean }) => void)[] = [];
 vi.mock("../../ipc/events", async importOriginal => ({
   ...await importOriginal<typeof import("../../ipc/events")>(),
-  onAssistRequest: (cb: (request: { id: string; sessionId: string }) => void) => { requests.push(cb); return Promise.resolve(() => {}); },
+  onAssistRequest: (cb: (request: { id: string; sessionId: string; noConfirm?: boolean }) => void) => { requests.push(cb); return Promise.resolve(() => {}); },
   onAssistChanged: () => Promise.resolve(() => {}),
 }));
 
@@ -23,7 +23,7 @@ const plan = (actions: AssistAction[], extra: Partial<AssistPlan> = {}): AssistP
 
 beforeEach(() => {
   setLang("en");
-  for (const mock of [assistGet, assistRun, assistRunAll, assistSkipAll, assistMark, assistPending]) vi.mocked(mock).mockReset();
+  for (const mock of [assistClaim, assistGet, assistRun, assistRunAll, assistSkipAll, assistMark, assistPending]) vi.mocked(mock).mockReset();
   window.history.replaceState(null, "", "/?session=keep");
 });
 afterEach(() => cleanup());
@@ -185,5 +185,41 @@ describe("requests in the session view", () => {
     await screen.findByRole("button", { name: "Confirm" });
     // The session the request came from comes into view.
     expect(openSession).toHaveBeenCalledWith("s1");
+  });
+
+  it("claims and executes window actions for noConfirm requests without stealing session focus", async () => {
+    const autoPlan = plan([action({ domain: "settings", kind: "openSettings", page: "terminal" })], { noConfirm: true });
+    const runningPlan = { ...autoPlan, actions: [{ ...autoPlan.actions[0], status: "running" as const }] };
+    const donePlan = { ...autoPlan, actions: [{ ...autoPlan.actions[0], status: "done" as const }] };
+    vi.mocked(assistPending).mockResolvedValue([]);
+    vi.mocked(assistGet).mockResolvedValue(autoPlan);
+    vi.mocked(assistClaim).mockResolvedValue({ claimed: true, plan: runningPlan });
+    vi.mocked(assistMark).mockResolvedValue(donePlan);
+    const openSession = vi.fn();
+    useTermStore.setState({ sessions: [{ id: "s1" } as Session], activeSessionId: "other", openSession });
+    render(<AssistRequestListener />);
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    act(() => requests[requests.length - 1]({ id: "plan-1", sessionId: "s1", noConfirm: true }));
+    await waitFor(() => expect(assistMark).toHaveBeenCalledWith("plan-1", 0, "done"));
+    expect(assistClaim).toHaveBeenCalledWith("plan-1", 0);
+    expect(new URLSearchParams(location.search).get("settings")).toBe("terminal");
+    expect(openSession).not.toHaveBeenCalled();
+  });
+
+  it("does not run a noConfirm window action when another client already claimed it, and focuses when a folder choice remains", async () => {
+    const mixed = plan([
+      action({ domain: "projects", kind: "importProject", backend: true, candidates: ["/p/a", "/p/b"] }),
+      action({ domain: "settings", kind: "openSettings", page: "terminal" }),
+    ], { noConfirm: true });
+    vi.mocked(assistGet).mockResolvedValue(mixed);
+    vi.mocked(assistClaim).mockResolvedValue({ claimed: false, plan: { ...mixed, actions: [mixed.actions[0], { ...mixed.actions[1], status: "running" }] } });
+    const openSession = vi.fn();
+    useTermStore.setState({ sessions: [{ id: "s1" } as Session], activeSessionId: "other", openSession });
+    render(<AssistRequestListener />);
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    act(() => requests[requests.length - 1]({ id: "plan-1", sessionId: "s1", noConfirm: true }));
+    await waitFor(() => expect(openSession).toHaveBeenCalledWith("s1"));
+    expect(assistMark).not.toHaveBeenCalled();
+    expect(new URLSearchParams(location.search).get("settings")).toBeNull();
   });
 });

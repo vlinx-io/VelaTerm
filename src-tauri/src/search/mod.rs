@@ -119,7 +119,7 @@ pub fn reindex_session_quiet(app: &AppCtx, session_id: &str) {
     std::thread::spawn(move || {
         let session=corpus::sessions(&app,None).ok().and_then(|_|{
             let conn=app.db().conn.lock().unwrap();
-            repo::get_session(&conn,&id).ok().flatten().map(|session|corpus::Session {id:session.id,name:session.name,kind:session.kind,
+            repo::get_session(&conn,&id).ok().flatten().map(|session|corpus::Session {id:session.id,project_id:session.project_id,name:session.name,kind:session.kind,
                 native:session.agent_session_id.or(session.legacy_agent_session_id),archived:session.archived_at.is_some()})
         });
         let Some(session)=session else {return;};
@@ -231,14 +231,15 @@ mod tests {
         corpus::insert(&conn,sid,source,message_index,ordinal,None,None,None,text).unwrap();
     }
 
-    fn search_in(db: &Fixture, query: &str, scope: SearchScope, session: Option<&str>) -> Vec<SessionSearchHit> {
+    fn search_in_project(db: &Fixture, query: &str, scope: SearchScope, session: Option<&str>, project: Option<&str>) -> Vec<SessionSearchHit> {
         let conn=corpus::open(&db.app).unwrap();
-        let (query,ranked)=corpus::rank(&conn,query,scope,session).unwrap();
+        let (query,ranked)=corpus::rank(&conn,query,scope,session,project).unwrap();
         let Some(query)=query else {return Vec::new();};
         let names=repo::list_all_sessions(&db.app.db().conn.lock().unwrap()).unwrap().into_iter()
             .map(|session|(session.id,(session.name,session.kind,session.archived_at.is_some()))).collect();
         ranked.iter().filter_map(|ranked|corpus::hit(&conn,&query,ranked,&names).unwrap()).collect()
     }
+    fn search_in(db: &Fixture, query: &str, scope: SearchScope, session: Option<&str>) -> Vec<SessionSearchHit> {search_in_project(db,query,scope,session,None)}
     fn search(db: &Fixture, query: &str, scope: SearchScope) -> Vec<SessionSearchHit> {search_in(db,query,scope,None)}
 
     /// The word index answers first: `和服` matches the word but not the run `总和服务`, which the trigram
@@ -527,5 +528,78 @@ mod tests {
             "the LIKE fallback filters by scope as well"
         );
         assert_eq!(live_like[0].session_id, "live1");
+    }
+
+    /// Project and collection filters apply in SQL before word/trigram/LIKE ranking and recursively
+    /// expand nested collections, system collections, and archived sessions under tombstoned projects.
+    #[test]
+    fn project_and_collection_filters_apply_across_all_index_paths() {
+        let db = Fixture::new();
+        {
+            let conn = db.app.db().conn.lock().unwrap();
+            crate::db::system_collections::ensure(&conn).unwrap();
+            conn.execute_batch("
+                INSERT INTO projects(id,name,root_path,sort_order,created_at,collection_id,deleted_at) VALUES
+                    ('col-work','Work','',0,0,'vlx-system-projects',NULL),
+                    ('col-sub','Sub','',1,0,'col-work',NULL),
+                    ('proj-a','Alpha','/a',2,0,'col-work',NULL),
+                    ('proj-b','Beta','/b',3,0,'col-sub',NULL),
+                    ('proj-tomb','Deleted','/old',4,0,'col-work',100),
+                    ('proj-other','Other','/other',5,0,'vlx-system-projects',NULL),
+                    ('proj-legacy','Legacy','/legacy',6,0,NULL,NULL);
+                INSERT INTO sessions(id,project_id,name,kind,sort_order,created_at,archived_at) VALUES
+                    ('s-col','col-work','Direct','claude',0,0,NULL),
+                    ('s-a','proj-a','Alpha','claude',0,0,NULL),
+                    ('s-b','proj-b','Beta','claude',0,0,NULL),
+                    ('s-tomb','proj-tomb','Archived','claude',0,0,200),
+                    ('s-other','proj-other','Other','claude',0,0,NULL),
+                    ('s-legacy','proj-legacy','Legacy','claude',0,0,NULL),
+                    ('s-task','vlx-system-tasks','Task','claude',0,0,NULL),
+                    ('s-chat','vlx-system-chat','Chat','claude',0,0,NULL);
+            ").unwrap();
+        }
+        // proj-other has whole-word "work"; proj-a only has substring "worktree", proving project
+        // filtering runs before deciding whether to fall back from words to trigram.
+        insert_fts(&db, "s-col", "transcript", Some(0), 0, "deploy worktree 配置");
+        insert_fts(&db, "s-a", "transcript", Some(0), 0, "deploy worktree 配置");
+        insert_fts(&db, "s-b", "transcript", Some(0), 0, "deploy worktree 配置");
+        insert_fts(&db, "s-tomb", "transcript", Some(0), 0, "deploy archived 配置");
+        insert_fts(&db, "s-other", "transcript", Some(0), 0, "deploy work 配置");
+        insert_fts(&db, "s-legacy", "transcript", Some(0), 0, "deploy legacy");
+        insert_fts(&db, "s-task", "transcript", Some(0), 0, "deploy task 配置");
+        insert_fts(&db, "s-chat", "transcript", Some(0), 0, "deploy chat 配置");
+
+        let ids = |hits: Vec<SessionSearchHit>| {
+            let mut out: Vec<_> = hits.into_iter().map(|h| h.session_id).collect();
+            out.sort();
+            out
+        };
+
+        // Single project: words, trigram fallback despite whole-word hit elsewhere, and LIKE fallback.
+        assert_eq!(ids(search_in_project(&db, "deploy", SearchScope::Live, None, Some("proj-a"))), ["s-a"]);
+        assert_eq!(ids(search_in_project(&db, "work", SearchScope::Live, None, Some("proj-a"))), ["s-a"]);
+        assert_eq!(ids(search_in_project(&db, "配置", SearchScope::Live, None, Some("proj-a"))), ["s-a"]);
+
+        // Collection includes direct sessions, child projects, and nested sub-collections; archived
+        // sessions under tombstoned child projects appear when scope is All.
+        assert_eq!(ids(search_in_project(&db, "deploy", SearchScope::Live, None, Some("col-work"))), ["s-a", "s-b", "s-col"]);
+        assert_eq!(ids(search_in_project(&db, "deploy", SearchScope::All, None, Some("col-work"))), ["s-a", "s-b", "s-col", "s-tomb"]);
+        assert_eq!(ids(search_in_project(&db, "配置", SearchScope::Live, None, Some("col-sub"))), ["s-b"]);
+
+        // System collections: Projects gathers all non-task/chat projects (including unmigrated NULL),
+        // while Tasks and Chat stay isolated.
+        assert_eq!(
+            ids(search_in_project(&db, "deploy", SearchScope::Live, None, Some(crate::db::system_collections::PROJECTS))),
+            ["s-a", "s-b", "s-col", "s-legacy", "s-other"]
+        );
+        assert_eq!(
+            ids(search_in_project(&db, "deploy", SearchScope::Live, None, Some(crate::db::system_collections::TASKS))),
+            ["s-task"]
+        );
+        assert_eq!(
+            ids(search_in_project(&db, "deploy", SearchScope::Live, None, Some(crate::db::system_collections::CHAT))),
+            ["s-chat"]
+        );
+        assert!(search_in_project(&db, "deploy", SearchScope::All, None, Some("nonexistent")).is_empty());
     }
 }

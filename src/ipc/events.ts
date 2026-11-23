@@ -199,17 +199,21 @@ export function onViewRequest(
   return listen<ViewRequest>("view://request", (payload) => cb(payload));
 }
 
-/** A session's agent submitted actions with `vapp do`; that session's view shows them for confirmation. */
-export function onAssistRequest(cb: (request: { id: string; sessionId: string }) => void): Promise<UnlistenFn> {
-  return listen<{ id: string; sessionId: string }>("assist://request", (payload) => {
-    if (typeof payload?.id === "string" && typeof payload.sessionId === "string") cb({ id: payload.id, sessionId: payload.sessionId });
+/** A session's agent submitted actions with `vapp do`; that session's view shows them for confirmation, or runs window actions directly when `noConfirm` is set. */
+export function onAssistRequest(cb: (request: { id: string; sessionId: string; noConfirm?: boolean }) => void): Promise<UnlistenFn> {
+  return listen<{ id: string; sessionId: string; noConfirm?: boolean }>("assist://request", (payload) => {
+    if (typeof payload?.id === "string" && typeof payload.sessionId === "string") {
+      cb({ id: payload.id, sessionId: payload.sessionId, ...(payload.noConfirm === true ? { noConfirm: true } : {}) });
+    }
   });
 }
 
 /** Actions of a request were decided in some client; every view of that session reads its list again. */
-export function onAssistChanged(cb: (change: { id: string; sessionId: string }) => void): Promise<UnlistenFn> {
-  return listen<{ id: string; sessionId: string }>("assist://changed", (payload) => {
-    if (typeof payload?.id === "string" && typeof payload.sessionId === "string") cb({ id: payload.id, sessionId: payload.sessionId });
+export function onAssistChanged(cb: (change: { id: string; sessionId: string; knowledgeChanged?: boolean }) => void): Promise<UnlistenFn> {
+  return listen<{ id: string; sessionId: string; knowledgeChanged?: boolean }>("assist://changed", (payload) => {
+    if (typeof payload?.id === "string" && typeof payload.sessionId === "string") {
+      cb({ id: payload.id, sessionId: payload.sessionId, ...(payload.knowledgeChanged === true ? { knowledgeChanged: true } : {}) });
+    }
   });
 }
 

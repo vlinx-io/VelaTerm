@@ -28,8 +28,9 @@ The target accepts a full session ID, an ID prefix of at least eight characters,
 unique name substring. Quote names containing spaces. Prefer the full ID for retries. If the reference
 is ambiguous, use the returned candidate list to identify the intended session; never choose arbitrarily.
 `vrefer --list` can help locate a target before sending. Self-targets, archived sessions, and sessions
-without native chat support are rejected. Supported recipients currently include Claude, Codex,
-OpenCode, Pi and OMP native chat sessions.
+without native chat support are rejected. Any agent running in the conversation view (`engine = chat`)
+is supported as a recipient, including Claude, Codex, OpenCode, Pi, OMP, Antigravity, ZCode, DeepSeek,
+Copilot, Cursor, Kimi and Grok.
 
 Send a self-contained message with the context and paths the recipient actually needs. Preserve the
 user's intended meaning and scope. Do not turn an informational update into an instruction to edit files.
@@ -44,7 +45,9 @@ planning/execution workflow's state.
 Without `--steer` a message sent to a busy recipient waits for its running turn to end. `--steer` writes
 the message into that turn instead, so the recipient reads it at its next step and answers it together
 with the work already under way. With no turn to join the message is sent normally, so `--steer` is never
-an error on an idle recipient. It cannot be combined with `--report`.
+an error on an idle recipient for agents that support steering. Agents without native steering support
+(Copilot, Cursor, Kimi and Grok) reject `--steer`; omit `--steer` to queue the message instead. `--steer`
+cannot be combined with `--report`.
 
 Steer when the recipient is working and the message changes what that work should produce: a correction,
 a revised requirement, a warning that the current approach is wrong. Do not steer routine progress notes

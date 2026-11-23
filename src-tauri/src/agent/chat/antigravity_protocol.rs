@@ -12,6 +12,84 @@ use super::protocol::ChatImage;
 
 pub const EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
 
+/// Internal continuation prompt sent after restarting `agy acp` to recover from a mid-session HTTP 401.
+/// Hidden from user bubbles in live and replayed timelines so recovery remains seamless.
+pub const AUTH_RECOVERY_PROMPT: &str = "Your previous step was interrupted by a transient OAuth token expiration (HTTP 401) that has now been refreshed. Continue from where you left off without repeating completed steps.";
+
+/// Internal continuation prompt sent after `agy acp` aborts a turn on a transient upstream API or
+/// transport error (such as HTTP 404/500/503/504 or mid-stream EOF/connection reset).
+/// Hidden from user bubbles in live and replayed timelines so recovery remains seamless.
+pub const TRANSIENT_RECOVERY_PROMPT: &str = "Your previous step was interrupted by a transient upstream API error. Continue from where you left off without repeating completed steps.";
+
+/// Whether a user prompt string is one of VelaTerm's internal Antigravity recovery prompts.
+pub fn is_internal_recovery_prompt(text: &str) -> bool {
+    matches!(text, AUTH_RECOVERY_PROMPT | TRANSIENT_RECOVERY_PROMPT)
+}
+
+/// Whether an error string is Antigravity's Google OAuth 401 credential failure.
+pub fn is_oauth_401_error(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    (lower.contains("unauthenticated")
+        && (lower.contains("401") || lower.contains("invalid authentication credentials")))
+        || (lower.contains("invalid authentication credentials") && lower.contains("oauth 2"))
+        || lower.contains("authentication expired. please log back in")
+}
+
+/// Extract the error message from `agy acp`'s streamed `"\n⚠ <err>\n"` chunk when `<err>` is an OAuth 401.
+pub fn strip_streamed_401_warning(chunk: &str) -> Option<String> {
+    let trimmed = chunk.trim();
+    let rest = trimmed
+        .strip_prefix('\u{26a0}')
+        .map(|s| s.trim_start_matches('\u{fe0f}').trim())?;
+    is_oauth_401_error(rest).then(|| rest.to_string())
+}
+
+/// Whether an error string is a transient Antigravity upstream API or transport error that can be
+/// safely retried on the same ACP session (for example Google CloudCode 404/500/503/504 or stream
+/// EOF / connection reset).
+pub fn is_transient_upstream_error(text: &str) -> bool {
+    if is_oauth_401_error(text) {
+        return false;
+    }
+    let lower = text.to_ascii_lowercase();
+    if lower.contains("failed to construct executor")
+        || lower.contains("resource_exhausted")
+        || lower.contains("code 429")
+        || lower.contains("permission_denied")
+        || lower.contains("invalid_argument")
+    {
+        return false;
+    }
+    (lower.contains("not_found (code 404)") && lower.contains("requested entity was not found"))
+        || lower.contains("internal (code 500)")
+        || lower.contains("unavailable (code 503)")
+        || lower.contains("deadline_exceeded (code 504)")
+        || (lower.contains("request failed:")
+            && (lower.contains("eof")
+                || lower.contains("connection reset by peer")
+                || lower.contains("broken pipe")
+                || lower.contains("tls handshake timeout")
+                || lower.contains("i/o timeout")))
+}
+
+/// Extract the error message from `agy acp`'s streamed `"\n⚠ <err>\n"` chunk when `<err>` is a
+/// transient upstream API or transport error.
+pub fn strip_streamed_transient_warning(chunk: &str) -> Option<String> {
+    let trimmed = chunk.trim();
+    let rest = trimmed
+        .strip_prefix('\u{26a0}')
+        .map(|s| s.trim_start_matches('\u{fe0f}').trim())?;
+    let mut lines = rest.lines().map(str::trim).filter(|line| !line.is_empty());
+    let first = lines.next()?;
+    if !is_transient_upstream_error(first) {
+        return None;
+    }
+    if lines.any(|line| !line.to_ascii_lowercase().starts_with("error id:")) {
+        return None;
+    }
+    Some(first.to_string())
+}
+
 /// Map VelaTerm's Antigravity permission mode to the matching `agy acp` session mode id.
 pub fn acp_mode_for_permission(permission_mode: &str) -> &'static str {
     match permission_mode.trim() {
@@ -531,6 +609,11 @@ impl StreamState {
 
 /// Read the genuine user request, excluding runtime metadata and setting-change annotations.
 pub fn user_request(content: &str) -> Option<String> {
+    let text = raw_user_request(content)?;
+    (!is_internal_recovery_prompt(&text)).then_some(text)
+}
+
+fn raw_user_request(content: &str) -> Option<String> {
     let text = if let Some((_, rest)) = content.split_once("<USER_REQUEST>") {
         rest.split_once("</USER_REQUEST>")?.0
     } else { content };
@@ -580,7 +663,16 @@ pub fn history_rows(content: &str) -> Vec<ChatRow> {
                 pending.clear();
                 in_user_turn = true;
                 in_wake_turn = false;
-                if let Some(text) = user_request(text) {
+                let raw_req = raw_user_request(text);
+                if raw_req.as_deref() == Some(AUTH_RECOVERY_PROMPT) {
+                    if rows.last().is_some_and(|r| matches!(r, ChatRow::Error { message, .. } if is_oauth_401_error(message))) {
+                        rows.pop();
+                    }
+                } else if raw_req.as_deref() == Some(TRANSIENT_RECOVERY_PROMPT) {
+                    if rows.last().is_some_and(|r| matches!(r, ChatRow::Error { message, .. } if is_transient_upstream_error(message))) {
+                        rows.pop();
+                    }
+                } else if let Some(text) = user_request(text) {
                     rows.push(super::engine::user_row(id, &text, step_images(&step, &mut image_budget), at));
                 }
             }
@@ -855,5 +947,87 @@ mod tests {
         assert_eq!(next_id, "agy-step-3");
         assert_eq!(next_name, "Read");
         assert_eq!(next_out.as_deref(), Some("port=8080"));
+    }
+
+    #[test]
+    fn oauth_401_helpers_and_history_replay_hide_recovered_401_prompts() {
+        let chunk = "\n⚠ UNAUTHENTICATED (code 401): Request had invalid authentication credentials. Expected OAuth 2 access token, login cookie or other valid authentication credential.\n";
+        let extracted = strip_streamed_401_warning(chunk).expect("401 warning should be recognized");
+        assert!(extracted.starts_with("UNAUTHENTICATED (code 401):"));
+        assert!(is_oauth_401_error(&extracted));
+        assert!(strip_streamed_401_warning("\n⚠ Command exited with code 1\n").is_none());
+        assert!(user_request(&format!("<USER_REQUEST>{AUTH_RECOVERY_PROMPT}</USER_REQUEST>")).is_none());
+
+        let recovered = [
+            json!({"step_index":0,"type":"USER_INPUT","content":"<USER_REQUEST>Submit 6 declarations</USER_REQUEST>"}),
+            json!({"step_index":1,"type":"PLANNER_RESPONSE","status":"DONE","content":"Submitting 6 declarations..."}),
+            json!({"step_index":2,"type":"ERROR_MESSAGE","status":"DONE","content":extracted}),
+            json!({"step_index":3,"type":"USER_INPUT","content":format!("<USER_REQUEST>{AUTH_RECOVERY_PROMPT}</USER_REQUEST>")}),
+            json!({"step_index":4,"type":"PLANNER_RESPONSE","status":"DONE","content":"All 6 declarations submitted."}),
+        ];
+        let rows = history_rows(&recovered.iter().map(Value::to_string).collect::<Vec<_>>().join("\n"));
+        assert_eq!(rows.len(), 3, "recovered 401 error and internal continuation prompt must stay hidden: {rows:?}");
+        assert!(matches!(&rows[0], ChatRow::User { text, .. } if text == "Submit 6 declarations"));
+        assert!(matches!(&rows[1], ChatRow::Assistant { text, .. } if text == "Submitting 6 declarations..."));
+        assert!(matches!(&rows[2], ChatRow::Assistant { text, .. } if text == "All 6 declarations submitted."));
+
+        // An unrecovered trailing 401 remains visible as an Error row.
+        let unrecovered = &recovered[..3];
+        let err_rows = history_rows(&unrecovered.iter().map(Value::to_string).collect::<Vec<_>>().join("\n"));
+        assert_eq!(err_rows.len(), 3);
+        assert!(matches!(&err_rows[2], ChatRow::Error { message, .. } if is_oauth_401_error(message)));
+    }
+
+    #[test]
+    fn transient_upstream_helpers_and_history_replay_hide_recovered_transient_prompts() {
+        let not_found = "\n⚠ NOT_FOUND (code 404): Requested entity was not found.\n";
+        let extracted = strip_streamed_transient_warning(not_found).expect("404 transient warning should be recognized");
+        assert_eq!(extracted, "NOT_FOUND (code 404): Requested entity was not found.");
+        assert!(is_transient_upstream_error(&extracted));
+
+        assert_eq!(
+            strip_streamed_transient_warning("\n⚠ INTERNAL (code 500): Internal error encountered.\nError ID: abc-123\n").as_deref(),
+            Some("INTERNAL (code 500): Internal error encountered."),
+        );
+        assert_eq!(
+            strip_streamed_transient_warning("\n⚠ UNAVAILABLE (code 503): Service unavailable.\n").as_deref(),
+            Some("UNAVAILABLE (code 503): Service unavailable."),
+        );
+        assert_eq!(
+            strip_streamed_transient_warning("\n⚠ DEADLINE_EXCEEDED (code 504): Deadline exceeded.\n").as_deref(),
+            Some("DEADLINE_EXCEEDED (code 504): Deadline exceeded."),
+        );
+        assert_eq!(
+            strip_streamed_transient_warning("\n⚠ request failed: Post \"https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse\": EOF\n").as_deref(),
+            Some("request failed: Post \"https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse\": EOF"),
+        );
+        assert!(is_transient_upstream_error("request failed: Post \"https://example.com\": read tcp 10.0.0.1:1234->1.2.3.4:443: read: connection reset by peer"));
+
+        // Non-transient, 401, 429, cold-model, and prose lines must not match.
+        assert!(strip_streamed_transient_warning("\n⚠ UNAUTHENTICATED (code 401): Request had invalid authentication credentials.\n").is_none());
+        assert!(strip_streamed_transient_warning("\n⚠ RESOURCE_EXHAUSTED (code 429): Resource has been exhausted.\n").is_none());
+        assert!(strip_streamed_transient_warning("\n⚠ failed to construct executor: unknown model key MODEL_PLACEHOLDER_M532: model not found\n").is_none());
+        assert!(strip_streamed_transient_warning("\n⚠ NOT_FOUND (code 404): Requested entity was not found.\nHere is why that happened.").is_none());
+        assert!(strip_streamed_transient_warning("\n⚠ Command exited with code 1\n").is_none());
+        assert!(user_request(&format!("<USER_REQUEST>{TRANSIENT_RECOVERY_PROMPT}</USER_REQUEST>")).is_none());
+
+        let recovered = [
+            json!({"step_index":0,"type":"USER_INPUT","content":"<USER_REQUEST>Check readiness</USER_REQUEST>"}),
+            json!({"step_index":1,"type":"PLANNER_RESPONSE","status":"DONE","content":"Reading readiness.rs..."}),
+            json!({"step_index":2,"type":"ERROR_MESSAGE","status":"DONE","content":extracted}),
+            json!({"step_index":3,"type":"USER_INPUT","content":format!("<USER_REQUEST>{TRANSIENT_RECOVERY_PROMPT}</USER_REQUEST>")}),
+            json!({"step_index":4,"type":"PLANNER_RESPONSE","status":"DONE","content":"Readiness check complete."}),
+        ];
+        let rows = history_rows(&recovered.iter().map(Value::to_string).collect::<Vec<_>>().join("\n"));
+        assert_eq!(rows.len(), 3, "recovered transient error and internal continuation prompt must stay hidden: {rows:?}");
+        assert!(matches!(&rows[0], ChatRow::User { text, .. } if text == "Check readiness"));
+        assert!(matches!(&rows[1], ChatRow::Assistant { text, .. } if text == "Reading readiness.rs..."));
+        assert!(matches!(&rows[2], ChatRow::Assistant { text, .. } if text == "Readiness check complete."));
+
+        // An unrecovered trailing transient error remains visible as an Error row.
+        let unrecovered = &recovered[..3];
+        let err_rows = history_rows(&unrecovered.iter().map(Value::to_string).collect::<Vec<_>>().join("\n"));
+        assert_eq!(err_rows.len(), 3);
+        assert!(matches!(&err_rows[2], ChatRow::Error { message, .. } if is_transient_upstream_error(message)));
     }
 }

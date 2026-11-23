@@ -1403,6 +1403,9 @@ const ptBR: typeof en = {
 
   // ── Global session-content search ──
   "search.allPlaceholder": "Pesquisar em todo o conteúdo das sessões…", // Search across all session content…
+  "search.inLocationPlaceholder": (name) => `Pesquisar em ${name}…`, // Search in {name}…
+  "search.allLocations": "Todos os projetos e coleções", // All projects & collections
+  "search.filterLocation": "Filtrar por projeto ou coleção", // Filter by project or collection
   "search.hint":
     'Pesquise o conteúdo das sessões. As arquivadas são excluídas por padrão — marque "Incluir arquivadas" para incluí-las.', // Search session content. Archived sessions are excluded by default.
   "search.includeArchived": "Incluir arquivadas", // Include archived

@@ -1415,6 +1415,9 @@ const ru: typeof en = {
 
   // ── Global session-content search ──
   "search.allPlaceholder": "Поиск по содержимому всех сессий…", // Search across all session content…
+  "search.inLocationPlaceholder": (name) => `Поиск в ${name}…`, // Search in {name}…
+  "search.allLocations": "Все проекты и коллекции", // All projects & collections
+  "search.filterLocation": "Фильтр по проекту или коллекции", // Filter by project or collection
   "search.hint":
     "Поиск по содержимому сессий. Архивные по умолчанию исключены — отметьте «Включая архив», чтобы добавить их.", // Search session content. Archived sessions are excluded by default.
   "search.includeArchived": "Включая архив", // Include archived

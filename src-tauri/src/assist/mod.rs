@@ -1,4 +1,6 @@
-//! `vapp`: lets the agent in any session operate the app; nothing runs until the user confirms it.
+//! `vapp`: lets the agent in any session operate the app. By default nothing runs until the user confirms
+//! it; passing `--yes` (`noConfirm: true`) runs validated actions directly, except actions that need a user
+//! choice such as picking among multiple import folders.
 //!
 //! Each app area ("domain") describes its actions, supplies a secret-free state summary, validates what
 //! the agent proposed, and runs the actions the backend owns. A request is checked whole before it is
@@ -198,9 +200,35 @@ pub(crate) fn catalog(app: &AppCtx, only: Option<&str>) -> Result<Value> {
     Ok(json!({"domains": contexts.iter().map(|(d, c)| json!({"id": d.id, "guide": d.guide, "state": c})).collect::<Vec<_>>()}))
 }
 
-/// For `vapp do`: validates the actions an agent proposes and, when all are valid, shows them in its
-/// session's view for the user to confirm. Nothing runs here.
-pub(crate) fn submit(app: &AppCtx, session_id: &str, summary: &str, actions: &Value) -> Result<Value> {
+/// Multi-candidate project imports always wait for the user to choose one folder, even with `--yes`.
+fn needs_choice(action: &Value) -> bool { action["candidates"].as_array().is_some_and(|c| c.len() > 1) }
+
+/// Executes one pending backend action in `plan` and records `done` or `failed`. Caller must hold
+/// `plans_lock()` and have checked that the action is pending, backend-owned, and has no unresolved `$name`.
+fn execute_backend(app: &AppCtx, plan: &mut Value, index: usize, args: &Value, origin: CallOrigin) -> Result<Option<String>> {
+    let action = action_at(plan, index)?.clone();
+    let domain = domain(action["domain"].as_str().unwrap_or_default()).ok_or("This action's area is unavailable")?;
+    action_at(plan, index)?["status"] = json!("running"); store(app, plan)?;
+    let result = (domain.run)(app, &action, args, origin);
+    let slot = action_at(plan, index)?;
+    match result {
+        Ok(value) => {
+            slot["status"] = json!("done");
+            if !slot["ref"].is_null() { slot["createdId"] = value["id"].clone(); }
+            slot["result"] = value;
+            Ok(None)
+        }
+        Err(error) => {
+            slot["status"] = json!("failed"); slot["error"] = json!(error.chars().take(2000).collect::<String>());
+            Ok(Some(error))
+        }
+    }
+}
+
+/// For `vapp do`: validates the actions an agent proposes. By default, valid actions wait in the session's
+/// view for confirmation; when `no_confirm` is true, eligible host actions run immediately and any remaining
+/// window actions are marked for automatic client execution.
+pub(crate) fn submit(app: &AppCtx, session_id: &str, summary: &str, actions: &Value, no_confirm: bool) -> Result<Value> {
     if session_id.is_empty() { return Err("Run vapp inside a VelaTerm session".into()); }
     // Unsaved draft terminals have no stored row yet; they are still the user's own sessions.
     let session = {
@@ -215,13 +243,34 @@ pub(crate) fn submit(app: &AppCtx, session_id: &str, summary: &str, actions: &Va
         // A request reaches the user whole or not at all, so they never see half a plan.
         Err(problems) => return Ok(json!({"accepted": false, "problems": problems})),
     };
-    let plan = json!({"id": uuid::Uuid::new_v4().to_string(), "createdAt": now(), "summary": summary,
+    let mut plan = json!({"id": uuid::Uuid::new_v4().to_string(), "createdAt": now(), "summary": summary,
         "source": {"sessionId": session_id, "sessionName": session.as_ref().map(|s| s.name.clone()).unwrap_or_default(), "agent": session.as_ref().map(|s| s.kind)},
         "actions": actions});
-    { let _guard = plans_lock()?; store(app, &plan)?; }
-    app.emit(REQUEST_EVENT, json!({"id": plan["id"], "sessionId": session_id}));
+    if no_confirm { plan["noConfirm"] = json!(true); }
+    {
+        let _guard = plans_lock()?;
+        store(app, &plan)?;
+        if no_confirm {
+            let count = plan["actions"].as_array().map_or(0, Vec::len);
+            let empty = json!({});
+            for index in 0..count {
+                link(&mut plan);
+                let action = plan["actions"][index].clone();
+                if action["status"] != "pending" || action["backend"] != true || needs_choice(&action) || !references(&action).is_empty() { continue; }
+                execute_backend(app, &mut plan, index, &empty, CallOrigin::Local)?;
+            }
+            link(&mut plan);
+            store(app, &plan)?;
+        }
+    }
     let mut result = outcome_of(&plan);
     result["accepted"] = json!(true);
+    if result["settled"] == true {
+        changed(app, &plan);
+    } else {
+        app.emit(REQUEST_EVENT, json!({"id": plan["id"], "sessionId": session_id, "noConfirm": no_confirm}));
+        if no_confirm { changed(app, &plan); }
+    }
     Ok(result)
 }
 
@@ -321,7 +370,9 @@ fn action_at(plan: &mut Value, index: usize) -> Result<&mut Value> {
 }
 
 fn changed(app: &AppCtx, plan: &Value) {
-    app.emit(CHANGED_EVENT, json!({"id": plan["id"], "sessionId": plan["source"]["sessionId"]}));
+    let knowledge_changed = plan["actions"].as_array().into_iter().flatten()
+        .any(|a| a["domain"] == "knowledge" && a["backend"] == true && a["status"] == "done");
+    app.emit(CHANGED_EVENT, json!({"id": plan["id"], "sessionId": plan["source"]["sessionId"], "knowledgeChanged": knowledge_changed}));
 }
 
 /// Runs backend-owned actions once each, in the order given. A started action is never run again, even
@@ -345,21 +396,7 @@ fn run(app: &AppCtx, args: &Value, origin: CallOrigin) -> Result<Value> {
         // Stranded by an earlier failure while this batch ran.
         if action["status"] != "pending" { first_error.get_or_insert_with(|| action["error"].as_str().unwrap_or_default().to_string()); continue; }
         if !references(&action).is_empty() { return finish(app, plan, Err("Confirm the earlier change this one depends on first".into())); }
-        let domain = domain(action["domain"].as_str().unwrap_or_default()).ok_or("This action's area is unavailable")?;
-        action_at(&mut plan, index)?["status"] = json!("running"); store(app, &plan)?;
-        let result = (domain.run)(app, &action, args, origin);
-        let slot = action_at(&mut plan, index)?;
-        match result {
-            Ok(value) => {
-                slot["status"] = json!("done");
-                if !slot["ref"].is_null() { slot["createdId"] = value["id"].clone(); }
-                slot["result"] = value;
-            }
-            Err(error) => {
-                slot["status"] = json!("failed"); slot["error"] = json!(error.chars().take(2000).collect::<String>());
-                first_error.get_or_insert(error);
-            }
-        }
+        if let Some(error) = execute_backend(app, &mut plan, index, args, origin)? { first_error.get_or_insert(error); }
     }
     link(&mut plan);
     // A single action reports its failure as an error, as before; a batch returns each outcome in the plan.
@@ -371,6 +408,24 @@ fn finish(app: &AppCtx, plan: Value, result: Result<()>) -> Result<Value> {
     store(app, &plan)?;
     changed(app, &plan);
     result.map(|_| plan)
+}
+
+/// Atomically claims one pending window action on a `noConfirm` plan so only one connected client executes it.
+fn claim(app: &AppCtx, args: &Value) -> Result<Value> {
+    let _guard = plans_lock()?;
+    let mut plan = load(app, required(args, "id")?)?;
+    if plan["noConfirm"] != true { return Err("Confirm the action before running it".into()); }
+    let index = args["index"].as_u64().ok_or("index is required")? as usize;
+    link(&mut plan);
+    let action = action_at(&mut plan, index)?.clone();
+    let domain = domain(action["domain"].as_str().unwrap_or_default()).ok_or("This action's area is unavailable")?;
+    if domain.backend.contains(&action["kind"].as_str().unwrap_or_default()) { return Err("This action runs on the host".into()); }
+    if action["status"] != "pending" || !references(&action).is_empty() {
+        return Ok(json!({"claimed": false, "plan": plan}));
+    }
+    action_at(&mut plan, index)?["status"] = json!("running");
+    let plan = finish(app, plan, Ok(()))?;
+    Ok(json!({"claimed": true, "plan": plan}))
 }
 
 /// Records the outcome of a client-owned action, or the user skipping any actions.
@@ -386,7 +441,8 @@ fn mark(app: &AppCtx, args: &Value) -> Result<Value> {
         let domain = domain(action["domain"].as_str().unwrap_or_default()).ok_or("This action's area is unavailable")?;
         // Host actions record their own outcome when they run; the user can still skip them beforehand.
         if status != "dismissed" && domain.backend.contains(&action["kind"].as_str().unwrap_or_default()) { return Err("This action runs on the host".into()); }
-        if action["status"] != "pending" { continue; }
+        let can_mark = if status == "dismissed" { action["status"] == "pending" } else { matches!(action["status"].as_str(), Some("pending" | "running")) };
+        if !can_mark { continue; }
         action["status"] = json!(status);
         if let Some(error) = args["error"].as_str() { action["error"] = json!(error.chars().take(2000).collect::<String>()); }
     }
@@ -399,6 +455,7 @@ pub fn dispatch(app: &AppCtx, cmd: &str, args: &Value, origin: CallOrigin) -> Re
         "assist_get" => { let _guard = plans_lock()?; load(app, required(args, "id")?) }
         "assist_pending" => { let _guard = plans_lock()?; pending(app, required(args, "sessionId")?) }
         "assist_run" => run(app, args, origin),
+        "assist_claim" => claim(app, args),
         "assist_mark" => mark(app, args),
         _ => Err(format!("Unknown command: {cmd}")),
     }

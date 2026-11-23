@@ -6,17 +6,18 @@ description: >-
   open sessions, open files, work with knowledge-base notes, or change app settings such as theme,
   language and font size. Use it whenever the user asks for something done in VelaTerm's own interface
   rather than in files or the shell, for example "put these sessions into groups by series" or "switch to
-  the dark theme". The user confirms every action in VelaTerm before it runs. Available only inside
-  VelaTerm-hosted local sessions.
-argument-hint: "catalog [area] | session list [project] | session create-group|rename|move|sort ... | do '<JSON actions>' | status <id>"
+  the dark theme". By default the user confirms every action in VelaTerm before it runs; pass `--yes`
+  when the user authorized unattended execution. Available only inside VelaTerm-hosted local sessions.
+argument-hint: "catalog [area] | session list [project] | session create-group|rename|move|sort ... [--yes] | do [--yes] '<JSON actions>' | status <id>"
 allowed-tools: Bash(vapp:*)
 ---
 
 # vapp
 
 `vapp` lets you act in the VelaTerm application: its sidebar tree, files, knowledge base and settings.
-You propose actions; VelaTerm shows them in this session's view, and the user confirms or skips them.
-Nothing runs without that confirmation.
+By default, you propose actions, VelaTerm shows them in this session's view, and the user confirms or
+skips them. Pass `--yes` (`-y`, `--no-confirm`) to run validated actions directly without waiting for a
+confirmation click (multi-folder `importProject` choices still ask the user to pick a folder).
 
 **Never work around `vapp`.** Do not read `vlx-local-link.json`, log in to the local web service, call the
 app's internal commands, or write to `vlx-term.db`. If `vapp` cannot do something, tell the user.
@@ -78,13 +79,27 @@ vapp do --summary "Group the lessons by series and switch to the dark theme" '[
 - Consecutive sidebar changes appear on one card that the user applies or skips together. Actions that
   open a form or view, and imports where the user picks among several folders, get a card each.
 
-## Waiting for the user
+## Confirmation and `--yes`
 
-A submitting command waits until the user has decided on every action (15 minutes by default,
+By default, a submitting command waits until the user has decided on every action (15 minutes by default,
 `--timeout` seconds to change it, `--no-wait` to return at once). Give the command a long enough timeout
 in your tool call, or run it in the background. It then prints each action's `status`: `done` (with
 `createdId` for new items), `failed` (with `error`) or `dismissed` (the user skipped it). An action that
 needs an item the user skipped or that failed to be created fails too.
+
+Add `--yes` (aliases `-y`, `--no-confirm`) on `vapp do` or `vapp session create-group|rename|move|sort`
+when the user asked to apply the change directly without confirmation (or authorized unattended
+reorganization):
+
+- The whole request is still validated first; if any action is invalid, nothing runs.
+- Backend actions (sidebar organization, single-folder `importProject`, knowledge-base `registerVault` /
+  `favorite`) run immediately on the host and return settled results at once.
+- Window actions (settings, opening files/sessions/forms) run automatically in the connected app window
+  without stealing session focus.
+- Multi-folder `importProject` (by `name` with several matches) still shows a card so the user can choose
+  which folder to import.
+- Do not pass `--yes` for destructive actions like `deleteNode` unless the user explicitly asked to run
+  them without confirmation.
 
 Exit code 2 means some actions were still undecided when the wait ended; check later with
 `vapp status <id>`. Do not resubmit the same actions while they are pending.

@@ -112,6 +112,11 @@ pub fn schedule_refresh(ctx: &AppCtx, bin: &str) {
     if (bin.contains('/') || bin.contains('\\')) && !Path::new(bin).is_file() {
         return;
     }
+    // Live `agy acp` sessions already publish their full model and effort catalogue via `remember_acp`,
+    // so avoid spawning a competing `agy models` subprocess that contends on the credential store.
+    if ctx.chat().has_live_antigravity() {
+        return;
+    }
     let key: RefreshKey = (ctx.data_dir().ok(), bin.to_string());
     {
         let mut map = refresh_states().lock().unwrap();
@@ -128,11 +133,14 @@ pub fn schedule_refresh(ctx: &AppCtx, bin: &str) {
     let ctx = ctx.clone();
     let bin = bin.to_string();
     std::thread::spawn(move || {
-        let parsed = super::model_catalog::run_list_command_with_timeout(
-            "antigravity",
-            &bin,
-            REFRESH_TIMEOUT,
-        )
+        let parsed = {
+            let _auth_gate = crate::agent::antigravity::acquire_auth_gate(&bin, &[]);
+            super::model_catalog::run_list_command_with_timeout(
+                "antigravity",
+                &bin,
+                REFRESH_TIMEOUT,
+            )
+        }
         .ok()
         .map(|text| parse_cli_output(&text))
         .filter(|models| !models.is_empty());

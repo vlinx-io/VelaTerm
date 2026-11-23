@@ -1406,6 +1406,9 @@ const es: typeof en = {
 
   // ── Global session-content search ──
   "search.allPlaceholder": "Buscar en todo el contenido de las sesiones…", // Search across all session content…
+  "search.inLocationPlaceholder": (name) => `Buscar en ${name}…`, // Search in {name}…
+  "search.allLocations": "Todos los proyectos y colecciones", // All projects & collections
+  "search.filterLocation": "Filtrar por proyecto o colección", // Filter by project or collection
   "search.hint":
     "Busca en el contenido de las sesiones. Las archivadas se excluyen por defecto; marca «Incluir archivadas» para añadirlas.", // Search session content. Archived sessions are excluded by default.
   "search.includeArchived": "Incluir archivadas", // Include archived

@@ -24,9 +24,10 @@ impl Fixture {
         repo::create_session(&conn, &project.id, None, "Planner", SessionKind::Codex, None, None, None, None, None).unwrap().id
     }
     /// Submits as a fresh session and returns the stored plan, or the refusal when any action is invalid.
-    fn submit(&self, actions: Value) -> Value {
+    fn submit(&self, actions: Value) -> Value { self.submit_with(actions, false) }
+    fn submit_with(&self, actions: Value, no_confirm: bool) -> Value {
         let session = self.session();
-        let submitted = submit(&self.app, &session, "request", &actions).unwrap();
+        let submitted = submit(&self.app, &session, "request", &actions, no_confirm).unwrap();
         if submitted["accepted"] == false { return submitted; }
         self.command("assist_get", json!({"id": submitted["id"]})).unwrap()
     }
@@ -217,13 +218,13 @@ fn large_state_is_shortened() {
 fn sessions_submit_validated_actions_and_read_their_outcome() {
     let fixture = Fixture::new();
     let session = fixture.session();
-    assert!(submit(&fixture.app, "", "x", &json!([{"domain": "settings", "kind": "openSettings"}])).is_err());
-    assert!(submit(&fixture.app, &session, "x", &json!([])).is_err());
+    assert!(submit(&fixture.app, "", "x", &json!([{"domain": "settings", "kind": "openSettings"}]), false).is_err());
+    assert!(submit(&fixture.app, &session, "x", &json!([]), false).is_err());
     // A draft terminal has no stored row; its request is still accepted, without a name.
-    let draft = submit(&fixture.app, "eph-draft", "x", &json!([{"domain": "settings", "kind": "openSettings"}])).unwrap();
+    let draft = submit(&fixture.app, "eph-draft", "x", &json!([{"domain": "settings", "kind": "openSettings"}]), false).unwrap();
     let saved = fixture.command("assist_get", json!({"id": draft["id"]})).unwrap();
     assert_eq!(saved["source"], json!({"sessionId": "eph-draft", "sessionName": "", "agent": null}));
-    let submitted = submit(&fixture.app, &session, "Open the terminal settings", &json!([{"domain": "settings", "kind": "openSettings", "page": "terminal"}])).unwrap();
+    let submitted = submit(&fixture.app, &session, "Open the terminal settings", &json!([{"domain": "settings", "kind": "openSettings", "page": "terminal"}]), false).unwrap();
     assert_eq!(submitted["accepted"], true);
     assert_eq!(submitted["settled"], false);
     let id = submitted["id"].as_str().unwrap();
@@ -349,4 +350,96 @@ fn list_shows_the_callers_project() {
     assert_eq!(listed["sessions"].as_array().unwrap().len(), 3);
     assert_eq!(listed["sessions"][0]["kind"], "claude");
     assert!(list(&fixture.app, Some("Nowhere"), "").is_err());
+}
+
+#[test]
+fn no_confirm_runs_host_actions_immediately_with_references() {
+    let fixture = Fixture::new();
+    let (project, sessions) = fixture.course();
+    let caller = fixture.session();
+    let submitted = submit(&fixture.app, &caller, "Group lessons", &json!([
+        {"kind": "createGroup", "projectId": "Course", "name": "Lessons", "as": "lessons"},
+        {"kind": "rename", "id": sessions[0], "name": "Lesson 10"},
+        {"kind": "rename", "id": sessions[1], "name": "Lesson 2"},
+        {"kind": "move", "id": "Lesson 10", "groupId": "$lessons"},
+        {"kind": "move", "id": &sessions[1][..8], "groupId": "$lessons"},
+        {"kind": "sort", "groupId": "$lessons", "by": "name"},
+    ]), true).unwrap();
+    assert_eq!(submitted["accepted"], true);
+    assert_eq!(submitted["settled"], true);
+    assert!(submitted["actions"].as_array().unwrap().iter().all(|a| a["status"] == "done"));
+    assert!(submitted["actions"][0]["createdId"].is_string());
+    assert_eq!(fixture.command("assist_pending", json!({"sessionId": caller})).unwrap(), json!([]));
+    let tree = fixture.tree();
+    let group = tree.groups.iter().find(|g| g.name == "Lessons").unwrap();
+    assert_eq!(group.project_id, project);
+    let mut inside = tree.sessions.iter().filter(|s| s.group_id.as_deref() == Some(group.id.as_str())).collect::<Vec<_>>();
+    inside.sort_by_key(|s| s.sort_order);
+    assert_eq!(inside.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Lesson 2", "Lesson 10"]);
+}
+
+#[test]
+fn no_confirm_still_refuses_invalid_plans_without_side_effects() {
+    let fixture = Fixture::new();
+    let collection = fixture.local("create_virtual_project", json!({"name": "Clients"})).unwrap();
+    let refused = fixture.submit_with(json!([
+        {"kind": "rename", "id": collection["id"], "name": "Office"},
+        {"kind": "rename", "id": "missing", "name": "x"},
+    ]), true);
+    assert_eq!(reasons(&refused), ["unknownItem"]);
+    assert_eq!(fixture.name_of(&collection["id"]), "Clients");
+}
+
+#[test]
+fn no_confirm_leaves_multi_choice_import_and_dependents_pending() {
+    let fixture = Fixture::new();
+    let parent_a = fixture.dir.join("a");
+    let parent_b = fixture.dir.join("b");
+    let anchor_a = parent_a.join("anchor-a");
+    let anchor_b = parent_b.join("anchor-b");
+    let dup_a = parent_a.join("shared-proj");
+    let dup_b = parent_b.join("shared-proj");
+    for d in [&anchor_a, &anchor_b, &dup_a, &dup_b] { std::fs::create_dir_all(d).unwrap(); }
+    // Import sibling anchor projects so `search` discovers both parent_a and parent_b.
+    fixture.local("import_project", json!({"rootPath": anchor_a})).unwrap();
+    fixture.local("import_project", json!({"rootPath": anchor_b})).unwrap();
+    let plan = fixture.submit_with(json!([
+        {"kind": "importProject", "name": "shared-proj", "as": "shared"},
+        {"kind": "createGroup", "projectId": "$shared", "name": "Docs"},
+    ]), true);
+    assert_eq!(plan["noConfirm"], true);
+    assert_eq!(statuses(&plan), ["pending", "pending"]);
+    assert_eq!(plan["actions"][0]["candidates"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn no_confirm_window_actions_claim_once_and_mark_done() {
+    let fixture = Fixture::new();
+    let (_, sessions) = fixture.course();
+    let caller = fixture.session();
+    let submitted = submit(&fixture.app, &caller, "Group and open", &json!([
+        {"kind": "createGroup", "projectId": "Course", "name": "Lessons", "as": "lessons"},
+        {"domain": "projects", "kind": "openSession", "sessionId": sessions[0]},
+    ]), true).unwrap();
+    assert_eq!(submitted["accepted"], true);
+    assert_eq!(submitted["settled"], false);
+    assert_eq!(submitted["actions"][0]["status"], "done");
+    assert_eq!(submitted["actions"][1]["status"], "pending");
+    let id = submitted["id"].as_str().unwrap();
+
+    // First client claims the window action; a second client sees it already claimed.
+    let first = fixture.command("assist_claim", json!({"id": id, "index": 1})).unwrap();
+    assert_eq!(first["claimed"], true);
+    assert_eq!(first["plan"]["actions"][1]["status"], "running");
+    let second = fixture.command("assist_claim", json!({"id": id, "index": 1})).unwrap();
+    assert_eq!(second["claimed"], false);
+
+    // Marking a running window action done settles the plan.
+    let marked = fixture.command("assist_mark", json!({"id": id, "index": 1, "status": "done"})).unwrap();
+    assert_eq!(marked["actions"][1]["status"], "done");
+    assert_eq!(outcome(&fixture.app, id).unwrap()["settled"], true);
+
+    // Regular plans without noConfirm cannot be claimed.
+    let normal = fixture.submit(json!([{"domain": "settings", "kind": "openSettings", "page": "terminal"}]));
+    assert!(fixture.command("assist_claim", json!({"id": normal["id"], "index": 0})).unwrap_err().contains("Confirm"));
 }

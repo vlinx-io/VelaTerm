@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 vi.mock("../../../ipc/chat", () => ({ chatSend: vi.fn(), resolveChatImage: vi.fn() }));
 import { chatSend } from "../../../ipc/chat";
-import { acknowledgeSubmissions, ChatVersions, createSubmission, deliverSubmission, retrySubmission, submissionsFor, useOutbox, unconfirmedSubmissionRows } from "./outbox";
+import { acknowledgeSubmissions, ChatVersions, createSubmission, deliverSubmission, reconcileConfirmedSubmissions, retrySubmission, submissionsFor, useOutbox, unconfirmedSubmissionRows } from "./outbox";
 
 beforeEach(() => {
   useOutbox.setState({ sessions: {} });
@@ -81,5 +81,22 @@ it("does not republish an already observed submission while its receipt is pendi
   acknowledgeSubmissions("s", [item.id]);
   expect(submissionsFor("s")).toBe(observed);
   resolve("sent"); await pending;
+  expect(submissionsFor("s")).toEqual([]);
+});
+
+it("retires confirmed submissions once a post-receipt tail snapshot has moved on", async () => {
+  vi.mocked(chatSend).mockResolvedValue("sent");
+  const item = createSubmission("s", "Hello", [], "queue");
+  await deliverSubmission("s", item);
+  const confirmedAt = submissionsFor("s")[0].confirmedAt!;
+  expect(confirmedAt).toBeTypeOf("number");
+  // An earlier snapshot cannot retire a submission confirmed after it started.
+  reconcileConfirmedSubmissions("s", confirmedAt - 1, [], true);
+  expect(submissionsFor("s")).toHaveLength(1);
+  // A non-authoritative empty snapshot marks the submission reconciled once without dropping it.
+  reconcileConfirmedSubmissions("s", confirmedAt, [], false);
+  expect(submissionsFor("s")[0].reconciled).toBe(true);
+  // An authoritative tail snapshot started at or after confirmation clears the stale optimistic ghost.
+  reconcileConfirmedSubmissions("s", confirmedAt, ["later-row"], true);
   expect(submissionsFor("s")).toEqual([]);
 });

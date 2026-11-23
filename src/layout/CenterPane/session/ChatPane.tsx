@@ -134,7 +134,7 @@ import {
 import "./session-view.css";
 import { onTransportReconnect, onTransportDisconnect } from "../../../ipc/transport";
 import { TranslationTime } from "../../../translation/Time";
-import { useOutbox, emptySubmissions, acknowledgeSubmissions, createSubmission, deliverSubmission, discardSubmission, retrySubmission, submissionsFor, ChatVersions, unconfirmedSubmissionRows } from "./outbox";
+import { useOutbox, emptySubmissions, acknowledgeSubmissions, createSubmission, deliverSubmission, discardSubmission, reconcileConfirmedSubmissions, retrySubmission, SENT_RECONCILE_MS, submissionsFor, ChatVersions, unconfirmedSubmissionRows } from "./outbox";
 import { cachedChat, cacheChat, mergeRows, reconcileChat, chatSyncMetrics, limitHistoryWindow } from "./chatCache";
 import { ChatSearch } from "./ChatSearch";
 import { HistorySearch } from "./HistorySearch";
@@ -321,6 +321,7 @@ export function ChatPane({
   // A sync that hit a stale cursor: the next one starts over without the reader id or the row anchor
   // remembered from an index the server has since rebuilt.
   const coldSync = useRef(false);
+  const tailSyncRequested = useRef(false);
   const refreshRef = useRef<(cold?: boolean) => Promise<void>>(async () => {});
   // The reader only keeps the server's index alive and lets it cancel a scan; page cursors are row ids.
   // A reader the server has already reclaimed is therefore dropped rather than reused.
@@ -339,6 +340,21 @@ export function ChatPane({
   useEffect(() => {
     acknowledgeSubmissions(session.id, [...rows, ...queue].map(row => row.id));
   }, [session.id, rows, queue, pendingSubmissions]);
+  // Reconcile against an authoritative snapshot if a confirmed submission's live row event never arrived.
+  useEffect(() => {
+    if (historyOnly || syncState !== "ready") return;
+    const known = new Set([...rows, ...queue].map(row => row.id));
+    const overdue = pendingSubmissions.filter(
+      item => (item.status === "sent" || item.status === "queued") && !item.reconciled && item.confirmedAt !== undefined && !known.has(item.id),
+    );
+    if (overdue.length === 0) return;
+    const earliest = Math.min(...overdue.map(item => item.confirmedAt!));
+    const delay = Math.max(0, SENT_RECONCILE_MS - (Date.now() - earliest));
+    const timer = window.setTimeout(() => {
+      void refreshRef.current();
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [historyOnly, syncState, rows, queue, pendingSubmissions]);
   const [steeringQueue, setSteeringQueue] = useState(false);
   const steeringQueueRef = useRef(false);
   /** The queued message being rewritten in place, and the text so far. */
@@ -654,21 +670,23 @@ export function ChatPane({
 
   /** Add or replace rows by id. The engine addresses rows this way so a message can be revised as it lands. */
   const applyRows = useCallback((incoming: ChatRow[]) => {
+    const pendingIds = new Set(submissionsFor(session.id).map(item => item.id));
     setRows(prev => {
       const known = snapshotRef.current;
-      if (known?.protocolVersion !== 2) return mergeRows(prev, incoming, known?.hasMore ?? false);
-      // A window parked mid-history only revises what it shows. A window that holds the end keeps every
-      // live row, wherever the reader is, and gives up its oldest rows instead.
-      const visible = known.hasNewer ? incoming.filter(row => prev.some(current => current.id === row.id)) : incoming;
-      const window = limitHistoryWindow(mergeRows(prev, visible, known.hasMore ?? false), known.hasNewer ? "older" : "newer");
+      if (known?.protocolVersion !== 2) return mergeRows(prev, incoming, known?.hasMore ?? false, pendingIds);
+      // A window parked mid-history only revises what it shows, unless the reader just pinned to the
+      // end to send a message while the tail refresh is still in flight.
+      const parked = Boolean(known.hasNewer) && !(pinnedRef.current && pendingIds.size > 0);
+      const visible = parked ? incoming.filter(row => prev.some(current => current.id === row.id)) : incoming;
+      const window = limitHistoryWindow(mergeRows(prev, visible, known.hasMore ?? false, pendingIds), parked ? "older" : "newer");
       // Dropping rows above a reader who scrolled up would slide the text out from under them.
       if (window.droppedBefore && !pinnedRef.current) prependScroll.current ??= readingAnchor();
       if (window.droppedBefore) setHasMore(true);
       if (window.droppedAfter) setHasNewer(true);
-      snapshotRef.current = { ...known, hasMore: known.hasMore || window.droppedBefore, hasNewer: known.hasNewer || window.droppedAfter };
+      snapshotRef.current = { ...known, hasMore: known.hasMore || window.droppedBefore, hasNewer: parked ? (known.hasNewer || window.droppedAfter) : window.droppedAfter };
       return window.rows;
     });
-  }, []);
+  }, [session.id]);
 
   // Follow the conversation, then start the agent. Subscribing first means nothing said during startup is
   // missed; the snapshot afterwards covers anything that happened before this pane existed.
@@ -706,9 +724,23 @@ export function ChatPane({
           setUserMessages(event.userMessages ?? []);
           {
             const window = snapshotRef.current?.protocolVersion === 2 ? limitHistoryWindow(event.rows, "newer") : undefined;
-            setRows(window?.rows ?? event.rows);
-            setHasMore((event.hasMore ?? false) || (window?.droppedBefore ?? false));
-            setHasNewer(window?.droppedAfter ?? false);
+            const nextRows = window?.rows ?? event.rows;
+            const nextHasMore = (event.hasMore ?? false) || (window?.droppedBefore ?? false);
+            const nextHasNewer = window?.droppedAfter ?? false;
+            setRows(nextRows);
+            setHasMore(nextHasMore);
+            setHasNewer(nextHasNewer);
+            if (snapshotRef.current) {
+              snapshotRef.current = {
+                ...snapshotRef.current,
+                userMessages: event.userMessages ?? [],
+                rows: nextRows,
+                hasMore: nextHasMore,
+                hasNewer: nextHasNewer,
+                rowsRevision: event.revision ?? snapshotRef.current.rowsRevision,
+                ...(event.epoch !== undefined ? { startedAt: event.epoch } : {}),
+              };
+            }
           }
           setPendingRewind((pending) =>
             pending && event.rows.some((row) => row.id === pending.rowId) ? pending : null,
@@ -725,12 +757,17 @@ export function ChatPane({
           versions.queue = 0;
           {
             const window = snapshotRef.current?.protocolVersion === 2 ? limitHistoryWindow(event.rows ?? [], "newer") : undefined;
-            setRows(window?.rows ?? event.rows ?? []);
-            setHasMore((event.hasMore ?? false) || (window?.droppedBefore ?? false));
-            setHasNewer(window?.droppedAfter ?? false);
+            const nextRows = window?.rows ?? event.rows ?? [];
+            const nextHasMore = (event.hasMore ?? false) || (window?.droppedBefore ?? false);
+            const nextHasNewer = window?.droppedAfter ?? false;
+            setRows(nextRows);
+            setHasMore(nextHasMore);
+            setHasNewer(nextHasNewer);
+            setQueue([]);
+            snapshotRef.current = snapshotRef.current?.protocolVersion === 2
+              ? { ...snapshotRef.current, userMessages: event.userMessages ?? [], rows: nextRows, queue: [], hasMore: nextHasMore, hasNewer: nextHasNewer, startedAt: event.epoch, rowsRevision: event.revision }
+              : undefined;
           }
-          setQueue([]);
-          snapshotRef.current = snapshotRef.current?.protocolVersion === 2 ? { ...snapshotRef.current, rows: [], queue: [], startedAt: event.epoch, rowsRevision: event.revision } : undefined;
           setEditing(null);
           setPermissions([]);
           setPendingPermissionMode(null);
@@ -923,13 +960,19 @@ export function ChatPane({
         // index the server has rebuilt, and repeating it would fail the same way every time. The wire
         // protocol this pane already speaks is kept.
         const protocol = snapshotRef.current?.protocolVersion;
+        const tailRequested = tailSyncRequested.current;
+        tailSyncRequested.current = false;
+        if (tailRequested && snapshotRef.current?.pendingLocation) {
+          snapshotRef.current = { ...snapshotRef.current, pendingLocation: undefined };
+        }
         const known = cold ? undefined : snapshotRef.current;
-        if (cold) initialLocation = false;
+        if (cold || tailRequested) initialLocation = false;
         const location = known?.pendingLocation ?? (initialLocation ? { ...historyLocation(session.id), ...(initialRowId ? {anchor:initialRowId} : {
           ...(initialMessageIndex!==undefined ? {messageIndex: initialMessageIndex} : {}), ...(initialRecordOffset!==undefined ? {recordOffset: initialRecordOffset} : {}) }) } : {});
         const hasLocation = Boolean(location.before || location.after || location.anchor || location.messageIndex!==undefined || location.recordOffset!==undefined);
         // Cleared when the requested location no longer exists and the recent rows are shown instead.
         let located = hasLocation;
+        const syncStartedAt = Date.now();
         let response: ChatSnapshot;
         try {
           response = await chatSnapshot(session.id, { historyOnly,
@@ -965,7 +1008,8 @@ export function ChatPane({
         indexReader.current = response.readJobId;
         initialLocation = false;
         const pendingEvents = buffered ?? [];
-        const snapshot = reconcileChat(response, rowsRef.current, pendingEvents);
+        const pendingIds = new Set(submissionsFor(session.id).map(item => item.id));
+        const snapshot = reconcileChat(response, rowsRef.current, pendingEvents, pendingIds);
         if (located) {
           pinnedRef.current = false;setAway(true);
           if (location.anchor || snapshot.locatedRowId) {const anchor=snapshot.locatedRowId ?? location.anchor!;pendingHistoryHit.current = { rowId: anchor, snippet: "", offset: 0 };setSearchTarget(anchor);}
@@ -983,6 +1027,12 @@ export function ChatPane({
           setHistoryCoverage(snapshot.coverage);
           snapshotRef.current = snapshot;
           cacheChat(cacheId, snapshotRef.current);
+          reconcileConfirmedSubmissions(
+            session.id,
+            syncStartedAt,
+            [...snapshot.rows, ...snapshot.queue].map(row => row.id),
+            !snapshot.hasNewer && Boolean(snapshot.hasMore || snapshot.rows.length > 0),
+          );
         }
         setSyncState("ready");
         synced = true;
@@ -1090,6 +1140,8 @@ export function ChatPane({
         if (coldSync.current && !disposed && !failed) {
           coldSync.current = false;
           void refresh(true);
+        } else if (tailSyncRequested.current && !disposed && !failed) {
+          void refresh();
         }
         // Events were rendered as they arrived, including when the snapshot failed.
         void events;
@@ -1682,6 +1734,7 @@ export function ChatPane({
     setAway(false);
     if (snapshotRef.current?.protocolVersion === 2 && snapshotRef.current.hasNewer) {
       window.history.pushState(null, "", historyPageURL(session.id, "after"));
+      tailSyncRequested.current = true;
       void refreshRef.current();
     }
     const el = scrollRef.current;

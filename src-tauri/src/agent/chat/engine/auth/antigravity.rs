@@ -155,6 +155,7 @@ pub(in crate::agent::chat::engine) fn require(
     session_id: &str,
     proc: &Arc<ChatProcess>,
 ) {
+    crate::agent::antigravity::invalidate_readiness_cache();
     {
         let mut extras = proc.extras.lock().unwrap();
         if extras.auth.as_ref().is_some_and(AuthState::active) {
@@ -303,6 +304,9 @@ pub(in crate::agent::chat::engine) fn start(
         {
             finish(&app, &session_id, &proc, outcome);
             if outcome == "success" {
+                crate::agent::antigravity::bump_auth_epoch();
+                crate::agent::antigravity::invalidate_readiness_cache();
+                app.chat().clear_antigravity_401_recovery(&session_id);
                 // The running ACP server caches its pre-login auth state; release so the next message starts fresh.
                 release(&app, &session_id, &proc);
             } else {
@@ -431,6 +435,8 @@ pub(in crate::agent::chat::engine) fn logout(
         }),
     );
     emit_extras(app, session_id, proc);
+    crate::agent::antigravity::bump_auth_epoch();
+    crate::agent::antigravity::invalidate_readiness_cache();
     release(app, session_id, proc);
     result
         .map(|_| ())
@@ -462,6 +468,16 @@ pub(in crate::agent::chat::engine) fn restore(previous: &ChatProcess, proc: &Cha
     *proc.agent_session_id.lock().unwrap() = previous.agent_session_id.lock().unwrap().clone();
     *proc.user_targets.lock().unwrap() = previous.user_targets.lock().unwrap().clone();
     proc.turn.lock().unwrap().waiting = previous.turn.lock().unwrap().waiting.clone();
+    proc.release_when_idle.store(
+        previous.release_when_idle.load(Ordering::Relaxed),
+        Ordering::Relaxed,
+    );
+    {
+        let mut prev_acp = previous.acp.lock().unwrap();
+        let mut next_acp = proc.acp.lock().unwrap();
+        next_acp.suppress_replay_401 = prev_acp.recovering_401;
+        next_acp.pending_401_continuation = prev_acp.pending_401_continuation.take();
+    }
     proc.compactions.store(
         previous.compactions.load(Ordering::Relaxed),
         Ordering::Relaxed,

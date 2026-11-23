@@ -123,6 +123,10 @@ enum ReactiveAction {
         name: String,
         args: Value,
     },
+    RecoverAuth401 {
+        step_index: Option<u64>,
+        message: String,
+    },
 }
 
 enum ResolvedReactiveAction {
@@ -140,6 +144,10 @@ enum ResolvedReactiveAction {
         row_id: String,
         name: String,
         args: Value,
+    },
+    RecoverAuth401 {
+        step_index: Option<u64>,
+        message: String,
     },
 }
 
@@ -586,6 +594,12 @@ pub(super) fn refresh(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, i
             ResolvedReactiveAction::RecoverStalledCall { row_id, name, args } => {
                 super::acp::recover_stalled_tool(app, session_id, proc, &row_id, &name, &args);
             }
+            ResolvedReactiveAction::RecoverAuth401 { step_index, message } => {
+                let ids = proc.acp.lock().unwrap().tasks.take_aborted_reactive_rows();
+                settle_rows(proc, &ids);
+                super::acp::handle_reactive_401(app, session_id, proc, step_index, &message);
+                ended_reactive = true;
+            }
         }
     }
     ended_reactive
@@ -638,6 +652,9 @@ fn resolve_reactive_actions(
             ReactiveAction::EndTurn(ids) => out.push(ResolvedReactiveAction::EndTurn(ids)),
             ReactiveAction::RecoverStalledCall { row_id, name, args } => {
                 out.push(ResolvedReactiveAction::RecoverStalledCall { row_id, name, args });
+            }
+            ReactiveAction::RecoverAuth401 { step_index, message } => {
+                out.push(ResolvedReactiveAction::RecoverAuth401 { step_index, message });
             }
         }
     }
@@ -935,13 +952,17 @@ pub(super) fn emit_unread_wake(
     adopt_agent_turn(app, session_id, proc);
 }
 
-fn pending(proc: &Arc<ChatProcess>) -> bool {
+pub(super) fn pending(proc: &Arc<ChatProcess>) -> bool {
     proc.extras
         .lock()
         .unwrap()
         .background_tasks
         .iter()
         .any(|task| task.listed && !task.finished())
+}
+
+pub(super) fn has_background_activity(proc: &Arc<ChatProcess>) -> bool {
+    pending(proc) || settling_active(proc) || reactive_active(proc)
 }
 
 fn settling_active(proc: &Arc<ChatProcess>) -> bool {
@@ -1122,7 +1143,14 @@ fn scan_transcript(
                             finished,
                         )));
                     } else if is_error && !content.is_empty() {
-                        if let Some(idx) = step_index {
+                        if crate::agent::chat::antigravity_protocol::is_oauth_401_error(content) {
+                            scanner.in_reactive_turn = false;
+                            scanner.reactive_calls.clear();
+                            reactive.push(ReactiveAction::RecoverAuth401 {
+                                step_index,
+                                message: content.to_string(),
+                            });
+                        } else if let Some(idx) = step_index {
                             reactive.push(ReactiveAction::Upsert(ChatRow::Error {
                                 id: step_id(idx),
                                 message: content.to_string(),

@@ -62,3 +62,17 @@ it("says when sessions were still being indexed so a short result is not mistake
   expect(getByRole("status").textContent).toBe("72 matches · 12 sessions · 3 sessions are still being indexed, so results may be incomplete.");
   rerender(<ContentSearchControls search={search(0)} />);expect(getByRole("status").textContent).toBe("72 matches · 12 sessions");
 });
+
+it("forwards project/collection filter changes to startContentSearch and cancels the prior job",async()=>{
+  api.start.mockResolvedValueOnce({jobId:"all",status:"pending",scannedSessions:0,scannedBytes:0})
+    .mockResolvedValueOnce({jobId:"col",status:"pending",scannedSessions:0,scannedBytes:0});
+  api.page.mockResolvedValueOnce(ready("all","first")).mockResolvedValueOnce(ready("col","filtered"));
+  const {result,rerender}=renderHook(({projectId}:{projectId?:string})=>useContentSearch("live",undefined,projectId),{initialProps:{projectId:undefined as string|undefined}});
+  act(()=>result.current.setQuery("needle"));await advance(250);
+  expect(api.start).toHaveBeenLastCalledWith("needle","live",undefined);
+  expect(result.current.results[0].name).toBe("first");
+  rerender({projectId:"col-work"});await advance(250);
+  expect(api.cancel).toHaveBeenCalledWith("all");
+  expect(api.start).toHaveBeenLastCalledWith("needle","live","col-work");
+  expect(result.current.results[0].name).toBe("filtered");
+});

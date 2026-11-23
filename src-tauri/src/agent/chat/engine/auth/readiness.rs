@@ -84,7 +84,7 @@ pub(in crate::agent::chat::engine) fn check(app: &AppCtx, session_id: &str) -> R
     let args = crate::agent::inject::split_extra_args(Some(&session_settings::without_selection_args(kind, session.agent_args.as_deref())));
     let cmd = prepared(&bin);
     let signed_in = match kind {
-        SessionKind::Antigravity => antigravity(cmd, &args),
+        SessionKind::Antigravity => antigravity(app, &bin, cmd, &args),
         SessionKind::Zcode => zcode(&cmd, &bin, cwd.as_deref()),
         SessionKind::Claude => claude(cmd, &args),
         SessionKind::Codex => codex(cmd, &args),
@@ -219,15 +219,23 @@ fn cursor_signed_in(output: &str) -> Option<bool> {
 ///
 /// `session/list` runs through the same auth gate as `session/new`, returning JSON-RPC `-32000` when no
 /// credentials are active and a session list when signed in via OAuth, an API key, or ADC.
-fn antigravity(mut cmd: Command, args: &[String]) -> Option<bool> {
+fn antigravity(app: &AppCtx, bin: &str, mut cmd: Command, args: &[String]) -> Option<bool> {
+    let settings_args = super::antigravity::settings_args(args);
+    if let Some(live) = app.chat().antigravity_live_signed_in(bin, &settings_args) {
+        return Some(live);
+    }
     let launch = crate::agent::chat::acp_protocol::launch_args(SessionKind::Antigravity, None, None, args).ok()?;
     cmd.args(launch);
     let input = [
         crate::agent::chat::acp_protocol::initialize("1"),
         crate::agent::chat::acp_protocol::session_list(ANTIGRAVITY_LIST_REQUEST),
     ];
-    let text = output(cmd, &input, is_antigravity_list_answer)?;
-    antigravity_signed_in(&text)
+    let gate_args = settings_args.clone();
+    crate::agent::antigravity::cached_or_probe_readiness(bin, &settings_args, move || {
+        let _auth_gate = crate::agent::antigravity::acquire_auth_gate(bin, &gate_args);
+        let text = output(cmd, &input, is_antigravity_list_answer)?;
+        antigravity_signed_in(&text)
+    })
 }
 
 fn is_antigravity_list_answer(line: &str) -> bool {

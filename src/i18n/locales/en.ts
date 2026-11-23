@@ -1402,6 +1402,9 @@ const en = {
 
   // ── Global session-content search ──
   "search.allPlaceholder": "Search across all session content…",
+  "search.inLocationPlaceholder": (name: string) => `Search in ${name}…`,
+  "search.allLocations": "All projects & collections",
+  "search.filterLocation": "Filter by project or collection",
   "search.hint":
     "Search session content. Archived sessions are excluded by default — tick 'Include archived' to add them.",
   "search.includeArchived": "Include archived",

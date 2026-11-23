@@ -1,3 +1,12 @@
+## v0.3.5 — 2026-11-23
+
+- 🔎 Die globale Sitzungssuche ermöglicht es jetzt, Ergebnisse nach einem bestimmten Projekt oder einer Sammlung einschließlich verschachtelter Sammlungen und Projekte zu filtern.
+- 🪐 Das gleichzeitige Öffnen mehrerer Antigravity-Gespräche löst keine Anmeldedaten-Konflikte oder doppelten Anmeldeaufforderungen mehr aus, und länger inaktive Sitzungen erneuern abgelaufene Anmeldedaten automatisch, statt mitten im Durchgang fehlzuschlagen.
+- 🔄 Antigravity-Gespräche erholen sich jetzt automatisch von Modellfehlern beim Kaltstart und vorübergehenden Upstream-Fehlern, ohne den Durchgang abzubrechen oder bereits abgeschlossene Werkzeugergebnisse zu verlieren.
+- 🤖 `vapp` akzeptiert jetzt `--yes` (`-y` / `--no-confirm`), um Aktionen direkt ohne Bestätigungskarte auszuführen, und über `vapp` vorgenommene Änderungen an der Wissensdatenbank aktualisieren deren Ansicht automatisch.
+- 💬 `vtell` kann jetzt Nachrichten an jede Agent-Sitzung in der Gesprächsansicht senden — einschließlich Antigravity, ZCode, DeepSeek, Copilot, Cursor, Kimi und Grok —, wobei Antigravity auch `--steer`-Einwürfe unterstützt.
+- ✉️ Das Senden einer Nachricht beim Ansehen älterer Gesprächsverläufe oder nach einem verpassten Live-Update lässt die Nachricht nicht mehr auf „Gesendet“ hängen.
+
 ## v0.3.4 — 2026-11-22
 
 - 🪐 Antigravity-Gespräche enthalten jetzt eine integrierte Modellliste mit Gemini 4 Neon und Orchestrator (Neon), aktualisieren verfügbare Modelle beim Öffnen im Hintergrund und wechseln auch bei länger laufenden Sitzungen nahtlos zu neu veröffentlichten Modellen.

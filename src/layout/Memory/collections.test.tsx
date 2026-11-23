@@ -98,7 +98,7 @@ it("searches archived content from the query parameter and keeps it in the URL",
   render(<MemoryCollections sessionId="" />);
   expect(screen.getByRole("textbox", { name: "Search archived content…" })).toHaveProperty("value", "needle");
   expect(await screen.findByText("Archived one")).toBeTruthy();
-  await waitFor(() => expect(api.search).toHaveBeenCalledWith("needle", "archived"));
+  await waitFor(() => expect(api.search).toHaveBeenCalledWith("needle", "archived", undefined));
   fireEvent.change(screen.getByRole("textbox", { name: "Search archived content…" }), { target: { value: "tea" } });
   await waitFor(() => expect(new URLSearchParams(location.search).get("memoryCollectionQuery")).toBe("tea"));
 });

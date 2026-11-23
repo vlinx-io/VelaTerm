@@ -1394,6 +1394,9 @@ const ko: typeof en = {
 
   // ── Global session-content search ──
   "search.allPlaceholder": "모든 세션 내용 검색…", // Search across all session content…
+  "search.inLocationPlaceholder": (name) => `${name}에서 검색…`, // Search in {name}…
+  "search.allLocations": "모든 프로젝트 및 컬렉션", // All projects & collections
+  "search.filterLocation": "프로젝트 또는 컬렉션으로 필터", // Filter by project or collection
   "search.hint":
     "세션 내용을 검색합니다. 보관된 세션은 기본적으로 제외되며 '보관 세션 포함'을 선택하면 추가됩니다.", // Search session content. Archived sessions are excluded by default.
   "search.includeArchived": "보관 세션 포함", // Include archived

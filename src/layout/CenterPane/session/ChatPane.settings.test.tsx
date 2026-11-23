@@ -2538,3 +2538,112 @@ it("shows a clean localized error without ANSI codes or duplication when Codex f
   expect(container.textContent).not.toContain("thread-store conflict");
   expect(container.textContent).not.toContain("Error: Another Codex");
 });
+
+it("accepts the submitted user row immediately when sending from a parked v2 history window", async () => {
+  snapshotOverrides = {
+    protocolVersion: 2,
+    historyGeneration: "generation",
+    coverage: "complete",
+    hasMore: true,
+    hasNewer: true,
+    rows: [{ kind: "user", id: "parked", text: "Older parked message" }],
+  };
+  let releaseTailSnapshot!: (snapshot: ChatSnapshot) => void;
+  const previous = vi.mocked(invoke).getMockImplementation()!;
+  let snapshotCount = 0;
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    if (command === "chat_snapshot") {
+      snapshotCount += 1;
+      if (snapshotCount > 1) {
+        return new Promise<ChatSnapshot>((resolve) => { releaseTailSnapshot = resolve; }) as Promise<never>;
+      }
+    }
+    return previous(command, args);
+  });
+  const { container } = await mountPane();
+  await screen.findByText("Load newer messages");
+  const input = container.querySelector<HTMLTextAreaElement>(".sv-box textarea")!;
+  fireEvent.change(input, { target: { value: "Follow-up from history" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith("chat_send", expect.anything()));
+  const messageId = vi.mocked(invoke).mock.calls.find(([command]) => command === "chat_send")![1]!.messageId as string;
+
+  // Even before the tail snapshot resolves, the live confirmation row and reply are accepted and clear Sent.
+  act(() => {
+    eventCallback({
+      type: "rows",
+      epoch: 1,
+      revision: 2,
+      rows: [
+        { kind: "user", id: messageId, text: "Follow-up from history", at: 1_700_000_000_000 },
+        { kind: "assistant", id: "a-live", text: "Live answer", streaming: false },
+      ],
+    });
+  });
+  await screen.findByText("Live answer");
+  expect(screen.queryByText("Sent")).toBeNull();
+  await act(async () => {
+    releaseTailSnapshot?.({
+      submissionReceipts: true,
+      running: true,
+      model: "old-model",
+      mode: "default",
+      rows: [
+        { kind: "user", id: messageId, text: "Follow-up from history", at: 1_700_000_000_000 },
+        { kind: "assistant", id: "a-live", text: "Live answer", streaming: false },
+      ],
+      queue: [],
+      permissions: [],
+      commands: [],
+      configKeys: [],
+    });
+  });
+});
+
+it("reconciles a Sent submission via snapshot when its live row event was missed", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    let sentMessageId: string | null = null;
+    const previous = vi.mocked(invoke).getMockImplementation()!;
+    vi.mocked(invoke).mockImplementation((command, args) => {
+      if (command === "chat_send") {
+        sentMessageId = (args as { messageId: string }).messageId;
+        return Promise.resolve("sent") as Promise<never>;
+      }
+      if (command === "chat_snapshot" && sentMessageId) {
+        return Promise.resolve({
+          submissionReceipts: true,
+          running: true,
+          startedAt: 1,
+          rowsRevision: 5,
+          model: "old-model",
+          mode: "default",
+          rows: [
+            { kind: "user", id: sentMessageId, text: "Missed live frame", at: 1_700_000_000_000 },
+            { kind: "assistant", id: "a-1", text: "Assistant reply", streaming: false },
+          ],
+          queue: [],
+          permissions: [],
+          commands: [],
+          configKeys: [],
+        }) as Promise<never>;
+      }
+      return previous(command, args);
+    });
+    const { container } = await mountPane();
+    const input = container.querySelector<HTMLTextAreaElement>(".sv-box textarea")!;
+    fireEvent.change(input, { target: { value: "Missed live frame" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(screen.getByText("Sent")).toBeTruthy());
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(900);
+    });
+    await waitFor(() => expect(screen.queryByText("Sent")).toBeNull());
+    await screen.findByText("Assistant reply");
+    const bodies = [...container.querySelectorAll(".sv-msg-body")].map(el => el.textContent?.trim());
+    expect(bodies).toEqual(["Missed live frame", "Assistant reply"]);
+  } finally {
+    vi.useRealTimers();
+  }
+});

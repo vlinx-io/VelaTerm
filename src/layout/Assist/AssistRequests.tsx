@@ -7,7 +7,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import Icons from "../../components/Icons";
 import Select from "../../components/Select";
 import { useT } from "../../i18n";
-import { assistGet, assistMark, assistPending, assistRun, assistRunAll, assistSkipAll, type AssistAction, type AssistPlan } from "../../ipc/assist";
+import { assistClaim, assistGet, assistMark, assistPending, assistRun, assistRunAll, assistSkipAll, type AssistAction, type AssistPlan } from "../../ipc/assist";
 import { onAssistChanged, onAssistRequest } from "../../ipc/events";
 import { useTermStore } from "../../store/termStore";
 import { afterHostAction, describeAction, label, performAction, references, waitsForEarlier } from "./actions";
@@ -20,18 +20,55 @@ const subscribe = (notify: () => void) => { listeners.add(notify); return () => 
 
 const refresh = () => { revision += 1; listeners.forEach(notify => notify()); };
 
+/** Runs client-owned actions of a `noConfirm` plan in order, claiming each one so only one client executes it. */
+async function runNoConfirmWindowActions(id: string): Promise<AssistPlan | null> {
+  const initial = await assistGet(id).catch(() => null);
+  if (!initial || !initial.noConfirm) return initial;
+  let plan: AssistPlan = initial;
+  for (let index = 0; index < plan.actions.length; index += 1) {
+    const action = plan.actions[index];
+    if (action.backend || action.status !== "pending" || waitsForEarlier(action)) continue;
+    const claimed = await assistClaim(id, index).catch(() => null);
+    if (!claimed) continue;
+    plan = claimed.plan;
+    if (!claimed.claimed) continue;
+    try {
+      await performAction(plan.actions[index]);
+      plan = await assistMark(id, index, "done");
+    } catch (e) {
+      plan = await assistMark(id, index, "failed", message(e)).catch(() => plan);
+    }
+  }
+  return plan;
+}
+
 /** Registered once at the app root: a new request refreshes the lanes and brings its session into view;
+ *  `noConfirm` plans run their window actions directly without stealing focus unless user choice remains;
  *  decisions made in another client refresh them too. */
 export function AssistRequestListener() {
   useEffect(() => {
     const stops: (() => void)[] = []; let live = true;
     const keep = (stop: () => void) => { if (live) stops.push(stop); else stop(); };
-    void onAssistRequest(({ sessionId }) => {
-      refresh();
+    const focusSession = (sessionId: string) => {
       const state = useTermStore.getState();
       if (state.activeSessionId !== sessionId && state.sessions.some(session => session.id === sessionId)) state.openSession(sessionId);
+    };
+    void onAssistRequest(({ id, sessionId, noConfirm }) => {
+      if (noConfirm) {
+        void runNoConfirmWindowActions(id).then((plan) => {
+          if (!live) return;
+          refresh();
+          if (plan?.actions.some(action => action.status === "pending")) focusSession(sessionId);
+        });
+        return;
+      }
+      refresh();
+      focusSession(sessionId);
     }).then(keep);
-    void onAssistChanged(refresh).then(keep);
+    void onAssistChanged((change) => {
+      if (change.knowledgeChanged) window.dispatchEvent(new Event("notebook:vaultsChanged"));
+      refresh();
+    }).then(keep);
     return () => { live = false; stops.forEach(stop => stop()); };
   }, []);
   return null;

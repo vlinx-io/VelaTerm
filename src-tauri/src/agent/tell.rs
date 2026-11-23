@@ -91,7 +91,7 @@ pub fn send(app: &AppCtx, req: &Request) -> Result<Value, String> {
     if sender.id == target {
         return Err("Choose another session as the target".into());
     }
-    if recipient.engine != "chat" || !super::plan_execute::supported(recipient.kind) {
+    if recipient.engine != "chat" || !recipient.kind.supports_chat() {
         return Err("The target must be a native chat session".into());
     }
     let fingerprint = format!(

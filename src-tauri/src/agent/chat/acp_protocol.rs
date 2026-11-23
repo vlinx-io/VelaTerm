@@ -254,23 +254,69 @@ pub fn api_key_missing(error: &Value) -> bool {
     error_text(error).to_ascii_lowercase().contains("no api key")
 }
 
-/// Whether a prompt error means Antigravity's in-memory model catalogue has not finished loading
+/// Whether an error message means Antigravity's in-memory model catalogue has not finished loading
 /// right after `agy acp` booted (e.g., `FetchAvailableModels` is still in flight).
-pub fn antigravity_model_not_ready(error: &Value) -> bool {
-    let text = error_text(error).to_ascii_lowercase();
-    if !text.contains("failed to construct executor") {
+pub fn antigravity_model_not_ready_text(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    if !lower.contains("failed to construct executor") {
         return false;
     }
-    text.contains("unknown model key")
-        || text.contains("plan model not specified")
-        || (text.contains("model not found") && text.contains("model_placeholder_"))
+    lower.contains("unknown model key")
+        || lower.contains("plan model not specified")
+        || (lower.contains("model not found") && lower.contains("model_placeholder_"))
+}
+
+/// Whether a JSON-RPC prompt error means Antigravity's in-memory model catalogue has not finished
+/// loading right after `agy acp` booted.
+pub fn antigravity_model_not_ready(error: &Value) -> bool {
+    antigravity_model_not_ready_text(&error_text(error))
+}
+
+/// Whether a cold-start Antigravity error message failed specifically because the new session has
+/// no active plan model assigned yet.
+pub fn antigravity_plan_model_missing_text(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("failed to construct executor") && lower.contains("plan model not specified")
 }
 
 /// Whether a cold-start Antigravity prompt failed specifically because the new session has no
 /// active plan model assigned yet.
 pub fn antigravity_plan_model_missing(error: &Value) -> bool {
-    let text = error_text(error).to_ascii_lowercase();
-    text.contains("failed to construct executor") && text.contains("plan model not specified")
+    antigravity_plan_model_missing_text(&error_text(error))
+}
+
+/// Whether an ACP JSON-RPC error reports an Antigravity Google OAuth 401 credential failure.
+pub fn antigravity_401_error(error: &Value) -> bool {
+    super::antigravity_protocol::is_oauth_401_error(&error_text(error))
+}
+
+/// Whether an ACP JSON-RPC error reports a transient Antigravity upstream API or transport error.
+pub fn antigravity_transient_error(error: &Value) -> bool {
+    super::antigravity_protocol::is_transient_upstream_error(&error_text(error))
+}
+
+/// Plain text carried by a `session/update` chunk notification, if any.
+pub fn update_text(update: &Value) -> Option<String> {
+    content_text(update.get("content"))
+}
+
+/// Extract the underlying error message when `agy acp` delivers a cold-start executor error as a
+/// warning-prefixed `agent_message_chunk` (`\n⚠ failed to construct executor: ...\n`) instead of a
+/// JSON-RPC error response.
+pub fn antigravity_cold_model_chunk_error(text: &str) -> Option<String> {
+    let body = text.trim().strip_prefix('⚠')?.trim();
+    let mut lines = body.lines().map(str::trim).filter(|line| !line.is_empty());
+    let first = lines.next()?;
+    if !first.to_ascii_lowercase().starts_with("failed to construct executor") {
+        return None;
+    }
+    if !antigravity_model_not_ready_text(first) {
+        return None;
+    }
+    if lines.any(|line| !line.to_ascii_lowercase().starts_with("error id:")) {
+        return None;
+    }
+    Some(first.to_string())
 }
 
 /// The readable part of a JSON-RPC error, preferring the detail an agent puts in `data`.
@@ -1332,14 +1378,21 @@ impl Mapper {
                     rows.extend(self.finish());
                     return rows;
                 }
-                // A replayed user message starts a turn, as a live prompt does.
-                if !matches!(self.open, Some((Block::User, _, _, _))) {
-                    rows.extend(self.finish());
-                    self.begin_turn();
-                }
                 if let Some(text) = content_text(update.get("content")) {
+                    if super::antigravity_protocol::is_internal_recovery_prompt(text.trim()) {
+                        return rows;
+                    }
+                    // A replayed user message starts a turn, as a live prompt does.
+                    if !matches!(self.open, Some((Block::User, _, _, _))) {
+                        rows.extend(self.finish());
+                        self.begin_turn();
+                    }
                     rows.push(self.append(Block::User, &text, None));
                 } else if let Some(image) = content_image(update.get("content")) {
+                    if !matches!(self.open, Some((Block::User, _, _, _))) {
+                        rows.extend(self.finish());
+                        self.begin_turn();
+                    }
                     rows.push(self.append_user_image(image));
                 }
             }
@@ -1831,6 +1884,36 @@ mod tests {
         assert!(!antigravity_model_not_ready(&json!({"code": -32602, "message": "Unknown model ID: gemini-99"})));
         assert!(!antigravity_model_not_ready(&json!({"code": -32000, "message": "Authentication required"})));
         assert!(!antigravity_model_not_ready(&json!({"code": -32603, "message": "failed to construct executor: permission denied"})));
+
+        assert_eq!(
+            antigravity_cold_model_chunk_error("\n⚠ failed to construct executor: plan model not specified; you must specify a valid model\n").as_deref(),
+            Some("failed to construct executor: plan model not specified; you must specify a valid model"),
+        );
+        assert_eq!(
+            antigravity_cold_model_chunk_error("\n⚠ failed to construct executor: unknown model key MODEL_PLACEHOLDER_M532: model not found\nError ID: edc0f379-1\n").as_deref(),
+            Some("failed to construct executor: unknown model key MODEL_PLACEHOLDER_M532: model not found"),
+        );
+        assert!(antigravity_cold_model_chunk_error("failed to construct executor: plan model not specified; you must specify a valid model").is_none());
+        assert!(antigravity_cold_model_chunk_error("The error was ⚠ failed to construct executor: plan model not specified").is_none());
+        assert!(antigravity_cold_model_chunk_error("⚠ failed to construct executor: plan model not specified\nHere is why it happened.").is_none());
+        assert!(antigravity_cold_model_chunk_error("⚠ failed to construct executor: permission denied").is_none());
+
+        assert!(antigravity_transient_error(&json!({
+            "code": -32603,
+            "message": "generating and executing: NOT_FOUND (code 404): Requested entity was not found."
+        })));
+        assert!(antigravity_transient_error(&json!({
+            "code": -32603,
+            "message": "modelAPI stream error: INTERNAL (code 500): Internal error encountered."
+        })));
+        assert!(!antigravity_transient_error(&json!({
+            "code": -32603,
+            "message": "RESOURCE_EXHAUSTED (code 429): Resource has been exhausted."
+        })));
+        assert!(!antigravity_transient_error(&json!({
+            "code": -32603,
+            "message": "UNAUTHENTICATED (code 401): Request had invalid authentication credentials."
+        })));
     }
 
     #[test]

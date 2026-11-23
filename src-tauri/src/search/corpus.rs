@@ -13,7 +13,7 @@
 //!
 //! The file can be deleted at any time: it is rebuilt from the original recordings.
 
-use std::collections::HashMap;
+use std::collections::{HashMap,HashSet};
 use std::io::Read;
 use std::path::{Path,PathBuf};
 use std::sync::{Arc,Mutex,OnceLock};
@@ -158,18 +158,32 @@ pub(super) fn remove_earlier(app:&AppCtx) {
 }
 
 #[derive(Clone)]
-pub(super) struct Session {pub id:String,pub name:String,pub kind:SessionKind,pub native:Option<String>,pub archived:bool}
+pub(super) struct Session {pub id:String,pub project_id:String,pub name:String,pub kind:SessionKind,pub native:Option<String>,pub archived:bool}
 
 /// Sessions in id order after `after`, 64 at a time, with every text field bounded before it is read.
 pub(super) fn sessions(app:&AppCtx,after:Option<&str>) -> Result<Vec<Session>,String> {
     let conn=app.db().conn.lock().unwrap();
-    let mut statement=conn.prepare("SELECT substr(id,1,128),substr(name,1,4096),kind,
+    let mut statement=conn.prepare("SELECT substr(id,1,128),substr(project_id,1,128),substr(name,1,4096),kind,
         substr(COALESCE(agent_session_id,legacy_agent_session_id),1,4096),archived_at IS NOT NULL,
-        length(CAST(id AS BLOB))>128 OR length(CAST(name AS BLOB))>4096
+        length(CAST(id AS BLOB))>128 OR length(CAST(project_id AS BLOB))>128 OR length(CAST(name AS BLOB))>4096
             OR length(CAST(COALESCE(agent_session_id,legacy_agent_session_id) AS BLOB))>4096
         FROM sessions WHERE (?1 IS NULL OR id>?1) ORDER BY id LIMIT 64").map_err(sql)?;
-    let rows=statement.query_map([after],|r|Ok((Session {id:r.get(0)?,name:r.get(1)?,kind:SessionKind::from_db(&r.get::<_,String>(2)?),native:r.get(3)?,archived:r.get(4)?},r.get::<_,Option<bool>>(5)?.unwrap_or(false)))).map_err(sql)?;
+    let rows=statement.query_map([after],|r|Ok((Session {id:r.get(0)?,project_id:r.get(1)?,name:r.get(2)?,kind:SessionKind::from_db(&r.get::<_,String>(3)?),native:r.get(4)?,archived:r.get(5)?},r.get::<_,Option<bool>>(6)?.unwrap_or(false)))).map_err(sql)?;
     rows.map(|row|row.map_err(sql).and_then(|(session,large)|if large {Err("unsupported_record: session metadata exceeds its byte budget".into())} else {Ok(session)})).collect()
+}
+
+/// Expand a project or collection ID into itself plus every descendant project and nested collection.
+/// When filtering by the built-in Projects collection, unmigrated top-level projects with NULL
+/// `collection_id` are included as well, matching the sidebar hierarchy.
+pub(super) fn resolve_project_ids(conn:&Connection,project_id:&str) -> Result<HashSet<String>,String> {
+    let mut statement=conn.prepare("WITH RECURSIVE target_projects(id,is_col) AS (
+        SELECT id,trim(root_path)='' FROM projects WHERE id=?1
+            OR (?1=?2 AND collection_id IS NULL AND id NOT IN (?2,?3,?4))
+        UNION
+        SELECT p.id,trim(p.root_path)='' FROM projects p JOIN target_projects tp ON p.collection_id=tp.id WHERE tp.is_col
+    ) SELECT id FROM target_projects").map_err(sql)?;
+    let rows=statement.query_map(params![project_id,crate::db::system_collections::PROJECTS,crate::db::system_collections::TASKS,crate::db::system_collections::CHAT],|r|r.get::<_,String>(0)).map_err(sql)?;
+    rows.collect::<Result<HashSet<_>,_>>().map_err(sql)
 }
 
 #[derive(Clone,PartialEq)]
@@ -527,8 +541,10 @@ fn holder(conn:&Connection,session:&str) -> Result<&'static str,String> {
 }
 
 /// Matching sessions in relevance order. The word index answers first; the trigram index or, for
-/// terms shorter than three characters, LIKE answers only when no word matched.
-pub(super) fn rank(conn:&Connection,query:&str,scope:SearchScope,session:Option<&str>) -> Result<(Option<Query>,Vec<Ranked>),String> {
+/// terms shorter than three characters, LIKE answers only when no word matched. When `project` is
+/// supplied, a recursive CTE restricts matches to that project or collection and all its descendants
+/// before ranking and fallback selection.
+pub(super) fn rank(conn:&Connection,query:&str,scope:SearchScope,session:Option<&str>,project:Option<&str>) -> Result<(Option<Query>,Vec<Ranked>),String> {
     let keys:Vec<String>=query.split_whitespace().map(str::to_string).collect();
     if keys.is_empty() {return Ok((None,Vec::new()));}
     let arms=arms(conn)?;
@@ -537,27 +553,48 @@ pub(super) fn rank(conn:&Connection,query:&str,scope:SearchScope,session:Option<
         let rows=statement.query_map(params_from_iter(binds.iter()),|r|Ok(Ranked {session:r.get(0)?,count:r.get(1)?,source:r.get(2)?})).map_err(sql_error)?;
         rows.collect::<Result<Vec<_>,_>>().map_err(sql_error)
     };
-    // Each arm selects session, source and rank; the sessions table applies the scope once.
-    let union=|arm:&dyn Fn(&str,&str)->String,order:&str| format!("SELECT x.session_id,count(*),min(x.source) FROM ({}) x JOIN app.sessions s ON s.id=x.session_id
-        WHERE 1=1{} GROUP BY x.session_id ORDER BY {order},x.session_id",arms.iter().map(|(db,limit)|arm(db,limit)).collect::<Vec<_>>().join(" UNION ALL "),scope_filter(scope));
+    let project_sql=|param_index:usize| -> (String,&'static str) {
+        if project.is_none() {return (String::new(),"");}
+        let cte=format!("WITH RECURSIVE target_projects(id,is_col) AS (
+            SELECT id,trim(root_path)='' FROM app.projects WHERE id=?{param_index}
+                OR (?{param_index}='{projects}' AND collection_id IS NULL AND id NOT IN ('{projects}','{tasks}','{chat}'))
+            UNION
+            SELECT p.id,trim(p.root_path)='' FROM app.projects p JOIN target_projects tp ON p.collection_id=tp.id WHERE tp.is_col
+        ) ",projects=crate::db::system_collections::PROJECTS,tasks=crate::db::system_collections::TASKS,chat=crate::db::system_collections::CHAT);
+        (cte," AND s.project_id IN (SELECT id FROM target_projects)")
+    };
+    // Each arm selects session, source and rank; the sessions table applies the scope and project filter once.
+    let union=|arm:&dyn Fn(&str,&str)->String,order:&str,project_param:usize| {
+        let (cte,project_filter)=project_sql(project_param);
+        format!("{cte}SELECT x.session_id,count(*),min(x.source) FROM ({}) x JOIN app.sessions s ON s.id=x.session_id
+        WHERE 1=1{}{} GROUP BY x.session_id ORDER BY {order},x.session_id",arms.iter().map(|(db,limit)|arm(db,limit)).collect::<Vec<_>>().join(" UNION ALL "),scope_filter(scope),project_filter)
+    };
     let one=if session.is_some() {" AND f.session_id=?2"} else {""};
-    let with_session=|first:String| -> Vec<String> {let mut binds=vec![first];if let Some(id)=session {binds.push(id.into());}binds};
+    let fts_project_param=if session.is_some() {3} else {2};
+    let with_filters=|first:String| -> Vec<String> {
+        let mut binds=vec![first];
+        if let Some(id)=session {binds.push(id.into());}
+        if let Some(pid)=project {binds.push(pid.into());}
+        binds
+    };
     if let Some(phrases)=keys.iter().map(|k|tokenize::query_phrase(k)).collect::<Option<Vec<_>>>() {
         let expression=phrases.join(" ");
         let ranked=run(union(&|db,limit|format!("SELECT f.session_id,f.source,w.rank AS r FROM {db}.session_words w JOIN {db}.session_fts f ON f.rowid=w.rowid
-            WHERE session_words MATCH ?1{limit}{one}"),"min(x.r)"),with_session(expression.clone()))?;
+            WHERE session_words MATCH ?1{limit}{one}"),"min(x.r)",fts_project_param),with_filters(expression.clone()))?;
         if !ranked.is_empty() {return Ok((Some(Query {keys,answered:Answered::Words,expression}),ranked));}
     }
     if keys.iter().all(|k|k.chars().count()>=MIN_FTS_TERM_CHARS) {
         let expression=fts_match_expr(&keys);
-        let ranked=run(union(&|db,limit|format!("SELECT f.session_id,f.source,f.rank AS r FROM {db}.session_fts f WHERE session_fts MATCH ?1{limit}{one}"),"min(x.r)"),
-            with_session(expression.clone()))?;
+        let ranked=run(union(&|db,limit|format!("SELECT f.session_id,f.source,f.rank AS r FROM {db}.session_fts f WHERE session_fts MATCH ?1{limit}{one}"),"min(x.r)",fts_project_param),
+            with_filters(expression.clone()))?;
         return Ok((Some(Query {keys,answered:Answered::Trigram,expression}),ranked));
     }
     let clause=keys.iter().enumerate().map(|(index,_)|format!("f.text LIKE ?{} ESCAPE '\\'",index+2)).collect::<Vec<_>>().join(" AND ");
     let one=if session.is_some() {" AND f.session_id=?1"} else {""};
+    let like_project_param=keys.len()+2;
     let mut binds=vec![session.unwrap_or_default().to_owned()];binds.extend(keys.iter().map(|k|format!("%{}%",like_escape(k))));
-    let mut ranked=run(union(&|db,limit|format!("SELECT f.session_id,f.source,0 AS r FROM {db}.session_fts f WHERE {clause}{limit}{one}"),"count(*) DESC"),binds)?;
+    if let Some(pid)=project {binds.push(pid.into());}
+    let mut ranked=run(union(&|db,limit|format!("SELECT f.session_id,f.source,0 AS r FROM {db}.session_fts f WHERE {clause}{limit}{one}"),"count(*) DESC",like_project_param),binds)?;
     ranked.sort_by(|a,b|b.count.cmp(&a.count));
     Ok((Some(Query {keys,answered:Answered::Like,expression:String::new()}),ranked))
 }
@@ -684,14 +721,14 @@ mod tests {
         assert!(matches!(refresh_session(&app,&conn,&session,&cancel).unwrap(),Refreshed::Indexed(_)));
         assert_eq!(rows(&conn),(2,2));
         assert!(matches!(refresh_session(&app,&conn,&session,&cancel).unwrap(),Refreshed::Unchanged));
-        let (query,ranked)=rank(&conn,"alpha",SearchScope::All,None).unwrap();assert_eq!(ranked.len(),1);assert_eq!(ranked[0].count,2);
+        let (query,ranked)=rank(&conn,"alpha",SearchScope::All,None,None).unwrap();assert_eq!(ranked.len(),1);assert_eq!(ranked[0].count,2);
         let found=matches(&conn,&query.unwrap(),"s").unwrap();assert_eq!(found[0].message_index,Some(0));assert_eq!(found[1].message_index,Some(1));
         // An append keeps earlier rows and adds only the new message.
         std::fs::OpenOptions::new().append(true).open(&rollout).unwrap().write_all(message("u2","user","And the omega one?").as_bytes()).unwrap();
         let later=std::time::SystemTime::now()+std::time::Duration::from_secs(2);std::fs::File::options().write(true).open(&rollout).unwrap().set_modified(later).unwrap();
         assert!(matches!(refresh_session(&app,&conn,&session,&cancel).unwrap(),Refreshed::Indexed(_)));
         assert_eq!(rows(&conn),(3,3));
-        assert_eq!(rank(&conn,"omega",SearchScope::All,None).unwrap().1.len(),1);
+        assert_eq!(rank(&conn,"omega",SearchScope::All,None,None).unwrap().1.len(),1);
         // A long message becomes several fragments of the same message.
         std::fs::OpenOptions::new().append(true).open(&rollout).unwrap().write_all(message("a2","assistant",&"long answer line\n".repeat(9000)).as_bytes()).unwrap();
         let later=std::time::SystemTime::now()+std::time::Duration::from_secs(4);std::fs::File::options().write(true).open(&rollout).unwrap().set_modified(later).unwrap();

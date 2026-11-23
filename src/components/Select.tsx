@@ -33,6 +33,8 @@ export type SelectOption<T extends string> = {
   disabled?: boolean;
   /** Draws a rule above this row, for lists that fall into groups (built-in kinds vs saved presets). */
   separatorBefore?: boolean;
+  /** Optional 0-based nesting level for hierarchical lists; applied only in the unfiltered popup list. */
+  indent?: number;
 };
 
 /** Trigger metrics. `sm` suits dense settings rows, `md` suits dialog form fields. */
@@ -583,6 +585,9 @@ export default function Select<T extends string>(props: SelectProps<T>) {
                   onMouseEnter={() => !opt.disabled && setActive(i)}
                   style={{
                     ...selectRowStyle(on, hot && !opt.disabled, size, mono),
+                    ...(opt.indent && !needle
+                      ? { padding: `${size === "sm" ? 5 : 6}px 8px ${size === "sm" ? 5 : 6}px ${8 + Math.min(opt.indent, 5) * 12}px` }
+                      : {}),
                     ...(opt.description ? { flexDirection: "column", alignItems: "stretch", gap: 2 } : {}),
                     borderTop: opt.separatorBefore ? "1px solid var(--border)" : undefined,
                     marginTop: opt.separatorBefore ? 4 : undefined,

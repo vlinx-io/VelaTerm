@@ -1378,6 +1378,9 @@ const vi: typeof en = {
   "archive.emptyTranscript": "Bản ghi hội thoại trống",
   "archive.loadingTranscript": "Đang tải bản ghi hội thoại…",
   "search.allPlaceholder": "Tìm trong nội dung của mọi phiên…",
+  "search.inLocationPlaceholder": (name) => `Tìm trong ${name}…`,
+  "search.allLocations": "Tất cả dự án và bộ sưu tập",
+  "search.filterLocation": "Lọc theo dự án hoặc bộ sưu tập",
   "search.hint":
     "Tìm nội dung phiên. Phiên đã lưu trữ mặc định bị loại trừ — chọn “Bao gồm đã lưu trữ” để thêm chúng.",
   "search.includeArchived": "Bao gồm đã lưu trữ",

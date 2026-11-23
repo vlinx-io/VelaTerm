@@ -1,11 +1,20 @@
 # Changelog
 
-> Created: 2026-07-09 16:10 · Updated: 2026-11-22
+> Created: 2026-07-09 16:10 · Updated: 2026-11-23
 
 All notable changes to VelaTerm are documented here, newest first.
 v0.1.91 is the first public release; earlier version numbers were internal iterations and are not covered.
 
 ---
+
+## v0.3.5 — 2026-11-23
+
+- 🔎 Global session search now lets you filter results by a specific project or collection, including nested collections and projects.
+- 🪐 Opening multiple Antigravity conversations at once no longer triggers credential conflicts or duplicate sign-in prompts, and idle sessions automatically renew expired credentials instead of failing mid-turn.
+- 🔄 Antigravity conversations now automatically recover from cold-start model errors and transient upstream errors without interrupting the turn or losing completed tool results.
+- 🤖 `vapp` now accepts `--yes` (`-y` / `--no-confirm`) to run actions directly without a confirmation card, and knowledge base changes made through `vapp` refresh the knowledge base view automatically.
+- 💬 `vtell` can now send messages to any conversation-view agent session—including Antigravity, ZCode, DeepSeek, Copilot, Cursor, Kimi and Grok—with Antigravity also supporting `--steer` interjections.
+- ✉️ Sending a message while viewing earlier conversation history or after a missed live update no longer leaves the message stuck on Sent.
 
 ## v0.3.4 — 2026-11-22
 

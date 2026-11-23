@@ -26,6 +26,8 @@ export interface AssistPlan {
   createdAt: number;
   /** The agent's summary of the request, in the user's language. */
   summary?: string;
+  /** Set by `vapp --yes`: validated actions run without waiting for confirmation (except folder choices). */
+  noConfirm?: boolean;
   actions: AssistAction[];
   source?: { sessionId: string; sessionName: string; agent: string | null };
 }
@@ -36,5 +38,7 @@ export const assistPending = (sessionId: string) => invoke<AssistPlan[]>("assist
 export const assistRun = (id: string, index: number, choice?: string) => invoke<AssistPlan>("assist_run", { id, index, confirmed: true, choice });
 /** Runs several host actions in order. Failures are recorded on each action rather than thrown. */
 export const assistRunAll = (id: string, indices: number[]) => invoke<AssistPlan>("assist_run", { id, indices, confirmed: true });
+/** Atomically claims a pending window action on a `noConfirm` plan so only one client executes it. */
+export const assistClaim = (id: string, index: number) => invoke<{ claimed: boolean; plan: AssistPlan }>("assist_claim", { id, index });
 export const assistMark = (id: string, index: number, status: "done" | "failed" | "dismissed", error?: string) => invoke<AssistPlan>("assist_mark", { id, index, status, error });
 export const assistSkipAll = (id: string, indices: number[]) => invoke<AssistPlan>("assist_mark", { id, indices, status: "dismissed" });

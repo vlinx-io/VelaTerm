@@ -1,3 +1,12 @@
+## v0.3.5 — 2026-11-23
+
+- 🔎 La búsqueda global de sesiones ahora permite filtrar los resultados por un proyecto o una colección concretos, incluidas las colecciones y los proyectos anidados.
+- 🪐 Abrir varias conversaciones de Antigravity a la vez ya no provoca conflictos de credenciales ni avisos de inicio de sesión duplicados, y las sesiones inactivas renuevan automáticamente las credenciales caducadas en lugar de fallar a mitad de turno.
+- 🔄 Las conversaciones de Antigravity ahora se recuperan automáticamente de errores de modelo en el arranque en frío y de errores temporales del servicio sin interrumpir el turno ni perder los resultados de herramientas ya completados.
+- 🤖 `vapp` ahora admite `--yes` (`-y` / `--no-confirm`) para ejecutar acciones directamente sin tarjeta de confirmación, y los cambios realizados en la base de conocimiento mediante `vapp` actualizan automáticamente su vista.
+- 💬 `vtell` ahora puede enviar mensajes a cualquier sesión de agente en vista de conversación —incluidos Antigravity, ZCode, DeepSeek, Copilot, Cursor, Kimi y Grok—, y Antigravity también admite interrupciones con `--steer`.
+- ✉️ Enviar un mensaje mientras se consulta un historial de conversación anterior o tras perder una actualización en vivo ya no deja el mensaje bloqueado en «Enviado».
+
 ## v0.3.4 — 2026-11-22
 
 - 🪐 Las conversaciones de Antigravity ahora incluyen una lista integrada de modelos con Gemini 4 Neon y Orchestrator (Neon), actualizan en segundo plano los modelos disponibles al abrirse y cambian sin problemas las sesiones de larga duración a los modelos recién lanzados.
