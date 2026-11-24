@@ -898,6 +898,10 @@ export interface BranchCompare {
   files: ChangedFile[];
   /** Branches that can be chosen as the base. */
   candidates: string[];
+  /** Suggested pull request title derived from the commit subject or branch name. */
+  suggestedTitle?: string;
+  /** Suggested pull request description derived from the commit body or commit list. */
+  suggestedBody?: string;
 }
 
 /** Compares HEAD with `base`, or the default base; null when there is nothing to compare with. */
@@ -915,15 +919,32 @@ export function gitRangeFileDiff(cwd: string, from: string, to: string, path: st
   return invoke<FileDiff>("git_range_file_diff", { cwd, from, to, path });
 }
 
-/** Whether the Git panel can open a pull request here, and why not when it cannot. */
+/** Whether the Git panel can open a pull or merge request here, and why not when it cannot. */
 export interface GitPrProvider {
-  provider: "gitea" | null;
+  provider: "github" | "gitlab" | "gitea" | null;
   available: boolean;
-  reason: "ok" | "not_gitea" | "no_token" | "unreachable";
+  reason: "ok" | "not_gitea" | "no_token" | "unreachable" | "no_cli" | "no_auth";
+  host?: string | null;
 }
 
 export function gitPrProvider(cwd: string): Promise<GitPrProvider> {
   return invoke<GitPrProvider>("git_pr_provider", { cwd });
+}
+
+/** Current pull or merge request state for the checked-out branch. */
+export interface GitPrStatus {
+  provider: "github" | "gitlab" | "gitea";
+  number: number;
+  title: string;
+  url: string;
+  state: "open" | "draft" | "merged" | "closed";
+  base: string;
+  checks: "passing" | "failing" | "pending" | "none";
+  worktree: { path: string; mainRepo: string } | null;
+}
+
+export function gitPrStatus(cwd: string): Promise<GitPrStatus | null> {
+  return invoke<GitPrStatus | null>("git_pr_status", { cwd });
 }
 
 /** Result of opening a pull request: its URL (empty when the server gave none) and a message. */
@@ -932,9 +953,20 @@ export interface PrOutcome {
   message: string;
 }
 
-/** Pushes the current branch and opens a pull request into `base`. */
-export function gitOpenPullRequest(cwd: string, base: string, title: string, body: string): Promise<PrOutcome> {
-  return invoke<PrOutcome>("git_open_pull_request", { cwd, base, title, body });
+/** Pushes the current branch and opens a pull or merge request into `base`. */
+export function gitOpenPullRequest(
+  cwd: string,
+  base: string,
+  title: string,
+  body: string,
+  draft = false,
+): Promise<PrOutcome> {
+  return invoke<PrOutcome>("git_open_pull_request", { cwd, base, title, body, draft });
+}
+
+/** Force-deletes a local branch from `repo`. */
+export function deleteBranch(repo: string, branch: string): Promise<void> {
+  return invoke<void>("delete_branch", { repo, branch });
 }
 
 /** Change-notification lease for the repository containing `cwd`, keyed by its top level. */

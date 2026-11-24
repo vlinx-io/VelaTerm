@@ -93,6 +93,7 @@ import { attachImages, attachmentRejectionNote, restoreAttachment, MAX_IMAGES, t
 import { attachChatInputGuard } from "./inputGuard";
 import { useTextFieldMenu } from "./useTextFieldMenu";
 import { attachInputLatencyLog } from "./inputLatency";
+import { registerComposer } from "./composerFocus";
 import { buildSuggestions, findFileMention, mentionDir, type Suggestion } from "./completion";
 import { env } from "../../../platform/env";
 import { platform } from "../../../platform";
@@ -646,6 +647,8 @@ export function ChatPane({
     if (!inputLatencyLog) return;
     return attachInputLatencyLog(() => inputRef.current, session.id);
   }, [inputLatencyLog, session.id]);
+  // Lets the session tree hand the keyboard to this composer the way it hands it to a terminal.
+  useEffect(() => registerComposer(session.id, () => inputRef.current), [session.id]);
   // Where the caret belongs once a chosen suggestion has been rendered into the textarea.
   const placeCaret = useRef<number | null>(null);
   // Whether the reader is following the end of the conversation. Scrolling up parks the view, so an

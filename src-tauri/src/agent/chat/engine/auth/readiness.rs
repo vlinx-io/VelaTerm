@@ -57,6 +57,9 @@ pub(in crate::agent::chat::engine) fn check(app: &AppCtx, session_id: &str) -> R
         }
         agent_environment(app, session_id, &mut cmd);
         executable::prepare_command(&mut cmd, bin);
+        if kind == SessionKind::Antigravity {
+            crate::agent::antigravity::prepare_command_env(&mut cmd);
+        }
         cmd
     };
     let bin = match executable::resolve_launch_binary(app, session_id, kind)? {
@@ -84,7 +87,13 @@ pub(in crate::agent::chat::engine) fn check(app: &AppCtx, session_id: &str) -> R
     let args = crate::agent::inject::split_extra_args(Some(&session_settings::without_selection_args(kind, session.agent_args.as_deref())));
     let cmd = prepared(&bin);
     let signed_in = match kind {
-        SessionKind::Antigravity => antigravity(app, &bin, cmd, &args),
+        // Passive pane-open checks consult live ACP state only; spawning a cold ~2.7s `agy acp`
+        // subprocess on open contends with the user's first message, and `chat_start` itself opens
+        // the inline sign-in panel if credentials are missing.
+        SessionKind::Antigravity => {
+            let settings_args = super::antigravity::settings_args(&args);
+            app.chat().antigravity_live_signed_in(&bin, &settings_args)
+        }
         SessionKind::Zcode => zcode(&cmd, &bin, cwd.as_deref()),
         SessionKind::Claude => claude(cmd, &args),
         SessionKind::Codex => codex(cmd, &args),
@@ -215,9 +224,43 @@ fn cursor_signed_in(output: &str) -> Option<bool> {
     }
 }
 
+/// Explicitly probe `agy acp` via `session/list` after an HTTP 401 failure to distinguish an expired
+/// access token (which `agy` refreshes) from a signed-out Google account, without holding `auth_gate`.
+pub(in crate::agent::chat::engine) fn probe_antigravity(app: &AppCtx, session_id: &str) -> Option<bool> {
+    let (session, root) = {
+        let conn = app.db().conn.lock().unwrap();
+        let session = crate::db::repo::get_session(&conn, session_id).ok().flatten()?;
+        let root = crate::db::repo::get_project_root(&conn, &session.project_id).ok()?;
+        (session, root)
+    };
+    if session.kind != SessionKind::Antigravity || session.engine != "chat" {
+        return None;
+    }
+    let bin = match executable::resolve_launch_binary(app, session_id, SessionKind::Antigravity).ok()? {
+        LaunchBinary::Broken => return None,
+        LaunchBinary::Path(path) => path,
+        LaunchBinary::Unresolved => executable::command_name(SessionKind::Antigravity).to_string(),
+    };
+    let cwd = crate::host::spawn_dir(
+        session.cwd.as_deref().filter(|c| !c.trim().is_empty()).or(root.as_deref()),
+    );
+    let mut cmd = crate::host::command(&bin);
+    if let Some(cwd) = &cwd {
+        cmd.current_dir(cwd);
+    }
+    agent_environment(app, session_id, &mut cmd);
+    executable::prepare_command(&mut cmd, &bin);
+    crate::agent::antigravity::prepare_command_env(&mut cmd);
+    let args = crate::agent::inject::split_extra_args(Some(&session_settings::without_selection_args(
+        SessionKind::Antigravity,
+        session.agent_args.as_deref(),
+    )));
+    antigravity(app, &bin, cmd, &args)
+}
+
 /// Ask `agy acp` for `session/list` without creating a conversation.
 ///
-/// `session/list` runs through the same auth gate as `session/new`, returning JSON-RPC `-32000` when no
+/// `session/list` runs through the same auth check as `session/new`, returning JSON-RPC `-32000` when no
 /// credentials are active and a session list when signed in via OAuth, an API key, or ADC.
 fn antigravity(app: &AppCtx, bin: &str, mut cmd: Command, args: &[String]) -> Option<bool> {
     let settings_args = super::antigravity::settings_args(args);
@@ -230,9 +273,7 @@ fn antigravity(app: &AppCtx, bin: &str, mut cmd: Command, args: &[String]) -> Op
         crate::agent::chat::acp_protocol::initialize("1"),
         crate::agent::chat::acp_protocol::session_list(ANTIGRAVITY_LIST_REQUEST),
     ];
-    let gate_args = settings_args.clone();
     crate::agent::antigravity::cached_or_probe_readiness(bin, &settings_args, move || {
-        let _auth_gate = crate::agent::antigravity::acquire_auth_gate(bin, &gate_args);
         let text = output(cmd, &input, is_antigravity_list_answer)?;
         antigravity_signed_in(&text)
     })

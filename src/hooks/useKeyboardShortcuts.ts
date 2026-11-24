@@ -214,6 +214,23 @@ export function useKeyboardShortcuts() {
         return;
       }
 
+      // Move keyboard focus into the session tree, expanding the sidebar first when it is collapsed.
+      // The tree owns its own arrow-key navigation once focused (see ProjectTree).
+      if (matchCombo(e, sc("focusSidebar"))) {
+        e.preventDefault();
+        const { leftCollapsed, toggleLeft } = useTermStore.getState();
+        if (leftCollapsed) toggleLeft();
+        // Focus after the expand renders; the element does not exist yet on a collapsed sidebar.
+        requestAnimationFrame(() => {
+          const tree =
+            document.querySelector<HTMLElement>('[data-session-tree="active"]') ??
+            document.querySelector<HTMLElement>('[data-session-tree="primary"]') ??
+            document.querySelector<HTMLElement>("[data-session-tree]");
+          tree?.focus();
+        });
+        return;
+      }
+
       // Check global search before terminal search for the same possible modifier overlap.
       if (matchCombo(e, sc("globalSearch"))) {
         e.preventDefault();

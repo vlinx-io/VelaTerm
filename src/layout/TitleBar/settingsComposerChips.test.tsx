@@ -62,6 +62,34 @@ it("reveals Translation only for an Alt settings opening and hides it on the nex
   expect(new URL(location.href).searchParams.has("settingsTranslation")).toBe(false);
   await act(async () => fireEvent.click(screen.getByTitle("Settings")));
   expect(screen.queryByRole("link", { name: "Translation" })).toBeNull();
+  expect(screen.queryByRole("link", { name: "Plugins" })).toBeNull();
+});
+
+it("reveals Plugins only for an Alt settings opening and hides it on normal openings", async () => {
+  // Even if a prior build saved "plugins" as settingsTab, a normal opening must hide it and fall back cleanly.
+  useTermStore.setState({ settingsTab: "plugins" });
+  await act(async () => render(<><TitleBar /><SidebarRail /></>));
+  await act(async () => fireEvent.click(screen.getByTitle("Settings")));
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  expect(screen.queryByRole("link", { name: "Plugins" })).toBeNull();
+  fireEvent.click(screen.getByTitle("Settings"));
+  expect(screen.queryByRole("dialog")).toBeNull();
+
+  await act(async () => fireEvent.click(screen.getByTitle("Settings"), { altKey: true }));
+  const plugins = screen.getByRole("link", { name: "Plugins" });
+  expect(new URL(plugins.getAttribute("href")!).searchParams.get("settingsPlugins")).toBe("1");
+  await act(async () => fireEvent.click(plugins));
+  expect(new URL(location.href).searchParams.get("settings")).toBe("plugins");
+  expect(screen.getByText(/Install, link, enable, or reload external VelaTerm plugins/i)).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("link", { name: "Appearance" }));
+  expect(screen.getByRole("link", { name: "Plugins" })).toBeTruthy();
+  expect(useTermStore.getState().settingsTab).toBe("appearance");
+
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  expect(new URL(location.href).searchParams.has("settingsPlugins")).toBe(false);
+  await act(async () => fireEvent.click(screen.getByTitle("Settings")));
+  expect(screen.queryByRole("link", { name: "Plugins" })).toBeNull();
 });
 
 it("restores the revealed category from its URL and follows back/forward route state", async () => {

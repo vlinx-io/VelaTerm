@@ -5,9 +5,11 @@
 //! model call (`interaction/requestProviderRuntimeHeaders`). Until it hears, every plan counts as not
 //! entitled, the model catalogue is empty and a message is refused, however recently `zcode login` saved the
 //! account. VelaTerm plays that part from the store `zcode login` writes, read the way ZCode's own prompt
-//! mode reads it: `~/.zcode/v2/credentials.json`, each value sealed with AES-256-GCM under the SHA-256 of
-//! `ZCODE_CREDENTIAL_SECRET` or, by default, of the platform, home directory and user name. Keys go only to
-//! the agent's stdin; nothing here logs or saves them.
+//! mode reads it: `~/.zcode/v2/credentials.json`, where values are sealed with AES-256-GCM either as legacy
+//! `enc:v1:` (derived from `ZCODE_CREDENTIAL_SECRET` or platform/home/username) or, since ZCode 4.0, as
+//! `enc:v2:os:<fingerprint>:` (random 32-byte key in the OS keyring) or `enc:v2:env:<fingerprint>:` (SHA-256
+//! of `ZCODE_CREDENTIAL_SECRET`, `ZCODE_CREDENTIAL_SECRET_FILE`, or a private `credential-secret` file beside
+//! `credentials.json`). Keys go only to the agent's stdin; nothing here logs or saves them.
 //!
 //! A plan signed in to with an API key keeps the key in the store. One signed in to through OAuth (every
 //! `zcode login` since ZCode 3.15) keeps only the platform's access token, which `agent::zcode_token`
@@ -22,6 +24,8 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use serde_json::{json, Map, Value};
@@ -34,12 +38,39 @@ pub(crate) const PERSONAL_CONFIG: &str = "ZCODE_PERSONAL_PROVIDER_CONFIG_FILE";
 /// The plan access `zcode login` signs in to; team and off-peak plans are granted through the desktop app.
 const PLAN_MODE: &str = "individual-coding-plan";
 const SEALED: &str = "enc:v1:";
+const SEALED_V2: &str = "enc:v2:";
+const KEYRING_SERVICE: &str = "ZCode Credential Encryption";
+const SECRET_FILE_MIN_BYTES: usize = 32;
+const SECRET_FILE_MAX_BYTES: usize = 4096;
+/// Cooldown after a failed or denied OS keyring lookup so background polls never spam permission prompts.
+const OS_KEY_MISS_COOLDOWN: Duration = Duration::from_secs(60);
+
+enum CachedOsKey {
+    Hit { key: [u8; 32], fingerprint: String },
+    Miss { until: Instant },
+}
+
+static OS_KEY_CACHE: Mutex<Option<HashMap<PathBuf, CachedOsKey>>> = Mutex::new(None);
+
+/// How an `enc:v2:env:` key was explicitly configured in the process environment, if at all.
+enum ExplicitEnvSecret {
+    /// Neither `ZCODE_CREDENTIAL_SECRET` nor `ZCODE_CREDENTIAL_SECRET_FILE` was set; a private
+    /// `credential-secret` file beside `credentials.json` may still supply an `env` key.
+    None,
+    /// `ZCODE_CREDENTIAL_SECRET` was set (raw untrimmed string hashed with SHA-256).
+    Direct([u8; 32]),
+    /// `ZCODE_CREDENTIAL_SECRET_FILE` was set.
+    File(PathBuf),
+    /// Both variables were set simultaneously, which ZCode rejects as an invalid configuration.
+    Conflict,
+}
 
 /// Where one agent process finds the account, and the provider config it was started with.
 pub struct Account {
     credentials: PathBuf,
-    /// Candidate keys for the store; a wrong one fails authentication, so trying each is safe.
+    /// Candidate keys for legacy `enc:v1:` values; GCM authentication rejects wrong keys safely.
     keys: Vec<[u8; 32]>,
+    explicit_env_secret: ExplicitEnvSecret,
     builtin: PathBuf,
 }
 
@@ -50,6 +81,16 @@ pub(crate) fn env_of(cmd: &Command, key: &str) -> Option<OsString> {
         None => std::env::var_os(key),
     }
     .filter(|v| !v.to_string_lossy().trim().is_empty())
+}
+
+/// Like `env_of`, but preserves leading/trailing whitespace as long as the value is non-empty.
+/// ZCode 4.0's `enc:v2:env:` hashes `ZCODE_CREDENTIAL_SECRET` without trimming it.
+fn env_of_raw(cmd: &Command, key: &str) -> Option<OsString> {
+    match cmd.get_envs().find(|(k, _)| *k == key) {
+        Some((_, value)) => value.map(|v| v.to_os_string()),
+        None => std::env::var_os(key),
+    }
+    .filter(|v| !v.is_empty())
 }
 
 /// Node's `os.platform()`, which the default key includes.
@@ -93,25 +134,144 @@ fn key_of(secret: &str) -> [u8; 32] {
     Sha256::digest(secret.as_bytes()).into()
 }
 
-/// Open one sealed value: `enc:v1:<iv>.<tag>.<ciphertext>`, each part base64url without padding. A value that
-/// is not sealed is stored as it is.
-fn open(value: &str, keys: &[[u8; 32]]) -> Option<String> {
+fn hex_of(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The 24-hex-char fingerprint ZCode 4.0 embeds in `enc:v2:<source>:<fingerprint>:...` values.
+fn key_fingerprint(key: &[u8; 32]) -> String {
+    hex_of(&Sha256::digest(key))[..24].to_string()
+}
+
+fn is_valid_fingerprint(fp: &str) -> bool {
+    fp.len() == 24 && fp.bytes().all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f'))
+}
+
+/// Open one AES-256-GCM `<iv>.<tag>.<ciphertext>` payload using the first matching key.
+fn open_gcm(payload: &str, keys: &[[u8; 32]]) -> Option<String> {
     use aes_gcm::aead::{Aead, KeyInit};
-    let Some(sealed) = value.strip_prefix(SEALED) else { return Some(value.to_string()) };
     let decode = |part: &str| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(part.trim_end_matches('=')).ok();
-    let mut parts = sealed.split('.');
+    let mut parts = payload.split('.');
     let (iv, tag, data) = (decode(parts.next()?)?, decode(parts.next()?)?, decode(parts.next()?)?);
     if parts.next().is_some() || iv.len() != 12 || tag.len() != 16 {
         return None;
     }
     let nonce = aes_gcm::Nonce::try_from(iv.as_slice()).ok()?;
-    let mut payload = data;
-    payload.extend_from_slice(&tag);
+    let mut combined = data;
+    combined.extend_from_slice(&tag);
     keys.iter().find_map(|key| {
         let cipher = aes_gcm::Aes256Gcm::new_from_slice(key).ok()?;
-        cipher.decrypt(&nonce, payload.as_slice()).ok()
+        cipher.decrypt(&nonce, combined.as_slice()).ok()
     })
     .and_then(|plain| String::from_utf8(plain).ok())
+}
+
+/// Open one legacy `enc:v1:` or plaintext value. Any other `enc:` prefix is rejected here.
+fn open(value: &str, keys: &[[u8; 32]]) -> Option<String> {
+    if let Some(sealed) = value.strip_prefix(SEALED) {
+        return open_gcm(sealed, keys);
+    }
+    if value.starts_with("enc:") {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+/// Parse an `enc:v2:<source>:<fingerprint>:<payload>` value into `(source, fingerprint, payload)`.
+fn parse_v2(value: &str) -> Option<(&str, &str, &str)> {
+    let rest = value.strip_prefix(SEALED_V2)?;
+    let mut parts = rest.split(':');
+    let source = parts.next()?;
+    let fingerprint = parts.next()?;
+    let payload = parts.next()?;
+    if parts.next().is_some()
+        || !matches!(source, "os" | "env")
+        || !is_valid_fingerprint(fingerprint)
+        || payload.is_empty()
+    {
+        return None;
+    }
+    Some((source, fingerprint, payload))
+}
+
+/// Decrypt an `enc:v2:` payload once its candidate key has been resolved and its fingerprint verified.
+fn open_v2_with_key(fingerprint: &str, payload: &str, key: &[u8; 32]) -> Option<String> {
+    if key_fingerprint(key) != fingerprint {
+        return None;
+    }
+    open_gcm(payload, &[*key])
+}
+
+/// Read a managed secret file (explicit `ZCODE_CREDENTIAL_SECRET_FILE` or private `credential-secret`).
+/// Enforces ZCode's 32..=4096 UTF-8 byte bounds and, for discovered private files on Unix, mode `0600`.
+fn read_secret_file(path: &Path, require_private_mode: bool) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    if !meta.is_file() {
+        return None;
+    }
+    #[cfg(unix)]
+    if require_private_mode {
+        use std::os::unix::fs::PermissionsExt;
+        if (meta.permissions().mode() & 0o077) != 0 {
+            return None;
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = require_private_mode;
+    let value = std::fs::read_to_string(path).ok()?;
+    let len = value.len();
+    (SECRET_FILE_MIN_BYTES..=SECRET_FILE_MAX_BYTES).contains(&len).then_some(value)
+}
+
+/// Decode a base64url-encoded 32-byte key stored by ZCode 4.0 in the OS keyring.
+fn decode_os_key(encoded: &str) -> Option<[u8; 32]> {
+    if encoded.len() != 43
+        || !encoded.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+    {
+        return None;
+    }
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded).ok()?;
+    <[u8; 32]>::try_from(bytes.as_slice()).ok()
+}
+
+/// Look up the OS keyring entry ZCode 4.0 created for `credentials`, with process-level caching so
+/// repeated account reads do not repeatedly hit the system keychain or prompt on denial.
+fn resolve_os_key(credentials: &Path, expected_fingerprint: &str) -> Option<[u8; 32]> {
+    let resolved = std::path::absolute(credentials).ok()?;
+    let now = Instant::now();
+    {
+        let guard = OS_KEY_CACHE.lock().unwrap();
+        if let Some(cached) = guard.as_ref().and_then(|map| map.get(&resolved)) {
+            match cached {
+                CachedOsKey::Hit { key, fingerprint } if fingerprint == expected_fingerprint => {
+                    return Some(*key);
+                }
+                CachedOsKey::Miss { until } if now < *until => return None,
+                _ => {}
+            }
+        }
+    }
+
+    let account_name = hex_of(&Sha256::digest(resolved.to_string_lossy().as_bytes()));
+    let fetched = keyring::Entry::new(KEYRING_SERVICE, &account_name)
+        .ok()
+        .and_then(|entry| entry.get_password().ok())
+        .and_then(|encoded| decode_os_key(&encoded));
+
+    let mut guard = OS_KEY_CACHE.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    match fetched {
+        Some(key) => {
+            let fingerprint = key_fingerprint(&key);
+            let matched = fingerprint == expected_fingerprint;
+            map.insert(resolved, CachedOsKey::Hit { key, fingerprint });
+            matched.then_some(key)
+        }
+        None => {
+            map.insert(resolved, CachedOsKey::Miss { until: Instant::now() + OS_KEY_MISS_COOLDOWN });
+            None
+        }
+    }
 }
 
 /// The store keys `zcode login` writes for one plan.
@@ -205,18 +365,52 @@ impl Account {
         let builtin = PathBuf::from(env_of(cmd, BUILTIN_CONFIG)?);
         env_of(cmd, PERSONAL_CONFIG)?;
         let base = env_of(cmd, "ZCODE_DATA_BASE_DIR").map(PathBuf::from).or_else(crate::host::home_dir)?;
-        let keys = match env_of(cmd, "ZCODE_CREDENTIAL_SECRET") {
-            Some(secret) => vec![key_of(secret.to_string_lossy().trim())],
-            None => {
-                let home = env_of(cmd, if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-                    .map(PathBuf::from)
-                    .or_else(crate::host::home_dir)?;
-                user_names().iter().map(|user| {
-                    key_of(&format!("zcode-credential-fallback:{}:{}:{user}", node_platform(), home.display()))
-                }).collect()
-            }
+        let raw_secret = env_of_raw(cmd, "ZCODE_CREDENTIAL_SECRET").map(|s| s.to_string_lossy().into_owned());
+        let secret_file = env_of_raw(cmd, "ZCODE_CREDENTIAL_SECRET_FILE").map(PathBuf::from);
+        let explicit_env_secret = match (&raw_secret, &secret_file) {
+            (Some(_), Some(_)) => ExplicitEnvSecret::Conflict,
+            (Some(secret), None) => ExplicitEnvSecret::Direct(key_of(secret)),
+            (None, Some(path)) => ExplicitEnvSecret::File(path.clone()),
+            (None, None) => ExplicitEnvSecret::None,
         };
-        Some(Account { credentials: base.join(".zcode").join("v2").join("credentials.json"), keys, builtin })
+        let mut keys = Vec::new();
+        if let Some(secret) = &raw_secret {
+            keys.push(key_of(secret));
+            let trimmed = secret.trim();
+            if !trimmed.is_empty() && trimmed != secret {
+                keys.push(key_of(trimmed));
+            }
+        }
+        if let Some(home) = env_of(cmd, if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+            .map(PathBuf::from)
+            .or_else(crate::host::home_dir)
+        {
+            for user in user_names() {
+                let candidate = key_of(&format!("zcode-credential-fallback:{}:{}:{user}", node_platform(), home.display()));
+                if !keys.contains(&candidate) {
+                    keys.push(candidate);
+                }
+            }
+        }
+        Some(Account {
+            credentials: base.join(".zcode").join("v2").join("credentials.json"),
+            keys,
+            explicit_env_secret,
+            builtin,
+        })
+    }
+
+    /// Resolve the `enc:v2:env:` key, matching ZCode 4.0's `resolveManagedSecret`.
+    fn env_v2_key(&self) -> Option<[u8; 32]> {
+        match &self.explicit_env_secret {
+            ExplicitEnvSecret::Conflict => None,
+            ExplicitEnvSecret::Direct(key) => Some(*key),
+            ExplicitEnvSecret::File(path) => read_secret_file(path, false).map(|s| key_of(&s)),
+            ExplicitEnvSecret::None => {
+                let private = self.credentials.parent()?.join("credential-secret");
+                read_secret_file(&private, true).map(|s| key_of(&s))
+            }
+        }
     }
 
     /// The store as saved now: a sign-in elsewhere shows up on the next read.
@@ -230,7 +424,23 @@ impl Account {
     }
 
     fn read(&self, store: &HashMap<String, String>, key: &str) -> Option<String> {
-        open(store.get(key)?, &self.keys).map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+        let raw = store.get(key)?;
+        let plain = if let Some((source, fingerprint, payload)) = parse_v2(raw) {
+            let resolved = match source {
+                "env" => self.env_v2_key()?,
+                "os" => resolve_os_key(&self.credentials, fingerprint)?,
+                _ => return None,
+            };
+            open_v2_with_key(fingerprint, payload, &resolved)?
+        } else {
+            open(raw, &self.keys).or_else(|| {
+                raw.starts_with(SEALED)
+                    .then(|| self.env_v2_key().and_then(|key| open(raw, &[key])))
+                    .flatten()
+            })?
+        };
+        let trimmed = plain.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
     }
 
     /// The platform the latest sign-in used. Signing in to the other one switches it, and the plans of the
@@ -484,6 +694,99 @@ mod tests {
         let mut partial = Command::new("zcode");
         partial.env(BUILTIN_CONFIG, &builtin).env(PERSONAL_CONFIG, "");
         assert!(Account::for_command(&partial).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn seal_v2(source: &str, plain: &str, key: &[u8; 32], iv: [u8; 12]) -> String {
+        let payload = seal(plain, key, iv).strip_prefix(SEALED).unwrap().to_string();
+        format!("{SEALED_V2}{source}:{}:{payload}", key_fingerprint(key))
+    }
+
+    #[test]
+    fn v2_env_and_os_ciphertexts_open_with_fingerprint_verification() {
+        let dir = std::env::temp_dir().join(format!("vlx-zcode-account-v2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let v2_dir = dir.join(".zcode").join("v2");
+        std::fs::create_dir_all(&v2_dir).unwrap();
+        let builtin = dir.join("zcode-builtin.json");
+        std::fs::write(&builtin, "{}").unwrap();
+
+        // Direct ZCODE_CREDENTIAL_SECRET preserves whitespace in v2.
+        let raw_secret = "  my-v2-secret-with-spaces  ";
+        let env_key = key_of(raw_secret);
+        std::fs::write(
+            v2_dir.join("credentials.json"),
+            json!({
+                "oauth:active_provider": seal_v2("env", "bigmodel", &env_key, [11; 12]),
+                "unknown": "enc:v9:something",
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let mut cmd = Command::new("zcode");
+        cmd.env(BUILTIN_CONFIG, &builtin)
+            .env(PERSONAL_CONFIG, dir.join("provider_config.json"))
+            .env("ZCODE_DATA_BASE_DIR", &dir)
+            .env("ZCODE_CREDENTIAL_SECRET", raw_secret);
+        let account = Account::for_command(&cmd).unwrap();
+        assert_eq!(account.signed_in().as_deref(), Some("bigmodel"));
+        assert_eq!(account.read(&account.store(), "unknown"), None);
+
+        // Explicit ZCODE_CREDENTIAL_SECRET_FILE (must be 32..=4096 bytes).
+        let secret_file = dir.join("managed.secret");
+        let file_secret = "0123456789abcdef0123456789abcdef";
+        std::fs::write(&secret_file, file_secret).unwrap();
+        let file_key = key_of(file_secret);
+        std::fs::write(
+            v2_dir.join("credentials.json"),
+            json!({"oauth:active_provider": seal_v2("env", "zai", &file_key, [12; 12])}).to_string(),
+        )
+        .unwrap();
+        let mut file_cmd = Command::new("zcode");
+        file_cmd
+            .env(BUILTIN_CONFIG, &builtin)
+            .env(PERSONAL_CONFIG, dir.join("provider_config.json"))
+            .env("ZCODE_DATA_BASE_DIR", &dir)
+            .env("ZCODE_CREDENTIAL_SECRET_FILE", &secret_file);
+        assert_eq!(Account::for_command(&file_cmd).unwrap().signed_in().as_deref(), Some("zai"));
+
+        // Both env vars at once are rejected as a configuration conflict.
+        file_cmd.env("ZCODE_CREDENTIAL_SECRET", raw_secret);
+        assert_eq!(Account::for_command(&file_cmd).unwrap().signed_in(), None);
+
+        // Private `credential-secret` file beside `credentials.json` (0600 on Unix).
+        let private_secret = v2_dir.join("credential-secret");
+        std::fs::write(&private_secret, file_secret).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&private_secret, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        let mut priv_cmd = Command::new("zcode");
+        priv_cmd
+            .env(BUILTIN_CONFIG, &builtin)
+            .env(PERSONAL_CONFIG, dir.join("provider_config.json"))
+            .env("ZCODE_DATA_BASE_DIR", &dir);
+        #[cfg(unix)]
+        assert_eq!(Account::for_command(&priv_cmd).unwrap().signed_in(), None, "group/world-readable file must be rejected");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&private_secret, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        assert_eq!(Account::for_command(&priv_cmd).unwrap().signed_in().as_deref(), Some("zai"));
+
+        // OS keyring v2 format & key decoding (verified in-memory without touching the real keyring).
+        let os_key = [0x42u8; 32];
+        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(os_key);
+        assert_eq!(decode_os_key(&encoded), Some(os_key));
+        assert_eq!(decode_os_key("too-short"), None);
+        let os_sealed = seal_v2("os", "oauth-token-v2", &os_key, [13; 12]);
+        let (src, fp, payload) = parse_v2(&os_sealed).unwrap();
+        assert_eq!(src, "os");
+        assert_eq!(open_v2_with_key(fp, payload, &os_key).as_deref(), Some("oauth-token-v2"));
+        assert_eq!(open_v2_with_key(fp, payload, &[0x99u8; 32]), None);
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

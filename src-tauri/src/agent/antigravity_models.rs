@@ -133,14 +133,13 @@ pub fn schedule_refresh(ctx: &AppCtx, bin: &str) {
     let ctx = ctx.clone();
     let bin = bin.to_string();
     std::thread::spawn(move || {
-        let parsed = {
-            let _auth_gate = crate::agent::antigravity::acquire_auth_gate(&bin, &[]);
-            super::model_catalog::run_list_command_with_timeout(
-                "antigravity",
-                &bin,
-                REFRESH_TIMEOUT,
-            )
-        }
+        // Never acquire `auth_gate` on a background catalogue refresh: `chat_attach` schedules this
+        // right when a pane opens, and holding the gate would block the user's immediate `chat_start`.
+        let parsed = super::model_catalog::run_list_command_with_timeout(
+            "antigravity",
+            &bin,
+            REFRESH_TIMEOUT,
+        )
         .ok()
         .map(|text| parse_cli_output(&text))
         .filter(|models| !models.is_empty());

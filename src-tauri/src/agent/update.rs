@@ -198,12 +198,14 @@ pub fn start(app: &AppCtx, id: &str) -> Result<UpdateStatus, String> {
             while !reader.is_finished() && Instant::now() < drained { std::thread::sleep(Duration::from_millis(20)); }
         }
         let mut code = code;
+        super::version::forget(&bin);
         let mut version = super::version::installed(&bin);
         if code != Some(0) && !timed_out && concurrent_update(&waiter.output.lock().unwrap()) {
             waiter.append(b"\nWaiting for the update already in progress to finish...\n");
             let deadline = Instant::now() + CONCURRENT_WAIT;
             while version == before && Instant::now() < deadline {
                 std::thread::sleep(Duration::from_secs(2));
+                super::version::forget(&bin);
                 version = super::version::installed(&bin);
             }
             if version != before && version.is_some() {

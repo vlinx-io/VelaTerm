@@ -1572,14 +1572,16 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             &req_str(args, "baseUrl")?,
             &req_str(args, "token")?,
         )),
-        // Git panel pull requests through Gitea: availability, then push + open into the compare base.
+        // Git panel pull/merge requests through GitHub (`gh`), GitLab (`glab`), or Gitea.
         "git_pr_provider" => to_value(core::git_pr_provider(app, &req_str(args, "cwd")?)),
+        "git_pr_status" => to_value(core::git_pr_status(app, &req_str(args, "cwd")?)?),
         "git_open_pull_request" => to_value(core::git_open_pull_request(
             app,
             &req_str(args, "cwd")?,
             &req_str(args, "base")?,
             &req_str(args, "title")?,
             &req_str(args, "body")?,
+            args.get("draft").and_then(Value::as_bool).unwrap_or(false),
         )?),
         "land_gitea_pr" => to_value(core::land_gitea_pr(
             app,
@@ -2918,6 +2920,7 @@ mod tests {
         "git_range_file_diff",
         // Pull requests read `origin` and push through git; they name no file.
         "git_pr_provider",
+        "git_pr_status",
         "git_open_pull_request",
         "create_worktree",   // git-mediated, refused outside a repository
         "list_worktrees",

@@ -81,9 +81,16 @@ export function rewindsLatestByEditing(kind: SessionKind): boolean {
 /** Agents that open their native session before they read the first message. Their first message can wait
  * for the `session` event and then go out as an ordinary turn instead of waiting in the engine's startup
  * queue, which is what kept it from jumping into the pending queue and back. Claude reports its session
- * only after that first message, and ZCode creates a new one from it, so waiting there would stall until
- * the startup timeout. */
-export const SESSION_BEFORE_INPUT_KINDS: SessionKind[] = ["codex", "opencode", "deepseek", "pi", "omp", ...ACP_CHAT_KINDS];
+ * only after that first message, ZCode creates a new one from it, and Antigravity accepts the first turn
+ * onto its timeline immediately while `agy acp` completes its handshake in the background. */
+export const SESSION_BEFORE_INPUT_KINDS: SessionKind[] = [
+  "codex",
+  "opencode",
+  "deepseek",
+  "pi",
+  "omp",
+  ...ACP_CHAT_KINDS.filter((kind) => kind !== "antigravity"),
+];
 export function opensSessionBeforeFirstMessage(kind: SessionKind): boolean {
   return SESSION_BEFORE_INPUT_KINDS.includes(kind);
 }

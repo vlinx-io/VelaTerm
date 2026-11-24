@@ -1,11 +1,28 @@
 # Changelog
 
-> Created: 2026-07-09 16:10 · Updated: 2026-11-23
+> Created: 2026-07-09 16:10 · Updated: 2026-11-24
 
 All notable changes to VelaTerm are documented here, newest first.
 v0.1.91 is the first public release; earlier version numbers were internal iterations and are not covered.
 
 ---
+
+## v0.3.6 — 2026-11-24
+
+- 📝 File diff views now support inline review comments on selected lines, with a review summary bar to edit, copy, or send all comments directly to an active agent session.
+- 🔀 Branch comparison in the Git panel now lets you create pull or merge requests (including drafts) on GitHub, GitLab, and Gitea with prefilled details, view PR status and CI checks, and clean up the worktree and branch after merge.
+- 🔌 SSH remote windows now include a Ports tab in the right panel and a forwarded-port counter in the status bar, detecting listening ports on Linux hosts and letting you forward ports, open them in your browser, or stop them directly.
+- 🎨 Settings ▸ Appearance now lets you choose separate named themes for dark mode (Tokyo Night, Dracula, Nord, Gruvbox Dark, Adventure Time, and Campbell PowerShell) and light mode (One Half Light and Solarized Light) alongside Classic, keeping your selection when switching between dark and light.
+- ⌨️ The sidebar session tree now supports full keyboard navigation with arrow keys, `Home`/`End`, `Enter`, and `Escape` to return focus to the active terminal or conversation input, along with a configurable Focus sidebar shortcut (`Cmd+Shift+E` on macOS, `Ctrl+Alt+S` on Windows and Linux).
+- 🔎 Searching in the sidebar while a status filter is active now lists matching projects excluded by the filter in a separate Other projects section below the filtered results.
+- ⚡ Antigravity conversations now reopen faster and send messages immediately without stalling on cold starts or background checks.
+- 🪐 Antigravity conversations now start cleanly even when no default model is selected, recover automatically from silent stalls, network hiccups, and corrupted session state, keep interactive choice prompts usable under Bypass permissions, and automatically resume after quota resets.
+- 🔑 ZCode sessions now automatically pick up newly released cloud models and support ZCode 4.0 encrypted credentials, including system keychain sign-ins.
+- 🤖 New Grok conversations now start cleanly without falsely warning that an earlier conversation could not be reopened, and Grok, Copilot, Cursor, Kimi, and Antigravity conversations whose earlier conversation can no longer be reopened recover cleanly into a fresh conversation instead of stopping.
+- 🪟 On macOS, the window title bar now matches your selected dark or light theme even when it differs from the system appearance, and switches back cleanly when returning to System mode.
+- 💬 Dismissing the conversation view hint is now remembered across restarts and across desktop, Electron, and browser windows without briefly reappearing on startup.
+- 🧩 Switching away from or closing a plugin view in the desktop app now works normally without snapping back, and plugin rendering errors stay contained with a Retry option.
+- 🔧 Switching between regular tabs and views without a right panel, such as the Knowledge Base, no longer crashes the interface.
 
 ## v0.3.5 — 2026-11-23
 

@@ -13,6 +13,7 @@
 //! - `engine` owns the running processes, one per session, and turns the wire into timeline rows.
 
 pub mod acp_protocol;
+pub mod antigravity_outcome;
 pub mod antigravity_protocol;
 pub mod auto_continue;
 pub mod config_schema;

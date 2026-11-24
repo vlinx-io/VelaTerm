@@ -1,3 +1,20 @@
+## v0.3.6 — 2026-11-24
+
+- 📝 Diff-Ansichten unterstützen jetzt Inline-Review-Kommentare für ausgewählte Zeilen sowie eine Übersichtsleiste zum Bearbeiten, Kopieren oder direkten Senden aller Kommentare an eine aktive Agent-Sitzung.
+- 🔀 Der Branch-Vergleich im Git-Bereich ermöglicht jetzt das Erstellen von Pull- oder Merge-Requests (einschließlich Entwürfen) auf GitHub, GitLab und Gitea mit vorausgefüllten Angaben, zeigt Status und CI-Prüfungen an und räumt Worktree sowie Branch nach dem Zusammenführen auf.
+- 🔌 SSH-Remote-Fenster bieten jetzt im rechten Bereich den Tab „Ports“ sowie einen Zähler weitergeleiteter Ports in der Statusleiste, erkennen lauschende Ports auf Linux-Hosts und erlauben direktes Weiterleiten, Öffnen im Browser oder Beenden.
+- 🎨 Unter Einstellungen ▸ Darstellung lassen sich neben „Klassisch“ jetzt separate benannte Designs für den dunklen Modus (Tokyo Night, Dracula, Nord, Gruvbox Dark, Adventure Time und Campbell PowerShell) und den hellen Modus (One Half Light und Solarized Light) wählen, wobei die Auswahl beim Wechsel zwischen Hell und Dunkel erhalten bleibt.
+- ⌨️ Der Sitzungsbaum in der Seitenleiste unterstützt jetzt vollständige Tastaturnavigation mit Pfeiltasten, `Home`/`End`, `Enter` sowie `Escape` zur Rückkehr des Fokus zum aktiven Terminal oder Eingabefeld, ergänzt um das anpassbare Kürzel „Seitenleiste fokussieren“ (`Cmd+Shift+E` unter macOS, `Ctrl+Alt+S` unter Windows und Linux).
+- 🔎 Bei der Suche in der Seitenleiste mit aktivem Statusfilter erscheinen passende, vom Filter ausgeblendete Projekte jetzt in einem eigenen Abschnitt „Weitere Projekte“ unterhalb der gefilterten Ergebnisse.
+- ⚡ Antigravity-Gespräche öffnen sich jetzt schneller erneut und senden Nachrichten sofort, ohne bei einem Kaltstart oder bei Hintergrundprüfungen hängen zu bleiben.
+- 🪐 Antigravity-Gespräche starten jetzt auch ohne vorausgewähltes Standardmodell sauber, erholen sich automatisch von stillem Stillstand, Netzwerkstörungen und beschädigtem Sitzungszustand, halten interaktive Auswahlfragen auch unter Bypass-Berechtigungen nutzbar und setzen nach dem Zurücksetzen des Kontingents automatisch fort.
+- 🔑 ZCode-Gespräche übernehmen neu veröffentlichte Cloud-Modelle jetzt automatisch und unterstützen verschlüsselte Anmeldedaten aus ZCode 4.0 einschließlich der Anmeldung über den System-Schlüsselbund.
+- 🤖 Neue Grok-Gespräche starten jetzt sauber ohne die fälschliche Warnung, ein früheres Gespräch könne nicht erneut geöffnet werden, und Gespräche von Grok, Copilot, Cursor, Kimi und Antigravity wechseln sauber in ein neues Gespräch statt abzubrechen, wenn das vorherige nicht mehr geöffnet werden kann.
+- 🪟 Unter macOS passt sich die Fenstertitelleiste jetzt dem gewählten dunklen oder hellen Design an, selbst wenn es vom Systemerscheinungsbild abweicht, und kehrt im Systemmodus sauber zurück.
+- 💬 Das Ausblenden des Hinweises zur Gesprächsansicht wird jetzt über Neustarts hinweg sowie zwischen Desktop-, Electron- und Browser-Fenstern gespeichert und blitzt beim Start nicht mehr kurz auf.
+- 🧩 Das Verlassen oder Schließen einer Plugin-Ansicht in der Desktop-App funktioniert jetzt normal ohne Zurückspringen, und Darstellungsfehler von Plugins bleiben mit einer Option zum erneuten Versuch isoliert.
+- 🔧 Das Wechseln zwischen regulären Tabs und Ansichten ohne rechten Bereich, wie der Wissensdatenbank, führt nicht mehr zum Absturz der Oberfläche.
+
 ## v0.3.5 — 2026-11-23
 
 - 🔎 Die globale Sitzungssuche ermöglicht es jetzt, Ergebnisse nach einem bestimmten Projekt oder einer Sammlung einschließlich verschachtelter Sammlungen und Projekte zu filtern.

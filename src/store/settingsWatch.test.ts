@@ -32,6 +32,7 @@ vi.mock("./termStore", () => ({
   useTermStore: { getState: () => ({ hydrateSettingsFromCache }) },
 }));
 
+import { CONVERSATION_VIEW_HINT_KEY } from "../ipc/conversationViewHint";
 import { pushSetting, reconcileSettings } from "../ipc/settingsSync";
 import { refreshSettingsFromBackend, startSettingsWatch } from "./settingsWatch";
 
@@ -101,6 +102,15 @@ describe("refreshSettingsFromBackend", () => {
     expect(calls[0]).toBe("set_app_settings"); // the pending write lands first
     expect(calls).toContain("get_app_settings");
     expect(localStorage.getItem("vlx-theme")).toBe("dark");
+  });
+
+  it("caches conversation view hint dismissal from the backend without re-hydrating the store", async () => {
+    invoke.mockResolvedValueOnce({ [CONVERSATION_VIEW_HINT_KEY]: "1" });
+
+    await refreshSettingsFromBackend();
+
+    expect(localStorage.getItem(CONVERSATION_VIEW_HINT_KEY)).toBe("1");
+    expect(hydrateSettingsFromCache).not.toHaveBeenCalled();
   });
 });
 

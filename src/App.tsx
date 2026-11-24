@@ -104,9 +104,11 @@ function NotificationsManager() {
 function App() {
   const leftCollapsed = useTermStore((s) => s.leftCollapsed);
   const rightCollapsed = useTermStore((s) => s.rightCollapsed);
+  const memoryLocation = useMemoryLocation();
+  const pluginLocation = usePluginLocation();
   const noRightPanel =
-    memoryRouteHidesRightPanel(useMemoryLocation()) ||
-    pluginRouteHidesRightPanel(usePluginLocation());
+    memoryRouteHidesRightPanel(memoryLocation) ||
+    pluginRouteHidesRightPanel(pluginLocation);
   const resizeLeft = useTermStore((s) => s.resizeLeft);
   const resizeRight = useTermStore((s) => s.resizeRight);
   const loadTree = useTermStore((s) => s.loadTree);

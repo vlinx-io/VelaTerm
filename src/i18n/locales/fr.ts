@@ -543,6 +543,9 @@ const fr: typeof en = {
   "settings.deepseekInvalid": "Saisissez une adresse d'API http(s) valide et une clé API sur une seule ligne.",
   "settings.deepseekLocalOnly": "Ces identifiants sont stockés sur l'appareil hôte ; ils ne peuvent donc être modifiés que là.",
   "settings.appearance": "Apparence", // Appearance
+  "settings.darkTheme": "Thème sombre", // Dark theme
+  "settings.lightTheme": "Thème clair", // Light theme
+  "settings.themeClassic": "Classique", // Classic
   "settings.accent": "Accent", // Accent
   "settings.accentAuto": "Suivre le thème", // Follow theme
   "settings.density": "Densité", // Density
@@ -681,6 +684,31 @@ const fr: typeof en = {
   "changes.ignoreWhitespace": "Ignorer les espaces",
   "changes.collapseUnchanged": "Replier les lignes inchangées",
   "changes.tooLarge": "Ce fichier dépasse la limite de prévisualisation de 2 MiB.",
+  "changes.review.addLine": (range: string) => `Commenter ${range}`,
+  "changes.review.addFile": "Ajouter un commentaire",
+  "changes.review.gutterHint": (line: number) => `Ajouter un commentaire de revue à la ligne ${line}`,
+  "changes.review.sideOriginal": "Avant",
+  "changes.review.sideModified": "Après",
+  "changes.review.fieldLabel": "Commentaire de revue",
+  "changes.review.placeholder": "Rédigez vos retours pour l'agent (Entrée pour enregistrer, Maj+Entrée pour une nouvelle ligne)…",
+  "changes.review.save": "Enregistrer le commentaire",
+  "changes.review.cancel": "Annuler",
+  "changes.review.edit": "Modifier",
+  "changes.review.remove": "Supprimer",
+  "changes.review.count": (count: number, files: number) =>
+    count === 1 ? "1 commentaire de revue" : `${count} commentaires de revue sur ${files} fichiers`,
+  "changes.review.showList": "Liste des commentaires",
+  "changes.review.hideList": "Masquer la liste",
+  "changes.review.clearAll": "Tout effacer",
+  "changes.review.targetAgent": "Session cible",
+  "changes.review.sendTo": (agent: string) => `Envoyer à ${agent}`,
+  "changes.review.pasteTo": (agent: string) => `Coller dans ${agent}`,
+  "changes.review.sending": "Envoi…",
+  "changes.review.copy": "Copier la revue",
+  "changes.review.copied": "Copié",
+  "changes.review.noAgent": "Ouvrez ou démarrez une session d'agent dans ce dépôt pour envoyer les commentaires directement.",
+  "changes.review.promptHeader": "Veuillez traiter les commentaires de revue de code suivants sur les modifications actuelles :",
+  "changes.review.promptComment": "Commentaire :",
   "git.fileStatus.modified": "Modifié",
   "git.fileStatus.added": "Ajouté",
   "git.fileStatus.deleted": "Supprimé",
@@ -729,6 +757,39 @@ const fr: typeof en = {
   "git.pr.noToken": "Ajoutez un jeton Gitea dans les Réglages pour créer des pull requests ici.",
   "git.pr.unreachable": "Le serveur Gitea est injoignable pour le moment.",
   "git.pr.opened": "Pull request créée",
+  "git.pr.openMr": "Créer une merge request",
+  "git.pr.openedMr": "Merge request créée",
+  "git.pr.formTitleProvider": (provider: string) =>
+    provider === "gitlab"
+      ? "Créer une merge request GitLab"
+      : provider === "github"
+        ? "Créer une pull request GitHub"
+        : "Créer une pull request Gitea",
+  "git.pr.formDescriptionMr": (branch: string, base: string) =>
+    `Pousse ${branch} vers origin et crée une merge request vers ${base}.`,
+  "git.pr.draftField": "Créer comme brouillon",
+  "git.pr.noGhCli": "Installez GitHub CLI (gh) pour créer des pull requests ici.",
+  "git.pr.noGhAuth": "Exécutez gh auth login dans un terminal pour connecter GitHub.",
+  "git.pr.noGlabCli": "Installez GitLab CLI (glab) pour créer des merge requests ici.",
+  "git.pr.noGlabAuth": "Exécutez glab auth login dans un terminal pour connecter GitLab.",
+  "git.pr.state.open": "Ouverte",
+  "git.pr.state.draft": "Brouillon",
+  "git.pr.state.merged": "Fusionnée",
+  "git.pr.state.closed": "Fermée",
+  "git.pr.checks.passing": "Vérifications réussies",
+  "git.pr.checks.failing": "Vérifications échouées",
+  "git.pr.checks.pending": "Vérifications en cours",
+  "git.pr.refreshStatus": "Actualiser l'état",
+  "git.pr.cleanupWorktree": "Nettoyer le worktree…",
+  "git.pr.cleanupTitle": "Nettoyer le worktree fusionné",
+  "git.pr.cleanupDescription": (branch: string, path: string) =>
+    `La branche ${branch} a été fusionnée. Supprimer le worktree ${path} ?`,
+  "git.pr.cleanupDeleteBranch": (branch: string) => `Supprimer la branche locale ${branch}`,
+  "git.pr.cleanupArchiveSession": "Archiver cette session",
+  "git.pr.cleanupArchiveHint": "Décochez pour conserver la session dans le répertoire principal du dépôt.",
+  "git.pr.cleanupForce": "Forcer la suppression des modifications non validées",
+  "git.pr.cleanupSubmit": "Nettoyer",
+  "git.pr.cleanupSubmitting": "Nettoyage…",
   "git.push": "Pousser",
   "git.pushTitle": (u: string) => `Pousser vers ${u}`,
   "git.publish": "Publier la branche",
@@ -940,6 +1001,7 @@ const fr: typeof en = {
   "settings.scCopyTerminal": "Copier la sélection du terminal", // Copy terminal selection
   "settings.scSelectAllTerminal": "Tout sélectionner dans le terminal", // Select all in terminal
   "settings.scSaveDoc": "Enregistrer le document", // Save document
+  "settings.scFocusSidebar": "Mettre le focus sur la barre latérale", // Focus sidebar
   "settings.scRecording": "Appuyez sur les touches…", // Press keys…
   "settings.scHint":
     "Cliquez sur un raccourci, puis appuyez sur une nouvelle combinaison (Cmd/Ctrl requis).", // hint
@@ -1248,6 +1310,7 @@ const fr: typeof en = {
   "tree.openProject": "Ouvrir un projet", // Open Project
   "tree.noAttention": "Aucune session ne correspond au filtre d'état", // No sessions match the status filter
   "tree.noMatch": "Aucun résultat", // No matches
+  "tree.otherProjects": "Autres projets", // Other projects
 
   // Dialog fields
   "tree.groupName": "Nom du groupe", // Group name
@@ -2789,6 +2852,25 @@ const fr: typeof en = {
   "plugins.uninstallConfirm": (name: string) => `Désinstaller l’extension « ${name} » ?`,
   "plugins.removeData": "Supprimer également le dossier de données local de cette extension",
   "plugins.loadFailed": "Échec du chargement de l’interface de l’extension",
+  "ports.title": "Ports", // Ports
+  "ports.active": "Transférés", // Forwarded
+  "ports.activeEmpty": "Aucun port transféré", // No forwarded ports
+  "ports.detected": "Détectés", // Detected
+  "ports.detectedEmpty": "Aucun port en écoute trouvé", // No listening ports found
+  "ports.detectionUnavailable": "La détection des ports n’est pas disponible sur cet hôte", // Port detection is not available on this host
+  "ports.manual": "Transférer un port", // Forward a port
+  "ports.portPlaceholder": "Port distant", // Remote port
+  "ports.forward": "Transférer", // Forward
+  "ports.open": "Ouvrir dans le navigateur", // Open in browser
+  "ports.stop": "Arrêter", // Stop
+  "ports.localChanged": (port) => `Le port local ${port} était occupé, un autre port local est utilisé`, // Local port {port} was busy, so another local port is used
+  "ports.unavailable": "Indisponible — mettez à jour VelaTerm", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `Port non valide : ${port}`, // Invalid port: {port}
+  "ports.missingPort": "Saisissez un port", // Enter a port
+  "ports.unknownAction": (action) => `Action inconnue : ${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `Au maximum ${max} ports peuvent être transférés par connexion`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `Le port ${port} n'est pas transféré`, // Port {port} is not forwarded
+  "statusbar.ports": (n) => (n === 1 ? "1 port transféré" : `${n} ports transférés`), // {n} forwarded ports
 };
 
 export default fr;

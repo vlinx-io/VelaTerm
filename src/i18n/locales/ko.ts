@@ -542,6 +542,9 @@ const ko: typeof en = {
   "settings.deepseekInvalid": "유효한 http(s) API 주소와 한 줄짜리 API 키를 입력하세요.",
   "settings.deepseekLocalOnly": "이 자격 증명은 실행 호스트에 저장되므로 호스트에서만 변경할 수 있습니다.",
   "settings.appearance": "외관", // Appearance
+  "settings.darkTheme": "다크 테마", // Dark theme
+  "settings.lightTheme": "라이트 테마", // Light theme
+  "settings.themeClassic": "클래식", // Classic
   "settings.accent": "강조색", // Accent
   "settings.accentAuto": "테마 따름", // Follow theme
   "settings.density": "밀도", // Density
@@ -680,6 +683,31 @@ const ko: typeof en = {
   "changes.ignoreWhitespace": "공백 무시",
   "changes.collapseUnchanged": "변경되지 않은 줄 접기",
   "changes.tooLarge": "이 파일은 미리 보기 한도인 2 MiB를 초과합니다.",
+  "changes.review.addLine": (range: string) => `${range}에 코멘트`,
+  "changes.review.addFile": "코멘트 추가",
+  "changes.review.gutterHint": (line: number) => `${line}번째 줄에 리뷰 코멘트 추가`,
+  "changes.review.sideOriginal": "변경 전",
+  "changes.review.sideModified": "변경 후",
+  "changes.review.fieldLabel": "리뷰 코멘트",
+  "changes.review.placeholder": "에이전트에게 전달할 피드백을 입력하세요 (Enter로 저장, Shift+Enter로 줄 바꿈)…",
+  "changes.review.save": "코멘트 저장",
+  "changes.review.cancel": "취소",
+  "changes.review.edit": "편집",
+  "changes.review.remove": "삭제",
+  "changes.review.count": (count: number, files: number) =>
+    count === 1 ? "리뷰 코멘트 1개" : `파일 ${files}개에 리뷰 코멘트 ${count}개`,
+  "changes.review.showList": "코멘트 목록",
+  "changes.review.hideList": "목록 접기",
+  "changes.review.clearAll": "모두 지우기",
+  "changes.review.targetAgent": "대상 세션",
+  "changes.review.sendTo": (agent: string) => `${agent}에 보내기`,
+  "changes.review.pasteTo": (agent: string) => `${agent}에 붙여넣기`,
+  "changes.review.sending": "보내는 중…",
+  "changes.review.copy": "리뷰 복사",
+  "changes.review.copied": "복사됨",
+  "changes.review.noAgent": "코멘트를 바로 보내려면 이 저장소에서 에이전트 세션을 열거나 시작하세요.",
+  "changes.review.promptHeader": "현재 변경 사항에 대한 다음 코드 리뷰 코멘트를 반영해 주세요:",
+  "changes.review.promptComment": "코멘트:",
   "git.fileStatus.modified": "수정됨",
   "git.fileStatus.added": "추가됨",
   "git.fileStatus.deleted": "삭제됨",
@@ -727,6 +755,39 @@ const ko: typeof en = {
   "git.pr.noToken": "여기서 풀 리퀘스트를 만들려면 설정에서 Gitea 토큰을 추가하세요.",
   "git.pr.unreachable": "지금은 Gitea 서버에 연결할 수 없습니다.",
   "git.pr.opened": "풀 리퀘스트를 만들었습니다",
+  "git.pr.openMr": "머지 리퀘스트 만들기",
+  "git.pr.openedMr": "머지 리퀘스트를 만들었습니다",
+  "git.pr.formTitleProvider": (provider: string) =>
+    provider === "gitlab"
+      ? "GitLab 머지 리퀘스트 만들기"
+      : provider === "github"
+        ? "GitHub 풀 리퀘스트 만들기"
+        : "Gitea 풀 리퀘스트 만들기",
+  "git.pr.formDescriptionMr": (branch: string, base: string) =>
+    `${branch}을(를) origin에 푸시하고 ${base}(으)로 병합하는 머지 리퀘스트를 만듭니다.`,
+  "git.pr.draftField": "초안(Draft)으로 만들기",
+  "git.pr.noGhCli": "여기서 풀 리퀘스트를 만들려면 GitHub CLI(gh)를 설치하세요.",
+  "git.pr.noGhAuth": "GitHub에 연결하려면 터미널에서 gh auth login을 실행하세요.",
+  "git.pr.noGlabCli": "여기서 머지 리퀘스트를 만들려면 GitLab CLI(glab)를 설치하세요.",
+  "git.pr.noGlabAuth": "GitLab에 연결하려면 터미널에서 glab auth login을 실행하세요.",
+  "git.pr.state.open": "열림",
+  "git.pr.state.draft": "초안",
+  "git.pr.state.merged": "병합됨",
+  "git.pr.state.closed": "닫힘",
+  "git.pr.checks.passing": "검사 통과",
+  "git.pr.checks.failing": "검사 실패",
+  "git.pr.checks.pending": "검사 진행 중",
+  "git.pr.refreshStatus": "상태 새로 고침",
+  "git.pr.cleanupWorktree": "워크트리 정리…",
+  "git.pr.cleanupTitle": "병합된 워크트리 정리",
+  "git.pr.cleanupDescription": (branch: string, path: string) =>
+    `브랜치 ${branch}이(가) 병합되었습니다. 워크트리 ${path}을(를) 삭제하시겠습니까?`,
+  "git.pr.cleanupDeleteBranch": (branch: string) => `로컬 브랜치 ${branch} 삭제`,
+  "git.pr.cleanupArchiveSession": "이 세션 보관",
+  "git.pr.cleanupArchiveHint": "선택을 해제하면 기본 저장소 디렉터리에서 세션을 계속 유지합니다.",
+  "git.pr.cleanupForce": "커밋되지 않은 변경 사항 강제 삭제",
+  "git.pr.cleanupSubmit": "정리",
+  "git.pr.cleanupSubmitting": "정리 중…",
   "git.push": "푸시",
   "git.pushTitle": (u: string) => `${u}(으)로 푸시`,
   "git.publish": "브랜치 게시",
@@ -938,6 +999,7 @@ const ko: typeof en = {
   "settings.scCopyTerminal": "터미널 선택 내용 복사", // Copy terminal selection
   "settings.scSelectAllTerminal": "터미널에서 모두 선택", // Select all in terminal
   "settings.scSaveDoc": "문서 저장", // Save document
+  "settings.scFocusSidebar": "사이드바로 포커스", // Focus sidebar
   "settings.scRecording": "키를 누르세요…", // Press keys…
   "settings.scHint": "단축키를 클릭한 다음 새 조합을 누르세요(Cmd/Ctrl 필요).", // hint
   "settings.scScreenshotSection": "스크린샷",
@@ -1238,6 +1300,7 @@ const ko: typeof en = {
   "tree.openProject": "프로젝트 열기", // Open Project
   "tree.noAttention": "상태 필터와 일치하는 세션이 없습니다", // No sessions match the status filter
   "tree.noMatch": "일치 항목 없음", // No matches
+  "tree.otherProjects": "기타 프로젝트", // Other projects
 
   // Dialog fields
   "tree.groupName": "그룹 이름", // Group name
@@ -2753,6 +2816,25 @@ const ko: typeof en = {
   "plugins.uninstallConfirm": (name: string) => `"${name}" 플러그인을 제거하시겠습니까?`,
   "plugins.removeData": "이 플러그인의 로컬 데이터 디렉터리도 함께 삭제",
   "plugins.loadFailed": "플러그인 인터페이스를 불러오지 못했습니다",
+  "ports.title": "포트", // Ports
+  "ports.active": "전달됨", // Forwarded
+  "ports.activeEmpty": "전달된 포트가 없습니다", // No forwarded ports
+  "ports.detected": "감지됨", // Detected
+  "ports.detectedEmpty": "수신 대기 중인 포트가 없습니다", // No listening ports found
+  "ports.detectionUnavailable": "이 호스트에서는 포트 감지를 사용할 수 없습니다", // Port detection is not available on this host
+  "ports.manual": "포트 전달", // Forward a port
+  "ports.portPlaceholder": "원격 포트", // Remote port
+  "ports.forward": "전달", // Forward
+  "ports.open": "브라우저에서 열기", // Open in browser
+  "ports.stop": "중지", // Stop
+  "ports.localChanged": (port) => `로컬 포트 ${port}이(가) 사용 중이어서 다른 로컬 포트를 사용합니다`, // Local port {port} was busy, so another local port is used
+  "ports.unavailable": "사용할 수 없음 — VelaTerm을 업데이트하세요", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `잘못된 포트: ${port}`, // Invalid port: {port}
+  "ports.missingPort": "포트를 입력하세요", // Enter a port
+  "ports.unknownAction": (action) => `알 수 없는 작업: ${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `연결당 최대 ${max}개의 포트를 전달할 수 있습니다`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `포트 ${port}은(는) 전달되지 않았습니다`, // Port {port} is not forwarded
+  "statusbar.ports": (n) => `전달된 포트 ${n}개`, // {n} forwarded ports
 };
 
 export default ko;

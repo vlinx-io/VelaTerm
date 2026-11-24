@@ -1,0 +1,70 @@
+.plugins-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.plugins-panel .vlx-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.plugins-panel .vlx-btn:focus-visible {
+  outline: 2px solid var(--accent-line, var(--accent));
+  outline-offset: 2px;
+}
+
+.plugins-panel .vlx-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.plugins-panel .vlx-btn:disabled:hover {
+  border-color: var(--border);
+}
+
+.plugins-panel .vlx-btn-primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  filter: brightness(0.95);
+}
+
+.plugins-panel .vlx-btn-primary:disabled:hover {
+  border-color: var(--accent);
+}
+
+.plugins-panel-btn-danger {
+  margin-left: auto;
+  color: var(--red);
+}
+
+.plugins-panel-btn-danger:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--red) 55%, var(--border));
+  background: color-mix(in srgb, var(--red) 8%, var(--bg-elevated));
+}
+
+.plugins-panel-btn-danger-solid {
+  background: var(--red);
+  border-color: var(--red);
+  color: var(--text-on-accent);
+}
+
+.plugins-panel-btn-danger-solid:hover:not(:disabled) {
+  border-color: var(--red);
+  filter: brightness(0.95);
+}
+
+.plugins-panel-btn-danger-solid:disabled:hover {
+  border-color: var(--red);
+}
+
+.plugins-panel-path-input {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  font-size: 12px;
+  padding: 5px 8px;
+}

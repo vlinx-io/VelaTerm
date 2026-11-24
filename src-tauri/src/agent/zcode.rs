@@ -9,7 +9,30 @@
 //! VelaTerm drives only the agent's protocol server (`app-server --stdio`), from the conversation view; ZCode
 //! has no terminal session, hooks, or plugin of VelaTerm's.
 
+use std::collections::HashMap;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+use sha2::{Digest, Sha256};
+
+const DEFAULT_ENDPOINT_ORIGIN: &str = "https://zcode.z.ai";
+/// Matches ZCode's bundled CLI version when run outside the desktop shell.
+const CLIENT_VERSION: &str = "0.0.0-dev";
+const REFRESH_TTL: Duration = Duration::from_secs(30 * 60);
+const RETRY_BACKOFF: Duration = Duration::from_secs(5 * 60);
+const HTTP_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_CONFIG_BYTES: usize = 10 * 1024 * 1024;
+
+#[derive(Default)]
+struct RefreshEntry {
+    in_flight: bool,
+    next_check: Option<Instant>,
+    last_url: Option<String>,
+}
+
+static REFRESH_STATE: Mutex<Option<HashMap<PathBuf, RefreshEntry>>> = Mutex::new(None);
 
 /// The desktop release's resource directory beside its main binary: `Contents/Resources` in a macOS app
 /// bundle, `resources` in a Windows install. Only one that carries the agent bundle counts.
@@ -60,12 +83,299 @@ fn exported(key: &str) -> Option<std::ffi::OsString> {
     std::env::var_os(key).filter(|v| !v.is_empty())
 }
 
+fn exported_str(key: &str) -> Option<String> {
+    exported(key)
+        .map(|v| v.to_string_lossy().trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// ZCode's platform tag for `/api/v1/client/configs`, matching `resolveZCodeBuiltinClientPlatform`.
+fn client_platform() -> String {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "windows",
+        other => other,
+    };
+    let arch = match std::env::consts::ARCH {
+        "aarch64" => "aarch64",
+        "x86_64" => "x86_64",
+        other => other,
+    };
+    format!("{os}-{arch}")
+}
+
+/// Normalize a URL string to its HTTP(S) origin (`scheme://host[:port]`) without embedded credentials.
+fn normalize_origin(raw: &str) -> Option<String> {
+    let url = url::Url::parse(raw.trim()).ok()?;
+    if !matches!(url.scheme(), "https" | "http") || !url.username().is_empty() || url.password().is_some() {
+        return None;
+    }
+    let host = url.host_str()?;
+    Some(match url.port() {
+        Some(port) => format!("{}://{host}:{port}", url.scheme()),
+        None => format!("{}://{host}", url.scheme()),
+    })
+}
+
+/// The ZCode control-plane origin, honoring the same environment overrides ZCode reads.
+fn endpoint_origin() -> String {
+    let is_test = exported_str("ZCODE_ENV").is_some_and(|v| v.eq_ignore_ascii_case("test"));
+    let env_specific = if is_test { "ZCODE_TEST_BASE_URL" } else { "ZCODE_PRODUCTION_BASE_URL" };
+    for key in ["ZCODE_BASE_URL", "ZCODE_ENDPOINT_ORIGIN", env_specific] {
+        if let Some(origin) = exported_str(key).and_then(|v| normalize_origin(&v)) {
+            return origin;
+        }
+    }
+    DEFAULT_ENDPOINT_ORIGIN.to_string()
+}
+
+/// Endpoint cache key matching ZCode's `createZCodeBuiltinEndpointKey`.
+fn endpoint_key(origin: &str) -> String {
+    let digest = Sha256::digest(origin.as_bytes());
+    let hex: String = digest.iter().take(16).map(|b| format!("{b:02x}")).collect();
+    format!("endpoint-{hex}")
+}
+
+fn velaterm_builtin_cache_path(base: &Path, platform: &str, origin: &str) -> PathBuf {
+    base.join(".zcode")
+        .join("vlx-term")
+        .join("provider")
+        .join(platform)
+        .join(endpoint_key(origin))
+        .join("zcode-builtin.json")
+}
+
+/// Read-only discovery of ZCode's own refreshed caches for `platform` and `origin`, so an offline session
+/// can still pick up a newer release ZCode Desktop already fetched.
+fn zcode_runtime_builtin_candidates(base: &Path, platform: &str, origin: &str) -> Vec<PathBuf> {
+    let root = base.join(".zcode").join("v2").join("runtime").join("provider").join(platform);
+    let key = endpoint_key(origin);
+    let Ok(entries) = std::fs::read_dir(&root) else { return Vec::new() };
+    entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path().join(&key).join("zcode-builtin.json"))
+        .filter(|path| path.is_file())
+        .collect()
+}
+
+/// Validate a built-in provider config payload and return its positive `revision`.
+fn validate_builtin_bytes(bytes: &[u8]) -> Option<u64> {
+    let value: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    if value.get("schemaVersion").and_then(serde_json::Value::as_u64) != Some(1) {
+        return None;
+    }
+    let revision = value.get("revision").and_then(serde_json::Value::as_u64).filter(|r| *r > 0)?;
+    let rules = value
+        .pointer("/config/providerConfigRules/providerRules")
+        .and_then(serde_json::Value::as_array)?;
+    if rules.is_empty() || !value.pointer("/config/modelConfigRules").is_some_and(serde_json::Value::is_object) {
+        return None;
+    }
+    Some(revision)
+}
+
+fn builtin_revision(path: &Path) -> Option<u64> {
+    let bytes = std::fs::read(path).ok()?;
+    validate_builtin_bytes(&bytes)
+}
+
+/// Pick the built-in provider config with the highest valid revision among the shipped copy, VelaTerm's
+/// cached remote copy, and any ZCode runtime cache. Never downgrades below `shipped`, and returns `shipped`
+/// untouched when `shipped` is absent (e.g. synthetic test paths).
+fn best_builtin_config(shipped: PathBuf, base: &Path, platform: &str, origin: &str) -> PathBuf {
+    let Some(shipped_rev) = builtin_revision(&shipped) else {
+        return shipped;
+    };
+    let mut best_rev = shipped_rev;
+    let mut best_path = shipped;
+    let mut candidates = vec![velaterm_builtin_cache_path(base, platform, origin)];
+    candidates.extend(zcode_runtime_builtin_candidates(base, platform, origin));
+    for candidate in candidates {
+        if let Some(rev) = builtin_revision(&candidate) {
+            if rev > best_rev {
+                best_rev = rev;
+                best_path = candidate;
+            }
+        }
+    }
+    best_path
+}
+
+/// Validate a CDN download URL returned by `/api/v1/client/configs`. Requires HTTPS whenever the control
+/// plane itself uses HTTPS, and rejects embedded credentials.
+fn validate_cdn_url(origin: &str, raw: &str) -> Option<String> {
+    let parsed = url::Url::parse(raw.trim()).ok()?;
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return None;
+    }
+    let allow_http = origin.starts_with("http://");
+    let scheme_ok = parsed.scheme() == "https" || (allow_http && parsed.scheme() == "http");
+    scheme_ok.then(|| parsed.to_string())
+}
+
+enum RemoteFetch {
+    Updated { bytes: Vec<u8>, revision: u64, url: String },
+    NotModified,
+    Missing,
+}
+
+fn read_bounded(resp: ureq::Response, max_bytes: usize) -> Result<Vec<u8>, String> {
+    let mut buf = Vec::new();
+    let limit = (max_bytes as u64).saturating_add(1);
+    resp.into_reader()
+        .take(limit)
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("read failed: {e}"))?;
+    if buf.len() > max_bytes {
+        return Err("body limit exceeded".to_string());
+    }
+    Ok(buf)
+}
+
+fn fetch_remote_builtin(origin: &str, platform: &str, reuse_url: Option<&str>) -> Result<RemoteFetch, String> {
+    let agent = ureq::AgentBuilder::new().redirects(0).timeout(HTTP_TIMEOUT).build();
+    let mut config_url = url::Url::parse(origin)
+        .and_then(|base| base.join("/api/v1/client/configs"))
+        .map_err(|_| "invalid endpoint origin".to_string())?;
+    config_url
+        .query_pairs_mut()
+        .append_pair("app_version", CLIENT_VERSION)
+        .append_pair("platform", platform);
+    let resp = agent
+        .get(config_url.as_str())
+        .set("Accept", "application/json")
+        .call()
+        .map_err(|e| format!("client-config request failed: {e}"))?;
+    let body = read_bounded(resp, 1024 * 1024)?;
+    let payload: serde_json::Value =
+        serde_json::from_slice(&body).map_err(|_| "client-config response is not JSON".to_string())?;
+    if payload.get("code").and_then(serde_json::Value::as_u64) != Some(0) {
+        return Err("client-config returned non-zero code".to_string());
+    }
+    let Some(raw_url) = payload
+        .pointer("/data/configs/builtin_provider_config_json")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return Ok(RemoteFetch::Missing);
+    };
+    let cdn_url = validate_cdn_url(origin, raw_url)
+        .ok_or_else(|| "client-config returned an invalid CDN URL".to_string())?;
+    if reuse_url == Some(cdn_url.as_str()) {
+        return Ok(RemoteFetch::NotModified);
+    }
+    let cdn_resp = agent
+        .get(&cdn_url)
+        .set("Accept", "application/json")
+        .call()
+        .map_err(|e| format!("cdn request failed: {e}"))?;
+    let bytes = read_bounded(cdn_resp, MAX_CONFIG_BYTES)?;
+    let revision = validate_builtin_bytes(&bytes)
+        .ok_or_else(|| "cdn payload failed built-in provider config validation".to_string())?;
+    Ok(RemoteFetch::Updated { bytes, revision, url: cdn_url })
+}
+
+fn write_atomic_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
+    if let Err(err) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(err);
+    }
+    Ok(())
+}
+
+/// Refresh VelaTerm's cached copy of ZCode's built-in provider config from ZCode's CDN when stale.
+///
+/// VelaTerm pins `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` and `ZCODE_PERSONAL_PROVIDER_CONFIG_FILE` so the
+/// account payload can name the exact revision `app-server` loaded, which causes ZCode's own CLI wrapper to
+/// skip remote refresh. Running this before `command(bin)` on background model/session startup keeps new
+/// cloud-published models (such as GLM-5.4) available without waiting for a new desktop release.
+///
+/// Best-effort: never blocks longer than `HTTP_TIMEOUT`, rate-limited by `REFRESH_TTL` / `RETRY_BACKOFF`,
+/// single-flight per cache path, and silently falls back to the best local copy on any failure.
+pub fn refresh_builtin_config(bin: &str) {
+    use crate::agent::zcode_account::BUILTIN_CONFIG;
+    if exported(BUILTIN_CONFIG).is_some() {
+        return;
+    }
+    let resources = desktop_resources(Path::new(bin));
+    let Some(shipped) = shipped_config(Path::new(bin), resources.as_deref()) else { return };
+    let Some(shipped_rev) = builtin_revision(&shipped) else { return };
+    let Some(base) = exported("ZCODE_DATA_BASE_DIR").map(PathBuf::from).or_else(crate::host::home_dir) else {
+        return;
+    };
+    let platform = client_platform();
+    let origin = endpoint_origin();
+    let cache_path = velaterm_builtin_cache_path(&base, &platform, &origin);
+    let current_cached_rev = builtin_revision(&cache_path);
+    let now = Instant::now();
+    let reuse_url = {
+        let mut guard = REFRESH_STATE.lock().unwrap();
+        let map = guard.get_or_insert_with(HashMap::new);
+        let entry = map.entry(cache_path.clone()).or_default();
+        if entry.in_flight || entry.next_check.is_some_and(|next| now < next) {
+            return;
+        }
+        entry.in_flight = true;
+        current_cached_rev.and_then(|_| entry.last_url.clone())
+    };
+
+    let outcome = fetch_remote_builtin(&origin, &platform, reuse_url.as_deref());
+    let mut new_url = reuse_url;
+    let backoff = match outcome {
+        Ok(RemoteFetch::Updated { bytes, revision, url }) => {
+            let floor = current_cached_rev.unwrap_or(0).max(shipped_rev);
+            if revision > floor {
+                match write_atomic_private(&cache_path, &bytes) {
+                    Ok(()) => {
+                        new_url = Some(url);
+                        crate::diagnostics::record("INFO", "zcode_builtin_config_updated", serde_json::json!({
+                            "revision": revision, "previousRevision": floor,
+                        }));
+                    }
+                    Err(err) => {
+                        crate::diagnostics::record("WARN", "zcode_builtin_config_refresh_failed", serde_json::json!({
+                            "reason": format!("write failed: {err}"),
+                        }));
+                    }
+                }
+            } else {
+                new_url = Some(url);
+            }
+            REFRESH_TTL
+        }
+        Ok(RemoteFetch::NotModified | RemoteFetch::Missing) => REFRESH_TTL,
+        Err(reason) => {
+            crate::diagnostics::record("WARN", "zcode_builtin_config_refresh_failed", serde_json::json!({
+                "reason": reason,
+            }));
+            RETRY_BACKOFF
+        }
+    };
+
+    let mut guard = REFRESH_STATE.lock().unwrap();
+    if let Some(entry) = guard.as_mut().and_then(|m| m.get_mut(&cache_path)) {
+        entry.in_flight = false;
+        entry.next_check = Some(Instant::now() + backoff);
+        entry.last_url = new_url;
+    }
+}
+
 /// A command that runs ZCode from `bin`, before its subcommand. The desktop app's binary runs the bundled
 /// agent as Node; anything else is the `zcode` command itself. A variable the user exported already wins.
 ///
 /// Both provider config files are pinned when the shipped one is known. Given both, ZCode reads them as they
 /// are instead of a copy it refreshes on its own, so the account VelaTerm reports can name the revision the
-/// server loaded (see `zcode_account`); the release's config is the one its agent was built with.
+/// server loaded (see `zcode_account`). When VelaTerm's remote cache or ZCode's runtime cache holds a newer
+/// revision than the shipped file, that file is pinned instead.
 pub fn command(bin: &str) -> std::process::Command {
     use crate::agent::zcode_account::{BUILTIN_CONFIG, PERSONAL_CONFIG};
     let mut cmd = crate::host::command(bin);
@@ -79,8 +389,14 @@ pub fn command(bin: &str) -> std::process::Command {
             }
         }
     }
-    let builtin = exported(BUILTIN_CONFIG).map(PathBuf::from).or_else(|| shipped_config(Path::new(bin), resources.as_deref()));
     let base = exported("ZCODE_DATA_BASE_DIR").map(PathBuf::from).or_else(crate::host::home_dir);
+    let builtin = exported(BUILTIN_CONFIG).map(PathBuf::from).or_else(|| {
+        let shipped = shipped_config(Path::new(bin), resources.as_deref())?;
+        Some(match base.as_deref() {
+            Some(base) => best_builtin_config(shipped, base, &client_platform(), &endpoint_origin()),
+            None => shipped,
+        })
+    });
     if let (Some(builtin), None, Some(base)) = (builtin, exported(PERSONAL_CONFIG), base) {
         cmd.env(BUILTIN_CONFIG, builtin);
         cmd.env(PERSONAL_CONFIG, base.join(".zcode").join("v2").join("provider_config.json"));
@@ -146,6 +462,7 @@ pub fn list_models(bin: &str, cwd: &str) -> Result<Vec<serde_json::Value>, Strin
     use std::io::{BufRead, BufReader, Write};
     use std::process::Stdio;
 
+    refresh_builtin_config(bin);
     let mut cmd = command(bin);
     cmd.arg("app-server").arg("--stdio").current_dir(cwd);
     crate::login_env::refresh_command(&mut cmd);
@@ -434,5 +751,81 @@ mod tests {
         assert!(session_missing_in(&db, "sess_gone"));
         assert!(session_missing_in(&db, "sess_unknown"));
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    fn sample_builtin(revision: u64) -> String {
+        serde_json::json!({
+            "schemaVersion": 1,
+            "revision": revision,
+            "config": {
+                "providerConfigRules": {
+                    "providerRules": [{"providerId": "account:zai-individual-coding-plan"}]
+                },
+                "modelConfigRules": {}
+            }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn best_builtin_config_prefers_higher_revision_and_never_downgrades() {
+        let home = temp_home("builtin-best");
+        let shipped = home.join("shipped").join("zcode-builtin.json");
+        std::fs::create_dir_all(shipped.parent().unwrap()).unwrap();
+        std::fs::write(&shipped, sample_builtin(44)).unwrap();
+
+        let platform = "darwin-aarch64";
+        let origin = "https://zcode.z.ai";
+        let cached = velaterm_builtin_cache_path(&home, platform, origin);
+        std::fs::create_dir_all(cached.parent().unwrap()).unwrap();
+
+        // Older or equal cache keeps the shipped file.
+        std::fs::write(&cached, sample_builtin(43)).unwrap();
+        assert_eq!(best_builtin_config(shipped.clone(), &home, platform, origin), shipped);
+        std::fs::write(&cached, sample_builtin(44)).unwrap();
+        assert_eq!(best_builtin_config(shipped.clone(), &home, platform, origin), shipped);
+
+        // Corrupt cache is ignored.
+        std::fs::write(&cached, "{not json").unwrap();
+        assert_eq!(best_builtin_config(shipped.clone(), &home, platform, origin), shipped);
+
+        // Newer VelaTerm cache wins.
+        std::fs::write(&cached, sample_builtin(47)).unwrap();
+        assert_eq!(best_builtin_config(shipped.clone(), &home, platform, origin), cached);
+
+        // Even newer ZCode Desktop runtime cache wins over both.
+        let runtime = home
+            .join(".zcode/v2/runtime/provider")
+            .join(platform)
+            .join("4.0.0")
+            .join(endpoint_key(origin))
+            .join("zcode-builtin.json");
+        std::fs::create_dir_all(runtime.parent().unwrap()).unwrap();
+        std::fs::write(&runtime, sample_builtin(48)).unwrap();
+        assert_eq!(best_builtin_config(shipped.clone(), &home, platform, origin), runtime);
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn builtin_validation_and_endpoint_helpers_match_zcode() {
+        assert_eq!(validate_builtin_bytes(sample_builtin(47).as_bytes()), Some(47));
+        assert_eq!(validate_builtin_bytes(sample_builtin(0).as_bytes()), None);
+        assert_eq!(validate_builtin_bytes(br#"{"schemaVersion":2,"revision":47,"config":{"providerConfigRules":{"providerRules":[{}]},"modelConfigRules":{}}}"#), None);
+        assert_eq!(validate_builtin_bytes(br#"{"schemaVersion":1,"revision":47,"config":{"providerConfigRules":{"providerRules":[]},"modelConfigRules":{}}}"#), None);
+
+        // Matches the endpoint hash ZCode itself computes for https://zcode.z.ai.
+        assert_eq!(endpoint_key("https://zcode.z.ai"), "endpoint-78d7c3bef4024722642626fe3669a799");
+        assert_eq!(normalize_origin("https://zcode.z.ai/some/path?x=1").as_deref(), Some("https://zcode.z.ai"));
+        assert_eq!(normalize_origin("https://user:pass@zcode.z.ai"), None);
+        assert_eq!(normalize_origin("ftp://zcode.z.ai"), None);
+
+        assert_eq!(
+            validate_cdn_url("https://zcode.z.ai", "https://cdn-zcode.z.ai/zcode/config/r47.json").as_deref(),
+            Some("https://cdn-zcode.z.ai/zcode/config/r47.json"),
+        );
+        assert_eq!(validate_cdn_url("https://zcode.z.ai", "http://cdn-zcode.z.ai/r47.json"), None);
+        assert_eq!(validate_cdn_url("http://127.0.0.1:3000", "http://127.0.0.1:3000/r47.json").as_deref(), Some("http://127.0.0.1:3000/r47.json"));
+        assert_eq!(validate_cdn_url("https://zcode.z.ai", "https://u:p@cdn-zcode.z.ai/r47.json"), None);
     }
 }

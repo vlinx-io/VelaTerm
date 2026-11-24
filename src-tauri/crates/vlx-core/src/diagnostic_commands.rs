@@ -158,6 +158,7 @@ const COMMANDS: &[&str] = &[
     "git_merge_preview",
     "git_open_pull_request",
     "git_pr_provider",
+    "git_pr_status",
     "git_pull",
     "git_push",
     "git_range_file_diff",

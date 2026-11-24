@@ -307,11 +307,9 @@ pub fn create_session(
         let seeded_agent_id = agent_session_id
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
-            // Zoo and Grok accept caller-provided UUIDs. Reuse the VelaTerm session ID so parallel sessions in
-            // one directory never attach to each other's most recent conversation; first launch creates it.
-            .or_else(|| {
-                matches!(kind, SessionKind::Zoo | SessionKind::Grok).then(|| session.id.clone())
-            });
+            // Only the terminal engine can seed a caller-provided id; the chat engine lets the agent assign
+            // it (see `SessionKind::accepts_caller_session_id`).
+            .or_else(|| kind.accepts_caller_session_id(&session.engine).then(|| session.id.clone()));
         if let Some(aid) = seeded_agent_id {
             // Reuse the kind-guarded update so only the newly created matching session is persisted.
             repo::set_agent_session_id(&conn, &session.id, &aid, kind)?;
@@ -785,21 +783,17 @@ pub fn land_gitea_pr(
         &targets.base_ref,
         title,
         body,
+        false,
     )
 }
 
-/// Whether the Git panel can open a pull request for the repository at `cwd`: Gitea must be
-/// configured on the same host as `origin`, hold a token, and answer. `reason` is `ok`,
-/// `not_gitea`, `no_token`, or `unreachable` for the panel to explain.
-pub fn git_pr_provider(ctx: &AppCtx, cwd: &str) -> serde_json::Value {
-    if !crate::gitea::relevant(ctx.db(), cwd) {
-        return serde_json::json!({ "provider": null, "available": false, "reason": "not_gitea" });
-    }
-    let (available, reason) = crate::gitea::land_provider_check(ctx.db(), &app_identifier(ctx));
-    serde_json::json!({ "provider": "gitea", "available": available, "reason": reason })
+/// Detect whether the Git panel can open pull or merge requests for `cwd` (GitHub via `gh`, GitLab
+/// via `glab`, or configured Gitea) and explain missing prerequisites.
+pub fn git_pr_provider(ctx: &AppCtx, cwd: &str) -> crate::git::pr::PrProviderStatus {
+    crate::git::pr::detect_provider(ctx.db(), &app_identifier(ctx), cwd)
 }
 
-/// Push the current branch and open a Gitea pull request into `base`, the branch the Git panel
+/// Push the current branch and open a pull or merge request into `base`, the branch the Git panel
 /// compares against.
 pub fn git_open_pull_request(
     ctx: &AppCtx,
@@ -807,11 +801,26 @@ pub fn git_open_pull_request(
     base: &str,
     title: &str,
     body: &str,
+    draft: bool,
 ) -> Result<crate::gitea::PrOutcome, String> {
     // `status().branch` is None on a detached HEAD, where there is no branch to push.
     let head = crate::git::status(cwd).branch.ok_or("Check out a branch before opening a pull request")?;
     let base_ref = crate::git::compare::full_ref(cwd, base)?;
-    crate::gitea::open_pr(ctx.db(), &app_identifier(ctx), cwd, &head, &base_ref, title, body)
+    crate::git::pr::open_pull_request(
+        ctx.db(),
+        &app_identifier(ctx),
+        cwd,
+        &head,
+        &base_ref,
+        title,
+        body,
+        draft,
+    )
+}
+
+/// Inspect the current branch's open, draft, merged, or closed pull/merge request when supported.
+pub fn git_pr_status(ctx: &AppCtx, cwd: &str) -> Result<Option<crate::git::pr::PrStatusInfo>, String> {
+    crate::git::pr::current_pr_status(ctx.db(), &app_identifier(ctx), cwd)
 }
 
 // SSH host history and remembered passwords. These commands are **desktop-only** because Connect Remote is hidden
@@ -1152,6 +1161,25 @@ pub fn chat_start(
         let conn = ctx.db().conn.lock().unwrap();
         crate::agent::permission_catalog::effective(&conn, session.kind, session.permission_mode.as_deref())?
     };
+    // A Grok session seeded with its own VelaTerm session id (see `create_session`/`insert_session`) has no
+    // agent conversation until first launch. If that id was never created — a row written before chat
+    // sessions stopped pre-seeding, or a tui session switched to chat before it ran — clear it in the
+    // database before starting: ACP assigns the id via `session/new`, and `ChatManager::start` re-reads
+    // the row under its writer lease and rejects any mismatch against `resume`.
+    if session.kind == SessionKind::Grok {
+        if let Some(seeded) = session.agent_session_id.clone().filter(|id| {
+            id == &session.id && crate::agent::resume::confirmed_missing(SessionKind::Grok, id)
+        }) {
+            let cleared = {
+                let conn = ctx.db().conn.lock().unwrap();
+                repo::forget_agent_session_id(&conn, session_id, &seeded, SessionKind::Grok)?
+            };
+            session.agent_session_id = None;
+            if cleared {
+                ctx.emit(TREE_CHANGED, ());
+            }
+        }
+    }
     // A DeepSeek conversation used to be recorded by DeepSeek Harness, so its saved id is not an
     // OpenCode session. Start a new OpenCode conversation instead of failing to resume a foreign id.
     let resume = session.agent_session_id.as_deref().filter(|id| {
@@ -1371,6 +1399,11 @@ pub fn chat_send(
     behavior: Option<&str>,
     message_id: Option<&str>,
 ) -> Result<&'static str, String> {
+    let _slow = crate::diagnostics::Slow::new(
+        "agent_submission",
+        std::time::Duration::from_millis(200),
+        serde_json::json!({"command":"chat_send","sessionId":session_id,"status":"slow"}),
+    );
     if crate::security::session_active(session_id) {
         return Err("security_audit_owns_conversation".into());
     }
@@ -2807,6 +2840,146 @@ mod tests {
         let db = crate::db::Db::open(&dir.join("t.db")).unwrap();
         let host = std::sync::Arc::new(crate::host::HeadlessHost::new(dir.to_path_buf(), db));
         crate::host::AppCtx::Headless(host)
+    }
+
+    /// The Grok terminal engine accepts `--session-id`, so a new terminal session seeds its own id for a
+    /// deterministic first launch. The chat engine (ACP) cannot choose the id — `session/new` assigns it —
+    /// so seeding one there makes the first launch try to reopen a conversation that was never created,
+    /// which surfaced as "could not reopen that conversation; a new one has been started".
+    #[test]
+    fn a_new_grok_chat_session_does_not_seed_a_resume_anchor() {
+        let dir = std::env::temp_dir().join(format!("vlx-create-seed-{}", uuid::Uuid::new_v4()));
+        let ctx = headless_ctx(&dir);
+        ctx.db()
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO projects (id, name, root_path, sort_order, created_at) VALUES ('p','P','/tmp',0,0)",
+                [],
+            )
+            .unwrap();
+
+        let create = |name: &str, engine: &str| {
+            super::create_session(
+                &ctx, "p", None, name, crate::models::SessionKind::Grok, None, None, None, None,
+                None, None, None, None, None, None, None, Some(engine),
+            )
+            .unwrap()
+        };
+
+        let chat = create("grok chat", "chat");
+        assert_eq!(
+            chat.agent_session_id, None,
+            "a new Grok chat session must not pre-seed a resume id"
+        );
+
+        let tui = create("grok tui", "tui");
+        assert_eq!(
+            tui.agent_session_id.as_deref(),
+            Some(tui.id.as_str()),
+            "a Grok terminal session seeds its own id for --session-id"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Seeding a caller-provided session id is a terminal-engine capability, independent of the specific
+    /// session-creation path (`create_session` vs `insert_session`).
+    #[test]
+    fn caller_id_seeding_is_terminal_only_and_grok_specific() {
+        use crate::models::SessionKind::*;
+        assert!(Grok.accepts_caller_session_id("tui"));
+        assert!(!Grok.accepts_caller_session_id("chat"));
+        assert!(Zoo.accepts_caller_session_id("tui"));
+        assert!(!Zoo.accepts_caller_session_id("chat"));
+        assert!(!Claude.accepts_caller_session_id("tui"));
+        assert!(!Claude.accepts_caller_session_id("chat"));
+    }
+
+    /// Dropping an uncreated seeded Grok id in memory alone fails `ChatManager::start`'s database
+    /// identity guard (`session.agent_session_id != resume`). `chat_start` must clear the seeded row in
+    /// SQLite for both legacy chat rows and tui->chat switches, while leaving genuinely distinct native
+    /// ids intact so ACP can report a missing conversation.
+    #[test]
+    fn chat_start_clears_uncreated_seeded_grok_anchor_in_db() {
+        use crate::db::repo;
+        use crate::models::SessionKind;
+        let dir = std::env::temp_dir().join(format!("vlx-grok-chat-start-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(&dir.join("t.db")).unwrap();
+        let host = std::sync::Arc::new(crate::host::HeadlessHost::new(dir.clone(), db));
+        host.set_hooks(crate::agent::server::HookServer {
+            port: 0,
+            token: "fixture".into(),
+        });
+        let ctx = crate::host::AppCtx::Headless(host);
+        ctx.db()
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO projects (id, name, root_path, sort_order, created_at) VALUES ('p','P','/tmp',0,0)",
+                [],
+            )
+            .unwrap();
+
+        let missing_bin = Some("missing-grok-fixture");
+        // Case 1: legacy pre-seeded Grok chat row written before chat stopped seeding.
+        let legacy = super::create_session(
+            &ctx, "p", None, "legacy", SessionKind::Grok, None, None, None, None, None, None,
+            None, None, None, None, missing_bin, Some("chat"),
+        )
+        .unwrap();
+        {
+            let conn = ctx.db().conn.lock().unwrap();
+            repo::set_agent_session_id(&conn, &legacy.id, &legacy.id, SessionKind::Grok).unwrap();
+        }
+        let err = super::chat_start(&ctx, &legacy.id, None, None, false).unwrap_err();
+        assert!(
+            !err.contains("identity changed"),
+            "legacy seeded Grok chat row must pass the startup identity check; got: {err}"
+        );
+        assert_eq!(
+            repo::get_agent_session_id(&ctx.db().conn.lock().unwrap(), &legacy.id).unwrap(),
+            None
+        );
+
+        // Case 2: Grok tui session switched to chat before its first launch.
+        let switched = super::create_session(
+            &ctx, "p", None, "switched", SessionKind::Grok, None, None, None, None, None, None,
+            None, None, None, None, missing_bin, Some("tui"),
+        )
+        .unwrap();
+        assert_eq!(switched.agent_session_id.as_deref(), Some(switched.id.as_str()));
+        super::set_session_engine(&ctx, &switched.id, "chat").unwrap();
+        let err = super::chat_start(&ctx, &switched.id, None, None, false).unwrap_err();
+        assert!(
+            !err.contains("identity changed"),
+            "tui->chat Grok session must pass the startup identity check; got: {err}"
+        );
+        assert_eq!(
+            repo::get_agent_session_id(&ctx.db().conn.lock().unwrap(), &switched.id).unwrap(),
+            None
+        );
+
+        // Case 3: a non-seeded native id stays persisted so ACP's session/load reports reopen failure.
+        let lost = super::create_session(
+            &ctx, "p", None, "lost", SessionKind::Grok, None, None, None, None, None, None,
+            None, Some("native-from-earlier-chat"), None, None, missing_bin, Some("chat"),
+        )
+        .unwrap();
+        let err = super::chat_start(&ctx, &lost.id, None, None, false).unwrap_err();
+        assert!(
+            !err.contains("identity changed"),
+            "distinct native id must stay aligned with DB; got: {err}"
+        );
+        assert_eq!(
+            repo::get_agent_session_id(&ctx.db().conn.lock().unwrap(), &lost.id).unwrap().as_deref(),
+            Some("native-from-earlier-chat")
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A preference written by one client must reach the others while they run, so the broadcast fires

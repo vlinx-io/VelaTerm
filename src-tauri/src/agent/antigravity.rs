@@ -267,6 +267,44 @@ pub(crate) fn is_native_id(id: &str) -> bool {
     native_id(id)
 }
 
+/// Apply standard runtime environment hardening to an `agy` child process:
+/// disable in-place CLI auto-updates during active sessions, keep Python stdio unbuffered, and on
+/// Linux supply a verified system CA bundle when `SSL_CERT_FILE` / `SSL_CERT_DIR` are unset so the
+/// bundled Python runtime does not fail TLS handshakes on distributions with non-default cert paths.
+pub fn prepare_command_env(cmd: &mut std::process::Command) {
+    let has_env = |cmd: &std::process::Command, key: &str| -> bool {
+        if let Some((_, val)) = cmd.get_envs().find(|(k, _)| *k == key) {
+            return val.is_some_and(|v| !v.is_empty());
+        }
+        std::env::var_os(key).is_some_and(|v| !v.is_empty())
+    };
+    if !has_env(cmd, "AGY_CLI_DISABLE_AUTO_UPDATE") {
+        cmd.env("AGY_CLI_DISABLE_AUTO_UPDATE", "1");
+    }
+    if !has_env(cmd, "PYTHONUNBUFFERED") {
+        cmd.env("PYTHONUNBUFFERED", "1");
+    }
+    #[cfg(target_os = "linux")]
+    if !has_env(cmd, "SSL_CERT_FILE") && !has_env(cmd, "SSL_CERT_DIR") {
+        let nix_ca = std::env::var("NIX_SSL_CERT_FILE").ok();
+        let candidates = [
+            nix_ca.as_deref(),
+            Some("/etc/ssl/certs/ca-bundle.crt"),
+            Some("/etc/ssl/certs/ca-certificates.crt"),
+            Some("/etc/pki/tls/certs/ca-bundle.crt"),
+            Some("/etc/ssl/ca-bundle.pem"),
+            Some("/etc/ssl/cert.pem"),
+        ];
+        for candidate in candidates.into_iter().flatten() {
+            let path = Path::new(candidate);
+            if path.is_absolute() && path.is_file() {
+                cmd.env("SSL_CERT_FILE", path);
+                break;
+            }
+        }
+    }
+}
+
 /// Resolve an Antigravity conversation's `.system_generated` directory from a native id.
 pub fn system_dir(id: &str) -> Option<PathBuf> {
     if !native_id(id) {

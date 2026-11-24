@@ -954,10 +954,10 @@ pub fn open_devtools(window: tauri::WebviewWindow) {
 /// frontend's `ThemeMode`: `dark`/`light` pin the chrome, anything else (`system`) restores follow-the-OS
 /// so a later OS change still reaches the title bar.
 ///
-/// macOS reserves a strip above the web content for the title bar and paints it with the window's web
-/// background, so the frame color carries the same choice: `apply_window_frame` rewrites that color together
-/// with the window background, which is also what lets a switch take effect without recreating the window.
-/// Under `system`, `dark` carries the scheme the frontend resolved, so the strip matches the page beneath it.
+/// macOS reserves a strip above the web content for the title bar and composites its system chrome over the
+/// window's web background using `NSWindow.appearance`. Updating both via `apply_window_frame` (`set_theme`
+/// plus window/under-page background colors) keeps an explicit dark UI on a light OS from getting a light
+/// frosted title bar over a dark strip, and restores OS tracking when switching back to `system`.
 /// `WebviewWindow::theme()` cannot stand in: tao caches it when the window is built, before the application
 /// has resolved its appearance, and on a dark system it can report Light for the whole session.
 ///
@@ -974,11 +974,7 @@ pub fn set_native_theme(app: AppHandle, mode: String, dark: Option<bool>) {
     #[cfg(windows)]
     {
         let _ = dark;
-        let theme = match mode.as_str() {
-            "dark" => Some(tauri::Theme::Dark),
-            "light" => Some(tauri::Theme::Light),
-            _ => None,
-        };
+        let theme = crate::theme_from_mode(&mode);
         if let Some(state) = app.try_state::<crate::NativeTheme>() {
             *state.0.lock().unwrap() = theme;
         }
@@ -988,14 +984,13 @@ pub fn set_native_theme(app: AppHandle, mode: String, dark: Option<bool>) {
     }
     #[cfg(target_os = "macos")]
     {
-        let dark = match mode.as_str() {
-            "dark" => true,
-            "light" => false,
-            // Following the OS: use the scheme the page resolved, falling back to the OS preference.
-            _ => dark.unwrap_or_else(crate::os_prefers_dark),
-        };
+        let theme = crate::theme_from_mode(&mode);
+        let prev_theme = app
+            .try_state::<crate::NativeTheme>()
+            .and_then(|state| std::mem::replace(&mut *state.0.lock().unwrap(), theme));
+        let dark = crate::resolve_macos_frame_dark(theme, prev_theme, dark, crate::os_prefers_dark);
         for (_, win) in app.webview_windows() {
-            crate::apply_window_frame(&win, dark);
+            crate::apply_window_frame(&win, theme, dark);
         }
     }
     #[cfg(not(any(windows, target_os = "macos")))]

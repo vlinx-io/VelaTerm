@@ -17,6 +17,7 @@ import { env, platform } from "../../platform";
 import { PluginIcon } from "../../plugins/PluginViews";
 import { refreshPlugins, usePlugins } from "../../plugins/host";
 import { SectionTitle } from "./settingsParts";
+import "./plugins-panel.css";
 
 type ActionMode = null | "archive" | "dev";
 
@@ -119,7 +120,7 @@ export function PluginsPanel() {
       case "running":
         return "var(--green)";
       case "starting":
-        return "var(--amber)";
+        return "var(--yellow)";
       case "error":
         return "var(--red)";
       default:
@@ -128,7 +129,7 @@ export function PluginsPanel() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <div className="plugins-panel">
       <SectionTitle>{t("plugins.title")}</SectionTitle>
       <p style={{ margin: 0, fontSize: 12, color: "var(--text-dim)", lineHeight: 1.5 }}>
         {t("plugins.subtitle")}
@@ -138,7 +139,7 @@ export function PluginsPanel() {
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
           <button
             type="button"
-            className="btn-primary sm"
+            className="vlx-btn vlx-btn-primary"
             disabled={busyId !== null}
             onClick={() => void pickArchive()}
           >
@@ -146,7 +147,7 @@ export function PluginsPanel() {
           </button>
           <button
             type="button"
-            className="btn-ghost sm"
+            className="vlx-btn"
             disabled={busyId !== null}
             onClick={() => void pickDevDir()}
           >
@@ -154,7 +155,7 @@ export function PluginsPanel() {
           </button>
           <button
             type="button"
-            className="btn-ghost sm"
+            className="vlx-btn"
             disabled={busyId !== null}
             onClick={() => void runAction("__refresh__", () => refreshPlugins())}
           >
@@ -167,7 +168,7 @@ export function PluginsPanel() {
             padding: "8px 10px",
             borderRadius: 6,
             border: "1px solid var(--border)",
-            background: "var(--bg-3)",
+            background: "var(--bg-hover)",
             fontSize: 11.5,
             color: "var(--text-dim)",
           }}
@@ -185,15 +186,16 @@ export function PluginsPanel() {
             padding: 10,
             borderRadius: 6,
             border: "1px solid var(--border)",
-            background: "var(--bg-3)",
+            background: "var(--bg-hover)",
           }}
         >
           <span style={{ fontSize: 11.5, fontWeight: 500, color: "var(--text)" }}>
             {mode === "archive" ? t("plugins.archivePathPrompt") : t("plugins.devPathPrompt")}
           </span>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <input
               type="text"
+              className="vlx-input plugins-panel-path-input"
               value={pathInput}
               onChange={(e) => setPathInput(e.target.value)}
               placeholder={mode === "archive" ? "/path/to/plugin.vlxplugin" : "/path/to/plugin-dir"}
@@ -201,20 +203,10 @@ export function PluginsPanel() {
                 if (e.key === "Enter") void submitManualPath();
                 if (e.key === "Escape") setMode(null);
               }}
-              style={{
-                flex: 1,
-                height: 28,
-                padding: "0 8px",
-                borderRadius: 5,
-                border: "1px solid var(--border)",
-                background: "var(--bg-2)",
-                color: "var(--text)",
-                fontSize: 12,
-              }}
             />
             <button
               type="button"
-              className="btn-primary sm"
+              className="vlx-btn vlx-btn-primary"
               disabled={!pathInput.trim() || busyId !== null}
               onClick={() => void submitManualPath()}
             >
@@ -222,7 +214,7 @@ export function PluginsPanel() {
             </button>
             <button
               type="button"
-              className="btn-ghost sm"
+              className="vlx-btn"
               onClick={() => setMode(null)}
             >
               {t("common.cancel")}
@@ -275,7 +267,7 @@ export function PluginsPanel() {
                   padding: 12,
                   borderRadius: 8,
                   border: "1px solid var(--border)",
-                  background: "var(--bg-3)",
+                  background: "var(--bg-2)",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -381,10 +373,10 @@ export function PluginsPanel() {
                 )}
 
                 {canManage && (
-                  <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
                     <button
                       type="button"
-                      className={p.enabled ? "btn-ghost sm" : "btn-primary sm"}
+                      className={p.enabled ? "vlx-btn" : "vlx-btn vlx-btn-primary"}
                       disabled={busy}
                       onClick={() =>
                         void runAction(p.id, () => pluginSetEnabled(p.id, !p.enabled))
@@ -395,7 +387,7 @@ export function PluginsPanel() {
                     {p.enabled && (
                       <button
                         type="button"
-                        className="btn-ghost sm"
+                        className="vlx-btn"
                         disabled={busy}
                         onClick={() => void runAction(p.id, () => pluginReload(p.id))}
                       >
@@ -404,9 +396,8 @@ export function PluginsPanel() {
                     )}
                     <button
                       type="button"
-                      className="btn-ghost sm"
+                      className="vlx-btn plugins-panel-btn-danger"
                       disabled={busy}
-                      style={{ marginLeft: "auto", color: "var(--red)" }}
                       onClick={() => {
                         setConfirmUninstall(p);
                         setRemoveData(false);
@@ -431,7 +422,7 @@ export function PluginsPanel() {
             padding: 12,
             borderRadius: 8,
             border: "1px solid color-mix(in srgb, var(--red) 45%, transparent)",
-            background: "var(--bg-3)",
+            background: "var(--bg-hover)",
           }}
         >
           <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>
@@ -457,7 +448,7 @@ export function PluginsPanel() {
           <div style={{ display: "flex", gap: 6 }}>
             <button
               type="button"
-              className="btn-danger sm"
+              className="vlx-btn plugins-panel-btn-danger-solid"
               disabled={busyId !== null}
               onClick={async () => {
                 const target = confirmUninstall;
@@ -469,7 +460,7 @@ export function PluginsPanel() {
             </button>
             <button
               type="button"
-              className="btn-ghost sm"
+              className="vlx-btn"
               onClick={() => setConfirmUninstall(null)}
             >
               {t("common.cancel")}

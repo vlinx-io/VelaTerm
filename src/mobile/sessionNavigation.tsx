@@ -8,12 +8,12 @@ export function mobileSessionUrl(id: string | null, view: MobileSessionView = "t
   const url = new URL(sharedSessionUrl(id), window.location.href);
   if (id && view === "history") url.searchParams.set("sessionView", "history");
   else url.searchParams.delete("sessionView");
-  return url.pathname + url.search + url.hash;
+  return url.href;
 }
 
 export function navigateMobileSession(id: string | null, view: MobileSessionView = "terminal", replace = false) {
   const url = mobileSessionUrl(id, view);
-  if (url === location.pathname + location.search + location.hash) return;
+  if (url === location.href) return;
   if (replace) history.replaceState(null, "", url);
   else history.pushState(null, "", url);
   window.dispatchEvent(new PopStateEvent("popstate"));

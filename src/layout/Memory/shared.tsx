@@ -70,7 +70,7 @@ export function MemoryMarkdown({ content }: { content: string }) {
     if (!anchor) return;
     const url = new URL(anchor.href, window.location.href);
     if (url.origin === window.location.origin && url.searchParams.has("memory")) {
-      if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) { e.preventDefault(); memoryNavigate(`${url.pathname}${url.search}${url.hash}`); }
+      if (!e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) { e.preventDefault(); memoryNavigate(url.href); }
     } else if (url.protocol === "http:" || url.protocol === "https:") {
       anchor.target = "_blank"; anchor.rel = "noopener noreferrer";
     }

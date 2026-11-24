@@ -16,7 +16,7 @@ import { SharingLink } from "../../sharing/navigation";
 import { navigateTranslation, translationUrl } from "../../translation/navigation";
 import { useTermStore } from "../../store/termStore";
 import { memoryNavigate, memoryUrl } from "../Memory/navigation";
-import { clearPluginSearchParams, pluginNavigate, pluginUrl, readPluginRoute } from "../../plugins/navigation";
+import { pluginNavigate, pluginUrl, readPluginRoute } from "../../plugins/navigation";
 import { translatePluginKey, useRailPlugins } from "../../plugins/host";
 import { PluginIcon } from "../../plugins/PluginViews";
 import { knowledgeSelection } from "../Notebook/knowledgeSelection";
@@ -85,11 +85,9 @@ export function SidebarRail() {
               const route = new URLSearchParams(window.location.search).get("memory") ?? "";
               const onArchive = route === "collections" || route.startsWith("collection/");
               if (id === "archive" && !onArchive) {
-                clearPluginSearchParams();
                 memoryNavigate(memoryUrl("collections", knowledgeSelection));
               }
               if (id === "knowledge" && (!route || onArchive)) {
-                clearPluginSearchParams();
                 memoryNavigate(memoryUrl("notebooks", knowledgeSelection));
               }
             }}
@@ -168,12 +166,12 @@ function RailFooter() {
           title={t("settings.title")}
           aria-label={t("settings.title")}
           onClick={(e) => {
-            // Option/Alt reveals the translation category for this opening only.
+            // Option/Alt reveals hidden categories (translation, plugins) for this opening only.
             if (settingsOpen && !e.altKey) {
               setSettingsOpen(false);
-              navigateTranslation(translationUrl({ settings: null, settingsSection: null, settingsTranslation: null, translationService: null }));
+              navigateTranslation(translationUrl({ settings: null, settingsSection: null, settingsTranslation: null, settingsPlugins: null, translationService: null }));
             } else {
-              navigateTranslation(translationUrl({ settings: "appearance", settingsSection: null, settingsTranslation: e.altKey ? "1" : null, translationService: null }));
+              navigateTranslation(translationUrl({ settings: "appearance", settingsSection: null, settingsTranslation: e.altKey ? "1" : null, settingsPlugins: e.altKey ? "1" : null, translationService: null }));
             }
           }}
         >

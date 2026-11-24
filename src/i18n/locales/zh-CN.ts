@@ -538,6 +538,9 @@ const zhCN: typeof en = {
   "settings.deepseekInvalid": "请输入有效的 http(s) API 地址和单行 API 密钥。",
   "settings.deepseekLocalOnly": "这些凭据保存在运行主机上，因此只能在主机上修改。",
   "settings.appearance": "外观",
+  "settings.darkTheme": "深色主题",
+  "settings.lightTheme": "浅色主题",
+  "settings.themeClassic": "经典",
   "settings.accent": "强调色",
   "settings.accentAuto": "跟随明暗",
   "settings.density": "密度",
@@ -676,6 +679,31 @@ const zhCN: typeof en = {
   "changes.ignoreWhitespace": "忽略空白",
   "changes.collapseUnchanged": "折叠未改动的行",
   "changes.tooLarge": "此文件超过 2 MiB 预览上限。",
+  "changes.review.addLine": (range: string) => `批注 ${range}`,
+  "changes.review.addFile": "添加批注",
+  "changes.review.gutterHint": (line: number) => `在第 ${line} 行添加评审批注`,
+  "changes.review.sideOriginal": "变更前",
+  "changes.review.sideModified": "变更后",
+  "changes.review.fieldLabel": "评审批注",
+  "changes.review.placeholder": "输入给智能体的修改意见（Enter 保存，Shift+Enter 换行）…",
+  "changes.review.save": "保存批注",
+  "changes.review.cancel": "取消",
+  "changes.review.edit": "编辑",
+  "changes.review.remove": "删除",
+  "changes.review.count": (count: number, files: number) =>
+    count === 1 ? "1 条评审批注" : `共 ${files} 个文件、${count} 条评审批注`,
+  "changes.review.showList": "批注清单",
+  "changes.review.hideList": "收起清单",
+  "changes.review.clearAll": "全部清空",
+  "changes.review.targetAgent": "目标会话",
+  "changes.review.sendTo": (agent: string) => `发送给 ${agent}`,
+  "changes.review.pasteTo": (agent: string) => `粘贴到 ${agent}`,
+  "changes.review.sending": "正在发送…",
+  "changes.review.copy": "复制评审内容",
+  "changes.review.copied": "已复制",
+  "changes.review.noAgent": "请先在当前仓库打开或启动一个智能体会话，即可直接发送批注。",
+  "changes.review.promptHeader": "请根据以下针对当前改动的评审批注进行修改：",
+  "changes.review.promptComment": "批注：",
   "git.fileStatus.modified": "已修改",
   "git.fileStatus.added": "已新增",
   "git.fileStatus.deleted": "已删除",
@@ -723,6 +751,39 @@ const zhCN: typeof en = {
   "git.pr.noToken": "请先在设置中添加 Gitea 令牌，才能在这里创建拉取请求。",
   "git.pr.unreachable": "暂时无法连接 Gitea 服务器。",
   "git.pr.opened": "已创建拉取请求",
+  "git.pr.openMr": "创建合并请求",
+  "git.pr.openedMr": "已创建合并请求",
+  "git.pr.formTitleProvider": (provider: string) =>
+    provider === "gitlab"
+      ? "创建 GitLab 合并请求"
+      : provider === "github"
+        ? "创建 GitHub 拉取请求"
+        : "创建 Gitea 拉取请求",
+  "git.pr.formDescriptionMr": (branch: string, base: string) =>
+    `将 ${branch} 推送到 origin，并创建合并到 ${base} 的合并请求。`,
+  "git.pr.draftField": "创建为草稿（Draft）",
+  "git.pr.noGhCli": "请先安装 GitHub CLI（gh），才能在这里创建拉取请求。",
+  "git.pr.noGhAuth": "请在终端运行 gh auth login 登录 GitHub。",
+  "git.pr.noGlabCli": "请先安装 GitLab CLI（glab），才能在这里创建合并请求。",
+  "git.pr.noGlabAuth": "请在终端运行 glab auth login 登录 GitLab。",
+  "git.pr.state.open": "待合并",
+  "git.pr.state.draft": "草稿",
+  "git.pr.state.merged": "已合并",
+  "git.pr.state.closed": "已关闭",
+  "git.pr.checks.passing": "检查通过",
+  "git.pr.checks.failing": "检查失败",
+  "git.pr.checks.pending": "检查运行中",
+  "git.pr.refreshStatus": "刷新状态",
+  "git.pr.cleanupWorktree": "清理工作树…",
+  "git.pr.cleanupTitle": "清理已合并的工作树",
+  "git.pr.cleanupDescription": (branch: string, path: string) =>
+    `分支 ${branch} 已合并，是否删除工作树目录 ${path}？`,
+  "git.pr.cleanupDeleteBranch": (branch: string) => `同时删除本地分支 ${branch}`,
+  "git.pr.cleanupArchiveSession": "归档当前会话",
+  "git.pr.cleanupArchiveHint": "取消勾选则保留该会话，并切回主仓库目录。",
+  "git.pr.cleanupForce": "强制删除未提交改动",
+  "git.pr.cleanupSubmit": "立即清理",
+  "git.pr.cleanupSubmitting": "正在清理…",
   "git.push": "推送",
   "git.pushTitle": (u: string) => `推送到 ${u}`,
   "git.publish": "发布分支",
@@ -927,6 +988,7 @@ const zhCN: typeof en = {
   "settings.scCopyTerminal": "复制终端选中内容", // Copy terminal selection
   "settings.scSelectAllTerminal": "全选终端内容", // Select all in terminal
   "settings.scSaveDoc": "保存文档",
+  "settings.scFocusSidebar": "聚焦侧边栏",
   "settings.scRecording": "请按下组合键…",
   "settings.scHint": "点一下某个快捷键，再按下新的组合键（需含 Cmd/Ctrl）。",
   "settings.scScreenshotSection": "截图",
@@ -1225,6 +1287,7 @@ const zhCN: typeof en = {
   "tree.openProject": "打开项目",
   "tree.noAttention": "没有符合状态筛选的会话",
   "tree.noMatch": "无匹配结果",
+  "tree.otherProjects": "其他项目",
 
   // Dialog fields
   "tree.groupName": "分组名称",
@@ -2718,6 +2781,25 @@ const zhCN: typeof en = {
   "plugins.uninstallConfirm": (name: string) => `确认卸载插件“${name}”？`,
   "plugins.removeData": "同时删除该插件的本地数据目录",
   "plugins.loadFailed": "插件界面加载失败",
+  "ports.title": "端口", // Ports
+  "ports.active": "已转发", // Forwarded
+  "ports.activeEmpty": "没有已转发的端口", // No forwarded ports
+  "ports.detected": "已检测", // Detected
+  "ports.detectedEmpty": "未发现监听中的端口", // No listening ports found
+  "ports.detectionUnavailable": "此主机不支持端口检测", // Port detection is not available on this host
+  "ports.manual": "转发端口", // Forward a port
+  "ports.portPlaceholder": "远程端口", // Remote port
+  "ports.forward": "转发", // Forward
+  "ports.open": "在浏览器中打开", // Open in browser
+  "ports.stop": "停止", // Stop
+  "ports.localChanged": (port) => `本地端口 ${port} 已被占用，已改用其他本地端口`, // Local port {port} was busy, so another local port is used
+  "ports.unavailable": "不可用 — 请更新 VelaTerm", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `无效的端口：${port}`, // Invalid port: {port}
+  "ports.missingPort": "请输入端口", // Enter a port
+  "ports.unknownAction": (action) => `未知操作：${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `每个连接最多可转发 ${max} 个端口`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `端口 ${port} 未被转发`, // Port {port} is not forwarded
+  "statusbar.ports": (n) => `已转发 ${n} 个端口`, // {n} forwarded ports
 };
 
 export default zhCN;

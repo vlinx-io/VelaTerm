@@ -3,11 +3,13 @@
 //! SettingsModal and the store share types while reducing the size of the main store.
 
 import { parseDefaultViewSection, type DefaultViewSection } from "../layout/LeftSidebar/systemCollections";
+import { sanitizeDarkStyle, sanitizeLightStyle } from "../themes";
 import { pushSetting } from "../ipc/settingsSync";
 import { DEFAULT_CONVERSATION_FONT_SIZE, DEFAULT_TERMINAL_FONT_SIZE, DEFAULT_TERMINAL_LINE_HEIGHT, SETTINGS_TABS, normalizeFontFamily, normalizeLetterSpacing, normalizeTextSize, normalizeTextLineHeight } from "../theme";
 import type {
   AccentChoice,
   DarkStyle,
+  LightStyle,
   Density,
   DividerStyle,
   InspectorTab,
@@ -119,6 +121,7 @@ export type ImagePasteMode = "upload" | "agent";
 export const SETTINGS_KEY = "vlx-settings";
 export interface PersistedSettings {
   darkStyle: DarkStyle;
+  lightStyle: LightStyle;
   accent: AccentChoice;
   density: Density;
   paneStyle: PaneStyle;
@@ -289,6 +292,7 @@ export const COMPOSER_INLINE_CHIPS_REVISION = 1;
 
 export const SETTINGS_DEFAULTS: PersistedSettings = {
   darkStyle: "classic",
+  lightStyle: "classic",
   accent: "auto",
   density: "regular",
   paneStyle: "flush",
@@ -411,8 +415,9 @@ export function loadSettings(): PersistedSettings {
       defaultSessionEngine?: SessionEngine;
     };
     const merged = { ...SETTINGS_DEFAULTS, ...parsed };
-    // Retired comparison styles and missing preferences use the single supported dark palette.
-    merged.darkStyle = "classic";
+    // Retired comparison styles, unknown themes and missing preferences use the classic palettes.
+    merged.darkStyle = sanitizeDarkStyle(parsed.darkStyle);
+    merged.lightStyle = sanitizeLightStyle(parsed.lightStyle);
     // Before v0.3.0, uiFontFamily held the retired monospace interface face, and v0.3.0 fixed the interface to Inter.
     // Saves without uiMonoFontFamily predate the current interface font settings, so a leftover value there would
     // turn the whole interface monospace. Drop it to keep the Inter default.
@@ -444,7 +449,7 @@ export function loadSettings(): PersistedSettings {
     merged.turnFilesView = merged.turnFilesView === true;
     merged.usageAntigravityShowOther = merged.usageAntigravityShowOther === true;
     // The right panel's knowledge tab was removed; a saved value for it, or any unknown value, opens Info.
-    if (!["files", "info", "git"].includes(merged.inspectorTab)) merged.inspectorTab = "info";
+    if (!["files", "info", "git", "ports"].includes(merged.inspectorTab)) merged.inspectorTab = "info";
     merged.planExecutePrefs = sanitizePlanExecutePrefs(parsed.planExecutePrefs);
     merged.memoryPrefs = sanitizeLaunchChoice(parsed.memoryPrefs);
     merged.sessionTitlePrefs = sanitizeSessionTitlePrefs(parsed.sessionTitlePrefs);
@@ -505,6 +510,7 @@ export function saveSettings(s: PersistedSettings) {
 }
 export const visualOf = (s: PersistedSettings): VisualSettings => ({
   darkStyle: s.darkStyle,
+  lightStyle: s.lightStyle,
   accent: s.accent,
   density: s.density,
   paneStyle: s.paneStyle,

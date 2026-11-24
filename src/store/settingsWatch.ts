@@ -10,6 +10,10 @@
 //! only. This module turns that signal back into the same reconciliation the app runs at startup, so the
 //! authority and the code path stay identical; only the trigger is new.
 
+import {
+  CONVERSATION_VIEW_HINT_KEY,
+  notifyConversationViewHintChanged,
+} from "../ipc/conversationViewHint";
 import { onSettingsChanged } from "../ipc/events";
 import { notifyServerRegionChanged, SERVER_REGION_KEY } from "../ipc/serverRegion";
 import { flushNow, reconcileSettings } from "../ipc/settingsSync";
@@ -26,6 +30,22 @@ let resolveSettingsReady: () => void;
 const settingsReadyPromise = new Promise<void>((resolve) => {
   resolveSettingsReady = resolve;
 });
+const initialPendingListeners = new Set<() => void>();
+
+function notifyInitialSettingsPending(): void {
+  for (const listener of initialPendingListeners) listener();
+}
+
+/** True while the startup backend reconciliation is still in flight, so one-time notices wait instead of flashing
+ *  on shells whose localStorage starts empty (such as Electron's dynamic loopback port). */
+export function isInitialSettingsPending(): boolean {
+  return !settingsReady && initialRefreshes > 0;
+}
+
+export function subscribeInitialSettingsPending(listener: () => void): () => void {
+  initialPendingListeners.add(listener);
+  return () => initialPendingListeners.delete(listener);
+}
 
 /** Apply explicit theme choices after initial hydration, so startup cannot replace a user's choice
  *  or persist unrelated preferences from the stale local cache. Later choices remain immediate. */
@@ -44,13 +64,16 @@ export function runAfterInitialSettings(action: () => void): void {
  * the refresh; the local cache is written either way, so a dropped flush only defers the backend write.
  */
 export async function refreshSettingsFromBackend(): Promise<void> {
+  const wasPending = isInitialSettingsPending();
   initialRefreshes++;
+  if (!wasPending && isInitialSettingsPending()) notifyInitialSettingsPending();
   try {
     await flushNow(FLUSH_TIMEOUT_MS);
     const changed = await reconcileSettings();
     if (changed.size === 0) return;
     if (changed.has("vlx-lang")) setLang(loadLangChoice());
     if (changed.has(SERVER_REGION_KEY)) notifyServerRegionChanged();
+    if (changed.has(CONVERSATION_VIEW_HINT_KEY)) notifyConversationViewHintChanged();
     if (
       changed.has("vlx-theme") ||
       changed.has("vlx-sound") ||
@@ -66,6 +89,7 @@ export async function refreshSettingsFromBackend(): Promise<void> {
     if (!settingsReady && initialRefreshes === 0) {
       settingsReady = true;
       resolveSettingsReady();
+      notifyInitialSettingsPending();
     }
   }
 }

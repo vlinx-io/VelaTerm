@@ -10,6 +10,19 @@ import { CompletionModeField } from "./CompletionModeField";
 import { ServerRegionField } from "./ServerRegionField";
 import { FontSelect, useFontCatalog } from "./FontSelect";
 import Select, { type SelectOption } from "../../components/Select";
+import { DARK_THEMES, LIGHT_THEMES } from "../../themes";
+
+/** Classic first, then a mode's named themes by their own names, which are not translated. */
+function themeOptions<T extends string>(themes: Record<string, { label: string }>, classic: string): SelectOption<T>[] {
+  return [
+    { value: "classic" as T, label: classic },
+    ...Object.entries(themes).map(([value, theme], index) => ({
+      value: value as T,
+      label: theme.label,
+      separatorBefore: index === 0,
+    })),
+  ];
+}
 import {
   getLangChoice,
   LOCALE_NAMES,
@@ -46,6 +59,8 @@ import {
 } from "../../theme";
 import type {
   AccentChoice,
+  DarkStyle,
+  LightStyle,
   Density,
   DividerStyle,
   NavLayout,
@@ -435,6 +450,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const density = useTermStore((s) => s.density);
   const paneStyle = useTermStore((s) => s.paneStyle);
   const dividerStyle = useTermStore((s) => s.dividerStyle);
+  const darkStyle = useTermStore((s) => s.darkStyle);
+  const setDarkStyle = useTermStore((s) => s.setDarkStyle);
+  const lightStyle = useTermStore((s) => s.lightStyle);
+  const setLightStyle = useTermStore((s) => s.setLightStyle);
   const navLayout = useTermStore((s) => s.navLayout);
   const setAccent = useTermStore((s) => s.setAccent);
   const setDensity = useTermStore((s) => s.setDensity);
@@ -498,17 +517,18 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const legacyTranslation = route.get("settings") === "conversation" && route.get("settingsSection") === "translation";
   const requestedCategory = legacyTranslation ? "translation" : categoryOf(route.get("settings"));
   const showTranslation = route.get("settingsTranslation") === "1" || requestedCategory === "translation";
+  const showPlugins = PLUGINS_ENABLED && (route.get("settingsPlugins") === "1" || requestedCategory === "plugins");
   // The section lives in local state so switching panels does not go through settings persistence; the
   // store only seeds it on open and records each change, so Settings reopens where it was left.
-  // Translation is not recorded: it is listed only when the route asks for it, so reopening on it would
-  // show a panel with no entry in the list.
+  // Translation and plugins are not recorded: they are listed only when the route asks for them, so
+  // reopening normally would show a panel with no entry in the list.
   const savedTab = useTermStore((s) => s.settingsTab);
   const setSettingsTab = useTermStore((s) => s.setSettingsTab);
-  const initialCat: Cat = requestedCategory ?? (CATS.has(savedTab) ? savedTab : "appearance");
+  const initialCat: Cat = requestedCategory ?? (CATS.has(savedTab) && (savedTab !== "plugins" || showPlugins) ? savedTab : "appearance");
   const [cat, setCatLocal] = useState<Cat>(initialCat);
   const setCat = (v: Cat) => {
     setCatLocal(v);
-    if ((SETTINGS_TABS as readonly string[]).includes(v)) setSettingsTab(v as SettingsTab);
+    if (v !== "plugins" && (SETTINGS_TABS as readonly string[]).includes(v)) setSettingsTab(v as SettingsTab);
   };
   useEffect(() => { if (requestedCategory) setCat(requestedCategory as Cat); }, [requestedCategory]);
   useEffect(() => { if (legacyTranslation) navigateTranslation(translationUrl({ settings: "translation", settingsSection: null }), true); }, [legacyTranslation]);
@@ -614,12 +634,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               overflowY: "auto",
             }}
           >
-            {cats.filter(c => c.key !== "translation" || showTranslation).map((c) => {
+            {cats.filter(c => (c.key !== "translation" || showTranslation) && (c.key !== "plugins" || showPlugins)).map((c) => {
               const on = c.key === cat;
               return (
                 <a
                   key={c.key}
-                  href={translationUrl({ settings: c.key, settingsSection: null, settingsTranslation: showTranslation ? "1" : null, translationService: null })}
+                  href={translationUrl({ settings: c.key, settingsSection: null, settingsTranslation: showTranslation ? "1" : null, settingsPlugins: showPlugins ? "1" : null, translationService: null })}
                   onClick={(event) => { followTranslationLink(event); if (event.defaultPrevented) setCat(c.key); }}
                   style={{
                     display: "flex",
@@ -655,6 +675,28 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             {cat === "appearance" && (
               <>
                 <SectionTitle>{t("settings.appearance")}</SectionTitle>
+                <Field label={t("settings.darkTheme")}>
+                  <Select<DarkStyle>
+                    value={darkStyle}
+                    onChange={setDarkStyle}
+                    options={themeOptions(DARK_THEMES, t("settings.themeClassic"))}
+                    size="sm"
+                    width={180}
+                    menuWidth={196}
+                    align="right"
+                  />
+                </Field>
+                <Field label={t("settings.lightTheme")}>
+                  <Select<LightStyle>
+                    value={lightStyle}
+                    onChange={setLightStyle}
+                    options={themeOptions(LIGHT_THEMES, t("settings.themeClassic"))}
+                    size="sm"
+                    width={180}
+                    menuWidth={196}
+                    align="right"
+                  />
+                </Field>
                 <Field label={t("settings.accent")}>
                   <AccentPicker accent={accent} setAccent={setAccent} />
                 </Field>
@@ -971,7 +1013,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
             {cat === "agents" && <AgentsPanel />}
 
-            {PLUGINS_ENABLED && cat === "plugins" && <PluginsPanel />}
+            {showPlugins && cat === "plugins" && <PluginsPanel />}
 
             {cat === "shortcuts" && <ShortcutsPanel />}
 

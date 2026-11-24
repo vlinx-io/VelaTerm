@@ -269,7 +269,8 @@ fn fire(ctx: &AppCtx, session_id: &str, waiting: Waiting) {
     let Some(session) = session else { return };
     if session.archived_at.is_some()
         || session.engine != "chat"
-        || !(matches!(session.kind, SessionKind::Claude | SessionKind::Codex) || session.kind.uses_opencode())
+        || !(matches!(session.kind, SessionKind::Claude | SessionKind::Codex | SessionKind::Antigravity)
+            || session.kind.uses_opencode())
         || crate::security::session_active(session_id)
     {
         return;

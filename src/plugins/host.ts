@@ -331,8 +331,8 @@ async function loadPluginUi(summary: PluginSummary): Promise<void> {
   }
 }
 
-/** Visibility and runtime switch for the dynamic plugin host. Set true to expose plugin UI and boot. */
-export const PLUGINS_ENABLED = false;
+/** Visibility and runtime switch for the dynamic plugin host. */
+export const PLUGINS_ENABLED = true;
 
 export async function refreshPlugins(): Promise<void> {
   if (!PLUGINS_ENABLED) return;

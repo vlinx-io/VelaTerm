@@ -1,28 +1,32 @@
 //! "Committed on this branch": the files the current branch changed since it split from a base
-//! branch, with how far each side has moved. The working-tree groups above go empty once work is
-//! committed; this is what a worktree session still has to merge or put up for review.
+//! branch, with how far each side has moved, paired with a full pull/merge request loop across
+//! GitHub (`gh`), GitLab (`glab`), and configured Gitea servers.
 //!
-//! The base is chosen per repository and remembered; until then the backend picks the remote's
-//! default branch. On the base branch itself the backend has nothing to compare and the section
-//! stays hidden.
-//!
-//! When the repository's `origin` is on the configured Gitea server, the section also opens a pull
-//! request from this branch into the chosen base, pushing the branch first.
+//! When an open, draft, merged, or closed PR/MR exists for the branch, its status and CI check
+//! summary appear directly in the section, and a merged worktree offers one-click cleanup.
 
-import { useEffect, useState } from "react";
-import { FormModal } from "../../../components/FormModal";
+import { useCallback, useEffect, useState } from "react";
+import { FormModal, type FieldDef } from "../../../components/FormModal";
+import Icons from "../../../components/Icons";
 import Select from "../../../components/Select";
+import { invalidateGitBranch } from "../../../hooks/useGitBranch";
 import { useT } from "../../../i18n";
 import {
+  deleteBranch,
   gitBranchCompare,
   gitOpenPullRequest,
   gitPrProvider,
+  gitPrStatus,
+  removeWorktree,
   type BranchCompare,
   type GitPrProvider,
+  type GitPrStatus,
   type PrOutcome,
 } from "../../../ipc/commands";
 import { platform } from "../../../platform";
 import { useTermStore } from "../../../store/termStore";
+import type { Session } from "../../../types";
+import { normalizeRepoPath } from "../../../components/diff/diffReviewStore";
 import { GitFileRow } from "./GitFileRow";
 import { GitSection } from "./GitSection";
 
@@ -52,6 +56,7 @@ export function BranchCompareSection({
   refreshToken,
   open,
   onToggle,
+  session,
 }: {
   cwd: string;
   /** Checked-out branch, the head of a pull request; null when detached. */
@@ -63,28 +68,60 @@ export function BranchCompareSection({
   refreshToken: number;
   open: boolean;
   onToggle: () => void;
+  session?: Session;
 }) {
   const t = useT();
   const openChanges = useTermStore((s) => s.openChanges);
+  const archiveSession = useTermStore((s) => (s as Partial<typeof s>)?.archiveSession);
+  const clearNodeWorktree = useTermStore((s) => (s as Partial<typeof s>)?.clearNodeWorktree);
+
   const [base, setBase] = useState<string | null>(() => readBase(root));
   const [data, setData] = useState<BranchCompare | null>(null);
   const [err, setErr] = useState("");
   const [provider, setProvider] = useState<GitPrProvider | null>(null);
+  const [prStatus, setPrStatus] = useState<GitPrStatus | null>(null);
+  const [statusTick, setStatusTick] = useState(0);
   const [prForm, setPrForm] = useState(false);
+  const [cleanupForm, setCleanupForm] = useState(false);
   const [opened, setOpened] = useState<PrOutcome | null>(null);
 
   useEffect(() => setBase(readBase(root)), [root]);
 
-  // Asked once per repository: it may probe the Gitea server over the network.
+  // Asked once per repository: it may probe Gitea over the network or check gh/glab auth status.
   useEffect(() => {
     let alive = true;
     setProvider(null);
+    setPrStatus(null);
     setOpened(null);
-    void gitPrProvider(cwd).then((p) => { if (alive) setProvider(p); }).catch(() => {});
+    void gitPrProvider(cwd)
+      .then((p) => {
+        if (alive) setProvider(p);
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
   }, [cwd]);
+
+  const reloadPrStatus = useCallback(() => {
+    setStatusTick((n) => n + 1);
+  }, []);
+
+  useEffect(() => {
+    if (!provider?.available || !branch || typeof gitPrStatus !== "function") {
+      setPrStatus(null);
+      return;
+    }
+    let alive = true;
+    void gitPrStatus(cwd)
+      .then((s) => {
+        if (alive) setPrStatus(s);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [cwd, provider, branch, head, refreshToken, statusTick]);
 
   useEffect(() => {
     if (!head) {
@@ -123,6 +160,64 @@ export function BranchCompareSection({
     setBase(next);
   };
 
+  const isGitLab = provider?.provider === "gitlab";
+  const openLabel = isGitLab ? t("git.pr.openMr") : t("git.pr.open");
+  const openedLabel = isGitLab ? t("git.pr.openedMr") : t("git.pr.opened");
+
+  const unavailableReason =
+    provider && !provider.available
+      ? provider.reason === "no_token"
+        ? t("git.pr.noToken")
+        : provider.reason === "unreachable"
+          ? t("git.pr.unreachable")
+          : provider.reason === "no_cli"
+            ? isGitLab
+              ? t("git.pr.noGlabCli")
+              : t("git.pr.noGhCli")
+            : provider.reason === "no_auth"
+              ? isGitLab
+                ? t("git.pr.noGlabAuth")
+                : t("git.pr.noGhAuth")
+              : undefined
+      : undefined;
+
+  const hasActiveOrMergedPr =
+    prStatus != null && (prStatus.state === "open" || prStatus.state === "draft" || prStatus.state === "merged");
+  const canPromptCreate = Boolean(provider?.provider && branch && data && data.ahead > 0 && !hasActiveOrMergedPr);
+
+  const prPrefix = prStatus?.provider === "gitlab" ? "!" : "#";
+  const sessionMatchesWorktree = Boolean(
+    session &&
+      prStatus?.worktree &&
+      (normalizeRepoPath(session.worktreePath ?? "") === normalizeRepoPath(prStatus.worktree.path) ||
+        normalizeRepoPath(session.cwd ?? "") === normalizeRepoPath(prStatus.worktree.path)),
+  );
+
+  const cleanupFields: FieldDef[] = prStatus?.worktree && branch
+    ? [
+        {
+          key: "deleteBranch",
+          type: "checkbox",
+          label: t("git.pr.cleanupDeleteBranch", branch),
+        },
+        ...(sessionMatchesWorktree
+          ? [
+              {
+                key: "archiveSession",
+                type: "checkbox" as const,
+                label: t("git.pr.cleanupArchiveSession"),
+                hint: t("git.pr.cleanupArchiveHint"),
+              },
+            ]
+          : []),
+        {
+          key: "force",
+          type: "checkbox",
+          label: t("git.pr.cleanupForce"),
+        },
+      ]
+    : [];
+
   return (
     <GitSection
       title={t("git.branchChanges")}
@@ -149,29 +244,86 @@ export function BranchCompareSection({
               ↑{data.ahead} ↓{data.behind}
             </span>
           </div>
-          {provider?.provider === "gitea" && branch && data.ahead > 0 && (
+
+          {prStatus && (
+            <div className="git-pr-card">
+              <div className="git-pr-card-top">
+                <span className={`git-pr-badge is-${prStatus.state}`}>
+                  {t(`git.pr.state.${prStatus.state}`)}
+                </span>
+                <a
+                  href={prStatus.url}
+                  className="git-pr-link"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (prStatus.url) void platform.opener.openExternal(prStatus.url);
+                  }}
+                >
+                  {prStatus.number > 0 ? `${prPrefix}${prStatus.number} ` : ""}
+                  {prStatus.title || openedLabel}
+                </a>
+                <button
+                  type="button"
+                  className="icon-btn sm"
+                  aria-label={t("git.pr.refreshStatus")}
+                  title={t("git.pr.refreshStatus")}
+                  onClick={reloadPrStatus}
+                >
+                  <Icons.restart size={12} aria-hidden="true" />
+                </button>
+              </div>
+              {(prStatus.checks !== "none" || (prStatus.state === "merged" && prStatus.worktree)) && (
+                <div className="git-pr-card-meta">
+                  {prStatus.checks !== "none" && (
+                    <span className={`git-pr-checks is-${prStatus.checks}`}>
+                      {prStatus.checks === "passing" ? (
+                        <Icons.check size={11} aria-hidden="true" />
+                      ) : prStatus.checks === "failing" ? (
+                        <Icons.x size={11} aria-hidden="true" />
+                      ) : (
+                        <Icons.clock size={11} aria-hidden="true" />
+                      )}
+                      <span>{t(`git.pr.checks.${prStatus.checks}`)}</span>
+                    </span>
+                  )}
+                  {prStatus.state === "merged" && prStatus.worktree && (
+                    <button
+                      type="button"
+                      className="vlx-btn git-pr-cleanup-btn"
+                      onClick={() => setCleanupForm(true)}
+                    >
+                      {t("git.pr.cleanupWorktree")}
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {canPromptCreate && provider && (
             <div className="git-pr">
               <button
                 type="button"
                 className="vlx-btn"
                 disabled={!provider.available}
-                title={provider.reason === "no_token" ? t("git.pr.noToken") : provider.reason === "unreachable" ? t("git.pr.unreachable") : undefined}
+                title={unavailableReason}
                 onClick={() => { setOpened(null); setPrForm(true); }}
               >
-                {t("git.pr.open")}
+                {openLabel}
               </button>
-              {!provider.available && (
-                <span className="git-pr-note">{provider.reason === "no_token" ? t("git.pr.noToken") : t("git.pr.unreachable")}</span>
+              {!provider.available && unavailableReason && (
+                <span className="git-pr-note">{unavailableReason}</span>
               )}
-              {opened && (
+              {opened && !prStatus && (
                 <span className="git-pr-note">
                   {opened.url
-                    ? <a href={opened.url} onClick={(e) => { e.preventDefault(); void platform.opener.openExternal(opened.url); }}>{t("git.pr.opened")}</a>
-                    : t("git.pr.opened")}
+                    ? <a href={opened.url} onClick={(e) => { e.preventDefault(); void platform.opener.openExternal(opened.url); }}>{openedLabel}</a>
+                    : openedLabel}
                 </span>
               )}
             </div>
           )}
+
           {data.files.length === 0 && <div className="insp-empty">{t("git.noBranchChanges")}</div>}
           {data.files.map((f) => (
             <GitFileRow
@@ -186,10 +338,19 @@ export function BranchCompareSection({
           ))}
         </>
       )}
+
       {prForm && data && branch && (
         <FormModal
-          title={t("git.pr.formTitle")}
-          description={t("git.pr.formDescription", branch, data.base)}
+          title={
+            provider?.provider === "gitea"
+              ? t("git.pr.formTitle")
+              : t("git.pr.formTitleProvider", provider?.provider ?? "github")
+          }
+          description={
+            isGitLab
+              ? t("git.pr.formDescriptionMr", branch, data.base)
+              : t("git.pr.formDescription", branch, data.base)
+          }
           fields={[
             { key: "title", label: t("git.pr.titleField"), autoFocus: true, placeholder: branch },
             {
@@ -200,17 +361,64 @@ export function BranchCompareSection({
                   onChange={(e) => onChange(e.target.value)} />
               ),
             },
+            {
+              key: "draft",
+              type: "checkbox",
+              label: t("git.pr.draftField"),
+            },
           ]}
-          initial={{ title: "", body: "" }}
-          submitLabel={t("git.pr.open")}
+          initial={{
+            title: data.suggestedTitle ?? "",
+            body: data.suggestedBody ?? "",
+            draft: "",
+          }}
+          submitLabel={openLabel}
           submittingLabel={t("git.pr.opening")}
           width={460}
           onSubmit={async (values) => {
-            const outcome = await gitOpenPullRequest(cwd, data.base, values.title ?? "", values.body ?? "");
+            const draft = values.draft === "1";
+            const outcome = draft
+              ? await gitOpenPullRequest(cwd, data.base, values.title ?? "", values.body ?? "", true)
+              : await gitOpenPullRequest(cwd, data.base, values.title ?? "", values.body ?? "");
             setOpened(outcome);
             setPrForm(false);
+            reloadPrStatus();
           }}
           onCancel={() => setPrForm(false)}
+        />
+      )}
+
+      {cleanupForm && prStatus?.worktree && branch && (
+        <FormModal
+          title={t("git.pr.cleanupTitle")}
+          description={t("git.pr.cleanupDescription", branch, prStatus.worktree.path)}
+          fields={cleanupFields}
+          initial={{
+            deleteBranch: "1",
+            ...(sessionMatchesWorktree ? { archiveSession: "1" } : {}),
+            force: "",
+          }}
+          submitLabel={t("git.pr.cleanupSubmit")}
+          submittingLabel={t("git.pr.cleanupSubmitting")}
+          width={440}
+          onSubmit={async (values) => {
+            const wt = prStatus.worktree!;
+            const force = values.force === "1";
+            await removeWorktree(wt.path, force);
+            if (values.deleteBranch === "1") {
+              await deleteBranch(wt.mainRepo, branch).catch(() => {});
+            }
+            if (sessionMatchesWorktree && session) {
+              if (values.archiveSession === "1") {
+                await archiveSession?.(session.id);
+              } else {
+                await clearNodeWorktree?.("session", session.id);
+              }
+            }
+            invalidateGitBranch(wt.path);
+            setCleanupForm(false);
+          }}
+          onCancel={() => setCleanupForm(false)}
         />
       )}
     </GitSection>

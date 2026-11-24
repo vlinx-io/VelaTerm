@@ -24,8 +24,10 @@ use serde_json::{json, Value};
 
 use super::{emit, emit_state, handle_turn_end, now_ms, start_waiting_message, verify_native_identity, ChatProcess, ChatRow};
 use crate::agent::chat::acp_protocol::{self as wire, Catalog, Incoming, Mapper};
+use crate::agent::chat::antigravity_outcome::{HiddenTurnFailure, PromptOutcomeWatch};
 use crate::agent::chat::antigravity_protocol::{
-    acp_mode_for_permission, is_transient_upstream_error, permission_for_acp_mode,
+    acp_mode_for_permission, is_invalid_thinking_signature, is_transient_upstream_error,
+    is_usage_limit_error, parse_usage_limit_reset, permission_for_acp_mode,
     strip_streamed_401_warning, strip_streamed_transient_warning, tool_row,
     AUTH_RECOVERY_PROMPT, TRANSIENT_RECOVERY_PROMPT,
 };
@@ -43,6 +45,11 @@ const MAX_SAFE_STOP_CONTINUATIONS: u64 = 32;
 const RETIRE_WAIT_TIMEOUT: Duration = Duration::from_secs(3);
 /// Wake interval for a parked `Stop` hook checking `.system_generated/messages/` for deliveries.
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(500);
+/// Default silence threshold before a prompt with no open tool, permission, background task, or
+/// native DB write activity is recovered by replacing the wedged Antigravity process.
+/// Large tool-call generations (e.g. writing a full source file) produce no ACP `session/update`
+/// until the call completes and may not flush to the native DB for several minutes.
+const DEFAULT_PROMPT_INACTIVITY_MS: u64 = 600_000;
 
 /// Backoff delays when retrying an Antigravity prompt rejected during cold-start model loading.
 fn cold_model_retry_delays() -> &'static [Duration] {
@@ -121,6 +128,14 @@ struct ActivePrompt {
     had_other_output: bool,
     sole_assistant_id: Option<String>,
     chunk_cold_error: Option<String>,
+}
+
+#[derive(Clone)]
+pub(in crate::agent::chat::engine) struct StartupPrompt {
+    pub id: String,
+    pub text: String,
+    pub images: Vec<ChatImage>,
+    pub sent_at: u64,
 }
 
 #[derive(Clone)]
@@ -205,6 +220,8 @@ pub(super) struct AcpState {
     pending_model_switch: bool,
     /// Native session id waiting to finish Antigravity startup once mode/model sync settles.
     startup_native: Option<String>,
+    /// First user turn accepted onto the timeline while the Antigravity ACP handshake is still opening.
+    pub(in crate::agent::chat::engine) startup_prompt: Option<StartupPrompt>,
     /// Set when Antigravity opened before `FetchAvailableModels` populated its model list.
     awaiting_initial_models: bool,
     /// Reasoning effort waiting for a startup model switch to publish the target model's options.
@@ -235,6 +252,8 @@ pub(super) struct AcpState {
     pub(in crate::agent::chat::engine) auth_epoch_at_launch: u64,
     /// Streamed OAuth 401 warning captured during the active turn before `end_turn` arrives.
     turn_auth_error: Option<String>,
+    /// Assistant row id holding a split streamed OAuth 401 warning chunk (`"\n⚠ "` + error text).
+    split_auth_row_id: Option<String>,
     /// Streamed transient upstream warning captured during the active turn before `end_turn` arrives.
     turn_transient_error: Option<String>,
     /// Number of automatic transient upstream retries already spent in the current visible turn.
@@ -243,6 +262,20 @@ pub(super) struct AcpState {
     transient_retry_wait: Option<Arc<RetryWait>>,
     /// Assistant row id holding a split streamed transient warning chunk (`"\n⚠ "` + error text).
     split_transient_row_id: Option<String>,
+    /// Pre-prompt SQLite `steps` cursor used to uncover upstream errors hidden behind `end_turn`.
+    outcome_watch: Option<PromptOutcomeWatch>,
+    /// Quota or rate-limit reset timestamp parsed from the latest Antigravity refusal, for `auto_continue`.
+    usage_limit_reset: Option<crate::agent::chat::auto_continue::Reset>,
+    /// Set when an upstream or executor error poisoned this `agy acp` process so the next turn rotates it.
+    pub(in crate::agent::chat::engine) needs_error_rotate: bool,
+    /// Bounded conversation context carried into a fresh `session/new` after `InvalidThinkingSignature`.
+    pub(in crate::agent::chat::engine) pending_context_carryover: Option<String>,
+    /// Monotonic epoch ms of the latest stream activity or prompt dispatch for inactivity watchdog checks.
+    last_prompt_activity_ms: u64,
+    /// Wakes the prompt inactivity watchdog when the prompt settles, retries, cancels, or exits.
+    inactivity_wait: Option<Arc<RetryWait>>,
+    /// Optional per-process inactivity limit override (used by unit tests).
+    pub(super) prompt_inactivity_limit_ms: Option<u64>,
     /// Set before restarting for an OAuth 401 so `restore` suppresses the stale 401 chunk during replay.
     pub(in crate::agent::chat::engine) recovering_401: bool,
     /// Suppress replayed `⚠ UNAUTHENTICATED (code 401)` chunks while `session/load` rebuilds history.
@@ -266,7 +299,10 @@ impl AcpState {
     }
 
     pub(super) fn prompt_active(&self) -> bool {
-        self.prompt.is_some() || !self.steers.is_empty() || self.retrying_prompt
+        self.prompt.is_some()
+            || !self.steers.is_empty()
+            || self.retrying_prompt
+            || self.startup_prompt.is_some()
     }
 }
 
@@ -464,9 +500,13 @@ fn handle_response(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: 
                     let mut state = proc.acp.lock().unwrap();
                     state.loading = None;
                     state.resume = None;
+                    state.journal = None;
                     state.mapper = Mapper::for_kind(proc.kind);
                     state.cwd.clone()
                 };
+                // The recorded conversation is gone for good: stop expecting its id so the replacement the
+                // agent opens next passes the identity guard (and still claims its own writer lease).
+                *proc.expected_native.lock().unwrap() = None;
                 emit(app, session_id, json!({"type":"error","message":format!(
                     "{} could not reopen that conversation; a new one has been started. Earlier messages stay in this view.",
                     wire::label(proc.kind))}));
@@ -491,7 +531,7 @@ fn handle_response(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: 
 
 fn on_initialize(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, result: &Value) {
     let capabilities = result.get("agentCapabilities").cloned().unwrap_or(Value::Null);
-    let (resume, cwd, images) = {
+    let (resume, cwd, images, load_session, resume_session) = {
         let mut state = proc.acp.lock().unwrap();
         state.initialized = true;
         state.auth_logout_supported = capabilities.pointer("/auth/logout").is_some_and(|v| !v.is_null());
@@ -500,17 +540,21 @@ fn on_initialize(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, result
         let images = capabilities.pointer("/promptCapabilities/image").and_then(Value::as_bool).unwrap_or(false);
         state.images = images;
         state.images_known = true;
-        (state.resume.clone(), state.cwd.clone(), images)
+        (state.resume.clone(), state.cwd.clone(), images, state.load_session, state.resume_session)
     };
     emit(app, session_id, json!({"type":"capabilities","images":images}));
+    // Antigravity advertises both `loadSession` and `sessionCapabilities.resume`; prefer `session/resume`
+    // because VelaTerm already restores the conversation from Antigravity's native SQLite history and
+    // `session/load` replays every historical chunk over stdout with a post-replay idle wait.
+    let prefer_resume = proc.kind == SessionKind::Antigravity && resume_session;
     match resume {
         // Resuming replays nothing: the rows on screen came from the agent's own recording and stay.
-        Some(native) if !proc.acp.lock().unwrap().load_session && proc.acp.lock().unwrap().resume_session => {
+        Some(native) if prefer_resume || (!load_session && resume_session) => {
             let id = proc.request_id("acp_session_resume");
             let _ = proc.write(&wire::session_resume(&id, &native, &cwd));
         }
         Some(native) => {
-            if !proc.acp.lock().unwrap().load_session {
+            if !load_session {
                 emit(app, session_id, json!({"type":"error","message":
                     format!("{} cannot reopen an earlier conversation. Continue it in the terminal view.", wire::label(proc.kind))}));
                 super::release_process(app, session_id, proc);
@@ -621,8 +665,38 @@ pub(super) fn finish_startup(app: &AppCtx, session_id: &str, proc: &Arc<ChatProc
             return;
         }
     }
+    let startup_prompt = proc.acp.lock().unwrap().startup_prompt.take();
     let opening = !proc.ready.swap(true, Ordering::Relaxed);
     emit(app, session_id, json!({"type":"session","agentSessionId":native,"model":proc.model.lock().unwrap().clone()}));
+    if let Some(prompt) = startup_prompt {
+        let outcome = validate(proc, "queue", prompt.images.len())
+            .and_then(|()| super::claim_native_writer(app, proc))
+            .and_then(|()| dispatch(proc, &prompt.text, &prompt.images));
+        match outcome {
+            Ok(()) => {
+                emit_state(app, session_id, AgentState::Working);
+                super::antigravity_tasks::ensure_poller(app, session_id, proc);
+                start_prompt_watchdog(app, session_id, proc);
+                return;
+            }
+            Err(message) => {
+                if proc.timeline.lock().unwrap().remove_row(&prompt.id) {
+                    super::flush_timeline_now(app, session_id, proc);
+                }
+                {
+                    let mut turn = proc.turn.lock().unwrap();
+                    turn.running = false;
+                    turn.started_at = None;
+                }
+                emit(app, session_id, json!({"type":"unsent","id":prompt.id,"text":prompt.text,"images":prompt.images}));
+                emit(app, session_id, json!({"type":"error","message":message}));
+                emit(app, session_id, json!({"type":"turnCompleted"}));
+                emit_state(app, session_id, AgentState::Waiting);
+                start_waiting_message(app, session_id, proc);
+                return;
+            }
+        }
+    }
     if opening {
         emit_state(app, session_id, AgentState::Waiting);
         start_waiting_message(app, session_id, proc);
@@ -631,7 +705,7 @@ pub(super) fn finish_startup(app: &AppCtx, session_id: &str, proc: &Arc<ChatProc
 
 /// The replay is complete: its rows replace the recording's, and the journal is rewritten from it.
 fn finish_replay(proc: &Arc<ChatProcess>) {
-    let (rows, lines, journal) = {
+    let (rows, lines, journal, startup_prompt) = {
         let mut state = proc.acp.lock().unwrap();
         let Some(mut replay) = state.loading.take() else { return };
         let tail: Vec<ChatRow> = state.mapper.finish().into_iter().chain(state.mapper.settle_running(true)).collect();
@@ -646,10 +720,15 @@ fn finish_replay(proc: &Arc<ChatProcess>) {
             (line, row.clone())
         }).collect();
         let lines = journal_with_turn_ends(&lines, &durations);
-        (replay.rows, lines, state.journal.clone())
+        (replay.rows, lines, state.journal.clone(), state.startup_prompt.clone())
     };
     let mut rows = rows;
     super::super::shell::map_replayed_rows(&mut rows);
+    if let Some(prompt) = startup_prompt {
+        if rows.iter().all(|row| row.id() != prompt.id) {
+            rows.push(super::user_row(prompt.id, &prompt.text, prompt.images, Some(prompt.sent_at as i64)));
+        }
+    }
     proc.timeline.lock().unwrap().replace_all(rows);
     if let Some(path) = journal {
         if let Err(error) = wire::rewrite_journal(&path, &lines) {
@@ -710,8 +789,8 @@ fn antigravity_bypass_acp_mode(modes: &[wire::Choice]) -> &'static str {
 fn apply_saved_selection(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, presets: &[CollaborationModePreset], current: Option<String>) {
     if proc.kind == SessionKind::Antigravity {
         let mut selection = crate::agent::session_settings::Selection {
-            model: proc.model.lock().unwrap().clone(),
-            effort: proc.effort.lock().unwrap().clone(),
+            model: proc.model.lock().unwrap().clone().filter(|m| !m.trim().is_empty()),
+            effort: proc.effort.lock().unwrap().clone().filter(|e| !e.trim().is_empty()),
         };
         crate::agent::antigravity_models::normalize_selection(app, &mut selection);
         *proc.model.lock().unwrap() = selection.model;
@@ -762,7 +841,15 @@ fn apply_saved_selection(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>
                 saved.as_deref().is_none_or(|model| !catalog.models.iter().any(|choice| choice.id == model))
             };
             if invalid_saved {
-                *proc.model.lock().unwrap() = catalog.model.clone();
+                let fallback = catalog
+                    .model
+                    .clone()
+                    .or_else(|| {
+                        (proc.kind == SessionKind::Antigravity)
+                            .then(|| catalog.models.first().map(|c| c.id.clone()))
+                            .flatten()
+                    });
+                *proc.model.lock().unwrap() = fallback;
                 if !catalog.effort_switchable() {
                     *proc.effort.lock().unwrap() = None;
                 }
@@ -777,8 +864,25 @@ fn apply_saved_model_and_effort(proc: &Arc<ChatProcess>) {
     let catalog = proc.acp.lock().unwrap().catalog.clone();
     let mut model_switching = false;
     if catalog.model_switchable() {
-        let desired = proc.model.lock().unwrap().clone();
-        match desired.filter(|model| catalog.model.as_deref() != Some(model.as_str()) && catalog.models.iter().any(|choice| &choice.id == model)) {
+        let desired = proc
+            .model
+            .lock()
+            .unwrap()
+            .clone()
+            .filter(|m| !m.trim().is_empty());
+        let target = desired
+            .filter(|model| {
+                catalog.model.as_deref() != Some(model.as_str())
+                    && catalog.models.iter().any(|choice| &choice.id == model)
+            })
+            .or_else(|| {
+                // Antigravity can open a session with an empty `currentValue` ("plan model not specified");
+                // proactively select the first available model before any prompt is dispatched.
+                (proc.kind == SessionKind::Antigravity && catalog.model.is_none())
+                    .then(|| catalog.models.first().map(|choice| choice.id.clone()))
+                    .flatten()
+            });
+        match target {
             Some(model) => {
                 // Switching models can widen or drop `thought_level` options, so wait for the model
                 // response before applying the saved effort.
@@ -908,18 +1012,30 @@ fn on_model_switched(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, re
 /// The agent refused to start the conversation. Signing in is the one cause the person can act on, so it
 /// becomes a stable code the view explains; anything else is shown as the agent wrote it.
 fn fail_start(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, error: &Value) {
-    let (gate_permit, had_401_continuation) = {
+    let (gate_permit, had_401_continuation, startup_prompt) = {
         let mut state = proc.acp.lock().unwrap();
-        (state.auth_gate_permit.take(), state.pending_401_continuation.take().is_some())
+        (
+            state.auth_gate_permit.take(),
+            state.pending_401_continuation.take().is_some(),
+            state.startup_prompt.take(),
+        )
     };
     drop(gate_permit);
-    if had_401_continuation {
+    if let Some(ref prompt) = startup_prompt {
+        if proc.timeline.lock().unwrap().remove_row(&prompt.id) {
+            super::flush_timeline_now(app, session_id, proc);
+        }
+    }
+    if had_401_continuation || startup_prompt.is_some() {
         let mut turn = proc.turn.lock().unwrap();
         turn.running = false;
         turn.started_at = None;
         drop(turn);
         emit(app, session_id, json!({"type":"turnCompleted"}));
         emit_state(app, session_id, AgentState::Waiting);
+    }
+    if let Some(prompt) = startup_prompt {
+        emit(app, session_id, json!({"type":"unsent","id":prompt.id,"text":prompt.text,"images":prompt.images}));
     }
     if proc.kind == SessionKind::Antigravity && (wire::auth_required(error) || wire::antigravity_401_error(error)) {
         let waiting: Vec<_> = proc.turn.lock().unwrap().waiting.drain(..).collect();
@@ -1084,6 +1200,9 @@ fn handle_update(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, update
         _ => {}
     }
     let mut state = proc.acp.lock().unwrap();
+    if proc.kind == SessionKind::Antigravity && state.loading.is_none() {
+        state.last_prompt_activity_ms = now_ms();
+    }
     if proc.kind == SessionKind::Antigravity {
         if kind == "agent_message_chunk" {
             if let Some(text) = wire::update_text(update) {
@@ -1158,26 +1277,44 @@ fn handle_update(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, update
     let mut suppress_rows = false;
     let mut retract_row_id = None;
     if !rows.is_empty() {
-        let mut matched_split_transient = false;
+        let mut matched_split_warning = false;
         if proc.kind == SessionKind::Antigravity && rows.len() == 1 {
             if let ChatRow::Assistant { id, text, .. } = &rows[0] {
-                if let Some(msg) = strip_streamed_transient_warning(text) {
+                if let Some(msg) = strip_streamed_401_warning(text) {
+                    state.turn_auth_error = Some(msg);
+                    state.split_auth_row_id = Some(id.clone());
+                    suppress_rows = true;
+                    retract_row_id = Some(id.clone());
+                    matched_split_warning = true;
+                } else if let Some(msg) = strip_streamed_transient_warning(text) {
                     state.turn_transient_error = Some(msg);
                     state.split_transient_row_id = Some(id.clone());
                     suppress_rows = true;
                     retract_row_id = Some(id.clone());
-                    matched_split_transient = true;
-                } else if state.split_transient_row_id.as_deref() == Some(id.as_str()) {
-                    state.split_transient_row_id = None;
-                    state.turn_transient_error = None;
+                    matched_split_warning = true;
+                } else {
+                    if state.split_auth_row_id.as_deref() == Some(id.as_str()) {
+                        state.split_auth_row_id = None;
+                        state.turn_auth_error = None;
+                    }
+                    if state.split_transient_row_id.as_deref() == Some(id.as_str()) {
+                        state.split_transient_row_id = None;
+                        state.turn_transient_error = None;
+                    }
                 }
             }
         }
-        if !matched_split_transient && state.turn_transient_error.is_some() {
-            state.turn_transient_error = None;
-            state.split_transient_row_id = None;
+        if !matched_split_warning {
+            if state.split_auth_row_id.is_some() {
+                state.split_auth_row_id = None;
+                state.turn_auth_error = None;
+            }
+            if state.turn_transient_error.is_some() {
+                state.turn_transient_error = None;
+                state.split_transient_row_id = None;
+            }
         }
-        if !matched_split_transient {
+        if !matched_split_warning {
             if let Some(active) = state.active_prompt.as_mut() {
                 if proc.kind == SessionKind::Antigravity
                     && !active.had_other_output
@@ -1273,9 +1410,14 @@ fn adopt_mode(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, mode: &st
 }
 
 fn handle_request(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: Value, method: &str, params: Value) {
+    if proc.kind == SessionKind::Antigravity {
+        proc.acp.lock().unwrap().last_prompt_activity_ms = now_ms();
+    }
     match method {
         "session/request_permission" => {
-            if proc.mode.lock().unwrap().as_str() == "bypassPermissions" {
+            if proc.mode.lock().unwrap().as_str() == "bypassPermissions"
+                && !wire::is_antigravity_interaction_question(proc.kind, &params)
+            {
                 let option = wire::choose_option(params.get("options"), true, None);
                 let _ = proc.write(&wire::permission_outcome(&id, option.as_deref()));
                 return;
@@ -1338,10 +1480,22 @@ pub(super) fn respond(
         .ok_or("That permission request is no longer waiting for an answer")?;
     match entry {
         PendingRequest::Permission { id, params } => {
-            let always = updated_permissions.and_then(Value::as_array).into_iter().flatten()
-                .find(|value| value.get("type").and_then(Value::as_str) == Some("acpAllowAlways"))
-                .and_then(|value| value.get("optionId").and_then(Value::as_str));
-            let option = wire::choose_option(params.get("options"), allow, always);
+            let stored_card = proc.permissions.lock().unwrap().get(card).cloned();
+            let is_interaction_question = stored_card
+                .as_ref()
+                .and_then(|c| c.pointer("/input/_acpInteractionQuestion"))
+                .and_then(Value::as_bool)
+                == Some(true);
+            let option = if is_interaction_question {
+                stored_card
+                    .as_ref()
+                    .and_then(|c| wire::interaction_question_option(c, &params, allow, updated_input))
+            } else {
+                let always = updated_permissions.and_then(Value::as_array).into_iter().flatten()
+                    .find(|value| value.get("type").and_then(Value::as_str) == Some("acpAllowAlways"))
+                    .and_then(|value| value.get("optionId").and_then(Value::as_str));
+                wire::choose_option(params.get("options"), allow, always)
+            };
             proc.write(&wire::permission_outcome(&id, option.as_deref()))?;
             resolve(app, session_id, proc, card);
         }
@@ -1412,6 +1566,10 @@ pub(super) fn respond(
                     emit(app, session_id, json!({"type":"turnCompleted"}));
                     emit_state(app, session_id, AgentState::Waiting);
                     return Err(error);
+                }
+                if proc.kind == SessionKind::Antigravity {
+                    super::antigravity_tasks::ensure_poller(app, session_id, proc);
+                    start_prompt_watchdog(app, session_id, proc);
                 }
             }
         }
@@ -1508,7 +1666,11 @@ fn resolve(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, card: &str) 
 pub(super) fn approve_pending(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
     let requests: Vec<(String, Value, Value)> = proc.acp.lock().unwrap().requests.iter()
         .filter_map(|(card, entry)| match entry {
-            PendingRequest::Permission { id, params } => Some((card.clone(), id.clone(), params.clone())),
+            PendingRequest::Permission { id, params }
+                if !wire::is_antigravity_interaction_question(proc.kind, params) =>
+            {
+                Some((card.clone(), id.clone(), params.clone()))
+            }
             _ => None,
         })
         .collect();
@@ -1558,9 +1720,17 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
         let turn = proc.turn.lock().unwrap();
         (turn.interrupted, turn.started_at)
     };
+    let stop_reason = result
+        .as_ref()
+        .and_then(|res| res.get("stopReason"))
+        .and_then(Value::as_str)
+        .unwrap_or("end_turn");
     let mut cold_retry = None;
     let mut transient_retry = None;
     let mut suppressed_chunk_error = None;
+    let mut db_usage_limit: Option<(String, Option<crate::agent::chat::auto_continue::Reset>)> = None;
+    let mut db_broken_signature: Option<String> = None;
+    let mut db_provider_error: Option<String> = None;
     let settled_while_parked = {
         let mut state = proc.acp.lock().unwrap();
         // A response can belong to the first prompt or to one sent into the running turn. Anything else is
@@ -1578,11 +1748,30 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
         let parked_flag = state.parked_idle;
         let was_settled_while_parked = state.settled_while_parked;
         state.parked_idle = false;
+        let now_secs = Some((now_ms() / 1_000) as i64);
+        let hidden_outcome = if proc.kind == SessionKind::Antigravity
+            && !canceled
+            && !was_settled_while_parked
+            && state.steers.is_empty()
+            && error.is_none()
+        {
+            state
+                .outcome_watch
+                .as_ref()
+                .and_then(|watch| watch.check(stop_reason, now_secs))
+        } else {
+            None
+        };
+        if let Some(HiddenTurnFailure::Auth401 { ref message }) = hidden_outcome {
+            if state.turn_auth_error.is_none() {
+                state.turn_auth_error = Some(message.clone());
+            }
+        }
         // Antigravity can answer `session/resume` or `session/new` before `FetchAvailableModels`
         // finishes populating its in-memory model map, rejecting the first `session/prompt` with
         // `failed to construct executor: unknown model key MODEL_PLACEHOLDER_...` or `plan model
-        // not specified` — delivered either as a JSON-RPC error or as a `⚠ ...` assistant chunk
-        // followed by `stopReason: "end_turn"`. Retry transparently while keeping the turn active.
+        // not specified` — delivered either as a JSON-RPC error, a `⚠ ...` assistant chunk, or a
+        // native `ERROR_MESSAGE` step followed by `stopReason: "end_turn"`. Retry transparently.
         if proc.kind == SessionKind::Antigravity
             && !canceled
             && !was_settled_while_parked
@@ -1605,6 +1794,12 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
                                 (msg, missing)
                             })
                     })
+                })
+                .or_else(|| match &hidden_outcome {
+                    Some(HiddenTurnFailure::ColdModelNotReady { message, plan_model_missing }) => {
+                        Some((message.clone(), *plan_model_missing))
+                    }
+                    _ => None,
                 });
             if let Some((reason, plan_model_missing)) = cold_error {
                 let delays = cold_model_retry_delays();
@@ -1621,6 +1816,9 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
                         if let Some(prev) = state.model_retry_wait.replace(wait.clone()) {
                             prev.wake();
                         }
+                        if let Some(inact) = state.inactivity_wait.take() {
+                            inact.wake();
+                        }
                         state.retrying_prompt = true;
                         let _ = state.mapper.finish();
                         cold_retry = Some((
@@ -1636,10 +1834,10 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
                 }
             }
         }
-        // Antigravity can also abort mid-turn on a transient Google CloudCode error (e.g. HTTP 404
-        // `Requested entity was not found`, 500, 503, 504, or stream EOF/connection reset), emitting
-        // a `⚠ ...` assistant chunk followed by `stopReason: "end_turn"`. Retry on the same process
-        // with backoff so the turn resumes seamlessly without requiring the user to type "continue".
+        // Antigravity can also abort mid-turn on a transient Google CloudCode or network error
+        // (e.g. HTTP 404 after model output, 500/502/503/504, `There was a network issue...`, or
+        // stream EOF/connection reset), emitting a `⚠ ...` assistant chunk or a hidden DB error
+        // step followed by `stopReason: "end_turn"`. Retry on the same process with backoff.
         if cold_retry.is_none()
             && proc.kind == SessionKind::Antigravity
             && !canceled
@@ -1654,7 +1852,13 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
                 .as_ref()
                 .filter(|err| wire::antigravity_transient_error(err))
                 .map(|err| (wire::error_text(err), true))
-                .or_else(|| state.turn_transient_error.clone().map(|msg| (msg, false)));
+                .or_else(|| state.turn_transient_error.clone().map(|msg| (msg, false)))
+                .or_else(|| match &hidden_outcome {
+                    Some(HiddenTurnFailure::TransientUpstream { message }) => {
+                        Some((message.clone(), false))
+                    }
+                    _ => None,
+                });
             if let Some((reason, rpc_rejected_before_record)) = transient_error {
                 let delays = transient_upstream_retry_delays();
                 if state.transient_retry_attempts < delays.len() {
@@ -1682,6 +1886,9 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
                     let wait = Arc::new(RetryWait::default());
                     if let Some(prev) = state.transient_retry_wait.replace(wait.clone()) {
                         prev.wake();
+                    }
+                    if let Some(inact) = state.inactivity_wait.take() {
+                        inact.wake();
                     }
                     state.retrying_prompt = true;
                     transient_retry = Some((
@@ -1711,16 +1918,43 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
             }
             return;
         }
+        state.outcome_watch = None;
+        if let Some(inact) = state.inactivity_wait.take() {
+            inact.wake();
+        }
         let finished_prompt = state.active_prompt.take();
         let saved_prompt_for_401 = finished_prompt.as_ref().map(|p| (p.text.clone(), p.images.clone()));
         let streamed_auth_error = state.turn_auth_error.take();
-        let streamed_transient_error = state.turn_transient_error.take();
+        let split_auth_row_id = state.split_auth_row_id.take();
+        let mut streamed_transient_error = state.turn_transient_error.take();
         let split_transient_row_id = state.split_transient_row_id.take();
         state.transient_retry_attempts = 0;
         let suppressed_row_id = finished_prompt.as_ref().and_then(|active| {
             active.chunk_cold_error.as_ref().and_then(|_| active.sole_assistant_id.clone())
         });
         suppressed_chunk_error = finished_prompt.and_then(|active| active.chunk_cold_error);
+        match hidden_outcome {
+            Some(HiddenTurnFailure::UsageLimit { message, reset }) => {
+                db_usage_limit = Some((message, reset));
+            }
+            Some(HiddenTurnFailure::InvalidThinkingSignature { message }) => {
+                db_broken_signature = Some(message);
+            }
+            Some(HiddenTurnFailure::ProviderError { message }) => {
+                db_provider_error = Some(message);
+            }
+            Some(HiddenTurnFailure::TransientUpstream { message }) => {
+                if streamed_transient_error.is_none() {
+                    streamed_transient_error = Some(message);
+                }
+            }
+            Some(HiddenTurnFailure::ColdModelNotReady { message, .. }) => {
+                if suppressed_chunk_error.is_none() {
+                    suppressed_chunk_error = Some(message);
+                }
+            }
+            Some(HiddenTurnFailure::Auth401 { .. }) | None => {}
+        }
         state.retrying_prompt = false;
         if let Some(wait) = state.model_retry_wait.take() {
             wait.wake();
@@ -1736,6 +1970,7 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
             .into_iter()
             .filter(|row| {
                 suppressed_row_id.as_deref() != Some(row.id())
+                    && split_auth_row_id.as_deref() != Some(row.id())
                     && split_transient_row_id.as_deref() != Some(row.id())
             })
             .chain(state.mapper.settle_running(canceled))
@@ -1817,6 +2052,41 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
             evict_or_require_auth_after_401(app.clone(), session_id.to_string(), proc.clone());
             return;
         }
+        if let Some(err) = error.as_ref() {
+            let err_text = wire::error_text(err);
+            if db_broken_signature.is_none() && is_invalid_thinking_signature(&err_text) {
+                db_broken_signature = Some(
+                    "Antigravity's saved conversation can no longer be sent to the model. Your next message will automatically start a fresh Antigravity session with this conversation's context.".to_string(),
+                );
+            } else if db_usage_limit.is_none() && is_usage_limit_error(&err_text) {
+                let reset = parse_usage_limit_reset(&err_text, Some((now_ms() / 1_000) as i64));
+                db_usage_limit = Some((err_text, reset));
+            }
+        }
+        if let Some(ref msg) = db_broken_signature {
+            retire_broken_antigravity_conversation(app, session_id, proc);
+            let turn_num = proc.acp.lock().unwrap().mapper.turn();
+            proc.timeline.lock().unwrap().upsert(ChatRow::Error {
+                id: format!("e-acp-{turn_num}"),
+                message: msg.clone(),
+            });
+            super::antigravity_tasks::before_turn_end(app, session_id, proc);
+            handle_turn_end(app, session_id, proc, "success", None);
+            return;
+        }
+        if let Some((msg, reset)) = db_usage_limit {
+            proc.acp.lock().unwrap().usage_limit_reset = reset;
+            proc.acp.lock().unwrap().needs_error_rotate = true;
+            proc.extras.lock().unwrap().usage_limit_hit = true;
+            let turn_num = proc.acp.lock().unwrap().mapper.turn();
+            proc.timeline.lock().unwrap().upsert(ChatRow::Error {
+                id: format!("e-acp-{turn_num}"),
+                message: msg,
+            });
+            super::antigravity_tasks::before_turn_end(app, session_id, proc);
+            handle_turn_end(app, session_id, proc, "success", None);
+            return;
+        }
     }
     let failure = match &error {
         Some(error) if wire::auth_required(error) => {
@@ -1835,15 +2105,18 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
         }
         Some(error) => Some(wire::error_text(error)),
         None => {
-            let reason = result.as_ref().and_then(|result| result.get("stopReason")).and_then(Value::as_str).unwrap_or("end_turn");
-            wire::stop_reason_error(reason)
-                .map(str::to_string)
+            db_provider_error
+                .or_else(|| wire::stop_reason_error(stop_reason).map(str::to_string))
                 .or(suppressed_chunk_error)
                 .or(streamed_transient_error)
         }
     };
     if error.is_none() && failure.is_none() {
         super::auth::turn_succeeded(app, session_id, proc);
+    } else if proc.kind == SessionKind::Antigravity && !canceled {
+        // Mark the process for idle replacement before the next turn so broken upstream HTTP
+        // streams, failed model maps, or stale cached credentials do not poison later prompts.
+        proc.acp.lock().unwrap().needs_error_rotate = true;
     }
     if let Some(message) = failure.as_deref().filter(|_| !canceled) {
         let turn = proc.acp.lock().unwrap().mapper.turn();
@@ -1923,6 +2196,8 @@ fn spawn_cold_model_retry(
             let id = proc.request_id("prompt");
             state.retrying_prompt = false;
             state.model_retry_wait = None;
+            state.last_prompt_activity_ms = now_ms();
+            state.outcome_watch = Some(PromptOutcomeWatch::capture(&native, &proc.auth_settings_args));
             state.prompt = Some(id.clone());
             id
         };
@@ -1934,6 +2209,7 @@ fn spawn_cold_model_retry(
                     state.prompt = None;
                 }
                 state.active_prompt = None;
+                state.outcome_watch = None;
                 state.mapper.turn()
             };
             proc.timeline.lock().unwrap().upsert(ChatRow::Error {
@@ -1941,6 +2217,8 @@ fn spawn_cold_model_retry(
                 message: error,
             });
             handle_turn_end(&app, &session_id, &proc, "success", None);
+        } else {
+            start_prompt_watchdog(&app, &session_id, &proc);
         }
     });
 }
@@ -1994,6 +2272,8 @@ fn spawn_transient_retry(
             state.transient_retry_wait = None;
             state.turn_transient_error = None;
             state.split_transient_row_id = None;
+            state.last_prompt_activity_ms = now_ms();
+            state.outcome_watch = Some(PromptOutcomeWatch::capture(&native, &proc.auth_settings_args));
             state.mapper.begin_turn();
             state.prompt = Some(id.clone());
             id
@@ -2006,6 +2286,7 @@ fn spawn_transient_retry(
                     state.prompt = None;
                 }
                 state.active_prompt = None;
+                state.outcome_watch = None;
                 state.transient_retry_attempts = 0;
                 state.mapper.turn()
             };
@@ -2014,47 +2295,118 @@ fn spawn_transient_retry(
                 message: error,
             });
             handle_turn_end(&app, &session_id, &proc, "success", None);
+        } else {
+            start_prompt_watchdog(&app, &session_id, &proc);
         }
     });
 }
 
 /// If a cold-started Antigravity session failed with `plan model not specified`, try pushing the
-/// conversation's saved model (or an available default model) over `session/set_config_option`
-/// before retrying the prompt.
+/// conversation's saved model (or available fallback models) over `session/set_config_option` or
+/// `session/set_model` before retrying the prompt.
 fn try_sync_antigravity_plan_model(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
-    let saved_model = proc.model.lock().unwrap().clone();
+    let saved_model = proc
+        .model
+        .lock()
+        .unwrap()
+        .clone()
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty());
     let Some(native) = proc.agent_session_id.lock().unwrap().clone() else { return; };
-    let (option, catalog_fallback) = {
+    let (option, models_from_state, catalog_current, catalog_choices) = {
         let state = proc.acp.lock().unwrap();
         let option = state.catalog.model_option.clone().unwrap_or_else(|| "model".to_string());
-        let fallback = state
+        let current = state
             .catalog
             .model
             .clone()
-            .or_else(|| state.catalog.models.first().map(|choice| choice.id.clone()));
-        (option, fallback)
+            .filter(|m| !m.trim().is_empty());
+        let choices: Vec<String> = state
+            .catalog
+            .models
+            .iter()
+            .map(|c| c.id.trim().to_string())
+            .filter(|m| !m.is_empty())
+            .take(2)
+            .collect();
+        (option, state.catalog.models_from_state, current, choices)
     };
-    let model = saved_model
-        .clone()
-        .or(catalog_fallback)
-        .or_else(|| crate::agent::antigravity_models::cached(app).into_iter().next().map(|m| m.id));
-    let Some(model) = model else { return; };
-    let Ok(result) = proc.request_and_wait("acp_set_model", |id| {
-        wire::set_config_option(id, &native, &option, &model)
-    }) else {
+    let mut candidates: Vec<String> = Vec::new();
+    let mut push_unique = |candidate: Option<String>| {
+        if let Some(m) = candidate.filter(|s| !s.trim().is_empty()) {
+            if !candidates.iter().any(|existing| existing == &m) {
+                candidates.push(m);
+            }
+        }
+    };
+    if let Some(ref saved) = saved_model {
+        push_unique(Some(saved.clone()));
+        // Only fall back past an explicit saved model when the live ACP session has already
+        // advertised real model choices (for instance, when the saved model ID was retired).
+        if !catalog_choices.is_empty() {
+            push_unique(catalog_current);
+            push_unique(catalog_choices.into_iter().next());
+        }
+    } else {
+        push_unique(catalog_current);
+        if let Some(first_live) = catalog_choices.into_iter().next() {
+            push_unique(Some(first_live));
+        } else {
+            push_unique(crate::agent::antigravity_models::cached(app).into_iter().next().map(|m| m.id));
+        }
+    }
+    if candidates.is_empty() {
+        return;
+    }
+
+    let is_method_not_found = |err: &str| {
+        let lower = err.to_ascii_lowercase();
+        lower.contains("method not found") || lower.contains("unknown method") || lower.contains("-32601")
+    };
+    let mut applied: Option<(String, Value)> = None;
+    for model in candidates {
+        let primary = if models_from_state {
+            proc.request_and_wait("acp_set_model", |id| wire::set_model(id, &native, &model))
+                .or_else(|err| {
+                    if is_method_not_found(&err) {
+                        proc.request_and_wait("acp_set_model", |id| {
+                            wire::set_config_option(id, &native, &option, &model)
+                        })
+                    } else {
+                        Err(err)
+                    }
+                })
+        } else {
+            proc.request_and_wait("acp_set_model", |id| {
+                wire::set_config_option(id, &native, &option, &model)
+            })
+            .or_else(|err| {
+                if is_method_not_found(&err) {
+                    proc.request_and_wait("acp_set_model", |id| wire::set_model(id, &native, &model))
+                } else {
+                    Err(err)
+                }
+            })
+        };
+        if let Ok(result) = primary {
+            applied = Some((model, result));
+            break;
+        }
+    }
+    let Some((model, result)) = applied else {
         return;
     };
     let catalog = {
         let mut state = proc.acp.lock().unwrap();
         state.awaiting_initial_models = false;
-        state.catalog.model = Some(model);
+        state.catalog.model = Some(model.clone());
         if let Some(options) = result.get("configOptions").and_then(Value::as_array) {
             state.catalog.absorb_options(options);
         }
         state.catalog.clone()
     };
-    if saved_model.is_none() {
-        *proc.model.lock().unwrap() = catalog.model.clone();
+    if saved_model.as_deref() != Some(model.as_str()) {
+        *proc.model.lock().unwrap() = catalog.model.clone().or(Some(model));
     }
     crate::agent::antigravity_models::remember_acp(app, &catalog);
     if catalog.effort_switchable() {
@@ -2227,7 +2579,13 @@ pub(super) fn handle_stop_hook(app: &AppCtx, session_id: &str, proc: &Arc<ChatPr
         super::antigravity_tasks::ensure_poller(app, session_id, proc);
         return r#"{"decision":"continue"}"#.to_string();
     }
-    if proc.release_when_idle.load(Ordering::Relaxed)
+    // Only park the Stop hook when background tasks, timers, subagents, or unread deliveries exist;
+    // ordinary completed turns allow Stop immediately so the next user message sends with zero wait.
+    let has_turn_tasks = {
+        let turn = proc.turn.lock().unwrap();
+        !turn.active_tasks.is_empty() || !turn.background_tasks.is_empty()
+    };
+    if !has_turn_tasks
         && !super::antigravity_tasks::has_pending_or_unread(proc, &surfaced, &woken_deliveries)
     {
         return r#"{"decision":"allow"}"#.to_string();
@@ -2360,7 +2718,11 @@ pub(super) fn handle_stop_hook(app: &AppCtx, session_id: &str, proc: &Arc<ChatPr
             super::antigravity_tasks::ensure_poller(app, session_id, proc);
             return r#"{"decision":"continue"}"#.to_string();
         }
-        if proc.release_when_idle.load(Ordering::Relaxed)
+        let has_turn_tasks = {
+            let turn = proc.turn.lock().unwrap();
+            !turn.active_tasks.is_empty() || !turn.background_tasks.is_empty()
+        };
+        if !has_turn_tasks
             && !super::antigravity_tasks::has_pending_or_unread(proc, &surfaced, &woken_deliveries)
         {
             let mut state = proc.acp.lock().unwrap();
@@ -2457,7 +2819,339 @@ fn resume_after_401_restart(
         return true;
     }
     super::antigravity_tasks::ensure_poller(app, session_id, proc);
+    start_prompt_watchdog(app, session_id, proc);
     true
+}
+
+/// Take the reset timestamp recorded when Antigravity hit a quota or rate limit on this turn.
+pub(super) fn take_usage_limit_reset(
+    proc: &ChatProcess,
+) -> Option<crate::agent::chat::auto_continue::Reset> {
+    proc.acp.lock().unwrap().usage_limit_reset.take()
+}
+
+/// Unbind a native Antigravity session whose persisted history contains an invalid Claude thinking
+/// signature, while retaining bounded recent context so the next turn seamlessly opens a fresh
+/// native conversation without losing the visible thread history.
+fn retire_broken_antigravity_conversation(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
+    let carryover = build_carryover_context(&proc.timeline.lock().unwrap().rows);
+    let old_native = proc.agent_session_id.lock().unwrap().take();
+    *proc.expected_native.lock().unwrap() = None;
+    {
+        let mut state = proc.acp.lock().unwrap();
+        state.resume = None;
+        state.pending_context_carryover = carryover;
+        state.needs_error_rotate = true;
+    }
+    if let Some(old_native) = old_native {
+        let changed = crate::db::repo::forget_agent_session_id(
+            &app.db().conn.lock().unwrap(),
+            session_id,
+            &old_native,
+            SessionKind::Antigravity,
+        )
+        .unwrap_or(false);
+        if changed {
+            app.emit(crate::host::TREE_CHANGED, ());
+        }
+    }
+    crate::diagnostics::record("WARN", "agent_chat", json!({
+        "sessionId": session_id,
+        "event": "antigravity_broken_thinking_signature_retired",
+    }));
+}
+
+fn build_carryover_context(rows: &[ChatRow]) -> Option<String> {
+    const MAX_EXCHANGES: usize = 8;
+    const MAX_CHARS: usize = 12_000;
+    let relevant: Vec<(&'static str, &str)> = rows
+        .iter()
+        .filter_map(|row| match row {
+            ChatRow::User { text, .. } if !text.trim().is_empty() => Some(("User", text.trim())),
+            ChatRow::Assistant { text, .. } if !text.trim().is_empty() => Some(("Assistant", text.trim())),
+            _ => None,
+        })
+        .collect();
+    if relevant.is_empty() {
+        return None;
+    }
+    let start = relevant.len().saturating_sub(MAX_EXCHANGES);
+    let mut parts = Vec::new();
+    let mut used = 0usize;
+    for &(role, text) in &relevant[start..] {
+        let clipped: String = text.chars().take(2_500).collect();
+        let entry = format!("{role}: {clipped}");
+        if used + entry.len() > MAX_CHARS && !parts.is_empty() {
+            break;
+        }
+        used += entry.len();
+        parts.push(entry);
+    }
+    (!parts.is_empty()).then(|| {
+        format!(
+            "Prior conversation context from this thread (the previous Antigravity session could not be resumed):\n\n{}",
+            parts.join("\n\n")
+        )
+    })
+}
+
+/// Start a slice-based inactivity watchdog for an active Antigravity `session/prompt`.
+///
+/// Long-running tool calls, open permission/question cards, background tasks, parked `Stop` hooks,
+/// and ongoing writes to Antigravity's native conversation DB keep the timer alive; genuine
+/// silence past the threshold replaces the wedged `agy acp` process.
+pub(super) fn start_prompt_watchdog(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>) {
+    if proc.kind != SessionKind::Antigravity {
+        return;
+    }
+    let (wait, limit_ms, initial_watch) = {
+        let mut state = proc.acp.lock().unwrap();
+        if state.prompt.is_none() {
+            return;
+        }
+        let limit_ms = state.prompt_inactivity_limit_ms.unwrap_or(DEFAULT_PROMPT_INACTIVITY_MS);
+        state.last_prompt_activity_ms = now_ms();
+        let wait = Arc::new(RetryWait::default());
+        if let Some(prev) = state.inactivity_wait.replace(wait.clone()) {
+            prev.wake();
+        }
+        (wait, limit_ms, state.outcome_watch.clone())
+    };
+    let slice = Duration::from_millis((limit_ms / 3).clamp(15, 5_000));
+    let (app, session_id, proc) = (app.clone(), session_id.to_string(), proc.clone());
+    std::thread::spawn(move || {
+        let mut last_watch_path = initial_watch
+            .as_ref()
+            .and_then(|w| w.db_path().map(PathBuf::from));
+        let mut last_db_activity = initial_watch
+            .as_ref()
+            .and_then(PromptOutcomeWatch::activity_fingerprint);
+        loop {
+            wait.wait_for(slice);
+            if !proc.alive.load(Ordering::Relaxed) || proc.released.load(Ordering::Relaxed) {
+                return;
+            }
+            let has_open_permissions = !proc.permissions.lock().unwrap().is_empty();
+            let (turn_running, turn_interrupted, started_at, has_bg_tasks) = {
+                let turn = proc.turn.lock().unwrap();
+                (
+                    turn.running,
+                    turn.interrupted,
+                    turn.started_at,
+                    !turn.background_tasks.is_empty() || !turn.active_tasks.is_empty(),
+                )
+            };
+            if !turn_running || turn_interrupted {
+                return;
+            }
+            let (watch, paused) = {
+                let mut state = proc.acp.lock().unwrap();
+                if !state.inactivity_wait.as_ref().is_some_and(|cur| Arc::ptr_eq(cur, &wait))
+                    || state.prompt.is_none()
+                    || state.retrying_prompt
+                    || state.parked_idle
+                {
+                    return;
+                }
+                let paused = has_open_permissions
+                    || has_bg_tasks
+                    || !state.requests.is_empty()
+                    || state.mapper.has_running_tool()
+                    || state.tasks.reactive_active();
+                if paused {
+                    state.last_prompt_activity_ms = now_ms();
+                    (None, true)
+                } else {
+                    (state.outcome_watch.clone(), false)
+                }
+            };
+            if paused {
+                continue;
+            }
+
+            // Probe Antigravity's native conversation DB outside the `acp` lock so ongoing
+            // generation (which flushes into `steps` / `-wal` without emitting ACP updates)
+            // keeps the turn alive.
+            if let Some(ref w) = watch {
+                let cur_path = w.db_path().map(PathBuf::from);
+                if cur_path != last_watch_path {
+                    last_watch_path = cur_path;
+                    last_db_activity = w.activity_fingerprint();
+                } else if let Some(sample) = w.activity_fingerprint() {
+                    let progressed = match last_db_activity.as_mut() {
+                        Some(prev) => prev.advance_from(sample),
+                        None => {
+                            last_db_activity = Some(sample);
+                            true
+                        }
+                    };
+                    if progressed {
+                        let mut state = proc.acp.lock().unwrap();
+                        if state.inactivity_wait.as_ref().is_some_and(|cur| Arc::ptr_eq(cur, &wait)) {
+                            state.last_prompt_activity_ms = now_ms();
+                        }
+                        continue;
+                    }
+                }
+            }
+
+            let stalled = {
+                let mut state = proc.acp.lock().unwrap();
+                if !state.inactivity_wait.as_ref().is_some_and(|cur| Arc::ptr_eq(cur, &wait))
+                    || state.prompt.is_none()
+                    || state.retrying_prompt
+                    || state.parked_idle
+                {
+                    return;
+                }
+                let recheck_paused = !proc.permissions.lock().unwrap().is_empty()
+                    || !state.requests.is_empty()
+                    || state.mapper.has_running_tool()
+                    || state.tasks.reactive_active();
+                if recheck_paused {
+                    state.last_prompt_activity_ms = now_ms();
+                    None
+                } else {
+                    let elapsed = now_ms().saturating_sub(state.last_prompt_activity_ms);
+                    if elapsed >= limit_ms {
+                        state.inactivity_wait = None;
+                        let saved = state
+                            .active_prompt
+                            .as_ref()
+                            .map(|p| (p.text.clone(), p.images.clone(), p.had_output));
+                        Some((saved, elapsed))
+                    } else {
+                        None
+                    }
+                }
+            };
+            if let Some((saved, elapsed_ms)) = stalled {
+                trigger_antigravity_stall_recovery(
+                    &app,
+                    &session_id,
+                    &proc,
+                    saved,
+                    started_at,
+                    elapsed_ms,
+                    limit_ms,
+                );
+                return;
+            }
+        }
+    });
+}
+
+fn trigger_antigravity_stall_recovery(
+    app: &AppCtx,
+    session_id: &str,
+    proc: &Arc<ChatProcess>,
+    saved_prompt: Option<(String, Vec<ChatImage>, bool)>,
+    started_at: Option<u64>,
+    elapsed_ms: u64,
+    threshold_ms: u64,
+) {
+    if let Ok(native) = session(proc) {
+        let _ = proc.write(&wire::cancel(&native));
+    }
+    if let Some(cancel_token) = app.chat().claim_antigravity_stall_recovery(session_id) {
+        let (text, images) = match saved_prompt {
+            Some((text, images, false)) => (text, images),
+            _ => (TRANSIENT_RECOVERY_PROMPT.to_string(), Vec::new()),
+        };
+        let continuation = Pending401Continuation {
+            text,
+            images,
+            ensure_user_row: false,
+            started_at,
+        };
+        crate::diagnostics::record("WARN", "antigravity_prompt_inactivity", json!({
+            "sessionId": session_id,
+            "status": "recovered",
+            "errorCode": "timeout",
+            "elapsedMs": elapsed_ms,
+            "thresholdMs": threshold_ms,
+        }));
+        let (app, session_id, proc) = (app.clone(), session_id.to_string(), proc.clone());
+        std::thread::spawn(move || {
+            if cancel_token.load(Ordering::Relaxed) {
+                return;
+            }
+            let (model, effort) = {
+                let _action = proc.action.lock().unwrap();
+                let _callbacks = proc.callbacks.read().unwrap();
+                if !app.chat().owns_process(&session_id, &proc)
+                    || cancel_token.load(Ordering::Relaxed)
+                {
+                    return;
+                }
+                let model = proc.model.lock().unwrap().clone();
+                let effort = proc.effort.lock().unwrap().clone();
+                {
+                    let mut state = proc.acp.lock().unwrap();
+                    state.pending_401_continuation = Some(continuation);
+                }
+                proc.auth_restart.store(true, Ordering::Relaxed);
+                super::release_process(&app, &session_id, &proc);
+                (model, effort)
+            };
+            if cancel_token.load(Ordering::Relaxed) {
+                proc.acp.lock().unwrap().pending_401_continuation = None;
+                return;
+            }
+            if let Err(_err) = crate::command_core::chat_start(
+                &app,
+                &session_id,
+                model.as_deref(),
+                effort.as_deref(),
+                false,
+            ) {
+                proc.acp.lock().unwrap().pending_401_continuation = None;
+                proc.timeline.lock().unwrap().upsert(ChatRow::Error {
+                    id: format!("e-acp-stall-{}", now_ms()),
+                    message: "Antigravity did not respond for too long, and automatic recovery could not restart it. Please try again.".into(),
+                });
+                emit(&app, &session_id, json!({"type":"turnCompleted"}));
+                emit_state(&app, &session_id, AgentState::Waiting);
+            }
+        });
+        return;
+    }
+
+    crate::diagnostics::record("WARN", "antigravity_prompt_inactivity", json!({
+        "sessionId": session_id,
+        "status": "failed",
+        "errorCode": "timeout",
+        "elapsedMs": elapsed_ms,
+        "thresholdMs": threshold_ms,
+    }));
+    let (rows, turn_num) = {
+        let mut state = proc.acp.lock().unwrap();
+        state.prompt = None;
+        state.steers.clear();
+        state.active_prompt = None;
+        state.outcome_watch = None;
+        state.needs_error_rotate = true;
+        let rows: Vec<ChatRow> = state
+            .mapper
+            .finish()
+            .into_iter()
+            .chain(state.mapper.settle_running(false))
+            .collect();
+        (rows, state.mapper.turn())
+    };
+    {
+        let mut timeline = proc.timeline.lock().unwrap();
+        for row in rows {
+            timeline.upsert(row);
+        }
+        timeline.upsert(ChatRow::Error {
+            id: format!("e-acp-{turn_num}"),
+            message: "Antigravity stopped sending updates for too long, so this turn was stopped. Please try again.".into(),
+        });
+    }
+    cancel_pending(app, session_id, proc);
+    super::antigravity_tasks::before_turn_end(app, session_id, proc);
+    handle_turn_end(app, session_id, proc, "success", None);
 }
 
 /// Claim a one-shot automatic process restart to recover an Antigravity turn interrupted by HTTP 401.
@@ -2500,7 +3194,6 @@ fn trigger_antigravity_401_recovery(
         reason.to_string(),
     );
     std::thread::spawn(move || {
-        crate::agent::antigravity::bump_auth_epoch();
         crate::agent::antigravity::invalidate_readiness_cache();
         if cancel_token.load(Ordering::Relaxed) {
             return;
@@ -2525,11 +3218,9 @@ fn trigger_antigravity_401_recovery(
             (model, effort)
         };
 
-        // Run a gated readiness probe so `agy` refreshes any expired OAuth token on disk cleanly
+        // Run a readiness probe so `agy` refreshes any expired OAuth token on disk cleanly
         // before the replacement ACP session starts, or confirms the account is genuinely signed out.
-        let signed_in = super::auth::readiness::check(&app, &session_id)
-            .ok()
-            .and_then(|r| r.signed_in);
+        let signed_in = super::auth::readiness::probe_antigravity(&app, &session_id);
         if cancel_token.load(Ordering::Relaxed) {
             proc.acp.lock().unwrap().pending_401_continuation = None;
             return;
@@ -2573,11 +3264,8 @@ fn trigger_antigravity_401_recovery(
 /// Evict a poisoned ACP process after a repeated 401, or surface the sign-in panel if logged out.
 fn evict_or_require_auth_after_401(app: AppCtx, session_id: String, proc: Arc<ChatProcess>) {
     std::thread::spawn(move || {
-        crate::agent::antigravity::bump_auth_epoch();
         crate::agent::antigravity::invalidate_readiness_cache();
-        let signed_in = super::auth::readiness::check(&app, &session_id)
-            .ok()
-            .and_then(|r| r.signed_in);
+        let signed_in = super::auth::readiness::probe_antigravity(&app, &session_id);
         let _action = proc.action.lock().unwrap();
         let _callbacks = proc.callbacks.read().unwrap();
         if !app.chat().owns_process(&session_id, &proc) || !proc.alive.load(Ordering::Relaxed) {
@@ -2594,26 +3282,30 @@ fn evict_or_require_auth_after_401(app: AppCtx, session_id: String, proc: Arc<Ch
 
 /// The process is gone: close whatever was streaming and keep the journal complete.
 pub(super) fn finish(proc: &Arc<ChatProcess>) {
-    let (rows, reactive_rows, park, retry_wait, transient_wait, waiter, gate_permit) = {
+    let (rows, reactive_rows, park, retry_wait, transient_wait, inactivity_wait, waiter, gate_permit) = {
         let mut state = proc.acp.lock().unwrap();
         state.parked_idle = false;
         state.settled_while_parked = false;
         state.retrying_prompt = false;
         state.active_prompt = None;
+        state.outcome_watch = None;
         state.turn_auth_error = None;
+        state.split_auth_row_id = None;
         state.turn_transient_error = None;
         state.transient_retry_attempts = 0;
         state.split_transient_row_id = None;
         state.startup_native = None;
+        state.startup_prompt = None;
         let gate_permit = state.auth_gate_permit.take();
         let park = state.stop_park.take();
         let retry_wait = state.model_retry_wait.take();
         let transient_wait = state.transient_retry_wait.take();
+        let inactivity_wait = state.inactivity_wait.take();
         let waiter = state.retire_waiter.clone();
         let rows: Vec<ChatRow> = state.mapper.finish().into_iter().chain(state.mapper.settle_running(true)).collect();
         let reactive_rows = state.tasks.take_aborted_reactive_rows();
         flush_journal_locked(&mut state);
-        (rows, reactive_rows, park, retry_wait, transient_wait, waiter, gate_permit)
+        (rows, reactive_rows, park, retry_wait, transient_wait, inactivity_wait, waiter, gate_permit)
     };
     drop(gate_permit);
     if let Some(park) = park {
@@ -2623,6 +3315,9 @@ pub(super) fn finish(proc: &Arc<ChatProcess>) {
         wait.wake();
     }
     if let Some(wait) = transient_wait {
+        wait.wake();
+    }
+    if let Some(wait) = inactivity_wait {
         wait.wake();
     }
     waiter.pending.lock().unwrap().clear();
@@ -2648,20 +3343,38 @@ pub(super) fn validate(proc: &ChatProcess, behavior: &str, image_count: usize) -
 pub(super) fn dispatch(proc: &Arc<ChatProcess>, text: &str, images: &[ChatImage]) -> Result<(), String> {
     let session = proc.agent_session_id.lock().unwrap().clone().ok_or("The agent has not opened its conversation yet")?;
     let id = proc.request_id("prompt");
-    let (reactive_rows, prev_retry_wait, prev_transient_wait) = {
+    let outcome_watch = (proc.kind == SessionKind::Antigravity)
+        .then(|| PromptOutcomeWatch::capture(&session, &proc.auth_settings_args));
+    let (wire_text, reactive_rows, prev_retry_wait, prev_transient_wait, prev_inactivity_wait) = {
         let mut state = proc.acp.lock().unwrap();
+        let wire_text = match (proc.kind == SessionKind::Antigravity)
+            .then(|| state.pending_context_carryover.take())
+            .flatten()
+        {
+            Some(carryover) if !text.trim().is_empty() => {
+                format!("{carryover}\n\nCurrent user request:\n{text}")
+            }
+            Some(carryover) => carryover,
+            None => text.to_string(),
+        };
         let reactive_rows = state.tasks.take_aborted_reactive_rows();
         state.parked_idle = false;
         state.settled_while_parked = false;
         state.retrying_prompt = false;
+        state.needs_error_rotate = false;
+        state.usage_limit_reset = None;
         state.turn_auth_error = None;
+        state.split_auth_row_id = None;
         state.turn_transient_error = None;
         state.transient_retry_attempts = 0;
         state.split_transient_row_id = None;
+        state.last_prompt_activity_ms = now_ms();
+        state.outcome_watch = outcome_watch;
         let prev_retry_wait = state.model_retry_wait.take();
         let prev_transient_wait = state.transient_retry_wait.take();
+        let prev_inactivity_wait = state.inactivity_wait.take();
         state.active_prompt = (proc.kind == SessionKind::Antigravity).then(|| ActivePrompt {
-            text: text.to_string(),
+            text: wire_text.clone(),
             images: images.to_vec(),
             attempts: 0,
             had_output: false,
@@ -2676,7 +3389,7 @@ pub(super) fn dispatch(proc: &Arc<ChatProcess>, text: &str, images: &[ChatImage]
             state.pending_journal.push(wire::journal_prompt(text, now_ms() as i64));
             flush_journal_locked(&mut state);
         }
-        (reactive_rows, prev_retry_wait, prev_transient_wait)
+        (wire_text, reactive_rows, prev_retry_wait, prev_transient_wait, prev_inactivity_wait)
     };
     if let Some(wait) = prev_retry_wait {
         wait.wake();
@@ -2684,13 +3397,17 @@ pub(super) fn dispatch(proc: &Arc<ChatProcess>, text: &str, images: &[ChatImage]
     if let Some(wait) = prev_transient_wait {
         wait.wake();
     }
+    if let Some(wait) = prev_inactivity_wait {
+        wait.wake();
+    }
     super::antigravity_tasks::settle_rows(proc, &reactive_rows);
-    let result = proc.write(&wire::prompt(&id, &session, text, images));
+    let result = proc.write(&wire::prompt(&id, &session, &wire_text, images));
     if result.is_err() {
         proc.pending.lock().unwrap().remove(&id);
         let mut state = proc.acp.lock().unwrap();
         state.prompt = None;
         state.active_prompt = None;
+        state.outcome_watch = None;
     }
     result
 }
@@ -2703,6 +3420,8 @@ pub(super) fn dispatch(proc: &Arc<ChatProcess>, text: &str, images: &[ChatImage]
 /// closed here so the steer message becomes a boundary in the transcript.
 pub(super) fn steer(proc: &Arc<ChatProcess>, text: &str, images: &[ChatImage]) -> Result<(), String> {
     let session = proc.agent_session_id.lock().unwrap().clone().ok_or("The agent has not opened its conversation yet")?;
+    let outcome_watch = (proc.kind == SessionKind::Antigravity)
+        .then(|| PromptOutcomeWatch::capture(&session, &proc.auth_settings_args));
     let (id, rows, reactive_rows) = {
         let mut state = proc.acp.lock().unwrap();
         if state.retrying_prompt {
@@ -2726,6 +3445,10 @@ pub(super) fn steer(proc: &Arc<ChatProcess>, text: &str, images: &[ChatImage]) -
         let id = proc.request_id("prompt");
         let rows: Vec<ChatRow> = state.mapper.finish().into_iter().collect();
         state.active_prompt = None;
+        state.last_prompt_activity_ms = now_ms();
+        if proc.kind == SessionKind::Antigravity {
+            state.outcome_watch = outcome_watch;
+        }
         state.steers.push(id.clone());
         if state.journal.is_some() {
             state.pending_journal.push(wire::journal_prompt(text, now_ms() as i64));
@@ -2746,26 +3469,39 @@ pub(super) fn steer(proc: &Arc<ChatProcess>, text: &str, images: &[ChatImage]) -
 /// Cancel the running prompt. Waiting requests are answered at once, because an agent may hold the
 /// prompt open until they are; their cards are cleared when the prompt answers.
 pub(super) fn cancel(proc: &Arc<ChatProcess>) -> Result<(), String> {
+    if proc.acp.lock().unwrap().startup_prompt.take().is_some() {
+        return Ok(());
+    }
     let session = proc.agent_session_id.lock().unwrap().clone().ok_or("The agent has not opened its conversation yet")?;
     release_parked_stop(proc, "allow");
-    let (retry_wait, transient_wait) = {
+    let (retry_wait, transient_wait, inactivity_wait) = {
         let mut state = proc.acp.lock().unwrap();
         state.retrying_prompt = false;
         if state.active_prompt.as_ref().is_some_and(|active| active.chunk_cold_error.is_some())
+            || state.split_auth_row_id.is_some()
             || state.split_transient_row_id.is_some()
         {
             let _ = state.mapper.finish();
         }
         state.active_prompt = None;
+        state.outcome_watch = None;
+        state.split_auth_row_id = None;
         state.turn_transient_error = None;
         state.transient_retry_attempts = 0;
         state.split_transient_row_id = None;
-        (state.model_retry_wait.take(), state.transient_retry_wait.take())
+        (
+            state.model_retry_wait.take(),
+            state.transient_retry_wait.take(),
+            state.inactivity_wait.take(),
+        )
     };
     if let Some(wait) = retry_wait {
         wait.wake();
     }
     if let Some(wait) = transient_wait {
+        wait.wake();
+    }
+    if let Some(wait) = inactivity_wait {
         wait.wake();
     }
     proc.write(&wire::cancel(&session))?;
@@ -3018,6 +3754,77 @@ mod tests {
         handle_line(&app, "s", &other, &json!({"jsonrpc":"2.0","id":load["id"],
             "error":{"code":-32602,"message":"Invalid params"}}).to_string());
         assert!(other.released.load(Ordering::Relaxed));
+    }
+
+    /// A missing recorded conversation is deliberately replaced with a fresh one. On a resume
+    /// `expected_native` still names the lost conversation, so unless it is cleared the identity guard
+    /// rejects the replacement and tears the process down right after the "a new one has been started"
+    /// message.
+    #[test]
+    fn a_recovered_missing_conversation_survives_the_identity_guard() {
+        let app = ctx("acp-load-missing-identity");
+        let (mut proc, mut agent) = wired(SessionKind::Grok);
+        *Arc::get_mut(&mut proc).unwrap().expected_native.lock().unwrap() = Some("native-lost".into());
+        let errors = Arc::new(Mutex::new(Vec::<String>::new()));
+        {
+            let errors = errors.clone();
+            app.listen("chat://event/s", move |payload| {
+                let value: Value = serde_json::from_str(payload).unwrap_or(Value::Null);
+                if value["type"] == "error" {
+                    errors.lock().unwrap().push(value["message"].as_str().unwrap_or_default().to_string());
+                }
+            });
+        }
+
+        bootstrap(&app, &proc, Some("native-lost"), Some("/w"), None);
+        let initialize = written(&mut agent);
+        reply(&app, &proc, &initialize, json!({"agentCapabilities":{"loadSession":true}}));
+        let load = written(&mut agent);
+        assert_eq!(load["method"], "session/load");
+        handle_line(&app, "s", &proc, &json!({"jsonrpc":"2.0","id":load["id"],
+            "error":{"code":-32603,"message":"Path not found.","data":{"code":"FS_NOT_FOUND"}}}).to_string());
+        let fresh = written(&mut agent);
+        assert_eq!(fresh["method"], "session/new");
+
+        // The agent opens the replacement conversation.
+        reply(&app, &proc, &fresh, json!({"sessionId":"native-fresh"}));
+
+        let seen = errors.lock().unwrap().clone();
+        assert!(
+            !seen.iter().any(|m| m.contains("different native conversation")),
+            "the replacement conversation must not be vetoed by the identity guard; errors: {seen:?}"
+        );
+        assert!(proc.alive.load(Ordering::Relaxed), "the replacement conversation must stay alive");
+        assert_eq!(proc.agent_session_id.lock().unwrap().as_deref(), Some("native-fresh"));
+    }
+
+    /// Agents that persist their own ACP journal (Copilot, Cursor, Kimi) must bind the journal to the
+    /// replacement conversation after a missing-conversation fallback instead of appending to the lost id's file.
+    #[test]
+    fn a_recovered_missing_conversation_rebinds_the_journal_to_the_replacement() {
+        let app = ctx("acp-load-missing-journal");
+        let (mut proc, mut agent) = wired(SessionKind::Copilot);
+        *Arc::get_mut(&mut proc).unwrap().expected_native.lock().unwrap() = Some("native-lost".into());
+
+        bootstrap(&app, &proc, Some("native-lost"), Some("/w"), None);
+        assert_eq!(
+            proc.acp.lock().unwrap().journal,
+            journal_path(&app, SessionKind::Copilot, "native-lost")
+        );
+        let initialize = written(&mut agent);
+        reply(&app, &proc, &initialize, json!({"agentCapabilities":{"loadSession":true}}));
+        let load = written(&mut agent);
+        handle_line(&app, "s", &proc, &json!({"jsonrpc":"2.0","id":load["id"],
+            "error":{"code":-32000,"message":"Session not found"}}).to_string());
+        let fresh = written(&mut agent);
+        assert_eq!(fresh["method"], "session/new");
+        reply(&app, &proc, &fresh, json!({"sessionId":"native-fresh"}));
+
+        assert_eq!(
+            proc.acp.lock().unwrap().journal,
+            journal_path(&app, SessionKind::Copilot, "native-fresh"),
+            "subsequent turns must write to the replacement conversation's journal"
+        );
     }
 
     #[test]
@@ -3679,12 +4486,16 @@ mod tests {
         dispatch(&proc, "turn one", &[]).unwrap();
         let first_prompt_id = proc.acp.lock().unwrap().prompt.clone().unwrap();
 
-        // Subagent stop hooks and non-NO_TOOL_CALL / safety-capped invocations must allow immediately.
+        // Subagent stop hooks, non-NO_TOOL_CALL, safety-capped invocations, and ordinary turns with no
+        // background tasks or unread deliveries must allow immediately without parking.
         assert_eq!(handle_stop_hook(&app, "s", &proc, r#"{"conversationId":"sub-conv","terminationReason":"NO_TOOL_CALL","executionNum":0}"#), r#"{"decision":"allow"}"#);
         assert_eq!(handle_stop_hook(&app, "s", &proc, r#"{"conversationId":"main-conv","terminationReason":"USER_CANCELED","executionNum":0}"#), r#"{"decision":"allow"}"#);
         assert_eq!(handle_stop_hook(&app, "s", &proc, &format!(r#"{{"conversationId":"main-conv","terminationReason":"NO_TOOL_CALL","executionNum":{}}}"#, MAX_SAFE_STOP_CONTINUATIONS)), r#"{"decision":"allow"}"#);
+        assert_eq!(handle_stop_hook(&app, "s", &proc, r#"{"conversationId":"main-conv","terminationReason":"NO_TOOL_CALL","executionNum":0}"#), r#"{"decision":"allow"}"#);
+        assert!(!is_stop_parked(&proc));
 
-        // Main NO_TOOL_CALL stop parks the turn until an unread delivery arrives.
+        // When background work is active, NO_TOOL_CALL parks the turn until an unread delivery arrives.
+        proc.turn.lock().unwrap().active_tasks.insert("task-1".into());
         let (app_t, proc_t) = (app.clone(), proc.clone());
         let h1 = std::thread::spawn(move || {
             handle_stop_hook(&app_t, "s", &proc_t, r#"{"conversationId":"main-conv","terminationReason":"NO_TOOL_CALL","executionNum":0}"#)
@@ -3895,13 +4706,14 @@ mod tests {
         let card1_id = card1["id"].as_str().unwrap().to_string();
         h.app.chat().respond_permission(&h.app, &h.sid, &card1_id, true, None, None, None).unwrap();
 
-        h.wait_until(Duration::from_secs(60), "Turn 1 parked Stop", |proc| {
+        h.wait_until(Duration::from_secs(60), "Turn 1 completion", |proc| {
             let snap = h.app.chat().snapshot(&h.sid);
-            (!proc.turn.lock().unwrap().running && snap.turn_started_at.is_none() && is_stop_parked(proc) && marker1.exists()).then_some(())
+            (!proc.turn.lock().unwrap().running && snap.turn_started_at.is_none() && marker1.exists()).then_some(())
         });
+        assert!(!is_stop_parked(h.proc.as_ref().unwrap()));
         assert_eq!(h.proc.as_ref().unwrap().acp.lock().unwrap().stop_execution_nums, vec![0]);
 
-        // Send Turn 2 while Turn 1 Stop is parked; Stop must retire with allow and Turn 2 resets executionNum to 0.
+        // Send Turn 2 with a `schedule` timer; Stop parks while the timer is active and wakes on expiry.
         let mid2 = format!("msg-{}", uuid::Uuid::new_v4());
         crate::command_core::chat_send(
             &h.app,
@@ -3945,12 +4757,12 @@ mod tests {
         }
         assert!(saw_wake_row, "expected ChatRow::Wake when schedule timer woke parked ACP session");
         assert!(marker2.exists(), "expected post-wakeup run_command permission approval to create {}", marker2.display());
-        h.wait_until(Duration::from_secs(30), "Turn 2 re-parked Stop", |proc| {
+        h.wait_until(Duration::from_secs(30), "Turn 2 settled after wakeup", |proc| {
             let snap = h.app.chat().snapshot(&h.sid);
-            (!proc.turn.lock().unwrap().running && snap.turn_started_at.is_none() && is_stop_parked(proc)).then_some(())
+            (!proc.turn.lock().unwrap().running && snap.turn_started_at.is_none()).then_some(())
         });
 
-        // Turn 3 sent after a Stop-continue wakeup must retire Turn 2 Stop and reset executionNum to 0.
+        // Turn 3 sent after a Stop-continue wakeup resets executionNum to 0 and finishes unparked.
         let mid3 = format!("msg-{}", uuid::Uuid::new_v4());
         crate::command_core::chat_send(
             &h.app,
@@ -3961,12 +4773,12 @@ mod tests {
             Some(&mid3),
         )
         .unwrap();
-        h.wait_until(Duration::from_secs(60), "Turn 3 reply and parked Stop", |proc| {
+        h.wait_until(Duration::from_secs(60), "Turn 3 reply", |proc| {
             let snap = h.app.chat().snapshot(&h.sid);
             let has_reply = snap.rows.iter().rev().any(|r| {
                 matches!(r, ChatRow::Assistant { text, streaming: false, .. } if text.contains("TURN3_OK"))
             });
-            (!proc.turn.lock().unwrap().running && snap.turn_started_at.is_none() && is_stop_parked(proc) && has_reply).then_some(())
+            (!proc.turn.lock().unwrap().running && snap.turn_started_at.is_none() && has_reply).then_some(())
         });
         {
             let nums = h.proc.as_ref().unwrap().acp.lock().unwrap().stop_execution_nums.clone();
@@ -4526,6 +5338,34 @@ sys.exit(0 if alive else 2)
         let session_idx = recorded.iter().position(|kind| kind == "session").expect("session ready emitted");
         assert!(replace_idx < session_idx, "expected replaceRows before session, got {recorded:?}");
         assert!(matches!(proc.timeline.lock().unwrap().take_flush(), super::super::TimelineFlush::None));
+
+        // When Antigravity advertises both `loadSession` and `sessionCapabilities.resume`, `session/resume`
+        // must be preferred over `session/load`, and a cold-start prompt accepted before the handshake
+        // answers must dispatch automatically once `finish_startup` runs.
+        let (proc_resume, mut agent_resume) = wired(SessionKind::Antigravity);
+        proc_resume.ready.store(false, Ordering::Relaxed);
+        app.chat().sessions.lock().unwrap().insert("s".into(), proc_resume.clone());
+        bootstrap(&app, &proc_resume, Some("agy-resume-2"), Some("/w"), None);
+        let init_resume = written(&mut agent_resume);
+        let send_outcome = app.chat().send_identified(&app, "s", "First cold prompt", vec![], "queue", None).unwrap();
+        assert_eq!(send_outcome, "sent");
+        assert!(proc_resume.turn.lock().unwrap().running);
+        assert!(proc_resume.timeline.lock().unwrap().rows.iter().any(|row| {
+            matches!(row, ChatRow::User { text, .. } if text == "First cold prompt")
+        }));
+        reply(&app, &proc_resume, &init_resume, json!({
+            "agentCapabilities": {
+                "loadSession": true,
+                "sessionCapabilities": { "resume": {} }
+            }
+        }));
+        let resume_req = written(&mut agent_resume);
+        assert_eq!(resume_req["method"], "session/resume");
+        reply(&app, &proc_resume, &resume_req, json!({"sessionId":"agy-resume-2"}));
+        let prompt_req = written(&mut agent_resume);
+        assert_eq!(prompt_req["method"], "session/prompt");
+        assert_eq!(prompt_req["params"]["prompt"][0]["text"], "First cold prompt");
+        app.chat().sessions.lock().unwrap().remove("s");
     }
 
     #[cfg(unix)]
@@ -4778,7 +5618,7 @@ while True:
 
         let mid2 = format!("msg-{}", uuid::Uuid::new_v4());
         crate::command_core::chat_send(&app, &sid, "Trigger persistent 401", vec![], Some("queue"), Some(&mid2)).unwrap();
-        let err_deadline = Instant::now() + Duration::from_secs(10);
+        let err_deadline = Instant::now() + Duration::from_secs(25);
         loop {
             let snap = app.chat().snapshot(&sid);
             let has_err = snap.rows.iter().any(|r| {
@@ -4793,8 +5633,8 @@ while True:
         let st_after: Value = serde_json::from_str(&std::fs::read_to_string(&state_path).unwrap()).unwrap();
         assert_eq!(
             st_after["acp_spawns"].as_u64().unwrap(),
-            spawns_before_turn2 + 1,
-            "persistent 401 must restart at most once per turn"
+            spawns_before_turn2 + 2,
+            "persistent 401 must restart at most MAX_ANTIGRAVITY_401_RESTARTS (2) times per turn"
         );
 
         let _ = crate::command_core::chat_stop(&app, &sid);
@@ -4969,5 +5809,408 @@ while True:
         std::thread::sleep(Duration::from_millis(60));
         assert!(!proc2.acp.lock().unwrap().retrying_prompt);
         assert!(proc2.acp.lock().unwrap().prompt.is_none());
+    }
+
+    #[test]
+    fn antigravity_empty_current_model_on_open_selects_first_choice_and_plan_model_fallback_recovers() {
+        // Case 1: `session/new` returns `currentValue: ""` with available model options while `proc.model`
+        // is `None`. Startup must proactively issue `session/set_config_option` for the first available
+        // model before marking the session ready, preventing `plan model not specified` on turn 1.
+        let app = ctx("acp-agy-empty-current-model");
+        let (proc, mut agent) = wired(SessionKind::Antigravity);
+        proc.ready.store(false, Ordering::Relaxed);
+        *proc.mode.lock().unwrap() = "default".into();
+        *proc.model.lock().unwrap() = None;
+
+        bootstrap(&app, &proc, None, Some("/w"), None);
+        let init = written(&mut agent);
+        reply(&app, &proc, &init, json!({"agentCapabilities": {"loadSession": true}}));
+        let open = written(&mut agent);
+        reply(&app, &proc, &open, json!({
+            "sessionId": "agy-empty-model-1",
+            "modes": {
+                "currentModeId": "default",
+                "availableModes": [{"id": "default", "name": "Default"}]
+            },
+            "configOptions": [{
+                "type": "select",
+                "id": "model",
+                "category": "model",
+                "currentValue": "",
+                "options": [
+                    {"value": "claude-opus-4-6-thinking", "name": "Claude Opus 4.6 Thinking"},
+                    {"value": "gemini-4-neon", "name": "Gemini 4 Neon"}
+                ]
+            }]
+        }));
+        assert!(!proc.ready.load(Ordering::Relaxed), "must wait for initial model switch");
+        let set_model_req = written(&mut agent);
+        assert_eq!(set_model_req["method"], "session/set_config_option");
+        assert_eq!(set_model_req["params"]["configId"], "model");
+        assert_eq!(set_model_req["params"]["value"], "claude-opus-4-6-thinking");
+        reply(&app, &proc, &set_model_req, json!({
+            "configOptions": [{
+                "type": "select",
+                "id": "model",
+                "category": "model",
+                "currentValue": "claude-opus-4-6-thinking",
+                "options": [
+                    {"value": "claude-opus-4-6-thinking", "name": "Claude Opus 4.6 Thinking"},
+                    {"value": "gemini-4-neon", "name": "Gemini 4 Neon"}
+                ]
+            }]
+        }));
+        assert!(proc.ready.load(Ordering::Relaxed));
+        assert_eq!(proc.model.lock().unwrap().as_deref(), Some("claude-opus-4-6-thinking"));
+
+        // Case 2: if `proc.model` holds a retired ID and `plan model not specified` fires,
+        // `try_sync_antigravity_plan_model` falls back to the first live choice in `catalog.models`.
+        let app2 = ctx("acp-agy-retired-plan-fallback");
+        let (proc2, mut agent2) = wired(SessionKind::Antigravity);
+        *proc2.agent_session_id.lock().unwrap() = Some("s-retired".into());
+        *proc2.model.lock().unwrap() = Some("retired-model-v0".into());
+        {
+            let mut state = proc2.acp.lock().unwrap();
+            state.catalog.absorb_options(&[json!({
+                "type": "select",
+                "id": "model",
+                "category": "model",
+                "currentValue": "",
+                "options": [
+                    {"value": "claude-opus-4-6-thinking", "name": "Claude Opus 4.6 Thinking"}
+                ]
+            })]);
+        }
+        proc2.ready.store(true, Ordering::Relaxed);
+        proc2.turn.lock().unwrap().running = true;
+
+        dispatch(&proc2, "Run check", &[]).unwrap();
+        let first = written(&mut agent2);
+        notify(&app2, &proc2, json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": "\n⚠ failed to construct executor: plan model not specified; you must specify a valid model\n"}
+        }));
+        reply(&app2, &proc2, &first, json!({"stopReason": "end_turn"}));
+
+        let attempt1 = written(&mut agent2);
+        assert_eq!(attempt1["method"], "session/set_config_option");
+        assert_eq!(attempt1["params"]["value"], "retired-model-v0");
+        handle_line(&app2, "s", &proc2, &json!({
+            "jsonrpc": "2.0",
+            "id": attempt1["id"],
+            "error": {"code": -32603, "message": "invalid model"}
+        }).to_string());
+
+        let attempt2 = written(&mut agent2);
+        assert_eq!(attempt2["method"], "session/set_config_option");
+        assert_eq!(attempt2["params"]["value"], "claude-opus-4-6-thinking");
+        reply(&app2, &proc2, &attempt2, json!({}));
+
+        let retried = written(&mut agent2);
+        assert_eq!(retried["method"], "session/prompt");
+        assert_eq!(proc2.model.lock().unwrap().as_deref(), Some("claude-opus-4-6-thinking"));
+        notify(&app2, &proc2, json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "OK"}}));
+        reply(&app2, &proc2, &retried, json!({"stopReason": "end_turn"}));
+        assert!(!proc2.turn.lock().unwrap().running);
+    }
+
+    #[test]
+    fn antigravity_network_issue_warning_and_split_401_retract_and_mark_error_rotate() {
+        // Generic `There was a network issue connecting to the server, please try again.` warning
+        // retries transparently via `TRANSIENT_RECOVERY_PROMPT` without leaking the warning bubble.
+        let app = ctx("acp-agy-generic-net-issue");
+        let (proc, mut agent) = wired(SessionKind::Antigravity);
+        *proc.agent_session_id.lock().unwrap() = Some("s-net".into());
+        proc.ready.store(true, Ordering::Relaxed);
+        proc.turn.lock().unwrap().running = true;
+
+        dispatch(&proc, "Explain architecture", &[]).unwrap();
+        let first = written(&mut agent);
+        notify(&app, &proc, json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": "\n⚠ There was a network issue connecting to the server, please try again.\n"}
+        }));
+        assert!(proc.timeline.lock().unwrap().rows.is_empty());
+        reply(&app, &proc, &first, json!({"stopReason": "end_turn"}));
+
+        let retry = written(&mut agent);
+        assert_eq!(retry["method"], "session/prompt");
+        assert_eq!(retry["params"]["prompt"][0]["text"], TRANSIENT_RECOVERY_PROMPT);
+        notify(&app, &proc, json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Architecture summary."}}));
+        reply(&app, &proc, &retry, json!({"stopReason": "end_turn"}));
+        let rows = proc.timeline.lock().unwrap().rows.clone();
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(&rows[0], ChatRow::Assistant { text, .. } if text == "Architecture summary."));
+        assert!(!proc.acp.lock().unwrap().needs_error_rotate);
+
+        // Split `⚠ ` + `UNAUTHENTICATED (code 401)...` chunks retract the partial bubble immediately.
+        let app2 = ctx("acp-agy-split-401");
+        let (proc2, mut agent2) = wired(SessionKind::Antigravity);
+        *proc2.agent_session_id.lock().unwrap() = Some("s-401".into());
+        proc2.ready.store(true, Ordering::Relaxed);
+        proc2.turn.lock().unwrap().running = true;
+
+        dispatch(&proc2, "Check auth", &[]).unwrap();
+        let _p = written(&mut agent2);
+        notify(&app2, &proc2, json!({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "\n⚠ "}}));
+        assert_eq!(proc2.timeline.lock().unwrap().rows.len(), 1);
+        notify(&app2, &proc2, json!({
+            "sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": "UNAUTHENTICATED (code 401): Request had invalid authentication credentials.\n"}
+        }));
+        assert!(proc2.timeline.lock().unwrap().rows.is_empty(), "partial split 401 bubble must retract");
+        assert!(proc2.acp.lock().unwrap().turn_auth_error.is_some());
+    }
+
+    #[test]
+    fn antigravity_steps_db_outcomes_interaction_questions_and_watchdog_behave_safely() {
+        let dir = std::env::temp_dir().join(format!("vlx-acp-db-outcomes-{}", uuid::Uuid::new_v4()));
+        let conv_dir = dir.join("conversations");
+        std::fs::create_dir_all(&conv_dir).unwrap();
+        let conv_id = "11111111-2222-3333-4444-555555555555";
+        let db_path = conv_dir.join(format!("{conv_id}.db"));
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE steps (
+                    idx INTEGER PRIMARY KEY,
+                    step_type INTEGER NOT NULL,
+                    step_payload BLOB NOT NULL
+                );",
+            )
+            .unwrap();
+        }
+
+        let app = ctx("acp-agy-db-outcomes");
+        let sid_owned = format!("s-db-{}", uuid::Uuid::new_v4());
+        let sid = sid_owned.as_str();
+        {
+            let conn = app.db().conn.lock().unwrap();
+            crate::db::system_collections::ensure(&conn).unwrap();
+            crate::db::repo::create_session_identified(
+                &conn,
+                sid,
+                crate::db::system_collections::CHAT,
+                None,
+                "agy-db",
+                SessionKind::Antigravity,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(conv_id),
+                Some("bypassPermissions"),
+                None,
+                None,
+                None,
+                Some("chat"),
+            )
+            .unwrap();
+        }
+        let (proc, mut agent) = wired(SessionKind::Antigravity);
+        *proc.mode.lock().unwrap() = "bypassPermissions".into();
+        *proc.agent_session_id.lock().unwrap() = Some(conv_id.into());
+        proc.ready.store(true, Ordering::Relaxed);
+
+        // 1) Hidden DB `UsageLimit` marks `usage_limit_hit`, `needs_error_rotate`, and captures `Reset`.
+        proc.turn.lock().unwrap().running = true;
+        dispatch(&proc, "Generate report", &[]).unwrap();
+        proc.acp.lock().unwrap().outcome_watch = Some(
+        PromptOutcomeWatch::capture_at(Some(db_path.clone())),
+        );
+        let p1 = written(&mut agent);
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            conn.execute(
+                "INSERT INTO steps (idx, step_type, step_payload) VALUES (0, 17, ?1)",
+                [json!({
+                    "errorMessage": {
+                        "error": {
+                            "userErrorMessage": "Model quota reached.",
+                            "details": r#"{"error":{"status":"RESOURCE_EXHAUSTED","details":[{"metadata":{"quotaResetDelay":"3m"}}]}}"#
+                        }
+                    }
+                })
+                .to_string()
+                .as_bytes()],
+            )
+            .unwrap();
+        }
+        handle_line(&app, sid, &proc, &json!({"jsonrpc": "2.0", "id": p1["id"], "result": {"stopReason": "end_turn"}}).to_string());
+        assert!(proc.acp.lock().unwrap().needs_error_rotate);
+        assert!(
+            crate::agent::chat::auto_continue::waiting(sid).is_some_and(|w| w.continue_at > 0),
+            "expected auto_continue wait scheduled after Antigravity quota exhaustion"
+        );
+
+        // 2) Hidden DB `InvalidThinkingSignature` unbinds the broken native conversation and carries
+        // recent thread context into the next fresh turn's prompt.
+        proc.timeline.lock().unwrap().replace_all(vec![
+            super::super::user_row("u1".into(), "Refactor auth module", vec![], None),
+            ChatRow::Assistant {
+                id: "a1".into(),
+                text: "I inspected readiness.rs and engine.rs.".into(),
+                streaming: false,
+                model: None,
+                at: None,
+                duration_ms: None,
+            },
+        ]);
+        proc.turn.lock().unwrap().running = true;
+        dispatch(&proc, "Continue refactor", &[]).unwrap();
+        proc.acp.lock().unwrap().outcome_watch = Some(
+        PromptOutcomeWatch::capture_at(Some(db_path.clone())),
+        );
+        let p2 = written(&mut agent);
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            conn.execute(
+                "INSERT INTO steps (idx, step_type, step_payload) VALUES (1, 17, ?1)",
+                [json!({
+                    "errorMessage": {
+                        "error": {
+                            "shortError": "INVALID_ARGUMENT (code 400): messages.2.content.0: Invalid `signature` in `thinking` block"
+                        }
+                    }
+                })
+                .to_string()
+                .as_bytes()],
+            )
+            .unwrap();
+        }
+        handle_line(&app, sid, &proc, &json!({"jsonrpc": "2.0", "id": p2["id"], "result": {"stopReason": "end_turn"}}).to_string());
+        assert!(proc.agent_session_id.lock().unwrap().is_none(), "broken native session must be unbound");
+        assert!(proc.acp.lock().unwrap().needs_error_rotate);
+        let db_session = crate::db::repo::get_session(&app.db().conn.lock().unwrap(), sid).unwrap().unwrap();
+        assert!(db_session.agent_session_id.is_none(), "DB agent_session_id must be cleared");
+
+        // Next turn on a fresh native session carries bounded thread context automatically.
+        *proc.agent_session_id.lock().unwrap() = Some("22222222-3333-4444-5555-666666666666".into());
+        proc.turn.lock().unwrap().running = true;
+        dispatch(&proc, "Finish tests", &[]).unwrap();
+        let p3 = written(&mut agent);
+        let carried_text = p3["params"]["prompt"][0]["text"].as_str().unwrap();
+        assert!(carried_text.contains("Prior conversation context from this thread"));
+        assert!(carried_text.contains("Refactor auth module"));
+        assert!(carried_text.contains("Current user request:\nFinish tests"));
+
+        // 3) `interaction_*` fixed-choice question stays interactive even in `bypassPermissions`
+        // and maps the chosen option label back to its `optionId`.
+        handle_line(&app, sid, &proc, &json!({
+            "jsonrpc": "2.0",
+            "id": 77,
+            "method": "session/request_permission",
+            "params": {
+                "toolCall": {
+                    "toolCallId": "interaction_0",
+                    "title": "Select target environment",
+                    "rawInput": {"question": "Which environment should we deploy to?"}
+                },
+                "options": [
+                    {"optionId": "opt-staging", "name": "Staging", "kind": "allow_once"},
+                    {"optionId": "opt-prod", "name": "Production", "kind": "allow_once"}
+                ]
+            }
+        }).to_string());
+        approve_pending(&app, sid, &proc);
+        let card_id = {
+            let perms = proc.permissions.lock().unwrap();
+            assert_eq!(perms.len(), 1, "interaction_* question must not be auto-approved in bypass mode");
+            let (id, card) = perms.iter().next().unwrap();
+            assert_eq!(card["tool_name"], "AskUserQuestion");
+            id.clone()
+        };
+        respond(
+            &app,
+            sid,
+            &proc,
+            &card_id,
+            true,
+            Some(&json!({"answers": {"Which environment should we deploy to?": "Production"}})),
+            None,
+            None,
+        )
+        .unwrap();
+        let perm_reply = written(&mut agent);
+        assert_eq!(perm_reply["id"], 77);
+        assert_eq!(perm_reply["result"]["outcome"]["optionId"], "opt-prod");
+        handle_line(&app, sid, &proc, &json!({"jsonrpc": "2.0", "id": p3["id"], "result": {"stopReason": "end_turn"}}).to_string());
+
+        // 4) Prompt inactivity watchdog pauses while a tool is running or while Antigravity's
+        // native conversation DB is still receiving writes, then fires once genuinely silent.
+        let _ = app.chat().claim_antigravity_stall_recovery(sid); // Exhaust restart budget to test direct settle.
+        proc.acp.lock().unwrap().prompt_inactivity_limit_ms = Some(120);
+        proc.turn.lock().unwrap().running = true;
+        dispatch(&proc, "Hang test", &[]).unwrap();
+        proc.acp.lock().unwrap().outcome_watch = Some(
+            PromptOutcomeWatch::capture_at(Some(db_path.clone())),
+        );
+        let _p4 = written(&mut agent);
+        start_prompt_watchdog(&app, sid, &proc);
+        handle_line(&app, sid, &proc, &json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "22222222-3333-4444-5555-666666666666",
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "slow-tool-1",
+                    "title": "Running cargo build",
+                    "kind": "execute",
+                    "status": "in_progress"
+                }
+            }
+        }).to_string());
+        std::thread::sleep(Duration::from_millis(160));
+        assert!(proc.turn.lock().unwrap().running, "watchdog must stay paused while a tool is running");
+
+        handle_line(&app, sid, &proc, &json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "22222222-3333-4444-5555-666666666666",
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "slow-tool-1",
+                    "status": "completed"
+                }
+            }
+        }).to_string());
+
+        // Growing `step_payload` in the native DB keeps the watchdog alive even with silent stdout.
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            conn.execute(
+                "INSERT INTO steps (idx, step_type, step_payload) VALUES (2, 15, ?1)",
+                [vec![b'a'; 64]],
+            )
+            .unwrap();
+        }
+        for round in 1..=3 {
+            std::thread::sleep(Duration::from_millis(55));
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            conn.execute(
+                "UPDATE steps SET step_payload = ?1 WHERE idx = 2",
+                [vec![b'a'; 64 * (round + 1)]],
+            )
+            .unwrap();
+        }
+        assert!(
+            proc.turn.lock().unwrap().running,
+            "watchdog must stay alive while native conversation DB keeps growing"
+        );
+
+        let stall_deadline = Instant::now() + Duration::from_secs(2);
+        while proc.turn.lock().unwrap().running && Instant::now() < stall_deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!proc.turn.lock().unwrap().running, "watchdog must end wedged silent prompt");
+        assert!(proc.acp.lock().unwrap().needs_error_rotate);
+        assert!(proc.timeline.lock().unwrap().rows.iter().any(|r| {
+            matches!(r, ChatRow::Error { message, .. } if message.contains("stopped sending updates for too long"))
+        }));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

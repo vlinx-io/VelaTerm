@@ -83,6 +83,9 @@ mod ssh_remote;
 // GUI-only pure-Rust russh transport, currently used on Windows.
 #[cfg(feature = "gui")]
 mod ssh_russh;
+// GUI-only user port forwarding for SSH remote windows: detection, registry and request handling.
+#[cfg(feature = "gui")]
+mod ssh_ports;
 mod web;
 mod wsl_remote;
 // GUI-only macOS native notifications with session-aware click navigation.
@@ -138,16 +141,27 @@ pub(crate) struct QuitState {
     pub close_window: std::sync::atomic::AtomicBool,
 }
 
-/// Light/dark preference for native window chrome, mirroring the frontend's theme mode. Windows only.
+/// Light/dark preference for native window chrome, mirroring the frontend's theme mode (Windows and macOS).
 ///
-/// The app keeps the system title bar, and DWM paints that bar light until told otherwise, so a dark UI
-/// carries a white strip above it. `None` means "follow the OS", which is what the frontend's `system` mode
-/// wants — pinning a value there would freeze the title bar the next time the OS scheme changed. Windows
-/// created after the user picks a mode read this so they open already correct instead of flashing the wrong
-/// chrome. `set_native_theme` never writes this on other platforms, so it stays `None` there.
+/// The app keeps the system title bar: Windows DWM paints it light until told otherwise, and macOS composites
+/// a light-appearance title bar material over a dark frame color when the OS is in light mode. `None` means
+/// "follow the OS", which is what the frontend's `system` mode wants — pinning a value there would freeze the
+/// title bar the next time the OS scheme changed. Windows created after the user picks a mode (main window
+/// reopened from Dock, remote/SSH windows) read this so they open already correct instead of flashing the
+/// wrong chrome. `set_native_theme` never writes this on Linux, so it stays `None` there.
 #[cfg(feature = "gui")]
 #[derive(Default)]
 pub(crate) struct NativeTheme(pub std::sync::Mutex<Option<tauri::Theme>>);
+
+/// Map the frontend's persisted theme mode to a pinned native window theme, or `None` to follow the OS.
+#[cfg(feature = "gui")]
+pub(crate) fn theme_from_mode(mode: &str) -> Option<tauri::Theme> {
+    match mode {
+        "dark" => Some(tauri::Theme::Dark),
+        "light" => Some(tauri::Theme::Light),
+        _ => None,
+    }
+}
 
 /// Read the pinned native chrome preference, or `None` while the frontend is still following the OS.
 #[cfg(feature = "gui")]
@@ -168,7 +182,39 @@ const FRAME_COLOR_DARK: (u8, u8, u8, u8) = (0x23, 0x26, 0x2b, 0xff);
 #[cfg(all(feature = "gui", target_os = "macos"))]
 const FRAME_COLOR_LIGHT: (u8, u8, u8, u8) = (0xff, 0xff, 0xff, 0xff);
 
-/// Give the window the frame color of the resolved scheme.
+/// Resolve whether the macOS window frame strip should be painted dark.
+///
+/// Explicit modes pin the color directly. Under `system`, when unpinning from an explicit appearance
+/// (`prev_theme.is_some()`), the frontend's `frontend_dark` was measured while the window still carried the
+/// old pinned `NSAppearance`, so fall back directly to the OS preference (`os_dark`) instead of painting the
+/// stale scheme. Once already following the OS (`prev_theme.is_none()`), prefer `frontend_dark` because it
+/// came from the page's live `prefers-color-scheme` resolution.
+#[cfg(all(feature = "gui", target_os = "macos"))]
+pub(crate) fn resolve_macos_frame_dark(
+    theme: Option<tauri::Theme>,
+    prev_theme: Option<tauri::Theme>,
+    frontend_dark: Option<bool>,
+    os_dark: impl FnOnce() -> bool,
+) -> bool {
+    match theme {
+        Some(tauri::Theme::Dark) => true,
+        Some(tauri::Theme::Light) => false,
+        None => {
+            if prev_theme.is_some() {
+                os_dark()
+            } else {
+                frontend_dark.unwrap_or_else(os_dark)
+            }
+        }
+        _ => os_dark(),
+    }
+}
+
+/// Give the window the native appearance and frame color of the resolved scheme.
+///
+/// Setting `win.set_theme(theme)` aligns `NSWindow.appearance` (`DarkAqua` / `Aqua` / `nil` to follow the OS)
+/// so an explicit dark UI on a light macOS desktop does not get a light-appearance frosted title bar overlay
+/// composited on top of its dark frame color.
 ///
 /// macOS 26 insets a window's web content below the title bar and paints that strip with the WKWebView's
 /// under-page background color. wry writes that color once at creation from `windows[].backgroundColor` and
@@ -176,13 +222,15 @@ const FRAME_COLOR_LIGHT: (u8, u8, u8, u8) = (0xff, 0xff, 0xff, 0xff);
 /// keeps a dark strip above a light interface. Rewriting it through AppKit is what actually repaints the
 /// strip; the window background is given the same color so any surface without web content agrees.
 #[cfg(all(feature = "gui", target_os = "macos"))]
-pub(crate) fn apply_window_frame(win: &tauri::WebviewWindow, dark: bool) {
+pub(crate) fn apply_window_frame(win: &tauri::WebviewWindow, theme: Option<tauri::Theme>, dark: bool) {
+    let _ = win.set_theme(theme);
     let (red, green, blue, alpha) = if dark { FRAME_COLOR_DARK } else { FRAME_COLOR_LIGHT };
     let _ = win.set_background_color(Some(tauri::window::Color(red, green, blue, alpha)));
     let Ok(ns_window) = win.ns_window() else {
         return;
     };
-    // Runs on the main thread: both call sites are the setup hook and the `set_native_theme` command.
+    // Runs on the main thread: all call sites are the setup hook, `open_main_window`'s main-thread callback,
+    // and the synchronous `set_native_theme` command.
     unsafe {
         use objc2::msg_send;
         use objc2::runtime::{AnyObject, Bool};
@@ -213,22 +261,16 @@ pub(crate) fn apply_window_frame(win: &tauri::WebviewWindow, dark: bool) {
     }
 }
 
-/// Resolve the frame color for the first painted frame: the persisted mode, or, while the interface
-/// follows the OS, the OS preference. Read before the window is shown so the strip never opens in the wrong
-/// color; the resolution matches the frontend's `resolveTheme`.
+/// Read the persisted theme mode from `app_settings` for the first painted frame, returning `None` when
+/// following the OS. Read before the window is shown so the strip never opens in the wrong appearance or color.
 #[cfg(all(feature = "gui", target_os = "macos"))]
-fn startup_frame_is_dark(db: &Db) -> bool {
-    let mode = db
-        .conn
+fn startup_theme_mode(db: &Db) -> Option<tauri::Theme> {
+    db.conn
         .lock()
         .ok()
         .and_then(|conn| db::repo::get_app_settings(&conn).ok())
-        .and_then(|settings| settings.get(THEME_SETTING_KEY).cloned());
-    match mode.as_deref() {
-        Some("dark") => true,
-        Some("light") => false,
-        _ => os_prefers_dark(),
-    }
+        .and_then(|settings| settings.get(THEME_SETTING_KEY).cloned())
+        .and_then(|mode| theme_from_mode(&mode))
 }
 
 /// Whether macOS is set to dark mode, read from the user's global `AppleInterfaceStyle` preference (also kept
@@ -948,17 +990,24 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                     crate::diagnostic_warn!("startup sweep: removed {swept} stale pasted temp image(s)");
                 }
             }
-            // The main window is created hidden so it can be sized, centered, and given the frame color of
-            // the persisted scheme before its first painted frame. Showing it here also covers the other
-            // platforms, which previously appeared before setup ran.
+            // The main window is created hidden so it can be sized, centered, and given the appearance and
+            // frame color of the persisted scheme before its first painted frame. Showing it here also covers
+            // the other platforms, which previously appeared before setup ran.
             #[cfg(target_os = "macos")]
-            let frame_is_dark = startup_frame_is_dark(&db);
+            let (startup_theme, frame_is_dark) = {
+                let theme = startup_theme_mode(&db);
+                if let Some(state) = app.try_state::<NativeTheme>() {
+                    *state.0.lock().unwrap() = theme;
+                }
+                let dark = resolve_macos_frame_dark(theme, None, None, os_prefers_dark);
+                (theme, dark)
+            };
             app.manage(db);
             screenshot::init(app.handle());
 
             if let Some(win) = app.get_webview_window("main") {
                 #[cfg(target_os = "macos")]
-                apply_window_frame(&win, frame_is_dark);
+                apply_window_frame(&win, startup_theme, frame_is_dark);
                 let _ = win.show();
             }
 
@@ -1149,6 +1198,28 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 if let Some(session) = v.get("session").and_then(|s| s.as_str()) {
                     ssh_remote::kick_tunnel(session);
                 }
+            });
+
+            // Remote windows cannot invoke local commands, so port forwarding requests arrive as events and
+            // every request is answered with a full snapshot. Handling runs on a plain thread because it
+            // performs blocking SSH I/O and may drop the last transport, which must not happen in async code.
+            let ports_app = app.handle().clone();
+            app.listen_any("vlx://ports-request", move |event| {
+                let Ok(req) = serde_json::from_str::<ssh_ports::PortsRequest>(event.payload()) else {
+                    return;
+                };
+                let app = ports_app.clone();
+                std::thread::spawn(move || {
+                    let Some(out) = ssh_ports::handle(req) else { return };
+                    if let Some(lport) = out.open_lport {
+                        use tauri_plugin_opener::OpenerExt;
+                        let _ = app
+                            .opener()
+                            .open_url(format!("http://localhost:{lport}"), None::<&str>);
+                    }
+                    use tauri::Emitter;
+                    let _ = app.emit("ssh://ports-state", &out.snapshot);
+                });
             });
 
             let wsl_app = app.handle().clone();
@@ -1680,11 +1751,15 @@ pub(crate) fn open_main_window(app: &tauri::AppHandle) {
         install_main_window_hooks(&app);
         #[cfg(target_os = "macos")]
         {
-            let dark = startup_frame_is_dark(app.state::<Db>().inner());
+            let pinned = startup_theme_mode(app.state::<Db>().inner());
+            if let Some(state) = app.try_state::<NativeTheme>() {
+                *state.0.lock().unwrap() = pinned;
+            }
+            let dark = resolve_macos_frame_dark(pinned, None, None, os_prefers_dark);
             let handle = app.clone();
             let _ = app.run_on_main_thread(move || {
                 if let Some(win) = handle.get_webview_window("main") {
-                    apply_window_frame(&win, dark);
+                    apply_window_frame(&win, pinned, dark);
                 }
                 show_main_window(&handle);
             });
@@ -2855,5 +2930,33 @@ mod tests {
         };
         let got = serve_data_dir(&args, "io.vlinx.vlxterm").unwrap();
         assert!(got.ends_with("io.vlinx.vlxterm"), "got {got:?}");
+    }
+
+    #[cfg(feature = "gui")]
+    #[test]
+    fn theme_from_mode_maps_explicit_and_system() {
+        assert_eq!(theme_from_mode("dark"), Some(tauri::Theme::Dark));
+        assert_eq!(theme_from_mode("light"), Some(tauri::Theme::Light));
+        assert_eq!(theme_from_mode("system"), None);
+        assert_eq!(theme_from_mode(""), None);
+    }
+
+    #[cfg(all(feature = "gui", target_os = "macos"))]
+    #[test]
+    fn resolve_macos_frame_dark_ignores_stale_frontend_value_when_unpinning() {
+        // Explicit modes pin directly regardless of frontend hint or OS state.
+        assert!(resolve_macos_frame_dark(Some(tauri::Theme::Dark), None, Some(false), || false));
+        assert!(!resolve_macos_frame_dark(Some(tauri::Theme::Light), None, Some(true), || true));
+
+        // Unpinning from Dark back to system on a light OS: frontend matchMedia still saw DarkAqua before
+        // set_theme(None) ran, so OS preference must win.
+        assert!(!resolve_macos_frame_dark(None, Some(tauri::Theme::Dark), Some(true), || false));
+        assert!(resolve_macos_frame_dark(None, Some(tauri::Theme::Light), Some(false), || true));
+
+        // Already following the OS: prefer the live frontend resolution, falling back to OS when absent.
+        assert!(resolve_macos_frame_dark(None, None, Some(true), || false));
+        assert!(!resolve_macos_frame_dark(None, None, Some(false), || true));
+        assert!(resolve_macos_frame_dark(None, None, None, || true));
+        assert!(!resolve_macos_frame_dark(None, None, None, || false));
     }
 }

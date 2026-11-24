@@ -1012,7 +1012,10 @@ pub(crate) fn agent_environment_in_shell(app: &AppCtx, session_id: &str, cmd: &m
 
 struct ChatProcess {
     callbacks: RwLock<()>,
-    expected_native: Option<String>,
+    /// The native conversation this process is expected to reopen. Cleared when the engine deliberately
+    /// abandons the recorded conversation (it turned out to be gone) and opens a fresh one, so the
+    /// identity guard accepts the replacement instead of vetoing it.
+    expected_native: Mutex<Option<String>>,
     identity_checked: AtomicBool,
     owner: Mutex<Option<super::ownership::Owner>>,
     kind: SessionKind,
@@ -1289,9 +1292,8 @@ fn initial_mode(kind: SessionKind, stored: Option<&str>) -> String {
     .to_string()
 }
 
-/// Idle Antigravity ACP processes older than 50 minutes proactively rotate before starting a new
-/// user turn so they load freshly refreshed credentials instead of hitting Google's 60m token TTL.
-const ANTIGRAVITY_IDLE_ROTATE_MS: u64 = 50 * 60 * 1000;
+/// Maximum consecutive automatic process restarts allowed for HTTP 401 recovery within one turn.
+const MAX_ANTIGRAVITY_401_RESTARTS: usize = 2;
 
 /// All chat-engine sessions, keyed by VelaTerm session id.
 #[derive(Default)]
@@ -1303,9 +1305,11 @@ pub struct ChatManager {
     closing: AtomicBool,
     /// The shell command running for each session, at most one per conversation.
     shell_runs: Mutex<HashMap<String, Arc<super::shell::ShellRun>>>,
-    /// Sessions that have already used their one automatic Antigravity 401 restart for the active turn.
-    antigravity_401_attempts: Mutex<HashSet<String>>,
-    /// Cancellation flags for in-flight Antigravity 401 process-restart recoveries.
+    /// Consecutive automatic Antigravity 401 restarts spent on the active turn.
+    antigravity_401_attempts: Mutex<HashMap<String, usize>>,
+    /// Sessions that have already used their one automatic Antigravity stall restart on the active turn.
+    antigravity_stall_attempts: Mutex<HashSet<String>>,
+    /// Cancellation flags for in-flight Antigravity 401 or stall process-restart recoveries.
     antigravity_401_cancels: Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 
@@ -1652,6 +1656,10 @@ impl ChatManager {
             crate::db::repo::get_fork_pending(&conn, session_id)?
         };
         // ZCode's desktop release runs its bundled agent through the app's own binary; see `agent::zcode`.
+        // Refresh the cached built-in provider config first so newly published models appear immediately.
+        if kind == SessionKind::Zcode {
+            crate::agent::zcode::refresh_builtin_config(bin);
+        }
         let mut cmd = if kind == SessionKind::Zcode { crate::agent::zcode::command(bin) } else { crate::host::command(bin) };
         // OpenCode is reached over HTTP: the port it listens on and the password that guards it.
         let mut opencode_launch: Option<(u16, String)> = None;
@@ -1730,6 +1738,7 @@ impl ChatManager {
             cmd.env("CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING", "1");
         }
         if kind == SessionKind::Antigravity {
+            crate::agent::antigravity::prepare_command_env(&mut cmd);
             // Install Antigravity's Stop/Pre/Post hook script on disk so ACP turns can park/wake
             // reliably across background tasks and schedule timers without manual TUI setup.
             let exe_path = std::env::current_exe().unwrap_or_default();
@@ -1788,7 +1797,7 @@ impl ChatManager {
             && permission_restart::claude_bypass_capable(Some(&mode), extra_args);
         let proc = Arc::new(ChatProcess {
             callbacks: RwLock::new(()),
-            expected_native: resume.filter(|_| !fork && kind != SessionKind::Deepseek).map(str::to_owned),
+            expected_native: Mutex::new(resume.filter(|_| !fork && kind != SessionKind::Deepseek).map(str::to_owned)),
             identity_checked: AtomicBool::new(false),
             owner: Mutex::new(Some(owner)),
             kind,
@@ -2078,7 +2087,6 @@ impl ChatManager {
     pub(crate) fn antigravity_live_signed_in(&self, bin: &str, settings_args: &[String]) -> Option<bool> {
         let target_scope = crate::agent::antigravity::auth_scope_key(bin, settings_args);
         let current_epoch = crate::agent::antigravity::auth_epoch();
-        let now = now_ms();
         let procs: Vec<Arc<ChatProcess>> = self
             .sessions
             .lock()
@@ -2101,7 +2109,6 @@ impl ChatManager {
             }
             if auth_status.is_none()
                 && proc.ready.load(Ordering::Relaxed)
-                && now.saturating_sub(proc.started_at) < ANTIGRAVITY_IDLE_ROTATE_MS
                 && proc.acp.lock().unwrap().auth_epoch_at_launch == current_epoch
             {
                 saw_healthy = true;
@@ -2111,8 +2118,29 @@ impl ChatManager {
     }
 
     fn claim_antigravity_401_recovery(&self, session_id: &str) -> Option<Arc<AtomicBool>> {
+        {
+            let mut attempts = self.antigravity_401_attempts.lock().unwrap();
+            let count = attempts.entry(session_id.to_string()).or_insert(0);
+            if *count >= MAX_ANTIGRAVITY_401_RESTARTS {
+                return None;
+            }
+            *count += 1;
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        if let Some(prev) = self
+            .antigravity_401_cancels
+            .lock()
+            .unwrap()
+            .insert(session_id.to_string(), cancel.clone())
+        {
+            prev.store(true, Ordering::Relaxed);
+        }
+        Some(cancel)
+    }
+
+    fn claim_antigravity_stall_recovery(&self, session_id: &str) -> Option<Arc<AtomicBool>> {
         if !self
-            .antigravity_401_attempts
+            .antigravity_stall_attempts
             .lock()
             .unwrap()
             .insert(session_id.to_string())
@@ -2133,6 +2161,7 @@ impl ChatManager {
 
     fn clear_antigravity_401_recovery(&self, session_id: &str) {
         self.antigravity_401_attempts.lock().unwrap().remove(session_id);
+        self.antigravity_stall_attempts.lock().unwrap().remove(session_id);
         self.antigravity_401_cancels.lock().unwrap().remove(session_id);
     }
 
@@ -2140,6 +2169,7 @@ impl ChatManager {
         if let Some(cancel) = self.antigravity_401_cancels.lock().unwrap().remove(session_id) {
             cancel.store(true, Ordering::Relaxed);
         }
+        self.antigravity_stall_attempts.lock().unwrap().remove(session_id);
         if let Some(proc) = self.sessions.lock().unwrap().get(session_id).cloned() {
             if proc.kind == SessionKind::Antigravity {
                 proc.acp.lock().unwrap().pending_401_continuation = None;
@@ -2147,7 +2177,7 @@ impl ChatManager {
         }
     }
 
-    fn should_rotate_idle_antigravity(&self, proc: &Arc<ChatProcess>, now: u64) -> bool {
+    fn should_rotate_idle_antigravity(&self, proc: &Arc<ChatProcess>) -> bool {
         if proc.kind != SessionKind::Antigravity
             || !proc.alive.load(Ordering::Relaxed)
             || proc.released.load(Ordering::Relaxed)
@@ -2158,8 +2188,15 @@ impl ChatManager {
         {
             return false;
         }
+        let (force_error_rotate, needs_rotate) = {
+            let acp = proc.acp.lock().unwrap();
+            let force = acp.needs_error_rotate;
+            let rotate = force
+                || acp.auth_epoch_at_launch != crate::agent::antigravity::auth_epoch();
+            (force, rotate)
+        };
         if !proc.permissions.lock().unwrap().is_empty()
-            || proc.agent_session_id.lock().unwrap().is_none()
+            || (!force_error_rotate && proc.agent_session_id.lock().unwrap().is_none())
         {
             return false;
         }
@@ -2173,11 +2210,6 @@ impl ChatManager {
                 return false;
             }
         }
-        let needs_rotate = {
-            let acp = proc.acp.lock().unwrap();
-            acp.auth_epoch_at_launch != crate::agent::antigravity::auth_epoch()
-                || now.saturating_sub(proc.started_at) >= ANTIGRAVITY_IDLE_ROTATE_MS
-        };
         needs_rotate && !acp::has_background_activity(proc)
     }
 
@@ -2191,7 +2223,7 @@ impl ChatManager {
             let _action = proc.action.lock().unwrap();
             let _callbacks = proc.callbacks.read().unwrap();
             if !self.owns_process(session_id, proc)
-                || !self.should_rotate_idle_antigravity(proc, now_ms())
+                || !self.should_rotate_idle_antigravity(proc)
             {
                 return Ok(proc.clone());
             }
@@ -2272,7 +2304,7 @@ impl ChatManager {
         let mut proc = self.get(session_id).map_err(SubmissionFailure::Rejected)?;
         if proc.kind == SessionKind::Antigravity && behavior != "steer" {
             self.clear_antigravity_401_recovery(session_id);
-            if self.should_rotate_idle_antigravity(&proc, now_ms()) {
+            if self.should_rotate_idle_antigravity(&proc) {
                 proc = self
                     .try_rotate_idle_antigravity(app, session_id, &proc)
                     .map_err(SubmissionFailure::Rejected)?;
@@ -2335,6 +2367,53 @@ impl ChatManager {
             }
         }
         if !proc.ready.load(Ordering::Relaxed) {
+            if proc.kind == SessionKind::Antigravity && !turn.running {
+                let sent_at = now_ms();
+                turn.running = true;
+                turn.interrupted = false;
+                turn.started_at = Some(sent_at);
+                drop(turn);
+                proc.extras.lock().unwrap().generation = generation::GenerationTiming::default();
+                let commands = proc.commands.lock().unwrap().clone();
+                let normalized = skills::native_text(text, &commands);
+                let text = normalized.as_ref();
+                let row_id = message_id
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("u-{}", proc.next_request.fetch_add(1, Ordering::Relaxed)));
+                if let Some(id) = message_id {
+                    if let Err(err) = super::submissions::begin_dispatch(&app.db().conn.lock().unwrap(), session_id, id) {
+                        let mut turn = proc.turn.lock().unwrap();
+                        turn.running = false;
+                        turn.started_at = None;
+                        return Err(err);
+                    }
+                }
+                *attempted = true;
+                if prune_finished_tasks(&mut proc.extras.lock().unwrap()) {
+                    emit_extras(app, session_id, proc);
+                }
+                proc.acp.lock().unwrap().startup_prompt = Some(acp::StartupPrompt {
+                    id: row_id.clone(),
+                    text: text.to_string(),
+                    images: images.clone(),
+                    sent_at,
+                });
+                proc.timeline
+                    .lock()
+                    .unwrap()
+                    .upsert(user_row(row_id, text, images, Some(sent_at as i64)));
+                flush_timeline_now(app, session_id, proc);
+                emit(app, session_id, json!({"type":"turnStarted","startedAt":sent_at}));
+                emit_state(app, session_id, AgentState::Working);
+                let receipt = message_id
+                    .map(|id| super::submissions::finish_dispatch(&app.db().conn.lock().unwrap(), session_id, id, "sent"))
+                    .transpose();
+                if !super::shell::is_tagged(text) {
+                    crate::agent::server::try_auto_rename(app, session_id, text);
+                }
+                receipt?;
+                return Ok("sent");
+            }
             drop(turn);
             let item = QueuedMessage {
                 id: message_id.map(str::to_owned).unwrap_or_else(|| format!("q-{}", proc.next_request.fetch_add(1, Ordering::Relaxed))),
@@ -2343,7 +2422,19 @@ impl ChatManager {
             };
             let mut turn=proc.turn.lock().unwrap();
             *attempted = true;
-            turn.waiting.push(item);
+            if behavior == "interrupt" && proc.kind == SessionKind::Antigravity {
+                turn.waiting.insert(0, item);
+                if proc.acp.lock().unwrap().startup_prompt.take().is_some() {
+                    turn.running = false;
+                    turn.started_at = None;
+                    drop(turn);
+                    emit(app, session_id, json!({"type":"turnInterrupted"}));
+                    emit_queue(app, session_id, &proc);
+                    return Ok("queued");
+                }
+            } else {
+                turn.waiting.push(item);
+            }
             drop(turn);
             emit_queue(app, session_id, &proc);
             start_waiting_message(app,session_id,proc);
@@ -6563,6 +6654,9 @@ fn report_auto_continue(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>,
                 }
             });
         }
+        SessionKind::Antigravity => {
+            auto_continue::turn_ended(app, session_id, TurnOutcome::LimitReached(acp::take_usage_limit_reset(proc)))
+        }
         // OpenCode Go v2 errors carry no reset time; the pane then says the task will not continue on its own.
         kind if kind.uses_opencode() => {
             auto_continue::turn_ended(app, session_id, TurnOutcome::LimitReached(opencode::take_usage_limit_reset(proc)))
@@ -6666,7 +6760,7 @@ fn terminate_owned(child: &mut std::process::Child) {
 
 fn verify_native_identity(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &str) -> bool {
     if proc.identity_checked.load(Ordering::Relaxed) { return true; }
-    if proc.expected_native.as_ref().is_some_and(|expected|expected!=id) {
+    if proc.expected_native.lock().unwrap().as_ref().is_some_and(|expected|expected!=id) {
         emit(app,session_id,json!({"type":"error","message":"The agent opened a different native conversation. Recovery was stopped to preserve the original history."}));
         fail_codex_start(app,session_id,proc);
         return false;
@@ -6829,6 +6923,7 @@ fn dispatch(
         acp::dispatch(proc, text, images)?;
         if proc.kind == SessionKind::Antigravity {
             antigravity_tasks::ensure_poller(app, session_id, proc);
+            acp::start_prompt_watchdog(app, session_id, proc);
         }
     } else if proc.kind == SessionKind::Codex {
         let thread_id = proc
@@ -7527,7 +7622,7 @@ mod tests {
     pub(super) fn inert_process(kind: SessionKind) -> Arc<ChatProcess> {
         Arc::new(ChatProcess {
             callbacks: RwLock::new(()),
-            expected_native: None,
+            expected_native: Mutex::new(None),
             identity_checked: AtomicBool::new(false),
             owner: Mutex::new(None),
             kind,
@@ -9140,7 +9235,7 @@ mod tests {
         let stdout = child.stdout.take().unwrap();
         let proc = Arc::new(ChatProcess {
             callbacks: RwLock::new(()),
-            expected_native: None,
+            expected_native: Mutex::new(None),
             identity_checked: AtomicBool::new(false),
             owner: Mutex::new(None),
             kind: SessionKind::Claude,

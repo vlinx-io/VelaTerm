@@ -386,7 +386,9 @@ impl Catalog {
         if let Some(modes) = result.get("modes").filter(|modes| modes.is_object()) {
             self.modes = modes.get("availableModes").and_then(Value::as_array).into_iter().flatten()
                 .filter_map(|mode| choice(mode, "id")).collect();
-            self.mode = modes.get("currentModeId").and_then(Value::as_str).map(str::to_string);
+            if let Some(mode) = non_empty_str(modes.get("currentModeId")) {
+                self.mode = Some(mode);
+            }
         }
         if let Some(models) = result.get("models").filter(|models| models.is_object()) {
             let available = models.get("availableModels").and_then(Value::as_array);
@@ -407,7 +409,7 @@ impl Catalog {
                     .map(str::to_string).collect());
                 if !levels.is_empty() { self.model_efforts.insert(id.to_string(), levels); }
             }
-            self.model = models.get("currentModelId").and_then(Value::as_str).map(str::to_string).or(self.model.take());
+            self.model = non_empty_str(models.get("currentModelId")).or(self.model.take());
         }
         if let Some(options) = result.get("configOptions").and_then(Value::as_array) {
             self.absorb_options(options);
@@ -426,7 +428,8 @@ impl Catalog {
             if option.get("type").and_then(Value::as_str) != Some("select") { continue; }
             let Some(id) = option.get("id").and_then(Value::as_str) else { continue };
             let choices = distinct(flatten_options(option.get("options")));
-            let current = option.get("currentValue").and_then(Value::as_str).map(str::to_string);
+            let has_current_field = option.get("currentValue").is_some_and(|v| v.is_string());
+            let current = non_empty_str(option.get("currentValue"));
             match option.get("category").and_then(Value::as_str) {
                 Some("mode") => {
                     self.mode_option = Some(id.into());
@@ -440,13 +443,18 @@ impl Catalog {
                     saw_model = true;
                     self.model_option = Some(id.into());
                     if !choices.is_empty() { self.models = choices; self.models_from_state = false; }
-                    if current.is_some() { self.model = current; }
+                    if current.is_some() {
+                        self.model = current;
+                    } else if has_current_field {
+                        // Explicit empty `currentValue: ""` means no model is selected yet.
+                        self.model = None;
+                    }
                 }
                 Some("thought_level") => {
                     saw_effort = true;
                     self.effort_option = Some(id.into());
                     self.efforts = choices;
-                    self.effort = current;
+                    if current.is_some() { self.effort = current; }
                 }
                 _ => {}
             }
@@ -533,6 +541,182 @@ pub fn commands(update: &Value) -> Vec<Value> {
 
 // ─────────────────────────── Permissions ───────────────────────────
 
+fn non_empty_str(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// Whether a `session/request_permission` is an Antigravity `interaction_*` fixed-choice question
+/// rather than a tool execution approval (so even `bypassPermissions` must ask the user).
+pub fn is_antigravity_interaction_question(kind: SessionKind, params: &Value) -> bool {
+    kind == SessionKind::Antigravity
+        && antigravity_interaction_question_card("", params).is_some()
+}
+
+fn antigravity_interaction_question_card(request_id: &str, params: &Value) -> Option<Value> {
+    let call = params.get("toolCall")?;
+    let call_id = call.get("toolCallId").and_then(Value::as_str)?.trim();
+    if !call_id.starts_with("interaction_") {
+        return None;
+    }
+    let raw_options = params.get("options").and_then(Value::as_array)?;
+    if raw_options.is_empty() {
+        return None;
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut options = Vec::with_capacity(raw_options.len());
+    let mut option_values = Vec::with_capacity(raw_options.len());
+    for entry in raw_options {
+        let opt_id = entry.get("optionId").and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())?;
+        if !seen.insert(opt_id.to_string()) {
+            return None;
+        }
+        let label = entry
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(opt_id);
+        options.push(json!({"label": label}));
+        option_values.push(json!(opt_id));
+    }
+    let question_text = call
+        .pointer("/rawInput/question")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            call.get("title")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        })
+        .unwrap_or("Choose an option.");
+    Some(json!({
+        "id": request_id,
+        "tool_name": "AskUserQuestion",
+        "display_name": label(SessionKind::Antigravity),
+        "description": question_text,
+        "input": {
+            "_acpAskQuestion": true,
+            "_acpInteractionQuestion": true,
+            "questions": [{
+                "_key": call_id,
+                "header": "Question",
+                "question": question_text,
+                "multiSelect": false,
+                "allowOther": false,
+                "allowEmpty": false,
+                "options": options,
+                "_optionValues": option_values,
+            }],
+        },
+    }))
+}
+
+/// Resolve the selected `optionId` for an Antigravity `interaction_*` question card.
+pub fn interaction_question_option(
+    request_card: &Value,
+    params: &Value,
+    allow: bool,
+    updated_input: Option<&Value>,
+) -> Option<String> {
+    if !allow {
+        return None;
+    }
+    let question = request_card.pointer("/input/questions/0")?;
+    let key = question.get("_key").and_then(Value::as_str).unwrap_or("");
+    let question_text = question.get("question").and_then(Value::as_str).unwrap_or("");
+    let opt_values: Vec<&str> = question
+        .get("_optionValues")
+        .and_then(Value::as_array)
+        .map(|arr| arr.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let opt_labels: Vec<&str> = question
+        .get("options")
+        .and_then(Value::as_array)
+        .map(|arr| arr.iter().filter_map(|o| o.get("label").and_then(Value::as_str)).collect())
+        .unwrap_or_default();
+
+    if let Some(picked) = updated_input
+        .and_then(|u| u.get("_selectedIndices"))
+        .and_then(Value::as_object)
+        .and_then(|m| m.get("0").or_else(|| m.get(key)))
+        .and_then(Value::as_array)
+        .and_then(|arr| arr.first())
+        .and_then(Value::as_u64)
+    {
+        if let Some(&opt_id) = opt_values.get(picked as usize) {
+            return Some(opt_id.to_string());
+        }
+    }
+
+    let raw_ans = updated_input
+        .and_then(|u| {
+            u.get("_answerList")
+                .and_then(Value::as_array)
+                .and_then(|arr| arr.first())
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    u.get("answers")
+                        .and_then(Value::as_object)
+                        .and_then(|a| {
+                            a.get(question_text)
+                                .or_else(|| a.get(key))
+                                .or_else(|| (a.len() == 1).then(|| a.values().next()).flatten())
+                        })
+                        .and_then(Value::as_str)
+                })
+        })
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?;
+
+    if opt_values.contains(&raw_ans) {
+        return Some(raw_ans.to_string());
+    }
+    let matching: Vec<usize> = opt_labels
+        .iter()
+        .enumerate()
+        .filter_map(|(i, label)| (*label == raw_ans).then_some(i))
+        .collect();
+    if matching.len() == 1 {
+        return opt_values.get(matching[0]).map(|s| (*s).to_string());
+    }
+    let _ = params;
+    None
+}
+
+fn antigravity_security_warning(options: Option<&Value>, option_id: &str) -> Option<String> {
+    let entry = options
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|opt| opt.get("optionId").and_then(Value::as_str) == Some(option_id))?;
+    let warn = entry.pointer("/_meta/agy.security.warning")?;
+    let text = warn
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            warn.get("title")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+        })?;
+    if text.len() > 512 {
+        let mut cut = 509;
+        while !text.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        Some(format!("{}...", &text[..cut]))
+    } else {
+        Some(text.to_string())
+    }
+}
+
 /// A `session/request_permission` as the view's permission card.
 ///
 /// The tool call it asks about is drawn with the same mapping as the timeline, so the card reads like the
@@ -541,6 +725,11 @@ pub fn commands(update: &Value) -> Vec<Value> {
 /// A request may name only the call, so what the mapper already knows about that call is the base the
 /// request's own fields are laid over.
 pub fn permission_payload(kind: SessionKind, request_id: &str, params: &Value, mapper: Option<&Mapper>) -> Value {
+    if kind == SessionKind::Antigravity {
+        if let Some(card) = antigravity_interaction_question_card(request_id, params) {
+            return card;
+        }
+    }
     let call = params.get("toolCall").cloned().unwrap_or(Value::Null);
     let known = call.get("toolCallId").and_then(Value::as_str)
         .and_then(|id| mapper.and_then(|mapper| mapper.tools.get(id)).cloned());
@@ -559,11 +748,24 @@ pub fn permission_payload(kind: SessionKind, request_id: &str, params: &Value, m
         payload["description"] = json!(title);
     }
     if let Some(option) = option_of(params.get("options"), &["allow_always"]) {
-        payload["permission_suggestions"] = json!([{
+        let warning = (kind == SessionKind::Antigravity)
+            .then(|| antigravity_security_warning(params.get("options"), &option))
+            .flatten();
+        let mut suggestion = json!({
             "type": "acpAllowAlways",
             "optionId": option,
             "subject": tool.title.clone().unwrap_or_else(|| name.clone()),
-        }]);
+        });
+        if let Some(ref warn_text) = warning {
+            suggestion["warning"] = json!(warn_text);
+            let existing_desc = payload.get("description").and_then(Value::as_str).unwrap_or("");
+            payload["description"] = if existing_desc.is_empty() {
+                json!(format!("Warning: {warn_text}"))
+            } else {
+                json!(format!("{existing_desc}\nWarning: {warn_text}"))
+            };
+        }
+        payload["permission_suggestions"] = json!([suggestion]);
     }
     payload
 }
@@ -1354,6 +1556,11 @@ impl Mapper {
         }
         tool.raw_input = Some(normalized);
         Some(tool_row(&id, tool))
+    }
+
+    /// Whether any announced tool call in the active turn is still in `running` state.
+    pub fn has_running_tool(&self) -> bool {
+        self.tools.values().any(|tool| tool.status() == "running")
     }
 
     /// Tool calls the agent left running when its turn ended, marked so they stop spinning.
@@ -2228,5 +2435,87 @@ mod tests {
         append_journal(&path, &["four".into()]).unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "three\nfour\n");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn empty_current_model_is_ignored_and_interaction_questions_or_warnings_map_cleanly() {
+        let mut catalog = Catalog::default();
+        catalog.absorb_session(&json!({
+            "models": {
+                "availableModels": [{"modelId": "gemini-4-carbon", "name": "Gemini 4 Carbon"}],
+                "currentModelId": "   "
+            },
+            "configOptions": [{
+                "type": "select",
+                "id": "model",
+                "category": "model",
+                "currentValue": "",
+                "options": [
+                    {"value": "gemini-4-carbon", "name": "Gemini 4 Carbon"},
+                    {"value": "gemini-4-argon", "name": "Gemini 4 Argon"}
+                ]
+            }]
+        }));
+        assert!(catalog.model.is_none(), "empty currentValue must not populate catalog.model");
+        assert!(catalog.model_switchable());
+
+        // Antigravity interaction_* permission requests become fixed-choice AskUserQuestion cards.
+        let interaction = json!({
+            "toolCall": {
+                "toolCallId": "interaction_abc",
+                "title": "Select deployment target"
+            },
+            "options": [
+                {"optionId": "opt_staging", "name": "Staging", "kind": "allow_once"},
+                {"optionId": "opt_prod", "name": "Production", "kind": "allow_once"}
+            ]
+        });
+        assert!(is_antigravity_interaction_question(SessionKind::Antigravity, &interaction));
+        assert!(!is_antigravity_interaction_question(SessionKind::Grok, &interaction));
+        let q_card = permission_payload(SessionKind::Antigravity, "acp-q1", &interaction, None);
+        assert_eq!(q_card["tool_name"], "AskUserQuestion");
+        assert_eq!(q_card["input"]["_acpInteractionQuestion"], true);
+        assert_eq!(
+            interaction_question_option(
+                &q_card,
+                &interaction,
+                true,
+                Some(&json!({"_selectedIndices": {"0": [1]}}))
+            )
+            .as_deref(),
+            Some("opt_prod")
+        );
+
+        // Antigravity allow_always security warning surfaces in permission_suggestions and description.
+        let warn_req = json!({
+            "toolCall": {
+                "toolCallId": "call_1",
+                "kind": "execute",
+                "title": "Run rm -rf build?",
+                "rawInput": {"CommandLine": "rm -rf build"}
+            },
+            "options": [
+                {"optionId": "once", "name": "Allow once", "kind": "allow_once"},
+                {
+                    "optionId": "always",
+                    "name": "Allow always",
+                    "kind": "allow_always",
+                    "_meta": {
+                        "agy.security.warning": {
+                            "message": "Allows every rm command in this session."
+                        }
+                    }
+                }
+            ]
+        });
+        let p_card = permission_payload(SessionKind::Antigravity, "acp-p1", &warn_req, None);
+        assert_eq!(
+            p_card["permission_suggestions"][0]["warning"],
+            "Allows every rm command in this session."
+        );
+        assert!(p_card["description"]
+            .as_str()
+            .unwrap()
+            .contains("Allows every rm command in this session."));
     }
 }

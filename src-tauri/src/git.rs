@@ -12,6 +12,7 @@ use uuid::Uuid;
 pub mod panel;
 pub mod compare;
 pub mod remote;
+pub mod pr;
 
 /// Git clone progress event, delivered directly through Tauri or forwarded globally over WebSocket.
 pub const CLONE_PROGRESS_EVENT: &str = "git://clone-progress";
@@ -1282,17 +1283,9 @@ pub fn remote_origin_url(path: &str) -> Option<String> {
 
 /// Push the current worktree branch to origin with upstream tracking before opening a PR.
 pub fn push_branch(wt_path: &str, branch: &str) -> Result<(), String> {
-    let out = crate::host::command("git")
-        .arg("-C")
-        .arg(wt_path)
-        .args(["push", "-u", "origin", branch])
-        .output()
-        .map_err(|e| format!("Failed to run git push: {e}"))?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        return Err(format!("git push failed: {err}"));
-    }
-    Ok(())
+    remote::run_headless(wt_path, &["push", "-u", "origin", branch], Duration::from_secs(180))
+        .map(|_| ())
+        .map_err(|e| format!("git push failed: {e}"))
 }
 
 /// Whether a directory has uncommitted changes; None when Git could not answer (including a timeout).

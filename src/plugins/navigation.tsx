@@ -29,7 +29,10 @@ export function pluginUrl(pluginId: string | null, subRoute?: string | null): st
     url.searchParams.delete("plugin");
     url.searchParams.delete("pluginRoute");
   }
-  return url.pathname + url.search + url.hash;
+  // Tauri can open at tauri://localhost with an empty pathname. Passing "" to
+  // pushState/replaceState is a no-op that leaves ?plugin=... stuck in the URL,
+  // so always emit a full URL.
+  return url.href;
 }
 
 export function clearPluginSearchParams(onlyPluginId?: string): void {
@@ -39,8 +42,9 @@ export function clearPluginSearchParams(onlyPluginId?: string): void {
   if (onlyPluginId && current !== onlyPluginId) return;
   url.searchParams.delete("plugin");
   url.searchParams.delete("pluginRoute");
-  window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  window.history.replaceState(null, "", url.href);
   window.dispatchEvent(new Event(PLUGIN_NAV_EVENT));
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 export function readPluginRoute(search: string): ActivePluginRoute | null {
@@ -54,17 +58,15 @@ export function readPluginRoute(search: string): ActivePluginRoute | null {
 export function pluginNavigate(href: string): void {
   window.history.pushState(null, "", href);
   window.dispatchEvent(new Event(PLUGIN_NAV_EVENT));
-  window.dispatchEvent(new Event("memory:navigate"));
+  window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
 function subscribe(cb: () => void): () => void {
   window.addEventListener("popstate", cb);
   window.addEventListener(PLUGIN_NAV_EVENT, cb);
-  window.addEventListener("memory:navigate", cb);
   return () => {
     window.removeEventListener("popstate", cb);
     window.removeEventListener(PLUGIN_NAV_EVENT, cb);
-    window.removeEventListener("memory:navigate", cb);
   };
 }
 
@@ -116,6 +118,7 @@ export function usePluginTab(): void {
       }
       const target = state.activeTabId;
       if (state.projects !== before.projects || state.sidebarTreeViews !== before.sidebarTreeViews) {
+        clearSelection();
         if (!previous || !state.openTabs.includes(previous)) previous = target;
         return;
       }
@@ -126,14 +129,12 @@ export function usePluginTab(): void {
 
     window.addEventListener("popstate", sync);
     window.addEventListener(PLUGIN_NAV_EVENT, sync);
-    window.addEventListener("memory:navigate", sync);
     sync();
 
     return () => {
       unsubscribe();
       window.removeEventListener("popstate", sync);
       window.removeEventListener(PLUGIN_NAV_EVENT, sync);
-      window.removeEventListener("memory:navigate", sync);
     };
   }, []);
 }

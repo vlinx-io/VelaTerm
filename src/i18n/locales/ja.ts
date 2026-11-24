@@ -542,6 +542,9 @@ const ja: typeof en = {
   "settings.deepseekInvalid": "有効な http(s) API アドレスと 1 行の API キーを入力してください。",
   "settings.deepseekLocalOnly": "この認証情報は実行ホストに保存されるため、変更できるのはホスト上のみです。",
   "settings.appearance": "外観", // Appearance
+  "settings.darkTheme": "ダークテーマ", // Dark theme
+  "settings.lightTheme": "ライトテーマ", // Light theme
+  "settings.themeClassic": "クラシック", // Classic
   "settings.accent": "アクセント", // Accent
   "settings.accentAuto": "テーマに従う", // Follow theme
   "settings.density": "密度", // Density
@@ -680,6 +683,31 @@ const ja: typeof en = {
   "changes.ignoreWhitespace": "空白を無視",
   "changes.collapseUnchanged": "変更のない行を折りたたむ",
   "changes.tooLarge": "このファイルはプレビューの上限（2 MiB）を超えています。",
+  "changes.review.addLine": (range: string) => `${range} にコメント`,
+  "changes.review.addFile": "コメントを追加",
+  "changes.review.gutterHint": (line: number) => `${line} 行目にレビューコメントを追加`,
+  "changes.review.sideOriginal": "変更前",
+  "changes.review.sideModified": "変更後",
+  "changes.review.fieldLabel": "レビューコメント",
+  "changes.review.placeholder": "エージェントへの修正指示を入力（Enter で保存、Shift+Enter で改行）…",
+  "changes.review.save": "コメントを保存",
+  "changes.review.cancel": "キャンセル",
+  "changes.review.edit": "編集",
+  "changes.review.remove": "削除",
+  "changes.review.count": (count: number, files: number) =>
+    count === 1 ? "1 件のレビューコメント" : `${files} 個のファイルに ${count} 件のレビューコメント`,
+  "changes.review.showList": "コメント一覧",
+  "changes.review.hideList": "一覧を閉じる",
+  "changes.review.clearAll": "すべて消去",
+  "changes.review.targetAgent": "送信先セッション",
+  "changes.review.sendTo": (agent: string) => `${agent} に送信`,
+  "changes.review.pasteTo": (agent: string) => `${agent} に貼り付け`,
+  "changes.review.sending": "送信中…",
+  "changes.review.copy": "レビューをコピー",
+  "changes.review.copied": "コピーしました",
+  "changes.review.noAgent": "コメントを直接送信するには、このリポジトリでエージェントのセッションを開くか開始してください。",
+  "changes.review.promptHeader": "現在の変更に対する以下のレビューコメントに対応してください：",
+  "changes.review.promptComment": "コメント：",
   "git.fileStatus.modified": "変更済み",
   "git.fileStatus.added": "追加済み",
   "git.fileStatus.deleted": "削除済み",
@@ -727,6 +755,39 @@ const ja: typeof en = {
   "git.pr.noToken": "ここでプルリクエストを作成するには、設定で Gitea トークンを追加してください。",
   "git.pr.unreachable": "現在 Gitea サーバーに接続できません。",
   "git.pr.opened": "プルリクエストを作成しました",
+  "git.pr.openMr": "マージリクエストを作成",
+  "git.pr.openedMr": "マージリクエストを作成しました",
+  "git.pr.formTitleProvider": (provider: string) =>
+    provider === "gitlab"
+      ? "GitLab のマージリクエストを作成"
+      : provider === "github"
+        ? "GitHub のプルリクエストを作成"
+        : "Gitea のプルリクエストを作成",
+  "git.pr.formDescriptionMr": (branch: string, base: string) =>
+    `${branch} を origin にプッシュし、${base} へのマージリクエストを作成します。`,
+  "git.pr.draftField": "ドラフトとして作成",
+  "git.pr.noGhCli": "ここでプルリクエストを作成するには、GitHub CLI（gh）をインストールしてください。",
+  "git.pr.noGhAuth": "GitHub に接続するには、ターミナルで gh auth login を実行してください。",
+  "git.pr.noGlabCli": "ここでマージリクエストを作成するには、GitLab CLI（glab）をインストールしてください。",
+  "git.pr.noGlabAuth": "GitLab に接続するには、ターミナルで glab auth login を実行してください。",
+  "git.pr.state.open": "オープン",
+  "git.pr.state.draft": "ドラフト",
+  "git.pr.state.merged": "マージ済み",
+  "git.pr.state.closed": "クローズ",
+  "git.pr.checks.passing": "チェック通過",
+  "git.pr.checks.failing": "チェック失敗",
+  "git.pr.checks.pending": "チェック実行中",
+  "git.pr.refreshStatus": "状態を更新",
+  "git.pr.cleanupWorktree": "ワークツリーを整理…",
+  "git.pr.cleanupTitle": "マージ済みワークツリーの整理",
+  "git.pr.cleanupDescription": (branch: string, path: string) =>
+    `ブランチ ${branch} はマージされました。ワークツリー ${path} を削除しますか？`,
+  "git.pr.cleanupDeleteBranch": (branch: string) => `ローカルブランチ ${branch} も削除`,
+  "git.pr.cleanupArchiveSession": "このセッションをアーカイブ",
+  "git.pr.cleanupArchiveHint": "オフのままにすると、メインのリポジトリディレクトリでセッションを継続します。",
+  "git.pr.cleanupForce": "未コミットの変更を強制削除",
+  "git.pr.cleanupSubmit": "整理を実行",
+  "git.pr.cleanupSubmitting": "整理中…",
   "git.push": "プッシュ",
   "git.pushTitle": (u: string) => `${u} へプッシュ`,
   "git.publish": "ブランチを公開",
@@ -938,6 +999,7 @@ const ja: typeof en = {
   "settings.scCopyTerminal": "ターミナルの選択内容をコピー", // Copy terminal selection
   "settings.scSelectAllTerminal": "ターミナル内をすべて選択", // Select all in terminal
   "settings.scSaveDoc": "ドキュメントを保存", // Save document
+  "settings.scFocusSidebar": "サイドバーにフォーカス", // Focus sidebar
   "settings.scRecording": "キーを押してください…", // Press keys…
   "settings.scHint":
     "ショートカットをクリックし、新しい組み合わせを押します（Cmd/Ctrl が必要）。", // hint
@@ -1245,6 +1307,7 @@ const ja: typeof en = {
   "tree.openProject": "プロジェクトを開く", // Open Project
   "tree.noAttention": "ステータス絞り込みに一致するセッションはありません", // No sessions match the status filter
   "tree.noMatch": "一致なし", // No matches
+  "tree.otherProjects": "その他のプロジェクト", // Other projects
 
   // Dialog fields
   "tree.groupName": "グループ名", // Group name
@@ -2770,6 +2833,25 @@ const ja: typeof en = {
   "plugins.uninstallConfirm": (name: string) => `プラグイン「${name}」をアンインストールしますか？`,
   "plugins.removeData": "このプラグインのローカルデータディレクトリも削除する",
   "plugins.loadFailed": "プラグイン UI の読み込みに失敗しました",
+  "ports.title": "ポート", // Ports
+  "ports.active": "転送中", // Forwarded
+  "ports.activeEmpty": "転送中のポートはありません", // No forwarded ports
+  "ports.detected": "検出済み", // Detected
+  "ports.detectedEmpty": "待ち受け中のポートが見つかりません", // No listening ports found
+  "ports.detectionUnavailable": "このホストではポート検出を利用できません", // Port detection is not available on this host
+  "ports.manual": "ポートを転送", // Forward a port
+  "ports.portPlaceholder": "リモートポート", // Remote port
+  "ports.forward": "転送", // Forward
+  "ports.open": "ブラウザで開く", // Open in browser
+  "ports.stop": "停止", // Stop
+  "ports.localChanged": (port) => `ローカルポート ${port} は使用中のため、別のローカルポートを使用しています`, // Local port {port} was busy, so another local port is used
+  "ports.unavailable": "利用できません — VelaTerm を更新してください", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `無効なポート: ${port}`, // Invalid port: {port}
+  "ports.missingPort": "ポートを入力してください", // Enter a port
+  "ports.unknownAction": (action) => `不明な操作: ${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `1 つの接続で転送できるポートは最大 ${max} 個です`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `ポート ${port} は転送されていません`, // Port {port} is not forwarded
+  "statusbar.ports": (n) => `${n} 個のポートを転送中`, // {n} forwarded ports
 };
 
 export default ja;

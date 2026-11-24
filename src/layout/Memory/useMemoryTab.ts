@@ -21,9 +21,12 @@ export function useMemoryTab() {
         clearSelection();
       } else if (!open && selected) {
         selected = false;
-        const state = useTermStore.getState();
-        const target = previous && state.openTabs.includes(previous) ? previous : state.openTabs[0];
-        if (target) state.setActiveTab(target);
+        const params = new URLSearchParams(window.location.search);
+        if (!params.get("plugin")) {
+          const state = useTermStore.getState();
+          const target = previous && state.openTabs.includes(previous) ? previous : state.openTabs[0];
+          if (target) state.setActiveTab(target);
+        }
       }
     };
     const unsubscribe = useTermStore.subscribe((state, before) => {

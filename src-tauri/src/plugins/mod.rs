@@ -25,18 +25,20 @@ pub const PLUGIN_EVENT: &str = "plugin://event";
 /// Broadcast whenever the installed plugin catalog or runtime status changes.
 pub const PLUGINS_CHANGED: &str = "plugins://changed";
 
-/// Runtime switch for the out-of-process plugin host. Off by default until the plugin UI ships;
-/// set `VLX_ENABLE_PLUGINS=1` to activate plugin loading and management commands.
+/// Runtime switch for the out-of-process plugin host. Enabled by default;
+/// set `VLX_ENABLE_PLUGINS=0` (or `false`, `no`, `off`) to disable plugin loading and management.
 pub fn host_enabled() -> bool {
-    std::env::var("VLX_ENABLE_PLUGINS")
-        .ok()
-        .map(|v| {
-            matches!(
-                v.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
-        .unwrap_or(false)
+    host_enabled_from_value(std::env::var("VLX_ENABLE_PLUGINS").ok().as_deref())
+}
+
+fn host_enabled_from_value(raw: Option<&str>) -> bool {
+    raw.map(|v| {
+        !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        )
+    })
+    .unwrap_or(true)
 }
 
 /// Runtime state of a registered plugin.
@@ -884,5 +886,17 @@ done
         assert!(!dir.join("bin/vecho").exists());
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn host_enabled_defaults_to_true_and_honors_disable_values() {
+        assert!(host_enabled_from_value(None));
+        assert!(host_enabled_from_value(Some("")));
+        assert!(host_enabled_from_value(Some("1")));
+        assert!(host_enabled_from_value(Some("true")));
+        assert!(!host_enabled_from_value(Some("0")));
+        assert!(!host_enabled_from_value(Some("false")));
+        assert!(!host_enabled_from_value(Some("OFF")));
+        assert!(!host_enabled_from_value(Some(" no ")));
     }
 }

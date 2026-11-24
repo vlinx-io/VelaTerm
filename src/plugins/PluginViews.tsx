@@ -111,7 +111,7 @@ export function PluginTab({
   return (
     <>
       <div
-        className={`tab${isActive ? " active" : ""}`}
+        className={`tab${isActive ? " on" : ""}`}
         title={resolvedLabel}
         onClick={activate}
         onContextMenu={(e) => {
@@ -120,18 +120,19 @@ export function PluginTab({
         }}
       >
         <PluginIcon plugin={plugin} size={13} />
-        <span className="t-name">{resolvedLabel}</span>
-        <span
-          className="t-close"
-          role="button"
+        <span className="tnm">{resolvedLabel}</span>
+        <button
+          type="button"
+          className="x"
+          title={t("common.close")}
           aria-label={t("common.close")}
           onClick={(e) => {
             e.stopPropagation();
             close();
           }}
         >
-          <Icons.close size={11} />
-        </span>
+          <Icons.x size={12} />
+        </button>
       </div>
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} items={items} onClose={() => setMenu(null)} />
@@ -170,9 +171,24 @@ export function PluginCenterRoute() {
   }
 
   return (
-    <ErrorBoundary>
-      <CenterPage route={active.route} />
-    </ErrorBoundary>
+    <div className="plugin-center-surface">
+      <ErrorBoundary
+        key={`${active.pluginId}:${runtime.revision}`}
+        fallback={(err, retry) => (
+          <div className="plugin-center-state">
+            <div className="plugin-center-error">
+              <strong>{t("plugins.loadFailed")}</strong>
+              <span>{err.message}</span>
+              <button type="button" className="vlx-btn" onClick={retry}>
+                {t("common.retry")}
+              </button>
+            </div>
+          </div>
+        )}
+      >
+        <CenterPage route={active.route} />
+      </ErrorBoundary>
+    </div>
   );
 }
 
@@ -199,7 +215,17 @@ export function PluginSidebarHost({ pluginId }: { pluginId: string }) {
   }
 
   return (
-    <ErrorBoundary>
+    <ErrorBoundary
+      key={`${pluginId}:${runtime.revision}`}
+      fallback={(err, retry) => (
+        <div style={{ padding: 12, fontSize: 12, color: "var(--red)", display: "flex", flexDirection: "column", gap: 8 }}>
+          <span>{err.message}</span>
+          <button type="button" className="vlx-btn" onClick={retry}>
+            {t("common.retry")}
+          </button>
+        </div>
+      )}
+    >
       <Sidebar />
     </ErrorBoundary>
   );

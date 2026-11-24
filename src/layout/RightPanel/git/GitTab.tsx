@@ -635,6 +635,7 @@ export function GitTab({ path, session }: { path: string | null; session?: Sessi
             refreshToken={panel.historyRefresh}
             open={open.branch}
             onToggle={() => toggle("branch")}
+            session={session}
           />
 
           <GitSection

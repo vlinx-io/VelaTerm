@@ -841,13 +841,13 @@ pub fn antigravity_usage(bin: &str, cwd: &std::path::Path, log_file: &std::path:
     command.arg("--log-file").arg(log_file).args(["-p", "/usage", "--output-format", "json"]).current_dir(cwd);
     crate::login_env::refresh_command(&mut command);
     crate::agent::executable::prepare_command(&mut command, bin);
-    // A quota query is not a session: keep it out of VelaTerm's spawn and hook plumbing.
+    // A quota query is not a session: keep it out of VelaTerm's spawn and hook plumbing, and never
+    // hold `auth_gate` where an ~8s background poll would stall user-initiated `chat_start`.
     command.env_remove("VLX_SPAWN_URL");
     command.env_remove("VLX_SESSION_ID");
     command.env_remove("VLX_TOKEN");
     command.env_remove("VLX_AUTH");
     command.env_remove(crate::agent::hook_bridge::CHAT_ENGINE_ENV);
-    let _auth_gate = crate::agent::antigravity::acquire_auth_gate(bin, &[]);
     let out = crate::agent::headless::run_command(command, None, AGY_USAGE_TIMEOUT).map_err(|e| {
         FetchError::from(match e {
             HeadlessError::Start(e) => format!("Antigravity could not be started: {e}"),

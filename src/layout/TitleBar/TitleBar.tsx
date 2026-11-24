@@ -17,6 +17,7 @@ import { useTermStore } from "../../store/termStore";
 import { runAfterInitialSettings } from "../../store/settingsWatch";
 import { navigateTranslation, translationUrl, useTranslationRoute } from "../../translation/navigation";
 import { resolveTheme } from "../../theme";
+import { namedTheme } from "../../themes";
 import { AppMenuBar } from "./AppMenuBar";
 import { memoryRouteHidesRightPanel, useMemoryLocation } from "../Memory/navigation";
 import { pluginRouteHidesRightPanel } from "../../plugins/host";
@@ -64,13 +65,15 @@ export function TitleBar() {
   const hotReloadTime = useHotReloadTime();
   const theme = useTermStore((s) => s.theme);
   const setTheme = useTermStore((s) => s.setTheme);
-  const setDarkTheme = useTermStore((s) => s.setDarkTheme);
+  const darkStyle = useTermStore((s) => s.darkStyle);
   const leftCollapsed = useTermStore((s) => s.leftCollapsed);
   const toggleLeft = useTermStore((s) => s.toggleLeft);
   const rightCollapsed = useTermStore((s) => s.rightCollapsed);
+  const memoryLocation = useMemoryLocation();
+  const pluginLocation = usePluginLocation();
   const noRightPanel =
-    memoryRouteHidesRightPanel(useMemoryLocation()) ||
-    pluginRouteHidesRightPanel(usePluginLocation());
+    memoryRouteHidesRightPanel(memoryLocation) ||
+    pluginRouteHidesRightPanel(pluginLocation);
   const toggleRight = useTermStore((s) => s.toggleRight);
   // Mirror mode is switched on the host only. Without a marker, a followed client sees its tabs and
   // splits rearrange with no visible cause; the badge names where those changes come from.
@@ -120,7 +123,7 @@ export function TitleBar() {
     if (translationSessionId && routeSessions.some(session => session.id === translationSessionId && session.engine === "chat") && (useTermStore.getState().activeSessionId !== translationSessionId || translationDormant)) useTermStore.getState().openSession(translationSessionId);
   }, [translationSessionId, routeSessions, translationDormant]);
   useEffect(() => { setSettingsOpen(!!settingsRoute); }, [settingsRoute, setSettingsOpen]);
-  const closeSettings = () => { setSettingsOpen(false); navigateTranslation(translationUrl({ settings: null, settingsSection: null, settingsTranslation: null, translationService: null })); };
+  const closeSettings = () => { setSettingsOpen(false); navigateTranslation(translationUrl({ settings: null, settingsSection: null, settingsTranslation: null, settingsPlugins: null, translationService: null })); };
   // Share-dialog visibility is shared by the activity-bar action and macOS native Share menu; the dialog mounts here.
   const shareOpen = useTermStore((s) => s.shareOpen);
   const setShareOpen = useTermStore((s) => s.setShareOpen);
@@ -146,7 +149,7 @@ export function TitleBar() {
     backend: string;
   } | null>(null);
   const resolved = resolveTheme(theme);
-  const darkThemeLabel = t("titlebar.themeClassicDark");
+  const darkThemeLabel = namedTheme("dark", darkStyle)?.label ?? t("titlebar.themeClassicDark");
 
   // Compare bundle __APP_VERSION__ from package.json with backend app_version from Cargo.toml at
   // startup. Release scripts update both, but remote deployments or manual edits can drift. Report
@@ -446,9 +449,11 @@ export function TitleBar() {
         <button
           className={theme === "dark" ? "on" : ""}
           aria-pressed={theme === "dark"}
-          title={t("titlebar.themeClassicDark")}
-          aria-label={t("titlebar.themeClassicDark")}
-          onClick={() => runAfterInitialSettings(() => setDarkTheme("classic"))}
+          title={darkThemeLabel}
+          aria-label={darkThemeLabel}
+          // Switching modes keeps the chosen dark theme. Read nothing from this render: the click can be
+          // deferred until saved settings have loaded, and the theme it should keep is the loaded one.
+          onClick={() => runAfterInitialSettings(() => setTheme("dark"))}
         >
           <Icons.moon size={14} fill />
         </button>

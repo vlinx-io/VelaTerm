@@ -24,6 +24,82 @@ pub struct BranchCompare {
     pub files: Vec<ChangedFile>,
     /// Branches that can be picked as the base: local first, then remote-tracking.
     pub candidates: Vec<String>,
+    /// Suggested pull request title derived from the single commit subject or branch name.
+    pub suggested_title: String,
+    /// Suggested pull request description derived from the commit body or commit list.
+    pub suggested_body: String,
+}
+
+fn strip_vlx_slug_suffix(name: &str) -> &str {
+    let Some((stem, tail)) = name.rsplit_once('-') else { return name };
+    let hexish = (tail.len() == 6 && tail.chars().all(|c| c.is_ascii_hexdigit()))
+        || (tail.len() >= 8 && tail.chars().all(|c| c.is_ascii_hexdigit()));
+    if hexish && !stem.is_empty() { stem } else { name }
+}
+
+/// Turn a branch name like `vlx/fix-auth-a1b2c3` or `feat/user_login` into a readable PR title.
+pub(crate) fn humanize_branch(branch: &str) -> String {
+    let raw = branch.trim();
+    let is_vlx = raw.starts_with("vlx/");
+    let stripped = [
+        "vlx/",
+        "feat/",
+        "feature/",
+        "fix/",
+        "bugfix/",
+        "hotfix/",
+        "chore/",
+        "refactor/",
+        "docs/",
+        "perf/",
+        "test/",
+        "ci/",
+    ]
+    .iter()
+    .find_map(|prefix| raw.strip_prefix(prefix))
+    .unwrap_or(raw);
+    let cleaned = if is_vlx { strip_vlx_slug_suffix(stripped) } else { stripped };
+    let words: Vec<&str> = cleaned
+        .split(['-', '_', '/'])
+        .filter(|part| !part.is_empty())
+        .collect();
+    if words.is_empty() {
+        return raw.to_string();
+    }
+    let joined = words.join(" ");
+    let mut chars = joined.chars();
+    match chars.next() {
+        Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+        None => raw.to_string(),
+    }
+}
+
+fn suggest_pr_text(root: &str, merge_base: &str, head: &str, ahead: u32, branch: Option<&str>) -> (String, String) {
+    if ahead == 0 {
+        return (String::new(), String::new());
+    }
+    if ahead == 1 {
+        if let Some(out) = run_git(root, &["log", "-1", "--format=%s%x00%b", head]) {
+            let (subj, body) = out.split_once('\0').unwrap_or((&out, ""));
+            let title = subj.trim().to_string();
+            if !title.is_empty() {
+                return (title, body.trim().to_string());
+            }
+        }
+    }
+    let title = branch.map(humanize_branch).unwrap_or_default();
+    let range = format!("{merge_base}..{head}");
+    let body = run_git(root, &["log", "--reverse", "--format=%s", &range])
+        .map(|s| {
+            s.lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty())
+                .map(|l| format!("- {l}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+        .unwrap_or_default();
+    (title, body)
 }
 
 /// A ref the user may name. Leading dashes would read as options; the rest is up to git.
@@ -90,6 +166,8 @@ pub fn compare(cwd: &str, base: Option<&str>) -> Result<Option<BranchCompare>, S
     let ahead = count(format!("{merge_base}..{head}"));
     let behind = count(format!("{merge_base}..{base_commit}"));
     let files = tree_diff_files(&root, Some(&merge_base), &head)?;
+    let (suggested_title, suggested_body) =
+        suggest_pr_text(&root, &merge_base, &head, ahead, current.as_deref());
     Ok(Some(BranchCompare {
         candidates: candidates(&root, current.as_deref()),
         base,
@@ -98,6 +176,8 @@ pub fn compare(cwd: &str, base: Option<&str>) -> Result<Option<BranchCompare>, S
         ahead,
         behind,
         files,
+        suggested_title,
+        suggested_body,
     }))
 }
 
@@ -171,6 +251,8 @@ mod tests {
         let c = compare(cwd, None).unwrap().unwrap();
         assert_eq!(c.base, "main");
         assert_eq!((c.ahead, c.behind), (1, 1));
+        assert_eq!(c.suggested_title, "feature work");
+        assert_eq!(humanize_branch("vlx/fix-login-a1b2c3"), "Fix login");
         let paths: Vec<_> = c.files.iter().map(|f| (f.path.as_str(), f.status.as_str())).collect();
         assert_eq!(paths, [("a.txt", "modified"), ("new.txt", "renamed")]);
         assert!(c.candidates.contains(&"main".to_string()));

@@ -19,6 +19,72 @@ const reactHooksStub = {
   rules: { "exhaustive-deps": noopRule, "rules-of-hooks": noopRule },
 };
 
+/** Block relative pathname+search URL assembly and empty-string history URLs that break on Tauri's empty-pathname tauri://localhost origin. */
+const noRelativeHistoryUrlRule = {
+  meta: {
+    type: "problem",
+    schema: [],
+  },
+  create(context) {
+    const MSG =
+      "Use url.href instead of concatenating pathname + search (+ hash). On Tauri's tauri://localhost origin pathname is empty, so clearing query params produces \"\" and makes history.pushState/replaceState a no-op.";
+    const isProp = (node, name) =>
+      node &&
+      node.type === "MemberExpression" &&
+      !node.computed &&
+      node.property.type === "Identifier" &&
+      node.property.name === name;
+    const flattenAdd = (node, out = []) => {
+      if (node && node.type === "BinaryExpression" && node.operator === "+") {
+        flattenAdd(node.left, out);
+        flattenAdd(node.right, out);
+      } else if (node) {
+        out.push(node);
+      }
+      return out;
+    };
+    return {
+      BinaryExpression(node) {
+        if (node.operator !== "+") return;
+        if (node.parent && node.parent.type === "BinaryExpression" && node.parent.operator === "+") return;
+        const parts = flattenAdd(node);
+        if (parts.some((p) => isProp(p, "pathname")) && parts.some((p) => isProp(p, "search"))) {
+          context.report({ node, message: MSG });
+        }
+      },
+      TemplateLiteral(node) {
+        if (
+          node.expressions.some((e) => isProp(e, "pathname")) &&
+          node.expressions.some((e) => isProp(e, "search"))
+        ) {
+          context.report({ node, message: MSG });
+        }
+      },
+      CallExpression(node) {
+        const callee = node.callee;
+        if (!callee || callee.type !== "MemberExpression") return;
+        const method =
+          !callee.computed && callee.property.type === "Identifier"
+            ? callee.property.name
+            : null;
+        if (method !== "pushState" && method !== "replaceState") return;
+        const target = node.arguments[2];
+        if (target && target.type === "Literal" && target.value === "") {
+          context.report({
+            node: target,
+            message:
+              "Do not pass an empty string to history.pushState/replaceState; pass a full url.href instead.",
+          });
+        }
+      },
+    };
+  },
+};
+
+const vlxPlugin = {
+  rules: { "no-relative-history-url": noRelativeHistoryUrlRule },
+};
+
 /** Block static @tauri-apps imports through no-restricted-imports patterns and electron through paths. */
 const restrictedImports = {
   paths: [
@@ -95,11 +161,13 @@ export default [
     // Keep this separate from platform exemptions: IPC also runs over plain HTTP on the LAN.
     files: ["src/**/*.{ts,tsx}"],
     ignores: ["src/genId.ts", "src/**/*.test.{ts,tsx}"],
+    plugins: { vlx: vlxPlugin },
     rules: {
       "no-restricted-properties": ["error", {
         property: "randomUUID",
         message: "Use genId() from src/genId.ts; crypto.randomUUID() is unavailable over plain HTTP LAN access.",
       }],
+      "vlx/no-relative-history-url": "error",
     },
   },
 ];

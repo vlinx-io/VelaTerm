@@ -1,3 +1,20 @@
+## v0.3.6 — 2026-11-24
+
+- 📝 As visualizações de diff agora aceitam comentários de revisão em linha nas linhas selecionadas, com uma barra de resumo para editar, copiar ou enviar todos os comentários diretamente para uma sessão de agente ativa.
+- 🔀 A comparação de branches no painel Git agora permite criar pull ou merge requests (incluindo rascunhos) no GitHub, GitLab e Gitea com dados pré-preenchidos, acompanhar o status e as verificações de CI, e limpar o worktree e a branch após o merge.
+- 🔌 As janelas remotas SSH agora trazem uma aba Portas no painel direito e um contador de portas encaminhadas na barra de status, detectando portas em escuta em hosts Linux para encaminhá-las, abri-las no navegador ou interrompê-las diretamente.
+- 🎨 Configurações ▸ Aparência agora permite escolher temas nomeados separados para o modo escuro (Tokyo Night, Dracula, Nord, Gruvbox Dark, Adventure Time e Campbell PowerShell) e para o modo claro (One Half Light e Solarized Light) além de Clássico, mantendo sua escolha ao alternar entre escuro e claro.
+- ⌨️ A árvore de sessões na barra lateral agora oferece navegação completa pelo teclado com setas, `Home`/`End`, `Enter` e `Escape` para devolver o foco ao terminal ativo ou à caixa de conversa, além do atalho configurável «Focar barra lateral» (`Cmd+Shift+E` no macOS, `Ctrl+Alt+S` no Windows e Linux).
+- 🔎 Pesquisar na barra lateral com um filtro de status ativo agora exibe os projetos correspondentes excluídos pelo filtro em uma seção separada «Outros projetos» abaixo dos resultados filtrados.
+- ⚡ As conversas do Antigravity agora reabrem mais rápido e enviam mensagens imediatamente, sem travar na inicialização a frio ou durante verificações em segundo plano.
+- 🪐 As conversas do Antigravity agora iniciam normalmente mesmo sem um modelo padrão selecionado, recuperam-se automaticamente de travamentos silenciosos, instabilidades de rede e estados de sessão corrompidos, mantêm as perguntas interativas utilizáveis com permissões Bypass e retomam automaticamente após a renovação da cota.
+- 🔑 As conversas do ZCode agora recebem automaticamente os novos modelos publicados na nuvem e oferecem suporte às credenciais criptografadas do ZCode 4.0, incluindo o login pelo chaveiro do sistema.
+- 🤖 Novas conversas do Grok agora começam normalmente sem avisar incorretamente que não foi possível reabrir uma conversa anterior, e conversas do Grok, Copilot, Cursor, Kimi e Antigravity cuja conversa anterior não pode mais ser reaberta se recuperam em uma nova conversa em vez de parar.
+- 🪟 No macOS, a barra de título da janela agora acompanha o tema escuro ou claro selecionado mesmo quando difere da aparência do sistema, e volta corretamente ao retornar ao modo Sistema.
+- 💬 Dispensar a dica da visualização de conversa agora é lembrado após reinicializações e entre janelas desktop, Electron e do navegador, sem reaparecer brevemente na inicialização.
+- 🧩 Sair ou fechar uma visualização de plugin no aplicativo desktop agora funciona normalmente sem voltar à tela anterior, e erros de renderização de plugins ficam isolados com a opção de tentar novamente.
+- 🔧 Alternar entre abas comuns e visualizações sem painel direito, como a base de conhecimento, não trava mais a interface.
+
 ## v0.3.5 — 2026-11-23
 
 - 🔎 A pesquisa global de sessões agora permite filtrar resultados por um projeto ou uma coleção específica, incluindo coleções e projetos aninhados.

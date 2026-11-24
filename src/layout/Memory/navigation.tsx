@@ -60,7 +60,11 @@ export const COLLECTIONS_COLLAPSE = "memory:collections-collapse";
 export function useMemoryLocation() { return useSyncExternalStore(subscribe, () => window.location.search); }
 export function memoryUrl(route = "library", values: Record<string, string | number | null> = {}) {
   const url = new URL(window.location.href);
-  if (route) [...url.searchParams.keys()].filter((key) => key.startsWith("knowledge")).forEach((key) => url.searchParams.delete(key));
+  if (route) {
+    [...url.searchParams.keys()].filter((key) => key.startsWith("knowledge")).forEach((key) => url.searchParams.delete(key));
+    url.searchParams.delete("plugin");
+    url.searchParams.delete("pluginRoute");
+  }
   if (route) url.searchParams.set("memory", route); else {
     [...url.searchParams.keys()].filter((key) => key.startsWith("memory")).forEach((key) => url.searchParams.delete(key));
   }

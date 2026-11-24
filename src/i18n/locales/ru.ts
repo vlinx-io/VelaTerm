@@ -552,6 +552,9 @@ const ru: typeof en = {
   "settings.deepseekInvalid": "Укажите корректный адрес API http(s) и ключ API в одну строку.",
   "settings.deepseekLocalOnly": "Эти учётные данные хранятся на хост-устройстве, поэтому изменить их можно только там.",
   "settings.appearance": "Внешний вид", // Appearance
+  "settings.darkTheme": "Тёмная тема", // Dark theme
+  "settings.lightTheme": "Светлая тема", // Light theme
+  "settings.themeClassic": "Классическая", // Classic
   "settings.accent": "Акцент", // Accent
   "settings.accentAuto": "Как тема", // Follow theme
   "settings.density": "Плотность", // Density
@@ -690,6 +693,31 @@ const ru: typeof en = {
   "changes.ignoreWhitespace": "Игнорировать пробелы",
   "changes.collapseUnchanged": "Сворачивать неизменённые строки",
   "changes.tooLarge": "Этот файл превышает лимит предпросмотра в 2 МиБ.",
+  "changes.review.addLine": (range: string) => `Комментировать ${range}`,
+  "changes.review.addFile": "Добавить комментарий",
+  "changes.review.gutterHint": (line: number) => `Добавить комментарий ревью к строке ${line}`,
+  "changes.review.sideOriginal": "До изменений",
+  "changes.review.sideModified": "После изменений",
+  "changes.review.fieldLabel": "Комментарий ревью",
+  "changes.review.placeholder": "Напишите замечание для агента (Enter — сохранить, Shift+Enter — новая строка)…",
+  "changes.review.save": "Сохранить комментарий",
+  "changes.review.cancel": "Отмена",
+  "changes.review.edit": "Изменить",
+  "changes.review.remove": "Удалить",
+  "changes.review.count": (count: number, files: number) =>
+    count === 1 ? "1 комментарий ревью" : `Комментариев ревью: ${count} (файлов: ${files})`,
+  "changes.review.showList": "Список комментариев",
+  "changes.review.hideList": "Скрыть список",
+  "changes.review.clearAll": "Очистить всё",
+  "changes.review.targetAgent": "Целевая сессия",
+  "changes.review.sendTo": (agent: string) => `Отправить в ${agent}`,
+  "changes.review.pasteTo": (agent: string) => `Вставить в ${agent}`,
+  "changes.review.sending": "Отправка…",
+  "changes.review.copy": "Копировать ревью",
+  "changes.review.copied": "Скопировано",
+  "changes.review.noAgent": "Откройте или запустите сессию агента в этом репозитории, чтобы сразу отправить комментарии.",
+  "changes.review.promptHeader": "Пожалуйста, учтите следующие комментарии ревью кода к текущим изменениям:",
+  "changes.review.promptComment": "Комментарий:",
   "git.fileStatus.modified": "Изменён",
   "git.fileStatus.added": "Добавлен",
   "git.fileStatus.deleted": "Удалён",
@@ -737,6 +765,39 @@ const ru: typeof en = {
   "git.pr.noToken": "Чтобы создавать pull request здесь, добавьте токен Gitea в настройках.",
   "git.pr.unreachable": "Сервер Gitea сейчас недоступен.",
   "git.pr.opened": "Pull request создан",
+  "git.pr.openMr": "Создать merge request",
+  "git.pr.openedMr": "Merge request создан",
+  "git.pr.formTitleProvider": (provider: string) =>
+    provider === "gitlab"
+      ? "Создание merge request в GitLab"
+      : provider === "github"
+        ? "Создание pull request в GitHub"
+        : "Создание pull request в Gitea",
+  "git.pr.formDescriptionMr": (branch: string, base: string) =>
+    `Отправляет ${branch} в origin и создаёт merge request в ${base}.`,
+  "git.pr.draftField": "Создать как черновик",
+  "git.pr.noGhCli": "Установите GitHub CLI (gh), чтобы создавать pull request здесь.",
+  "git.pr.noGhAuth": "Выполните gh auth login в терминале для входа в GitHub.",
+  "git.pr.noGlabCli": "Установите GitLab CLI (glab), чтобы создавать merge request здесь.",
+  "git.pr.noGlabAuth": "Выполните glab auth login в терминале для входа в GitLab.",
+  "git.pr.state.open": "Открыт",
+  "git.pr.state.draft": "Черновик",
+  "git.pr.state.merged": "Влит",
+  "git.pr.state.closed": "Закрыт",
+  "git.pr.checks.passing": "Проверки пройдены",
+  "git.pr.checks.failing": "Проверки не пройдены",
+  "git.pr.checks.pending": "Проверки выполняются",
+  "git.pr.refreshStatus": "Обновить статус",
+  "git.pr.cleanupWorktree": "Очистить worktree…",
+  "git.pr.cleanupTitle": "Очистка влитого worktree",
+  "git.pr.cleanupDescription": (branch: string, path: string) =>
+    `Ветка ${branch} влита. Удалить рабочее дерево ${path}?`,
+  "git.pr.cleanupDeleteBranch": (branch: string) => `Удалить локальную ветку ${branch}`,
+  "git.pr.cleanupArchiveSession": "Архивировать эту сессию",
+  "git.pr.cleanupArchiveHint": "Снимите флажок, чтобы оставить сессию в основном каталоге репозитория.",
+  "git.pr.cleanupForce": "Принудительно удалить незакоммиченные изменения",
+  "git.pr.cleanupSubmit": "Очистить",
+  "git.pr.cleanupSubmitting": "Очистка…",
   "git.push": "Отправить",
   "git.pushTitle": (u: string) => `Отправить в ${u}`,
   "git.publish": "Опубликовать ветку",
@@ -948,6 +1009,7 @@ const ru: typeof en = {
   "settings.scCopyTerminal": "Копировать выделение в терминале", // Copy terminal selection
   "settings.scSelectAllTerminal": "Выделить всё в терминале", // Select all in terminal
   "settings.scSaveDoc": "Сохранить документ", // Save document
+  "settings.scFocusSidebar": "Фокус на боковой панели", // Focus sidebar
   "settings.scRecording": "Нажмите клавиши…", // Press keys…
   "settings.scHint":
     "Нажмите на сочетание, затем нажмите новую комбинацию (нужен Cmd/Ctrl).", // hint
@@ -1256,6 +1318,7 @@ const ru: typeof en = {
   "tree.openProject": "Открыть проект", // Open Project
   "tree.noAttention": "Нет сессий, соответствующих фильтру статуса", // No sessions match the status filter
   "tree.noMatch": "Совпадений нет", // No matches
+  "tree.otherProjects": "Другие проекты", // Other projects
 
   // Dialog fields
   "tree.groupName": "Название группы", // Group name
@@ -2794,6 +2857,25 @@ const ru: typeof en = {
   "plugins.uninstallConfirm": (name: string) => `Удалить плагин «${name}»?`,
   "plugins.removeData": "Также удалить локальный каталог данных этого плагина",
   "plugins.loadFailed": "Не удалось загрузить интерфейс плагина",
+  "ports.title": "Порты", // Ports
+  "ports.active": "Перенаправленные", // Forwarded
+  "ports.activeEmpty": "Нет перенаправленных портов", // No forwarded ports
+  "ports.detected": "Обнаруженные", // Detected
+  "ports.detectedEmpty": "Прослушиваемые порты не найдены", // No listening ports found
+  "ports.detectionUnavailable": "Обнаружение портов недоступно на этом хосте", // Port detection is not available on this host
+  "ports.manual": "Перенаправить порт", // Forward a port
+  "ports.portPlaceholder": "Удалённый порт", // Remote port
+  "ports.forward": "Перенаправить", // Forward
+  "ports.open": "Открыть в браузере", // Open in browser
+  "ports.stop": "Остановить", // Stop
+  "ports.localChanged": (port) => `Локальный порт ${port} был занят, поэтому используется другой локальный порт`, // Local port {port} was busy, so another local port is used
+  "ports.unavailable": "Недоступно — обновите VelaTerm", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `Недопустимый порт: ${port}`, // Invalid port: {port}
+  "ports.missingPort": "Введите порт", // Enter a port
+  "ports.unknownAction": (action) => `Неизвестное действие: ${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `Для одного подключения можно перенаправить не более ${max} портов`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `Порт ${port} не перенаправлен`, // Port {port} is not forwarded
+  "statusbar.ports": (n) => `Перенаправлено портов: ${n}`, // {n} forwarded ports
 };
 
 export default ru;

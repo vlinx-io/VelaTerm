@@ -143,6 +143,7 @@ fn login_command(proc: &ChatProcess) -> Command {
     }
     crate::login_env::refresh_command(&mut cmd);
     crate::agent::executable::prepare_command(&mut cmd, &proc.bin);
+    crate::agent::antigravity::prepare_command_env(&mut cmd);
     for key in crate::pty::manager::AGENT_HARNESS_MARKERS {
         cmd.env_remove(key);
     }
@@ -477,6 +478,7 @@ pub(in crate::agent::chat::engine) fn restore(previous: &ChatProcess, proc: &Cha
         let mut next_acp = proc.acp.lock().unwrap();
         next_acp.suppress_replay_401 = prev_acp.recovering_401;
         next_acp.pending_401_continuation = prev_acp.pending_401_continuation.take();
+        next_acp.pending_context_carryover = prev_acp.pending_context_carryover.take();
     }
     proc.compactions.store(
         previous.compactions.load(Ordering::Relaxed),

@@ -1,3 +1,20 @@
+## v0.3.6 — 2026-11-24
+
+- 📝 Chế độ xem khác biệt tệp nay hỗ trợ thêm nhận xét đánh giá trực tiếp trên các dòng đã chọn, kèm thanh tổng hợp để chỉnh sửa, sao chép hoặc gửi toàn bộ nhận xét tới phiên agent đang hoạt động.
+- 🔀 Mục so sánh nhánh trong bảng Git nay cho phép tạo pull hoặc merge request (bao gồm bản nháp) trên GitHub, GitLab và Gitea với thông tin điền sẵn, xem trạng thái PR cùng kết quả kiểm tra CI, và dọn dẹp worktree cùng nhánh sau khi hợp nhất.
+- 🔌 Cửa sổ SSH từ xa nay có thêm thẻ Cổng ở bảng bên phải và bộ đếm cổng đang chuyển tiếp trên thanh trạng thái, tự động phát hiện cổng đang lắng nghe trên máy chủ Linux và cho phép chuyển tiếp, mở trong trình duyệt hoặc dừng trực tiếp.
+- 🎨 Cài đặt ▸ Giao diện nay cho phép chọn riêng các chủ đề có tên cho chế độ tối (Tokyo Night, Dracula, Nord, Gruvbox Dark, Adventure Time và Campbell PowerShell) và chế độ sáng (One Half Light và Solarized Light) bên cạnh Cổ điển, đồng thời giữ nguyên lựa chọn khi chuyển giữa sáng và tối.
+- ⌨️ Cây phiên ở thanh bên nay hỗ trợ điều hướng hoàn chỉnh bằng bàn phím với các phím mũi tên, `Home`/`End`, `Enter` và `Escape` để trả tiêu điểm về terminal hoặc ô nhập hội thoại đang mở, kèm phím tắt tùy chỉnh «Chuyển tiêu điểm vào thanh bên» (`Cmd+Shift+E` trên macOS, `Ctrl+Alt+S` trên Windows và Linux).
+- 🔎 Khi tìm kiếm trên thanh bên trong lúc bộ lọc trạng thái đang bật, các dự án khớp từ khóa nhưng bị bộ lọc ẩn nay hiển thị trong mục riêng «Dự án khác» ngay bên dưới kết quả đã lọc.
+- ⚡ Hội thoại Antigravity nay mở lại nhanh hơn và gửi tin nhắn ngay lập tức mà không bị khựng khi khởi động nguội hoặc khi đang kiểm tra nền.
+- 🪐 Hội thoại Antigravity nay khởi chạy ổn định ngay cả khi chưa chọn sẵn mô hình mặc định, tự động khôi phục sau tình trạng đứng im lặng, chập chờn mạng hoặc trạng thái phiên bị hỏng, vẫn giữ các câu hỏi chọn phương án hoạt động dưới quyền Bypass và tự động tiếp tục sau khi hạn mức được đặt lại.
+- 🔑 Hội thoại ZCode nay tự động cập nhật danh sách mô hình mới phát hành trên đám mây và hỗ trợ thông tin đăng nhập mã hóa của ZCode 4.0, bao gồm đăng nhập qua chuỗi khóa hệ thống.
+- 🤖 Các hội thoại Grok mới nay khởi chạy gọn gàng mà không báo nhầm rằng không thể mở lại hội thoại cũ, và các hội thoại Grok, Copilot, Cursor, Kimi, Antigravity không thể mở lại bản ghi trước đó sẽ tự chuyển sang hội thoại mới thay vì dừng hẳn.
+- 🪟 Trên macOS, thanh tiêu đề cửa sổ nay khớp với chủ đề tối hoặc sáng bạn chọn ngay cả khi khác với giao diện hệ thống, và khôi phục chính xác khi chuyển lại chế độ Hệ thống.
+- 💬 Việc đóng gợi ý chế độ xem hội thoại nay được ghi nhớ sau khi khởi động lại và đồng bộ giữa cửa sổ máy tính, Electron và trình duyệt mà không nhấp nháy lại lúc mở ứng dụng.
+- 🧩 Rời khỏi hoặc đóng chế độ xem plugin trên ứng dụng máy tính nay hoạt động bình thường mà không bị bật quay lại, đồng thời lỗi hiển thị của plugin được cô lập kèm nút thử lại.
+- 🔧 Chuyển đổi qua lại giữa các thẻ thông thường và các chế độ xem không có bảng bên phải, chẳng hạn kho tri thức, không còn làm sập giao diện.
+
 ## v0.3.5 — 2026-11-23
 
 - 🔎 Tìm kiếm phiên toàn cục giờ cho phép lọc kết quả theo một dự án hoặc bộ sưu tập cụ thể, bao gồm cả các bộ sưu tập và dự án lồng nhau.

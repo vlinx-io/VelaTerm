@@ -83,6 +83,16 @@ impl SessionKind {
         !matches!(self, Self::Deepseek | Self::Zcode)
     }
 
+    /// Whether a new session of this kind, driven by `engine`, seeds its own VelaTerm session UUID as the
+    /// agent session id before its first launch. The terminal engine for Zoo and Grok accepts a
+    /// caller-provided `--session-id`, so seeding there keeps parallel sessions in one directory from
+    /// attaching to each other's most recent conversation. The chat engine (ACP) gets its id from
+    /// `session/new` and cannot choose it, so seeding there would only make the first launch try to
+    /// reopen a conversation that was never created.
+    pub fn accepts_caller_session_id(self, engine: &str) -> bool {
+        matches!(self, Self::Zoo | Self::Grok) && engine != "chat"
+    }
+
     /// Lowercase string used for persistence.
     pub fn as_str(self) -> &'static str {
         match self {

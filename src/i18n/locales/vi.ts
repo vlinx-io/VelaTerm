@@ -542,6 +542,9 @@ const vi: typeof en = {
   "settings.deepseekInvalid": "Nhập địa chỉ API http(s) hợp lệ và khóa API trên một dòng.",
   "settings.deepseekLocalOnly": "Thông tin đăng nhập này được lưu trên thiết bị chủ, nên chỉ có thể thay đổi tại đó.",
   "settings.appearance": "Giao diện",
+  "settings.darkTheme": "Chủ đề tối",
+  "settings.lightTheme": "Chủ đề sáng",
+  "settings.themeClassic": "Cổ điển",
   "settings.accent": "Màu nhấn",
   "settings.accentAuto": "Theo chủ đề",
   "settings.density": "Mật độ",
@@ -680,6 +683,31 @@ const vi: typeof en = {
   "changes.ignoreWhitespace": "Bỏ qua khoảng trắng",
   "changes.collapseUnchanged": "Thu gọn các dòng không đổi",
   "changes.tooLarge": "Tệp này vượt quá giới hạn xem trước 2 MiB.",
+  "changes.review.addLine": (range: string) => `Nhận xét ${range}`,
+  "changes.review.addFile": "Thêm nhận xét",
+  "changes.review.gutterHint": (line: number) => `Thêm nhận xét đánh giá tại dòng ${line}`,
+  "changes.review.sideOriginal": "Bản gốc",
+  "changes.review.sideModified": "Bản sửa đổi",
+  "changes.review.fieldLabel": "Nhận xét đánh giá",
+  "changes.review.placeholder": "Nhập phản hồi cho tác tử (Enter để lưu, Shift+Enter để xuống dòng)…",
+  "changes.review.save": "Lưu nhận xét",
+  "changes.review.cancel": "Hủy",
+  "changes.review.edit": "Sửa",
+  "changes.review.remove": "Xóa",
+  "changes.review.count": (count: number, files: number) =>
+    count === 1 ? "1 nhận xét đánh giá" : `${count} nhận xét đánh giá trên ${files} tệp`,
+  "changes.review.showList": "Danh sách nhận xét",
+  "changes.review.hideList": "Ẩn danh sách",
+  "changes.review.clearAll": "Xóa tất cả",
+  "changes.review.targetAgent": "Phiên đích",
+  "changes.review.sendTo": (agent: string) => `Gửi tới ${agent}`,
+  "changes.review.pasteTo": (agent: string) => `Dán vào ${agent}`,
+  "changes.review.sending": "Đang gửi…",
+  "changes.review.copy": "Sao chép đánh giá",
+  "changes.review.copied": "Đã sao chép",
+  "changes.review.noAgent": "Hãy mở hoặc khởi chạy một phiên tác tử trong kho mã này để gửi nhận xét trực tiếp.",
+  "changes.review.promptHeader": "Vui lòng xử lý các nhận xét đánh giá mã sau đối với các thay đổi hiện tại:",
+  "changes.review.promptComment": "Nhận xét:",
   "git.fileStatus.modified": "Đã sửa đổi",
   "git.fileStatus.added": "Đã thêm",
   "git.fileStatus.deleted": "Đã xóa",
@@ -727,6 +755,39 @@ const vi: typeof en = {
   "git.pr.noToken": "Hãy thêm token Gitea trong Cài đặt để tạo pull request tại đây.",
   "git.pr.unreachable": "Hiện không kết nối được máy chủ Gitea.",
   "git.pr.opened": "Đã tạo pull request",
+  "git.pr.openMr": "Tạo merge request",
+  "git.pr.openedMr": "Đã tạo merge request",
+  "git.pr.formTitleProvider": (provider: string) =>
+    provider === "gitlab"
+      ? "Tạo merge request trên GitLab"
+      : provider === "github"
+        ? "Tạo pull request trên GitHub"
+        : "Tạo pull request trên Gitea",
+  "git.pr.formDescriptionMr": (branch: string, base: string) =>
+    `Push ${branch} lên origin và tạo merge request vào ${base}.`,
+  "git.pr.draftField": "Tạo dưới dạng bản nháp",
+  "git.pr.noGhCli": "Hãy cài đặt GitHub CLI (gh) để tạo pull request tại đây.",
+  "git.pr.noGhAuth": "Hãy chạy gh auth login trong thiết bị đầu cuối để kết nối GitHub.",
+  "git.pr.noGlabCli": "Hãy cài đặt GitLab CLI (glab) để tạo merge request tại đây.",
+  "git.pr.noGlabAuth": "Hãy chạy glab auth login trong thiết bị đầu cuối để kết nối GitLab.",
+  "git.pr.state.open": "Đang mở",
+  "git.pr.state.draft": "Bản nháp",
+  "git.pr.state.merged": "Đã hợp nhất",
+  "git.pr.state.closed": "Đã đóng",
+  "git.pr.checks.passing": "Kiểm tra đạt",
+  "git.pr.checks.failing": "Kiểm tra lỗi",
+  "git.pr.checks.pending": "Đang kiểm tra",
+  "git.pr.refreshStatus": "Làm mới trạng thái",
+  "git.pr.cleanupWorktree": "Dọn dẹp worktree…",
+  "git.pr.cleanupTitle": "Dọn dẹp worktree đã hợp nhất",
+  "git.pr.cleanupDescription": (branch: string, path: string) =>
+    `Nhánh ${branch} đã được hợp nhất. Xóa worktree ${path}?`,
+  "git.pr.cleanupDeleteBranch": (branch: string) => `Xóa nhánh cục bộ ${branch}`,
+  "git.pr.cleanupArchiveSession": "Lưu trữ phiên này",
+  "git.pr.cleanupArchiveHint": "Bỏ chọn để giữ lại phiên trong thư mục kho mã chính.",
+  "git.pr.cleanupForce": "Buộc xóa các thay đổi chưa commit",
+  "git.pr.cleanupSubmit": "Dọn dẹp",
+  "git.pr.cleanupSubmitting": "Đang dọn dẹp…",
   "git.push": "Push",
   "git.pushTitle": (u: string) => `Push lên ${u}`,
   "git.publish": "Xuất bản nhánh",
@@ -933,6 +994,7 @@ const vi: typeof en = {
   "settings.scCopyTerminal": "Sao chép vùng chọn trong terminal", // Copy terminal selection
   "settings.scSelectAllTerminal": "Chọn tất cả trong terminal", // Select all in terminal
   "settings.scSaveDoc": "Lưu tài liệu",
+  "settings.scFocusSidebar": "Chuyển tiêu điểm vào thanh bên",
   "settings.scRecording": "Nhấn phím…",
   "settings.scHint":
     "Nhấp vào phím tắt, rồi nhấn tổ hợp mới (bắt buộc Cmd/Ctrl).",
@@ -1232,6 +1294,7 @@ const vi: typeof en = {
   "tree.openProject": "Mở dự án",
   "tree.noAttention": "Không có phiên nào khớp bộ lọc trạng thái",
   "tree.noMatch": "Không tìm thấy kết quả",
+  "tree.otherProjects": "Dự án khác",
   "tree.groupName": "Tên nhóm",
   "tree.sessionNameAuto": "Tên phiên (để trống để đặt tự động)",
   "tree.editSession": "Sửa phiên",
@@ -2730,6 +2793,25 @@ const vi: typeof en = {
   "plugins.uninstallConfirm": (name: string) => `Gỡ cài đặt plugin "${name}"?`,
   "plugins.removeData": "Đồng thời xóa thư mục dữ liệu cục bộ của plugin này",
   "plugins.loadFailed": "Không thể tải giao diện plugin",
+  "ports.title": "Cổng", // Ports
+  "ports.active": "Đã chuyển tiếp", // Forwarded
+  "ports.activeEmpty": "Không có cổng nào được chuyển tiếp", // No forwarded ports
+  "ports.detected": "Đã phát hiện", // Detected
+  "ports.detectedEmpty": "Không tìm thấy cổng đang lắng nghe", // No listening ports found
+  "ports.detectionUnavailable": "Không thể phát hiện cổng trên máy chủ này", // Port detection is not available on this host
+  "ports.manual": "Chuyển tiếp một cổng", // Forward a port
+  "ports.portPlaceholder": "Cổng từ xa", // Remote port
+  "ports.forward": "Chuyển tiếp", // Forward
+  "ports.open": "Mở trong trình duyệt", // Open in browser
+  "ports.stop": "Dừng", // Stop
+  "ports.localChanged": (port) => `Cổng cục bộ ${port} đang bận nên đã dùng một cổng cục bộ khác`, // Local port {port} was busy, so another local port is used
+  "ports.unavailable": "Không khả dụng — hãy cập nhật VelaTerm", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `Cổng không hợp lệ: ${port}`, // Invalid port: {port}
+  "ports.missingPort": "Hãy nhập một cổng", // Enter a port
+  "ports.unknownAction": (action) => `Thao tác không xác định: ${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `Mỗi kết nối chỉ có thể chuyển tiếp tối đa ${max} cổng`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `Cổng ${port} chưa được chuyển tiếp`, // Port {port} is not forwarded
+  "statusbar.ports": (n) => `${n} cổng đã chuyển tiếp`, // {n} forwarded ports
 };
 
 export default vi;

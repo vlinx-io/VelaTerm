@@ -14,6 +14,9 @@ import { GitTab } from "./git/GitTab";
 import { InfoTab } from "./InfoTab";
 import { KV, Section } from "./parts";
 import { memoryNavigate, useMemoryLocation } from "../Memory/navigation";
+import { portsSupported } from "../../remote/ports/portsClient";
+import { PortsTab } from "../../remote/ports/PortsTab";
+import type { InspectorTab } from "../../theme";
 // Brings the Markdown editor with it, so it loads only when a knowledge page first asks for it.
 const MemoryInfo = lazy(() => import("../Memory/MemoryInfo").then((module) => ({ default: module.MemoryInfo })));
 
@@ -21,7 +24,11 @@ const INSPECTOR_TABS = [
   { id: "files" as const, label: "Files", Icon: Icons.file },
   { id: "info" as const, label: "Info", Icon: Icons.info },
   { id: "git" as const, label: "Git", Icon: Icons.git },
+  ...(portsSupported ? [{ id: "ports" as const, label: "", Icon: Icons.connect }] : []),
 ];
+
+const isInspectorTab = (tab: string): tab is InspectorTab =>
+  INSPECTOR_TABS.some((entry) => entry.id === tab);
 
 
 /* ===================== Info: real basics and placeholder resources ===================== */
@@ -50,7 +57,7 @@ export function RightPanel() {
   const setInspectorTab = useTermStore((s) => s.setInspectorTab);
   const search=useMemoryLocation();
   const initialInspectorTab = useRef(inspectorTab);
-  useEffect(()=>{const tab=new URLSearchParams(search).get("inspector") ?? initialInspectorTab.current;if((tab==="files"||tab==="info"||tab==="git")&&useTermStore.getState().inspectorTab!==tab)setInspectorTab(tab);},[search,setInspectorTab]);
+  useEffect(()=>{const tab=new URLSearchParams(search).get("inspector") ?? initialInspectorTab.current;if(isInspectorTab(tab)&&useTermStore.getState().inspectorTab!==tab)setInspectorTab(tab);},[search,setInspectorTab]);
   // Settings and mirror sync can switch the tab without touching the URL. A stale inspector param would
   // make that tab's link equal to the current URL, so clicking it could never switch back. A missing param
   // is written too: otherwise the next unrelated navigation falls back to the initial tab above.
@@ -107,6 +114,8 @@ export function RightPanel() {
     ({ session, project, group } = resolve(lastTargetRef.current));
   }
   const cwd = session?.cwd || project?.rootPath || null;
+  // A stored or mirrored "ports" selection has no panel outside SSH remote windows.
+  const activeTab: InspectorTab = isInspectorTab(inspectorTab) ? inspectorTab : "info";
   // An open knowledge entry or archived session takes over the Info tab while its page is showing.
   const memoryRoute = new URLSearchParams(search).get("memory") ?? "";
   const memoryInfoRoute = /^(entry|history|collection)\//.test(memoryRoute) ? memoryRoute : "";
@@ -117,11 +126,11 @@ export function RightPanel() {
         {INSPECTOR_TABS.map(({ id, label, Icon }) => (
           <a
             href={tabUrl(id)}
-            title={label}
-            aria-label={label}
-            aria-current={inspectorTab===id?"page":undefined}
+            title={id === "ports" ? t("ports.title") : label}
+            aria-label={id === "ports" ? t("ports.title") : label}
+            aria-current={activeTab === id ? "page" : undefined}
             key={id}
-            className={"insp-tab" + (inspectorTab === id ? " on" : "")}
+            className={"insp-tab" + (activeTab === id ? " on" : "")}
             onClick={event=>{if(event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;event.preventDefault();const href=tabUrl(id);memoryNavigate(href,false,onlyInspectorChanges(href));}}
           >
             <Icon size={13} />
@@ -129,8 +138,8 @@ export function RightPanel() {
         ))}
       </nav>
       <div className="insp-body" style={{ display: "flex", flexDirection: "column" }}>
-        {inspectorTab === "files" && <FilesTab rootPath={cwd} rootName={project?.name ?? null} />}
-        {inspectorTab === "info" &&
+        {activeTab === "files" && <FilesTab rootPath={cwd} rootName={project?.name ?? null} />}
+        {activeTab === "info" &&
           (memoryInfoRoute ? (
             <Suspense fallback={null}><MemoryInfo route={memoryInfoRoute} /></Suspense>
           ) : session ? (
@@ -142,7 +151,8 @@ export function RightPanel() {
               {t("panel.noSession")}
             </div>
           ))}
-        {inspectorTab === "git" && <GitTab path={cwd} session={session} />}
+        {activeTab === "git" && <GitTab path={cwd} session={session} />}
+        {activeTab === "ports" && <PortsTab />}
       </div>
     </aside>
   );

@@ -244,7 +244,7 @@ pub fn probe(base_url: &str, token: &str) -> GiteaProbe {
 }
 
 /// Extract a lowercase host from HTTPS, SSH, or SCP-style Git URLs.
-fn url_host(url: &str) -> Option<String> {
+pub(crate) fn url_host(url: &str) -> Option<String> {
     let mut s = url.trim();
     if let Some(i) = s.find("://") {
         s = &s[i + 3..];
@@ -289,7 +289,7 @@ fn parse_owner_repo(url: &str) -> Option<(String, String)> {
 
 /// Convert a full baseline ref to the remote base branch name by stripping `refs/heads/` or
 /// `refs/remotes/<remote>/`; return other forms unchanged.
-fn pr_base_name(base_ref: &str) -> String {
+pub(crate) fn pr_base_name(base_ref: &str) -> String {
     if let Some(rest) = base_ref.strip_prefix("refs/heads/") {
         return rest.to_string();
     }
@@ -344,6 +344,7 @@ pub struct PrOutcome {
 
 /// Land through Gitea by pushing the worktree branch to origin and opening a pull request whose head is
 /// the worktree branch and base is the shortened baseline branch.
+#[allow(clippy::too_many_arguments)]
 pub fn open_pr(
     db: &Db,
     identifier: &str,
@@ -352,6 +353,7 @@ pub fn open_pr(
     base_ref: &str,
     title: &str,
     body: &str,
+    draft: bool,
 ) -> Result<PrOutcome, String> {
     let base_url = get_base_url(db).ok_or("Gitea base URL not configured")?;
     let token = load_token(db, identifier).ok_or("Gitea token not configured")?;
@@ -370,15 +372,23 @@ pub fn open_pr(
         owner,
         repo
     );
-    let title = if title.trim().is_empty() {
+    let raw_title = if title.trim().is_empty() {
         head_branch
     } else {
         title.trim()
     };
+    let final_title = if draft
+        && !raw_title.to_lowercase().starts_with("wip:")
+        && !raw_title.to_lowercase().starts_with("draft:")
+    {
+        format!("WIP: {raw_title}")
+    } else {
+        raw_title.to_string()
+    };
     let payload = serde_json::json!({
         "head": head_branch,
         "base": base_name,
-        "title": title,
+        "title": final_title,
         "body": body,
     });
     // Send serialized JSON as a string because ureq's send_json requires an otherwise unused feature.
@@ -416,6 +426,87 @@ pub fn open_pr(
         }
         Err(e) => Err(format!("Gitea PR request failed: {e}")),
     }
+}
+
+/// Inspect the newest Gitea pull request matching `head_branch`, preferring open PRs.
+pub fn pr_status(
+    db: &Db,
+    identifier: &str,
+    wt_path: &str,
+    head_branch: &str,
+) -> Result<Option<crate::git::pr::PrStatusInfo>, String> {
+    let Some(base_url) = get_base_url(db) else {
+        return Ok(None);
+    };
+    let Some(token) = load_token(db, identifier) else {
+        return Ok(None);
+    };
+    let Some(origin) = git::remote_origin_url(wt_path) else {
+        return Ok(None);
+    };
+    let Some((owner, repo)) = parse_owner_repo(&origin) else {
+        return Ok(None);
+    };
+    let url = format!(
+        "{}/api/v1/repos/{}/{}/pulls?state=all&limit=30",
+        base_url.trim_end_matches('/'),
+        owner,
+        repo
+    );
+    let body = http_get(&url, Some(&token))
+        .map_err(|_| "Could not load Gitea pull request status right now.".to_string())?;
+    let items: Vec<Value> = serde_json::from_str(&body)
+        .map_err(|_| "Received an invalid Gitea pull request response.".to_string())?;
+    let matching: Vec<&Value> = items
+        .iter()
+        .filter(|item| {
+            item.get("head")
+                .and_then(|h| h.get("ref"))
+                .and_then(Value::as_str)
+                == Some(head_branch)
+        })
+        .collect();
+    let chosen = matching
+        .iter()
+        .copied()
+        .find(|item| item.get("state").and_then(Value::as_str) == Some("open"))
+        .or_else(|| matching.first().copied());
+    let Some(v) = chosen else {
+        return Ok(None);
+    };
+    let number = v.get("number").and_then(Value::as_u64).unwrap_or(0);
+    let title = v.get("title").and_then(Value::as_str).unwrap_or_default().to_string();
+    let html_url = v.get("html_url").and_then(Value::as_str).unwrap_or_default().to_string();
+    let base = v
+        .get("base")
+        .and_then(|b| b.get("ref"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let merged = v.get("merged").and_then(Value::as_bool).unwrap_or(false);
+    let draft = v.get("draft").and_then(Value::as_bool).unwrap_or(false)
+        || title.to_lowercase().starts_with("wip:")
+        || title.to_lowercase().starts_with("[wip]");
+    let raw_state = v.get("state").and_then(Value::as_str).unwrap_or("open");
+    let state = if merged {
+        "merged"
+    } else if raw_state == "open" && draft {
+        "draft"
+    } else if raw_state == "open" {
+        "open"
+    } else {
+        "closed"
+    };
+    Ok(Some(crate::git::pr::PrStatusInfo {
+        provider: "gitea".into(),
+        number,
+        title,
+        url: html_url,
+        state: state.into(),
+        base,
+        checks: "none".into(),
+        worktree: None,
+    }))
 }
 
 #[cfg(test)]

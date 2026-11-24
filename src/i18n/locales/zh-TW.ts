@@ -539,6 +539,9 @@ const zhTW: typeof en = {
   "settings.deepseekInvalid": "請輸入有效的 http(s) API 位址與單行 API 金鑰。",
   "settings.deepseekLocalOnly": "這些憑據保存在執行主機上，因此只能在主機上修改。",
   "settings.appearance": "外觀", // Appearance
+  "settings.darkTheme": "深色主題", // Dark theme
+  "settings.lightTheme": "淺色主題", // Light theme
+  "settings.themeClassic": "經典", // Classic
   "settings.accent": "強調色", // Accent
   "settings.accentAuto": "跟隨明暗", // Follow theme
   "settings.density": "密度", // Density
@@ -677,6 +680,31 @@ const zhTW: typeof en = {
   "changes.ignoreWhitespace": "忽略空白",
   "changes.collapseUnchanged": "摺疊未變更的行",
   "changes.tooLarge": "此檔案超過 2 MiB 的預覽上限。",
+  "changes.review.addLine": (range: string) => `註解 ${range}`,
+  "changes.review.addFile": "新增註解",
+  "changes.review.gutterHint": (line: number) => `在第 ${line} 行新增審查註解`,
+  "changes.review.sideOriginal": "變更前",
+  "changes.review.sideModified": "變更後",
+  "changes.review.fieldLabel": "審查註解",
+  "changes.review.placeholder": "輸入給智慧體的修改意見（Enter 儲存，Shift+Enter 換行）…",
+  "changes.review.save": "儲存註解",
+  "changes.review.cancel": "取消",
+  "changes.review.edit": "編輯",
+  "changes.review.remove": "移除",
+  "changes.review.count": (count: number, files: number) =>
+    count === 1 ? "1 則審查註解" : `共 ${files} 個檔案、${count} 則審查註解`,
+  "changes.review.showList": "註解清單",
+  "changes.review.hideList": "收合清單",
+  "changes.review.clearAll": "全部清除",
+  "changes.review.targetAgent": "目標會話",
+  "changes.review.sendTo": (agent: string) => `傳送給 ${agent}`,
+  "changes.review.pasteTo": (agent: string) => `貼到 ${agent}`,
+  "changes.review.sending": "正在傳送…",
+  "changes.review.copy": "複製審查內容",
+  "changes.review.copied": "已複製",
+  "changes.review.noAgent": "請先在此儲存庫開啟或啟動智慧體會話，即可直接傳送註解。",
+  "changes.review.promptHeader": "請根據以下針對目前變更的審查註解進行修改：",
+  "changes.review.promptComment": "註解：",
   "git.fileStatus.modified": "已修改",
   "git.fileStatus.added": "已新增",
   "git.fileStatus.deleted": "已刪除",
@@ -724,6 +752,39 @@ const zhTW: typeof en = {
   "git.pr.noToken": "請先在設定中加入 Gitea 權杖，才能在這裡建立提取要求。",
   "git.pr.unreachable": "目前無法連線到 Gitea 伺服器。",
   "git.pr.opened": "已建立提取要求",
+  "git.pr.openMr": "建立合併要求",
+  "git.pr.openedMr": "已建立合併要求",
+  "git.pr.formTitleProvider": (provider: string) =>
+    provider === "gitlab"
+      ? "建立 GitLab 合併要求"
+      : provider === "github"
+        ? "建立 GitHub 提取要求"
+        : "建立 Gitea 提取要求",
+  "git.pr.formDescriptionMr": (branch: string, base: string) =>
+    `將 ${branch} 推送到 origin，並建立合併到 ${base} 的合併要求。`,
+  "git.pr.draftField": "建立為草稿（Draft）",
+  "git.pr.noGhCli": "請先安裝 GitHub CLI（gh），才能在這裡建立提取要求。",
+  "git.pr.noGhAuth": "請在終端機執行 gh auth login 登入 GitHub。",
+  "git.pr.noGlabCli": "請先安裝 GitLab CLI（glab），才能在這裡建立合併要求。",
+  "git.pr.noGlabAuth": "請在終端機執行 glab auth login 登入 GitLab。",
+  "git.pr.state.open": "開啟中",
+  "git.pr.state.draft": "草稿",
+  "git.pr.state.merged": "已合併",
+  "git.pr.state.closed": "已關閉",
+  "git.pr.checks.passing": "檢查通過",
+  "git.pr.checks.failing": "檢查失敗",
+  "git.pr.checks.pending": "檢查執行中",
+  "git.pr.refreshStatus": "重新整理狀態",
+  "git.pr.cleanupWorktree": "清理工作樹…",
+  "git.pr.cleanupTitle": "清理已合併的工作樹",
+  "git.pr.cleanupDescription": (branch: string, path: string) =>
+    `分支 ${branch} 已合併，是否移除工作樹目錄 ${path}？`,
+  "git.pr.cleanupDeleteBranch": (branch: string) => `同時刪除本機分支 ${branch}`,
+  "git.pr.cleanupArchiveSession": "封存此會話",
+  "git.pr.cleanupArchiveHint": "取消勾選則保留此會話，並切回主儲存庫目錄。",
+  "git.pr.cleanupForce": "強制刪除未提交的變更",
+  "git.pr.cleanupSubmit": "立即清理",
+  "git.pr.cleanupSubmitting": "正在清理…",
   "git.push": "推送",
   "git.pushTitle": (u: string) => `推送到 ${u}`,
   "git.publish": "發佈分支",
@@ -928,6 +989,7 @@ const zhTW: typeof en = {
   "settings.scCopyTerminal": "複製終端機選取內容", // Copy terminal selection
   "settings.scSelectAllTerminal": "全選終端機內容", // Select all in terminal
   "settings.scSaveDoc": "儲存文件", // Save document
+  "settings.scFocusSidebar": "聚焦側邊欄", // Focus sidebar
   "settings.scRecording": "請按下按鍵…", // Press keys…
   "settings.scHint": "點一下快捷鍵，再按下新的組合鍵（需含 Cmd/Ctrl）。", // hint
   "settings.scScreenshotSection": "截圖",
@@ -1226,6 +1288,7 @@ const zhTW: typeof en = {
   "tree.openProject": "開啟專案", // Open Project
   "tree.noAttention": "沒有符合狀態篩選的會話", // No sessions match the status filter
   "tree.noMatch": "無符合結果", // No matches
+  "tree.otherProjects": "其他專案", // Other projects
 
   // Dialog fields
   "tree.groupName": "群組名稱", // Group name
@@ -2719,6 +2782,25 @@ const zhTW: typeof en = {
   "plugins.uninstallConfirm": (name: string) => `確定要解除安裝外掛「${name}」嗎？`,
   "plugins.removeData": "同時刪除此外掛的本機資料目錄",
   "plugins.loadFailed": "外掛介面載入失敗",
+  "ports.title": "連接埠", // Ports
+  "ports.active": "已轉送", // Forwarded
+  "ports.activeEmpty": "沒有已轉送的連接埠", // No forwarded ports
+  "ports.detected": "已偵測", // Detected
+  "ports.detectedEmpty": "找不到正在監聽的連接埠", // No listening ports found
+  "ports.detectionUnavailable": "此主機不支援連接埠偵測", // Port detection is not available on this host
+  "ports.manual": "轉送連接埠", // Forward a port
+  "ports.portPlaceholder": "遠端連接埠", // Remote port
+  "ports.forward": "轉送", // Forward
+  "ports.open": "在瀏覽器中開啟", // Open in browser
+  "ports.stop": "停止", // Stop
+  "ports.localChanged": (port) => `本機連接埠 ${port} 已被占用，已改用其他本機連接埠`, // Local port {port} was busy, so another local port is used
+  "ports.unavailable": "無法使用 — 請更新 VelaTerm", // Unavailable — update VelaTerm
+  "ports.invalidPort": (port) => `無效的連接埠：${port}`, // Invalid port: {port}
+  "ports.missingPort": "請輸入連接埠", // Enter a port
+  "ports.unknownAction": (action) => `未知的操作：${action}`, // Unknown action: {action}
+  "ports.limit": (max) => `每個連線最多可轉送 ${max} 個連接埠`, // At most {max} ports can be forwarded per connection
+  "ports.notForwarded": (port) => `連接埠 ${port} 尚未轉送`, // Port {port} is not forwarded
+  "statusbar.ports": (n) => `已轉送 ${n} 個連接埠`, // {n} forwarded ports
 };
 
 export default zhTW;

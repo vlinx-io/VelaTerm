@@ -445,6 +445,7 @@ fn installed_and_working(kind: crate::models::SessionKind) -> bool {
     forget_shell_discovery();
     match super::executable::discover(kind) {
         super::executable::LaunchBinary::Path(path) => {
+            super::version::forget(&path);
             super::health::forget(&path);
             super::health::check(kind, &path) != super::health::Health::Broken
         }
@@ -457,6 +458,7 @@ fn installed_and_working(kind: crate::models::SessionKind) -> bool {
 pub fn locate_working_bin(agent: &str) -> Option<String> {
     let path = locate_installed_bin(agent)?;
     forget_shell_discovery();
+    super::version::forget(&path);
     super::health::forget(&path);
     let kind = crate::models::SessionKind::from_db(agent);
     (super::health::check(kind, &path) != super::health::Health::Broken).then_some(path)

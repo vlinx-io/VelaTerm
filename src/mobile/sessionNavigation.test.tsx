@@ -16,12 +16,12 @@ describe("mobile session URLs", () => {
   });
   it("preserves the connection path and unrelated query/hash while encoding session identity", () => {
     history.replaceState(null, "", "/share/project?view=mobile&filter=active#anchor");
-    expect(mobileSessionUrl("id +&", "history")).toBe("/share/project?view=mobile&filter=active&session=id+%2B%26&sessionView=history#anchor");
+    expect(mobileSessionUrl("id +&", "history")).toBe(`${location.origin}/share/project?view=mobile&filter=active&session=id+%2B%26&sessionView=history#anchor`);
   });
   it("provides actual terminal/history link targets and updates the mounted view", () => {
     render(<><Location /><MobileSessionLink sessionId="kiro-1" view="history">History</MobileSessionLink></>);
     const link = screen.getByRole("link");
-    expect(link.getAttribute("href")).toBe("/?session=kiro-1&sessionView=history");
+    expect(link.getAttribute("href")).toBe(`${location.origin}/?session=kiro-1&sessionView=history`);
     fireEvent.click(link);
     expect(screen.getByText("kiro-1:history")).toBeTruthy();
     act(() => navigateMobileSession("kiro-1"));

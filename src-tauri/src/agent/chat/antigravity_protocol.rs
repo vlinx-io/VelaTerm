@@ -45,31 +45,176 @@ pub fn strip_streamed_401_warning(chunk: &str) -> Option<String> {
 }
 
 /// Whether an error string is a transient Antigravity upstream API or transport error that can be
-/// safely retried on the same ACP session (for example Google CloudCode 404/500/503/504 or stream
-/// EOF / connection reset).
+/// safely retried on the same ACP session (for example Google CloudCode 404/500/502/503/504,
+/// `There was a network issue connecting to the server`, or stream EOF / connection reset).
 pub fn is_transient_upstream_error(text: &str) -> bool {
-    if is_oauth_401_error(text) {
+    if is_oauth_401_error(text) || is_invalid_thinking_signature(text) {
         return false;
     }
     let lower = text.to_ascii_lowercase();
     if lower.contains("failed to construct executor")
         || lower.contains("resource_exhausted")
+        || lower.contains("quota_exhausted")
         || lower.contains("code 429")
+        || lower.contains("error 429,")
         || lower.contains("permission_denied")
         || lower.contains("invalid_argument")
     {
         return false;
     }
-    (lower.contains("not_found (code 404)") && lower.contains("requested entity was not found"))
+    lower.contains("there was a network issue connecting to the server")
+        || (lower.contains("not_found (code 404)") && lower.contains("requested entity was not found"))
         || lower.contains("internal (code 500)")
+        || lower.contains("bad gateway")
+        || lower.contains("code 502")
+        || lower.contains("error 500,")
+        || lower.contains("error 502,")
+        || lower.contains("error 503,")
+        || lower.contains("error 504,")
         || lower.contains("unavailable (code 503)")
         || lower.contains("deadline_exceeded (code 504)")
+        || lower.contains("failed to connect to backend api")
+        || lower.contains("the model is currently unreachable")
         || (lower.contains("request failed:")
             && (lower.contains("eof")
                 || lower.contains("connection reset by peer")
                 || lower.contains("broken pipe")
                 || lower.contains("tls handshake timeout")
-                || lower.contains("i/o timeout")))
+                || lower.contains("i/o timeout")
+                || lower.contains("network is unreachable")
+                || lower.contains("temporary failure in name resolution")
+                || lower.contains("context deadline exceeded")))
+}
+
+/// Whether an error indicates a corrupted Claude `thinking` block signature in Antigravity's
+/// persisted history, which rejects every subsequent prompt sent to that native conversation.
+pub fn is_invalid_thinking_signature(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("messages.")
+        && lower.contains(".content.")
+        && (lower.contains(".thinking.signature: field required")
+            || lower.contains("invalid `signature` in `thinking` block"))
+}
+
+/// Whether an error string reports an Antigravity quota or rate-limit exhaustion.
+pub fn is_usage_limit_error(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("reason:quota_exhausted")
+        || lower.contains("resource_exhausted")
+        || lower.contains("code 429")
+        || lower.contains("error 429,")
+        || lower.contains("you have reached your current quota for this period")
+}
+
+/// Extract a quota / rate-limit `Reset` timestamp from Antigravity error metadata
+/// (`quotaResetTimeStamp:<iso>`, `quotaResetDelay:<go_duration>`, or `retryDelay:<go_duration>`).
+pub fn parse_usage_limit_reset(text: &str, now_epoch_secs: Option<i64>) -> Option<super::auto_continue::Reset> {
+    if let Some(raw_ts) = extract_metadata_token(text, "quotaResetTimeStamp") {
+        if let Some(ms) = parsed_timestamp_ms(Some(raw_ts)) {
+            let resets_at = (ms / 1_000) as i64;
+            let limit_type = now_epoch_secs.and_then(|now| infer_limit_type_secs(resets_at.saturating_sub(now)));
+            return Some(super::auto_continue::Reset { resets_at, limit_type });
+        }
+    }
+    let now = now_epoch_secs?;
+    let delay_ms = extract_metadata_token(text, "quotaResetDelay")
+        .and_then(parse_go_duration_ms)
+        .or_else(|| extract_metadata_token(text, "retryDelay").and_then(parse_go_duration_ms))?;
+    if delay_ms == 0 {
+        return None;
+    }
+    let delay_secs = ((delay_ms + 999) / 1_000) as i64;
+    Some(super::auto_continue::Reset {
+        resets_at: now.saturating_add(delay_secs),
+        limit_type: infer_limit_type_secs(delay_secs),
+    })
+}
+
+fn infer_limit_type_secs(delta_secs: i64) -> Option<String> {
+    if delta_secs <= 0 {
+        None
+    } else if delta_secs <= 6 * 3_600 {
+        Some("five_hour".into())
+    } else if delta_secs >= 24 * 3_600 {
+        Some("seven_day".into())
+    } else {
+        None
+    }
+}
+
+fn extract_metadata_token<'a>(text: &'a str, field: &str) -> Option<&'a str> {
+    let mut search_from = 0;
+    while let Some(rel) = text[search_from..].find(field) {
+        let after_field = search_from + rel + field.len();
+        search_from = after_field;
+        let rest = &text[after_field..];
+        // Accept Go map (`field:value`), JSON (`"field": "value"`), and escaped JSON (`\"field\":\"value\"`).
+        let rest = rest.strip_prefix("\\\"").or_else(|| rest.strip_prefix('"')).unwrap_or(rest);
+        let rest = rest.trim_start();
+        let Some(rest) = rest.strip_prefix(':') else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let rest = rest.strip_prefix("\\\"").or_else(|| rest.strip_prefix('"')).unwrap_or(rest);
+        let end = rest
+            .find(|c: char| c.is_whitespace() || matches!(c, ']' | '}' | ',' | '"' | '\'' | '\\'))
+            .unwrap_or(rest.len());
+        let token = &rest[..end];
+        if !token.is_empty() {
+            return Some(token);
+        }
+    }
+    None
+}
+
+fn parse_go_duration_ms(raw: &str) -> Option<u64> {
+    let mut cursor = 0;
+    let bytes = raw.as_bytes();
+    let mut total_ms = 0f64;
+    let mut matched = false;
+    while cursor < bytes.len() {
+        let num_start = cursor;
+        let mut saw_dot = false;
+        while cursor < bytes.len() {
+            let b = bytes[cursor];
+            if b.is_ascii_digit() {
+                cursor += 1;
+            } else if b == b'.' && !saw_dot {
+                saw_dot = true;
+                cursor += 1;
+            } else {
+                break;
+            }
+        }
+        if cursor == num_start {
+            return None;
+        }
+        let amount: f64 = raw[num_start..cursor].parse().ok()?;
+        let rest = &raw[cursor..];
+        let (unit_ms, unit_len) = if rest.starts_with("ns") {
+            (1e-6, 2)
+        } else if rest.starts_with("us") {
+            (1e-3, 2)
+        } else if rest.starts_with("µs") {
+            (1e-3, "µs".len())
+        } else if rest.starts_with("μs") {
+            (1e-3, "μs".len())
+        } else if rest.starts_with("ms") {
+            (1.0, 2)
+        } else if rest.starts_with('s') {
+            (1_000.0, 1)
+        } else if rest.starts_with('m') {
+            (60_000.0, 1)
+        } else if rest.starts_with('h') {
+            (3_600_000.0, 1)
+        } else {
+            return None;
+        };
+        total_ms += amount * unit_ms;
+        cursor += unit_len;
+        matched = true;
+    }
+    matched.then_some(total_ms.ceil() as u64)
 }
 
 /// Extract the error message from `agy acp`'s streamed `"\n⚠ <err>\n"` chunk when `<err>` is a
@@ -1029,5 +1174,41 @@ mod tests {
         let err_rows = history_rows(&unrecovered.iter().map(Value::to_string).collect::<Vec<_>>().join("\n"));
         assert_eq!(err_rows.len(), 3);
         assert!(matches!(&err_rows[2], ChatRow::Error { message, .. } if is_transient_upstream_error(message)));
+    }
+
+    #[test]
+    fn recognizes_generic_network_issue_502_thinking_signature_and_usage_reset() {
+        let generic_net = "\n⚠ There was a network issue connecting to the server, please try again.\n";
+        assert_eq!(
+            strip_streamed_transient_warning(generic_net).as_deref(),
+            Some("There was a network issue connecting to the server, please try again."),
+        );
+        assert!(is_transient_upstream_error(
+            "Error 502, Message: Bad Gateway: Failed to connect to backend API, Status: 502 Bad Gateway"
+        ));
+        assert!(is_invalid_thinking_signature(
+            r#"Error 400, Message: {"type":"error","error":{"message":"messages.1.content.0.thinking.signature: Field required"}}"#
+        ));
+        assert!(is_invalid_thinking_signature(
+            r#"messages.3.content.0: Invalid `signature` in `thinking` block"#
+        ));
+        assert!(!is_transient_upstream_error(
+            r#"messages.3.content.0: Invalid `signature` in `thinking` block"#
+        ));
+
+        let ts_reset = parse_usage_limit_reset(
+            "metadata:map[quotaResetDelay:3600s quotaResetTimeStamp:2026-11-09T01:05:00Z] reason:QUOTA_EXHAUSTED]",
+            Some(1_700_000_000),
+        )
+        .unwrap();
+        assert_eq!(ts_reset.resets_at, 1_794_186_300);
+
+        let delay_reset = parse_usage_limit_reset(
+            "Details: [map[retryDelay:1m30s] map[quotaResetTimeStamp:invalid]]",
+            Some(10_000),
+        )
+        .unwrap();
+        assert_eq!(delay_reset.resets_at, 10_090);
+        assert_eq!(delay_reset.limit_type.as_deref(), Some("five_hour"));
     }
 }

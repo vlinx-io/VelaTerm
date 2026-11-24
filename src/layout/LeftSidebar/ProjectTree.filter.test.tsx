@@ -38,6 +38,8 @@ vi.mock("../../hooks/shortcutRegistry", () => ({
   formatCombo: (combo: string) => combo,
 }));
 vi.mock("../../ipc/shareBase", () => ({ isShareSurface: false }));
+// Keyboard navigation hands focus back to the terminal; the real registry pulls in the transport.
+vi.mock("../../terminal/registry", () => ({ focusTerminal: vi.fn() }));
 vi.mock("../../sharing/sessionNavigation", () => ({
   navigateSharedSession: vi.fn(),
   sharedSessionUrl: () => "",

@@ -83,6 +83,7 @@ import {
   resolveTheme,
   type AccentChoice,
   type DarkStyle,
+  type LightStyle,
   type Density,
   type DividerStyle,
   type InspectorTab,
@@ -1168,6 +1169,7 @@ interface TermStore {
 
   // Vlinx appearance settings, driven by `data-*` attributes and persisted in `vlx-settings`.
   darkStyle: DarkStyle;
+  lightStyle: LightStyle;
   accent: AccentChoice;
   density: Density;
   paneStyle: PaneStyle;
@@ -1653,6 +1655,9 @@ interface TermStore {
 
   // Persisted Vlinx appearance settings applied through `data-*` attributes.
   setDarkTheme: (style: DarkStyle) => void;
+  /** Choose the theme each mode uses, without switching modes. */
+  setDarkStyle: (style: DarkStyle) => void;
+  setLightStyle: (style: LightStyle) => void;
   setAccent: (v: AccentChoice) => void;
   setDensity: (v: Density) => void;
   setPaneStyle: (v: PaneStyle) => void;
@@ -1881,6 +1886,7 @@ function persistAndApplyVisual(getState: () => TermStore) {
   const s = getState();
   const ps: PersistedSettings = {
     darkStyle: s.darkStyle,
+    lightStyle: s.lightStyle,
     accent: s.accent,
     density: s.density,
     paneStyle: s.paneStyle,
@@ -4703,14 +4709,14 @@ export const useTermStore = create<TermStore>((set, get) => ({
   toggleBottom: () => set((s) => ({ bottomExpanded: !s.bottomExpanded })),
   toggleTheme: () => {
     const mode: Theme = get().theme === "dark" ? "light" : "dark";
-    applyTheme(mode, get().darkStyle);
+    applyTheme(mode, get().darkStyle, get().lightStyle);
     pushSetting("vlx-theme", mode); // Mirror to backend for cross-shell sharing.
     persistAndApplyVisual(get); // Re-resolve automatic accents and publish `vlx-settings`.
     set({ theme: mode });
     notifyAgentsColorScheme(get);
   },
   setTheme: (mode) => {
-    applyTheme(mode, get().darkStyle);
+    applyTheme(mode, get().darkStyle, get().lightStyle);
     pushSetting("vlx-theme", mode); // Mirror to backend for cross-shell sharing.
     persistAndApplyVisual(get);
     set({ theme: mode });
@@ -5018,6 +5024,16 @@ export const useTermStore = create<TermStore>((set, get) => ({
     set({ darkStyle: style });
     get().setTheme("dark");
   },
+  setDarkStyle: (style) => {
+    set({ darkStyle: style });
+    applyTheme(get().theme, style, get().lightStyle);
+    persistAndApplyVisual(get);
+  },
+  setLightStyle: (style) => {
+    set({ lightStyle: style });
+    applyTheme(get().theme, get().darkStyle, style);
+    persistAndApplyVisual(get);
+  },
   setAccent: (v) => {
     set({ accent: v });
     persistAndApplyVisual(get);
@@ -5286,7 +5302,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
     persistAndApplyVisual(get);
   },
   applyAppearance: () => {
-    applyTheme(get().theme, get().darkStyle);
+    applyTheme(get().theme, get().darkStyle, get().lightStyle);
     persistAndApplyVisual(get);
     notifyAgentsColorScheme(get);
   },
@@ -5305,7 +5321,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
       cleanPastedImages: loadCleanPastedImages(),
       recordSessions: loadRecordSessions(),
     });
-    applyTheme(theme, ps.darkStyle);
+    applyTheme(theme, ps.darkStyle, ps.lightStyle);
     applyVisual(visualOf(ps));
     notifyAgentsColorScheme(get);
   },

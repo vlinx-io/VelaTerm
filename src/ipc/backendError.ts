@@ -108,6 +108,16 @@ export function mapBackendError(raw: string): string {
       return t("remote.bindUnavailable", detail);
     case "remote_pairing_host_invalid":
       return t("remote.pairingHostInvalid", detail);
+    case "ports_missing_port":
+      return t("ports.missingPort");
+    case "ports_invalid_port":
+      return t("ports.invalidPort", detail);
+    case "ports_unknown_action":
+      return t("ports.unknownAction", detail);
+    case "ports_limit":
+      return t("ports.limit", detail);
+    case "ports_not_forwarded":
+      return t("ports.notForwarded", detail);
     default:
       return clean;
   }

@@ -2,19 +2,60 @@
 .changes-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 13px; }
 .changes-toolbar { display: flex; gap: 8px; flex: none; }
 .changes-comparison { margin-top: 5px; color: var(--text-dim); font-size: 11px; }
-.changes-body { flex: 1; display: flex; min-height: 0; gap: var(--pane-gap, 8px); padding: 8px; }
+.changes-stack { flex: 1; display: flex; flex-direction: column; min-height: 0; gap: 8px; padding: 8px; }
+.changes-body { flex: 1; display: flex; min-height: 0; gap: var(--pane-gap, 8px); }
 .changes-files { width: min(34%, 340px); flex: none; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r-md); padding: 4px; }
-.changes-files .git-row { padding: 2px 4px; }
+.changes-files .git-row { padding: 2px 4px; flex: 1; min-width: 0; }
+.changes-file-entry { display: flex; align-items: center; gap: 4px; padding-inline-end: 4px; }
 .changes-selected { background: var(--bg-active); border-radius: var(--r-sm); }
+.changes-comment-badge { flex: none; min-inline-size: 18px; padding: 1px 6px; border-radius: 999px; background: var(--accent-soft); border: 1px solid var(--accent-line); color: var(--accent); font-size: 10.5px; font-weight: 600; text-align: center; }
 .changes-content { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
-.changes-file-path { padding: 9px 12px; font-size: 12px; font-family: var(--font-prose); overflow-wrap: anywhere; white-space: pre-wrap; border-bottom: 1px solid var(--border); }
+.changes-file-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--border); }
+.changes-file-path { min-width: 0; font-size: 12px; font-family: var(--font-prose); overflow-wrap: anywhere; white-space: pre-wrap; }
 .changes-file-path span { color: var(--text-dim); }
+.changes-add-comment-btn { display: inline-flex; align-items: center; gap: 5px; flex: none; padding: 2px 8px; font-size: 11px; }
 .changes-editor { flex: 1; min-height: 0; overflow: hidden; }
 .changes-message { padding: 16px; font-size: 12px; color: var(--text-dim); white-space: pre-wrap; }
 .changes-files button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.changes-toggle[aria-pressed="true"] { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
+
+/* ── Inline diff review bar & CodeMirror comment widgets ── */
+.diff-view-shell { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+.diff-comment-fallback { padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--bg-1); }
+.diff-review-bar { display: flex; flex-direction: column; gap: 8px; padding: 8px 12px; background: var(--bg-1); border: 1px solid var(--border-strong); border-radius: var(--r-md); flex: none; }
+.diff-review-bar-main { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+.diff-review-summary { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text); }
+.diff-review-spacer { flex: 1; min-width: 8px; }
+.diff-review-hint { color: var(--text-dim); font-size: 11.5px; }
+.diff-review-bar-main .vlx-btn { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; font-size: 11.5px; }
+.diff-review-error { color: var(--red); font-size: 11.5px; }
+.diff-review-list { list-style: none; margin: 0; padding: 6px 0 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; }
+.diff-review-list-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg-2); }
+.diff-review-list-jump { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; cursor: pointer; color: var(--text); }
+.diff-review-list-jump:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+.diff-review-list-loc { font-family: var(--font-mono); font-size: 11px; color: var(--accent); }
+.diff-review-list-body { font-size: 12px; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff-review-item-remove { flex: none; padding: 2px 8px; font-size: 11px; }
+
+.cm-diff-comment-gutter { width: 20px; cursor: pointer; }
+.cm-diff-comment-plus { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); opacity: 0; transition: opacity 120ms ease; user-select: none; }
+.cm-gutterElement:hover .cm-diff-comment-plus { opacity: 1; }
+.cm-diff-commented-line { background-color: color-mix(in srgb, var(--accent) 10%, transparent) !important; }
+.cm-diff-draft-line { background-color: color-mix(in srgb, var(--yellow) 14%, transparent) !important; }
+.cm-diff-widget-host { padding: 6px 12px; font-family: var(--font-prose); white-space: normal; }
+
+.diff-comment-card { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; background: var(--bg-1); border: 1px solid var(--border-strong); border-radius: var(--r-md); box-shadow: var(--shadow); color: var(--text); font-family: var(--font-prose); }
+.diff-comment-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.diff-comment-label, .diff-comment-meta { font-size: 11.5px; font-weight: 600; color: var(--text-mid); }
+.diff-comment-head-btns { display: inline-flex; align-items: center; gap: 6px; }
+.diff-comment-head-btns .vlx-btn { padding: 2px 8px; font-size: 11px; }
+.diff-comment-body { font-size: 12.5px; line-height: 1.45; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff-comment-textarea { resize: vertical; min-height: 64px; font-family: var(--font-prose); font-size: 12.5px; line-height: 1.45; }
+.diff-comment-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.diff-comment-actions .vlx-btn { padding: 4px 10px; font-size: 11.5px; }
+
 @media (max-width: 640px) {
   .changes-body { flex-direction: column; }
   .changes-files { width: 100%; max-height: 30%; }
   .changes-header { padding: 10px; }
 }
-.changes-toggle[aria-pressed="true"] { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
