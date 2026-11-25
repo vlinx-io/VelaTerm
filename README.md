@@ -187,8 +187,13 @@ Tauri 2: a small install that stays smooth under heavy terminal load.
 ## Download
 
 From the first command to the final review. Get the installer for your platform at
-[velaterm.com/download](https://velaterm.com/download), then start with the
-[getting started guide](docs/manuals/getting-started_20260709_2041.md).
+[velaterm.com/download](https://velaterm.com/download), or install on macOS with Homebrew:
+
+```bash
+brew install --cask velaterm
+```
+
+Then start with the [getting started guide](docs/manuals/getting-started_20260709_2041.md).
 
 ## Documentation
 

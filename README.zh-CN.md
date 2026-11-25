@@ -164,7 +164,13 @@ Claude、Codex、OpenCode、Pi 等不同智能体的会话之间，可以互相�
 
 ## 下载
 
-从敲下第一条命令，到完成最终验收。请前往 [velaterm.com/zh-CN/download](https://velaterm.com/zh-CN/download) 下载对应平台的安装包，再从[入门指南](https://velaterm.com/zh-CN/docs/getting-started)开始使用。
+从敲下第一条命令，到完成最终验收。请前往 [velaterm.com/zh-CN/download](https://velaterm.com/zh-CN/download) 下载对应平台的安装包，在 macOS 上也可以通过 Homebrew 安装：
+
+```bash
+brew install --cask velaterm
+```
+
+安装完成后，可以从[入门指南](https://velaterm.com/zh-CN/docs/getting-started)开始使用。
 
 ## 文档
 
