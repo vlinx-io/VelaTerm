@@ -195,6 +195,30 @@ describe("editing a previous message", () => {
     expect(fireEvent.paste(screen.getByRole("textbox"), { clipboardData: { items: [], getData: () => "plain text" } })).toBe(true);
     expect(imageFromNativeClipboard).toHaveBeenCalledOnce();
   });
+
+  it("inserts copied Finder file paths into the edited message instead of attaching the file icon (#195)", async () => {
+    env.isTauri = true;
+    const { platform } = await import("../../../platform");
+    const spy = vi.spyOn(platform.clipboard, "readFiles").mockResolvedValue(["/Users/me/spec.pdf"]);
+    vi.mocked(imageFromNativeClipboard).mockClear();
+    const { container } = render(<MessageBubble who="You" isUser text="Check" onEditSend={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    box.setSelectionRange(box.value.length, box.value.length);
+    const pdf = new File(["pdf"], "spec.pdf", { type: "application/pdf" });
+    fireEvent.paste(box, {
+      clipboardData: {
+        types: ["Files"],
+        items: [{ kind: "file", type: "application/pdf", getAsFile: () => pdf }],
+        files: [pdf],
+        getData: () => "",
+      },
+    });
+    await waitFor(() => expect(box.value).toBe("Check /Users/me/spec.pdf "));
+    expect(container.querySelectorAll(".sv-attach-item")).toHaveLength(0);
+    expect(imageFromNativeClipboard).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
 });
 
 describe("snapshot-backed message images", () => {

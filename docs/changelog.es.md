@@ -1,3 +1,20 @@
+## v0.3.7 — 2026-11-26
+
+- 🧩 Ahora puedes vincular sesiones de conversación existentes en un flujo de orquestación como sesión de dirección y sesiones de ejecución —o añadir sesiones de ejecución a un flujo activo—, con agrupación opcional en el árbol lateral y terminología de orquestación unificada.
+- 🪐 Antigravity funciona ahora como agente de primer nivel en los roles de dirección, ejecución y revisión de los flujos de orquestación, gestionando las pausas por tareas en segundo plano sin falsos bloqueos.
+- 🏷️ Ahora puedes renombrar por lotes con IA varias sesiones de agente seleccionadas o todas las sesiones de un grupo a la vez, con selección de elementos, progreso en directo, cancelación y reintento con un clic para los elementos fallidos.
+- 🛑 Al seleccionar varias sesiones en la barra lateral, el menú contextual ofrece ahora detener varios procesos en ejecución a la vez, omitiendo automáticamente las sesiones detenidas o de navegador y permitiendo reintentar los elementos fallidos.
+- 🔔 Los contadores de filtro de la barra lateral ahora reflejan únicamente la vista activa (Proyectos, Terminales, Tareas o Chat), y la barra de actividad muestra insignias con el recuento de pendientes en cada icono de sección.
+- 🧭 Los flujos de orquestación ahora distinguen los estados «Esperando sesión padre» y «Esperando sesiones hijas» sin disparar alertas de pendientes ni notificaciones push innecesarias en los traspasos habituales, mientras que las solicitudes de permiso siguen notificando con normalidad.
+- 📋 Pegar archivos no gráficos o carpetas copiados desde Finder o el Explorador de archivos en terminales, conversaciones o el editor de código ahora inserta sus rutas en lugar de pegar los iconos de archivo como imágenes, mientras que las capturas de pantalla y los archivos de imagen siguen adjuntándose con normalidad.
+- 🤖 `vapp session list` ahora marca las sesiones en ejecución, y `vapp session kill` permite a los agentes detener el proceso de una sesión activa conservando intactos su historial de conversación y sus archivos.
+- ⚡ Las conversaciones de Antigravity ahora se inician en paralelo sin bloquearse entre sí, mantienen intacto el historial existente ante errores temporales al reabrir y conservan todos los mensajes incluso cuando se reinicia la numeración de pasos.
+- 📚 `vkb` ahora funciona desde terminales temporales y en todos los directorios de proyectos importados, se conecta localmente sin interferencias de variables de proxy y muestra mensajes de error claros.
+- 📁 En macOS, los terminales abiertos en carpetas con nombres no ASCII ahora abren paneles divididos y el panel Archivos en el directorio correcto, y el panel Archivos vuelve automáticamente a la raíz del proyecto cuando se elimina la carpeta de una sesión.
+- 🛡️ Se ha mejorado la estabilidad de la aplicación de escritorio en Windows y macOS, evitando bloqueos y cierres inesperados durante actividad intensa con múltiples sesiones y al interactuar con el Dock de macOS o el navegador integrado.
+- ⌨️ Pulsar las teclas de flecha en campos de texto, al renombrar pestañas y en las anotaciones de texto de capturas de pantalla en macOS ya no inserta caracteres de control inesperados.
+- ⚠️ En la aplicación Electron, un aviso descartable te alerta ahora tras un reinicio inesperado del servicio en segundo plano para indicar que las sesiones que estaban en ejecución se detuvieron.
+
 ## v0.3.6 — 2026-11-24
 
 - 📝 Las vistas de diferencias ahora admiten comentarios de revisión en línea sobre las líneas seleccionadas, con una barra de resumen para editarlos, copiarlos o enviarlos directamente a una sesión de agente activa.

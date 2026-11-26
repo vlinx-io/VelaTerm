@@ -1,3 +1,20 @@
+## v0.3.7 — 2026-11-26
+
+- 🧩 Agora você pode vincular sessões de conversa existentes a um fluxo de orquestração como sessão de comando e sessões de execução — ou adicionar sessões de execução a um fluxo ativo —, com agrupamento opcional na árvore lateral e terminologia de orquestração unificada.
+- 🪐 O Antigravity agora atua como agente de primeira classe nos papéis de comando, execução e revisão em fluxos de orquestração, lidando com pausas de tarefas em segundo plano sem falsos travamentos.
+- 🏷️ Agora é possível renomear em lote com IA várias sessões de agente selecionadas ou todas as sessões de um grupo de uma só vez, com seleção de itens, progresso em tempo real, cancelamento e nova tentativa em um clique para os itens com falha.
+- 🛑 Selecionar várias sessões na barra lateral agora oferece no menu de contexto o encerramento em lote de processos em execução, pulando automaticamente sessões paradas ou de navegador e permitindo tentar novamente os itens com falha.
+- 🔔 Os contadores de filtro da barra lateral agora refletem apenas a visualização ativa (Projetos, Terminais, Tarefas ou Chat), e a barra de atividades passa a exibir selos com a contagem de pendentes em cada ícone de seção.
+- 🧭 Os fluxos de orquestração agora distinguem os estados «Aguardando sessão pai» e «Aguardando sessões filhas» sem disparar alertas de pendência ou notificações push desnecessárias nas transições rotineiras, enquanto solicitações de permissão continuam notificando normalmente.
+- 📋 Colar arquivos não gráficos ou pastas copiados do Finder ou do Explorador de Arquivos em terminais, conversas ou no editor de código agora insere seus caminhos em vez de colar ícones de arquivo como imagens, enquanto capturas de tela e arquivos de imagem continuam sendo anexados normalmente.
+- 🤖 `vapp session list` agora indica quais sessões estão em execução, e `vapp session kill` permite que agentes encerrem o processo de uma sessão em execução mantendo intactos o histórico da conversa e os arquivos.
+- ⚡ As conversas do Antigravity agora iniciam em paralelo sem bloquear umas às outras, preservam o histórico existente diante de erros temporários ao reabrir e mantêm todas as mensagens mesmo quando as etapas da conversa são reiniciadas.
+- 📚 `vkb` agora funciona em terminais temporários e em diretórios de projetos importados, conecta-se localmente sem interferência de variáveis de proxy e exibe mensagens de erro claras.
+- 📁 No macOS, terminais em pastas com caracteres não ASCII agora abrem painéis divididos e o painel Arquivos no diretório correto, e o painel Arquivos retorna automaticamente à raiz do projeto quando a pasta de uma sessão é excluída.
+- 🛡️ Estabilidade aprimorada no aplicativo desktop para Windows e macOS, evitando travamentos durante uso intenso com várias sessões e em interações com o Dock do macOS ou com o navegador integrado.
+- ⌨️ Pressionar as teclas de seta em campos de texto, ao renomear abas e em anotações de texto de capturas de tela no macOS não insere mais caracteres de controle indevidos.
+- ⚠️ No aplicativo Electron, um banner de aviso dispensável agora informa quando o serviço em segundo plano é reiniciado inesperadamente, avisando que as sessões que estavam em execução foram encerradas.
+
 ## v0.3.6 — 2026-11-24
 
 - 📝 As visualizações de diff agora aceitam comentários de revisão em linha nas linhas selecionadas, com uma barra de resumo para editar, copiar ou enviar todos os comentários diretamente para uma sessão de agente ativa.

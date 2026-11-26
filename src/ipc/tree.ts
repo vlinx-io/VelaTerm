@@ -210,11 +210,28 @@ export function cancelSessionTitle(sessionId: string, operationId: string): Prom
   return invoke("cancel_session_title", { sessionId, operationId });
 }
 
-export function sessionTitleOptions(sessionId: string): Promise<{
+export interface SessionTitleOptions {
   agents: (import("./launch").LaunchOption & { available: boolean; model: string; effort: string; modelSelectable: boolean })[];
-  agent: SessionKind | ""; sessionName: string;
-}> {
+  agent: SessionKind | "";
+  sessionName: string;
+}
+
+export interface BatchSessionTitleItem {
+  id: string;
+  name: string;
+  kind: SessionKind;
+}
+
+export interface BatchSessionTitleOptions extends SessionTitleOptions {
+  sessions: BatchSessionTitleItem[];
+}
+
+export function sessionTitleOptions(sessionId: string): Promise<SessionTitleOptions> {
   return invoke("session_title_options", { sessionId });
+}
+
+export function sessionTitleOptionsMany(sessionIds: readonly string[]): Promise<BatchSessionTitleOptions> {
+  return invoke("session_title_options", { sessionIds: [...sessionIds] });
 }
 
 /** Clear a node's worktree binding when converting it to a regular session/group. Remove

@@ -31,58 +31,9 @@ use std::time::{Duration, Instant};
 
 /// Monotonic epoch bumped whenever Antigravity credentials are refreshed, replaced, or signed out.
 static AUTH_EPOCH: AtomicU64 = AtomicU64::new(1);
-/// Monotonic id for active auth-gate leases so an expired lease never clears a newer holder.
-static NEXT_GATE_ID: AtomicU64 = AtomicU64::new(1);
-
-/// Maximum time one `agy` process may hold the credential startup gate before letting peers proceed.
-/// Slightly above `agy`'s internal 10s `keyringAuth` timeout so an unresponsive child cannot stall peers.
-#[cfg(not(test))]
-const DEFAULT_AUTH_GATE_LEASE: Duration = Duration::from_secs(12);
-#[cfg(test)]
-const DEFAULT_AUTH_GATE_LEASE: Duration = Duration::from_millis(500);
 
 /// Reuse a completed `session/list` readiness answer across simultaneous pane focus checks.
 const READINESS_CACHE_TTL: Duration = Duration::from_secs(10);
-
-#[derive(Default)]
-struct ScopeGate {
-    active: Option<(u64, Instant)>,
-}
-
-struct ScopeGateEntry {
-    state: Mutex<ScopeGate>,
-    cv: Condvar,
-}
-
-impl Default for ScopeGateEntry {
-    fn default() -> Self {
-        Self {
-            state: Mutex::new(ScopeGate::default()),
-            cv: Condvar::new(),
-        }
-    }
-}
-
-/// RAII lease serializing the initial credential-load / token-refresh window across concurrent `agy` spawns.
-pub struct AuthGatePermit {
-    entry: Arc<ScopeGateEntry>,
-    id: u64,
-}
-
-impl Drop for AuthGatePermit {
-    fn drop(&mut self) {
-        let mut state = self.entry.state.lock().unwrap();
-        if state.active.is_some_and(|(id, _)| id == self.id) {
-            state.active = None;
-            self.entry.cv.notify_one();
-        }
-    }
-}
-
-fn auth_gates() -> &'static Mutex<HashMap<String, Arc<ScopeGateEntry>>> {
-    static GATES: OnceLock<Mutex<HashMap<String, Arc<ScopeGateEntry>>>> = OnceLock::new();
-    GATES.get_or_init(|| Mutex::new(HashMap::new()))
-}
 
 #[derive(Default)]
 struct ReadinessSlot {
@@ -141,36 +92,6 @@ pub fn auth_scope_key(bin: &str, args: &[String]) -> String {
             .unwrap_or_default()
     });
     format!("{}|{}|{}", bin.trim(), home, cli_name.unwrap_or_default())
-}
-
-/// Acquire the credential startup gate for `(bin, args)` so concurrent `agy` processes do not
-/// contend on the system keyring or trigger duplicate OAuth token refreshes simultaneously.
-pub fn acquire_auth_gate(bin: &str, args: &[String]) -> AuthGatePermit {
-    acquire_auth_gate_with_lease(bin, args, DEFAULT_AUTH_GATE_LEASE)
-}
-
-pub fn acquire_auth_gate_with_lease(bin: &str, args: &[String], lease: Duration) -> AuthGatePermit {
-    let scope = auth_scope_key(bin, args);
-    let entry = {
-        let mut map = auth_gates().lock().unwrap();
-        map.entry(scope).or_default().clone()
-    };
-    let id = NEXT_GATE_ID.fetch_add(1, Ordering::Relaxed);
-    let mut state = entry.state.lock().unwrap();
-    loop {
-        let now = Instant::now();
-        match state.active {
-            Some((_, deadline)) if now < deadline => {
-                let wait = deadline.saturating_duration_since(now);
-                let (next, _) = entry.cv.wait_timeout(state, wait).unwrap();
-                state = next;
-            }
-            _ => {
-                state.active = Some((id, now + lease));
-                return AuthGatePermit { entry: entry.clone(), id };
-            }
-        }
-    }
 }
 
 /// Current Antigravity credential epoch. Idle ACP processes launched under an older epoch rotate
@@ -872,7 +793,7 @@ mod tests {
     }
 
     #[test]
-    fn auth_gate_serializes_same_scope_and_allows_distinct_scopes() {
+    fn auth_scope_key_distinguishes_credential_directories() {
         assert_eq!(
             auth_scope_key("/bin/agy", &["--gemini-dir=/tmp/g1".into(), "--sandbox".into()]),
             auth_scope_key("/bin/agy", &["--gemini-dir".into(), "/tmp/g1".into()])
@@ -881,28 +802,6 @@ mod tests {
             auth_scope_key("/bin/agy", &["--gemini-dir=/tmp/g1".into()]),
             auth_scope_key("/bin/agy", &["--gemini-dir=/tmp/g2".into()])
         );
-
-        let scope_args = vec!["--gemini-dir=/tmp/vlx-gate-scope-a".to_string()];
-        let other_args = vec!["--gemini-dir=/tmp/vlx-gate-scope-b".to_string()];
-        let permit1 = acquire_auth_gate_with_lease("/mock/agy-gate", &scope_args, Duration::from_secs(2));
-
-        // A distinct credential directory must not wait behind `permit1`.
-        let other_start = Instant::now();
-        let other_permit = acquire_auth_gate_with_lease("/mock/agy-gate", &other_args, Duration::from_secs(2));
-        assert!(other_start.elapsed() < Duration::from_millis(100));
-        drop(other_permit);
-
-        // A second caller on the same credential scope must wait until `permit1` drops.
-        let args_clone = scope_args.clone();
-        let waiter = std::thread::spawn(move || {
-            let start = Instant::now();
-            let _permit2 = acquire_auth_gate_with_lease("/mock/agy-gate", &args_clone, Duration::from_secs(2));
-            start.elapsed()
-        });
-        std::thread::sleep(Duration::from_millis(80));
-        drop(permit1);
-        let waited = waiter.join().unwrap();
-        assert!(waited >= Duration::from_millis(60), "expected same-scope caller to block, waited {waited:?}");
     }
 
     #[test]

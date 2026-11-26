@@ -42,11 +42,13 @@ import { defaultEngineFor, effectivePermissionMode } from "../store/settings";
 import {
   isVirtualProject,
   projectRoot,
+  supportsPlanExecute,
   type NodeKind,
   type Session,
   supportsChatEngine,
   type SessionEngine,
   type SessionKind,
+  type SessionRuntime,
   supportsPermissionToggle,
   worktreeGroup,
 } from "../types";
@@ -58,7 +60,12 @@ import { importSessionsUrl, openImportSessions } from "./ImportSessions";
 import { memoryNavigate, memoryUrl } from "./Memory/navigation";
 import { kindLabel, supportsAgentArgs } from "./sessionMenuShared";
 import { projectDisplayName } from "./LeftSidebar/systemCollections";
-import { navigatePlanExecute, planExecuteUrl } from "../components/planExecuteNavigation";
+import {
+  bindPlanExecuteUrl,
+  navigateBindPlanExecute,
+  navigatePlanExecute,
+  planExecuteUrl,
+} from "../components/planExecuteNavigation";
 
 // The menu's dialogs (about 30 KB) open only from a menu action, so they load on first use instead of with
 // the sidebar that is on screen at startup.
@@ -210,6 +217,8 @@ export interface SessionMenu {
   shellSwitchItems: (sessionId: string) => MenuItem[];
   /** Batch Move Selected To menu using moveMany. Available only for nonempty selections within one project. */
   buildMoveToMany: (sessionIds: string[]) => MenuItem | null;
+  /** Batch Kill Process item for selected sessions that currently have a running process; skips ineligible ones. */
+  buildKillProcessMany: (sessionIds: string[], opts?: { onDone?: () => void }) => MenuItem | null;
   /** Mark submenu offering the emoji palette plus No Mark, checking the node's current marker. Works for any node
    *  kind, so the sidebar reuses it for projects and groups. */
   buildMarkItem: (kind: NodeKind, id: string) => MenuItem;
@@ -224,6 +233,15 @@ export interface SessionMenu {
   openDialog: (dialog: Dialog) => void;
   /** Dialog rendering owned independently by each sidebar/tab-bar hook instance. The sidebar owns group URLs. */
   dialogs: React.ReactNode;
+}
+
+/** Whether a session currently has a running process that can be ended. */
+export function canKillSessionProcess(
+  session: Session | undefined,
+  runtime: SessionRuntime | undefined,
+): boolean {
+  if (session?.kind === "browser") return false;
+  return Boolean(runtime?.alive ?? runtime?.status === "running");
 }
 
 /**
@@ -267,26 +285,47 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
     else setDialog(null);
   };
   const [killError, setKillError] = useState<string | null>(null);
-  const [killTarget, setKillTarget] = useState<{ id: string; name: string } | null>(null);
+  const [killRequest, setKillRequest] = useState<{
+    targets: { id: string; name: string }[];
+    onDone?: () => void;
+  } | null>(null);
   const [killBusy, setKillBusy] = useState(false);
   const killInFlight = useRef(false);
   const killDialogId = useId();
-  const cancelKill = () => { if (!killInFlight.current) setKillTarget(null); };
+  const cancelKill = () => { if (!killInFlight.current) setKillRequest(null); };
   const confirmKill = async () => {
-    if (!killTarget || killInFlight.current) return;
+    if (!killRequest || killInFlight.current) return;
     killInFlight.current = true;
     setKillBusy(true);
     setKillError(null);
+    const failed: { target: { id: string; name: string }; message: string }[] = [];
     try {
-      const st = useTermStore.getState();
-      const session = st.sessions.find((s) => s.id === killTarget.id);
-      if (session?.engine === "chat") await chatStop(killTarget.id);
-      else await ptyKill(killTarget.id);
-      st.setRuntime(killTarget.id, { status: "exited", pid: undefined });
-      st.closeSession(killTarget.id);
-      setKillTarget(null);
-    } catch (error) {
-      setKillError(String(error));
+      for (const target of killRequest.targets) {
+        const st = useTermStore.getState();
+        const session = st.sessions.find((s) => s.id === target.id);
+        // Re-check before executing so sessions that stopped after the menu opened are skipped cleanly.
+        if (!canKillSessionProcess(session, st.runtimes[target.id])) continue;
+        try {
+          if (session?.engine === "chat") await chatStop(target.id);
+          else await ptyKill(target.id);
+          const latest = useTermStore.getState();
+          latest.setRuntime(target.id, { status: "exited", pid: undefined });
+          latest.closeSession(target.id);
+        } catch (error) {
+          failed.push({ target, message: String(error) });
+        }
+      }
+      if (failed.length > 0) {
+        setKillRequest({ targets: failed.map((item) => item.target), onDone: killRequest.onDone });
+        setKillError(
+          killRequest.targets.length === 1
+            ? failed[0].message
+            : failed.map((item) => `${item.target.name}: ${item.message}`).join("\n"),
+        );
+      } else {
+        killRequest.onDone?.();
+        setKillRequest(null);
+      }
     } finally {
       killInFlight.current = false;
       setKillBusy(false);
@@ -1076,6 +1115,61 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
       { label: t("tree.openNewTab"), onClick: () => openSession(node.id, { newTab: true }) },
       paneItem(node.id),
       { label: t("tree.newChildSession"), submenu: newSessionItems(node.projectId, node.groupId, node.id) },
+      ...(sessionRec
+        ? (() => {
+            const newHref = planExecuteUrl({
+              projectId: node.projectId,
+              groupId: node.groupId,
+              parentSessionId: node.id,
+            });
+            const eligible =
+              sessionRec.engine === "chat" && supportsPlanExecute(sessionRec.kind);
+            const planHref = eligible ? bindPlanExecuteUrl({ plannerId: node.id }) : undefined;
+            const execHref = eligible
+              ? bindPlanExecuteUrl({ role: "exec", sessionIds: [node.id] })
+              : undefined;
+            return [
+              {
+                label: t("tree.orchestrationMenu"),
+                icon: <Icons.planExecute size={14} />,
+                submenu: [
+                  {
+                    label: t("tree.newPlanExecuteSession"),
+                    icon: <Icons.planExecute size={14} />,
+                    href: newHref,
+                    onClick: (event: React.MouseEvent) => {
+                      if (event?.metaKey || event?.ctrlKey || event?.shiftKey || event?.altKey) return;
+                      event?.preventDefault?.();
+                      navigatePlanExecute(newHref);
+                    },
+                  },
+                  {
+                    label: t("tree.bindPlanExecuteWorkflow"),
+                    icon: <Icons.planExecute size={14} />,
+                    disabled: !eligible,
+                    href: planHref,
+                    onClick: (event: React.MouseEvent) => {
+                      if (event?.metaKey || event?.ctrlKey || event?.shiftKey || event?.altKey) return;
+                      event?.preventDefault?.();
+                      if (planHref) navigateBindPlanExecute(planHref);
+                    },
+                  },
+                  {
+                    label: t("tree.bindAsExecutorWorkflow"),
+                    icon: <Icons.planExecute size={14} />,
+                    disabled: !eligible,
+                    href: execHref,
+                    onClick: (event: React.MouseEvent) => {
+                      if (event?.metaKey || event?.ctrlKey || event?.shiftKey || event?.altKey) return;
+                      event?.preventDefault?.();
+                      if (execHref) navigateBindPlanExecute(execHref);
+                    },
+                  },
+                ],
+              } as MenuItem,
+            ];
+          })()
+        : []),
       ...shellMenu,
       ...(canFork
         ? [{ label: t("tree.forkSession"), onClick: () => void forkSession(node.id) }]
@@ -1156,13 +1250,13 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
     // reported one: `status` only knows about processes this client started, and a chat process that exits
     // on its own never clears it.
     const rt = useTermStore.getState().runtimes[node.id];
-    if (rt?.alive ?? rt?.status === "running") {
+    if (canKillSessionProcess(sessionRec, rt)) {
       items.push({
         label: t("tree.killProcess"),
         onClick: () => {
           if (killInFlight.current) return;
           setKillError(null);
-          setKillTarget({ id: node.id, name: node.name });
+          setKillRequest({ targets: [{ id: node.id, name: node.name }] });
         },
       });
     }
@@ -1209,6 +1303,36 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
     }));
 
     return { label: t("tree.moveSelected"), submenu: [rootItem, ...groupItems] };
+  };
+
+  // Batch Kill Process appears whenever at least one selected session has a running process;
+  // ineligible sessions are omitted and never executed.
+  const buildKillProcessMany = (
+    sessionIds: string[],
+    opts?: { onDone?: () => void },
+  ): MenuItem | null => {
+    const st = useTermStore.getState();
+    const seen = new Set<string>();
+    const targets: { id: string; name: string }[] = [];
+    for (const id of sessionIds) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const session = st.sessions.find((s) => s.id === id);
+      if (!session || !canKillSessionProcess(session, st.runtimes[id])) continue;
+      targets.push({ id: session.id, name: session.name });
+    }
+    if (targets.length === 0) return null;
+    return {
+      label:
+        targets.length === 1
+          ? t("tree.killProcess")
+          : t("tree.killProcessSelected", targets.length),
+      onClick: () => {
+        if (killInFlight.current) return;
+        setKillError(null);
+        setKillRequest({ targets, onDone: opts?.onDone });
+      },
+    };
   };
 
   // Reduced draft menu for temporary terminal sessions, browser tabs, and document tabs.
@@ -1304,9 +1428,13 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
     setDialog(null);
   };
 
+  const killCount = killRequest?.targets.length ?? 0;
+  const killActionLabel =
+    killCount <= 1 ? t("tree.killProcess") : t("tree.killProcessSelected", killCount);
+
   const dialogs = (
     <>
-      {killTarget !== null && (
+      {killRequest !== null && (
         <Backdrop onClose={cancelKill}>
           <div className="quit-card" role="alertdialog" aria-modal="true" aria-busy={killBusy}
             aria-labelledby={`${killDialogId}-title`} aria-describedby={`${killDialogId}-body`}
@@ -1314,15 +1442,17 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
               if (event.key === "Escape") { event.stopPropagation(); cancelKill(); }
             }}>
             <div className="quit-head">
-              <div className="quit-title" id={`${killDialogId}-title`}>{t("tree.killProcess")}</div>
+              <div className="quit-title" id={`${killDialogId}-title`}>{killActionLabel}</div>
               <div className="quit-body" id={`${killDialogId}-body`} style={{ overflowWrap: "anywhere" }}>
-                {t("tree.killProcessConfirm", killTarget.name)}
+                {killCount === 1
+                  ? t("tree.killProcessConfirm", killRequest.targets[0].name)
+                  : t("tree.killProcessConfirmMany", killCount)}
               </div>
               {killError !== null && <p role="alert" style={{ marginTop: 12, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{killError}</p>}
             </div>
             <div className="quit-foot">
               <button className="quit-btn ghost" disabled={killBusy} autoFocus onClick={cancelKill}>{t("common.cancel")}</button>
-              <button className="quit-btn primary" disabled={killBusy} onClick={() => void confirmKill()}>{t("tree.killProcess")}</button>
+              <button className="quit-btn primary" disabled={killBusy} onClick={() => void confirmKill()}>{killActionLabel}</button>
             </div>
           </div>
         </Backdrop>
@@ -1580,6 +1710,7 @@ export function useSessionMenu(opts?: { groupNavigation?: boolean }): SessionMen
     buildScratchItems,
     shellSwitchItems,
     buildMoveToMany,
+    buildKillProcessMany,
     buildGitItems,
     buildMarkItem,
     openDialog: next => {

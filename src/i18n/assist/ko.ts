@@ -35,6 +35,7 @@ const assist: typeof en = {
   "assist.reason.notFile": "파일이 아니라 폴더입니다.",
   "assist.reason.unavailable": "지금은 앱의 이 기능을 사용할 수 없습니다.",
   "assist.reason.builtIn": "기본 제공 컬렉션은 이름을 바꾸거나 이동하거나 삭제할 수 없습니다.",
+  "assist.reason.notRunning": "이 세션에서 실행 중인 프로세스가 없습니다.",
 
   "assist.field.name": "이름",
   "assist.field.location": "위치",
@@ -70,6 +71,8 @@ const assist: typeof en = {
   "assist.projects.move": (name: string, to: string) => `"${name}"을(를) "${to}"(으)로 이동`,
   "assist.projects.sortByName": (where: string) => `"${where}"의 항목을 이름순으로 정렬`,
   "assist.projects.sortByOrder": (where: string) => `"${where}"의 항목 순서 변경`,
+  "assist.projects.killProcess": (name: string) => `세션 "${name}"의 프로세스 종료`,
+  "assist.projects.killProcessNote": "현재 작업이 중단됩니다. 저장된 대화 기록과 파일은 유지됩니다.",
   "assist.projects.archiveSession": (name: string) => `세션 "${name}" 보관`,
   "assist.projects.deleteNode": (name: string) => `사이드바에서 "${name}" 제거`,
   "assist.projects.deleteKeepsFiles": "디스크의 파일은 그대로 유지됩니다.",

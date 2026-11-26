@@ -119,6 +119,8 @@ export interface ClipboardCapability {
   readText(): Promise<string>;
   /** Read RGBA pixels from a clipboard image; currently supported only in the main Tauri window, otherwise null. */
   readImage(): Promise<{ rgba: Uint8Array; width: number; height: number } | null>;
+  /** Read local filesystem paths from the OS clipboard; returns an empty list when unavailable or on remote browsers. */
+  readFiles(): Promise<string[]>;
 }
 
 /** Communication capability (invoke/event listening); see ipc/transport.ts for transport routing. */
@@ -146,6 +148,8 @@ export interface WindowCapability {
   onNotificationClick(cb: (sessionId: string) => void): Promise<UnlistenFn | null>;
   /** Take and clear an unconsumed `vela <path>` launch request; return null outside desktop environments. */
   takeOpenProjectRequest(): Promise<string | null>;
+  /** Take and clear a one-shot flag reporting that the local background service restarted unexpectedly. */
+  takeServiceRestartNotice(): Promise<boolean>;
   /** Fire when a second `vela` process wakes this window; read the payload through takeOpenProjectRequest. */
   onOpenProjectRequest(cb: () => void): Promise<UnlistenFn>;
 }

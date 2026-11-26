@@ -3,7 +3,13 @@ import { useEffect, useRef, useState, type ClipboardEvent } from "react";
 import { useT } from "../i18n";
 import type { ChatImage } from "../ipc/chat";
 import { env } from "../platform/env";
-import { imagesFromClipboard, imageFromNativeClipboard } from "../terminal/imageInput";
+import {
+  capturePasteData,
+  insertPathsIntoTextField,
+  isLocalDesktop,
+  resolveClipboardFiles,
+} from "../terminal/clipboardFiles";
+import { imageFromNativeClipboard } from "../terminal/imageInput";
 import { useTermStore } from "../store/termStore";
 import { attachImages, attachmentRejectionNote, restoreAttachment, type Attachment } from "../layout/CenterPane/session/attachments";
 
@@ -40,11 +46,27 @@ export function useTaskImages(request: object | undefined, initial: ChatImage[] 
       .finally(() => { if (epoch === generation.current) { pending.current -= 1; setBusy(pending.current > 0); } });
   };
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = imagesFromClipboard(event.clipboardData);
-    if (files.length) { event.preventDefault(); enqueue(() => Promise.resolve(files)); return; }
-    if (env.isTauri && !event.clipboardData?.getData("text/plain")) {
-      event.preventDefault();
-      enqueue(() => imageFromNativeClipboard().then(file => [file]).catch(() => []));
+    const field = event.currentTarget;
+    const captured = capturePasteData(event.clipboardData);
+    const local = isLocalDesktop();
+    if (!captured.hasFileSignal && (captured.text || !env.isTauri)) return;
+    if (!local && !captured.images.length) return;
+    event.preventDefault();
+    if (local) {
+      enqueue(async () => {
+        const resolved = await resolveClipboardFiles(captured.images, { loadMissingImages: true }).catch(() => null);
+        if (resolved) {
+          if (resolved.otherPaths.length && field.isConnected && !field.disabled) {
+            insertPathsIntoTextField(field, resolved.otherPaths);
+          }
+          return resolved.imageFiles;
+        }
+        if (captured.images.length) return captured.images;
+        if (!env.isTauri || captured.text) return [];
+        return imageFromNativeClipboard().then(file => [file]).catch(() => []);
+      });
+    } else if (captured.images.length) {
+      enqueue(() => Promise.resolve(captured.images));
     }
   };
   const remove = (id: string) => {

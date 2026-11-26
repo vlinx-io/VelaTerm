@@ -26,9 +26,12 @@ import {
   countByAgentState,
   isVirtualProject,
   projectRoot,
+  supportsPlanExecute,
   worktreeGroup,
   type AgentState,
   type NodeKind,
+  type Session,
+  type SessionRuntime,
 } from "../../types";
 import { MARK_LABEL_KEYS, NODE_MARKS, normalizeMark } from "../../marks";
 import { sessionStatusItem, useSessionMenu } from "../sessionMenu";
@@ -55,7 +58,63 @@ import { setProjectCollection } from "../../store/projectCollections";
 import { projectDialogUrl } from "../../remote/dialogNavigation";
 import { newGroupDialogUrl } from "./groupNavigation";
 import { newSessionHref, openNewSession, openNewSessionHere } from "../NewSession/navigation";
+import { navigateSmartRename, smartRenameUrl } from "../SmartRename/navigation";
+import {
+  bindPlanExecuteUrl,
+  navigateBindPlanExecute,
+} from "../../components/planExecuteNavigation";
 import { isSystemCollection, SYSTEM_CHAT, SYSTEM_PROJECTS, SYSTEM_TASKS, systemLabel, type RailSection } from "./systemCollections";
+
+/** Collect all group IDs rooted at the given group, including nested subgroups. */
+function collectGroupIds(
+  rootId: string,
+  groups: readonly { id: string; parentGroupId?: string | null }[],
+): Set<string> {
+  const result = new Set<string>([rootId]);
+  let growing = true;
+  while (growing) {
+    growing = false;
+    for (const g of groups) {
+      if (!result.has(g.id) && g.parentGroupId && result.has(g.parentGroupId)) {
+        result.add(g.id);
+        growing = true;
+      }
+    }
+  }
+  return result;
+}
+
+/** Collect candidate agent sessions and renameable session IDs from selected sessions and groups. */
+function collectSmartRenameTargets(
+  nodes: readonly { kind: NodeKind; id: string }[],
+  sessions: readonly Session[],
+  groups: readonly { id: string; parentGroupId?: string | null }[],
+): { totalAgent: number; renameableIds: string[] } {
+  const seen = new Set<string>();
+  const agentSessions: Session[] = [];
+  const addSession = (s: Session) => {
+    if (seen.has(s.id)) return;
+    if (s.kind === "terminal" || s.kind === "browser") return;
+    seen.add(s.id);
+    agentSessions.push(s);
+  };
+  for (const node of nodes) {
+    if (node.kind === "session") {
+      const s = sessions.find((x) => x.id === node.id);
+      if (s) addSession(s);
+    } else if (node.kind === "group") {
+      const groupIds = collectGroupIds(node.id, groups);
+      for (const s of sessions) {
+        if (s.groupId && groupIds.has(s.groupId)) addSession(s);
+      }
+    }
+  }
+  const renameableIds = agentSessions
+    .filter((s) => !!s.agentSessionId || s.engine === "chat")
+    .map((s) => s.id);
+  return { totalAgent: agentSessions.length, renameableIds };
+}
+import { sectionNodes } from "./projectCollectionLayout";
 
 // The search overlay and its result viewers load when it is first opened (Cmd+Shift+F or the search button).
 const GlobalSearch = lazy(() => import("../GlobalSearch/GlobalSearch").then((m) => ({ default: m.GlobalSearch })));
@@ -79,13 +138,17 @@ const STATUS_FILTERS: {
   { st: "background", color: "var(--status-background)", pulse: false, labelKey: "tree.filterBackground" },
 ];
 
+const EMPTY_EPHEMERAL_SESSIONS: Record<string, Session> = {};
+const EMPTY_RUNTIMES: Record<string, SessionRuntime> = {};
+
 /** Isolated filter button/dropdown subscribing to high-frequency runtime/notification changes. Agent updates
  * rerender only this control instead of LeftSidebar and its large ProjectTree, removing a major source of lag
  * during tab closure, switching, and typing. The dropdown holds a multi-select session-status section and an
  * independent single-select node-marker section. */
-function TreeFilter({ view }: { view: SidebarTreeView }) {
+function TreeFilter({ view, section }: { view: SidebarTreeView; section: RailSection }) {
   const t = useT();
   const sessions = useTermStore((s) => s.sessions);
+  const ephemeralSessions = useTermStore((s) => s.ephemeralSessions);
   const groups = useTermStore((s) => s.groups);
   const projects = useTermStore((s) => s.projects);
   const runtimes = useTermStore((s) => s.runtimes);
@@ -97,22 +160,32 @@ function TreeFilter({ view }: { view: SidebarTreeView }) {
   const [filterOpen, setFilterOpen] = useState(false);
   const { statusFilter, markFilter } = view;
 
-  // Per-state session counts shared with the bottom status bar for consistent totals.
-  const statusCounts = useMemo(
-    () => countByAgentState(sessions, runtimes, notifications),
-    [sessions, runtimes, notifications],
+  // Scope filter counts to the active sidebar view (Projects, Terminals, Tasks, or Chat) so numbers match
+  // the nodes shown in that view. Pass stable empty maps outside Terminals to avoid recomputing tree scoping
+  // on high-frequency runtime ticks.
+  const liveEphemeral = section === "terminals" ? ephemeralSessions : EMPTY_EPHEMERAL_SESSIONS;
+  const liveRuntimes = section === "terminals" ? runtimes : EMPTY_RUNTIMES;
+  const scoped = useMemo(
+    () => sectionNodes(section, projects, groups, sessions, liveEphemeral, liveRuntimes),
+    [section, projects, groups, sessions, liveEphemeral, liveRuntimes],
   );
 
-  // Marker counts span all three node kinds, matching what the filter actually keeps visible. Markers nobody uses
-  // still appear so the palette stays a stable target.
+  // Per-state session counts for the active sidebar section.
+  const statusCounts = useMemo(
+    () => countByAgentState(scoped.sessions, runtimes, notifications),
+    [scoped.sessions, runtimes, notifications],
+  );
+
+  // Marker counts span all three node kinds in this section, matching what the filter actually keeps visible.
+  // Markers nobody uses still appear so the palette stays a stable target.
   const markCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const node of [...projects, ...groups, ...sessions]) {
+    for (const node of [...scoped.projects, ...scoped.groups, ...scoped.sessions]) {
       const m = normalizeMark(node.mark);
       if (m) counts[m] = (counts[m] ?? 0) + 1;
     }
     return counts;
-  }, [projects, groups, sessions]);
+  }, [scoped.projects, scoped.groups, scoped.sessions]);
 
   const active = statusFilter !== null || markFilter !== null;
   // The badge counts every active filter, status and marker alike, so it always matches the number of ticks in
@@ -326,7 +399,7 @@ function SidebarTreePane({
             </button>
           )}
         </div>
-        <TreeFilter view={view} />
+        <TreeFilter view={view} section={section} />
         {closeButton}
       </div>
       <div ref={treeWrapRef} className="sidebar-tree-body">
@@ -559,6 +632,7 @@ export function LeftSidebar() {
     buildSessionItems,
     buildScratchItems,
     buildMoveToMany,
+    buildKillProcessMany,
     buildGitItems,
     buildMarkItem,
     openDialog,
@@ -747,7 +821,88 @@ export function LeftSidebar() {
           selection.filter((s) => s.kind === "session").map((s) => s.id),
         );
         if (moveItem) items.push(moveItem);
+        // Offer binding selected sessions as a Plan/Execute workflow when at least one non-browser session is selected.
+        const selectedSessionIds = selection
+          .filter((s) => s.kind === "session")
+          .map((s) => s.id);
+        const allSessions = useTermStore.getState().sessions;
+        const selectedNonBrowser = selectedSessionIds
+          .map((id) => allSessions.find((x) => x.id === id))
+          .filter((x): x is Session => !!x && x.kind !== "browser");
+        if (selectedNonBrowser.some((s) => s.kind !== "terminal")) {
+          const hasEligible = selectedNonBrowser.some(
+            (s) => s.engine === "chat" && supportsPlanExecute(s.kind),
+          );
+          const ids = selectedNonBrowser.map((s) => s.id);
+          const bindHref = hasEligible ? bindPlanExecuteUrl({ sessionIds: ids }) : undefined;
+          const execHref = hasEligible
+            ? bindPlanExecuteUrl({ role: "exec", sessionIds: ids })
+            : undefined;
+          items.push({
+            label: t("tree.orchestrationMenu"),
+            icon: <Icons.planExecute size={14} />,
+            disabled: !hasEligible,
+            submenu: [
+              {
+                label: t("tree.bindPlanExecuteSelected"),
+                icon: <Icons.planExecute size={14} />,
+                disabled: !hasEligible,
+                href: bindHref,
+                onClick: (event) => {
+                  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  if (!bindHref) return;
+                  clearSelection();
+                  navigateBindPlanExecute(bindHref);
+                },
+              },
+              {
+                label: t("tree.bindAsExecutorsSelected"),
+                icon: <Icons.planExecute size={14} />,
+                disabled: !hasEligible,
+                href: execHref,
+                onClick: (event) => {
+                  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  if (!execHref) return;
+                  clearSelection();
+                  navigateBindPlanExecute(execHref);
+                },
+              },
+            ],
+          });
+        }
       }
+      // Batch AI rename covers selected agent sessions and any agent sessions inside selected groups.
+      const stForRename = useTermStore.getState();
+      const renameTargets = collectSmartRenameTargets(
+        selection,
+        stForRename.sessions,
+        stForRename.groups,
+      );
+      if (renameTargets.totalAgent > 0) {
+        const ids = renameTargets.renameableIds;
+        items.push({
+          label:
+            ids.length >= 2
+              ? t("sessionTitle.menuSelected", ids.length)
+              : t("sessionTitle.menu"),
+          icon: <Icons.sparkle size={14} />,
+          disabled: ids.length === 0,
+          href: ids.length > 0 ? smartRenameUrl(ids) : undefined,
+          onClick: (event) => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            if (ids.length > 0) navigateSmartRename(ids);
+          },
+        });
+      }
+      // Kill Process appears when at least one selected session has a running process; ineligible sessions are skipped.
+      const killItem = buildKillProcessMany(
+        selection.filter((s) => s.kind === "session").map((s) => s.id),
+        { onDone: clearSelection },
+      );
+      if (killItem) items.push(killItem);
       // Archive covers sessions and groups; projects cannot be archived and are left out.
       const archivable = selection.filter((s) => s.kind === "session" || s.kind === "group");
       if (archivable.length) {
@@ -918,6 +1073,27 @@ export function LeftSidebar() {
           : []),
         buildMarkItem("group", node.id),
         rename,
+        ...(() => {
+          const groupRename = collectSmartRenameTargets(
+            [{ kind: "group", id: node.id }],
+            st.sessions,
+            st.groups,
+          );
+          return groupRename.renameableIds.length >= 2
+            ? [
+                {
+                  label: t("sessionTitle.menuGroup", groupRename.renameableIds.length),
+                  icon: <Icons.sparkle size={14} />,
+                  href: smartRenameUrl(groupRename.renameableIds),
+                  onClick: (event: React.MouseEvent) => {
+                    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                    event.preventDefault();
+                    navigateSmartRename(groupRename.renameableIds);
+                  },
+                },
+              ]
+            : [];
+        })(),
         { label: t("tree.archiveGroup"), onClick: () => void archiveGroup(node.id) },
         {
           label: t("tree.deleteGroup"),

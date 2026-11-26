@@ -84,6 +84,12 @@ pub struct SessionState {
     pub alive: bool,
     /// Commands this session started with `vrun` that are still running, oldest first.
     pub runs: Vec<crate::agent::runs::RunBrief>,
+    /// Whether this session's idle replies are consumed by another workflow session rather than the
+    /// user: `"parent"` for an active executor/reviewer waiting on its parent/peer session, or
+    /// `"children"` for a planner waiting on dispatched workers. While set, automatic completion
+    /// signals (`waiting`, `background`, `notify`) do not raise `unread` or trigger notifications;
+    /// interactive `asking` prompts and manual Pending markers still alert the user.
+    pub workflow_wait: Option<String>,
     /// Milliseconds since the epoch of the last change, for clients that need to order records.
     pub updated_at: u64,
 }
@@ -311,6 +317,53 @@ pub fn set_runs(ctx: &AppCtx, session_id: &str, runs: Vec<crate::agent::runs::Ru
     update(ctx, session_id, |s| s.runs = runs)
 }
 
+/// Synchronize active workflow wait roles across all known sessions in one pass.
+///
+/// Entering a workflow wait clears any non-manual `unread` marker unless the session is actively
+/// `asking` the user for confirmation, so stale Pending dots clear when work is handed off.
+pub fn sync_workflow_waits(ctx: &AppCtx, desired: HashMap<String, &'static str>) -> bool {
+    let changed = {
+        let mut guard = hub().lock().unwrap();
+        let mut ids: HashSet<String> = guard
+            .states
+            .iter()
+            .filter_map(|(id, record)| record.workflow_wait.as_ref().map(|_| id.clone()))
+            .collect();
+        ids.extend(desired.keys().cloned());
+
+        let mut any_changed = false;
+        for session_id in ids {
+            let next = desired.get(&session_id).map(|role| (*role).to_string());
+            let before = match guard.states.get(&session_id) {
+                Some(existing) => existing.clone(),
+                None if next.is_some() => SessionState::default(),
+                None => continue,
+            };
+            let mut candidate = before.clone();
+            let entered_wait = before.workflow_wait.is_none() && next.is_some();
+            candidate.workflow_wait = next;
+            if entered_wait
+                && !candidate.unread_manual
+                && candidate.agent_state.as_deref() != Some("asking")
+            {
+                candidate.unread = false;
+            }
+            let compared = SessionState { updated_at: before.updated_at, ..candidate.clone() };
+            if compared != before {
+                candidate.updated_at = now_ms();
+                guard.states.insert(session_id.clone(), candidate);
+                guard.dirty.insert(session_id);
+                any_changed = true;
+            }
+        }
+        any_changed
+    };
+    if changed {
+        schedule_flush(ctx);
+    }
+    changed
+}
+
 /// A deliberately stopped chat process has no active turn. Apply this immediately, without the
 /// display hold, so a delayed Waiting transition cannot overwrite a replacement's Working state.
 pub fn set_stopped(ctx: &AppCtx, session_id: &str) -> bool {
@@ -384,20 +437,29 @@ pub fn observe_status(
         _ => false,
     };
     let resumed = entered == Some("working");
+    let mut notify_state: Option<&str> = None;
     // One update for both, so a signal that changes state and raises the marker produces one broadcast.
     update(ctx, session_id, |record| {
         apply_signal(record, payload);
-        if notable {
+        // Active workflow sessions awaiting a parent or child peer do not need user attention for
+        // ordinary turn completions; only interactive `asking` prompts still raise Pending.
+        let suppress_unread = record.workflow_wait.is_some() && entered != Some("asking");
+        if notable && !suppress_unread {
             record.unread = true;
             record.unread_manual = false;
+            notify_state = Some(
+                payload
+                    .get("state")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("waiting"),
+            );
         }
         if resumed {
             record.unread = false;
             record.unread_manual = false;
         }
     });
-    if notable {
-        let state = payload.get("state").and_then(serde_json::Value::as_str).unwrap_or("waiting");
+    if let Some(state) = notify_state {
         crate::mobile_push::observe(ctx, session_id, state, payload.get("body").and_then(serde_json::Value::as_str));
     }
 }
@@ -1150,5 +1212,91 @@ mod tests {
         let batch: HashMap<String, SessionState> = serde_json::from_str(&frames[0]).unwrap();
         assert_eq!(batch.len(), 3);
         assert!(batch.values().all(|s| s.unread));
+    }
+
+    #[test]
+    fn workflow_wait_suppresses_waiting_unread_but_keeps_asking_and_manual() {
+        let _lock = test_lock();
+        let app = ctx("workflow-wait");
+
+        let mut waits = HashMap::new();
+        waits.insert("exec".to_string(), "parent");
+        assert!(sync_workflow_waits(&app, waits));
+        assert_eq!(snapshot()["exec"].workflow_wait.as_deref(), Some("parent"));
+
+        // Normal turn completions hand off to the parent session instead of raising Pending.
+        feed(
+            &app,
+            "exec",
+            &[
+                json!({ "kind": "agent", "agent": "claude", "state_source": "chat" }),
+                json!({ "kind": "state", "state": "working", "authoritative": true }),
+                json!({ "kind": "state", "state": "waiting", "authoritative": true }),
+            ],
+        );
+        let record = snapshot()["exec"].clone();
+        assert_eq!(record.agent_state.as_deref(), Some("waiting"));
+        assert!(!record.unread, "executor waiting on parent must not become unread");
+
+        // Background turn completion is likewise quiet while awaiting the workflow.
+        feed(
+            &app,
+            "exec",
+            &[
+                json!({ "kind": "state", "state": "working", "authoritative": true }),
+                json!({ "kind": "state", "state": "background", "authoritative": true }),
+            ],
+        );
+        assert!(!snapshot()["exec"].unread);
+
+        // Permission prompts still need the user, so `asking` raises unread as usual.
+        feed(
+            &app,
+            "exec",
+            &[
+                json!({ "kind": "state", "state": "working", "authoritative": true }),
+                json!({ "kind": "state", "state": "asking", "authoritative": true }),
+            ],
+        );
+        assert!(snapshot()["exec"].unread, "interactive asking must still alert the user");
+
+        // Resuming clears unread, and the subsequent waiting turn stays quiet again.
+        feed(
+            &app,
+            "exec",
+            &[
+                json!({ "kind": "state", "state": "working", "authoritative": true }),
+                json!({ "kind": "state", "state": "waiting", "authoritative": true }),
+            ],
+        );
+        assert!(!snapshot()["exec"].unread);
+
+        // Manual Pending marks are never suppressed or stripped by workflow wait.
+        assert!(mark_pending(&app, "exec"));
+        assert!(snapshot()["exec"].unread);
+        assert!(snapshot()["exec"].unread_manual);
+
+        // Entering workflow wait clears a stale non-manual unread marker on a planner.
+        set_unread(&app, "plan", true);
+        let mut both = HashMap::new();
+        both.insert("exec".to_string(), "parent");
+        both.insert("plan".to_string(), "children");
+        sync_workflow_waits(&app, both);
+        assert!(!snapshot()["plan"].unread, "entering workflow wait clears stale automatic unread");
+        assert!(snapshot()["exec"].unread, "manual pending survives workflow sync");
+
+        // Clearing workflow wait restores ordinary unread behavior on the next reply.
+        sync_workflow_waits(&app, HashMap::new());
+        assert_eq!(snapshot()["exec"].workflow_wait, None);
+        set_unread(&app, "exec", false);
+        feed(
+            &app,
+            "exec",
+            &[
+                json!({ "kind": "state", "state": "working", "authoritative": true }),
+                json!({ "kind": "state", "state": "waiting", "authoritative": true }),
+            ],
+        );
+        assert!(snapshot()["exec"].unread, "ended workflow session notifies like a normal session");
     }
 }

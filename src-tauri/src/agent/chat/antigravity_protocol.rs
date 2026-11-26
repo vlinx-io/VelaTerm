@@ -706,6 +706,14 @@ pub(crate) fn parsed_timestamp_ms(timestamp: Option<&str>) -> Option<u64> {
 
 pub fn step_id(index: u64) -> String { format!("agy-step-{index}") }
 
+fn segmented_step_id(segment: u64, index: u64) -> String {
+    if segment == 0 {
+        step_id(index)
+    } else {
+        format!("agy-step-s{segment}-{index}")
+    }
+}
+
 #[derive(Default)]
 pub struct StreamState {
     text: HashMap<String, String>,
@@ -795,10 +803,19 @@ pub fn history_rows(content: &str) -> Vec<ChatRow> {
     // A replay holds every image inline. Past this budget older attachments stay out of the restored
     // timeline; the native recording still has them for a later read.
     let mut image_budget = 64 * 1024 * 1024;
+    let mut last_step: Option<u64> = None;
+    let mut segment: u64 = 0;
     for line in content.lines() {
         let Ok(step) = serde_json::from_str::<Value>(line) else { continue };
         let Some(index) = step.get("step_index").and_then(Value::as_u64) else { continue };
-        let id = step_id(index);
+        if last_step.is_some_and(|prev| index < prev) {
+            segment += 1;
+            pending.clear();
+            in_user_turn = false;
+            in_wake_turn = false;
+        }
+        last_step = Some(index);
+        let id = segmented_step_id(segment, index);
         let at = super::history::parsed_at(step.get("created_at").and_then(Value::as_str))
             .or_else(|| parsed_timestamp_ms(step.get("created_at").and_then(Value::as_str)).and_then(|ms| i64::try_from(ms).ok()));
         let text = step.get("content").and_then(Value::as_str).unwrap_or("");
@@ -899,10 +916,20 @@ pub fn history_rows(content: &str) -> Vec<ChatRow> {
 /// The same parsed context feeds archive viewing, search and Markdown export.
 pub(crate) fn events(content: &str) -> Vec<crate::agent::export::Event> {
     use crate::agent::export::Event;
-    let timestamps: HashMap<_, _> = content.lines().filter_map(|line| {
-        let step: Value = serde_json::from_str(line).ok()?;
-        Some((step_id(step.get("step_index")?.as_u64()?), step.get("created_at")?.as_str()?.to_string()))
-    }).collect();
+    let mut timestamps = HashMap::new();
+    let mut last_step: Option<u64> = None;
+    let mut segment: u64 = 0;
+    for line in content.lines() {
+        let Ok(step) = serde_json::from_str::<Value>(line) else { continue };
+        let Some(index) = step.get("step_index").and_then(Value::as_u64) else { continue };
+        if last_step.is_some_and(|prev| index < prev) {
+            segment += 1;
+        }
+        last_step = Some(index);
+        if let Some(ts) = step.get("created_at").and_then(Value::as_str) {
+            timestamps.insert(segmented_step_id(segment, index), ts.to_string());
+        }
+    }
     let mut events = Vec::new();
     for row in history_rows(content) {
         let id = match &row {
@@ -1210,5 +1237,27 @@ mod tests {
         .unwrap();
         assert_eq!(delay_reset.resets_at, 10_090);
         assert_eq!(delay_reset.limit_type.as_deref(), Some("five_hour"));
+    }
+
+    #[test]
+    fn history_rows_and_events_preserve_both_segments_after_step_index_reset() {
+        let lines = [
+            json!({"step_index":0,"type":"USER_INPUT","created_at":"2026-11-23T10:00:00Z","content":"<USER_REQUEST>before reset</USER_REQUEST>"}),
+            json!({"step_index":1,"type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-23T10:00:01Z","content":"first answer"}),
+            json!({"step_index":0,"type":"USER_INPUT","created_at":"2026-11-23T11:00:00Z","content":"<USER_REQUEST>after reset</USER_REQUEST>\n<USER_SETTINGS_CHANGE>Model Selection</USER_SETTINGS_CHANGE>"}),
+            json!({"step_index":1,"type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-11-23T11:00:01Z","content":"second answer"}),
+        ];
+        let raw = lines.iter().map(Value::to_string).collect::<Vec<_>>().join("\n");
+        let rows = history_rows(&raw);
+        assert_eq!(rows.len(), 4);
+        assert!(matches!(&rows[0], ChatRow::User { id, text, .. } if id == "agy-step-0" && text == "before reset"));
+        assert!(matches!(&rows[1], ChatRow::Assistant { id, text, .. } if id == "agy-step-1" && text == "first answer"));
+        assert!(matches!(&rows[2], ChatRow::User { id, text, .. } if id == "agy-step-s1-0" && text == "after reset"));
+        assert!(matches!(&rows[3], ChatRow::Assistant { id, text, .. } if id == "agy-step-s1-1" && text == "second answer"));
+
+        let exported = events(&raw);
+        assert_eq!(exported.len(), 4);
+        assert!(matches!(&exported[0], crate::agent::export::Event::User { text, ts } if text == "before reset" && ts.as_deref() == Some("2026-11-23T10:00:00Z")));
+        assert!(matches!(&exported[2], crate::agent::export::Event::User { text, ts } if text == "after reset" && ts.as_deref() == Some("2026-11-23T11:00:00Z")));
     }
 }

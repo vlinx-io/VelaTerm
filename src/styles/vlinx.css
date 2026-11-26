@@ -428,7 +428,8 @@ svg { display: block; }
 .sidebar-rail-tool:hover { color: var(--tb-icon-hover, var(--text)); }
 .sidebar-rail-tool.on, .sidebar-rail-tool.account-on, .sidebar-rail-tool.account-on:hover { color: var(--accent); }
 .sidebar-rail-tool.account-on svg { filter: drop-shadow(0 0 4px color-mix(in oklch, var(--accent) 60%, transparent)); }
-.sidebar-rail-count { position: absolute; right: -2px; bottom: 0; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--bg-2); border: 1px solid var(--border); color: var(--text-dim); font-size: 9px; line-height: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+.sidebar-rail-count { position: absolute; right: -2px; bottom: 0; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--bg-2); border: 1px solid var(--border); color: var(--text-dim); font-size: 9px; line-height: 12px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
+.sidebar-rail-pending { position: absolute; top: -2px; right: -2px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--status-asking); color: var(--bg-0); box-shadow: 0 0 0 1.5px var(--bg-1); font-size: 9px; font-weight: 600; line-height: 14px; text-align: center; font-variant-numeric: tabular-nums; pointer-events: none; }
 .sidebar-section-empty { padding: 24px 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; color: var(--text-dim); text-align: center; line-height: 1.5; }
 .sidebar-section-empty-title { color: var(--text); font-size: 13px; font-weight: 600; }
 .sidebar-section-empty-desc { margin-bottom: 12px; text-wrap: pretty; }
@@ -443,6 +444,7 @@ svg { display: block; }
 .st-working { background: var(--green); box-shadow: 0 0 0 2px var(--accent-soft); }
 .st-attention { background: var(--yellow); }
 .st-waiting { background: var(--mag); }
+.st-workflow-wait { box-sizing: border-box; background: transparent; border: 1.5px solid var(--status-workflow-wait); }
 .st-background { background: var(--cyan); }
 .st-idle { background: var(--text-faint); }
 @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }

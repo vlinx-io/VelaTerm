@@ -246,8 +246,6 @@ pub(super) struct AcpState {
     surfaced_unread: HashSet<String>,
     /// One-shot `schedule` timer keys (`<task_id>:0`) already woken by a parked `Stop` hook.
     woken_schedules: HashSet<String>,
-    /// Credential startup gate held only until this ACP process finishes opening or fails startup.
-    pub(in crate::agent::chat::engine) auth_gate_permit: Option<crate::agent::antigravity::AuthGatePermit>,
     /// Antigravity credential epoch observed when this ACP process launched.
     pub(in crate::agent::chat::engine) auth_epoch_at_launch: u64,
     /// Streamed OAuth 401 warning captured during the active turn before `end_turn` arrives.
@@ -288,11 +286,9 @@ pub(super) struct AcpState {
 
 impl AcpState {
     pub(in crate::agent::chat::engine) fn with_antigravity_launch(
-        auth_gate_permit: Option<crate::agent::antigravity::AuthGatePermit>,
         auth_epoch_at_launch: u64,
     ) -> Self {
         Self {
-            auth_gate_permit,
             auth_epoch_at_launch,
             ..Self::default()
         }
@@ -492,6 +488,27 @@ fn handle_response(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: 
             // Start a fresh native conversation instead of leaving the pane unusable, and say so — the
             // rows on screen come from VelaTerm's own recording, which the agent no longer has.
             Some(error) if kind != Some("acp_session_new") && wire::conversation_missing(&error) => {
+                // If Antigravity's local recording still exists on disk, refuse to detach it into
+                // a fresh `session/new` conversation (which would overwrite `agent_session_id` and
+                // orphan the existing history after a transient or locked-DB reopen failure).
+                let preserve_existing = proc.kind == SessionKind::Antigravity
+                    && proc.acp.lock().unwrap().resume.as_deref().is_some_and(|native| {
+                        crate::agent::chat::antigravity_outcome::has_native_recording(
+                            native,
+                            &proc.auth_settings_args,
+                        )
+                    });
+                if preserve_existing {
+                    crate::diagnostics::record("WARN", "agent_chat", json!({
+                        "sessionId": session_id,
+                        "event": "native_conversation_missing_preserved",
+                        "agent": proc.kind.as_str(),
+                        "reason": wire::error_text(&error),
+                    }));
+                    proc.acp.lock().unwrap().loading = None;
+                    fail_start(app, session_id, proc, &error);
+                    return;
+                }
                 crate::diagnostics::record("WARN", "agent_chat", json!({
                     "sessionId":session_id,"event":"native_conversation_missing",
                     "agent":proc.kind.as_str(),"reason":wire::error_text(&error)
@@ -579,8 +596,6 @@ fn on_initialize(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, result
 
 /// The session is open: record its identity and catalogue, settle a replay, and start taking turns.
 fn on_open(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, result: &Value, loaded: bool) {
-    let gate_permit = proc.acp.lock().unwrap().auth_gate_permit.take();
-    drop(gate_permit);
     let native = if loaded {
         proc.acp.lock().unwrap().resume.clone()
     } else {
@@ -1012,15 +1027,13 @@ fn on_model_switched(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, re
 /// The agent refused to start the conversation. Signing in is the one cause the person can act on, so it
 /// becomes a stable code the view explains; anything else is shown as the agent wrote it.
 fn fail_start(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, error: &Value) {
-    let (gate_permit, had_401_continuation, startup_prompt) = {
+    let (had_401_continuation, startup_prompt) = {
         let mut state = proc.acp.lock().unwrap();
         (
-            state.auth_gate_permit.take(),
             state.pending_401_continuation.take().is_some(),
             state.startup_prompt.take(),
         )
     };
-    drop(gate_permit);
     if let Some(ref prompt) = startup_prompt {
         if proc.timeline.lock().unwrap().remove_row(&prompt.id) {
             super::flush_timeline_now(app, session_id, proc);
@@ -2134,6 +2147,10 @@ fn on_prompt_end(app: &AppCtx, session_id: &str, proc: &Arc<ChatProcess>, id: &s
     if needs_turn_end {
         handle_turn_end(app, session_id, proc, "success", None);
     } else {
+        // A parked Antigravity turn that drained silently still needs workflow handoff observation.
+        if settled_while_parked {
+            crate::agent::plan_execute::observe(app, session_id, &json!({"type": "turnCompleted"}));
+        }
         super::release_if_idle(app, session_id, proc);
     }
     if proc.kind == SessionKind::Grok {
@@ -2635,7 +2652,9 @@ pub(super) fn handle_stop_hook(app: &AppCtx, session_id: &str, proc: &Arc<ChatPr
         }
         bg
     };
-    emit(app, session_id, json!({"type":"turnCompleted"}));
+    // Mark stop-parked settlements so plan_execute::observe waits for the real turn completion
+    // rather than flagging a workflow blocked while Antigravity awaits its own background work.
+    emit(app, session_id, json!({"type":"turnCompleted","stopParked":true}));
     emit_state(app, session_id, if bg { AgentState::Background } else { AgentState::Waiting });
     if bg {
         super::settle_background_state(app, session_id, proc);
@@ -3282,7 +3301,7 @@ fn evict_or_require_auth_after_401(app: AppCtx, session_id: String, proc: Arc<Ch
 
 /// The process is gone: close whatever was streaming and keep the journal complete.
 pub(super) fn finish(proc: &Arc<ChatProcess>) {
-    let (rows, reactive_rows, park, retry_wait, transient_wait, inactivity_wait, waiter, gate_permit) = {
+    let (rows, reactive_rows, park, retry_wait, transient_wait, inactivity_wait, waiter) = {
         let mut state = proc.acp.lock().unwrap();
         state.parked_idle = false;
         state.settled_while_parked = false;
@@ -3296,7 +3315,6 @@ pub(super) fn finish(proc: &Arc<ChatProcess>) {
         state.split_transient_row_id = None;
         state.startup_native = None;
         state.startup_prompt = None;
-        let gate_permit = state.auth_gate_permit.take();
         let park = state.stop_park.take();
         let retry_wait = state.model_retry_wait.take();
         let transient_wait = state.transient_retry_wait.take();
@@ -3305,9 +3323,8 @@ pub(super) fn finish(proc: &Arc<ChatProcess>) {
         let rows: Vec<ChatRow> = state.mapper.finish().into_iter().chain(state.mapper.settle_running(true)).collect();
         let reactive_rows = state.tasks.take_aborted_reactive_rows();
         flush_journal_locked(&mut state);
-        (rows, reactive_rows, park, retry_wait, transient_wait, inactivity_wait, waiter, gate_permit)
+        (rows, reactive_rows, park, retry_wait, transient_wait, inactivity_wait, waiter)
     };
-    drop(gate_permit);
     if let Some(park) = park {
         park.release("allow");
     }
@@ -6212,5 +6229,97 @@ while True:
         }));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn antigravity_conversation_missing_preserves_binding_when_local_recording_exists() {
+        let app = ctx("acp-agy-preserve-existing");
+        let dir = std::env::temp_dir().join(format!("vlx-agy-preserve-{}", uuid::Uuid::new_v4()));
+        let native_id = "conv-existing-123";
+        let transcript_dir = dir
+            .join("antigravity-cli")
+            .join("brain")
+            .join(native_id)
+            .join(".system_generated")
+            .join("logs");
+        std::fs::create_dir_all(&transcript_dir).unwrap();
+        std::fs::write(
+            transcript_dir.join("transcript_full.jsonl"),
+            "{\"step_index\":0,\"type\":\"USER_INPUT\",\"content\":\"<USER_REQUEST>hi</USER_REQUEST>\"}\n",
+        )
+        .unwrap();
+
+        let (mut proc, mut agent) = wired(SessionKind::Antigravity);
+        Arc::get_mut(&mut proc).unwrap().auth_settings_args =
+            vec![format!("--gemini-dir={}", dir.display())];
+        *proc.agent_session_id.lock().unwrap() = Some(native_id.into());
+        *proc.expected_native.lock().unwrap() = Some(native_id.into());
+
+        bootstrap(&app, &proc, Some(native_id), Some("/w"), None);
+        let init = written(&mut agent);
+        reply(
+            &app,
+            &proc,
+            &init,
+            json!({"agentCapabilities":{"loadSession":true,"sessionCapabilities":{"resume":{}}}}),
+        );
+        let resume = written(&mut agent);
+        assert_eq!(resume["method"], "session/resume");
+
+        // Local transcript still exists: a transient "Session not found" must fail startup cleanly
+        // without issuing `session/new` or clearing `expected_native` / `agent_session_id`.
+        handle_line(
+            &app,
+            "s",
+            &proc,
+            &json!({"jsonrpc":"2.0","id":resume["id"],"error":{"code":-32000,"message":"Session not found"}})
+                .to_string(),
+        );
+        assert!(
+            proc.released.load(Ordering::Relaxed),
+            "process should be released on reopen failure instead of spawning a replacement conversation"
+        );
+        assert_eq!(
+            proc.expected_native.lock().unwrap().as_deref(),
+            Some(native_id),
+            "expected_native must remain intact when local recording still exists"
+        );
+        assert_eq!(
+            proc.agent_session_id.lock().unwrap().as_deref(),
+            Some(native_id),
+            "agent_session_id must remain intact when local recording still exists"
+        );
+
+        // Once the local recording is genuinely absent, Antigravity still falls back to `session/new`.
+        let empty_dir = std::env::temp_dir().join(format!("vlx-agy-missing-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&empty_dir).unwrap();
+        let (mut proc2, mut agent2) = wired(SessionKind::Antigravity);
+        Arc::get_mut(&mut proc2).unwrap().auth_settings_args =
+            vec![format!("--gemini-dir={}", empty_dir.display())];
+        *proc2.expected_native.lock().unwrap() = Some("conv-deleted-456".into());
+
+        bootstrap(&app, &proc2, Some("conv-deleted-456"), Some("/w"), None);
+        let init2 = written(&mut agent2);
+        reply(
+            &app,
+            &proc2,
+            &init2,
+            json!({"agentCapabilities":{"loadSession":true,"sessionCapabilities":{"resume":{}}}}),
+        );
+        let resume2 = written(&mut agent2);
+        assert_eq!(resume2["method"], "session/resume");
+        handle_line(
+            &app,
+            "s",
+            &proc2,
+            &json!({"jsonrpc":"2.0","id":resume2["id"],"error":{"code":-32000,"message":"Session not found"}})
+                .to_string(),
+        );
+        let fresh = written(&mut agent2);
+        assert_eq!(fresh["method"], "session/new");
+        assert!(proc2.expected_native.lock().unwrap().is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&empty_dir);
     }
 }

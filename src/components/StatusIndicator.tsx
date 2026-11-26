@@ -23,6 +23,14 @@ export function StatusIndicator({
   if (status === "waiting") {
     return <span className="status-dot st-waiting" title={status} />;
   }
+  if (status === "awaiting_parent" || status === "awaiting_children") {
+    return (
+      <span
+        className="status-dot st-workflow-wait"
+        title={t(status === "awaiting_parent" ? "status.awaitingParent" : "status.awaitingChildren")}
+      />
+    );
+  }
   if (status === "background") {
     return <span className="status-dot st-background" title={t("status.background")} />;
   }

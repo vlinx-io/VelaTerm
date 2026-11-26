@@ -44,6 +44,71 @@ export interface PlanExecutePreparation {
 export const preparePlanExecute = (context: PlanExecuteContext) =>
   invoke<PlanExecutePreparation>("plan_execute_prepare", { context });
 
+export interface BindExistingRunSummary {
+  id: string;
+  state: string;
+  round: number;
+  splitTasks: boolean;
+  taskCount: number;
+  remainingSlots: number;
+  reviewEnabled: boolean | null;
+  reviewStatus: string;
+  config: PlanExecuteConfig;
+}
+
+export interface BindSessionCandidate {
+  id: string;
+  projectId: string;
+  groupId: string | null;
+  parentSessionId: string | null;
+  name: string;
+  kind: import("../types").SessionKind;
+  engine: import("../types").SessionEngine;
+  cwd: string | null;
+  worktreePath: string | null;
+  eligible: boolean;
+  ineligibleReason: "unsupported_agent" | "not_chat" | null;
+  activeRole: "planner" | "executor" | "reviewer" | null;
+  extendablePlanner: boolean;
+  existingRun: BindExistingRunSummary | null;
+}
+
+export interface PlanExecuteBindPreparation {
+  plannerId: string;
+  executorIds: string[];
+  candidates: BindSessionCandidate[];
+  defaultConfig: PlanExecuteConfig;
+}
+
+export interface PlanExecuteBindRequest {
+  requestId: string;
+  plannerId: string;
+  executorIds: string[];
+  prompt: string;
+  images?: import("./chat").ChatImage[];
+  reparentExecutors: boolean;
+  config: PlanExecuteConfig;
+}
+
+export interface PlanExecuteBindResult {
+  planner: import("../types").Session;
+  run: { id: string; state: string; summary: string; config?: PlanExecuteConfig };
+  tasks: SplitProposal["executionTasks"];
+  delivery: { delivery: string; error?: string; messageId?: string; targetSessionId?: string };
+}
+
+export const preparePlanExecuteBind = (
+  sessionIds: string[],
+  mode?: "auto" | "executors",
+) =>
+  invoke<PlanExecuteBindPreparation>("plan_execute_bind_prepare", {
+    sessionIds,
+    ...(mode ? { mode } : {}),
+  });
+
+export const bindPlanExecute = (request: PlanExecuteBindRequest) =>
+  invoke<PlanExecuteBindResult>("plan_execute_bind", { request });
+
 export const createPlanExecute = (request: {
   requestId: string; context: PlanExecuteContext; prompt: string; cwd: string | null;
   worktree: boolean; config: PlanExecuteConfig; images?: import("./chat").ChatImage[];

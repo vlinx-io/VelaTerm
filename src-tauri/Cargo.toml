@@ -1,6 +1,6 @@
 [package]
 name = "velaterm"
-version = "0.3.6"
+version = "0.3.7"
 description = "VelaTerm multi-session terminal manager"
 authors = ["vlinx"]
 edition = "2021"
@@ -45,6 +45,7 @@ sidecar = ["dep:font-kit"]
 [workspace]
 # Domain crates live under crates/. Profiles stay in this root manifest: Cargo ignores them in members.
 members = ["crates/*"]
+exclude = ["patches/*"]
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -64,25 +65,21 @@ strip = true
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
-# Tao 0.35.3 predates the Windows input-lock reentrancy fix (tao#1215). The
-# stable Tauri runtime still requires 0.35, so pin the compatible upstream fix.
+# Wrap DispatcherMainThreadContext in Arc inside tauri-runtime-wry::Context so cross-thread
+# AppHandle/Webview clones and drops do not race on tao's non-atomic Rc<EventLoopRunner> on Windows
+# (issue #201). Remove once upstream tauri-runtime-wry or tao makes EventLoopWindowTarget atomic.
 [patch.crates-io]
-tao = { git = "https://github.com/tauri-apps/tao", rev = "c704261c519c58cfdd0bc2d58ba24e06a0b71c92" }
-
-# The pinned tree has an older Android path dependency. Preserve the published
-# 0.1.4 JNI macro fixes instead of resolving that path's 0.1.3 implementation.
-[patch."https://github.com/tauri-apps/tao"]
-tao-macros = { version = "=0.1.4", registry = "crates-io" }
+tauri-runtime-wry = { path = "patches/tauri-runtime-wry" }
 
 [dependencies]
 vlx-core = { path = "crates/vlx-core" }
 # Native font enumeration belongs to the display host, not the remote headless server.
 font-kit = { version = "0.14.3", optional = true }
 # The built-in browser needs unstable Window::add_child multi-WebView APIs. Their signatures may change,
-# so the version is pinned within 2.11 and call sites are centralized.
+# so the version is pinned within 2.12 and call sites are centralized.
 # Default features minus `compression`: the frontend is embedded as plain bytes, because antivirus heuristics
 # treat large compressed blobs inside an executable as a packed loader. The installer compresses it anyway.
-tauri = { version = "2", default-features = false, features = [
+tauri = { version = "~2.12", default-features = false, features = [
     "wry", "common-controls-v6", "dynamic-acl", "x11", "dbus", "unstable", "image-png",
 ], optional = true }
 tauri-plugin-opener = { version = "2", optional = true }
@@ -97,8 +94,7 @@ tauri-plugin-process = { version = "2", optional = true }
 # A second `vela <path>` process forwards the path to the running window and exits immediately.
 tauri-plugin-single-instance = { version = "2", optional = true }
 # System-wide screenshot hotkey that works while another application has focus.
-# Pinned below 2.4, which requires Tauri 2.12; the built-in browser pins Tauri within 2.11.
-tauri-plugin-global-shortcut = { version = "~2.3.2", optional = true }
+tauri-plugin-global-shortcut = { version = "2", optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # Source offsets let translation replace prose without rewriting Markdown, code, or link destinations.
@@ -222,9 +218,9 @@ notify = "8"
 reqwest = { version = "0.13", features = ["blocking", "json"] }
 # Disable WebView2 browser accelerators that Chromium would consume before frontend keydown, breaking app
 # shortcuts. Access ICoreWebView2Settings3 with versions already used by wry to avoid duplicate dependencies.
-webview2-com = "0.38"
+webview2-com = "0.39"
 # Enable Win32 modules used to repair taskbar icons and disable accelerators, sharing the windows dependency.
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_System_Threading",
     "Win32_System_Environment",

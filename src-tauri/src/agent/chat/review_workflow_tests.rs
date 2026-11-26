@@ -24,6 +24,7 @@ fn review_cleanup(app: AppCtx) {
 
 #[test]
 fn optional_review_fans_out_retries_failed_target_and_separates_acceptance_from_finish() {
+    let _state_guard = crate::session_state::test_lock();
     use crate::agent::plan_execute as flow;
     let app = review_fixture(true);
     flow::action(&app,&flow_request("planner","dispatch",1,"Implement")).unwrap();
@@ -69,6 +70,7 @@ fn optional_review_fans_out_retries_failed_target_and_separates_acceptance_from_
 
 #[test]
 fn optional_review_disabled_reports_and_supplements_go_to_plan_without_review_role() {
+    let _state_guard = crate::session_state::test_lock();
     use crate::agent::plan_execute as flow;
     let app = review_fixture(false);
     flow::action(&app,&flow_request("planner","dispatch",1,"Implement")).unwrap();
@@ -91,6 +93,7 @@ fn optional_review_disabled_reports_and_supplements_go_to_plan_without_review_ro
 
 #[test]
 fn optional_review_split_shares_reviewer_and_requires_integrated_delivery_review() {
+    let _state_guard = crate::session_state::test_lock();
     use crate::agent::plan_execute::{self as flow,split};
     for enabled in [false,true] {
         let app = review_fixture(enabled);
@@ -158,6 +161,7 @@ fn optional_review_schema_migration_preserves_legacy_records() {
 
 #[test]
 fn optional_review_retries_only_missing_plan_notices_after_review_advanced_the_round() {
+    let _state_guard = crate::session_state::test_lock();
     use crate::agent::plan_execute as flow;
     let app = review_fixture(true);
     flow::action(&app,&flow_request("planner","dispatch",1,"Implement")).unwrap();

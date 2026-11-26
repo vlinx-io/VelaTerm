@@ -37,25 +37,29 @@ pub(super) struct Node {
     pub path: String,
     /// A session's agent kind, for listings.
     agent: Value,
+    /// Whether a live PTY or chat process is currently backing this session.
+    alive: bool,
 }
 
 pub(crate) struct Model { nodes: Vec<Node> }
 
 impl Model {
-    fn new(tree: Tree) -> Self {
+    fn new(tree: Tree, app: &AppCtx) -> Self {
         let mut nodes = Vec::new();
         for p in tree.projects {
             let kind = if p.root_path.is_empty() { Kind::Collection } else { Kind::Project };
             nodes.push(Node { id: p.id, kind, name: p.name, project: None, group: None, parent_session: None,
-                collection: p.collection_id, sort_order: p.sort_order, path: p.root_path, agent: Value::Null });
+                collection: p.collection_id, sort_order: p.sort_order, path: p.root_path, agent: Value::Null, alive: false });
         }
         for g in tree.groups {
             nodes.push(Node { id: g.id, kind: Kind::Group, name: g.name, project: Some(g.project_id), group: g.parent_group_id,
-                parent_session: None, collection: None, sort_order: g.sort_order, path: String::new(), agent: Value::Null });
+                parent_session: None, collection: None, sort_order: g.sort_order, path: String::new(), agent: Value::Null, alive: false });
         }
         for s in tree.sessions {
+            let alive = s.kind != crate::models::SessionKind::Browser
+                && (app.pty().is_running(&s.id) || app.chat().is_alive(&s.id));
             nodes.push(Node { id: s.id, kind: Kind::Session, name: s.name, project: Some(s.project_id), group: s.group_id,
-                parent_session: s.parent_session_id, collection: None, sort_order: s.sort_order, path: String::new(), agent: json!(s.kind) });
+                parent_session: s.parent_session_id, collection: None, sort_order: s.sort_order, path: String::new(), agent: json!(s.kind), alive });
         }
         Model { nodes }
     }
@@ -68,7 +72,7 @@ impl Model {
 
     /// Records a project the request imports, so later actions can name it.
     pub(super) fn add_project(&mut self, id: String, name: String, path: String, collection: Option<String>) {
-        self.nodes.push(Node { id, kind: Kind::Project, name, project: None, group: None, parent_session: None, collection, sort_order: 0, path, agent: Value::Null });
+        self.nodes.push(Node { id, kind: Kind::Project, name, project: None, group: None, parent_session: None, collection, sort_order: 0, path, agent: Value::Null, alive: false });
     }
 
     /// Collections and projects for `vapp catalog`. Groups and sessions are listed per project by `list`.
@@ -188,7 +192,7 @@ impl Model {
     }
 }
 
-pub(super) fn load(app: &AppCtx) -> Result<Model> { Ok(Model::new(crate::command_core::list_tree(app)?)) }
+pub(super) fn load(app: &AppCtx) -> Result<Model> { Ok(Model::new(crate::command_core::list_tree(app)?, app)) }
 
 /// Compares names so that embedded numbers order by value: `Lesson 2` before `Lesson 10`.
 pub(super) fn natural_cmp(a: &str, b: &str) -> Ordering {
@@ -249,7 +253,7 @@ pub(super) fn validate(model: &mut Model, raw: &Value, index: usize) -> std::res
             if model.nodes.iter().any(|n| n.kind == Kind::Collection && n.name.trim().to_lowercase() == wanted) { return Err(("name", "exists")); }
             let id = reference(model, raw, index)?;
             model.nodes.push(Node { id: id.clone(), kind: Kind::Collection, name: name.clone(), project: None, group: None, parent_session: None,
-                collection: parent.as_ref().map(|p| p.0.clone()), sort_order: 0, path: String::new(), agent: Value::Null });
+                collection: parent.as_ref().map(|p| p.0.clone()), sort_order: 0, path: String::new(), agent: Value::Null, alive: false });
             Ok(json!({"name": name, "parentId": parent.as_ref().map(|p| &p.0), "parentName": parent.as_ref().map(|p| &p.1), "ref": id, "as": raw["as"]}))
         }
         "moveToCollection" => {
@@ -274,7 +278,7 @@ pub(super) fn validate(model: &mut Model, raw: &Value, index: usize) -> std::res
             let action = json!({"projectId": project.id, "parentGroupId": parent.as_ref().map(|g| &g.id),
                 "where": model.container_label(&project.id, parent.as_ref().map(|g| g.id.as_str()), None), "name": name, "ref": id, "as": raw["as"]});
             model.nodes.push(Node { id, kind: Kind::Group, name, project: Some(project.id), group: parent.map(|g| g.id), parent_session: None,
-                collection: None, sort_order: i64::MAX, path: String::new(), agent: Value::Null });
+                collection: None, sort_order: i64::MAX, path: String::new(), agent: Value::Null, alive: false });
             Ok(action)
         }
         "rename" => {
@@ -291,6 +295,14 @@ pub(super) fn validate(model: &mut Model, raw: &Value, index: usize) -> std::res
         }
         "move" => validate_move(model, raw),
         "sort" => validate_sort(model, raw),
+        "killProcess" => {
+            let node = model.resolve(raw.get("id").filter(|v| !v.is_null()).unwrap_or(&raw["sessionId"]), &[Kind::Session], "id")?.clone();
+            if node.agent == "browser" { return Err(("id", "wrongKind")); }
+            if !node.alive { return Err(("id", "notRunning")); }
+            let action = json!({"id": node.id, "nodeName": node.name, "where": model.label(&node)});
+            if let Some(n) = model.get_mut(&node.id) { n.alive = false; }
+            Ok(action)
+        }
         "archiveSession" => {
             let node = model.resolve(raw.get("id").filter(|v| !v.is_null()).unwrap_or(&raw["sessionId"]), &[Kind::Session], "id")?.clone();
             let action = json!({"id": node.id, "nodeName": node.name, "where": model.label(&node)});
@@ -405,10 +417,38 @@ pub(super) fn run(app: &AppCtx, action: &Value, origin: CallOrigin) -> Result<Va
         "rename" => call(app, "rename_node", json!({"kind": node_kind(), "id": action["id"], "name": action["name"]}), origin),
         "move" => run_move(app, action, origin).map(|_| Value::Null),
         "sort" => run_sort(app, action, origin).map(|_| Value::Null),
+        "killProcess" => run_kill_process(app, action, origin),
         "archiveSession" => call(app, "set_session_archived", json!({"id": action["id"], "archived": true}), origin),
         "deleteNode" => call(app, "delete_node", json!({"kind": node_kind(), "id": action["id"]}), origin),
         _ => Err("This change is not supported".into()),
     }
+}
+
+fn run_kill_process(app: &AppCtx, action: &Value, origin: CallOrigin) -> Result<Value> {
+    let id = action["id"].as_str().ok_or("The session no longer exists")?;
+    let session = {
+        let conn = app.db().conn.lock().map_err(|e| e.to_string())?;
+        crate::db::repo::get_session(&conn, id)?
+    }.ok_or("The session no longer exists")?;
+    if session.kind == crate::models::SessionKind::Browser {
+        return Err("This session does not have a process to stop".into());
+    }
+    let mut stopped_chat = false;
+    if session.engine == "chat" || app.chat().is_alive(id) {
+        call(app, "chat_stop", json!({"sessionId": id}), origin)?;
+        stopped_chat = true;
+    }
+    if !stopped_chat || app.pty().is_running(id) {
+        // Use a dedicated source so every open client (including the desktop host) closes its pane on `pty://killed`.
+        crate::web::dispatch::dispatch(
+            app,
+            "pty_kill",
+            &json!({"sessionId": id, "reason": "close"}),
+            super::ASSIST_SOURCE,
+            origin,
+        )?;
+    }
+    Ok(json!({"id": id}))
 }
 
 fn move_node(app: &AppCtx, node: &Node, project: &str, group: Option<&str>, parent_session: Option<&str>, order: i64, origin: CallOrigin) -> Result<()> {
@@ -488,6 +528,6 @@ pub(super) fn list(app: &AppCtx, project: Option<&str>, session_id: &str) -> Res
     Ok(json!({
         "project": {"id": project.id, "name": project.name, "kind": project.kind.as_str(), "path": project.path},
         "groups": groups.into_iter().map(entry).collect::<Vec<_>>(),
-        "sessions": sessions.into_iter().map(|n| { let mut e = entry(n); e["kind"] = n.agent.clone(); e }).collect::<Vec<_>>(),
+        "sessions": sessions.into_iter().map(|n| { let mut e = entry(n); e["kind"] = n.agent.clone(); e["alive"] = json!(n.alive); e }).collect::<Vec<_>>(),
     }))
 }

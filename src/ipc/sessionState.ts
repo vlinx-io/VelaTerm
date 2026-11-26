@@ -10,7 +10,7 @@
 //! implementation.
 
 import { invoke } from "./transport";
-import type { AgentKind, AgentState } from "../types";
+import type { AgentKind, AgentState, WorkflowWait } from "../types";
 import type { BackgroundRun } from "./runs";
 
 /** One session's authoritative record. Absent from a batch means "nothing known", not "false". */
@@ -36,6 +36,8 @@ export interface SessionStateRecord {
   alive?: boolean;
   /** Commands this session started with `vrun` that are still running, oldest first. */
   runs?: BackgroundRun[];
+  /** Whether idle replies wait on another workflow session (`parent` or `children`) instead of the user. */
+  workflowWait?: WorkflowWait | null;
   /** Milliseconds since the epoch of the record's last change. */
   updatedAt?: number;
 }

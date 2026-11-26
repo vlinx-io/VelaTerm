@@ -63,6 +63,7 @@ interface VlxNativeBridge {
   setFocus(): Promise<void>;
   onFocusChanged(cb: (focused: boolean) => void): () => void;
   takeOpenProjectRequest(): Promise<string | null>;
+  takeServiceRestartNotice?(): Promise<boolean>;
   onOpenProjectRequest(cb: () => void): () => void;
   quit?: {
     onRequested(cb: (request?: Partial<QuitRequest>) => void): () => void;
@@ -187,6 +188,15 @@ const clipboard: ClipboardCapability = {
   async readImage() {
     return null;
   },
+  async readFiles() {
+    if (!env.isElectron) return [];
+    try {
+      const res = await transportInvoke<{ paths: string[] } | null>("clipboard_read_files", {});
+      return res?.paths ?? [];
+    } catch {
+      return [];
+    }
+  },
 };
 
 const windowCap: WindowCapability = {
@@ -214,6 +224,9 @@ const windowCap: WindowCapability = {
   },
   async takeOpenProjectRequest() {
     return (await bridge()?.takeOpenProjectRequest()) ?? null;
+  },
+  async takeServiceRestartNotice() {
+    return (await bridge()?.takeServiceRestartNotice?.()) ?? false;
   },
   async onOpenProjectRequest(cb) {
     return bridge()?.onOpenProjectRequest(cb) ?? (() => {});

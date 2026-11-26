@@ -2,18 +2,31 @@ import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from "@t
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session } from "../types";
 
-const mocks = vi.hoisted(() => ({ rename: vi.fn(), cancel: vi.fn(), options: vi.fn(), models: vi.fn(), t: (key: string) => key }));
+const mocks = vi.hoisted(() => ({
+  rename: vi.fn(),
+  cancel: vi.fn(),
+  options: vi.fn(),
+  optionsMany: vi.fn(),
+  models: vi.fn(),
+  t: (key: string, ...args: unknown[]) => (args.length ? `${key}:${args.join(",")}` : key),
+}));
 const state = vi.hoisted(() => new Proxy({
   sessions: [] as Session[], projects: [], groups: [], agentPresets: [], agentDefaults: {},
   runtimes: {}, paneTrees: {}, sidebarTreeViews: [], ephemeralSessions: {}, openTabs: [], liveTabs: [],
   sessionTitlePrefs: {},
   sessionTitleAgent: "",
   setSessionTitleAgent: vi.fn(),
+  setSessionTitlePrefs: vi.fn(),
 }, { get: (target, key) => key in target ? target[key as keyof typeof target] : vi.fn() }));
 vi.mock("../store/termStore", () => ({
   useTermStore: Object.assign((select: (s: typeof state) => unknown) => select(state), { getState: () => state }),
 }));
-vi.mock("../ipc/tree", () => ({ renameSessionWithAgent: mocks.rename, cancelSessionTitle: mocks.cancel, sessionTitleOptions: mocks.options }));
+vi.mock("../ipc/tree", () => ({
+  renameSessionWithAgent: mocks.rename,
+  cancelSessionTitle: mocks.cancel,
+  sessionTitleOptions: mocks.options,
+  sessionTitleOptionsMany: mocks.optionsMany,
+}));
 vi.mock("../ipc/launch", async importOriginal => ({ ...await importOriginal<object>(), launchModels: mocks.models }));
 vi.mock("../ipc/commands", async importOriginal => ({
   ...await importOriginal<object>(), listShells: vi.fn().mockResolvedValue([]), gitbashStatus: vi.fn().mockResolvedValue(null),
@@ -28,7 +41,7 @@ vi.mock("../i18n", () => ({ t: mocks.t, useT: () => mocks.t }));
 
 import { useSessionMenu } from "./sessionMenu";
 import { SmartRenameRoute } from "./SmartRename/SmartRenameRoute";
-import { readSmartRenameRoute } from "./SmartRename/navigation";
+import { readSmartRenameRoute, smartRenameUrl } from "./SmartRename/navigation";
 
 function session(kind: Session["kind"] = "claude", agentSessionId: string | null = "native-id"): Session {
   return { id: "session", projectId: "project", groupId: null, name: "Existing title", kind,
@@ -48,10 +61,17 @@ function options(available = true) {
 }
 function openRoute(query = "?smartRename=session") { window.history.replaceState(null, "", `/${query}`); render(<SmartRenameRoute />); }
 beforeEach(() => {
-  state.sessions = [session()]; mocks.rename.mockReset(); mocks.options.mockReset(); mocks.models.mockReset();
+  state.sessions = [session()]; mocks.rename.mockReset(); mocks.options.mockReset(); mocks.optionsMany.mockReset(); mocks.models.mockReset();
   mocks.cancel.mockReset(); mocks.cancel.mockResolvedValue(true);
-  state.sessionTitlePrefs = {}; state.sessionTitleAgent = ""; state.setSessionTitleAgent.mockReset();
+  state.sessionTitlePrefs = {}; state.sessionTitleAgent = ""; state.setSessionTitleAgent.mockReset(); state.setSessionTitlePrefs.mockReset();
   mocks.options.mockResolvedValue(options());
+  mocks.optionsMany.mockResolvedValue({
+    ...options(),
+    sessions: [
+      { id: "s1", name: "First session", kind: "claude" },
+      { id: "s2", name: "Second session", kind: "codex" },
+    ],
+  });
   mocks.models.mockResolvedValue({ models: [{ id: "custom-model", label: "Custom", effortLevels: ["low", "high", "ultra"] }], effortLevels: ["low", "high", "ultra"] });
   window.history.replaceState(null, "", "/");
 });
@@ -76,7 +96,7 @@ describe("AI session renaming", () => {
     const { result } = renderHook(useSessionMenu);
     const item = titleItem(result.current, state.sessions[0])!;
     act(() => { item.onClick?.({ preventDefault: vi.fn() } as unknown as React.MouseEvent); item.onClick?.({ preventDefault: vi.fn() } as unknown as React.MouseEvent); });
-    expect(readSmartRenameRoute()).toEqual({ sessionId: "session", agent: null, model: null, effort: null });
+    expect(readSmartRenameRoute()).toEqual({ sessionId: "session", sessionIds: ["session"], agent: null, model: null, effort: null });
     expect(mocks.rename).not.toHaveBeenCalled();
   });
 
@@ -153,7 +173,7 @@ describe("AI session renaming", () => {
     fireEvent.click(await screen.findByRole("option", { name: /Custom/ }));
     fireEvent.click(effort);
     fireEvent.click(await screen.findByRole("option", { name: "chat.effort.ultra" }));
-    expect(readSmartRenameRoute()).toEqual({ sessionId: "session", agent: "codex", model: "custom-model", effort: "ultra" });
+    expect(readSmartRenameRoute()).toEqual({ sessionId: "session", sessionIds: ["session"], agent: "codex", model: "custom-model", effort: "ultra" });
     expect(mocks.rename).not.toHaveBeenCalled();
     const submit = screen.getByRole("button", { name: "common.rename" });
     fireEvent.click(submit); fireEvent.click(submit);
@@ -244,5 +264,124 @@ describe("AI session renaming", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(mocks.rename).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "common.rename" })).toHaveProperty("disabled", false);
+  });
+
+  it("clears batch smartRename route to full origin URL on tauri://localhost without trailing slash", () => {
+    const origLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: new URL("tauri://localhost?smartRename=s1,s2&smartRenameAgent=codex"),
+    });
+    try {
+      expect(readSmartRenameRoute()).toEqual({
+        sessionId: "s1",
+        sessionIds: ["s1", "s2"],
+        agent: "codex",
+        model: null,
+        effort: null,
+      });
+      expect(smartRenameUrl(null)).toBe("tauri://localhost");
+      expect(smartRenameUrl(["s1", "s2", "s1"])).toBe("tauri://localhost?smartRename=s1%2Cs2");
+    } finally {
+      Object.defineProperty(window, "location", { configurable: true, value: origLocation });
+    }
+  });
+
+  it("batch renames checked sessions with bounded concurrency and auto-closes when all succeed", async () => {
+    const resolvers = new Map<string, (value: { title: string; agent: string }) => void>();
+    mocks.optionsMany.mockResolvedValue({
+      ...options(),
+      sessions: [
+        { id: "s1", name: "Session One", kind: "claude" },
+        { id: "s2", name: "Session Two", kind: "claude" },
+        { id: "s3", name: "Session Three", kind: "codex" },
+        { id: "s4", name: "Session Four", kind: "codex" },
+        { id: "s5", name: "Session Five", kind: "claude" },
+      ],
+    });
+    mocks.rename.mockImplementation((id: string) => new Promise(resolve => { resolvers.set(id, resolve); }));
+
+    openRoute("?smartRename=s1,s2,s3,s4,s5");
+    expect(await screen.findByRole("checkbox", { name: "Session One" })).toBeTruthy();
+    expect(mocks.optionsMany).toHaveBeenCalledWith(["s1", "s2", "s3", "s4", "s5"]);
+
+    // Uncheck one session before starting so only 4 are submitted.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Session Five" }));
+    const submit = screen.getByRole("button", { name: "sessionTitle.batchSubmit:4" });
+    fireEvent.click(submit);
+
+    // Concurrency is bounded to 3 in-flight at a time.
+    await waitFor(() => expect(mocks.rename).toHaveBeenCalledTimes(3));
+    expect(mocks.rename.mock.calls.map(c => c[0])).toEqual(["s1", "s2", "s3"]);
+
+    await act(async () => { resolvers.get("s1")?.({ title: "New One", agent: "claude" }); });
+    await waitFor(() => expect(mocks.rename).toHaveBeenCalledTimes(4));
+    expect(mocks.rename.mock.calls[3][0]).toBe("s4");
+
+    await act(async () => {
+      resolvers.get("s2")?.({ title: "New Two", agent: "claude" });
+      resolvers.get("s3")?.({ title: "New Three", agent: "claude" });
+      resolvers.get("s4")?.({ title: "New Four", agent: "claude" });
+    });
+
+    await waitFor(() => expect(readSmartRenameRoute()).toBeNull());
+    expect(mocks.rename).not.toHaveBeenCalledWith("s5", expect.anything(), expect.anything(), expect.anything(), expect.anything());
+  });
+
+  it("stays open on partial batch failure and retries only the failed sessions", async () => {
+    mocks.rename
+      .mockResolvedValueOnce({ title: "Renamed One", agent: "claude" })
+      .mockRejectedValueOnce(new Error("session_title:timeout"))
+      .mockResolvedValueOnce({ title: "Renamed Two", agent: "claude" });
+
+    openRoute("?smartRename=s1,s2");
+    await screen.findByRole("checkbox", { name: "First session" });
+    fireEvent.click(screen.getByRole("button", { name: "sessionTitle.batchSubmit:2" }));
+
+    expect(await screen.findByText("Renamed One")).toBeTruthy();
+    expect(await screen.findByText("sessionTitle.timeout")).toBeTruthy();
+    expect(screen.getByText("sessionTitle.batchSummary:1,1")).toBeTruthy();
+    expect(readSmartRenameRoute()?.sessionIds).toEqual(["s1", "s2"]);
+
+    const retry = screen.getByRole("button", { name: "sessionTitle.batchRetryFailed:1" });
+    fireEvent.click(retry);
+    await waitFor(() => expect(readSmartRenameRoute()).toBeNull());
+    expect(mocks.rename).toHaveBeenCalledTimes(3);
+    expect(mocks.rename.mock.calls[2][0]).toBe("s2");
+  });
+
+  it("cancels all in-flight batch tasks and stops queued sessions before closing", async () => {
+    const rejectors = new Map<string, (cause: Error) => void>();
+    mocks.optionsMany.mockResolvedValue({
+      ...options(),
+      sessions: [
+        { id: "s1", name: "One", kind: "claude" },
+        { id: "s2", name: "Two", kind: "claude" },
+        { id: "s3", name: "Three", kind: "claude" },
+        { id: "s4", name: "Four", kind: "claude" },
+      ],
+    });
+    mocks.rename.mockImplementation((id: string) => new Promise((_resolve, reject) => { rejectors.set(id, reject); }));
+
+    openRoute("?smartRename=s1,s2,s3,s4");
+    await screen.findByRole("checkbox", { name: "One" });
+    fireEvent.click(screen.getByRole("button", { name: "sessionTitle.batchSubmit:4" }));
+    await waitFor(() => expect(mocks.rename).toHaveBeenCalledTimes(3));
+
+    fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+    expect(mocks.cancel).toHaveBeenCalledTimes(3);
+    expect(mocks.cancel).toHaveBeenCalledWith("s1", mocks.rename.mock.calls[0][4]);
+    expect(mocks.cancel).toHaveBeenCalledWith("s2", mocks.rename.mock.calls[1][4]);
+    expect(mocks.cancel).toHaveBeenCalledWith("s3", mocks.rename.mock.calls[2][4]);
+    expect(readSmartRenameRoute()).not.toBeNull();
+
+    await act(async () => {
+      rejectors.get("s1")?.(new Error("session_title:cancelled"));
+      rejectors.get("s2")?.(new Error("session_title:cancelled"));
+      rejectors.get("s3")?.(new Error("session_title:cancelled"));
+    });
+    await waitFor(() => expect(readSmartRenameRoute()).toBeNull());
+    // The 4th queued session never started.
+    expect(mocks.rename).toHaveBeenCalledTimes(3);
   });
 });

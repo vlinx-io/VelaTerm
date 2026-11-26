@@ -8,9 +8,13 @@ import { useTextFieldMenu } from "./useTextFieldMenu";
 const hoisted = vi.hoisted(() => ({
   env: { isTauri: false, isElectron: false, isWeb: true, hasNativeHost: false },
   imageFromNativeClipboard: vi.fn(),
+  imagesFromClipboard: vi.fn(() => []),
 }));
 vi.mock("../../../platform/env", () => ({ env: hoisted.env }));
-vi.mock("../../../terminal/imageInput", () => ({ imageFromNativeClipboard: hoisted.imageFromNativeClipboard }));
+vi.mock("../../../terminal/imageInput", () => ({
+  imageFromNativeClipboard: hoisted.imageFromNativeClipboard,
+  imagesFromClipboard: hoisted.imagesFromClipboard,
+}));
 
 function Field({ initial = "hello world", onImage, onCopyFailed = () => {}, type }: {
   initial?: string; onImage?: (file: File) => void; onCopyFailed?: (message: string) => void; type?: string;
@@ -104,6 +108,18 @@ it("hands a clipboard image to fields that accept attachments", async () => {
   await waitFor(() => expect(onImage).toHaveBeenCalledWith(image));
   expect(readText).not.toHaveBeenCalled();
   expect(field.value).toBe("hello world");
+});
+
+it("pastes copied OS file paths instead of Finder's file-icon bitmap (#195)", async () => {
+  hoisted.env.isTauri = true;
+  vi.spyOn(platform.clipboard, "readFiles").mockResolvedValue(["/Users/me/My Report.pdf"]);
+  const onImage = vi.fn();
+  render(<Field onImage={onImage} />);
+  const field = openMenu();
+  fireEvent.click(item("Paste"));
+  await waitFor(() => expect(field.value).toBe('"/Users/me/My Report.pdf" world'));
+  expect(hoisted.imageFromNativeClipboard).not.toHaveBeenCalled();
+  expect(onImage).not.toHaveBeenCalled();
 });
 
 it("disables Paste but keeps its shortcut visible when the page cannot read the clipboard", () => {

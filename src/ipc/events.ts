@@ -209,10 +209,18 @@ export function onAssistRequest(cb: (request: { id: string; sessionId: string; n
 }
 
 /** Actions of a request were decided in some client; every view of that session reads its list again. */
-export function onAssistChanged(cb: (change: { id: string; sessionId: string; knowledgeChanged?: boolean }) => void): Promise<UnlistenFn> {
-  return listen<{ id: string; sessionId: string; knowledgeChanged?: boolean }>("assist://changed", (payload) => {
+export function onAssistChanged(cb: (change: { id: string; sessionId: string; knowledgeChanged?: boolean; killedSessions?: string[] }) => void): Promise<UnlistenFn> {
+  return listen<{ id: string; sessionId: string; knowledgeChanged?: boolean; killedSessions?: unknown }>("assist://changed", (payload) => {
     if (typeof payload?.id === "string" && typeof payload.sessionId === "string") {
-      cb({ id: payload.id, sessionId: payload.sessionId, ...(payload.knowledgeChanged === true ? { knowledgeChanged: true } : {}) });
+      const killedSessions = Array.isArray(payload.killedSessions)
+        ? payload.killedSessions.filter((sid): sid is string => typeof sid === "string" && sid.length > 0)
+        : undefined;
+      cb({
+        id: payload.id,
+        sessionId: payload.sessionId,
+        ...(payload.knowledgeChanged === true ? { knowledgeChanged: true } : {}),
+        ...(killedSessions && killedSessions.length > 0 ? { killedSessions } : {}),
+      });
     }
   });
 }

@@ -127,6 +127,42 @@ describe("shell mode in the composer", () => {
     expect(input.value).toBe("!ls");
   });
 
+  it("inserts the path of a non-image file copied in Finder instead of attaching its icon (#195)", async () => {
+    const { env } = await import("../../../platform/env");
+    const { platform } = await import("../../../platform");
+    const prevTauri = env.isTauri;
+    env.isTauri = true;
+    const readSpy = vi.spyOn(platform.clipboard, "readFiles").mockResolvedValue(["/Users/me/My Notes.pdf"]);
+    const imgSpy = vi.spyOn(platform.clipboard, "readImage").mockResolvedValue({
+      rgba: new Uint8Array([0, 0, 0, 255]),
+      width: 1,
+      height: 1,
+    });
+    try {
+      const input = await mountPane();
+      fireEvent.change(input, { target: { value: "Read" } });
+      input.setSelectionRange(4, 4);
+      const pdf = new File(["pdf"], "My Notes.pdf", { type: "application/pdf" });
+      await act(async () => {
+        fireEvent.paste(input, {
+          clipboardData: {
+            types: ["Files"],
+            items: [{ kind: "file", type: "application/pdf", getAsFile: () => pdf }],
+            files: [pdf],
+            getData: () => "",
+          },
+        });
+      });
+      await waitFor(() => expect(input.value).toBe('Read "/Users/me/My Notes.pdf" '));
+      expect(document.querySelector(".sv-attach-item")).toBeNull();
+      expect(imgSpy).not.toHaveBeenCalled();
+    } finally {
+      env.isTauri = prevTauri;
+      readSpy.mockRestore();
+      imgSpy.mockRestore();
+    }
+  });
+
   it("tells the user when a command is already running", async () => {
     runShell = () => Promise.reject(new Error("chat_shell_running"));
     const input = await mountPane();

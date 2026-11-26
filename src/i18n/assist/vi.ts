@@ -35,6 +35,7 @@ const assist: typeof en = {
   "assist.reason.notFile": "Đây là thư mục, không phải tệp.",
   "assist.reason.unavailable": "Phần này của ứng dụng hiện không dùng được.",
   "assist.reason.builtIn": "Không thể đổi tên, di chuyển hoặc xóa các bộ sưu tập có sẵn.",
+  "assist.reason.notRunning": "Phiên này hiện không có tiến trình nào đang chạy.",
 
   "assist.field.name": "Tên",
   "assist.field.location": "Vị trí",
@@ -70,6 +71,8 @@ const assist: typeof en = {
   "assist.projects.move": (name: string, to: string) => `Chuyển “${name}” đến “${to}”`,
   "assist.projects.sortByName": (where: string) => `Sắp xếp các mục trong “${where}” theo tên`,
   "assist.projects.sortByOrder": (where: string) => `Sắp xếp lại các mục trong “${where}”`,
+  "assist.projects.killProcess": (name: string) => `Dừng tiến trình của “${name}”`,
+  "assist.projects.killProcessNote": "Tác vụ hiện tại sẽ bị gián đoạn. Lịch sử hội thoại và các tệp đã lưu sẽ được giữ lại.",
   "assist.projects.archiveSession": (name: string) => `Lưu trữ phiên “${name}”`,
   "assist.projects.deleteNode": (name: string) => `Gỡ “${name}” khỏi thanh bên`,
   "assist.projects.deleteKeepsFiles": "Các tệp trên ổ đĩa vẫn được giữ lại.",

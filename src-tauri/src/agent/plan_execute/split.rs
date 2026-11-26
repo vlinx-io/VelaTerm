@@ -2,7 +2,7 @@
 
 use super::*;
 
-const MAX_TASKS: usize = 12;
+pub(super) const MAX_TASKS: usize = 12;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -180,6 +180,7 @@ pub fn propose(app: &AppCtx, run: &Run, req: &Request) -> Result<Value, String> 
         tx.execute("UPDATE plan_execute_runs SET state='awaiting_confirmation',summary='Task proposal awaiting user confirmation' WHERE id=?1",[&run.id]).map_err(|e|e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
     }
+    sync_session_states(app);
     crate::diagnostics::record(
         "INFO",
         "plan_execute_proposal",
@@ -394,6 +395,7 @@ pub fn cancel(app: &AppCtx, id: &str, proposal_id: &str) -> Result<Value, String
     tx.execute("UPDATE plan_execute_runs SET state='blocked',summary='The user cancelled the task proposal. Wait for new instructions before proposing again.' WHERE id=?1 AND state='awaiting_confirmation'",[id]).map_err(|e|e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
     drop(conn);
+    sync_session_states(app);
     app.emit(
         "plan-execute://proposal",
         json!({"runId":id,"resolved":true}),
@@ -418,6 +420,7 @@ pub fn refresh_parent(app: &AppCtx, id: &str) -> Result<(), String> {
         app.db().conn.lock().unwrap().execute("UPDATE plan_execute_runs SET state=?2,review_status=CASE WHEN ?3 THEN 'pending' ELSE review_status END WHERE id=?1 AND state!='blocked'",
             params![id,state,!all_done && run.config.review_enabled == Some(true)]).map_err(|e|e.to_string())?;
     }
+    sync_session_states(app);
     Ok(())
 }
 

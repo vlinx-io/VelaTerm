@@ -1,11 +1,28 @@
 # Changelog
 
-> Created: 2026-07-09 16:10 · Updated: 2026-11-24
+> Created: 2026-07-09 16:10 · Updated: 2026-11-26
 
 All notable changes to VelaTerm are documented here, newest first.
 v0.1.91 is the first public release; earlier version numbers were internal iterations and are not covered.
 
 ---
+
+## v0.3.7 — 2026-11-26
+
+- 🧩 You can now bind existing conversation sessions into an orchestration workflow as command and execution sessions—or append execution sessions to an active workflow—with optional sidebar tree grouping and unified Orchestration wording.
+- 🪐 Antigravity now works as a first-class agent for command, execution, and review roles in orchestration workflows, handling background-task pauses without false stalls.
+- 🏷️ You can now batch-rename multiple selected agent sessions or all sessions in a group with AI at once, with item selection, live progress, cancellation, and one-click retry for failed items.
+- 🛑 Selecting multiple sessions in the sidebar now offers Kill Processes in the context menu to stop all selected running sessions at once, automatically skipping stopped or browser sessions and letting you retry any failed items.
+- 🔔 Sidebar filter counts now match only the active view (Projects, Terminals, Tasks, or Chat), and the activity bar now shows Pending count badges on each section icon.
+- 🧭 Orchestration workflows now distinguish Waiting for parent session and Waiting for child sessions states without triggering noisy Pending alerts or push notifications for routine handoffs, while permission prompts still notify as usual.
+- 📋 Pasting non-image files or folders copied from Finder or File Explorer into terminals, conversations, or the source editor now inserts their paths instead of pasting file icons as images, while screenshots and image files still attach normally.
+- 🤖 `vapp session list` now marks running sessions, and `vapp session kill` lets agents stop a running session's process while keeping its conversation history and files intact.
+- ⚡ Antigravity conversations now start concurrently without blocking one another, keep existing conversation history intact on transient reopen errors, and preserve all messages even when conversation steps reset.
+- 📚 `vkb` now works from temporary terminals and across imported project directories, connects locally without proxy interference, and reports clear error messages.
+- 📁 On macOS, terminals in folders with non-ASCII names now open split panes and the Files panel in the right directory, and the Files panel automatically falls back to the project root when a session's folder is deleted.
+- 🛡️ Improved desktop stability on Windows and macOS, preventing crashes during heavy multi-session activity and macOS Dock or built-in browser interactions.
+- ⌨️ Pressing arrow keys in text fields, tab renames, and screenshot text annotations on macOS no longer inserts stray control characters.
+- ⚠️ In the Electron app, a dismissible notice banner now alerts you after an unexpected background service restart so you know earlier running sessions were stopped.
 
 ## v0.3.6 — 2026-11-24
 

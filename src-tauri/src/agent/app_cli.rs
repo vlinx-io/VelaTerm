@@ -13,6 +13,7 @@ const USAGE: &str = "usage: vapp catalog [area]
        vapp session rename <item> <new name>
        vapp session move <item> [--group <group> | --root] [--parent-session <session>] [--project <project>] [--order N]
        vapp session sort <group|project|session> [--by name | --order <id,id,...>]
+       vapp session kill <session>
        vapp do [JSON]
        vapp status <id>
 catalog  Print the actions VelaTerm can perform and the current state (collections, projects, vaults...).
@@ -175,8 +176,9 @@ fn render(list: &Value) -> String {
     let sessions = list["sessions"].as_array().unwrap_or(&empty);
     fn sessions_in(out: &mut String, sessions: &[Value], group: &Value, parent: &Value, depth: usize) {
         for s in sessions.iter().filter(|s| &s["groupId"] == group && &s["parentSessionId"] == parent) {
-            out.push_str(&format!("{}- {}  [{} {}] order={}\n", "  ".repeat(depth), s["name"].as_str().unwrap_or_default(),
-                s["kind"].as_str().unwrap_or("session"), s["id"].as_str().unwrap_or_default(), s["sortOrder"]));
+            let running = if s["alive"] == true { " running" } else { "" };
+            out.push_str(&format!("{}- {}  [{} {}] order={}{}\n", "  ".repeat(depth), s["name"].as_str().unwrap_or_default(),
+                s["kind"].as_str().unwrap_or("session"), s["id"].as_str().unwrap_or_default(), s["sortOrder"], running));
             sessions_in(out, sessions, group, &s["id"], depth + 1);
         }
     }
@@ -192,12 +194,51 @@ fn render(list: &Value) -> String {
     out
 }
 
+fn session_action(command: &str, positional: &[String], options: &[(String, Option<String>)]) -> Result<Value, String> {
+    let option = |name: &str| options.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone().unwrap_or_default());
+    let flag = |name: &str| options.iter().any(|(n, _)| n == name);
+    let usage = |line: &str| format!("usage: vapp session {line}");
+    match command {
+        "create-group" => {
+            let [project, name] = positional else { return Err(usage("create-group <project> [--parent-group <group>] <name>")) };
+            Ok(json!({"kind": "createGroup", "projectId": project, "parentGroupId": option("parent-group"), "name": name}))
+        }
+        "rename" => {
+            let [item, name] = positional else { return Err(usage("rename <item> <new name>")) };
+            Ok(json!({"kind": "rename", "id": item, "name": name}))
+        }
+        "move" => {
+            let [item] = positional else { return Err(usage("move <item> [--group <group> | --root] [--parent-session <session>] [--project <project>] [--order N]")) };
+            let mut action = json!({"kind": "move", "id": item});
+            if let Some(group) = option("group") { action["groupId"] = json!(group); }
+            if flag("root") { action["groupId"] = Value::Null; }
+            if let Some(parent) = option("parent-session") { action["parentSessionId"] = json!(parent); }
+            if let Some(project) = option("project") { action["projectId"] = json!(project); }
+            if let Some(order) = option("order") { action["order"] = json!(order.parse::<i64>().map_err(|_| "--order needs a number")?); }
+            Ok(action)
+        }
+        "sort" => {
+            let [target] = positional else { return Err(usage("sort <group|project|session> [--by name | --order <id,id,...>]")) };
+            let mut action = json!({"kind": "sort", "target": target, "by": option("by").unwrap_or_else(|| "name".into())});
+            if let Some(order) = option("order") {
+                action["order"] = json!(order.split(',').map(str::trim).filter(|s| !s.is_empty()).collect::<Vec<_>>());
+                action["by"] = Value::Null;
+            }
+            Ok(action)
+        }
+        "kill" | "kill-process" => {
+            let [session] = positional else { return Err(usage("kill <session>")) };
+            Ok(json!({"kind": "killProcess", "id": session}))
+        }
+        "" => Err(format!("Missing session command\n{USAGE}")),
+        other => Err(format!("Unknown session command: {other}\n{USAGE}")),
+    }
+}
+
 fn session(args: &[String]) -> Result<i32, String> {
     let command = args.first().map(String::as_str).unwrap_or_default().replace('_', "-");
     let (positional, mut options) = split(&args[args.len().min(1)..], &["json", "root", "no-wait", "yes", "no-confirm"])?;
-    let option = |options: &[(String, Option<String>)], name: &str| options.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone().unwrap_or_default());
     let flag = |options: &[(String, Option<String>)], name: &str| options.iter().any(|(n, _)| n == name);
-    let usage = |line: &str| format!("usage: vapp session {line}");
     if command == "list" {
         let session = std::env::var("VLX_SESSION_ID").unwrap_or_default();
         let list = post(json!({"op": "list", "project": positional.first(), "sessionId": session}))?;
@@ -205,37 +246,7 @@ fn session(args: &[String]) -> Result<i32, String> {
         return Ok(0);
     }
     let submit_with = submit_options(&mut options)?;
-    let action = match command.as_str() {
-        "create-group" => {
-            let [project, name] = positional.as_slice() else { return Err(usage("create-group <project> [--parent-group <group>] <name>")) };
-            json!({"kind": "createGroup", "projectId": project, "parentGroupId": option(&options, "parent-group"), "name": name})
-        }
-        "rename" => {
-            let [item, name] = positional.as_slice() else { return Err(usage("rename <item> <new name>")) };
-            json!({"kind": "rename", "id": item, "name": name})
-        }
-        "move" => {
-            let [item] = positional.as_slice() else { return Err(usage("move <item> [--group <group> | --root] [--parent-session <session>] [--project <project>] [--order N]")) };
-            let mut action = json!({"kind": "move", "id": item});
-            if let Some(group) = option(&options, "group") { action["groupId"] = json!(group); }
-            if flag(&options, "root") { action["groupId"] = Value::Null; }
-            if let Some(parent) = option(&options, "parent-session") { action["parentSessionId"] = json!(parent); }
-            if let Some(project) = option(&options, "project") { action["projectId"] = json!(project); }
-            if let Some(order) = option(&options, "order") { action["order"] = json!(order.parse::<i64>().map_err(|_| "--order needs a number")?); }
-            action
-        }
-        "sort" => {
-            let [target] = positional.as_slice() else { return Err(usage("sort <group|project|session> [--by name | --order <id,id,...>]")) };
-            let mut action = json!({"kind": "sort", "target": target, "by": option(&options, "by").unwrap_or_else(|| "name".into())});
-            if let Some(order) = option(&options, "order") {
-                action["order"] = json!(order.split(',').map(str::trim).filter(|s| !s.is_empty()).collect::<Vec<_>>());
-                action["by"] = Value::Null;
-            }
-            action
-        }
-        "" => return Err(format!("Missing session command\n{USAGE}")),
-        other => return Err(format!("Unknown session command: {other}\n{USAGE}")),
-    };
+    let action = session_action(command.as_str(), positional.as_slice(), &options)?;
     submit(json!([action]), submit_with)
 }
 
@@ -321,5 +332,21 @@ mod tests {
             ],
         });
         assert_eq!(render(&list), "Course (project p)  /c\n  + Ancient  [group g] order=1000\n    - Lesson 1  [claude s1] order=1000\n      - Child  [codex s2] order=1000\n  - Loose  [terminal s3] order=2000\n");
+    }
+
+    #[test]
+    fn list_marks_running_sessions_and_session_kill_builds_action() {
+        let list = json!({
+            "project": {"id": "p", "name": "Course", "kind": "project", "path": ""},
+            "groups": [],
+            "sessions": [
+                {"id": "s1", "name": "Worker", "kind": "claude", "groupId": null, "parentSessionId": null, "sortOrder": 1000, "alive": true},
+                {"id": "s2", "name": "Idle", "kind": "terminal", "groupId": null, "parentSessionId": null, "sortOrder": 2000, "alive": false},
+            ],
+        });
+        assert_eq!(render(&list), "Course (project p)\n  - Worker  [claude s1] order=1000 running\n  - Idle  [terminal s2] order=2000\n");
+        assert_eq!(session_action("kill", &["s1".into()], &[]).unwrap(), json!({"kind": "killProcess", "id": "s1"}));
+        assert_eq!(session_action("kill-process", &["s1".into()], &[]).unwrap(), json!({"kind": "killProcess", "id": "s1"}));
+        assert!(session_action("kill", &[], &[]).unwrap_err().contains("vapp session kill <session>"));
     }
 }

@@ -35,6 +35,7 @@ const assist: typeof en = {
   "assist.reason.notFile": "Das ist ein Ordner, keine Datei.",
   "assist.reason.unavailable": "Dieser Bereich der App ist gerade nicht verfügbar.",
   "assist.reason.builtIn": "Integrierte Sammlungen können nicht umbenannt, verschoben oder gelöscht werden.",
+  "assist.reason.notRunning": "Für diese Sitzung läuft kein Prozess.",
 
   "assist.field.name": "Name",
   "assist.field.location": "Speicherort",
@@ -70,6 +71,8 @@ const assist: typeof en = {
   "assist.projects.move": (name: string, to: string) => `„${name}“ nach „${to}“ verschieben`,
   "assist.projects.sortByName": (where: string) => `Einträge in „${where}“ nach Namen sortieren`,
   "assist.projects.sortByOrder": (where: string) => `Einträge in „${where}“ neu anordnen`,
+  "assist.projects.killProcess": (name: string) => `Prozess für „${name}“ beenden`,
+  "assist.projects.killProcessNote": "Die aktuelle Aufgabe wird unterbrochen. Gespeicherte Gesprächsverläufe und Dateien bleiben erhalten.",
   "assist.projects.archiveSession": (name: string) => `Sitzung „${name}“ archivieren`,
   "assist.projects.deleteNode": (name: string) => `„${name}“ aus der Seitenleiste entfernen`,
   "assist.projects.deleteKeepsFiles": "Die Dateien auf dem Datenträger bleiben erhalten.",

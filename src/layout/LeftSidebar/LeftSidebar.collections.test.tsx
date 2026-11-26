@@ -105,6 +105,7 @@ vi.mock("../sessionMenu", () => ({
     buildSessionItems: vi.fn(() => []),
     buildScratchItems: vi.fn(() => []),
     buildMoveToMany: vi.fn(() => null),
+    buildKillProcessMany: vi.fn(() => null),
     buildGitItems: vi.fn(() => []),
     buildMarkItem: vi.fn(() => ({ label: "mark.menu", submenu: [] })),
     openDialog: mocks.openDialog,

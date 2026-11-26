@@ -86,6 +86,7 @@ export function describeAction(action: AssistAction, t: T): ActionCard {
     case "projects.rename": return { title: t("assist.projects.rename", str(a.currentName), str(a.name)), details: a.where !== a.currentName ? place(a.where) : [] };
     case "projects.move": return { title: t("assist.projects.move", str(a.nodeName), str(a.to)), details: [] };
     case "projects.sort": return { title: t(a.by === "order" ? "assist.projects.sortByOrder" : "assist.projects.sortByName", str(a.where)), details: [] };
+    case "projects.killProcess": return { title: t("assist.projects.killProcess", str(a.nodeName)), details: [...place(a.where), t("assist.projects.killProcessNote")], danger: true };
     case "projects.archiveSession": return { title: t("assist.projects.archiveSession", str(a.nodeName)), details: place(a.where) };
     case "projects.deleteNode": return { title: t("assist.projects.deleteNode", str(a.nodeName)), details: [...place(a.where), t("assist.projects.deleteKeepsFiles")], danger: true };
 

@@ -1598,9 +1598,6 @@ impl ChatManager {
     ) -> Result<(), String> {
         let antigravity_auth_settings = (kind == SessionKind::Antigravity)
             .then(|| auth::antigravity::settings_args(extra_args));
-        let mut antigravity_gate = antigravity_auth_settings
-            .as_ref()
-            .map(|args| crate::agent::antigravity::acquire_auth_gate(bin, args));
         let _start = self.starts.lock().unwrap();
         if self.closing.load(Ordering::Relaxed) { return Err("The application is shutting down.".into()); }
         {
@@ -1828,7 +1825,6 @@ impl ChatManager {
             pi: Mutex::new(pi::PiState::default()),
             zcode: Mutex::new(zcode::ZcodeState::default()),
             acp: Mutex::new(acp::AcpState::with_antigravity_launch(
-                antigravity_gate.take(),
                 (kind == SessionKind::Antigravity)
                     .then(crate::agent::antigravity::auth_epoch)
                     .unwrap_or(0),
@@ -7493,6 +7489,19 @@ fn emit_state_with(app: &AppCtx, session_id: &str, state: AgentState, silent: bo
 }
 
 #[cfg(test)]
+pub(crate) fn attach_inert_peer(app: &AppCtx, id: &str) {
+    tests::attach_inert_peer(app, id);
+}
+
+#[cfg(test)]
+pub(crate) fn stop_all_test_peers(app: &AppCtx) {
+    let ids: Vec<String> = app.chat().sessions.lock().unwrap().keys().cloned().collect();
+    for id in ids {
+        let _ = app.chat().stop(app, &id);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::process::Command;
@@ -9615,6 +9624,7 @@ mod tests {
 
     #[test]
     fn plan_execute_rounds_queue_reports_reuse_sessions_and_retain_identity() {
+        let _state_guard = crate::session_state::test_lock();
         use crate::agent::plan_execute as flow;
         let (app,peers,tag)=plan_execute_fixture();
         let request=flow_request;
@@ -9669,6 +9679,7 @@ mod tests {
 
     #[test]
     fn plan_execute_missing_report_blocks_and_stop_preserves_unrelated_input() {
+        let _state_guard = crate::session_state::test_lock();
         use crate::agent::plan_execute as flow;
         let (app,_,_)=plan_execute_fixture();
         flow::action(&app,&flow_request("planner","dispatch",1,"Implement")).unwrap();
@@ -9709,6 +9720,7 @@ mod tests {
 
     #[test]
     fn tell_messages_keep_workflow_state_and_restore_sender_identity() {
+        let _state_guard = crate::session_state::test_lock();
         use crate::agent::{plan_execute as flow, tell};
         let (app, _, tag) = plan_execute_fixture();
         flow::action(&app, &flow_request("planner", "dispatch", 1, "Implement")).unwrap();
@@ -9749,6 +9761,7 @@ mod tests {
 
     #[test]
     fn blocked_workflow_allows_tells_and_current_report_without_redispatch() {
+        let _state_guard = crate::session_state::test_lock();
         use crate::agent::{plan_execute as flow, tell};
         for cause in ["turnInterrupted", "exited", "planner", "executor"] {
             let (app, peers, _) = plan_execute_fixture();
@@ -9815,6 +9828,7 @@ mod tests {
 
     #[test]
     fn tell_report_checks_role_target_round_and_replay() {
+        let _state_guard = crate::session_state::test_lock();
         use crate::agent::{plan_execute as flow, tell};
         let (app, _, _) = plan_execute_fixture();
         flow::action(&app,&flow_request("planner","dispatch",1,"Implement")).unwrap();
@@ -10033,6 +10047,7 @@ mod tests {
 
     #[test]
     fn plan_execute_start_failure_retains_one_planner_and_exact_choices() {
+        let _state_guard = crate::session_state::test_lock();
         use crate::agent::plan_execute as flow;
         let (app,_,_)=plan_execute_fixture();
         match &app {
@@ -10084,6 +10099,10 @@ mod tests {
         app
     }
 
+    pub(crate) fn attach_inert_peer(app: &AppCtx, id: &str) {
+        menu_peer(app, id);
+    }
+
     fn menu_peer(app: &AppCtx, id: &str) {
         let (proc, stdout) = cat_process();
         proc.ready.store(true, Ordering::Relaxed);
@@ -10093,6 +10112,7 @@ mod tests {
 
     #[test]
     fn plan_execute_menu_validates_location_and_retries_without_an_extra_initiator() {
+        let _state_guard = crate::session_state::test_lock();
         use crate::agent::plan_execute::menu;
         let app = menu_fixture();
         for (group, parent) in [(None, None), (Some("g"), None), (Some("g"), Some("parent"))] {
@@ -10144,6 +10164,7 @@ mod tests {
 
     #[test]
     fn plan_execute_single_task_worktree_modes_and_acceptance_without_a_self_prompt() {
+        let _state_guard = crate::session_state::test_lock();
         use crate::agent::plan_execute::{self as flow, menu};
         for mode in [None, Some("none"), Some("shared"), Some("each")] {
         let app = menu_fixture();

@@ -20,18 +20,16 @@ import {
   planImagePaste,
 } from "./imageInput";
 
-function clipboardData(opts: { image?: File; text?: string } = {}): DataTransfer {
-  const image = opts.image;
+function clipboardData(opts: { image?: File; nonImage?: File; text?: string } = {}): DataTransfer {
+  const items: Array<{ kind: string; type: string; getAsFile: () => File }> = [];
+  if (opts.image) {
+    items.push({ kind: "file", type: opts.image.type, getAsFile: () => opts.image! });
+  }
+  if (opts.nonImage) {
+    items.push({ kind: "file", type: opts.nonImage.type, getAsFile: () => opts.nonImage! });
+  }
   return {
-    items: image
-      ? ([
-          {
-            kind: "file",
-            type: image.type,
-            getAsFile: () => image,
-          },
-        ] as unknown as DataTransferItemList)
-      : ([] as unknown as DataTransferItemList),
+    items: items as unknown as DataTransferItemList,
     getData: (type: string) => (type === "text/plain" ? (opts.text ?? "") : ""),
   } as DataTransfer;
 }
@@ -96,5 +94,17 @@ describe("routing of pasted images", () => {
   it("native image mode sends a real Ctrl+V to the PTY", async () => {
     await injectNativeImagePaste("codex-session");
     expect(ptyWrite).toHaveBeenCalledWith("codex-session", "\x16");
+  });
+
+  it("routes non-image Finder file pastes away from the native clipboard image fallback (#195)", () => {
+    const markdown = new File(["# Doc"], "README.md", { type: "text/markdown" });
+    expect(planImagePaste(clipboardData({ nonImage: markdown }), "upload", true, true)).toEqual({
+      kind: "non-image-files",
+    });
+    expect(
+      planImagePaste(clipboardData({ nonImage: markdown, text: "README.md" }), "agent", true, true),
+    ).toEqual({
+      kind: "non-image-files",
+    });
   });
 });

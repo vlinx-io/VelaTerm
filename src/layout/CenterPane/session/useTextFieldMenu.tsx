@@ -5,6 +5,12 @@ import { IS_MAC } from "../../../hooks/shortcutRegistry";
 import { useT } from "../../../i18n";
 import { platform } from "../../../platform";
 import { env } from "../../../platform/env";
+import {
+  insertPathsIntoTextField,
+  isLocalDesktop,
+  replaceTextFieldSelection,
+  resolveClipboardFiles,
+} from "../../../terminal/clipboardFiles";
 import { imageFromNativeClipboard } from "../../../terminal/imageInput";
 
 type TextField = HTMLTextAreaElement | HTMLInputElement;
@@ -15,28 +21,45 @@ const TEXT_FIELD = "textarea, input:not([type]), input[type=text], input[type=se
 /** The primary-modifier chord, written the way each platform's own menus write it. */
 const chord = (key: string) => IS_MAC ? `⌘ ${key}` : `Ctrl+${key}`;
 
-/** Replace the field's selection through the editing command, which keeps undo and fires React's onChange. */
-function replaceSelection(field: TextField, text: string) {
-  field.focus({ preventScroll: true });
-  if (document.execCommand?.(text ? "insertText" : "delete", false, text)) return;
-  field.setRangeText(text, field.selectionStart ?? 0, field.selectionEnd ?? 0, "end");
-  field.dispatchEvent(new Event("input", { bubbles: true }));
-}
-
 /**
  * Cut, Copy, Paste and Select All for text fields. The application cancels the system context menu
  * everywhere, so without this a field has no pointer route to its clipboard.
  *
- * `onImage` makes Paste accept a clipboard image, for fields that take attachments. An image wins over
- * text, as it does for the terminal's menu, because only that order avoids WKWebView's fallback paste prompt.
+ * OS file-clipboard paths are resolved first so files copied in Finder/Explorer insert paths rather than
+ * Finder's file-icon bitmap. `onImage` makes Paste accept clipboard images for fields that take attachments.
  */
-export function useTextFieldMenu({ onImage, onCopyFailed }: { onImage?: (file: File) => void; onCopyFailed: (message: string) => void }) {
+export function useTextFieldMenu({
+  onImage,
+  onPaths,
+  acceptsImages = Boolean(onImage),
+  onCopyFailed,
+}: {
+  onImage?: (file: File) => void;
+  onPaths?: (paths: string[]) => void;
+  acceptsImages?: boolean;
+  onCopyFailed: (message: string) => void;
+}) {
   const t = useT();
   const [menu, setMenu] = useState<{ x: number; y: number; host: Element; field: TextField; start: number; end: number; selected: string } | null>(null);
   const canReadClipboard = env.hasNativeHost || typeof navigator.clipboard?.readText === "function";
   const write = (text: string) => platform.clipboard.writeText(text, { reportFailure: true });
   const copyFailed = () => onCopyFailed(t("common.copyFailed"));
   const paste = async (field: TextField) => {
+    if (isLocalDesktop()) {
+      const canAttach = Boolean(onImage) && acceptsImages;
+      const resolved = await resolveClipboardFiles([], { loadMissingImages: canAttach }).catch(() => null);
+      if (resolved) {
+        if (canAttach && onImage && resolved.imageFiles.length) {
+          for (const image of resolved.imageFiles) onImage(image);
+        }
+        const paths = canAttach ? resolved.otherPaths : resolved.allPaths;
+        if (paths.length) {
+          if (onPaths) onPaths(paths);
+          else if (field.isConnected && !field.disabled) insertPathsIntoTextField(field, paths);
+        }
+        return;
+      }
+    }
     if (onImage && env.isTauri) {
       const image = await imageFromNativeClipboard().catch(() => null);
       if (image) {
@@ -45,7 +68,7 @@ export function useTextFieldMenu({ onImage, onCopyFailed }: { onImage?: (file: F
       }
     }
     const text = await platform.clipboard.readText();
-    if (text && field.isConnected && !field.disabled) replaceSelection(field, text);
+    if (text && field.isConnected && !field.disabled) replaceTextFieldSelection(field, text);
   };
   return {
     onContextMenu: (event: MouseEvent<HTMLElement>) => {
@@ -66,7 +89,7 @@ export function useTextFieldMenu({ onImage, onCopyFailed }: { onImage?: (file: F
           // The write can outlast further typing; never delete text that has since changed.
           if (!field.isConnected || field.value.slice(start, end) !== selected) return;
           field.setSelectionRange(start, end);
-          replaceSelection(field, "");
+          replaceTextFieldSelection(field, "");
         }).catch(copyFailed);
       } },
       { label: t("common.copy"), shortcut: chord("C"), disabled: !menu.selected, onClick: () => void write(menu.selected).catch(copyFailed) },

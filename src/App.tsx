@@ -2,6 +2,7 @@
 
 import { lazy, Suspense, useEffect } from "react";
 import { ClipboardNotice } from "./components/ClipboardNotice";
+import { ServiceRestartNotice } from "./components/ServiceRestartNotice";
 import { GitbashDownloadBanner } from "./components/GitbashDownloadBanner";
 import { ErrorLogModal } from "./components/ErrorLogModal";
 import { Splitter } from "./components/Splitter";
@@ -67,6 +68,9 @@ const CloneProjectModal = lazy(() => import("./remote/CloneProjectModal").then((
 const SpawnConfirmModal = lazy(() => import("./components/SpawnConfirmModal").then((m) => ({ default: m.SpawnConfirmModal })));
 const SplitTaskConfirmModal = lazy(() =>
   import("./components/SplitTaskConfirmModal").then((m) => ({ default: m.SplitTaskConfirmModal })),
+);
+const BindPlanExecuteModal = lazy(() =>
+  import("./components/BindPlanExecuteModal").then((m) => ({ default: m.BindPlanExecuteModal })),
 );
 const MergeModal = lazy(() => import("./components/MergeModal").then((m) => ({ default: m.MergeModal })));
 // The update dialog renders release notes with the Markdown engine; load it only when it is shown.
@@ -329,6 +333,7 @@ function App() {
       <Suspense fallback={null}>
         <SpawnConfirmModal />
         {!isShareSurface && <SplitTaskConfirmModal />}
+        {!isShareSurface && <BindPlanExecuteModal />}
       </Suspense>
       <QuitConfirmModal />
       <Suspense fallback={null}>
@@ -343,6 +348,7 @@ function App() {
       <NotificationsManager />
       {!isShareSurface && <ExportProgressDialog />}
       <GitbashDownloadBanner />
+      <ServiceRestartNotice />
       <ClipboardNotice />
     </div>
   );

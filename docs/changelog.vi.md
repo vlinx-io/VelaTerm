@@ -1,3 +1,20 @@
+## v0.3.7 — 2026-11-26
+
+- 🧩 Giờ đây bạn có thể liên kết các phiên hội thoại sẵn có thành quy trình điều phối với vai trò phiên chỉ huy và phiên thực thi — hoặc bổ sung phiên thực thi vào quy trình đang hoạt động — kèm tùy chọn gom nhánh trên cây thanh bên và thống nhất thuật ngữ Điều phối.
+- 🪐 Antigravity nay được hỗ trợ đầy đủ như agent hạng nhất cho các vai trò chỉ huy, thực thi và đánh giá trong quy trình điều phối, xử lý mượt các khoảng tạm dừng chờ tác vụ nền mà không báo treo nhầm.
+- 🏷️ Giờ đây bạn có thể đổi tên hàng loạt bằng AI cùng lúc cho nhiều phiên agent đã chọn hoặc toàn bộ phiên trong một nhóm, kèm chọn mục, tiến độ trực tiếp, hủy giữa chừng và thử lại các mục lỗi chỉ với một lần nhấp.
+- 🛑 Khi chọn nhiều phiên trên thanh bên, menu ngữ cảnh nay có mục dừng hàng loạt tiến trình đang chạy cùng lúc, tự động bỏ qua phiên đã dừng hoặc phiên trình duyệt và cho phép thử lại các mục lỗi.
+- 🔔 Bộ đếm bộ lọc trên thanh bên nay chỉ tính theo chế độ xem đang mở (Dự án, Terminal, Tác vụ hoặc Trò chuyện), đồng thời thanh hoạt động hiển thị huy hiệu số phiên đang chờ trên từng biểu tượng mục.
+- 🧭 Quy trình điều phối nay phân biệt trạng thái «Đang chờ phiên cha» và «Đang chờ phiên con», không còn kích hoạt cảnh báo chờ hay thông báo đẩy gây nhiễu ở các bước bàn giao thông thường, trong khi yêu cầu cấp quyền vẫn thông báo như bình thường.
+- 📋 Dán tệp không phải ảnh hoặc thư mục sao chép từ Finder hay File Explorer vào terminal, hội thoại hoặc trình soạn mã nguồn nay chèn đúng đường dẫn thay vì dán biểu tượng tệp dưới dạng ảnh, còn ảnh chụp màn hình và tệp ảnh vẫn được đính kèm bình thường.
+- 🤖 `vapp session list` nay đánh dấu các phiên đang chạy, và `vapp session kill` cho phép agent dừng tiến trình của một phiên đang chạy mà vẫn giữ nguyên lịch sử hội thoại và tệp trên đĩa.
+- ⚡ Các hội thoại Antigravity nay khởi chạy song song mà không chặn lẫn nhau, giữ nguyên lịch sử hội thoại hiện có khi gặp lỗi mở lại tạm thời và bảo toàn đầy đủ tin nhắn ngay cả khi số bước hội thoại bị đặt lại.
+- 📚 `vkb` nay hoạt động từ các terminal tạm và trên mọi thư mục dự án đã nhập, kết nối cục bộ không bị biến môi trường proxy cản trở và hiển thị thông báo lỗi rõ ràng.
+- 📁 Trên macOS, terminal mở trong thư mục có ký tự không phải ASCII nay mở khung chia và bảng Tệp đúng thư mục, đồng thời bảng Tệp tự động quay về thư mục gốc của dự án khi thư mục của phiên bị xóa.
+- 🛡️ Cải thiện độ ổn định của ứng dụng máy tính trên Windows và macOS, ngăn lỗi văng ứng dụng khi hoạt động đồng thời nhiều phiên hoặc khi tương tác với Dock trên macOS và trình duyệt tích hợp.
+- ⌨️ Nhấn các phím mũi tên trong ô nhập văn bản, khi đổi tên thẻ và trong chú thích văn bản ảnh chụp màn hình trên macOS không còn chèn ký tự điều khiển lạ.
+- ⚠️ Trong ứng dụng Electron, một biểu ngữ thông báo có thể đóng sẽ xuất hiện sau khi dịch vụ nền khởi động lại ngoài ý muốn để báo cho bạn biết các phiên đang chạy trước đó đã dừng.
+
 ## v0.3.6 — 2026-11-24
 
 - 📝 Chế độ xem khác biệt tệp nay hỗ trợ thêm nhận xét đánh giá trực tiếp trên các dòng đã chọn, kèm thanh tổng hợp để chỉnh sửa, sao chép hoặc gửi toàn bộ nhận xét tới phiên agent đang hoạt động.

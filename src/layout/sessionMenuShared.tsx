@@ -98,6 +98,10 @@ export function statusLabel(status: string): string {
       return t("status.asking");
     case "waiting":
       return t("status.waiting");
+    case "awaiting_parent":
+      return t("status.awaitingParent");
+    case "awaiting_children":
+      return t("status.awaitingChildren");
     case "background":
       return t("status.background");
     default:

@@ -4,9 +4,10 @@
 //! - Info resource/turn details and per-file Git changes retain design placeholders until their
 //!   backend IPC is available; their DOM structure already matches the design.
 
-import { lazy, Suspense, useEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import Icons from "../../components/Icons";
 import { useT } from "../../i18n";
+import { getSessionCwd } from "../../ipc/commands";
 import { useTermStore } from "../../store/termStore";
 import { projectRoot, type Group, type Project, type Session } from "../../types";
 import { FilesTab } from "./FilesTab";
@@ -113,7 +114,57 @@ export function RightPanel() {
   } else {
     ({ session, project, group } = resolve(lastTargetRef.current));
   }
-  const cwd = session?.cwd || project?.rootPath || null;
+  const [missingCwd, setMissingCwd] = useState<string | null>(null);
+  useEffect(() => {
+    setMissingCwd(null);
+  }, [session?.id]);
+
+  const projectPath = projectRoot(project);
+  const rawCwd = session?.cwd || projectPath || null;
+  const cwd =
+    rawCwd && rawCwd === missingCwd && projectPath && projectPath !== rawCwd
+      ? projectPath
+      : rawCwd;
+  const canFallbackToProject = !!cwd && !!projectPath && cwd !== projectPath;
+  const handleMissingRoot = (missingPath: string) => {
+    setMissingCwd(missingPath);
+    if (!session) return;
+    const sessionId = session.id;
+    const st = useTermStore.getState();
+    if (st.ephemeralSessions[sessionId]?.cwd === missingPath) {
+      // Repair an ephemeral split/scratch terminal whose captured startup cwd no longer exists so
+      // CenterPane branch chips and subsequent focus changes stop referencing the missing path.
+      const running = st.runtimes[sessionId]?.status === "running" && session.engine !== "chat";
+      useTermStore.setState((state) => {
+        const cur = state.ephemeralSessions[sessionId];
+        if (!cur || cur.cwd !== missingPath) return {};
+        return {
+          ephemeralSessions: {
+            ...state.ephemeralSessions,
+            [sessionId]: { ...cur, cwd: null },
+          },
+        };
+      });
+      if (running) {
+        void getSessionCwd(sessionId)
+          .then((live) => {
+            if (!live || live === missingPath) return;
+            useTermStore.setState((state) => {
+              const cur = state.ephemeralSessions[sessionId];
+              if (!cur || cur.cwd !== null) return {};
+              return {
+                ephemeralSessions: {
+                  ...state.ephemeralSessions,
+                  [sessionId]: { ...cur, cwd: live === projectPath ? null : live },
+                },
+              };
+            });
+          })
+          .catch(() => {});
+      }
+    }
+  };
+
   // A stored or mirrored "ports" selection has no panel outside SSH remote windows.
   const activeTab: InspectorTab = isInspectorTab(inspectorTab) ? inspectorTab : "info";
   // An open knowledge entry or archived session takes over the Info tab while its page is showing.
@@ -138,7 +189,13 @@ export function RightPanel() {
         ))}
       </nav>
       <div className="insp-body" style={{ display: "flex", flexDirection: "column" }}>
-        {activeTab === "files" && <FilesTab rootPath={cwd} rootName={project?.name ?? null} />}
+        {activeTab === "files" && (
+          <FilesTab
+            rootPath={cwd}
+            rootName={project?.name ?? null}
+            onMissingRoot={canFallbackToProject ? handleMissingRoot : undefined}
+          />
+        )}
         {activeTab === "info" &&
           (memoryInfoRoute ? (
             <Suspense fallback={null}><MemoryInfo route={memoryInfoRoute} /></Suspense>

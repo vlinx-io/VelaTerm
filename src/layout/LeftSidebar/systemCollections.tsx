@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 import Icons from "../../components/Icons";
 import { MemoryIcon } from "../Memory/MemoryIcon";
 import type { t as translate } from "../../i18n";
-import type { Project, Session, SessionRuntime } from "../../types";
+import { effectiveStatus, matchesAgentState, type Project, type Session, type SessionRuntime } from "../../types";
 
 export const SYSTEM_PROJECTS = "vlx-system-projects";
 export const SYSTEM_TASKS = "vlx-system-tasks";
@@ -140,4 +140,30 @@ export function liveTerminalIds(sessions: Session[], drafts: Record<string, Sess
 /** Terminals with an agent started inside them. The row goes away when the agent exits. */
 export function liveAgentIds(terminalIds: string[], runtimes: Record<string, SessionRuntime>) {
   return terminalIds.filter((id) => !!runtimes[id]?.agent);
+}
+
+export interface RailPendingCounts {
+  projects: number;
+  tasks: number;
+  chat: number;
+}
+
+/** Pending (`asking` or unread) session counts for persisted collection sections in the activity bar. */
+export function pendingCountsBySection(
+  sessions: Session[],
+  runtimes: Record<string, SessionRuntime>,
+  notifications: Record<string, unknown>,
+): RailPendingCounts {
+  let projects = 0;
+  let tasks = 0;
+  let chat = 0;
+  for (const s of sessions) {
+    if (s.archivedAt) continue;
+    if (!matchesAgentState("asking", effectiveStatus(runtimes[s.id]), s.id in notifications)) continue;
+    const type = sessionTypeOf(s.projectId);
+    if (type === "task") tasks++;
+    else if (type === "chat") chat++;
+    else projects++;
+  }
+  return { projects, tasks, chat };
 }

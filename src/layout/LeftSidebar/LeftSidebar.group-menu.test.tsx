@@ -10,6 +10,7 @@ const menuMocks = vi.hoisted(() => ({
       opts?: { withTerminal?: boolean; withBrowser?: boolean },
     ) => (opts?.withTerminal ? [{ label: "tree.newTerminalSession", onClick: vi.fn() }] : []),
   ),
+  buildKillProcessMany: vi.fn(() => null as { label: string; onClick: () => void } | null),
 }));
 
 const storeState = vi.hoisted(() => ({
@@ -38,6 +39,7 @@ const storeState = vi.hoisted(() => ({
   renameScratch: vi.fn(),
   sessions: [],
   runtimes: {},
+  sidebarTreeViews: [] as unknown[],
   statusFilter: null as ("working" | "asking" | "waiting")[] | null,
   dynamicStatusFilter: true,
   setStatusFilter: vi.fn(),
@@ -56,7 +58,7 @@ const storeState = vi.hoisted(() => ({
 }));
 
 vi.mock("../../i18n", () => ({
-  useT: () => (key: string) => key,
+  useT: () => (key: string, ...args: unknown[]) => (args.length ? `${key}:${args.join(",")}` : key),
 }));
 vi.mock("../../store/termStore", () => {
   const useTermStore = Object.assign(
@@ -72,20 +74,45 @@ vi.mock("../../components/Icons", () => ({
     { get: () => () => null },
   ),
 }));
-vi.mock("../../components/ContextMenu", () => ({
-  ContextMenu: ({ items, onClose }: { items: { label: string }[]; onClose: () => void }) => (
-    <div>
-      {items.map((item, index) => <span key={`${item.label}-${index}`}>{item.label}</span>)}
-      <button type="button" onClick={onClose}>close-context-menu</button>
-    </div>
-  ),
-}));
+vi.mock("../../components/ContextMenu", () => {
+  type MockMenuItem = {
+    label: string;
+    disabled?: boolean;
+    href?: string;
+    onClick?: (e: React.MouseEvent) => void;
+    submenu?: MockMenuItem[];
+  };
+  const renderItems = (items: MockMenuItem[], prefix = ""): React.ReactNode =>
+    items.map((item, index) => (
+      <div key={`${prefix}${item.label}-${index}`}>
+        <button
+          type="button"
+          disabled={item.disabled}
+          data-href={item.href ?? ""}
+          onClick={(e) => item.onClick?.(e)}
+        >
+          {item.label}
+        </button>
+        {item.submenu ? renderItems(item.submenu, `${prefix}${index}-`) : null}
+      </div>
+    ));
+  return {
+    ContextMenu: ({ items, onClose }: { items: MockMenuItem[]; onClose: () => void }) => (
+      <div>
+        {renderItems(items)}
+        <button type="button" onClick={onClose}>close-context-menu</button>
+      </div>
+    ),
+  };
+});
 vi.mock("../sessionMenu", () => ({
+  sessionStatusItem: vi.fn(() => null),
   useSessionMenu: () => ({
     newSessionItems: menuMocks.newSessionItems,
     buildSessionItems: vi.fn(() => []),
     buildScratchItems: vi.fn(() => []),
     buildMoveToMany: vi.fn(() => null),
+    buildKillProcessMany: menuMocks.buildKillProcessMany,
     buildGitItems: vi.fn(() => []),
     buildMarkItem: vi.fn((_kind: string, _id: string) => ({ label: "mark.menu", submenu: [] })),
     openDialog: vi.fn(),
@@ -114,6 +141,19 @@ vi.mock("./ProjectTree", () => ({
       >
         Group
       </button>
+      <button
+        type="button"
+        onContextMenu={(event) => {
+          event.preventDefault();
+          onContext(
+            { kind: "session", id: "s1", name: "Session 1", projectId: "project-1", groupId: "group-1" },
+            event.clientX,
+            event.clientY,
+          );
+        }}
+      >
+        Session 1
+      </button>
     </div>
   ),
 }));
@@ -124,10 +164,15 @@ import { LeftSidebar } from "./LeftSidebar";
 describe("LeftSidebar", () => {
   beforeEach(() => {
     menuMocks.newSessionItems.mockClear();
+    menuMocks.buildKillProcessMany.mockReset().mockReturnValue(null);
     storeState.addVirtualProject.mockReset();
     storeState.statusFilter = null;
     storeState.dynamicStatusFilter = true;
     storeState.appendSidebarTreeViewStatusMatches.mockClear();
+    storeState.selection = [];
+    storeState.sessions = [];
+    storeState.groups = [{ id: "group-1", projectId: "project-1", worktreePath: null }];
+    window.history.replaceState(null, "", "/");
   });
 
   it("keeps failed collection creation open and closes only after a successful retry", async () => {
@@ -216,5 +261,149 @@ describe("LeftSidebar", () => {
     // Other panes of the active tab get the quieter marker; the focused pane never does.
     expect(sessionRowClassName(false, false, false, false, true)).toBe("row session in-view");
     expect(sessionRowClassName(false, true, false, false, true)).toBe("row session active");
+  });
+
+  it("offers batch Rename with AI in multiselection menu for renameable agent sessions", () => {
+    storeState.sessions = [
+      { id: "s1", projectId: "project-1", groupId: "group-1", name: "One", kind: "claude", agentSessionId: "a1", engine: "tui" },
+      { id: "s2", projectId: "project-1", groupId: "group-1", name: "Two", kind: "codex", agentSessionId: null, engine: "chat" },
+      { id: "s3", projectId: "project-1", groupId: "group-1", name: "Term", kind: "terminal", agentSessionId: null, engine: "tui" },
+    ] as never;
+    storeState.selection = [
+      { kind: "session", id: "s1" },
+      { kind: "session", id: "s2" },
+      { kind: "session", id: "s3" },
+    ] as never;
+
+    render(<LeftSidebar />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Session 1" }));
+    const item = screen.getByRole("button", { name: "sessionTitle.menuSelected:2" });
+    expect(item.hasAttribute("disabled")).toBe(false);
+    expect(item.getAttribute("data-href")).toContain("smartRename=s1%2Cs2");
+    fireEvent.click(item);
+    expect(window.location.search).toContain("smartRename=s1%2Cs2");
+  });
+
+  it("offers batch Rename with AI on a group containing at least two renameable agent sessions", () => {
+    storeState.groups = [
+      { id: "group-1", projectId: "project-1", parentGroupId: null, worktreePath: null },
+      { id: "group-2", projectId: "project-1", parentGroupId: "group-1", worktreePath: null },
+    ] as never;
+    storeState.sessions = [
+      { id: "s1", projectId: "project-1", groupId: "group-1", name: "One", kind: "claude", agentSessionId: "a1", engine: "tui" },
+      { id: "s2", projectId: "project-1", groupId: "group-2", name: "Two", kind: "codex", agentSessionId: "a2", engine: "tui" },
+    ] as never;
+
+    render(<LeftSidebar />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Group" }));
+    const item = screen.getByRole("button", { name: "sessionTitle.menuGroup:2" });
+    expect(item.getAttribute("data-href")).toContain("smartRename=s1%2Cs2");
+  });
+
+  it("disables batch Rename with AI when selected agent sessions have no conversation yet", () => {
+    storeState.sessions = [
+      { id: "s1", projectId: "project-1", groupId: "group-1", name: "One", kind: "claude", agentSessionId: null, engine: "tui" },
+      { id: "s2", projectId: "project-1", groupId: "group-1", name: "Two", kind: "codex", agentSessionId: null, engine: "tui" },
+    ] as never;
+    storeState.selection = [
+      { kind: "session", id: "s1" },
+      { kind: "session", id: "s2" },
+    ] as never;
+
+    render(<LeftSidebar />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Session 1" }));
+    const item = screen.getByRole("button", { name: "sessionTitle.menu" });
+    expect(item.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("offers binding selected sessions as a Plan/Execute workflow in multiselection menu", () => {
+    window.history.replaceState(null, "", "/");
+    storeState.sessions = [
+      { id: "s1", projectId: "project-1", groupId: "group-1", name: "One", kind: "antigravity", engine: "chat" },
+      { id: "s2", projectId: "project-1", groupId: "group-1", name: "Two", kind: "codex", engine: "chat" },
+    ] as never;
+    storeState.selection = [
+      { kind: "session", id: "s1" },
+      { kind: "session", id: "s2" },
+    ] as never;
+
+    render(<LeftSidebar />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Session 1" }));
+    const orchMenu = screen.getByRole("button", { name: "tree.orchestrationMenu" });
+    expect(orchMenu.hasAttribute("disabled")).toBe(false);
+    const item = screen.getByRole("button", { name: "tree.bindPlanExecuteSelected" });
+    expect(item.hasAttribute("disabled")).toBe(false);
+    expect(item.getAttribute("data-href")).toContain("bindPlanExecute=");
+    expect(item.getAttribute("data-href")).toContain("bindExec=s1%2Cs2");
+    const execItem = screen.getByRole("button", { name: "tree.bindAsExecutorsSelected" });
+    expect(execItem.hasAttribute("disabled")).toBe(false);
+    expect(execItem.getAttribute("data-href")).toContain("bindRole=exec");
+    expect(execItem.getAttribute("data-href")).toContain("bindExec=s1%2Cs2");
+    fireEvent.click(execItem);
+    expect(window.location.search).toContain("bindPlanExecute=");
+    expect(window.location.search).toContain("bindRole=exec");
+    expect(window.location.search).toContain("bindExec=s1%2Cs2");
+    window.history.replaceState(null, "", "/");
+  });
+
+  it("disables binding selected sessions when none use the chat engine with a supported agent", () => {
+    storeState.sessions = [
+      { id: "s1", projectId: "project-1", groupId: "group-1", name: "One", kind: "claude", engine: "tui" },
+      { id: "s2", projectId: "project-1", groupId: "group-1", name: "Two", kind: "codex", engine: "tui" },
+    ] as never;
+    storeState.selection = [
+      { kind: "session", id: "s1" },
+      { kind: "session", id: "s2" },
+    ] as never;
+
+    render(<LeftSidebar />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Session 1" }));
+    const orchMenu = screen.getByRole("button", { name: "tree.orchestrationMenu" });
+    expect(orchMenu.hasAttribute("disabled")).toBe(true);
+    const item = screen.getByRole("button", { name: "tree.bindPlanExecuteSelected" });
+    expect(item.hasAttribute("disabled")).toBe(true);
+    const execItem = screen.getByRole("button", { name: "tree.bindAsExecutorsSelected" });
+    expect(execItem.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("offers Kill Process in the multiselection menu for selected sessions and ignores non-session nodes", () => {
+    const onKillClick = vi.fn();
+    menuMocks.buildKillProcessMany.mockReturnValue({
+      label: "tree.killProcessSelected:2",
+      onClick: onKillClick,
+    });
+    storeState.selection = [
+      { kind: "session", id: "s1" },
+      { kind: "group", id: "group-1" },
+      { kind: "session", id: "s2" },
+    ] as never;
+
+    render(<LeftSidebar />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Session 1" }));
+
+    expect(menuMocks.buildKillProcessMany).toHaveBeenCalledWith(
+      ["s1", "s2"],
+      { onDone: storeState.clearSelection },
+    );
+    const killBtn = screen.getByRole("button", { name: "tree.killProcessSelected:2" });
+    fireEvent.click(killBtn);
+    expect(onKillClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits Kill Process from the multiselection menu when no selected session can be killed", () => {
+    menuMocks.buildKillProcessMany.mockReturnValue(null);
+    storeState.selection = [
+      { kind: "session", id: "s1" },
+      { kind: "session", id: "s2" },
+    ] as never;
+
+    render(<LeftSidebar />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: "Session 1" }));
+
+    expect(menuMocks.buildKillProcessMany).toHaveBeenCalledWith(
+      ["s1", "s2"],
+      { onDone: storeState.clearSelection },
+    );
+    expect(screen.queryByRole("button", { name: /tree\.killProcess/ })).toBeNull();
   });
 });

@@ -29,10 +29,12 @@ import {
 import { flushNow as flushSettingsSync } from "../../ipc/settingsSync";
 import { isMac } from "../../ipc/transport";
 import { platform } from "../../platform";
+import { isLocalDesktop, resolveClipboardFiles } from "../../terminal/clipboardFiles";
 import { pathsExcept, terminalDropText } from "../../terminal/dropPaths";
 import { ClipboardUnresponsiveError } from "../../platform/clipboardStall";
 import { env } from "../../platform/env";
 import {
+  hasNonImageClipboardFiles,
   imagesFromDrop,
   imageFromNativeClipboard,
   injectImageFiles,
@@ -172,12 +174,33 @@ export const TerminalView = memo(function TerminalView({
     env.hasNativeHost || typeof navigator.clipboard?.readText === "function";
 
   /**
-   * A context-menu paste has no browser paste event from which to obtain a File. On Tauri, inspect the native
-   * clipboard for an image first and reuse the same upload/native routing as the keyboard shortcut; otherwise
-   * paste text normally. Electron cannot read images yet, but native mode can still send Ctrl+V to a local agent.
+   * A context-menu paste has no browser paste event from which to obtain a File. Check the local OS file
+   * clipboard first so files copied in Finder/Explorer paste their paths instead of Finder's icon bitmap,
+   * then inspect native image data and plain text.
    */
   const pasteFromContextMenu = async () => {
     try {
+      if (isLocalDesktop()) {
+        const resolved = await resolveClipboardFiles([], { loadMissingImages: true });
+        if (resolved) {
+          if (resolved.imagePaths.length > 0) {
+            if (
+              resolved.otherPaths.length === 0 &&
+              imagePasteMode === "agent" &&
+              supportsNativeImagePaste(session.kind)
+            ) {
+              await injectNativeImagePaste(session.id);
+            } else if (resolved.imageFiles.length > 0) {
+              injectImages(resolved.imageFiles);
+            }
+          }
+          if (resolved.otherPaths.length > 0) {
+            await ptyWrite(session.id, terminalDropText(resolved.otherPaths));
+          }
+          return;
+        }
+      }
+
       let image: File | null = null;
       if (env.isTauri) {
         try {
@@ -392,10 +415,12 @@ export const TerminalView = memo(function TerminalView({
           // onPaste never fires. This once broke image paste silently on desktop, browser, and remote clients.
           // When an image is found, also stop propagation to prevent xterm from performing an empty text paste.
           onPasteCapture={(e) => {
+            const local = isLocalDesktop();
+            const nonImageFiles = hasNonImageClipboardFiles(e.clipboardData);
             const plan = planImagePaste(
               e.clipboardData,
               imagePasteMode,
-              (env.isTauri || env.isElectron) && supportsNativeImagePaste(session.kind),
+              local && supportsNativeImagePaste(session.kind),
               env.isTauri,
             );
             if (plan.kind === "text") return;
@@ -404,16 +429,52 @@ export const TerminalView = memo(function TerminalView({
             // fall back to path upload. Keep this guard against future routing changes sending control bytes.
             if (plan.kind === "agent" && !supportsNativeImagePaste(session.kind)) return;
 
-            // Both image modes stop the captured event so xterm cannot perform an additional empty text paste.
+            // Both image and file modes stop the captured event so xterm cannot perform an additional text paste.
             e.preventDefault();
             e.stopPropagation();
-            if (plan.kind === "agent") {
-              void injectNativeImagePaste(session.id).catch(() =>
-                showImageError(t("term.imgClipboardUnavailable")),
-              );
-            } else if (plan.kind === "images") injectImages(plan.files);
-            else if (plan.kind === "native-clipboard") injectNativeClipboardImage();
-            else showImageError(t("term.imgClipboardUnavailable"));
+            const capturedImages = plan.kind === "images" ? plan.files : [];
+            void (async () => {
+              if (local) {
+                const resolved = await resolveClipboardFiles(capturedImages, {
+                  loadMissingImages: true,
+                }).catch(() => null);
+                if (resolved) {
+                  if (resolved.imagePaths.length > 0) {
+                    if (
+                      resolved.otherPaths.length === 0 &&
+                      imagePasteMode === "agent" &&
+                      supportsNativeImagePaste(session.kind)
+                    ) {
+                      await injectNativeImagePaste(session.id).catch(() =>
+                        showImageError(t("term.imgClipboardUnavailable")),
+                      );
+                    } else if (resolved.imageFiles.length > 0) {
+                      injectImages(resolved.imageFiles);
+                    }
+                  }
+                  if (resolved.otherPaths.length > 0) {
+                    await ptyWrite(session.id, terminalDropText(resolved.otherPaths));
+                  }
+                  return;
+                }
+              }
+              if (plan.kind === "non-image-files") {
+                showImageError(t(local ? "term.imgClipboardUnavailable" : "paste.browserFilesHint"));
+                return;
+              }
+              if (plan.kind === "agent") {
+                await injectNativeImagePaste(session.id).catch(() =>
+                  showImageError(t("term.imgClipboardUnavailable")),
+                );
+              } else if (plan.kind === "images") {
+                injectImages(plan.files);
+                if (!local && nonImageFiles) showImageError(t("paste.browserFilesHint"));
+              } else if (plan.kind === "native-clipboard") {
+                injectNativeClipboardImage();
+              } else {
+                showImageError(t("term.imgClipboardUnavailable"));
+              }
+            })();
           }}
           onDragOver={(e) => {
             if (e.dataTransfer?.types?.includes("Files")) e.preventDefault();

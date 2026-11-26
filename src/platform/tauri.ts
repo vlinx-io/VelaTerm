@@ -187,6 +187,24 @@ const clipboard: ClipboardCapability = {
       await image.close();
     }
   },
+  async readFiles() {
+    if (!env.isTauri) return [];
+    await ensureClipboardResponsive();
+    try {
+      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+        const res = await transportInvoke<{ paths: string[] } | null>("clipboard_read_files", {});
+        return res?.paths ?? [];
+      }
+      const { invoke } = await import("@tauri-apps/api/core");
+      const res = await invoke<{ paths: string[] } | null>("desktop_call", {
+        cmd: "clipboard_read_files",
+        args: {},
+      });
+      return res?.paths ?? [];
+    } catch {
+      return [];
+    }
+  },
 };
 
 const windowCap: WindowCapability = {
@@ -223,6 +241,9 @@ const windowCap: WindowCapability = {
     if (!env.isTauri) return null;
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<string | null>("take_open_project_request");
+  },
+  async takeServiceRestartNotice() {
+    return false;
   },
   async onOpenProjectRequest(cb) {
     if (!env.isTauri) return () => {};

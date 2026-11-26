@@ -20,6 +20,7 @@ import { LoginGate } from "./remote/LoginGate";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { isDeferredResizeNotification } from "./platform/resizeObserverError";
 import { installTauriLinkHandler } from "./platform/tauriLinkHandler";
+import { installWebkitArrowInputGuard } from "./platform/webkitArrowInputGuard";
 import { platform } from "./platform";
 import { applyStoredUiZoom } from "./platform/uiZoom";
 
@@ -32,7 +33,15 @@ applyStoredUiZoom();
 // Scope automatic system-browser links to application pages. The opener plugin's global injection
 // would also intercept links in unprivileged browser tabs before their native new-window handler.
 const removeTauriLinkHandler = installTauriLinkHandler((url) => platform.opener.openExternal(url));
-if (import.meta.hot) import.meta.hot.dispose(removeTauriLinkHandler);
+// Guard every input, textarea, and contenteditable field against WKWebView inserting U+001C–U+001F
+// control characters when an arrow key is pressed at an input boundary.
+const removeWebkitArrowInputGuard = installWebkitArrowInputGuard();
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    removeTauriLinkHandler();
+    removeWebkitArrowInputGuard();
+  });
+}
 
 // The main UI uses only application context menus. WKWebView otherwise shows native Reload/AutoFill
 // items in uncovered areas, mixing unrelated actions and styles. Cancel only the browser default in

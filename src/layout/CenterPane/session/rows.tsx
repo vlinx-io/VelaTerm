@@ -13,7 +13,13 @@ import { fmtTokens } from "../../../format";
 import { dateLocale, useT } from "../../../i18n";
 import { platform } from "../../../platform";
 import { env } from "../../../platform/env";
-import { imageFromNativeClipboard, imagesFromClipboard } from "../../../terminal/imageInput";
+import {
+  capturePasteData,
+  insertPathsIntoTextField,
+  isLocalDesktop,
+  resolveClipboardFiles,
+} from "../../../terminal/clipboardFiles";
+import { imageFromNativeClipboard } from "../../../terminal/imageInput";
 import { stripAnsi } from "../../../ipc/backendError";
 import {
   resolveChatImage,
@@ -577,13 +583,27 @@ function MessageEditor({ text, images = [], disabled, onCancel, onSend }: {
     });
   };
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = imagesFromClipboard(event.clipboardData);
-    if (files.length > 0) {
-      event.preventDefault();
-      enqueue(() => Promise.resolve(files));
-    } else if (env.isTauri && !event.clipboardData?.getData("text/plain")) {
-      event.preventDefault();
-      enqueue(() => imageFromNativeClipboard().then(file => [file]).catch(() => []));
+    const field = event.currentTarget;
+    const captured = capturePasteData(event.clipboardData);
+    const local = isLocalDesktop();
+    if (!captured.hasFileSignal && (captured.text || !env.isTauri)) return;
+    if (!local && !captured.images.length) return;
+    event.preventDefault();
+    if (local) {
+      enqueue(async () => {
+        const resolved = await resolveClipboardFiles(captured.images, { loadMissingImages: true }).catch(() => null);
+        if (resolved) {
+          if (resolved.otherPaths.length && field.isConnected && !field.disabled) {
+            insertPathsIntoTextField(field, resolved.otherPaths);
+          }
+          return resolved.imageFiles;
+        }
+        if (captured.images.length) return captured.images;
+        if (!env.isTauri || captured.text) return [];
+        return imageFromNativeClipboard().then(file => [file]).catch(() => []);
+      });
+    } else if (captured.images.length) {
+      enqueue(() => Promise.resolve(captured.images));
     }
   };
   const remove = (index: number) => {

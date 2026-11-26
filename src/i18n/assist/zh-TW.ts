@@ -35,6 +35,7 @@ const assist: typeof en = {
   "assist.reason.notFile": "這是資料夾，不是檔案。",
   "assist.reason.unavailable": "應用程式的這部分功能暫時無法使用。",
   "assist.reason.builtIn": "內建集合無法重新命名、移動或刪除。",
+  "assist.reason.notRunning": "此會話目前沒有執行中的處理程序。",
 
   "assist.field.name": "名稱",
   "assist.field.location": "位置",
@@ -70,6 +71,8 @@ const assist: typeof en = {
   "assist.projects.move": (name: string, to: string) => `將「${name}」移至「${to}」`,
   "assist.projects.sortByName": (where: string) => `依名稱排列「${where}」中的項目`,
   "assist.projects.sortByOrder": (where: string) => `重新排列「${where}」中的項目`,
+  "assist.projects.killProcess": (name: string) => `結束會話「${name}」的處理程序`,
+  "assist.projects.killProcessNote": "目前的工作將中斷，已儲存的對話紀錄和檔案會保留。",
   "assist.projects.archiveSession": (name: string) => `封存會話「${name}」`,
   "assist.projects.deleteNode": (name: string) => `從側邊欄移除「${name}」`,
   "assist.projects.deleteKeepsFiles": "磁碟上的檔案會保留。",

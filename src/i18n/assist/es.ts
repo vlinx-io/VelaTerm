@@ -35,6 +35,7 @@ const assist: typeof en = {
   "assist.reason.notFile": "Es una carpeta, no un archivo.",
   "assist.reason.unavailable": "Esta parte de la aplicación no está disponible en este momento.",
   "assist.reason.builtIn": "Las colecciones integradas no se pueden renombrar, mover ni eliminar.",
+  "assist.reason.notRunning": "No hay ningún proceso en ejecución para esta sesión.",
 
   "assist.field.name": "Nombre",
   "assist.field.location": "Ubicación",
@@ -70,6 +71,8 @@ const assist: typeof en = {
   "assist.projects.move": (name: string, to: string) => `Mover «${name}» a «${to}»`,
   "assist.projects.sortByName": (where: string) => `Ordenar por nombre los elementos de «${where}»`,
   "assist.projects.sortByOrder": (where: string) => `Reordenar los elementos de «${where}»`,
+  "assist.projects.killProcess": (name: string) => `Terminar el proceso de «${name}»`,
+  "assist.projects.killProcessNote": "Se interrumpirá la tarea actual. Se conservarán el historial de conversación y los archivos guardados.",
   "assist.projects.archiveSession": (name: string) => `Archivar la sesión «${name}»`,
   "assist.projects.deleteNode": (name: string) => `Quitar «${name}» de la barra lateral`,
   "assist.projects.deleteKeepsFiles": "Los archivos del disco se conservan.",

@@ -30,10 +30,12 @@ fn observer_class(base: &'static AnyClass) -> &'static AnyClass {
         let mut builder = ClassBuilder::new(c"VelaBrowserHostMouseTracking", base)
             .expect("unique browser mouse-tracking class");
         // No ivars are added: existing observer instances retain their original size and layout.
+        // Use C-unwind so Objective-C exceptions raised beneath AppKit/WebKit mouse tracking can unwind
+        // back to NSApplication instead of hitting a Rust nounwind abort.
         unsafe {
-            builder.add_method(sel!(mouseMoved:), mouse_moved as extern "C" fn(_, _, _));
-            builder.add_method(sel!(mouseEntered:), mouse_entered as extern "C" fn(_, _, _));
-            builder.add_method(sel!(mouseExited:), mouse_exited as extern "C" fn(_, _, _));
+            builder.add_method(sel!(mouseMoved:), mouse_moved as extern "C-unwind" fn(_, _, _));
+            builder.add_method(sel!(mouseEntered:), mouse_entered as extern "C-unwind" fn(_, _, _));
+            builder.add_method(sel!(mouseExited:), mouse_exited as extern "C-unwind" fn(_, _, _));
         }
         builder.register()
     })
@@ -78,7 +80,7 @@ fn should_forward(observer: &AnyObject, event: &AnyObject, exiting: bool) -> boo
     })
 }
 
-extern "C" fn mouse_moved(observer: &AnyObject, _: Sel, event: &AnyObject) {
+extern "C-unwind" fn mouse_moved(observer: &AnyObject, _: Sel, event: &AnyObject) {
     if should_forward(observer, event, false) {
         unsafe {
             let _: () = msg_send![super(observer, observer.class().superclass().unwrap()), mouseMoved: event];
@@ -86,7 +88,7 @@ extern "C" fn mouse_moved(observer: &AnyObject, _: Sel, event: &AnyObject) {
     }
 }
 
-extern "C" fn mouse_entered(observer: &AnyObject, _: Sel, event: &AnyObject) {
+extern "C-unwind" fn mouse_entered(observer: &AnyObject, _: Sel, event: &AnyObject) {
     if should_forward(observer, event, false) {
         unsafe {
             let _: () = msg_send![super(observer, observer.class().superclass().unwrap()), mouseEntered: event];
@@ -94,7 +96,7 @@ extern "C" fn mouse_entered(observer: &AnyObject, _: Sel, event: &AnyObject) {
     }
 }
 
-extern "C" fn mouse_exited(observer: &AnyObject, _: Sel, event: &AnyObject) {
+extern "C-unwind" fn mouse_exited(observer: &AnyObject, _: Sel, event: &AnyObject) {
     if should_forward(observer, event, true) {
         unsafe {
             let _: () = msg_send![super(observer, observer.class().superclass().unwrap()), mouseExited: event];

@@ -67,6 +67,13 @@ export function AssistRequestListener() {
     }).then(keep);
     void onAssistChanged((change) => {
       if (change.knowledgeChanged) window.dispatchEvent(new Event("notebook:vaultsChanged"));
+      if (change.killedSessions?.length) {
+        const state = useTermStore.getState();
+        for (const sid of change.killedSessions) {
+          state.setRuntime(sid, { status: "exited", pid: undefined });
+          state.closeSession(sid);
+        }
+      }
       refresh();
     }).then(keep);
     return () => { live = false; stops.forEach(stop => stop()); };

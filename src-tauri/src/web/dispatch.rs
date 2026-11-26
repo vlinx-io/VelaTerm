@@ -400,6 +400,17 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             app, &req_str(args, "agent")?, &req_str(args, "mode")?,
         ),
         "plan_execute_prepare" => crate::agent::plan_execute::menu::prepare(app, &serde_json::from_value(args.get("context").cloned().unwrap_or_default()).map_err(|e|format!("Invalid creation location: {e}"))?),
+        "plan_execute_bind_prepare" => {
+            let session_ids: Vec<String> = serde_json::from_value(args.get("sessionIds").cloned().unwrap_or_default())
+                .map_err(|e| format!("Invalid session selection: {e}"))?;
+            let mode = opt_str(args, "mode");
+            crate::agent::plan_execute::bind::prepare(app, &session_ids, mode.as_deref())
+        }
+        "plan_execute_bind" => {
+            let request: crate::agent::plan_execute::bind::BindRequest = serde_json::from_value(args.get("request").cloned().unwrap_or_default())
+                .map_err(|e| format!("Invalid binding request: {e}"))?;
+            crate::agent::plan_execute::bind::apply(app, &request)
+        }
         "plan_execute_create" => {
             let request: crate::agent::plan_execute::menu::Request = serde_json::from_value(args.get("request").cloned().unwrap_or_default()).map_err(|e|format!("Invalid workflow request: {e}"))?;
             if let Some(cwd) = request.cwd.as_deref().filter(|s|!s.is_empty()) { guard_remote_path(app, origin, cwd)?; }
@@ -550,7 +561,14 @@ fn dispatch_inner(app: &AppCtx, cmd: &str, args: &Value, source: &str, origin: C
             )?;
             Ok(Value::Null)
         }
-        "session_title_options" => to_value(crate::agent::session_title::options(app, &req_str(args, "sessionId")?)?),
+        "session_title_options" => {
+            if let Some(ids) = args.get("sessionIds").and_then(Value::as_array) {
+                let list: Vec<String> = ids.iter().filter_map(Value::as_str).map(str::to_string).collect();
+                to_value(crate::agent::session_title::options_many(app, &list)?)
+            } else {
+                to_value(crate::agent::session_title::options(app, &req_str(args, "sessionId")?)?)
+            }
+        }
         "rename_session_with_agent" => to_value(crate::agent::session_title::rename(app, &req_str(args, "sessionId")?,
             opt_str(args, "agent").map(|kind| serde_json::from_value::<SessionKind>(Value::String(kind))
                 .map_err(|e| e.to_string())).transpose()?, opt_str(args, "model").as_deref(), opt_str(args, "effort").as_deref(),

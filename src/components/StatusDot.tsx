@@ -10,6 +10,8 @@ const COLOR: Record<DisplayStatus, string> = {
   working: "var(--status-working)",
   asking: "var(--status-asking)",
   waiting: "var(--status-waiting)",
+  awaiting_parent: "var(--status-workflow-wait)",
+  awaiting_children: "var(--status-workflow-wait)",
   background: "var(--status-background)",
   unavailable: "var(--text-faint)",
 };
@@ -21,6 +23,7 @@ export function StatusDot({
   status: DisplayStatus;
   size?: number;
 }) {
+  const hollow = status === "awaiting_parent" || status === "awaiting_children";
   return (
     <span
       // Use a breathing animation for working and awaiting-action states so active work and user waits are recognizable
@@ -30,7 +33,9 @@ export function StatusDot({
         width: size,
         height: size,
         borderRadius: "50%",
-        background: COLOR[status],
+        boxSizing: hollow ? "border-box" : undefined,
+        background: hollow ? "transparent" : COLOR[status],
+        border: hollow ? `1.5px solid ${COLOR[status]}` : undefined,
         display: "inline-block",
         flex: "0 0 auto",
       }}

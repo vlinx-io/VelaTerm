@@ -1,0 +1,210 @@
+/* Batch AI rename dialog layout and per-session progress list. */
+
+.smart-rename-dialog {
+  width: 500px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  outline: none;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.smart-rename-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.smart-rename-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.smart-rename-desc {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.smart-rename-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.smart-rename-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.smart-rename-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.smart-rename-section-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.smart-rename-toggle {
+  font-size: 11px;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.smart-rename-toggle:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.smart-rename-toggle:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.smart-rename-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md, 8px);
+  background: var(--bg-1, var(--bg-app));
+}
+
+.smart-rename-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.smart-rename-row:last-child {
+  border-bottom: none;
+}
+
+.smart-rename-row-check {
+  margin-top: 2px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.smart-rename-row-check:disabled {
+  cursor: default;
+}
+
+.smart-rename-row-icon {
+  margin-top: 1px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.smart-rename-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.smart-rename-row-name {
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.smart-rename-row-name.done {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.smart-rename-row-new {
+  color: var(--text-primary);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.smart-rename-row-error {
+  color: var(--status-error);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.smart-rename-row-status {
+  flex-shrink: 0;
+  font-size: 11px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 1px;
+}
+
+.smart-rename-row-status.pending,
+.smart-rename-row-status.cancelled {
+  color: var(--text-muted);
+}
+
+.smart-rename-row-status.running {
+  color: var(--accent);
+}
+
+.smart-rename-row-status.done {
+  color: var(--green, #22c55e);
+}
+
+.smart-rename-row-status.error {
+  color: var(--status-error);
+}
+
+.smart-rename-summary {
+  padding: 8px 10px;
+  border-radius: var(--r-sm, 5px);
+  border: 1px solid var(--border);
+  background: var(--bg-2, var(--bg-elevated));
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.smart-rename-summary.has-error {
+  border-color: var(--status-error);
+  color: var(--status-error);
+}
+
+.smart-rename-error {
+  font-size: 12px;
+  color: var(--status-error);
+}
+
+.smart-rename-foot {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}

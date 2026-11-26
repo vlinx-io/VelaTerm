@@ -66,12 +66,14 @@ export function LaunchField({
   label,
   children,
   hint,
+  as,
 }: {
   label: string;
   children: ReactNode;
   hint?: string;
+  as?: "label" | "div";
 }) {
-  return <Field label={label} hint={hint}>{children}</Field>;
+  return <Field label={label} hint={hint} as={as}>{children}</Field>;
 }
 
 const modelRequests = new Map<string, Promise<LaunchModelCatalog>>();
@@ -376,21 +378,24 @@ export function WorktreeChoices({
   onChange,
   single = false,
   workflow = false,
+  allowShared = true,
   disabled = false,
 }: {
   value: WorktreeMode;
   onChange: (v: WorktreeMode) => void;
   single?: boolean;
   workflow?: boolean;
+  allowShared?: boolean;
   disabled?: boolean;
 }) {
   const t = useT();
   const name = useId();
+  const twoColumn = single || !allowShared;
   return (
     <fieldset className="launch-worktrees" disabled={disabled}>
       <legend className="vlx-field-label">{t("launch.directory")}</legend>
-      <div className={`launch-worktree-grid${single ? " is-single" : ""}`}>
-        {(["none", ...(single ? [] : ["shared"]), "each"] as const).map(
+      <div className={`launch-worktree-grid${twoColumn ? " is-single" : ""}`}>
+        {(["none", ...(twoColumn ? [] : ["shared"]), "each"] as const).map(
           (mode) => (
             <label
               key={mode}

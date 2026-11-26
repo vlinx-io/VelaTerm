@@ -51,7 +51,8 @@ export function SplitTaskConfirmModal() {
         if (!live) return;
         setPending(ids); setPendingError(null);
         // Keep the current launch draft in front; the pending link becomes available after it closes.
-        const launchOpen = new URLSearchParams(window.location.search).has("planExecute") || useTermStore.getState().pendingSpawns.length > 0;
+        const params = new URL(window.location.href).searchParams;
+        const launchOpen = params.has("planExecute") || params.has("bindPlanExecute") || useTermStore.getState().pendingSpawns.length > 0;
         if (open && !launchOpen && !readRoute().runId && ids.length) navigatePlanExecute(splitReviewUrl(ids[0]));
       } catch (cause) { if (live) setPendingError(launchErrorText(cause)); }
     };

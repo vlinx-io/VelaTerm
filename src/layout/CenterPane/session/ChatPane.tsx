@@ -97,8 +97,14 @@ import { registerComposer } from "./composerFocus";
 import { buildSuggestions, findFileMention, mentionDir, type Suggestion } from "./completion";
 import { env } from "../../../platform/env";
 import { platform } from "../../../platform";
-import { chatDropText, pathsExcept } from "../../../terminal/dropPaths";
-import { imageFromNativeClipboard, imagesFromClipboard, imagesFromDrop } from "../../../terminal/imageInput";
+import {
+  capturePasteData,
+  formatSpacedChatPaths,
+  isLocalDesktop,
+  resolveClipboardFiles,
+} from "../../../terminal/clipboardFiles";
+import { pathsExcept } from "../../../terminal/dropPaths";
+import { imageFromNativeClipboard, imagesFromDrop } from "../../../terminal/imageInput";
 import { IS_MAC, IS_PLAIN_BROWSER, labelWithCombo } from "../../../hooks/shortcutRegistry";
 import { useMentionFiles } from "./fileMentions";
 import { ControlChip, type ChipOption } from "./controls";
@@ -2166,17 +2172,14 @@ export function ChatPane({
     }).catch(() => {});
   };
 
-  /** Put dropped file paths into the draft at the caret, spaced off from the text around them. */
+  /** Put dropped or pasted file paths into the draft at the caret, spaced off from the text around them. */
   const insertDroppedPaths = (paths: string[]) => {
     const el = inputRef.current;
     const current = latestDraft.current;
-    const start = Math.min(el?.selectionStart ?? current.length, current.length);
-    const end = Math.min(el?.selectionEnd ?? start, current.length);
-    const before = current.slice(0, start);
-    const after = current.slice(end);
-    const text = (before && !/\s$/.test(before) ? " " : "") + chatDropText(paths) + (/^\s/.test(after) ? "" : " ");
-    const at = before.length + text.length;
-    updateDraft(before + text + after);
+    const start = el?.selectionStart ?? current.length;
+    const end = el?.selectionEnd ?? start;
+    const { value, caret: at } = formatSpacedChatPaths(current, start, end, paths);
+    updateDraft(value);
     setCaret(at);
     placeCaret.current = at;
     el?.focus();
@@ -2214,29 +2217,46 @@ export function ChatPane({
   };
 
   /**
-   * Images from a paste, including the ones WKWebView leaves out of the event.
-   *
-   * A Tauri window often reports an image paste with an empty clipboard payload; the terminal hits the
-   * same wall and answers it the same way, by reading the native clipboard instead. Anything that is not
-   * an image is left alone so it pastes as text.
+   * Files and images from a paste, matching `onComposerDrop`: OS file-clipboard entries insert paths for
+   * non-image files (and for text-only agents) instead of falling through to Finder's synthesized file icon.
    */
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = imagesFromClipboard(e.clipboardData);
-    if (files.length > 0) {
-      e.preventDefault();
-      void addFiles(files);
-      return;
-    }
-    if (!env.isTauri || e.clipboardData?.getData("text/plain")) return;
+    const captured = capturePasteData(e.clipboardData);
+    const local = isLocalDesktop();
+    if (!captured.hasFileSignal && (captured.text || !env.isTauri)) return;
+    if (!local && !captured.images.length && !captured.hasNonImageFiles) return;
     e.preventDefault();
-    void imageFromNativeClipboard()
-      .then((file) => addFiles([file]))
-      // Nothing to say: an empty clipboard is not an error, it is a keystroke that did nothing.
-      .catch(() => {});
+    void (async () => {
+      const accepts = acceptsChatImages(session.kind) && imageSupport !== false;
+      const resolved = await resolveClipboardFiles(captured.images, { loadMissingImages: accepts }).catch(() => null);
+      if (resolved) {
+        if (resolved.imageFiles.length && accepts) addFiles(resolved.imageFiles);
+        const paths = accepts ? resolved.otherPaths : resolved.allPaths;
+        if (paths.length) insertDroppedPaths(paths);
+        return;
+      }
+      if (captured.images.length > 0) {
+        addFiles(captured.images);
+        return;
+      }
+      if (!local && captured.hasNonImageFiles) {
+        setAttachNote(t("paste.browserFilesHint"));
+        return;
+      }
+      if (!env.isTauri || captured.text) return;
+      const file = await imageFromNativeClipboard().catch(() => null);
+      if (file) addFiles([file]);
+    })();
   };
 
-  // The composer also takes images; every other field in the pane (queue edits, questions, search) is text only.
-  const composerMenu = useTextFieldMenu({ onImage: (file) => void addFiles([file]), onCopyFailed: setError });
+  // The composer also takes images and file paths; every other field in the pane (queue edits, questions, search) is text/paths only.
+  const composerAcceptsImages = acceptsChatImages(session.kind) && imageSupport !== false;
+  const composerMenu = useTextFieldMenu({
+    onImage: (file) => void addFiles([file]),
+    onPaths: insertDroppedPaths,
+    acceptsImages: composerAcceptsImages,
+    onCopyFailed: setError,
+  });
   const paneFieldMenu = useTextFieldMenu({ onCopyFailed: setError });
 
   const steerQueued = async (id: string) => {

@@ -35,6 +35,7 @@
   --status-working: var(--green);
   --status-asking: var(--yellow);
   --status-waiting: var(--mag);
+  --status-workflow-wait: var(--text-dim);
   --status-background: var(--cyan);
 }
 

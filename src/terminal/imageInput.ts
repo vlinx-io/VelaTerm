@@ -40,6 +40,16 @@ export function imagesFromClipboard(data: DataTransfer | null): File[] {
   return out;
 }
 
+/** Whether `clipboardData` carries at least one non-image file entry (e.g. a document copied in Finder). */
+export function hasNonImageClipboardFiles(data: DataTransfer | null): boolean {
+  if (!data) return false;
+  const items = Array.from(data.items ?? []);
+  if (items.some((item) => item.kind === "file" && !item.type.startsWith("image/"))) {
+    return true;
+  }
+  return Array.from(data.files ?? []).some((file) => !file.type.startsWith("image/"));
+}
+
 /**
  * Select the path for one paste event while preserving three invariants:
  * 1. Native agent paste requires explicit user selection and shell support.
@@ -50,6 +60,7 @@ export function imagesFromClipboard(data: DataTransfer | null): File[] {
 export type ImagePastePlan =
   | { kind: "agent" }
   | { kind: "images"; files: File[] }
+  | { kind: "non-image-files" }
   | { kind: "text" }
   | { kind: "native-clipboard" }
   | { kind: "image-unavailable" };
@@ -61,7 +72,11 @@ export function planImagePaste(
   nativeClipboardFallbackAvailable: boolean,
 ): ImagePastePlan {
   const files = imagesFromClipboard(data);
-  const text = data?.getData("text/plain") ?? "";
+  const nonImageFiles = hasNonImageClipboardFiles(data);
+  const text = typeof data?.getData === "function" ? data.getData("text/plain") : "";
+  if (nonImageFiles && files.length === 0) {
+    return { kind: "non-image-files" };
+  }
   // In local native mode, VelaTerm converts image paste into the Ctrl+V agents recognize. Letting it
   // reach xterm would paste empty text because images lack text/plain, so the agent would never read
   // the system clipboard. Plain text still follows xterm's normal path.

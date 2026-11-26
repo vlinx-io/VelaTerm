@@ -33,6 +33,8 @@ const COMMANDS: &[&str] = &[
     "plan_execute_defaults",
     "plan_execute_start",
     "plan_execute_prepare",
+    "plan_execute_bind_prepare",
+    "plan_execute_bind",
     "plan_execute_create",
     "plan_execute_split_pending",
     "plan_execute_split_read",

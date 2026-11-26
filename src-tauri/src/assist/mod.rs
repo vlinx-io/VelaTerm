@@ -35,6 +35,8 @@ const MAX_SUMMARY: usize = 4000;
 pub(crate) const REQUEST_EVENT: &str = "assist://request";
 /// Event telling every client that actions of a request were decided, so other views drop them too.
 pub(crate) const CHANGED_EVENT: &str = "assist://changed";
+/// Client source used when `vapp` kills a PTY, distinct from desktop/WS sources so every open pane closes.
+pub(super) const ASSIST_SOURCE: &str = "assist";
 /// The area actions without a `domain` belong to: the sidebar commands (`vapp session ...`) omit it.
 const DEFAULT_DOMAIN: &str = "projects";
 /// Fields that hold item IDs, and so may hold a `$name` for an item created earlier in the request.
@@ -247,6 +249,7 @@ pub(crate) fn submit(app: &AppCtx, session_id: &str, summary: &str, actions: &Va
         "source": {"sessionId": session_id, "sessionName": session.as_ref().map(|s| s.name.clone()).unwrap_or_default(), "agent": session.as_ref().map(|s| s.kind)},
         "actions": actions});
     if no_confirm { plan["noConfirm"] = json!(true); }
+    let mut killed_sessions = Vec::new();
     {
         let _guard = plans_lock()?;
         store(app, &plan)?;
@@ -257,7 +260,9 @@ pub(crate) fn submit(app: &AppCtx, session_id: &str, summary: &str, actions: &Va
                 link(&mut plan);
                 let action = plan["actions"][index].clone();
                 if action["status"] != "pending" || action["backend"] != true || needs_choice(&action) || !references(&action).is_empty() { continue; }
-                execute_backend(app, &mut plan, index, &empty, CallOrigin::Local)?;
+                if execute_backend(app, &mut plan, index, &empty, CallOrigin::Local)?.is_none() {
+                    record_killed(&plan["actions"][index], &mut killed_sessions);
+                }
             }
             link(&mut plan);
             store(app, &plan)?;
@@ -266,10 +271,10 @@ pub(crate) fn submit(app: &AppCtx, session_id: &str, summary: &str, actions: &Va
     let mut result = outcome_of(&plan);
     result["accepted"] = json!(true);
     if result["settled"] == true {
-        changed(app, &plan);
+        changed(app, &plan, &killed_sessions);
     } else {
         app.emit(REQUEST_EVENT, json!({"id": plan["id"], "sessionId": session_id, "noConfirm": no_confirm}));
-        if no_confirm { changed(app, &plan); }
+        if no_confirm { changed(app, &plan, &killed_sessions); }
     }
     Ok(result)
 }
@@ -369,10 +374,20 @@ fn action_at(plan: &mut Value, index: usize) -> Result<&mut Value> {
     plan["actions"].get_mut(index).ok_or_else(|| "This action is not part of the request".to_string())
 }
 
-fn changed(app: &AppCtx, plan: &Value) {
+fn record_killed(action: &Value, killed: &mut Vec<String>) {
+    if action["domain"] == "projects" && action["kind"] == "killProcess" && action["status"] == "done" {
+        if let Some(id) = action["id"].as_str().filter(|s| !s.is_empty()) {
+            if !killed.iter().any(|existing| existing == id) { killed.push(id.to_string()); }
+        }
+    }
+}
+
+fn changed(app: &AppCtx, plan: &Value, killed_sessions: &[String]) {
     let knowledge_changed = plan["actions"].as_array().into_iter().flatten()
         .any(|a| a["domain"] == "knowledge" && a["backend"] == true && a["status"] == "done");
-    app.emit(CHANGED_EVENT, json!({"id": plan["id"], "sessionId": plan["source"]["sessionId"], "knowledgeChanged": knowledge_changed}));
+    let mut payload = json!({"id": plan["id"], "sessionId": plan["source"]["sessionId"], "knowledgeChanged": knowledge_changed});
+    if !killed_sessions.is_empty() { payload["killedSessions"] = json!(killed_sessions); }
+    app.emit(CHANGED_EVENT, payload);
 }
 
 /// Runs backend-owned actions once each, in the order given. A started action is never run again, even
@@ -390,23 +405,25 @@ fn run(app: &AppCtx, args: &Value, origin: CallOrigin) -> Result<Value> {
         if action["status"] != "pending" { return Err("This action has already run. Ask the agent to submit it again to repeat it.".into()); }
     }
     let mut first_error = None;
+    let mut killed_sessions = Vec::new();
     for &index in &list {
         link(&mut plan);
         let action = action_at(&mut plan, index)?.clone();
         // Stranded by an earlier failure while this batch ran.
         if action["status"] != "pending" { first_error.get_or_insert_with(|| action["error"].as_str().unwrap_or_default().to_string()); continue; }
-        if !references(&action).is_empty() { return finish(app, plan, Err("Confirm the earlier change this one depends on first".into())); }
+        if !references(&action).is_empty() { return finish(app, plan, &killed_sessions, Err("Confirm the earlier change this one depends on first".into())); }
         if let Some(error) = execute_backend(app, &mut plan, index, args, origin)? { first_error.get_or_insert(error); }
+        else { record_killed(&plan["actions"][index], &mut killed_sessions); }
     }
     link(&mut plan);
     // A single action reports its failure as an error, as before; a batch returns each outcome in the plan.
     let result = match first_error { Some(error) if list.len() == 1 => Err(error), _ => Ok(()) };
-    finish(app, plan, result)
+    finish(app, plan, &killed_sessions, result)
 }
 
-fn finish(app: &AppCtx, plan: Value, result: Result<()>) -> Result<Value> {
+fn finish(app: &AppCtx, plan: Value, killed_sessions: &[String], result: Result<()>) -> Result<Value> {
     store(app, &plan)?;
-    changed(app, &plan);
+    changed(app, &plan, killed_sessions);
     result.map(|_| plan)
 }
 
@@ -424,7 +441,7 @@ fn claim(app: &AppCtx, args: &Value) -> Result<Value> {
         return Ok(json!({"claimed": false, "plan": plan}));
     }
     action_at(&mut plan, index)?["status"] = json!("running");
-    let plan = finish(app, plan, Ok(()))?;
+    let plan = finish(app, plan, &[], Ok(()))?;
     Ok(json!({"claimed": true, "plan": plan}))
 }
 
@@ -447,7 +464,7 @@ fn mark(app: &AppCtx, args: &Value) -> Result<Value> {
         if let Some(error) = args["error"].as_str() { action["error"] = json!(error.chars().take(2000).collect::<String>()); }
     }
     link(&mut plan);
-    finish(app, plan, Ok(()))
+    finish(app, plan, &[], Ok(()))
 }
 
 pub fn dispatch(app: &AppCtx, cmd: &str, args: &Value, origin: CallOrigin) -> Result<Value> {

@@ -56,6 +56,7 @@ vi.mock("./platform", () => ({
     window: {
       takeOpenProjectRequest: vi.fn().mockResolvedValue(null),
       onOpenProjectRequest: vi.fn().mockResolvedValue(() => {}),
+      takeServiceRestartNotice: vi.fn().mockResolvedValue(false),
     },
   },
 }));

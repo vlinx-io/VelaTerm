@@ -88,34 +88,72 @@ const de: typeof en = {
   "translation.network": "Der Übersetzungsdienst ist nicht verfügbar. Bitte versuchen Sie es erneut.",
   "translation.paymentRequired": "Der Übersetzungsdienst erfordert eine Zahlung (HTTP 402). Prüfen Sie das Guthaben oder den Zahlungsstatus Ihres API-Kontos.",
 
-  "tree.newPlanExecuteSession": "Neue Planungs-/Ausführungssitzung…",
+  "tree.orchestrationMenu": "Orchestrierungssitzung",
+  "tree.newPlanExecuteSession": "Neue Orchestrierungssitzung…",
+  "tree.bindPlanExecuteWorkflow": "Als Orchestrierungssitzung festlegen…",
+  "tree.bindAsExecutorWorkflow": "Als Ausführungssitzung festlegen…",
+  "tree.bindPlanExecuteSelected": "Auswahl als Orchestrierung festlegen…",
+  "tree.bindAsExecutorsSelected": "Auswahl als Ausführungssitzungen festlegen…",
+  "bindPlanExecute.title": "Orchestrierungs-Workflow verknüpfen",
+  "bindPlanExecute.intro": "Legen Sie eine bestehende Konversation als Leitungssitzung fest und ordnen Sie optional bestehende Konversationen als Ausführungssitzungen zu.",
+  "bindPlanExecute.planSessionLabel": "Leitungssitzung",
+  "bindPlanExecute.planPlaceholder": "Leitungssitzung auswählen…",
+  "bindPlanExecute.planSessionHint": "Wählen Sie eine Sitzung in der Gesprächsansicht, die die Orchestrierung steuert und Ausführungsberichte entgegennimmt.",
+  "bindPlanExecute.execSessionsLabel": "Ausführungssitzungen",
+  "bindPlanExecute.execPlaceholder": "Keine (bei Zuweisung erstellen)",
+  "bindPlanExecute.execSummary": (n: number) => `${n} Ausführungssitzungen ausgewählt`,
+  "bindPlanExecute.execHintNone": "Leer lassen, damit Ausführungssitzungen erst beim Zuweisen von Aufgaben durch die Leitungssitzung erstellt werden.",
+  "bindPlanExecute.execHintSingle": "Die ausgewählte Ausführungssitzung wird direkt als Einzelaufgaben-Ausführer weiterverwendet.",
+  "bindPlanExecute.execHintMultiple": (n: number) => `${n} Ausführungssitzungen werden als parallele Aufgaben-Workflows unter dieser Leitungssitzung verknüpft.`,
+  "bindPlanExecute.execHintExtend": (n: number) => `Wählen Sie mindestens eine Ausführungssitzung zum Hinzufügen zu dieser aktiven Orchestrierung (bis zu ${n} weitere).`,
+  "bindPlanExecute.execLimitError": (n: number) => `Es können höchstens ${n} Ausführungssitzungen verknüpft werden.`,
+  "bindPlanExecute.tagChild": "Untersitzung",
+  "bindPlanExecute.tagExtendable": "Ausführer hinzufügen",
+  "bindPlanExecute.tagInWorkflow": "In aktiver Orchestrierung",
+  "bindPlanExecute.tagNotChat": "Keine Gesprächsansicht",
+  "bindPlanExecute.tagUnsupported": "Nicht unterstützter Agent",
+  "bindPlanExecute.reparentLabel": "Ausführungssitzungen unter die Leitungssitzung verschieben",
+  "bindPlanExecute.reparentHint": "Ordnet ausgewählte Ausführungssitzungen desselben Projekts in der Seitenleiste direkt unter der Leitungssitzung an.",
+  "bindPlanExecute.activeWorkflowNotice": (tasks: number, remaining: number) => `Diese Leitungssitzung hat bereits eine aktive Orchestrierung (${tasks} Aufgaben, bis zu ${remaining} weitere möglich).`,
+  "bindPlanExecute.lockedReviewEnabled": "Die unabhängige Prüfung ist für diese Orchestrierung aktiviert und festgelegt.",
+  "bindPlanExecute.lockedReviewDisabled": "Die unabhängige Prüfung ist für diese Orchestrierung deaktiviert und festgelegt.",
+  "bindPlanExecute.lockedReviewLegacy": "Diese Orchestrierung verwendet das bisherige Leitungs- und Prüfprotokoll.",
+  "bindPlanExecute.promptLabel": "Aufgabe oder zusätzliche Hinweise (optional)",
+  "bindPlanExecute.promptHint": "Optional. Leer lassen, um auf Grundlage des aktuellen Gesprächsverlaufs der Leitungssitzung fortzufahren.",
+  "bindPlanExecute.submit": "Orchestrierung verknüpfen",
+  "bindPlanExecute.submitExtend": "Ausführungssitzungen hinzufügen",
+  "bindPlanExecute.binding": "Wird verknüpft…",
+  "bindPlanExecute.footerHint": "Bestehende Konversationen bleiben unverändert und erhalten die Orchestrierungsanweisungen.",
+  "bindPlanExecute.plannerRequired": "Wählen Sie eine geeignete Leitungssitzung aus.",
+  "bindPlanExecute.extendExecRequired": "Wählen Sie mindestens eine Ausführungssitzung für die aktive Orchestrierung aus.",
+  "bindPlanExecute.deliveryBlocked": "Die Orchestrierung wurde gespeichert, die Benachrichtigung der Leitungssitzung ist jedoch fehlgeschlagen. Versuchen Sie es erneut.",
   "launch.splitTasks": "Automatisch in mehrere Aufgaben aufteilen",
-  "launch.splitTasksHint": "Die Planung schlägt unabhängige Aufgaben vor. Prüfen Sie vor dem Start die Anweisungen, Agenten, Modelle und den Denkaufwand.",
+  "launch.splitTasksHint": "Die Leitungssitzung schlägt unabhängige Aufgaben vor. Prüfen Sie vor dem Start die Anweisungen, Agenten, Modelle und den Denkaufwand.",
   "launch.splitReview": "Ausführungsaufgaben prüfen",
-  "launch.splitReviewHint": "Der Planer koordiniert alle Aufgaben. Die unabhängige Prüfung richtet sich nach den Workflow-Einstellungen. Die Ausführung beginnt erst nach Ihrer Bestätigung.",
+  "launch.splitReviewHint": "Die Leitungssitzung koordiniert alle Aufgaben. Die unabhängige Prüfung richtet sich nach den Orchestrierungseinstellungen. Die Ausführung beginnt erst nach Ihrer Bestätigung.",
   "launch.splitConfirmed": "Diese Aufgaben wurden bestätigt.",
   "launch.splitClosed": "Dieser Vorschlag wartet nicht mehr auf Bestätigung.",
   "launch.splitRetry": "Ausstehende Nachrichten erneut zustellen",
-  "launch.splitSharedDirectory": "Alle Ausführungssitzungen verwenden das Arbeitsverzeichnis der Planungssitzung und gegebenenfalls deren Worktree.",
+  "launch.splitSharedDirectory": "Alle Ausführungssitzungen verwenden das Arbeitsverzeichnis der Leitungssitzung und gegebenenfalls deren Worktree.",
   "launch.createIn": "Erstellen in",
   "launch.workingDirectory": "Pfad zum Arbeitsverzeichnis",
   "launch.createAndStart": "Erstellen und starten",
-  "launch.planExecuteTaskHint": "Beschreiben Sie die Aufgabe, Anforderungen und Abnahmekriterien für die Planung.",
-  "launch.planExecuteResult": "Zuerst startet die Planungssitzung. Sobald der Plan steht, erstellt sie die Ausführungssitzung.",
+  "launch.planExecuteTaskHint": "Beschreiben Sie die Aufgabe, Anforderungen und Abnahmekriterien für die Leitungssitzung.",
+  "launch.planExecuteResult": "Zuerst startet die Leitungssitzung. Sobald der Plan steht, erstellt sie die Ausführungssitzung.",
   "launch.planExecuteWorktreeHint": "Neue Worktrees basieren auf dem aktuellen Commit und enthalten keine uncommitteten Änderungen. Schlägt die Erstellung fehl, startet die betroffene Sitzung nicht.",
-  "launch.workflowDirectorySharedHint": "Alle Workflow-Sitzungen teilen sich ein neues Verzeichnis und einen neuen Branch.",
-  "launch.workflowDirectoryEachHint": "Die Planungssitzung und jede Ausführungssitzung erhalten einen eigenen Worktree und einen eigenen Branch.",
-  "launch.legacyPlanTitle": "Planung und Prüfung",
-  "launch.planTitle": "Planung",
+  "launch.workflowDirectorySharedHint": "Alle Orchestrierungssitzungen teilen sich ein neues Verzeichnis und einen neuen Branch.",
+  "launch.workflowDirectoryEachHint": "Die Leitungssitzung und jede Ausführungssitzung erhalten einen eigenen Worktree und einen eigenen Branch.",
+  "launch.legacyPlanTitle": "Leitung und Prüfung",
+  "launch.planTitle": "Leitung",
   "launch.reviewTitle": "Prüfung",
   "launch.reviewEnabled": "Unabhängige Prüfung aktivieren",
-  "launch.reviewEnabledHint": "Ein separater Prüfer kontrolliert die Berichte und fordert Korrekturen an. Der Planer verfolgt den Fortschritt und fasst die Ergebnisse zusammen.",
-  "launch.reviewDisabledHint": "Ausführungsberichte gehen direkt an den Planer, der die Ergebnisse zusammenfasst. Es findet keine unabhängige Prüfung statt.",
+  "launch.reviewEnabledHint": "Ein separater Prüfer kontrolliert die Berichte und fordert Korrekturen an. Die Leitungssitzung verfolgt den Fortschritt und fasst die Ergebnisse zusammen.",
+  "launch.reviewDisabledHint": "Ausführungsberichte gehen direkt an die Leitungssitzung, die die Ergebnisse zusammenfasst. Es findet keine unabhängige Prüfung statt.",
   "chat.origin.review": "Prüfung",
   "launch.execTitle": "Umsetzung",
-  "launch.legacyPlanExecuteIntro": "Eine separate Planungssitzung steuert die Umsetzung, prüft das Ergebnis und fordert Korrekturen an.",
-  "launch.planExecuteIntro": "Der Planer organisiert die Arbeit und fasst die Ergebnisse zusammen. Eine unabhängige Prüfung ist optional.",
-  "chat.origin.plan": "Planung",
+  "launch.legacyPlanExecuteIntro": "Eine separate Leitungssitzung steuert die Umsetzung, prüft das Ergebnis und fordert Korrekturen an.",
+  "launch.planExecuteIntro": "Die Leitungssitzung organisiert die Arbeit und fasst die Ergebnisse zusammen. Eine unabhängige Prüfung ist optional.",
+  "chat.origin.plan": "Leitung",
   "chat.origin.exec": "Umsetzung",
 
   // Project code intelligence and knowledge entry associations.
@@ -383,6 +421,8 @@ const de: typeof en = {
   "chat.imageActionFailed": "Die Bildaktion konnte nicht ausgeführt werden. Bitte versuchen Sie es erneut.",
   "clipboard.unresponsive":
     "Die Quell-App der Zwischenablage reagiert nicht, daher wurde nichts eingefügt. Bitte versuchen Sie es gleich noch einmal.",
+  "service.restartedNotice":
+    "Der Hintergrunddienst wurde unerwartet neu gestartet; zuvor laufende Sitzungen wurden beendet.",
   "common.copy": "Kopieren", // Copy
   "common.cut": "Ausschneiden", // Cut
   "common.paste": "Einfügen", // Paste
@@ -429,6 +469,8 @@ const de: typeof en = {
   "status.working": "Arbeitet", // Working
   "status.asking": "Bestätigung nötig", // Needs confirmation
   "status.waiting": "Gesehen", // Viewed
+  "status.awaitingParent": "Wartet auf übergeordnete Sitzung", // Waiting for parent session
+  "status.awaitingChildren": "Wartet auf Untersitzungen", // Waiting for child sessions
   "status.background": "Hintergrundaufgaben laufen", // Background tasks running
   "status.unavailable": "Status nicht verfügbar",
   "indicator.unread": "Ungelesen · ausstehend", // Unread · awaiting review
@@ -1191,6 +1233,19 @@ const de: typeof en = {
   "sessionTitle.invalid": "Der Agent hat einen ungültigen Titel zurückgegeben. Versuchen Sie es erneut.",
   "sessionTitle.changed": "Die Sitzung wurde während der Titelerstellung geändert. Der Titel wurde daher nicht aktualisiert.",
   "sessionTitle.failed": "Der Agent konnte keinen Titel erstellen. Versuchen Sie es erneut.",
+  "sessionTitle.menuSelected": (n) => `${n} ausgewählte Sitzungen mit KI umbenennen…`,
+  "sessionTitle.menuGroup": (n) => `${n} Sitzungen der Gruppe mit KI umbenennen…`,
+  "sessionTitle.batchRename": "Mehrere Sitzungen mit KI umbenennen",
+  "sessionTitle.batchConfirmHint": "Der ausgewählte Agent liest jede Unterhaltung vollständig und ersetzt den jeweiligen Sitzungsnamen durch einen neuen Titel. Prüfen Sie die Sitzungen und Einstellungen und bestätigen Sie anschließend den Vorgang.",
+  "sessionTitle.batchSessions": (selected, total) => `Sitzungen (${selected} von ${total} ausgewählt)`,
+  "sessionTitle.batchSelectAll": "Alle auswählen",
+  "sessionTitle.batchDeselectAll": "Auswahl aufheben",
+  "sessionTitle.batchSubmit": (n) => (n === 1 ? "1 Sitzung umbenennen" : `${n} Sitzungen umbenennen`),
+  "sessionTitle.batchProgress": (done, total) => `Wird umbenannt (${done}/${total})…`,
+  "sessionTitle.batchQueued": "In Warteschlange",
+  "sessionTitle.batchCancelled": "Abgebrochen",
+  "sessionTitle.batchSummary": (renamed, failed) => `${renamed} umbenannt, ${failed} fehlgeschlagen.`,
+  "sessionTitle.batchRetryFailed": (n) => (n === 1 ? "1 fehlgeschlagene wiederholen" : `${n} fehlgeschlagene wiederholen`),
   "tree.sessionInfo": "Sitzungsinfo", // Session Info
   "tree.groupInfo": "Gruppeninfo", // Group Info
   "tree.collectionInfo": "Sammlungsinfo", // Collection Info
@@ -1201,7 +1256,9 @@ const de: typeof en = {
   "info.recentCommits": "Letzte Commits", // Recent Commits
   "info.noCommits": "Keine Commits", // No commits
   "tree.killProcess": "Prozess beenden", // Kill Process
+  "tree.killProcessSelected": (n: number) => `${n} Prozesse beenden`, // Kill {n} Processes
   "tree.killProcessConfirm": (name: string) => `Den Prozess für „${name}“ beenden? Die aktuelle Aufgabe wird unterbrochen. Gespeicherte Gesprächsverläufe und Dateien bleiben erhalten.`,
+  "tree.killProcessConfirmMany": (n: number) => `Die Prozesse für ${n} laufende Sitzungen beenden? Die aktuellen Aufgaben werden unterbrochen. Gespeicherte Gesprächsverläufe und Dateien bleiben erhalten.`,
   "tree.archiveSession": "Sitzung archivieren", // Archive Session
   "tree.archiveGroup": "Gruppe archivieren", // Archive Group
   "tree.archiveCollection": "Sammlung archivieren", // Archive Collection
@@ -1739,6 +1796,7 @@ const de: typeof en = {
   "transfer.savedToDownloads": "Im Ordner „Downloads“ gespeichert", // Saved to Downloads
   "transfer.foldersUnsupported": "Ordner können nicht hochgeladen werden.", // Folders can't be uploaded.
   "drop.browserFilesHint": "Im Browser lassen sich hier nur Bilder ablegen. Laden Sie andere Dateien zuerst in das Projekt hoch.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
+  "paste.browserFilesHint": "Im Browser lassen sich hier nur Bilder einfügen. Laden Sie andere Dateien zuerst in das Projekt hoch.", // In the browser, only images can be pasted here. To use other files, upload them to the project first.
   "files.copyFailed": "Einige Dateien konnten nicht kopiert werden. Prüfen Sie, ob sie noch vorhanden sind und ob Sie in diesen Ordner schreiben dürfen.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
   "files.pasteFailed": "Einige Elemente konnten nicht eingefügt werden. Prüfen Sie, ob die Quelle noch vorhanden ist und ob Sie in diesen Ordner schreiben dürfen.", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 

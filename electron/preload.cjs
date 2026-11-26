@@ -59,6 +59,8 @@ contextBridge.exposeInMainWorld("vlxNative", {
   },
   /** Read/subscribe to external `vela <path>` launch requests. Events only wake the listener; take atomically consumes the path. */
   takeOpenProjectRequest: () => ipcRenderer.invoke("vlx:project:takeOpenRequest"),
+  /** Take and clear the one-shot flag indicating the local background service restarted unexpectedly. */
+  takeServiceRestartNotice: () => ipcRenderer.invoke("vlx:service:takeRestartNotice"),
   onOpenProjectRequest: (cb) => {
     const handler = () => cb();
     ipcRenderer.on("vlx:project:openRequest", handler);

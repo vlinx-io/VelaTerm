@@ -2,13 +2,14 @@
 name: vapp
 description: >-
   Operate the VelaTerm app itself on the user's behalf: organize the sidebar (create collections and
-  groups, import projects, rename, move, sort, archive or remove sessions, groups and projects), start or
-  open sessions, open files, work with knowledge-base notes, or change app settings such as theme,
-  language and font size. Use it whenever the user asks for something done in VelaTerm's own interface
-  rather than in files or the shell, for example "put these sessions into groups by series" or "switch to
-  the dark theme". By default the user confirms every action in VelaTerm before it runs; pass `--yes`
-  when the user authorized unattended execution. Available only inside VelaTerm-hosted local sessions.
-argument-hint: "catalog [area] | session list [project] | session create-group|rename|move|sort ... [--yes] | do [--yes] '<JSON actions>' | status <id>"
+  groups, import projects, rename, move, sort, archive or remove sessions, groups and projects), start,
+  open or kill processes of sessions, open files, work with knowledge-base notes, or change app settings
+  such as theme, language and font size. Use it whenever the user asks for something done in VelaTerm's
+  own interface rather than in files or the shell, for example "put these sessions into groups by series"
+  or "switch to the dark theme". By default the user confirms every action in VelaTerm before it runs;
+  pass `--yes` when the user authorized unattended execution. Available only inside VelaTerm-hosted local
+  sessions.
+argument-hint: "catalog [area] | session list [project] | session create-group|rename|move|sort|kill ... [--yes] | do [--yes] '<JSON actions>' | status <id>"
 allowed-tools: Bash(vapp:*)
 ---
 
@@ -33,8 +34,9 @@ vapp session list Course --json
 ```
 
 The projects area lists collections and projects; `vapp session list` shows a project's groups and
-sessions. Name sidebar items by full id, an id prefix of at least 6 characters, or an exact name when it
-is unique. Prefer ids: session names are often long and similar. Other areas take ids exactly as listed.
+sessions (running sessions are marked `running`, or `"alive": true` in `--json`). Name sidebar items by
+full id, an id prefix of at least 6 characters, or an exact name when it is unique. Prefer ids: session
+names are often long and similar. Other areas take ids exactly as listed.
 
 ## 2. One sidebar change
 
@@ -47,6 +49,7 @@ vapp session move <item> --parent-session <session>
 vapp session move <item> --order 3000             # reorder in place
 vapp session sort <group|project|session> --by name
 vapp session sort <group> --order id1,id2,id3
+vapp session kill <session>                       # end a running session's process; history and files are kept
 ```
 
 `sort --by name` orders numbers by value (lesson 2 before lesson 10). Sessions and subgroups are sorted
@@ -87,19 +90,19 @@ in your tool call, or run it in the background. It then prints each action's `st
 `createdId` for new items), `failed` (with `error`) or `dismissed` (the user skipped it). An action that
 needs an item the user skipped or that failed to be created fails too.
 
-Add `--yes` (aliases `-y`, `--no-confirm`) on `vapp do` or `vapp session create-group|rename|move|sort`
+Add `--yes` (aliases `-y`, `--no-confirm`) on `vapp do` or `vapp session create-group|rename|move|sort|kill`
 when the user asked to apply the change directly without confirmation (or authorized unattended
 reorganization):
 
 - The whole request is still validated first; if any action is invalid, nothing runs.
-- Backend actions (sidebar organization, single-folder `importProject`, knowledge-base `registerVault` /
-  `favorite`) run immediately on the host and return settled results at once.
+- Backend actions (sidebar organization, single-folder `importProject`, `killProcess`, knowledge-base
+  `registerVault` / `favorite`) run immediately on the host and return settled results at once.
 - Window actions (settings, opening files/sessions/forms) run automatically in the connected app window
   without stealing session focus.
 - Multi-folder `importProject` (by `name` with several matches) still shows a card so the user can choose
   which folder to import.
-- Do not pass `--yes` for destructive actions like `deleteNode` unless the user explicitly asked to run
-  them without confirmation.
+- Do not pass `--yes` for destructive or disruptive actions like `deleteNode` or `killProcess` unless the
+  user explicitly asked to run them without confirmation.
 
 Exit code 2 means some actions were still undecided when the wait ended; check later with
 `vapp status <id>`. Do not resubmit the same actions while they are pending.

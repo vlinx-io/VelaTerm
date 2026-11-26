@@ -400,3 +400,36 @@ describe("marking sessions viewed or pending by hand", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 });
+
+describe("workflow wait status display and counts", () => {
+  it("shows awaiting_parent for idle workflow executors without counting them as Pending or Viewed", () => {
+    useTermStore.getState().applySessionStates({
+      [SID]: { agent: "claude", agentState: "waiting", unread: false, workflowWait: "parent" },
+    });
+
+    const rt = useTermStore.getState().runtimes[SID];
+    const effective = effectiveStatus(rt);
+    expect(effective).toBe("awaiting_parent");
+    expect(SID in useTermStore.getState().notifications).toBe(false);
+    expect(notify).not.toHaveBeenCalled();
+
+    // Asking (e.g. a permission prompt) still surfaces as Pending even during workflow wait.
+    useTermStore.getState().applySessionStates({
+      [SID]: { agent: "claude", agentState: "asking", unread: true, workflowWait: "parent" },
+    });
+    expect(effectiveStatus(useTermStore.getState().runtimes[SID])).toBe("asking");
+    expect(SID in useTermStore.getState().notifications).toBe(true);
+  });
+
+  it("maps awaiting_children for waiting planners and returns to waiting once cleared", () => {
+    useTermStore.getState().applySessionStates({
+      [SID]: { agent: "claude", agentState: "waiting", unread: false, workflowWait: "children" },
+    });
+    expect(effectiveStatus(useTermStore.getState().runtimes[SID])).toBe("awaiting_children");
+
+    useTermStore.getState().applySessionStates({
+      [SID]: { agent: "claude", agentState: "waiting", unread: false, workflowWait: null },
+    });
+    expect(effectiveStatus(useTermStore.getState().runtimes[SID])).toBe("waiting");
+  });
+});

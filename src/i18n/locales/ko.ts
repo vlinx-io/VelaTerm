@@ -88,34 +88,72 @@ const ko: typeof en = {
   "translation.network": "번역 서비스를 사용할 수 없습니다. 다시 시도해 주세요.",
   "translation.paymentRequired": "번역 서비스를 이용하려면 결제가 필요합니다(HTTP 402). API 계정 잔액이나 결제 상태를 확인하세요.",
 
-  "tree.newPlanExecuteSession": "새 계획/실행 세션…",
+  "tree.orchestrationMenu": "오케스트레이션 세션",
+  "tree.newPlanExecuteSession": "새 오케스트레이션 세션…",
+  "tree.bindPlanExecuteWorkflow": "오케스트레이션 세션으로 설정…",
+  "tree.bindAsExecutorWorkflow": "실행 세션으로 설정…",
+  "tree.bindPlanExecuteSelected": "선택한 세션을 오케스트레이션으로 설정…",
+  "tree.bindAsExecutorsSelected": "선택한 세션을 실행 세션으로 설정…",
+  "bindPlanExecute.title": "오케스트레이션 워크플로 연결",
+  "bindPlanExecute.intro": "기존 대화 세션을 지휘 세션으로 지정하고, 필요에 따라 기존 대화 세션을 실행 세션으로 연결합니다.",
+  "bindPlanExecute.planSessionLabel": "지휘 세션",
+  "bindPlanExecute.planPlaceholder": "지휘 세션 선택…",
+  "bindPlanExecute.planSessionHint": "오케스트레이션을 총괄하고 실행 보고서를 받을 대화 보기 세션을 선택하세요.",
+  "bindPlanExecute.execSessionsLabel": "실행 세션",
+  "bindPlanExecute.execPlaceholder": "선택 안 함(전달 시 생성)",
+  "bindPlanExecute.execSummary": (n: number) => `실행 세션 ${n}개 선택됨`,
+  "bindPlanExecute.execHintNone": "비워 두면 지휘 세션이 작업을 전달할 때 실행 세션을 새로 생성합니다.",
+  "bindPlanExecute.execHintSingle": "선택한 실행 세션을 단일 작업 실행자로 그대로 재사용합니다.",
+  "bindPlanExecute.execHintMultiple": (n: number) => `선택한 실행 세션 ${n}개가 이 지휘 세션 아래 병렬 작업 워크플로로 연결됩니다.`,
+  "bindPlanExecute.execHintExtend": (n: number) => `진행 중인 오케스트레이션에 추가할 실행 세션을 1개 이상 선택하세요(최대 ${n}개 추가 가능).`,
+  "bindPlanExecute.execLimitError": (n: number) => `실행 세션은 최대 ${n}개까지 연결할 수 있습니다.`,
+  "bindPlanExecute.tagChild": "하위 세션",
+  "bindPlanExecute.tagExtendable": "실행 세션 추가 가능",
+  "bindPlanExecute.tagInWorkflow": "진행 중인 오케스트레이션 참여 중",
+  "bindPlanExecute.tagNotChat": "대화 보기 아님",
+  "bindPlanExecute.tagUnsupported": "지원되지 않는 에이전트",
+  "bindPlanExecute.reparentLabel": "실행 세션을 지휘 세션 하위로 이동",
+  "bindPlanExecute.reparentHint": "같은 프로젝트의 선택한 실행 세션을 사이드바 트리에서 지휘 세션의 직속 하위 세션으로 정리합니다.",
+  "bindPlanExecute.activeWorkflowNotice": (tasks: number, remaining: number) => `이 지휘 세션에는 진행 중인 오케스트레이션이 있습니다(현재 작업 ${tasks}개, 최대 ${remaining}개 추가 가능).`,
+  "bindPlanExecute.lockedReviewEnabled": "이 오케스트레이션은 독립 검토 사용으로 고정되어 있습니다.",
+  "bindPlanExecute.lockedReviewDisabled": "이 오케스트레이션은 독립 검토 사용 안 함으로 고정되어 있습니다.",
+  "bindPlanExecute.lockedReviewLegacy": "이 오케스트레이션은 기존 지휘·검토 프로토콜을 사용합니다.",
+  "bindPlanExecute.promptLabel": "작업 또는 추가 지시(선택)",
+  "bindPlanExecute.promptHint": "선택 사항입니다. 비워 두면 지휘 세션의 현재 대화 맥락을 바탕으로 계속 진행합니다.",
+  "bindPlanExecute.submit": "오케스트레이션 연결",
+  "bindPlanExecute.submitExtend": "실행 세션 추가",
+  "bindPlanExecute.binding": "연결 중…",
+  "bindPlanExecute.footerHint": "기존 대화 내용은 그대로 유지되며, 지휘 세션에 오케스트레이션 프로토콜 안내가 전달됩니다.",
+  "bindPlanExecute.plannerRequired": "조건을 충족하는 지휘 세션을 선택하세요.",
+  "bindPlanExecute.extendExecRequired": "진행 중인 오케스트레이션에 추가할 실행 세션을 1개 이상 선택하세요.",
+  "bindPlanExecute.deliveryBlocked": "오케스트레이션은 저장되었으나 지휘 세션에 알림을 보내지 못했습니다. 다시 시도해 주세요.",
   "launch.splitTasks": "여러 작업으로 자동 분할",
-  "launch.splitTasksHint": "계획 세션이 독립적인 작업을 제안합니다. 실행 전에 각 작업의 지시 사항, 에이전트, 모델 및 추론 강도를 검토할 수 있습니다.",
+  "launch.splitTasksHint": "지휘 세션이 독립적인 작업을 제안합니다. 실행 전에 각 작업의 지시 사항, 에이전트, 모델 및 추론 강도를 검토할 수 있습니다.",
   "launch.splitReview": "실행 작업 확인",
-  "launch.splitReviewHint": "계획 담당자는 모든 작업을 조율합니다. 독립 검토 여부는 워크플로 설정에 따릅니다. 확인한 후에만 실행이 시작됩니다.",
+  "launch.splitReviewHint": "지휘 세션이 모든 작업을 조율합니다. 독립 검토 여부는 오케스트레이션 설정에 따릅니다. 확인한 후에만 실행이 시작됩니다.",
   "launch.splitConfirmed": "이 작업들은 이미 확인되었습니다.",
   "launch.splitClosed": "이 제안은 더 이상 확인 대기 중이 아닙니다.",
   "launch.splitRetry": "전달되지 않은 메시지 다시 보내기",
-  "launch.splitSharedDirectory": "모든 실행 세션은 계획 세션의 작업 디렉터리를 사용하며, 워크트리가 활성화되어 있으면 해당 워크트리를 공유합니다.",
+  "launch.splitSharedDirectory": "모든 실행 세션은 지휘 세션의 작업 디렉터리를 사용하며, 워크트리가 활성화되어 있으면 해당 워크트리를 공유합니다.",
   "launch.createIn": "생성 위치",
   "launch.workingDirectory": "작업 디렉터리 경로",
   "launch.createAndStart": "생성 및 시작",
-  "launch.planExecuteTaskHint": "계획을 수립할 수 있도록 작업 목표, 요구 사항, 검수 기준을 입력하세요.",
-  "launch.planExecuteResult": "먼저 계획 세션을 시작하고, 계획이 준비되면 실행 세션을 생성합니다.",
+  "launch.planExecuteTaskHint": "지휘 세션이 작업을 구성할 수 있도록 목표, 요구 사항, 검수 기준을 입력하세요.",
+  "launch.planExecuteResult": "먼저 지휘 세션을 시작하고, 준비가 되면 실행 세션을 생성합니다.",
   "launch.planExecuteWorktreeHint": "새 워크트리는 현재 커밋을 기준으로 생성되며 커밋하지 않은 변경 사항은 포함되지 않습니다. 생성에 실패하면 해당 세션을 시작하지 않습니다.",
-  "launch.workflowDirectorySharedHint": "모든 워크플로 세션이 하나의 새 디렉터리와 브랜치를 공유합니다.",
-  "launch.workflowDirectoryEachHint": "계획 세션과 각 실행 세션에 독립된 워크트리와 브랜치를 생성합니다.",
-  "launch.legacyPlanTitle": "계획 및 검토",
-  "launch.planTitle": "계획",
+  "launch.workflowDirectorySharedHint": "모든 오케스트레이션 세션이 하나의 새 디렉터리와 브랜치를 공유합니다.",
+  "launch.workflowDirectoryEachHint": "지휘 세션과 각 실행 세션에 독립된 워크트리와 브랜치를 생성합니다.",
+  "launch.legacyPlanTitle": "지휘 및 검토",
+  "launch.planTitle": "지휘",
   "launch.reviewTitle": "검토",
   "launch.reviewEnabled": "독립 검토 사용",
-  "launch.reviewEnabledHint": "별도의 검토자가 실행 보고서를 확인하고 수정을 요청합니다. 계획 담당자는 진행 상황을 수집하고 결과를 정리합니다.",
-  "launch.reviewDisabledHint": "실행 보고서는 계획 담당자에게 직접 전달되어 결과 정리에 사용됩니다. 독립 검토는 수행하지 않습니다.",
+  "launch.reviewEnabledHint": "별도의 검토자가 실행 보고서를 확인하고 수정을 요청합니다. 지휘 세션은 진행 상황을 수집하고 결과를 정리합니다.",
+  "launch.reviewDisabledHint": "실행 보고서는 지휘 세션에 직접 전달되어 결과 정리에 사용됩니다. 독립 검토는 수행하지 않습니다.",
   "chat.origin.review": "검토",
   "launch.execTitle": "실행",
-  "launch.legacyPlanExecuteIntro": "별도의 계획 세션이 작업을 지시하고 결과를 검토한 뒤 실행 세션에 수정을 요청합니다.",
-  "launch.planExecuteIntro": "계획 담당자는 작업을 구성하고 결과를 정리합니다. 독립 검토는 선택 사항입니다.",
-  "chat.origin.plan": "계획",
+  "launch.legacyPlanExecuteIntro": "별도의 지휘 세션이 작업을 지시하고 결과를 검토한 뒤 실행 세션에 수정을 요청합니다.",
+  "launch.planExecuteIntro": "지휘 세션이 작업을 구성하고 결과를 정리합니다. 독립 검토는 선택 사항입니다.",
+  "chat.origin.plan": "지휘",
   "chat.origin.exec": "실행",
 
   // Project code intelligence and knowledge entry associations.
@@ -383,6 +421,8 @@ const ko: typeof en = {
   "chat.imageActionFailed": "이미지 작업을 완료하지 못했습니다. 다시 시도해 주세요.",
   "clipboard.unresponsive":
     "클립보드 내용을 제공하는 앱이 응답하지 않아 붙여넣지 못했습니다. 잠시 후 다시 시도해 주세요.",
+  "service.restartedNotice":
+    "백그라운드 서비스가 예기치 않게 다시 시작되어 이전에 실행 중이던 세션이 종료되었습니다.",
   "common.copy": "복사", // Copy
   "common.cut": "잘라내기", // Cut
   "common.paste": "붙여넣기", // Paste
@@ -429,6 +469,8 @@ const ko: typeof en = {
   "status.working": "작업 중", // Working
   "status.asking": "확인 필요", // Needs confirmation
   "status.waiting": "확인함", // Viewed
+  "status.awaitingParent": "상위 세션 대기 중", // Waiting for parent session
+  "status.awaitingChildren": "하위 세션 대기 중", // Waiting for child sessions
   "status.background": "백그라운드 작업 실행 중", // Background tasks running
   "status.unavailable": "상태 확인 불가",
   "indicator.unread": "읽지 않음 · 확인 대기", // Unread · awaiting review
@@ -1187,6 +1229,19 @@ const ko: typeof en = {
   "sessionTitle.invalid": "에이전트가 유효하지 않은 제목을 반환했습니다. 다시 시도하세요.",
   "sessionTitle.changed": "제목 생성 중에 세션이 변경되어 제목을 업데이트하지 않았습니다.",
   "sessionTitle.failed": "에이전트가 제목을 생성하지 못했습니다. 다시 시도하세요.",
+  "sessionTitle.menuSelected": (n) => `선택한 세션 ${n}개 AI로 이름 변경…`,
+  "sessionTitle.menuGroup": (n) => `그룹 내 세션 ${n}개 AI로 이름 변경…`,
+  "sessionTitle.batchRename": "AI로 일괄 이름 변경",
+  "sessionTitle.batchConfirmHint": "선택한 에이전트가 각 세션의 전체 대화를 읽고 새 제목을 생성하여 현재 세션 이름을 바꿉니다. 대상 세션과 설정을 검토한 후 확인하여 진행하세요.",
+  "sessionTitle.batchSessions": (selected, total) => `세션 (${total}개 중 ${selected}개 선택)`,
+  "sessionTitle.batchSelectAll": "모두 선택",
+  "sessionTitle.batchDeselectAll": "선택 해제",
+  "sessionTitle.batchSubmit": (n) => `세션 ${n}개 이름 변경`,
+  "sessionTitle.batchProgress": (done, total) => `이름 변경 중 (${done}/${total})…`,
+  "sessionTitle.batchQueued": "대기 중",
+  "sessionTitle.batchCancelled": "취소됨",
+  "sessionTitle.batchSummary": (renamed, failed) => `${renamed}개 완료, ${failed}개 실패했습니다.`,
+  "sessionTitle.batchRetryFailed": (n) => `실패한 ${n}개 다시 시도`,
   "tree.sessionInfo": "세션 정보", // Session Info
   "tree.groupInfo": "그룹 정보", // Group Info
   "tree.collectionInfo": "컬렉션 정보", // Collection Info
@@ -1197,7 +1252,9 @@ const ko: typeof en = {
   "info.recentCommits": "최근 커밋", // Recent Commits
   "info.noCommits": "커밋 없음", // No commits
   "tree.killProcess": "프로세스 종료", // Kill Process
+  "tree.killProcessSelected": (n: number) => `프로세스 ${n}개 종료`, // Kill {n} Processes
   "tree.killProcessConfirm": (name: string) => `“${name}”의 프로세스를 종료하시겠습니까? 현재 작업이 중단됩니다. 저장된 대화 기록과 파일은 유지됩니다.`,
+  "tree.killProcessConfirmMany": (n: number) => `실행 중인 세션 ${n}개의 프로세스를 종료하시겠습니까? 현재 작업이 중단됩니다. 저장된 대화 기록과 파일은 유지됩니다.`,
   "tree.archiveSession": "세션 보관", // Archive Session
   "tree.archiveGroup": "그룹 보관", // Archive Group
   "tree.archiveCollection": "컬렉션 보관", // Archive Collection
@@ -1722,6 +1779,7 @@ const ko: typeof en = {
   "transfer.savedToDownloads": "다운로드 폴더에 저장됨", // Saved to Downloads
   "transfer.foldersUnsupported": "폴더는 업로드할 수 없습니다.", // Folders can't be uploaded.
   "drop.browserFilesHint": "브라우저에서는 여기에 이미지만 놓을 수 있습니다. 다른 파일은 먼저 프로젝트에 업로드하세요.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
+  "paste.browserFilesHint": "브라우저에서는 여기에 이미지만 붙여넣을 수 있습니다. 다른 파일은 먼저 프로젝트에 업로드하세요.", // In the browser, only images can be pasted here. To use other files, upload them to the project first.
   "files.copyFailed": "일부 파일을 복사하지 못했습니다. 파일이 아직 있는지, 이 폴더에 쓰기 권한이 있는지 확인하세요.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
   "files.pasteFailed": "일부 항목을 붙여넣지 못했습니다. 원본 항목이 있는지, 이 폴더에 쓰기 권한이 있는지 확인하세요.", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 

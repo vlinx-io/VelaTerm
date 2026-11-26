@@ -88,34 +88,72 @@ const zhTW: typeof en = {
   "translation.network": "翻譯服務無法使用，請重試。",
   "translation.paymentRequired": "翻譯服務要求付款（HTTP 402），請檢查 API 帳戶餘額或付款狀態。",
 
-  "tree.newPlanExecuteSession": "新增規劃/執行會話…",
+  "tree.orchestrationMenu": "編排會話",
+  "tree.newPlanExecuteSession": "新增編排會話…",
+  "tree.bindPlanExecuteWorkflow": "設為編排會話…",
+  "tree.bindAsExecutorWorkflow": "設為執行會話…",
+  "tree.bindPlanExecuteSelected": "將所選設為編排會話…",
+  "tree.bindAsExecutorsSelected": "將所選設為執行會話…",
+  "bindPlanExecute.title": "綁定編排會話",
+  "bindPlanExecute.intro": "將既有對話會話設為指揮會話，並可選擇將既有對話會話綁定為執行會話。",
+  "bindPlanExecute.planSessionLabel": "指揮會話",
+  "bindPlanExecute.planPlaceholder": "選擇指揮會話…",
+  "bindPlanExecute.planSessionHint": "選擇一個對話檢視會話，用於統籌編排並接收執行報告。",
+  "bindPlanExecute.execSessionsLabel": "執行會話",
+  "bindPlanExecute.execPlaceholder": "暫不綁定（派發時建立）",
+  "bindPlanExecute.execSummary": (n: number) => `已選擇 ${n} 個執行會話`,
+  "bindPlanExecute.execHintNone": "留空時，將在指揮會話派發任務時依需求建立執行會話。",
+  "bindPlanExecute.execHintSingle": "所選執行會話將直接重複使用為單一任務執行者。",
+  "bindPlanExecute.execHintMultiple": (n: number) => `所選 ${n} 個執行會話將綁定為該指揮會話下的並行任務工作流程。`,
+  "bindPlanExecute.execHintExtend": (n: number) => `請至少選擇 1 個執行會話追加至此進行中的編排（最多還可追加 ${n} 個）。`,
+  "bindPlanExecute.execLimitError": (n: number) => `最多可綁定 ${n} 個執行會話。`,
+  "bindPlanExecute.tagChild": "子會話",
+  "bindPlanExecute.tagExtendable": "可追加執行會話",
+  "bindPlanExecute.tagInWorkflow": "已在進行中編排",
+  "bindPlanExecute.tagNotChat": "非對話檢視",
+  "bindPlanExecute.tagUnsupported": "不支援的智慧體",
+  "bindPlanExecute.reparentLabel": "將執行會話移至指揮會話子層",
+  "bindPlanExecute.reparentHint": "在側欄樹中將同專案的所選執行會話整理為指揮會話的直接子會話。",
+  "bindPlanExecute.activeWorkflowNotice": (tasks: number, remaining: number) => `此指揮會話已有進行中的編排（目前 ${tasks} 個任務，最多還可追加 ${remaining} 個）。`,
+  "bindPlanExecute.lockedReviewEnabled": "此編排已鎖定啟用獨立審核。",
+  "bindPlanExecute.lockedReviewDisabled": "此編排已鎖定停用獨立審核。",
+  "bindPlanExecute.lockedReviewLegacy": "此編排採用舊版指揮驗收協議。",
+  "bindPlanExecute.promptLabel": "任務或補充說明（選填）",
+  "bindPlanExecute.promptHint": "選填。留空時將依指揮會話目前的對話脈絡繼續整理並派發。",
+  "bindPlanExecute.submit": "綁定編排",
+  "bindPlanExecute.submitExtend": "追加執行會話",
+  "bindPlanExecute.binding": "正在綁定…",
+  "bindPlanExecute.footerHint": "既有對話內容將完整保留，系統會向指揮會話傳送編排協議說明。",
+  "bindPlanExecute.plannerRequired": "請選擇一個符合條件的指揮會話。",
+  "bindPlanExecute.extendExecRequired": "請至少選擇一個執行會話以追加至進行中的編排。",
+  "bindPlanExecute.deliveryBlocked": "編排已儲存，但通知指揮會話失敗，請重試傳送。",
   "launch.splitTasks": "自動拆分多個任務",
-  "launch.splitTasksHint": "由規劃會話拆分獨立任務；執行前可逐項確認任務說明、智慧體、模型和推理強度。",
+  "launch.splitTasksHint": "由指揮會話拆分獨立任務；執行前可逐項確認任務說明、智慧體、模型和推理強度。",
   "launch.splitReview": "確認執行任務",
-  "launch.splitReviewHint": "規劃會話協調所有任務，是否進行獨立審核取決於工作流程設定。確認後才開始執行。",
+  "launch.splitReviewHint": "指揮會話協調所有任務，是否進行獨立審核取決於編排設定。確認後才開始執行。",
   "launch.splitConfirmed": "這些任務已經確認。",
   "launch.splitClosed": "此方案已不再等待確認。",
   "launch.splitRetry": "重試尚未送達的任務訊息",
-  "launch.splitSharedDirectory": "所有執行會話使用規劃會話的工作目錄；啟用工作樹時共同使用該工作樹。",
+  "launch.splitSharedDirectory": "所有執行會話使用指揮會話的工作目錄；啟用工作樹時共同使用該工作樹。",
   "launch.createIn": "建立位置",
   "launch.workingDirectory": "工作目錄路徑",
   "launch.createAndStart": "建立並啟動",
-  "launch.planExecuteTaskHint": "請說明任務目標、要求與驗收標準，供規劃會話擬定方案。",
-  "launch.planExecuteResult": "先啟動規劃會話，再由規劃會話建立執行會話。",
+  "launch.planExecuteTaskHint": "請說明任務目標、要求與驗收標準，供指揮會話擬定方案。",
+  "launch.planExecuteResult": "先啟動指揮會話，再由指揮會話建立執行會話。",
   "launch.planExecuteWorktreeHint": "新工作樹以目前的提交建立，不包含尚未提交的修改；建立失敗時不啟動對應會話。",
-  "launch.workflowDirectorySharedHint": "所有工作流程會話共用一個新目錄和分支。",
-  "launch.workflowDirectoryEachHint": "規劃會話與每個執行會話分別使用獨立的工作樹和分支。",
-  "launch.legacyPlanTitle": "規劃與驗收",
-  "launch.planTitle": "規劃",
+  "launch.workflowDirectorySharedHint": "所有編排會話共用一個新目錄和分支。",
+  "launch.workflowDirectoryEachHint": "指揮會話與每個執行會話分別使用獨立的工作樹和分支。",
+  "launch.legacyPlanTitle": "指揮與驗收",
+  "launch.planTitle": "指揮",
   "launch.reviewTitle": "審核",
   "launch.reviewEnabled": "啟用獨立審核",
-  "launch.reviewEnabledHint": "獨立審核會話檢查執行報告並提出修正要求，規劃會話收集進度並彙整交付結果。",
-  "launch.reviewDisabledHint": "執行報告直接交給規劃會話彙整交付結果，不進行獨立審核。",
+  "launch.reviewEnabledHint": "獨立審核會話檢查執行報告並提出修正要求，指揮會話收集進度並彙整交付結果。",
+  "launch.reviewDisabledHint": "執行報告直接交給指揮會話彙整交付結果，不進行獨立審核。",
   "chat.origin.review": "審核",
   "launch.execTitle": "執行",
-  "launch.legacyPlanExecuteIntro": "建立獨立規劃會話，負責制定方案、驗收結果，並向執行會話提出修改要求。",
-  "launch.planExecuteIntro": "規劃會話負責安排工作並彙整交付結果，可選擇啟用獨立審核。",
-  "chat.origin.plan": "規劃",
+  "launch.legacyPlanExecuteIntro": "建立獨立指揮會話，負責制定方案、驗收結果，並向執行會話提出修改要求。",
+  "launch.planExecuteIntro": "指揮會話負責安排工作並彙整交付結果，可選擇啟用獨立審核。",
+  "chat.origin.plan": "指揮",
   "chat.origin.exec": "執行",
 
   // Project code intelligence and knowledge entry associations.
@@ -383,6 +421,8 @@ const zhTW: typeof en = {
   "chat.imageActionFailed": "圖片操作失敗，請重試。",
   "clipboard.unresponsive":
     "剪貼簿內容的來源應用程式沒有回應，本次未貼上。請稍後再試。",
+  "service.restartedNotice":
+    "背景服務意外重新啟動，先前執行中的工作階段已停止。",
   "common.copy": "複製", // Copy
   "common.cut": "剪下", // Cut
   "common.paste": "貼上", // Paste
@@ -429,6 +469,8 @@ const zhTW: typeof en = {
   "status.working": "處理中", // Working
   "status.asking": "待確認", // Needs confirmation
   "status.waiting": "已查看", // Viewed
+  "status.awaitingParent": "等待父會話", // Waiting for parent session
+  "status.awaitingChildren": "等待子會話", // Waiting for child sessions
   "status.background": "背景工作執行中", // Background tasks running
   "status.unavailable": "狀態無法取得",
   "indicator.unread": "未讀 · 待查看", // Unread · awaiting review
@@ -1175,6 +1217,19 @@ const zhTW: typeof en = {
   "sessionTitle.invalid": "智慧代理傳回的標題無效，請重試。",
   "sessionTitle.changed": "產生標題期間工作階段已變更，因此未更新標題。",
   "sessionTitle.failed": "智慧代理未能產生標題，請重試。",
+  "sessionTitle.menuSelected": (n) => `使用 AI 重新命名選取的 ${n} 個工作階段…`,
+  "sessionTitle.menuGroup": (n) => `使用 AI 重新命名群組內 ${n} 個工作階段…`,
+  "sessionTitle.batchRename": "使用 AI 批次重新命名",
+  "sessionTitle.batchConfirmHint": "所選智慧代理將分別完整閱讀每段對話，產生新標題並取代目前的工作階段名稱。請確認工作階段清單與設定後再執行。",
+  "sessionTitle.batchSessions": (selected, total) => `工作階段（已選 ${selected} / ${total}）`,
+  "sessionTitle.batchSelectAll": "全選",
+  "sessionTitle.batchDeselectAll": "清除選取",
+  "sessionTitle.batchSubmit": (n) => `重新命名 ${n} 個工作階段`,
+  "sessionTitle.batchProgress": (done, total) => `正在重新命名（${done}/${total}）…`,
+  "sessionTitle.batchQueued": "排隊中",
+  "sessionTitle.batchCancelled": "已取消",
+  "sessionTitle.batchSummary": (renamed, failed) => `已完成 ${renamed} 個，失敗 ${failed} 個。`,
+  "sessionTitle.batchRetryFailed": (n) => `重試失敗的 ${n} 個`,
   "tree.sessionInfo": "會話資訊", // Session Info
   "tree.groupInfo": "分組資訊", // Group Info
   "tree.collectionInfo": "集合資訊", // Collection Info
@@ -1185,7 +1240,9 @@ const zhTW: typeof en = {
   "info.recentCommits": "最近提交", // Recent Commits
   "info.noCommits": "無提交", // No commits
   "tree.killProcess": "結束處理程序", // Kill Process
+  "tree.killProcessSelected": (n: number) => `結束 ${n} 個處理程序`, // Kill {n} Processes
   "tree.killProcessConfirm": (name: string) => `結束「${name}」的處理程序？目前的工作將中斷，已儲存的對話紀錄和檔案會保留。`,
+  "tree.killProcessConfirmMany": (n: number) => `結束 ${n} 個執行中會話的處理程序？目前的工作將中斷，已儲存的對話紀錄和檔案會保留。`,
   "tree.archiveSession": "封存會話", // Archive Session
   "tree.archiveGroup": "封存分組", // Archive Group
   "tree.archiveCollection": "封存集合", // Archive Collection
@@ -1694,6 +1751,7 @@ const zhTW: typeof en = {
   "transfer.savedToDownloads": "已儲存至下載資料夾", // Saved to Downloads
   "transfer.foldersUnsupported": "資料夾傳不了。", // Folders can't be uploaded.
   "drop.browserFilesHint": "在瀏覽器中，這裡只能拖入圖片。其他檔案請先上傳到專案中。", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
+  "paste.browserFilesHint": "在瀏覽器中，這裡只能貼上圖片。其他檔案請先上傳到專案中。", // In the browser, only images can be pasted here. To use other files, upload them to the project first.
   "files.copyFailed": "部分檔案未能複製。請確認這些檔案仍然存在，並且你有權限寫入這個目錄。", // Some files could not be copied. Check that they still exist and that you can write to this folder.
   "files.pasteFailed": "部分項目未能貼上。請確認來源項目仍然存在，並且您有權限寫入目標資料夾。", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 

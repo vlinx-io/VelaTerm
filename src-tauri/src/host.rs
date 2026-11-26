@@ -151,9 +151,9 @@ pub(crate) fn kill_process_tree(child: &mut std::process::Child) {
 /// Unified runtime host entry point for desktop Tauri and headless operation.
 #[derive(Clone)]
 pub enum AppCtx {
-    /// Desktop GUI forwarding managed state, events, and paths through AppHandle.
+    /// Desktop GUI forwarding managed state, events, and paths through a shared AppHandle.
     #[cfg(feature = "gui")]
-    Tauri(tauri::AppHandle),
+    Tauri(Arc<tauri::AppHandle>),
     /// Headless CLI backed by the in-process host described in the module documentation.
     Headless(Arc<HeadlessHost>),
 }
@@ -205,6 +205,14 @@ pub enum ListenerId {
 }
 
 impl AppCtx {
+    /// Reuse the managed process-wide `AppCtx` when registered, falling back to wrapping `app` once.
+    #[cfg(feature = "gui")]
+    pub fn from_tauri(app: &tauri::AppHandle) -> Self {
+        app.try_state::<AppCtx>()
+            .map(|state| state.inner().clone())
+            .unwrap_or_else(|| AppCtx::Tauri(Arc::new(app.clone())))
+    }
+
     /// Application data directory from Tauri's identifier-based path API or the headless startup path.
     pub fn data_dir(&self) -> Result<PathBuf, String> {
         match self {

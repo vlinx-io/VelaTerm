@@ -98,34 +98,72 @@ const ru: typeof en = {
   "translation.network": "Сервис перевода недоступен. Повторите попытку.",
   "translation.paymentRequired": "Для использования сервиса перевода требуется оплата (HTTP 402). Проверьте баланс или статус оплаты в аккаунте API.",
 
-  "tree.newPlanExecuteSession": "Новая сессия планирования/выполнения…",
+  "tree.orchestrationMenu": "Сессия оркестрации",
+  "tree.newPlanExecuteSession": "Новая сессия оркестрации…",
+  "tree.bindPlanExecuteWorkflow": "Назначить сессией оркестрации…",
+  "tree.bindAsExecutorWorkflow": "Назначить сессией выполнения…",
+  "tree.bindPlanExecuteSelected": "Назначить выбранные для оркестрации…",
+  "tree.bindAsExecutorsSelected": "Назначить выбранные сессиями выполнения…",
+  "bindPlanExecute.title": "Привязка процесса оркестрации",
+  "bindPlanExecute.intro": "Назначьте существующий диалог командной сессией и при необходимости привяжите существующие диалоги как сессии выполнения.",
+  "bindPlanExecute.planSessionLabel": "Командная сессия",
+  "bindPlanExecute.planPlaceholder": "Выберите командную сессию…",
+  "bindPlanExecute.planSessionHint": "Выберите сессию в режиме беседы, которая будет руководить оркестрацией и получать отчёты о выполнении.",
+  "bindPlanExecute.execSessionsLabel": "Сессии выполнения",
+  "bindPlanExecute.execPlaceholder": "Не выбраны (создать при отправке задачи)",
+  "bindPlanExecute.execSummary": (n: number) => `Выбрано сессий выполнения: ${n}`,
+  "bindPlanExecute.execHintNone": "Оставьте пустым, чтобы сессии выполнения создавались автоматически при постановке задач командной сессией.",
+  "bindPlanExecute.execHintSingle": "Выбранная сессия выполнения будет напрямую использоваться для одной задачи.",
+  "bindPlanExecute.execHintMultiple": (n: number) => `Выбранные сессии выполнения (${n}) будут привязаны как параллельные задачи под управлением этой командной сессии.`,
+  "bindPlanExecute.execHintExtend": (n: number) => `Выберите не менее одной сессии выполнения для добавления в активную оркестрацию (можно добавить ещё до ${n}).`,
+  "bindPlanExecute.execLimitError": (n: number) => `Можно привязать не более ${n} сессий выполнения.`,
+  "bindPlanExecute.tagChild": "Дочерняя",
+  "bindPlanExecute.tagExtendable": "Добавить исполнителей",
+  "bindPlanExecute.tagInWorkflow": "В активной оркестрации",
+  "bindPlanExecute.tagNotChat": "Не режим беседы",
+  "bindPlanExecute.tagUnsupported": "Агент не поддерживается",
+  "bindPlanExecute.reparentLabel": "Переместить сессии выполнения внутрь командной сессии",
+  "bindPlanExecute.reparentHint": "Размещает выбранные сессии выполнения из того же проекта как прямые дочерние узлы командной сессии в боковом дереве.",
+  "bindPlanExecute.activeWorkflowNotice": (tasks: number, remaining: number) => `У этой командной сессии уже есть активная оркестрация (задач: ${tasks}, можно добавить ещё до ${remaining}).`,
+  "bindPlanExecute.lockedReviewEnabled": "Для этой оркестрации независимая проверка включена и зафиксирована.",
+  "bindPlanExecute.lockedReviewDisabled": "Для этой оркестрации независимая проверка отключена и зафиксирована.",
+  "bindPlanExecute.lockedReviewLegacy": "Эта оркестрация использует прежний протокол командования и проверки.",
+  "bindPlanExecute.promptLabel": "Задача или дополнительные указания (необязательно)",
+  "bindPlanExecute.promptHint": "Необязательно. Оставьте пустым, чтобы продолжить работу с учётом текущего контекста командной сессии.",
+  "bindPlanExecute.submit": "Привязать оркестрацию",
+  "bindPlanExecute.submitExtend": "Добавить сессии выполнения",
+  "bindPlanExecute.binding": "Привязка…",
+  "bindPlanExecute.footerHint": "Существующие диалоги останутся без изменений и получат инструкции протокола оркестрации.",
+  "bindPlanExecute.plannerRequired": "Выберите подходящую командную сессию.",
+  "bindPlanExecute.extendExecRequired": "Выберите не менее одной сессии выполнения для добавления в активную оркестрацию.",
+  "bindPlanExecute.deliveryBlocked": "Оркестрация сохранена, но уведомить командную сессию не удалось. Повторите отправку.",
   "launch.splitTasks": "Автоматически разделить на несколько задач",
-  "launch.splitTasksHint": "Сеанс планирования предложит независимые задачи. Перед запуском проверьте инструкции, агентов, модели и глубину рассуждений.",
+  "launch.splitTasksHint": "Командная сессия предложит независимые задачи. Перед запуском проверьте инструкции, агентов, модели и глубину рассуждений.",
   "launch.splitReview": "Проверка задач для выполнения",
-  "launch.splitReviewHint": "Планировщик координирует все задачи. Независимая проверка определяется настройками процесса. Исполнение начинается после вашего подтверждения.",
+  "launch.splitReviewHint": "Командная сессия координирует все задачи. Независимая проверка определяется настройками оркестрации. Исполнение начинается после вашего подтверждения.",
   "launch.splitConfirmed": "Эти задачи уже подтверждены.",
   "launch.splitClosed": "Это предложение больше не ожидает подтверждения.",
   "launch.splitRetry": "Повторить отправку недоставленных сообщений",
-  "launch.splitSharedDirectory": "Все сеансы выполнения используют рабочий каталог сеанса планирования и его рабочее дерево, если оно включено.",
+  "launch.splitSharedDirectory": "Все сессии выполнения используют рабочий каталог командной сессии и её рабочее дерево, если оно включено.",
   "launch.createIn": "Создать в",
   "launch.workingDirectory": "Путь к рабочему каталогу",
   "launch.createAndStart": "Создать и запустить",
-  "launch.planExecuteTaskHint": "Опишите задачу, требования и критерии приёмки для составления плана.",
-  "launch.planExecuteResult": "Сначала запускается сессия планирования. Когда план готов, она создаёт сессию выполнения.",
+  "launch.planExecuteTaskHint": "Опишите задачу, требования и критерии приёмки для командной сессии.",
+  "launch.planExecuteResult": "Сначала запускается командная сессия. Когда план готов, она создаёт сессию выполнения.",
   "launch.planExecuteWorktreeHint": "Новые рабочие деревья создаются из текущего коммита без незакоммиченных изменений. Если создать дерево не удалось, соответствующая сессия не запускается.",
-  "launch.workflowDirectorySharedHint": "Все сессии процесса используют общий новый каталог и ветку.",
-  "launch.workflowDirectoryEachHint": "Сессия планирования и каждая сессия выполнения получают собственное рабочее дерево и отдельную ветку.",
-  "launch.legacyPlanTitle": "Планирование и проверка",
-  "launch.planTitle": "Планирование",
+  "launch.workflowDirectorySharedHint": "Все сессии оркестрации используют общий новый каталог и ветку.",
+  "launch.workflowDirectoryEachHint": "Командная сессия и каждая сессия выполнения получают собственное рабочее дерево и отдельную ветку.",
+  "launch.legacyPlanTitle": "Командование и проверка",
+  "launch.planTitle": "Командование",
   "launch.reviewTitle": "Проверка",
   "launch.reviewEnabled": "Включить независимую проверку",
-  "launch.reviewEnabledHint": "Отдельный проверяющий изучает отчёты и запрашивает исправления. Планировщик отслеживает ход работы и подводит итоги.",
-  "launch.reviewDisabledHint": "Отчёты об исполнении направляются планировщику для подведения итогов. Независимая проверка не проводится.",
+  "launch.reviewEnabledHint": "Отдельный проверяющий изучает отчёты и запрашивает исправления. Командная сессия отслеживает ход работы и подводит итоги.",
+  "launch.reviewDisabledHint": "Отчёты об исполнении направляются напрямую в командную сессию для подведения итогов. Независимая проверка не проводится.",
   "chat.origin.review": "Проверка",
   "launch.execTitle": "Выполнение",
-  "launch.legacyPlanExecuteIntro": "Отдельная сессия планирует работу, проверяет результат и запрашивает исправления.",
-  "launch.planExecuteIntro": "Планировщик организует работу и подводит итоги. Независимую проверку можно включить по желанию.",
-  "chat.origin.plan": "Планирование",
+  "launch.legacyPlanExecuteIntro": "Отдельная командная сессия руководит выполнением, проверяет результат и запрашивает исправления.",
+  "launch.planExecuteIntro": "Командная сессия организует работу и подводит итоги. Независимую проверку можно включить по желанию.",
+  "chat.origin.plan": "Командование",
   "chat.origin.exec": "Выполнение",
 
   // Project code intelligence and knowledge entry associations.
@@ -393,6 +431,8 @@ const ru: typeof en = {
   "chat.imageActionFailed": "Не удалось выполнить операцию с изображением. Повторите попытку.",
   "clipboard.unresponsive":
     "Приложение — источник содержимого буфера обмена не отвечает, поэтому вставка не выполнена. Повторите попытку чуть позже.",
+  "service.restartedNotice":
+    "Фоновая служба неожиданно перезапустилась, поэтому ранее запущенные сессии были остановлены.",
   "common.copy": "Копировать", // Copy
   "common.cut": "Вырезать", // Cut
   "common.paste": "Вставить", // Paste
@@ -439,6 +479,8 @@ const ru: typeof en = {
   "status.working": "В работе", // Working
   "status.asking": "Нужно подтверждение", // Needs confirmation
   "status.waiting": "Просмотрено", // Viewed
+  "status.awaitingParent": "Ожидает родительскую сессию", // Waiting for parent session
+  "status.awaitingChildren": "Ожидает дочерние сессии", // Waiting for child sessions
   "status.background": "Выполняются фоновые задачи", // Background tasks running
   "status.unavailable": "Статус недоступен",
   "indicator.unread": "Непрочитано · к просмотру", // Unread · awaiting review
@@ -1203,6 +1245,19 @@ const ru: typeof en = {
   "sessionTitle.invalid": "Агент вернул некорректный заголовок. Повторите попытку.",
   "sessionTitle.changed": "Сеанс изменился во время создания заголовка, поэтому заголовок не был обновлён.",
   "sessionTitle.failed": "Агенту не удалось создать заголовок. Повторите попытку.",
+  "sessionTitle.menuSelected": (n) => `Переименовать выбранные сеансы (${n}) с помощью ИИ…`,
+  "sessionTitle.menuGroup": (n) => `Переименовать сеансы группы (${n}) с помощью ИИ…`,
+  "sessionTitle.batchRename": "Пакетное переименование с помощью ИИ",
+  "sessionTitle.batchConfirmHint": "Выбранный агент прочитает каждый диалог целиком и заменит имя каждого сеанса новым заголовком. Проверьте список сеансов и параметры, затем подтвердите действие.",
+  "sessionTitle.batchSessions": (selected, total) => `Сеансы (выбрано ${selected} из ${total})`,
+  "sessionTitle.batchSelectAll": "Выбрать все",
+  "sessionTitle.batchDeselectAll": "Снять выбор",
+  "sessionTitle.batchSubmit": (n) => `Переименовать (${n})`,
+  "sessionTitle.batchProgress": (done, total) => `Переименование (${done}/${total})…`,
+  "sessionTitle.batchQueued": "В очереди",
+  "sessionTitle.batchCancelled": "Отменено",
+  "sessionTitle.batchSummary": (renamed, failed) => `Переименовано: ${renamed}, ошибок: ${failed}.`,
+  "sessionTitle.batchRetryFailed": (n) => `Повторить неудавшиеся (${n})`,
   "tree.sessionInfo": "Сведения о сессии", // Session Info
   "tree.groupInfo": "Сведения о группе", // Group Info
   "tree.collectionInfo": "Сведения о коллекции", // Collection Info
@@ -1213,7 +1268,9 @@ const ru: typeof en = {
   "info.recentCommits": "Последние коммиты", // Recent Commits
   "info.noCommits": "Нет коммитов", // No commits
   "tree.killProcess": "Завершить процесс", // Kill Process
+  "tree.killProcessSelected": (n: number) => `Завершить ${n} ${plural(n, "процесс", "процесса", "процессов")}`, // Kill {n} Processes
   "tree.killProcessConfirm": (name: string) => `Завершить процесс сеанса «${name}»? Текущая задача будет прервана. Сохранённая история переписки и файлы останутся.`,
+  "tree.killProcessConfirmMany": (n: number) => `Завершить процессы для ${n} ${plural(n, "запущенной сессии", "запущенных сессий", "запущенных сессий")}? Текущие задачи будут прерваны. Сохранённая история переписки и файлы останутся.`,
   "tree.archiveSession": "Архивировать сессию", // Archive Session
   "tree.archiveGroup": "Архивировать группу", // Archive Group
   "tree.archiveCollection": "Архивировать коллекцию", // Archive Collection
@@ -1750,6 +1807,7 @@ const ru: typeof en = {
   "transfer.savedToDownloads": "Сохранено в папке «Загрузки»", // Saved to Downloads
   "transfer.foldersUnsupported": "Папки загрузить нельзя.", // Folders can't be uploaded.
   "drop.browserFilesHint": "В браузере сюда можно перетащить только изображения. Другие файлы сначала загрузите в проект.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
+  "paste.browserFilesHint": "В браузере сюда можно вставить только изображения. Другие файлы сначала загрузите в проект.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
   "files.copyFailed": "Не удалось скопировать некоторые файлы. Убедитесь, что они ещё существуют и что у вас есть права на запись в эту папку.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
   "files.pasteFailed": "Не удалось вставить некоторые элементы. Убедитесь, что исходные файлы существуют и у вас есть права на запись в эту папку.", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 

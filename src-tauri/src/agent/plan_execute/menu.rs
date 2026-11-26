@@ -215,7 +215,7 @@ pub fn start(app: &AppCtx, req: &Request) -> Result<Value, String> {
     let id = &req.request_id;
     let inherited = placement.inherited_worktree.as_deref().filter(|w| *w == cwd);
     let planner = create_role_bound(app, &role_id(id, "planner"), &req.context.project_id,
-        placement.group_id.as_deref(), placement.parent.as_ref(), "Plan · Execute", &config.plan, Some(&cwd),
+        placement.group_id.as_deref(), placement.parent.as_ref(), "Orchestration", &config.plan, Some(&cwd),
         config.worktree_mode(req.worktree) != WorktreeMode::None, inherited,
         inherited.and(placement.inherited_base.as_deref()), |tx, planner| {
             let message_id = format!("msg-{id}");

@@ -4451,6 +4451,7 @@ export const useTermStore = create<TermStore>((set, get) => ({
           agentHookReady: record.hookReady,
           authoritative: record.authoritative,
           everWorked: record.everWorked,
+          workflowWait: record.workflowWait ?? null,
         };
         if (
           Object.keys(next).some(

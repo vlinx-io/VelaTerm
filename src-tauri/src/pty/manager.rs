@@ -1943,7 +1943,7 @@ impl PtyManager {
     }
 
     /// Look up only the PID, leaving the actual cwd read to the caller. Callers on the main thread use
-    /// this to hand `process_cwd` — which shells out to `lsof` on macOS — to the blocking pool.
+    /// this to hand `process_cwd` to the blocking pool.
     pub fn cwd_pid(&self, id: &str) -> Option<u32> {
         let map = self.sessions.lock().unwrap();
         let pid = map.get(id)?.pid;
@@ -2429,33 +2429,56 @@ fn spawn_idle_heal(
     });
 }
 
-/// Queries a process's current working directory across platforms.
+/// Queries a process's current working directory across platforms, returning None when the process
+/// has exited or its directory no longer exists on disk.
 pub fn process_cwd(pid: u32) -> Option<String> {
     #[cfg(target_os = "macos")]
-    {
-        // macOS has no `/proc`; use `lsof` to inspect the cwd descriptor.
-        let output = std::process::Command::new("lsof")
-            .args(["-a", "-d", "cwd", "-Fn", "-p", &pid.to_string()])
-            .output()
-            .ok()?;
-        if !output.status.success() {
+    let raw = {
+        // Query the kernel vnode path directly via libproc instead of shelling out to `lsof`, which
+        // escapes non-ASCII UTF-8 bytes as `\xNN` under an empty/C locale and backslashes as `\\`.
+        let Ok(pid) = libc::c_int::try_from(pid) else {
+            return None;
+        };
+        if pid <= 0 {
             return None;
         }
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .find_map(|l| l.strip_prefix('n').map(|s| s.to_string()))
-    }
+        let mut info = std::mem::MaybeUninit::<libc::proc_vnodepathinfo>::zeroed();
+        let size = std::mem::size_of::<libc::proc_vnodepathinfo>() as libc::c_int;
+        let ret = unsafe {
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDVNODEPATHINFO,
+                0,
+                info.as_mut_ptr().cast::<libc::c_void>(),
+                size,
+            )
+        };
+        if ret != size {
+            return None;
+        }
+        let info = unsafe { info.assume_init() };
+        let bytes = unsafe {
+            std::slice::from_raw_parts(
+                (&raw const info.pvi_cdir.vip_path).cast::<u8>(),
+                std::mem::size_of_val(&info.pvi_cdir.vip_path),
+            )
+        };
+        let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+        std::str::from_utf8(&bytes[..end]).ok().map(str::to_string)
+    };
     #[cfg(target_os = "linux")]
-    {
+    let raw = {
         std::fs::read_link(format!("/proc/{pid}/cwd"))
             .ok()
             .map(|p| p.to_string_lossy().to_string())
-    }
+    };
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    {
+    let raw: Option<String> = {
         let _ = pid;
         None
-    }
+    };
+
+    raw.filter(|p| !p.is_empty() && std::path::Path::new(p).is_dir())
 }
 
 /// Disables rollout scanning when exact lifecycle hooks are available. This protects session identity:
@@ -3480,5 +3503,43 @@ mod tests {
             title_list.iter().any(|t| t == "codex-status"),
             "the OSC title codex-status should be picked up, got {title_list:?}"
         );
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn process_cwd_preserves_unicode_under_c_locale_and_rejects_deleted_dirs() {
+        use super::process_cwd;
+        let base = std::env::temp_dir().join(format!("vlx-cwd-test-{}", uuid::Uuid::new_v4()));
+        let nested = base.join("中文项目名").join("dir with spaces");
+        std::fs::create_dir_all(&nested).unwrap();
+        let expected = std::fs::canonicalize(&nested).unwrap();
+
+        let mut child = std::process::Command::new("sleep")
+            .arg("5")
+            .current_dir(&expected)
+            .env_clear()
+            .env("LC_ALL", "C")
+            .spawn()
+            .expect("failed to spawn sleep");
+
+        let resolved = process_cwd(child.id())
+            .and_then(|p| std::fs::canonicalize(p).ok());
+        assert_eq!(
+            resolved.as_deref(),
+            Some(expected.as_path()),
+            "process_cwd must return the real UTF-8 path without locale escaping"
+        );
+        assert!(
+            std::fs::read_dir(process_cwd(child.id()).unwrap()).is_ok(),
+            "resolved cwd must be readable by std::fs::read_dir"
+        );
+
+        // Removing the directory while the process holds it open must return None rather than a dead path.
+        std::fs::remove_dir_all(&base).unwrap();
+        assert_eq!(process_cwd(child.id()), None);
+
+        let _ = child.kill();
+        let _ = child.wait();
+        assert_eq!(process_cwd(0), None);
     }
 }

@@ -88,34 +88,72 @@ const fr: typeof en = {
   "translation.network": "Le service de traduction est indisponible. Réessayez.",
   "translation.paymentRequired": "Le service de traduction requiert un paiement (HTTP 402). Vérifiez le solde de votre compte API ou l’état de vos paiements.",
 
-  "tree.newPlanExecuteSession": "Nouvelle session planification/exécution…",
+  "tree.orchestrationMenu": "Session d’orchestration",
+  "tree.newPlanExecuteSession": "Nouvelle session d’orchestration…",
+  "tree.bindPlanExecuteWorkflow": "Définir comme session d’orchestration…",
+  "tree.bindAsExecutorWorkflow": "Définir comme session d’exécution…",
+  "tree.bindPlanExecuteSelected": "Définir la sélection comme orchestration…",
+  "tree.bindAsExecutorsSelected": "Définir la sélection comme sessions d’exécution…",
+  "bindPlanExecute.title": "Associer un flux d’orchestration",
+  "bindPlanExecute.intro": "Désignez une conversation existante comme session de pilotage et associez éventuellement des conversations existantes comme sessions d’exécution.",
+  "bindPlanExecute.planSessionLabel": "Session de pilotage",
+  "bindPlanExecute.planPlaceholder": "Sélectionner une session de pilotage…",
+  "bindPlanExecute.planSessionHint": "Choisissez une session en vue conversation pour diriger l’orchestration et recevoir les rapports d’exécution.",
+  "bindPlanExecute.execSessionsLabel": "Sessions d’exécution",
+  "bindPlanExecute.execPlaceholder": "Aucune (créer à l’attribution)",
+  "bindPlanExecute.execSummary": (n: number) => `${n} sessions d’exécution sélectionnées`,
+  "bindPlanExecute.execHintNone": "Laissez vide pour créer les sessions d’exécution lorsque la session de pilotage attribuera des tâches.",
+  "bindPlanExecute.execHintSingle": "La session d’exécution sélectionnée sera réutilisée directement comme exécuteur d’une tâche unique.",
+  "bindPlanExecute.execHintMultiple": (n: number) => `${n} sessions d’exécution seront associées en tant que flux de tâches parallèles sous cette session de pilotage.`,
+  "bindPlanExecute.execHintExtend": (n: number) => `Sélectionnez au moins une session d’exécution à ajouter à cette orchestration active (jusqu’à ${n} de plus).`,
+  "bindPlanExecute.execLimitError": (n: number) => `Vous pouvez associer au maximum ${n} sessions d’exécution.`,
+  "bindPlanExecute.tagChild": "Sous-session",
+  "bindPlanExecute.tagExtendable": "Ajouter des exécuteurs",
+  "bindPlanExecute.tagInWorkflow": "Dans une orchestration active",
+  "bindPlanExecute.tagNotChat": "Hors vue conversation",
+  "bindPlanExecute.tagUnsupported": "Agent non pris en charge",
+  "bindPlanExecute.reparentLabel": "Déplacer les sessions d’exécution sous la session de pilotage",
+  "bindPlanExecute.reparentHint": "Place dans l’arborescence latérale les sessions d’exécution du même projet directement sous la session de pilotage.",
+  "bindPlanExecute.activeWorkflowNotice": (tasks: number, remaining: number) => `Cette session de pilotage possède déjà une orchestration active (${tasks} tâches, jusqu’à ${remaining} ajouts possibles).`,
+  "bindPlanExecute.lockedReviewEnabled": "La révision indépendante est activée et verrouillée pour cette orchestration.",
+  "bindPlanExecute.lockedReviewDisabled": "La révision indépendante est désactivée et verrouillée pour cette orchestration.",
+  "bindPlanExecute.lockedReviewLegacy": "Cette orchestration utilise l’ancien protocole de pilotage et de validation.",
+  "bindPlanExecute.promptLabel": "Tâche ou consignes complémentaires (facultatif)",
+  "bindPlanExecute.promptHint": "Facultatif. Laissez vide pour poursuivre à partir du contexte actuel de la session de pilotage.",
+  "bindPlanExecute.submit": "Associer l’orchestration",
+  "bindPlanExecute.submitExtend": "Ajouter des sessions d’exécution",
+  "bindPlanExecute.binding": "Association…",
+  "bindPlanExecute.footerHint": "Les conversations existantes restent intactes et reçoivent les instructions du protocole d’orchestration.",
+  "bindPlanExecute.plannerRequired": "Sélectionnez une session de pilotage éligible.",
+  "bindPlanExecute.extendExecRequired": "Sélectionnez au moins une session d’exécution à ajouter à l’orchestration active.",
+  "bindPlanExecute.deliveryBlocked": "L’orchestration a été enregistrée, mais l’envoi à la session de pilotage a échoué. Réessayez.",
   "launch.splitTasks": "Diviser automatiquement en plusieurs tâches",
-  "launch.splitTasksHint": "La session de planification propose des tâches indépendantes. Vérifiez les instructions, les agents, les modèles et l’effort de raisonnement avant de lancer l’exécution.",
+  "launch.splitTasksHint": "La session de pilotage propose des tâches indépendantes. Vérifiez les instructions, les agents, les modèles et l’effort de raisonnement avant de lancer l’exécution.",
   "launch.splitReview": "Vérifier les tâches à exécuter",
-  "launch.splitReviewHint": "Le planificateur coordonne toutes les tâches. La révision indépendante dépend des paramètres du flux de travail. L’exécution commence après votre confirmation.",
+  "launch.splitReviewHint": "La session de pilotage coordonne toutes les tâches. La révision indépendante dépend des paramètres d’orchestration. L’exécution commence après votre confirmation.",
   "launch.splitConfirmed": "Ces tâches ont été confirmées.",
   "launch.splitClosed": "Cette proposition n’est plus en attente de confirmation.",
   "launch.splitRetry": "Réessayer les envois en attente",
-  "launch.splitSharedDirectory": "Toutes les sessions d’exécution utilisent le répertoire de travail de la session de planification et partagent son arbre de travail si cette option est activée.",
+  "launch.splitSharedDirectory": "Toutes les sessions d’exécution utilisent le répertoire de travail de la session de pilotage et partagent son arbre de travail si cette option est activée.",
   "launch.createIn": "Créer dans",
   "launch.workingDirectory": "Chemin du dossier de travail",
   "launch.createAndStart": "Créer et démarrer",
-  "launch.planExecuteTaskHint": "Décrivez la tâche, les exigences et les critères de validation pour la planification.",
-  "launch.planExecuteResult": "La session de planification démarre en premier et crée la session d’exécution une fois le plan prêt.",
+  "launch.planExecuteTaskHint": "Décrivez la tâche, les exigences et les critères de validation pour la session de pilotage.",
+  "launch.planExecuteResult": "La session de pilotage démarre en premier et crée la session d’exécution une fois le plan prêt.",
   "launch.planExecuteWorktreeHint": "Les nouveaux worktrees partent du commit actuel, sans les modifications non validées. En cas d’échec de création, la session concernée ne démarre pas.",
-  "launch.workflowDirectorySharedHint": "Toutes les sessions du flux de travail partagent un nouveau répertoire et une nouvelle branche.",
-  "launch.workflowDirectoryEachHint": "La session de planification et chaque session d’exécution disposent de leur propre worktree et de leur propre branche.",
-  "launch.legacyPlanTitle": "Planification et validation",
-  "launch.planTitle": "Planification",
+  "launch.workflowDirectorySharedHint": "Toutes les sessions d’orchestration partagent un nouveau répertoire et une nouvelle branche.",
+  "launch.workflowDirectoryEachHint": "La session de pilotage et chaque session d’exécution disposent de leur propre worktree et de leur propre branche.",
+  "launch.legacyPlanTitle": "Pilotage et validation",
+  "launch.planTitle": "Pilotage",
   "launch.reviewTitle": "Révision",
   "launch.reviewEnabled": "Activer une révision indépendante",
-  "launch.reviewEnabledHint": "Un réviseur distinct vérifie les rapports et demande les corrections. Le planificateur suit la progression et résume les livrables.",
-  "launch.reviewDisabledHint": "Les rapports d’exécution sont transmis directement au planificateur pour la synthèse des livrables. Aucune révision indépendante n’est effectuée.",
+  "launch.reviewEnabledHint": "Un réviseur distinct vérifie les rapports et demande les corrections. La session de pilotage suit la progression et résume les livrables.",
+  "launch.reviewDisabledHint": "Les rapports d’exécution sont transmis directement à la session de pilotage pour la synthèse des livrables. Aucune révision indépendante n’est effectuée.",
   "chat.origin.review": "Révision",
   "launch.execTitle": "Exécution",
-  "launch.legacyPlanExecuteIntro": "Une session distincte planifie le travail, vérifie le résultat et demande les corrections nécessaires.",
-  "launch.planExecuteIntro": "Le planificateur organise le travail et résume les livrables. La révision indépendante est facultative.",
-  "chat.origin.plan": "Planification",
+  "launch.legacyPlanExecuteIntro": "Une session de pilotage distincte dirige le travail, vérifie le résultat et demande les corrections nécessaires.",
+  "launch.planExecuteIntro": "La session de pilotage organise le travail et résume les livrables. La révision indépendante est facultative.",
+  "chat.origin.plan": "Pilotage",
   "chat.origin.exec": "Exécution",
 
   // Project code intelligence and knowledge entry associations.
@@ -383,6 +421,8 @@ const fr: typeof en = {
   "chat.imageActionFailed": "Impossible d’effectuer cette opération sur l’image. Veuillez réessayer.",
   "clipboard.unresponsive":
     "L'application source du presse-papiers ne répond pas : rien n'a été collé. Veuillez réessayer dans un instant.",
+  "service.restartedNotice":
+    "Le service d’arrière-plan a redémarré de manière inattendue ; les sessions précédemment en cours ont été arrêtées.",
   "common.copy": "Copier", // Copy
   "common.cut": "Couper", // Cut
   "common.paste": "Coller", // Paste
@@ -429,6 +469,8 @@ const fr: typeof en = {
   "status.working": "En traitement", // Working
   "status.asking": "Confirmation requise", // Needs confirmation
   "status.waiting": "Consulté", // Viewed
+  "status.awaitingParent": "En attente de la session parente", // Waiting for parent session
+  "status.awaitingChildren": "En attente des sessions enfants", // Waiting for child sessions
   "status.background": "Tâches en arrière-plan en cours", // Background tasks running
   "status.unavailable": "État indisponible",
   "indicator.unread": "Non lu · à consulter", // Unread · awaiting review
@@ -1194,6 +1236,19 @@ const fr: typeof en = {
   "sessionTitle.invalid": "L’agent a renvoyé un titre invalide. Réessayez.",
   "sessionTitle.changed": "La session a été modifiée pendant la génération du titre. Le titre n’a donc pas été mis à jour.",
   "sessionTitle.failed": "L’agent n’a pas pu générer de titre. Réessayez.",
+  "sessionTitle.menuSelected": (n) => `Renommer ${n} sessions sélectionnées avec l’IA…`,
+  "sessionTitle.menuGroup": (n) => `Renommer ${n} sessions du groupe avec l’IA…`,
+  "sessionTitle.batchRename": "Renommer en lot avec l’IA",
+  "sessionTitle.batchConfirmHint": "L’agent sélectionné lira chaque conversation en entier et remplacera chaque nom de session par un nouveau titre. Vérifiez les sessions et les paramètres, puis confirmez pour lancer l’opération.",
+  "sessionTitle.batchSessions": (selected, total) => `Sessions (${selected} sur ${total} sélectionnées)`,
+  "sessionTitle.batchSelectAll": "Tout sélectionner",
+  "sessionTitle.batchDeselectAll": "Effacer la sélection",
+  "sessionTitle.batchSubmit": (n) => (n === 1 ? "Renommer 1 session" : `Renommer ${n} sessions`),
+  "sessionTitle.batchProgress": (done, total) => `Renommage (${done}/${total})…`,
+  "sessionTitle.batchQueued": "En file d’attente",
+  "sessionTitle.batchCancelled": "Annulé",
+  "sessionTitle.batchSummary": (renamed, failed) => `${renamed} renommée(s), ${failed} en échec.`,
+  "sessionTitle.batchRetryFailed": (n) => (n === 1 ? "Réessayer 1 échec" : `Réessayer ${n} échecs`),
   "tree.sessionInfo": "Infos de session", // Session Info
   "tree.groupInfo": "Infos du groupe", // Group Info
   "tree.collectionInfo": "Infos de la collection", // Collection Info
@@ -1204,7 +1259,9 @@ const fr: typeof en = {
   "info.recentCommits": "Commits récents", // Recent Commits
   "info.noCommits": "Aucun commit", // No commits
   "tree.killProcess": "Tuer le processus", // Kill Process
+  "tree.killProcessSelected": (n: number) => `Tuer ${n} processus`, // Kill {n} Processes
   "tree.killProcessConfirm": (name: string) => `Terminer le processus de « ${name} » ? La tâche en cours sera interrompue. L’historique de conversation et les fichiers enregistrés seront conservés.`,
+  "tree.killProcessConfirmMany": (n: number) => `Terminer les processus de ${n} sessions en cours d’exécution ? Les tâches en cours seront interrompues. L’historique de conversation et les fichiers enregistrés seront conservés.`,
   "tree.archiveSession": "Archiver la session", // Archive Session
   "tree.archiveGroup": "Archiver le groupe", // Archive Group
   "tree.archiveCollection": "Archiver la collection", // Archive Collection
@@ -1749,6 +1806,7 @@ const fr: typeof en = {
   "transfer.savedToDownloads": "Enregistré dans Téléchargements", // Saved to Downloads
   "transfer.foldersUnsupported": "Les dossiers ne peuvent pas être envoyés.", // Folders can't be uploaded.
   "drop.browserFilesHint": "Dans le navigateur, seules les images peuvent être déposées ici. Pour utiliser d'autres fichiers, envoyez-les d'abord dans le projet.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
+  "paste.browserFilesHint": "Dans le navigateur, seules les images peuvent être collées ici. Pour utiliser d'autres fichiers, envoyez-les d'abord dans le projet.", // In the browser, only images can be pasted here. To use other files, upload them to the project first.
   "files.copyFailed": "Certains fichiers n'ont pas pu être copiés. Vérifiez qu'ils existent toujours et que vous pouvez écrire dans ce dossier.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
   "files.pasteFailed": "Certains éléments n'ont pas pu être collés. Vérifiez que la source existe toujours et que vous pouvez écrire dans ce dossier.", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 

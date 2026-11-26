@@ -466,6 +466,12 @@ pub fn safe_fields(data: &Value) -> Value {
                     | "kb_conflict" | "kb_exists" | "kb_invalid_path" | "kb_invalid" | "kb_io"
                     | "kb_too_large" | "kb_not_found" | "kb_unavailable" | "kb_encoding"
                     | "kb_empty_import" | "kb_incomplete_import" | "kb_move_incomplete"
+                    | "knowledge_unauthorized" | "knowledge_not_found" | "knowledge_invalid"
+                    | "knowledge_missing_directory" | "knowledge_invalid_directory"
+                    | "knowledge_directory_changed" | "knowledge_disabled"
+                    | "knowledge_runtime_missing" | "knowledge_busy" | "knowledge_timeout"
+                    | "knowledge_partial" | "knowledge_interrupted" | "knowledge_query_failed"
+                    | "knowledge_result_large" | "knowledge_symbol_missing" | "memory_not_found"
                     | "detail_unavailable" | "source_changed" | "source_missing" | "index_incomplete"
                     | "unsupported_record" | "cursor_expired" | "detail_requires_paging" | "index_busy"
             ),
@@ -1174,6 +1180,12 @@ mod tests {
             safe_fields(&json!({"file":"src/pty/manager.rs","line":1466})),
             json!({"file":"src/pty/manager.rs","line":1466})
         );
+        for code in ["knowledge_unauthorized", "knowledge_not_found", "knowledge_invalid", "memory_not_found"] {
+            assert_eq!(
+                safe_fields(&json!({"errorCode":code,"statusCode":400})),
+                json!({"errorCode":code,"statusCode":400})
+            );
+        }
         // Each synchronous command reported by `ui_thread_slow` must be a known protocol name.
         for command in [
             "pty_write", "pty_resize", "pty_kill", "set_native_theme", "native_notify",

@@ -99,13 +99,14 @@ pub async fn uninstall_vela_command() -> Result<crate::agent::spawn_cli::UserCli
 /// Remote windows log to their local desktop host, retaining the native window identity.
 #[tauri::command]
 pub async fn record_split_trace(
-    app: AppHandle,
+    ctx: State<'_, AppCtx>,
     window: tauri::WebviewWindow,
     entry: crate::split_trace::Entry,
 ) -> Result<bool, String> {
+    let ctx = ctx.inner().clone();
     let label = window.label().to_owned();
     tauri::async_runtime::spawn_blocking(move || {
-        crate::split_trace::record(&AppCtx::Tauri(app), &label, entry)
+        crate::split_trace::record(&ctx, &label, entry)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -116,17 +117,19 @@ pub async fn record_split_trace(
 /// typing, native windows/views, and host management remain direct allowlisted commands; see
 /// `DIRECT_DESKTOP_CMDS` in transport.ts.
 ///
-/// Details: AppHandle can move into `spawn_blocking`; AppCtx then retrieves managed state. The source
+/// Details: the shared `State<AppCtx>` clones only its `Arc<AppHandle>` rather than `AppHandle` itself,
+/// avoiding cross-thread runtime-context clones/drops on every RPC. The source
 /// is `DESKTOP_SOURCE` (`"desktop"`). Dispatch returns serialized JSON as `Result<Value, String>`,
 /// preserving the browser shape and camelCase argument keys.
 #[tauri::command]
 pub async fn desktop_call(
-    app: AppHandle,
+    ctx: State<'_, AppCtx>,
     cmd: String,
     args: serde_json::Value,
     diagnostic_request_id: Option<String>,
     diagnostic_operation_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
+    let ctx = ctx.inner().clone();
     let queued = std::time::Instant::now();
     tauri::async_runtime::spawn_blocking(move || {
         let _context=crate::diagnostics::Context::enter(diagnostic_request_id.as_deref());
@@ -138,7 +141,7 @@ pub async fn desktop_call(
         let level = if queue_ms >= RPC_QUEUE_REPORT_MS { "WARN" } else { "DEBUG" };
         crate::diagnostics::record(level, "rpc_queue", serde_json::json!({"command":cmd,"requestId":diagnostic_request_id,"queueMs":queue_ms}));
         crate::web::dispatch::dispatch(
-            &AppCtx::Tauri(app),
+            &ctx,
             &cmd,
             &args,
             crate::pty::manager::DESKTOP_SOURCE,
@@ -164,7 +167,7 @@ pub async fn desktop_call(
 #[allow(clippy::too_many_arguments)]
 #[tauri::command(async)]
 pub fn pty_spawn(
-    app: AppHandle,
+    ctx: State<AppCtx>,
     state: State<PtyManager>,
     hooks: State<HookServer>,
     db: State<Db>,
@@ -226,7 +229,7 @@ pub fn pty_spawn(
                     repo::claim_agent_session_id(&conn, &session_id, &agent_id, SessionKind::Pi)?
                 };
                 if changed {
-                    let _ = app.emit(crate::host::TREE_CHANGED, ());
+                    ctx.emit(crate::host::TREE_CHANGED, ());
                     resume_id = Some(agent_id);
                     break;
                 }
@@ -245,7 +248,7 @@ pub fn pty_spawn(
     });
 
     state.spawn(
-        crate::host::AppCtx::Tauri(app),
+        ctx.inner().clone(),
         session_id,
         kind,
         shell,
@@ -300,7 +303,7 @@ pub fn pty_write(state: State<PtyManager>, session_id: String, data: String) -> 
 /// changes broadcast `Resized`. `takeover` is an explicit “fit this window” action and defaults false.
 #[tauri::command]
 pub fn pty_resize(
-    app: AppHandle,
+    ctx: State<AppCtx>,
     state: State<PtyManager>,
     session_id: String,
     cols: u16,
@@ -313,7 +316,7 @@ pub fn pty_resize(
         serde_json::json!({"command":"pty_resize","sessionId":session_id}),
     );
     state.resize(
-        &crate::host::AppCtx::Tauri(app),
+        &ctx,
         &session_id,
         cols,
         rows,
@@ -348,8 +351,8 @@ pub fn pty_kill(
 // ─────────────────────────── Replay, Git Bash, and tree management ───────────────────────────
 /// Return a session's runtime working directory for split-pane inheritance.
 ///
-/// Runs on the blocking pool: reading a cwd means `lsof` on macOS, an actual subprocess whose cost is
-/// not bounded by anything this side controls, and `/proc` on Linux.
+/// Runs on the blocking pool because reading a process cwd performs OS/filesystem checks (`proc_pidinfo`
+/// on macOS, `/proc` on Linux, plus directory existence validation).
 #[tauri::command]
 pub async fn get_session_cwd(
     state: State<'_, PtyManager>,
@@ -570,14 +573,15 @@ pub async fn save_doc_image(
 /// `address` chooses the interface IP; rotate replaces the token, invalidates old links, and clears devices.
 #[tauri::command]
 pub async fn web_pairing_create(
-    app: AppHandle,
+    ctx: State<'_, AppCtx>,
     address: Option<String>,
     rotate: Option<bool>,
 ) -> Result<PairingInfo, String> {
+    let ctx = ctx.inner().clone();
     // Rotation persists the new token to SQLite, so this is a disk write, not just a string build.
     tauri::async_runtime::spawn_blocking(move || {
         crate::command_core::web_pairing_create(
-            &AppCtx::Tauri(app),
+            &ctx,
             address,
             rotate.unwrap_or(false),
         )
@@ -589,8 +593,9 @@ pub async fn web_pairing_create(
 /// List paired devices that have actually connected for the management panel.
 #[tauri::command]
 pub async fn web_devices_list(app: AppHandle) -> Vec<DeviceEntry> {
+    let ctx = AppCtx::from_tauri(&app);
     tauri::async_runtime::spawn_blocking(move || {
-        crate::command_core::web_devices_list(&AppCtx::Tauri(app))
+        crate::command_core::web_devices_list(&ctx)
     })
     .await
     .unwrap_or_default()
@@ -599,9 +604,10 @@ pub async fn web_devices_list(app: AppHandle) -> Vec<DeviceEntry> {
 /// Remove a device registration display entry. Shared links can still reconnect; rotate to revoke all.
 /// Errors when the revocation cannot be persisted (it would silently return after the next restart).
 #[tauri::command]
-pub async fn web_device_revoke(app: AppHandle, device_id: String) -> Result<bool, String> {
+pub async fn web_device_revoke(ctx: State<'_, AppCtx>, device_id: String) -> Result<bool, String> {
+    let ctx = ctx.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        crate::command_core::web_device_revoke(&AppCtx::Tauri(app), &device_id)
+        crate::command_core::web_device_revoke(&ctx, &device_id)
     })
     .await
     .map_err(|e| format!("failed to revoke the device: {e}"))?
@@ -759,7 +765,7 @@ pub async fn open_account_remote_window(
     let id = uuid::Uuid::parse_str(&device_id).map_err(|_| "Invalid device ID")?;
     let mut outcome = serde_json::json!({"access": "chat"});
     if let Some(full) = full_grant_id.filter(|g| uuid::Uuid::parse_str(g).is_ok()) {
-        let ctx = crate::host::AppCtx::Tauri(app.clone());
+        let ctx = crate::host::AppCtx::from_tauri(&app);
         let device = id.to_string();
         let attempt = tauri::async_runtime::spawn_blocking(move || -> Result<_, String> {
             let relay = remote_proxy::RelaySession::open(&ctx, &device, &full)?;
@@ -793,7 +799,7 @@ pub async fn open_account_remote_window(
             }
         }
     }
-    let ctx = crate::host::AppCtx::Tauri(app.clone());
+    let ctx = crate::host::AppCtx::from_tauri(&app);
     let url = tauri::async_runtime::spawn_blocking(move || {
         crate::web::public_relay::browser_ticket_url(&ctx, &id.to_string(), grant_id.as_deref())
     })
@@ -1208,7 +1214,7 @@ pub async fn wsl_connect(
         let _context = crate::diagnostics::Context::enter(diagnostic_request_id.as_deref());
         let _cancel = cancel_scope.enter();
         let mut span = crate::diagnostics::Span::new("wsl_connect", serde_json::json!({"command":"wsl_connect"}));
-        let result = crate::wsl_remote::connect(&crate::host::AppCtx::Tauri(app_bg.clone()), &distribution, restart_existing.unwrap_or(false), &|stage, percent| {
+        let result = crate::wsl_remote::connect(&crate::host::AppCtx::from_tauri(&app_bg), &distribution, restart_existing.unwrap_or(false), &|stage, percent| {
             let _ = app_bg.emit_to("main", "wsl://progress", serde_json::json!({"stage":stage,"percent":percent}));
         });
         span.finish(&result);

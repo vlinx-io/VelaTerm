@@ -7,17 +7,24 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   uploadDocImage: vi.fn(),
+  env: { isTauri: false },
+  readFiles: vi.fn<() => Promise<string[]>>(),
+  imageFromNativeClipboard: vi.fn(),
 }));
 
 vi.mock("../../../ipc/transport", () => ({
   uploadDocImage: mocks.uploadDocImage,
 }));
+vi.mock("../../../platform/env", () => ({
+  env: mocks.env,
+}));
 vi.mock("../../../platform", () => ({
-  env: { isTauri: false },
+  env: mocks.env,
+  platform: { clipboard: { readFiles: mocks.readFiles } },
 }));
 vi.mock("../../../terminal/imageInput", () => ({
   extOf: () => "png",
-  imageFromNativeClipboard: vi.fn(),
+  imageFromNativeClipboard: mocks.imageFromNativeClipboard,
   imagesFromClipboard: (data: DataTransfer | null) =>
     ((data as DataTransfer & { imageFiles?: File[] } | null)?.imageFiles ?? []),
 }));
@@ -45,6 +52,9 @@ function dispatchPaste(container: HTMLElement, data: DataTransfer): Event {
 describe("SourceEditor image paste", () => {
   beforeEach(() => {
     mocks.uploadDocImage.mockReset();
+    mocks.env.isTauri = false;
+    mocks.readFiles.mockReset().mockResolvedValue([]);
+    mocks.imageFromNativeClipboard.mockReset();
   });
 
   it("a saved Markdown file persists the image and inserts standard image syntax", async () => {
@@ -119,6 +129,36 @@ describe("SourceEditor image paste", () => {
     await waitFor(() =>
       expect(ref.current?.getText()).toMatch(/^!\[\]\(data:image\/png;base64,/),
     );
+    expect(mocks.uploadDocImage).not.toHaveBeenCalled();
+  });
+
+  it("inserts the path of a non-image file copied in Finder instead of reading the file-icon bitmap (#195)", async () => {
+    mocks.env.isTauri = true;
+    mocks.readFiles.mockResolvedValue(["/Users/me/Docs/spec.pdf"]);
+    const ref = createRef<SourceHandle>();
+    const { container } = render(
+      <SourceEditor
+        ref={ref}
+        defaultValue=""
+        path="/tmp/note.md"
+        kind="markdown"
+        onEdited={() => {}}
+      />,
+    );
+    await waitFor(() => expect(ref.current?.getText()).toBe(""));
+
+    const pdf = new File(["pdf"], "spec.pdf", { type: "application/pdf" });
+    const event = dispatchPaste(container, {
+      imageFiles: [],
+      items: [{ kind: "file", type: "application/pdf", getAsFile: () => pdf }],
+      files: [pdf],
+      types: ["Files"],
+      getData: () => "",
+    } as unknown as DataTransfer);
+
+    expect(event.defaultPrevented).toBe(true);
+    await waitFor(() => expect(ref.current?.getText()).toBe("/Users/me/Docs/spec.pdf"));
+    expect(mocks.imageFromNativeClipboard).not.toHaveBeenCalled();
     expect(mocks.uploadDocImage).not.toHaveBeenCalled();
   });
 });

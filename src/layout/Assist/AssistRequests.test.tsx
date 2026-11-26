@@ -11,10 +11,11 @@ import { describeAction, performAction } from "./actions";
 
 vi.mock("../../ipc/assist", () => ({ assistClaim: vi.fn(), assistGet: vi.fn(), assistMark: vi.fn(), assistRun: vi.fn(), assistRunAll: vi.fn(), assistSkipAll: vi.fn(), assistPending: vi.fn() }));
 const requests: ((request: { id: string; sessionId: string; noConfirm?: boolean }) => void)[] = [];
+const changes: ((change: { id: string; sessionId: string; knowledgeChanged?: boolean; killedSessions?: string[] }) => void)[] = [];
 vi.mock("../../ipc/events", async importOriginal => ({
   ...await importOriginal<typeof import("../../ipc/events")>(),
   onAssistRequest: (cb: (request: { id: string; sessionId: string; noConfirm?: boolean }) => void) => { requests.push(cb); return Promise.resolve(() => {}); },
-  onAssistChanged: () => Promise.resolve(() => {}),
+  onAssistChanged: (cb: (change: { id: string; sessionId: string; knowledgeChanged?: boolean; killedSessions?: string[] }) => void) => { changes.push(cb); return Promise.resolve(() => {}); },
 }));
 
 const action = (fields: Partial<AssistAction> & { domain: string; kind: string }): AssistAction => ({ status: "pending", backend: false, ...fields });
@@ -38,6 +39,7 @@ describe("action cards", () => {
     action({ domain: "projects", kind: "openSession", sessionName: "s", where: "p / s" }), action({ domain: "projects", kind: "revealProject", projectName: "p" }),
     action({ domain: "projects", kind: "rename", currentName: "a", name: "b", where: "p / a" }), action({ domain: "projects", kind: "move", nodeName: "s", to: "p / g" }),
     action({ domain: "projects", kind: "sort", by: "name", where: "p / g" }), action({ domain: "projects", kind: "sort", by: "order", where: "p" }),
+    action({ domain: "projects", kind: "killProcess", nodeName: "s", where: "p / s" }),
     action({ domain: "projects", kind: "archiveSession", nodeName: "s", where: "p / s" }), action({ domain: "projects", kind: "deleteNode", nodeName: "a", where: "p / a" }),
     action({ domain: "files", kind: "openFile", path: "/f/a" }), action({ domain: "files", kind: "reveal", path: "/f/a" }),
     ...["openVault", "search", "openNote", "createNote", "createFolder", "moveNote", "deleteNote", "favorite", "importFiles", "registerVault", "createVault", "openCollections"]
@@ -58,6 +60,10 @@ describe("action cards", () => {
     expect(card.title).toBe("Set the theme to Dark");
     expect(describeAction(action({ domain: "settings", kind: "openSettings", page: "agents" }), t).details).toEqual([t("settings.catAgents")]);
     expect(describeAction(action({ domain: "projects", kind: "deleteNode", nodeName: "Work" }), t).danger).toBe(true);
+    const killCard = describeAction(action({ domain: "projects", kind: "killProcess", nodeName: "Worker", where: "Course / Worker" }), t);
+    expect(killCard.danger).toBe(true);
+    expect(killCard.title).toBe(t("assist.projects.killProcess", "Worker"));
+    expect(killCard.details).toEqual(["Course / Worker", t("assist.projects.killProcessNote")]);
     expect(describeAction(action({ domain: "projects", kind: "importProject", candidates: ["/p/shop"] }), t).title).toBe(t("assist.projects.importFolder", "/p/shop"));
   });
 
@@ -221,5 +227,16 @@ describe("requests in the session view", () => {
     await waitFor(() => expect(openSession).toHaveBeenCalledWith("s1"));
     expect(assistMark).not.toHaveBeenCalled();
     expect(new URLSearchParams(location.search).get("settings")).toBeNull();
+  });
+
+  it("closes killed sessions and marks their runtime exited when assist://changed reports killedSessions", async () => {
+    const setRuntime = vi.fn();
+    const closeSession = vi.fn();
+    useTermStore.setState({ setRuntime, closeSession });
+    render(<AssistRequestListener />);
+    await waitFor(() => expect(changes.length).toBeGreaterThan(0));
+    act(() => changes[changes.length - 1]({ id: "plan-1", sessionId: "s1", killedSessions: ["s2"] }));
+    expect(setRuntime).toHaveBeenCalledWith("s2", { status: "exited", pid: undefined });
+    expect(closeSession).toHaveBeenCalledWith("s2");
   });
 });

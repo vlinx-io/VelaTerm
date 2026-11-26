@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { Project, Session, SessionRuntime } from "../../types";
-import { arrangeProjectsInCollections, sectionEntries } from "./projectCollectionLayout";
+import type { Group, Project, Session, SessionRuntime } from "../../types";
+import { arrangeProjectsInCollections, sectionEntries, sectionNodes } from "./projectCollectionLayout";
 import { resolveProjectDrop } from "./projectCollectionDrop";
 import { moveToCollectionItem } from "./projectCollectionMenu";
 import { t } from "../../i18n";
 import {
-  liveAgentIds, liveTerminalIds, parseRailSection, RAIL_SECTIONS, sectionCollection, sessionTypeOf, SYSTEM_CHAT, SYSTEM_PROJECTS,
+  liveAgentIds, liveTerminalIds, parseRailSection, pendingCountsBySection, RAIL_SECTIONS, sectionCollection, sessionTypeOf, SYSTEM_CHAT, SYSTEM_PROJECTS,
   SYSTEM_TASKS,
 } from "./systemCollections";
 
@@ -76,5 +76,101 @@ describe("fixed collections", () => {
       { e: session("e") }, runtimes);
     expect(terminals).toEqual(["a", "b", "e"]);
     expect(liveAgentIds(terminals, runtimes)).toEqual(["b", "e"]);
+  });
+
+  it("scopes projects, groups, and sessions to the active sidebar section", () => {
+    const col = project("col-1", SYSTEM_PROJECTS, "");
+    const nested = project("nested-p", "col-1");
+    const projectsList = [projects, tasks, chat, col, nested, loose];
+    const groupsList: Group[] = [
+      { id: "g-proj", projectId: "nested-p", parentGroupId: null, name: "gp", sortOrder: 0, collapsed: false, createdAt: 0 },
+      { id: "g-task", projectId: SYSTEM_TASKS, parentGroupId: null, name: "gt", sortOrder: 0, collapsed: false, createdAt: 0 },
+      { id: "g-chat", projectId: SYSTEM_CHAT, parentGroupId: null, name: "gc", sortOrder: 0, collapsed: false, createdAt: 0 },
+    ];
+    const mkSession = (id: string, projectId: string, kind: Session["kind"] = "claude"): Session =>
+      ({ id, projectId, groupId: null, name: id, kind, sortOrder: 0, collapsed: false, createdAt: 0 }) as Session;
+    const sessionsList = [
+      mkSession("s-proj-nested", "nested-p"),
+      mkSession("s-proj-loose", "loose", "terminal"),
+      mkSession("s-task", SYSTEM_TASKS),
+      mkSession("s-chat", SYSTEM_CHAT),
+    ];
+    const drafts: Record<string, Session> = {
+      "s-draft": mkSession("s-draft", "", "terminal"),
+    };
+    const runtimes: Record<string, SessionRuntime> = {
+      "s-proj-loose": { status: "running", agent: "claude", agentState: "working" },
+      "s-draft": { status: "running" },
+      "s-task": { status: "running", agent: "codex", agentState: "working" },
+    };
+
+    const projScope = sectionNodes("projects", projectsList, groupsList, sessionsList, drafts, runtimes);
+    expect(projScope.projects.map((p) => p.id)).toEqual(["col-1", "nested-p", "loose"]);
+    expect(projScope.groups.map((g) => g.id)).toEqual(["g-proj"]);
+    expect(projScope.sessions.map((s) => s.id)).toEqual(["s-proj-nested", "s-proj-loose"]);
+
+    const taskScope = sectionNodes("tasks", projectsList, groupsList, sessionsList, drafts, runtimes);
+    expect(taskScope.projects).toEqual([]);
+    expect(taskScope.groups.map((g) => g.id)).toEqual(["g-task"]);
+    expect(taskScope.sessions.map((s) => s.id)).toEqual(["s-task"]);
+
+    const chatScope = sectionNodes("chat", projectsList, groupsList, sessionsList, drafts, runtimes);
+    expect(chatScope.projects).toEqual([]);
+    expect(chatScope.groups.map((g) => g.id)).toEqual(["g-chat"]);
+    expect(chatScope.sessions.map((s) => s.id)).toEqual(["s-chat"]);
+
+    const termScope = sectionNodes("terminals", projectsList, groupsList, sessionsList, drafts, runtimes);
+    expect(termScope.projects).toEqual([]);
+    expect(termScope.groups).toEqual([]);
+    expect(termScope.sessions.map((s) => s.id)).toEqual(["s-proj-loose", "s-draft"]);
+
+    // Legacy single-tree layout (no SYSTEM_PROJECTS) keeps everything in scope.
+    const legacy = sectionNodes("projects", [nested, loose], groupsList, sessionsList, drafts, runtimes);
+    expect(legacy.projects.map((p) => p.id)).toEqual(["nested-p", "loose"]);
+    expect(legacy.groups.map((g) => g.id)).toEqual(["g-proj", "g-task", "g-chat"]);
+    expect(legacy.sessions.map((s) => s.id)).toEqual(["s-proj-nested", "s-proj-loose", "s-task", "s-chat"]);
+  });
+
+  it("counts pending (asking or unread) sessions per activity bar section", () => {
+    const mk = (
+      id: string,
+      projectId: string,
+      kind: Session["kind"] = "claude",
+      archivedAt: number | null = null,
+    ) => ({ id, projectId, kind, name: id, archivedAt }) as Session;
+    const sessions = [
+      mk("p-ask", "loose"),
+      mk("p-unread", SYSTEM_PROJECTS),
+      mk("p-viewed", "loose"),
+      mk("p-work", "loose"),
+      mk("p-term", "loose", "terminal"),
+      mk("t-ask", SYSTEM_TASKS),
+      mk("t-unread", SYSTEM_TASKS),
+      mk("t-archived", SYSTEM_TASKS, "claude", 12345),
+      mk("c-unread", SYSTEM_CHAT),
+    ];
+    const runtimes: Record<string, SessionRuntime> = {
+      "p-ask": { status: "running", agent: "claude", agentState: "asking" },
+      "p-unread": { status: "running", agent: "claude", agentState: "waiting" },
+      "p-viewed": { status: "running", agent: "claude", agentState: "waiting" },
+      "p-work": { status: "running", agent: "claude", agentState: "working" },
+      "p-term": { status: "running", agent: "codex", agentState: "asking" },
+      "t-ask": { status: "running", agent: "claude", agentState: "asking" },
+      "t-unread": { status: "idle" },
+      "t-archived": { status: "running", agent: "claude", agentState: "asking" },
+      "c-unread": { status: "running", agent: "claude", agentState: "background" },
+    };
+    const notifications = {
+      "p-unread": 1,
+      "t-unread": 2,
+      "c-unread": 3,
+      "t-archived": 4,
+    };
+
+    expect(pendingCountsBySection(sessions, runtimes, notifications)).toEqual({
+      projects: 3, // p-ask, p-unread, p-term
+      tasks: 2, // t-ask, t-unread (t-archived excluded)
+      chat: 1, // c-unread
+    });
   });
 });

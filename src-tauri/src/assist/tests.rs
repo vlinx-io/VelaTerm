@@ -49,8 +49,36 @@ impl Fixture {
             .collect();
         (project.id, sessions)
     }
+    /// Starts a real shell PTY behind a session so killProcess tests exercise live process termination.
+    fn start_pty(&self, session_id: &str) {
+        #[cfg(unix)]
+        let shell = Some("/bin/sh".to_string());
+        #[cfg(windows)]
+        let shell = None;
+        self.app.pty().spawn(
+            self.app.clone(),
+            session_id.to_string(),
+            SessionKind::Terminal,
+            shell,
+            None,
+            None,
+            80,
+            24,
+            crate::agent::server::HookEndpoint { port: 0, token: "test".to_string() },
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+            crate::pty::manager::DESKTOP_SOURCE,
+            false,
+            Box::new(|_| true),
+        ).unwrap();
+        assert!(self.app.pty().is_running(session_id));
+    }
 }
-impl Drop for Fixture { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.dir); } }
+impl Drop for Fixture { fn drop(&mut self) { self.app.pty().kill_all(); let _ = std::fs::remove_dir_all(&self.dir); } }
 
 fn reasons(refused: &Value) -> Vec<String> {
     assert_eq!(refused["accepted"], false, "{refused}");
@@ -442,4 +470,95 @@ fn no_confirm_window_actions_claim_once_and_mark_done() {
     // Regular plans without noConfirm cannot be claimed.
     let normal = fixture.submit(json!([{"domain": "settings", "kind": "openSettings", "page": "terminal"}]));
     assert!(fixture.command("assist_claim", json!({"id": normal["id"], "index": 0})).unwrap_err().contains("Confirm"));
+}
+
+#[test]
+fn kill_process_validates_target_and_running_state() {
+    let _state_guard = crate::session_state::test_lock();
+    let fixture = Fixture::new();
+    let (project, sessions) = fixture.course();
+    let browser = {
+        let conn = fixture.app.db().conn.lock().unwrap();
+        repo::create_session(&conn, &project, None, "Docs", SessionKind::Browser, None, None, None, None, None).unwrap().id
+    };
+    let refused = fixture.submit(json!([
+        {"kind": "killProcess", "id": project},
+        {"kind": "killProcess", "id": browser},
+        {"kind": "killProcess", "id": sessions[0]},
+    ]));
+    assert_eq!(reasons(&refused), ["wrongKind", "wrongKind", "notRunning"]);
+
+    fixture.start_pty(&sessions[0]);
+    // Killing twice in one request fails on the second action because the in-memory tree marks it stopped.
+    let duplicate = fixture.submit(json!([
+        {"kind": "killProcess", "id": sessions[0]},
+        {"kind": "killProcess", "sessionId": sessions[0]},
+    ]));
+    assert_eq!(reasons(&duplicate), ["notRunning"]);
+
+    // Killing keeps the session in the sidebar, so archiving it right after validates cleanly.
+    let chained = fixture.submit(json!([
+        {"kind": "killProcess", "id": sessions[0]},
+        {"kind": "archiveSession", "id": sessions[0]},
+    ]));
+    assert_eq!(chained["actions"][0]["kind"], "killProcess");
+    assert_eq!(chained["actions"][0]["backend"], true);
+    assert_eq!(chained["actions"][0]["nodeName"], "Lesson 10 make the Taiwan edition");
+    assert_eq!(chained["actions"][1]["kind"], "archiveSession");
+}
+
+#[test]
+fn kill_process_stops_running_pty_and_reports_killed_sessions() {
+    let _state_guard = crate::session_state::test_lock();
+    let fixture = Fixture::new();
+    let (_, sessions) = fixture.course();
+    fixture.start_pty(&sessions[0]);
+    fixture.start_pty(&sessions[1]);
+
+    // `vapp session list` exposes live status so agents can see which sessions are running.
+    let listed = list(&fixture.app, Some("Course"), "").unwrap();
+    let entries = listed["sessions"].as_array().unwrap();
+    assert_eq!(entries.iter().find(|s| s["id"] == sessions[0]).unwrap()["alive"], true);
+    assert_eq!(entries.iter().find(|s| s["id"] == sessions[2]).unwrap()["alive"], false);
+
+    let changed_events = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let changed_sink = Arc::clone(&changed_events);
+    let _changed_listener = fixture.app.listen(CHANGED_EVENT, move |payload| {
+        changed_sink.lock().unwrap().push(serde_json::from_str(payload).unwrap());
+    });
+    let killed_events = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let killed_sink = Arc::clone(&killed_events);
+    let _killed_listener = fixture.app.listen(&format!("pty://killed/{}", sessions[0]), move |payload| {
+        killed_sink.lock().unwrap().push(serde_json::from_str(payload).unwrap());
+    });
+
+    // Default flow waits for confirmation before killing.
+    let plan = fixture.submit(json!([
+        {"kind": "killProcess", "id": sessions[0]},
+        {"domain": "settings", "kind": "openSettings", "page": "terminal"},
+    ]));
+    assert!(fixture.app.pty().is_running(&sessions[0]));
+    let done = fixture.run_all(&plan, &[0]);
+    assert_eq!(done["actions"][0]["status"], "done");
+    assert!(!fixture.app.pty().is_running(&sessions[0]));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while killed_events.lock().unwrap().is_empty() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let killed = killed_events.lock().unwrap();
+    assert_eq!(killed.len(), 1);
+    assert_eq!(killed[0]["source"], ASSIST_SOURCE);
+    assert_eq!(killed[0]["reason"], "close");
+    assert_eq!(changed_events.lock().unwrap().last().unwrap()["killedSessions"], json!([sessions[0]]));
+
+    // Subsequent decisions on other actions of the same plan do not re-emit previously killed sessions.
+    fixture.command("assist_mark", json!({"id": plan["id"], "index": 1, "status": "dismissed"})).unwrap();
+    assert!(changed_events.lock().unwrap().last().unwrap()["killedSessions"].is_null());
+
+    // `--yes` (`no_confirm`) terminates immediately and emits killedSessions.
+    let immediate = submit(&fixture.app, &fixture.session(), "Stop session", &json!([{"kind": "killProcess", "id": sessions[1]}]), true).unwrap();
+    assert_eq!(immediate["settled"], true);
+    assert_eq!(immediate["actions"][0]["status"], "done");
+    assert!(!fixture.app.pty().is_running(&sessions[1]));
+    assert_eq!(changed_events.lock().unwrap().last().unwrap()["killedSessions"], json!([sessions[1]]));
 }

@@ -47,6 +47,12 @@ export function supportsChatEngine(kind: SessionKind): boolean {
   return CHAT_ENGINE_KINDS.includes(kind);
 }
 
+/** Agent kinds that support the Plan/Execute workflow protocol. */
+export const PLAN_EXECUTE_KINDS: SessionKind[] = ["claude", "codex", "antigravity", "opencode", "pi", "omp"];
+export function supportsPlanExecute(kind: SessionKind): boolean {
+  return PLAN_EXECUTE_KINDS.includes(kind);
+}
+
 /** Whether the agent has a terminal interface. DeepSeek runs through OpenCode but is offered only as a
  * conversation, and VelaTerm drives ZCode only through the protocol server of the agent its desktop
  * release bundles, so both only run as a conversation. */
@@ -107,8 +113,11 @@ export type AgentState = "working" | "asking" | "waiting" | "background";
 /** Every agent state, in the order status filters and counts list them. */
 export const AGENT_STATES: readonly AgentState[] = ["working", "asking", "waiting", "background"];
 
-/** Every value a status indicator may display: lifecycle ∪ agent activity states ∪ unavailable hook state. */
-export type DisplayStatus = SessionStatus | AgentState | "unavailable";
+/** Whether an active workflow session is waiting on another workflow session rather than the user. */
+export type WorkflowWait = "parent" | "children";
+
+/** Every value a status indicator may display: lifecycle ∪ agent activity states ∪ workflow wait ∪ unavailable hook state. */
+export type DisplayStatus = SessionStatus | AgentState | "awaiting_parent" | "awaiting_children" | "unavailable";
 
 /** Node kind used by rename, delete, and move operations. */
 export type NodeKind = "project" | "group" | "session";
@@ -272,6 +281,8 @@ export interface SessionRuntime {
   agent?: AgentKind | null;
   /** Agent activity state; meaningless when agent is absent. */
   agentState?: AgentState | null;
+  /** Whether an active workflow session waits on a parent or child session instead of the user. */
+  workflowWait?: WorkflowWait | null;
   /**
    * Activity source selected by the backend at launch. `chat` marks a conversation-view session, whose states
    * come from the agent protocol. For a Codex terminal, modern Codex is `hooks` and must never accept
@@ -368,7 +379,11 @@ export interface SessionRuntime {
 export function effectiveStatus(rt: SessionRuntime | undefined): DisplayStatus {
   if (!rt) return "idle";
   if (rt.status === "exited" || rt.status === "error") return rt.status;
-  if (rt.agent && rt.agentState) return rt.agentState;
+  if (rt.agent && rt.agentState) {
+    if (rt.agentState === "waiting" && rt.workflowWait === "parent") return "awaiting_parent";
+    if (rt.agentState === "waiting" && rt.workflowWait === "children") return "awaiting_children";
+    return rt.agentState;
+  }
   if (
     rt.agent === "codex" &&
     rt.agentStateSource === "hooks" &&

@@ -35,6 +35,7 @@ const assist: typeof en = {
   "assist.reason.notFile": "这是文件夹，不是文件。",
   "assist.reason.unavailable": "应用的这部分功能暂时不可用。",
   "assist.reason.builtIn": "内置集合不能重命名、移动或删除。",
+  "assist.reason.notRunning": "该会话当前没有运行中的进程。",
 
   "assist.field.name": "名称",
   "assist.field.location": "位置",
@@ -70,6 +71,8 @@ const assist: typeof en = {
   "assist.projects.move": (name: string, to: string) => `将“${name}”移到“${to}”`,
   "assist.projects.sortByName": (where: string) => `按名称排列“${where}”中的条目`,
   "assist.projects.sortByOrder": (where: string) => `重新排列“${where}”中的条目`,
+  "assist.projects.killProcess": (name: string) => `结束会话“${name}”的进程`,
+  "assist.projects.killProcessNote": "当前任务将中断，已保存的会话记录和文件会保留。",
   "assist.projects.archiveSession": (name: string) => `归档会话“${name}”`,
   "assist.projects.deleteNode": (name: string) => `从侧栏移除“${name}”`,
   "assist.projects.deleteKeepsFiles": "磁盘上的文件会保留。",

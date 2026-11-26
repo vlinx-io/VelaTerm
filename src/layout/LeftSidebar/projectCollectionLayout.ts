@@ -1,7 +1,14 @@
 //! Flatten collection membership independently of each project's own groups and sessions.
 
-import { collectionsFirst, isVirtualProject, type Project } from "../../types";
-import { isSystemCollection, SYSTEM_PROJECTS, systemOrder } from "./systemCollections";
+import { collectionsFirst, isVirtualProject, type Group, type Project, type Session, type SessionRuntime } from "../../types";
+import {
+  isSystemCollection,
+  liveTerminalIds,
+  sectionCollection,
+  SYSTEM_PROJECTS,
+  systemOrder,
+  type RailSection,
+} from "./systemCollections";
 
 export interface ProjectListEntry {
   project: Project;
@@ -65,4 +72,55 @@ export function sectionEntries(entries: ProjectListEntry[], rootId: string): Pro
   let end = start + 1;
   while (end < entries.length && entries[end].indent > 0) end++;
   return entries.slice(start, end).map(e => ({ ...e, indent: e.indent - 1 }));
+}
+
+export interface SectionNodes {
+  projects: Project[];
+  groups: Group[];
+  sessions: Session[];
+}
+
+/**
+ * Resolve the projects, groups, and sessions belonging to one sidebar section so filter counts reflect the
+ * active view rather than the whole workspace. Legacy single-tree layouts (without fixed system collections)
+ * include everything; the Terminals runtime view includes running terminals (including drafts).
+ */
+export function sectionNodes(
+  section: RailSection,
+  projects: Project[],
+  groups: Group[],
+  sessions: Session[],
+  ephemeralSessions: Record<string, Session> = {},
+  runtimes: Record<string, SessionRuntime> = {},
+): SectionNodes {
+  const fixedLayout = projects.some((p) => p.id === SYSTEM_PROJECTS);
+  if (!fixedLayout) {
+    return { projects, groups, sessions };
+  }
+  if (section === "terminals") {
+    const byId = new Map(sessions.map((s) => [s.id, s]));
+    const seen = new Set<string>();
+    const live: Session[] = [];
+    for (const id of liveTerminalIds(sessions, ephemeralSessions, runtimes)) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const session = byId.get(id) ?? ephemeralSessions[id];
+      if (session) live.push(session);
+    }
+    return { projects: [], groups: [], sessions: live };
+  }
+  const rootId = sectionCollection(section);
+  if (!rootId) {
+    return { projects: [], groups: [], sessions: [] };
+  }
+  const entries = sectionEntries(
+    arrangeProjectsInCollections(projects, () => true),
+    rootId,
+  );
+  const projectIds = new Set(entries.map((e) => e.project.id));
+  return {
+    projects: entries.filter((e) => e.indent >= 0).map((e) => e.project),
+    groups: groups.filter((g) => projectIds.has(g.projectId)),
+    sessions: sessions.filter((s) => projectIds.has(s.projectId)),
+  };
 }

@@ -200,6 +200,97 @@ pub fn options(app: &AppCtx, id: &str) -> Result<Value, String> {
         "sessionName":session.name}))
 }
 
+/// Return the confirmation defaults and resolved target sessions for a batch rename without starting any task.
+pub fn options_many(app: &AppCtx, ids: &[String]) -> Result<Value, String> {
+    let mut seen = HashSet::new();
+    let unique: Vec<&str> = ids.iter()
+        .map(|id| id.trim())
+        .filter(|id| !id.is_empty() && seen.insert(*id))
+        .collect();
+    if unique.is_empty() { return Err("session_title:unavailable".into()); }
+    let (sessions, defaults) = {
+        let conn = app.db().conn.lock().unwrap();
+        let mut sessions = Vec::new();
+        for id in unique {
+            if let Some(session) = repo::get_session(&conn, id)? {
+                sessions.push(session);
+            }
+        }
+        if sessions.is_empty() { return Err("session_title:unavailable".into()); }
+        let defaults = repo::get_app_settings(&conn)?.remove("vlx-settings")
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok()).unwrap_or_default();
+        (sessions, defaults)
+    };
+    let single = (sessions.len() == 1).then(|| &sessions[0]);
+    let mut available_kinds = Vec::new();
+    let agents: Vec<_> = super::launch_options::catalog().into_iter()
+        .filter(|spec| AGENTS.contains(&spec.id)).map(|spec| {
+            let path = single
+                .filter(|s| s.kind == spec.id)
+                .and_then(|s| s.agent_path.as_deref());
+            let available = available_binary_with_settings(spec.id, path, &defaults).is_some();
+            if available { available_kinds.push(spec.id); }
+            let (_, selection) = if let Some(session) = single {
+                task_selection_with_defaults(app, session, spec.id, &defaults)?
+            } else {
+                default_task_selection(app, spec.id, &defaults)?
+            };
+            let mut value = json!(spec);
+            value["available"] = json!(available);
+            value["model"] = json!(selection.model.unwrap_or_default());
+            value["effort"] = json!(selection.effort.unwrap_or_default());
+            value["modelSelectable"] = json!(model_selectable(spec.id));
+            Ok(value)
+        }).collect::<Result<_, String>>()?;
+    let default_agent = pick_batch_default_agent(&sessions, &available_kinds);
+    let items: Vec<_> = sessions.iter().map(|s| json!({
+        "id": s.id,
+        "name": s.name,
+        "kind": s.kind,
+    })).collect();
+    Ok(json!({
+        "agents": agents,
+        "agent": default_agent.map(SessionKind::as_str).unwrap_or(""),
+        "sessionName": sessions[0].name,
+        "sessions": items,
+    }))
+}
+
+fn default_task_selection(
+    app: &AppCtx,
+    kind: SessionKind,
+    defaults: &Value,
+) -> Result<(Option<String>, super::session_settings::Selection), String> {
+    let raw_args = defaults["agentDefaults"][kind.as_str()]["args"].as_str();
+    let mut selection = super::spawn_requests::default_selection(&app.db().conn.lock().unwrap(), kind, raw_args)?;
+    if kind == SessionKind::Deepseek {
+        selection.model = Some(super::chat::deepseek_models::normalize_model(selection.model.as_deref()));
+        selection.effort = super::chat::deepseek_models::normalize_effort(selection.effort.as_deref());
+    }
+    Ok((raw_args.map(str::to_owned), selection))
+}
+
+fn pick_batch_default_agent(sessions: &[Session], available: &[SessionKind]) -> Option<SessionKind> {
+    // Prefer the most frequent supported and installed kind among target sessions; ties keep first seen.
+    let mut counts: Vec<(SessionKind, usize, usize)> = Vec::new();
+    for (index, session) in sessions.iter().enumerate() {
+        if !AGENTS.contains(&session.kind) { continue; }
+        if let Some(entry) = counts.iter_mut().find(|(kind, _, _)| *kind == session.kind) {
+            entry.1 += 1;
+        } else {
+            counts.push((session.kind, 1, index));
+        }
+    }
+    counts.iter()
+        .filter(|(kind, _, _)| available.contains(kind))
+        .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.2.cmp(&a.2)))
+        .map(|(kind, _, _)| *kind)
+        .or_else(|| AGENTS.iter().copied().find(|kind| available.contains(kind)))
+        .or_else(|| counts.iter()
+            .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.2.cmp(&a.2)))
+            .map(|(kind, _, _)| *kind))
+}
+
 fn task_selection(app: &AppCtx, session: &Session, kind: SessionKind) -> Result<(Option<String>, super::session_settings::Selection), String> {
     let defaults = {
         let conn = app.db().conn.lock().unwrap();
@@ -1432,5 +1523,45 @@ mod tests {
         assert_eq!(title_error_code(&HeadlessError::Cancelled), "cancelled");
         assert_eq!(title_error_code(&HeadlessError::PromptTooLarge { limit: 10, actual: 20 }), "too_large");
         assert_eq!(title_error_code(&HeadlessError::InvalidSelection("bad".into())), "invalid_selection");
+    }
+
+    #[test]
+    fn options_many_resolves_unique_existing_sessions_and_picks_default_agent() {
+        let (dir, app, s1) = fixture();
+        let bin = agent_bin(&dir);
+        let (s2, s3) = {
+            let conn = app.db().conn.lock().unwrap();
+            repo::set_app_settings(&conn, &HashMap::from([(
+                "vlx-settings".to_string(),
+                json!({
+                    "agentDefaults": { "codex": { "execPath": bin }, "claude": { "execPath": bin } }
+                }).to_string(),
+            )])).unwrap();
+            let s2 = repo::create_session(&conn, &s1.project_id, None, "Second", SessionKind::Codex,
+                None, None, None, None, None).unwrap();
+            let s3 = repo::create_session(&conn, &s1.project_id, None, "Third", SessionKind::Codex,
+                None, None, None, None, None).unwrap();
+            (s2, s3)
+        };
+
+        assert_eq!(options_many(&app, &[]).unwrap_err(), "session_title:unavailable");
+        assert_eq!(options_many(&app, &["missing".to_string()]).unwrap_err(), "session_title:unavailable");
+
+        let value = options_many(&app, &[
+            s1.id.clone(),
+            "missing".to_string(),
+            s2.id.clone(),
+            s1.id.clone(),
+            s3.id.clone(),
+        ]).unwrap();
+        let sessions = value["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 3);
+        assert_eq!(sessions[0]["id"], s1.id);
+        assert_eq!(sessions[0]["name"], "Original");
+        assert_eq!(sessions[1]["id"], s2.id);
+        assert_eq!(sessions[2]["id"], s3.id);
+        assert_eq!(value["sessionName"], "Original");
+        // Two Codex sessions outnumber one Claude session, so Codex is chosen as the batch default.
+        assert_eq!(value["agent"], "codex");
     }
 }

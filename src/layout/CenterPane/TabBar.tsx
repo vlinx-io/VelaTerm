@@ -5,13 +5,14 @@
 //! scratch terminals add inline renaming, and browser and task tabs expose close actions only. StatusBar
 //! lists background liveTabs.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ContextMenu, type MenuItem } from "../../components/ContextMenu";
 import Icons from "../../components/Icons";
 import { StatusIndicator } from "../../components/StatusIndicator";
 import { changesTitle } from "../../components/diff/changesTitle";
 import { useT } from "../../i18n";
 import { DOC_EXPORT_PDF_EVENT } from "../../hooks/useKeyboardShortcuts";
+import { stripControlChars, useCtrlCharGuard } from "../../hooks/textInputGuards";
 import { isTauri } from "../../ipc/transport";
 import { isShareSurface } from "../../ipc/shareBase";
 import { env } from "../../platform";
@@ -53,22 +54,6 @@ const TIP_MAX_VISIBLE = 4000; // Safety limit in milliseconds.
 
 // Custom dataTransfer type identifies internal tab drags and rejects external ones.
 const TAB_DRAG_MIME = "application/x-vlx-tab";
-
-/** Match sidebar rename fields: reject control characters that WebKit can insert at input boundaries. */
-const CTRL_CHARS_RE = /[\u0000-\u001F\u007F-\u009F]/g;
-const stripControlChars = (s: string) => s.replace(CTRL_CHARS_RE, "");
-
-function useCtrlCharGuard() {
-  return useCallback((el: HTMLInputElement | null) => {
-    if (!el) return;
-    const onBeforeInput = (ev: Event) => {
-      const data = (ev as InputEvent).data;
-      if (typeof data === "string" && data !== stripControlChars(data)) ev.preventDefault();
-    };
-    el.addEventListener("beforeinput", onBeforeInput);
-    return () => el.removeEventListener("beforeinput", onBeforeInput);
-  }, []);
-}
 
 export function TabBar() {
   const t = useT();

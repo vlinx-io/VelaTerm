@@ -105,12 +105,9 @@ fn unlinked_ancestors(root: &Path, leaf: &Path) -> bool {
     true
 }
 
-/// Resolve the candidate conversation `.db` path for `native_id`, honoring custom `--gemini-dir`
-/// and `--app-data-dir` / `--cli_dir_name` flags when present.
-pub fn resolve_conversation_db_path(native_id: &str, settings_args: &[String]) -> Option<PathBuf> {
-    if !crate::agent::antigravity::is_native_id(native_id) {
-        return None;
-    }
+/// Resolve candidate `(root, data_dir)` roots honoring custom `--gemini-dir`, `--app-data-dir`,
+/// and `--cli_dir_name` flags when present.
+fn resolve_data_dirs(settings_args: &[String]) -> Option<Vec<(PathBuf, PathBuf)>> {
     let mut gemini_dir: Option<PathBuf> = None;
     let mut app_data_dir: Option<String> = None;
     let mut cli_dir_name: Option<String> = None;
@@ -163,27 +160,34 @@ pub fn resolve_conversation_db_path(native_id: &str, settings_args: &[String]) -
     }
 
     let base_gemini = gemini_dir.or_else(|| crate::host::home_dir().map(|h| h.join(".gemini")))?;
-    let db_name = format!("{native_id}.db");
-    let mut candidates = Vec::new();
+    let mut dirs = Vec::new();
     if let Some(app_dir) = app_data_dir {
         let sub = app_dir.trim_start_matches(['/', '\\']);
-        candidates.push((base_gemini.clone(), base_gemini.join(sub).join("conversations").join(&db_name)));
+        dirs.push((base_gemini.clone(), base_gemini.join(sub)));
         let direct = PathBuf::from(&app_dir);
         if direct.is_absolute() {
-            candidates.push((direct.clone(), direct.join("conversations").join(&db_name)));
+            dirs.push((direct.clone(), direct));
         }
     }
     if let Some(cli_name) = cli_dir_name {
-        candidates.push((base_gemini.clone(), base_gemini.join(cli_name).join("conversations").join(&db_name)));
+        dirs.push((base_gemini.clone(), base_gemini.join(cli_name)));
     }
-    candidates.push((
-        base_gemini.clone(),
-        base_gemini.join("antigravity-cli").join("conversations").join(&db_name),
-    ));
-    candidates.push((
-        base_gemini.clone(),
-        base_gemini.join("antigravity-acp").join("conversations").join(&db_name),
-    ));
+    dirs.push((base_gemini.clone(), base_gemini.join("antigravity-cli")));
+    dirs.push((base_gemini.clone(), base_gemini.join("antigravity-acp")));
+    Some(dirs)
+}
+
+/// Resolve the candidate conversation `.db` path for `native_id`, honoring custom `--gemini-dir`
+/// and `--app-data-dir` / `--cli_dir_name` flags when present.
+pub fn resolve_conversation_db_path(native_id: &str, settings_args: &[String]) -> Option<PathBuf> {
+    if !crate::agent::antigravity::is_native_id(native_id) {
+        return None;
+    }
+    let db_name = format!("{native_id}.db");
+    let candidates: Vec<(PathBuf, PathBuf)> = resolve_data_dirs(settings_args)?
+        .into_iter()
+        .map(|(root, data_dir)| (root, data_dir.join("conversations").join(&db_name)))
+        .collect();
 
     for (root, candidate) in &candidates {
         if candidate.exists() {
@@ -194,6 +198,37 @@ pub fn resolve_conversation_db_path(native_id: &str, settings_args: &[String]) -
     }
     let (root, primary) = candidates.into_iter().next()?;
     unlinked_ancestors(&root, &primary).then_some(primary)
+}
+
+/// Whether Antigravity's local native recording (`.db` or `transcript_full.jsonl`) still exists on
+/// disk for `native_id`. Used to avoid overwriting a live conversation binding on transient errors.
+pub fn has_native_recording(native_id: &str, settings_args: &[String]) -> bool {
+    if !crate::agent::antigravity::is_native_id(native_id) {
+        return false;
+    }
+    let Some(dirs) = resolve_data_dirs(settings_args) else {
+        return false;
+    };
+    let db_name = format!("{native_id}.db");
+    for (root, data_dir) in &dirs {
+        let db = data_dir.join("conversations").join(&db_name);
+        if db.exists() && unlinked_ancestors(root, &db) && unlinked_file_identity(&db).is_some() {
+            return true;
+        }
+        let transcript = data_dir
+            .join("brain")
+            .join(native_id)
+            .join(".system_generated")
+            .join("logs")
+            .join("transcript_full.jsonl");
+        if transcript.exists()
+            && unlinked_ancestors(root, &transcript)
+            && unlinked_file_identity(&transcript).is_some()
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// Snapshot of a session's `steps` cursor taken right before `session/prompt` goes out.

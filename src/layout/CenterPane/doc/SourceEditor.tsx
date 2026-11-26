@@ -27,9 +27,14 @@ import { EMPTY_STATUS, type DocSearchControl, type SearchStatus } from "./docSea
 import { uploadDocImage } from "../../../ipc/transport";
 import { env } from "../../../platform";
 import {
+  capturePasteData,
+  isLocalDesktop,
+  resolveClipboardFiles,
+} from "../../../terminal/clipboardFiles";
+import { chatDropText } from "../../../terminal/dropPaths";
+import {
   extOf,
   imageFromNativeClipboard,
-  imagesFromClipboard,
 } from "../../../terminal/imageInput";
 
 export interface SourceHandle {
@@ -295,23 +300,44 @@ export const SourceEditor = forwardRef<
         EditorView.domEventHandlers({
           paste(event, view) {
             if (readOnly) return false;
-            const files = imagesFromClipboard(event.clipboardData);
-            if (files.length) {
+            const captured = capturePasteData(event.clipboardData);
+            const local = isLocalDesktop();
+            if (captured.images.length && !local) {
               event.preventDefault();
-              void pasteImages(view, files);
+              void pasteImages(view, captured.images);
               return true;
             }
 
-            // Leave text/HTML paste to CodeMirror. When WKWebView exposes neither a File nor text for a
-            // pure image, read RGBA from the Tauri native clipboard and reuse the insertion path.
-            const hasText = Array.from(event.clipboardData?.types ?? []).some((type) =>
-              type.startsWith("text/"),
-            );
-            if (!hasText && env.isTauri) {
+            // Leave text/HTML paste to CodeMirror. On local desktop, check the OS file clipboard before
+            // reading native image data so copied non-image files insert paths instead of Finder's icon.
+            if (local && (captured.hasFileSignal || !captured.hasTextType)) {
               event.preventDefault();
-              void imageFromNativeClipboard()
-                .then((file) => pasteImages(view, [file]))
-                .catch(() => onImageClipboardUnavailableRef.current?.());
+              void (async () => {
+                const resolved = await resolveClipboardFiles(captured.images, {
+                  loadMissingImages: true,
+                }).catch(() => null);
+                if (resolved) {
+                  if (resolved.imageFiles.length) await pasteImages(view, resolved.imageFiles);
+                  if (resolved.otherPaths.length) {
+                    const insert = chatDropText(resolved.otherPaths);
+                    const { from, to } = view.state.selection.main;
+                    view.dispatch({
+                      changes: { from, to, insert },
+                      selection: { anchor: from + insert.length },
+                    });
+                  }
+                  return;
+                }
+                if (captured.images.length) {
+                  await pasteImages(view, captured.images);
+                  return;
+                }
+                if (!captured.hasTextType && env.isTauri) {
+                  await imageFromNativeClipboard()
+                    .then((file) => pasteImages(view, [file]))
+                    .catch(() => onImageClipboardUnavailableRef.current?.());
+                }
+              })();
               return true;
             }
             return false;

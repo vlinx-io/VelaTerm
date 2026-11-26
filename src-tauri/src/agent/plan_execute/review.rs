@@ -32,6 +32,7 @@ pub(super) fn ensure_reviewer(app: &AppCtx, run: &mut Run) -> Result<(), String>
         "UPDATE plan_execute_runs SET reviewer_id=?2 WHERE id=?1 OR id IN (SELECT run_id FROM plan_execute_tasks WHERE parent_id=?1)",
         params![root_id,reviewer.id]).map_err(|e|e.to_string())?;
     run.reviewer_id = Some(reviewer.id);
+    sync_session_states(app);
     Ok(())
 }
 
@@ -120,6 +121,7 @@ pub(super) fn integrated(app: &AppCtx, run: &mut Run) -> Result<(), String> {
         tx.commit().map_err(|e|e.to_string())?;
         wire
     };
+    sync_session_states(app);
     if run.review_status != "passed" {
         deliver(app,&get(app,&run.id)?,run.reviewer_id.as_deref().unwrap(),&wire,&id)?;
     }

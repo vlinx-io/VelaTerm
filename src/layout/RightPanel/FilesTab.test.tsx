@@ -591,3 +591,31 @@ describe("Files selection and clipboard", () => {
     });
   });
 });
+
+describe("Files missing root fallback", () => {
+  it("notifies onMissingRoot without showing an error banner when rootPath does not exist", async () => {
+    mocks.list.mockRejectedValueOnce(new Error("Failed to read directory: No such file or directory (os error 2)"));
+    const onMissingRoot = vi.fn();
+
+    const view = render(
+      <FilesTab rootPath="/repo/deleted-sub" rootName="Repo" onMissingRoot={onMissingRoot} />,
+    );
+    await act(async () => {});
+
+    expect(onMissingRoot).toHaveBeenCalledWith("/repo/deleted-sub");
+    expect(view.container.querySelector(".files-err")).toBeNull();
+  });
+
+  it("still shows permission errors on rootPath instead of triggering missing-root fallback", async () => {
+    mocks.list.mockRejectedValueOnce(new Error("Failed to read directory: Permission denied (os error 13)"));
+    const onMissingRoot = vi.fn();
+
+    const view = render(
+      <FilesTab rootPath="/repo/restricted" rootName="Repo" onMissingRoot={onMissingRoot} />,
+    );
+    await act(async () => {});
+
+    expect(onMissingRoot).not.toHaveBeenCalled();
+    expect(view.container.querySelector(".files-err")?.textContent).toContain("Permission denied");
+  });
+});

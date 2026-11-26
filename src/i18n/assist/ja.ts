@@ -35,6 +35,7 @@ const assist: typeof en = {
   "assist.reason.notFile": "これはファイルではなくフォルダーです。",
   "assist.reason.unavailable": "アプリのこの機能は現在利用できません。",
   "assist.reason.builtIn": "組み込みのコレクションは、名前の変更、移動、削除ができません。",
+  "assist.reason.notRunning": "このセッションで実行中のプロセスはありません。",
 
   "assist.field.name": "名前",
   "assist.field.location": "場所",
@@ -70,6 +71,8 @@ const assist: typeof en = {
   "assist.projects.move": (name: string, to: string) => `「${name}」を「${to}」に移動`,
   "assist.projects.sortByName": (where: string) => `「${where}」内の項目を名前順に並べ替え`,
   "assist.projects.sortByOrder": (where: string) => `「${where}」内の項目を並べ替え`,
+  "assist.projects.killProcess": (name: string) => `セッション「${name}」のプロセスを終了`,
+  "assist.projects.killProcessNote": "実行中のタスクは中断されます。保存済みの会話履歴とファイルは保持されます。",
   "assist.projects.archiveSession": (name: string) => `セッション「${name}」をアーカイブ`,
   "assist.projects.deleteNode": (name: string) => `サイドバーから「${name}」を削除`,
   "assist.projects.deleteKeepsFiles": "ディスク上のファイルはそのまま残ります。",

@@ -68,6 +68,8 @@ const state = {
   windowBadges: new Map(),
   /** Canonical absolute path from `vela <path>` that the renderer has not consumed yet. */
   pendingOpenProject: null,
+  /** One-shot flag set when the background service crashed and restarted, consumed by the reloaded window. */
+  pendingServiceRestartNotice: false,
 };
 
 /** Read `--open-project <path>` from Electron argv, resolving relative paths against the launching process's cwd. */
@@ -348,6 +350,7 @@ function scheduleRestart() {
   setTimeout(async () => {
     try {
       await startSidecar();
+      state.pendingServiceRestartNotice = true;
       if (state.win && !state.win.isDestroyed()) {
         await state.win.loadURL(`http://${LOOPBACK}:${state.port}/`);
       }
@@ -981,6 +984,12 @@ function registerNativeIpc() {
     const value = state.pendingOpenProject;
     state.pendingOpenProject = null;
     return value;
+  });
+  ipcMain.handle("vlx:service:takeRestartNotice", (event) => {
+    if (event.sender !== state.win?.webContents) return false;
+    const pending = state.pendingServiceRestartNotice;
+    state.pendingServiceRestartNotice = false;
+    return pending;
   });
   ipcMain.handle("vlx:account:remote", async (event, url) => {
     if (event.sender !== state.win?.webContents) throw new Error("Invalid Remote window request");

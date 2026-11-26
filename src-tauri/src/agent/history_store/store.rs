@@ -137,6 +137,9 @@ pub(super) struct State {
     pub branch_mark:Option<u64>,
     /// Antigravity tool calls awaiting their result step: (record start, call index) → (row, active).
     pub pending:BTreeMap<(u64,u64),(String,bool)>,
+    /// Antigravity step tracking across incremental scans: last step_index seen and reset segment counter.
+    pub agy_last_step:Option<u64>,
+    pub agy_segment:u64,
     pub append:HashSet<String>,
     pub calls:HashMap<Box<str>,Vec<Arc<str>>>,
     /// Rough size of everything above, for choosing which idle index to drop.
@@ -149,7 +152,7 @@ impl State {
             indexed:0,status:"partial".into(),error:None,failed_at:None,branch_revision:String::new(),bytes,blocks:Vec::new(),tail_block:None,stale:false,
             records:BTreeMap::new(),identities:HashMap::new(),rows:HashMap::new(),order:BTreeMap::new(),parts:HashMap::new(),record_rows:BTreeMap::new(),
             row_fields:HashMap::new(),fields:HashMap::new(),field_rows:HashMap::new(),files:HashMap::new(),superseded:HashMap::new(),kv:HashMap::new(),
-            branch_mark:None,pending:BTreeMap::new(),append:HashSet::new(),calls:HashMap::new(),memory:0}
+            branch_mark:None,pending:BTreeMap::new(),agy_last_step:None,agy_segment:0,append:HashSet::new(),calls:HashMap::new(),memory:0}
     }
 
     pub(super) fn row_id(&self,id:&str) -> Option<Arc<str>> {self.rows.get_key_value(id).map(|(key,_)|key.clone())}

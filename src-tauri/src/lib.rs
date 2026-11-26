@@ -1073,22 +1073,26 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 crate::diagnostic_warn!("failed to install opencode plugin (opencode status will degrade to screen detection): {e}");
             }
 
+            let app_ctx = AppCtx::Tauri(std::sync::Arc::new(app.handle().clone()));
+            app.manage(app_ctx.clone());
+
             // Start the random-port/token loopback hook service for agent status callbacks.
-            let hooks = HookServer::start(AppCtx::Tauri(app.handle().clone()))?;
+            let hooks = HookServer::start(app_ctx.clone())?;
             app.manage(hooks);
             // Track `vrun` commands by session, including ones that outlived the previous run of the app.
-            agent::runs::start(AppCtx::Tauri(app.handle().clone()));
-            let _ = mobile_push::start(&AppCtx::Tauri(app.handle().clone()));
-            let _ = web::public_relay::start(&AppCtx::Tauri(app.handle().clone()));
+            agent::runs::start(app_ctx.clone());
+            agent::plan_execute::sync_session_states(&app_ctx);
+            let _ = mobile_push::start(&app_ctx);
+            let _ = web::public_relay::start(&app_ctx);
 
             // Auto-start LAN remote access when the persisted enabled flag is set, restoring the state
             // from before the last quit (GitHub issue #15). On a thread because start() synchronously
             // preflights the port bind. Failures (e.g. port in use) are recorded on the WebServer and
             // shown in the remote-access panel — never fatal for app startup.
             {
-                let handle = app.handle().clone();
+                let ctx = app_ctx.clone();
                 std::thread::spawn(move || {
-                    match command_core::web_server_autostart(&AppCtx::Tauri(handle)) {
+                    match command_core::web_server_autostart(&ctx) {
                         Ok(Some(status)) => println!(
                             "remote access auto-started on port {}",
                             status.port.unwrap_or(0)
@@ -1105,8 +1109,8 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             // start() preflights the port bind. Failure only loses SSH mirror attachment, never startup.
             {
                 let handle = app.handle().clone();
+                let ctx = app_ctx.clone();
                 std::thread::spawn(move || {
-                    let ctx = AppCtx::Tauri(handle.clone());
                     let server = handle.state::<web::local_link::LocalLinkServer>();
                     match web::local_link::start(ctx, &server.0) {
                         Ok(port) => println!("local link listening on 127.0.0.1:{port}"),
@@ -1118,19 +1122,16 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
             // One background poller keeps the account-usage snapshot fresh for every session, window,
             // and browser client. It only touches providers whose account material exists on this
             // machine, and honours the usage settings live.
-            agent::usage_store::start(AppCtx::Tauri(app.handle().clone()));
-            {
-                let ctx = AppCtx::Tauri(app.handle().clone());
-                ctx.plugins().start(ctx.clone());
-            }
+            agent::usage_store::start(app_ctx.clone());
+            app_ctx.plugins().start(app_ctx.clone());
             // Sends the continuation prompt to conversations waiting for a usage limit to reset.
-            agent::chat::auto_continue::start(AppCtx::Tauri(app.handle().clone()));
-            agent::remote_model_catalog::start(AppCtx::Tauri(app.handle().clone()));
+            agent::chat::auto_continue::start(app_ctx.clone());
+            agent::remote_model_catalog::start(app_ctx.clone());
 
             // Refresh the search index in the background so the first search only pays for what changed
             // since startup.
-            search::warm_index(AppCtx::Tauri(app.handle().clone()));
-            memory::resume(&AppCtx::Tauri(app.handle().clone()));
+            search::warm_index(app_ctx.clone());
+            memory::resume(&app_ctx);
 
             // Watch the event loop for stalls. Start it last so the one-off cost of the setup above is not
             // reported as a freeze, and keep it running for the process lifetime.
@@ -1446,7 +1447,7 @@ fn run_with_builder(builder: tauri::Builder<tauri::Wry>, initial_open_project: O
                 // When enabled, remove only this process's pasted-image temp files on exit, preserving
                 // images used by other instances.
                 if let tauri::RunEvent::Exit = event {
-                    let ctx = host::AppCtx::Tauri(app.clone());
+                    let ctx = host::AppCtx::from_tauri(app);
                     ctx.plugins().shutdown_all();
                     ctx.chat().shutdown(&ctx);
                     diagnostics::record("INFO","runtime_stopping",serde_json::json!({}));
@@ -1692,7 +1693,7 @@ pub(crate) fn close_main_window(app: &tauri::AppHandle) {
     let app = app.clone();
     // Stopping agents waits for their processes to exit; keep that off the main thread.
     std::thread::spawn(move || {
-        let ctx = host::AppCtx::Tauri(app.clone());
+        let ctx = host::AppCtx::from_tauri(&app);
         ctx.chat().stop_all(&ctx);
         ctx.pty().kill_all();
         // Browser tabs are child views of the main window and go with it.
@@ -1796,7 +1797,7 @@ fn install_macos_dock_menu(app: &tauri::AppHandle) {
         }
     );
 
-    extern "C" fn application_dock_menu(
+    extern "C-unwind" fn application_dock_menu(
         _this: *mut AnyObject,
         _cmd: Sel,
         _sender: *mut AnyObject,
@@ -1837,7 +1838,7 @@ fn install_macos_dock_menu(app: &tauri::AppHandle) {
             let cls: *const AnyClass = msg_send![delegate, class];
             let imp: objc2::runtime::Imp = std::mem::transmute(
                 application_dock_menu
-                    as extern "C" fn(*mut AnyObject, Sel, *mut AnyObject) -> *mut AnyObject,
+                    as extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject) -> *mut AnyObject,
             );
             // Objective-C type encoding for `NSMenu *applicationDockMenu:(NSApplication *)`: "@@:@".
             let _ = objc2::ffi::class_addMethod(
@@ -2252,6 +2253,7 @@ fn serve_main(args: &ServeArgs) -> Result<(), String> {
     let ctx = AppCtx::Headless(std::sync::Arc::clone(&host));
     host.set_hooks(HookServer::start(ctx.clone())?);
     agent::runs::start(ctx.clone());
+    agent::plan_execute::sync_session_states(&ctx);
     ctx.plugins().start(ctx.clone());
     let _ = mobile_push::start(&ctx);
 

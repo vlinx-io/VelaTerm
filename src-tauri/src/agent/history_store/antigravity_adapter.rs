@@ -73,7 +73,18 @@ fn paths(record:&Record,root:&str) -> Vec<String> {
 pub(super) fn store(state:&mut State,scanned:&Scanned,record:&Record,refs:&Refs) -> Result<(),String> {
     let value=&record.value;let source=scanned.source;
     let Some(step)=value["step_index"].as_u64() else {return Ok(());};
-    let id=format!("native:{}",digest(format!("antigravity:{}:{step}",source.segment.native_id).as_bytes()));
+    // A process crash or re-initialization can restart step_index from 0 inside the same transcript.
+    // Advance the segment on any strict decrease so later rows append instead of overwriting earlier ones.
+    if state.agy_last_step.is_some_and(|prev|step<prev) {
+        state.agy_segment+=1;
+        for (_,(_,active)) in state.pending.range_mut(..(record.start,0)) {*active=false;}
+    }
+    state.agy_last_step=Some(step);
+    let id=if state.agy_segment==0 {
+        format!("native:{}",digest(format!("antigravity:{}:{step}",source.segment.native_id).as_bytes()))
+    } else {
+        format!("native:{}",digest(format!("antigravity:{}:s{}:{step}",source.segment.native_id,state.agy_segment).as_bytes()))
+    };
     let at=crate::agent::chat::history::parsed_at(value["created_at"].as_str());
     match value["type"].as_str() {
         Some("USER_INPUT")=>{
@@ -219,5 +230,45 @@ mod tests {
         assert!(rows[0]["output"].as_str().unwrap().contains("A1: 8080"));
         assert_eq!(rows[1]["name"],"Read");
         assert_eq!(rows[1]["output"],"port=8080");
+    }
+
+    #[test]
+    fn step_index_reset_preserves_earlier_rows_and_keeps_same_step_merges() {
+        let temp=super::super::tests::Temp::new();
+        let path=temp.0.join("native.jsonl");
+        let initial=[
+            json!({"type":"USER_INPUT","step_index":0,"content":"<USER_REQUEST>before reset</USER_REQUEST>"}),
+            json!({"type":"PLANNER_RESPONSE","step_index":1,"status":"RUNNING","content":"working"}),
+            json!({"type":"PLANNER_RESPONSE","step_index":1,"status":"DONE","content":"first answer"}),
+            json!({"type":"PLANNER_RESPONSE","step_index":2,"tool_calls":[{"name":"view_file","args":{"AbsolutePath":"/tmp/abandoned"}}]}),
+        ];
+        let raw=initial.iter().map(|record|record.to_string()+"\n").collect::<String>();
+        std::fs::write(&path,&raw).unwrap();
+        let store=super::super::store::Store::at(&temp.0).unwrap();
+        let source=store.register(SessionKind::Antigravity,super::super::source::Segment {path:path.clone(),native_id:"native".into(),end_byte:None,end_ordinal:None}).unwrap();
+        store.scan(SessionKind::Antigravity,&source,&std::sync::atomic::AtomicBool::new(false),false).unwrap();
+
+        // Append a reset segment starting back at step_index 0 and verify incremental rescan preserves both halves.
+        let after_reset=[
+            json!({"type":"USER_INPUT","step_index":0,"content":"<USER_REQUEST>after reset</USER_REQUEST>\n<USER_SETTINGS_CHANGE>Model Selection</USER_SETTINGS_CHANGE>"}),
+            json!({"type":"GENERIC","step_index":1,"status":"DONE","content":"unpaired result must not bind pre-reset call"}),
+            json!({"type":"PLANNER_RESPONSE","step_index":2,"status":"DONE","content":"second answer"}),
+        ];
+        let appended=raw+&after_reset.iter().map(|record|record.to_string()+"\n").collect::<String>();
+        std::fs::write(&path,appended).unwrap();
+        let source=store.register(SessionKind::Antigravity,super::super::source::Segment {path,native_id:"native".into(),end_byte:None,end_ordinal:None}).unwrap();
+        store.scan(SessionKind::Antigravity,&source,&std::sync::atomic::AtomicBool::new(false),false).unwrap();
+
+        let branch=super::super::api::Branch {store,sources:vec![source],generation:"branch".into(),kind:SessionKind::Antigravity,native_id:"native".into(),scope:"scope".into(),error:None,parent:None};
+        let page=branch.page(None,None,None).unwrap();
+        let rows=page["rows"].as_array().unwrap();
+        assert_eq!(rows.len(),5,"rows={rows:?}");
+        assert_eq!(rows[0]["text"],"before reset");
+        assert_eq!(rows[1]["text"],"first answer");
+        assert_eq!(rows[2]["name"],"Read");
+        assert!(rows[2].get("output").is_none(),"post-reset generic step must not pair with abandoned pre-reset tool call");
+        assert_eq!(rows[3]["text"],"after reset");
+        assert_eq!(rows[4]["text"],"second answer");
+        assert_ne!(rows[0]["id"],rows[3]["id"]);
     }
 }

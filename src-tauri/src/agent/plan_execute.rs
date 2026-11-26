@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
+pub mod bind;
 pub mod menu;
 pub mod split;
 mod query;
@@ -58,6 +59,11 @@ CREATE TABLE IF NOT EXISTS plan_execute_tasks (
  launch_pending INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS plan_execute_tasks_parent ON plan_execute_tasks(parent_id);
+CREATE TABLE IF NOT EXISTS plan_execute_bindings (
+ id TEXT PRIMARY KEY,
+ run_id TEXT NOT NULL REFERENCES plan_execute_runs(id) ON DELETE CASCADE,
+ request TEXT NOT NULL
+);
 ";
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -146,6 +152,7 @@ pub fn supported(kind: SessionKind) -> bool {
         kind,
         SessionKind::Claude
             | SessionKind::Codex
+            | SessionKind::Antigravity
             | SessionKind::Opencode
             | SessionKind::Pi
             | SessionKind::Omp
@@ -381,7 +388,7 @@ pub fn start(app: &AppCtx, request: &super::server::SpawnRequest) -> Result<Valu
     let root = repo::get_project_root(&app.db().conn.lock().unwrap(), &parent.project_id)?;
     let cwd = request.cwd.clone().or(parent.cwd.clone()).or(root);
     let planner = create_role_bound(app, &role_id(&id, "planner"), &parent.project_id,
-        parent.group_id.as_deref(), Some(&parent), request.title.as_deref().map_or("Plan · Execute", str::trim), &config.plan, cwd.as_deref(),
+        parent.group_id.as_deref(), Some(&parent), request.title.as_deref().map_or("Orchestration", str::trim), &config.plan, cwd.as_deref(),
         config.worktree_mode(request.worktree == Some(true)) != WorktreeMode::None, None, None,
         |tx, planner| {
             let task = format!("{}\n\nWorkflow ID: {id}\nRole: planner\nWorking directory: {}\n\nUser task:\n{}",
@@ -426,6 +433,7 @@ fn bootstrap(app: &AppCtx, run: &Run) -> Result<(), String> {
             params![run.id, state, summary],
         )
         .map_err(|e| e.to_string())?;
+    sync_session_states(app);
     Ok(())
 }
 
@@ -620,6 +628,7 @@ fn apply_action(app: &AppCtx, req: &Request) -> Result<Value, String> {
                 }
             }
         }
+        sync_session_states(app);
         app.emit("plan-execute://proposal",json!({"runId":run.id,"resolved":true}));
         return Ok(
             json!({"run":brief(&get(app,&run.id)?),"interruptErrors":failures,
@@ -787,6 +796,7 @@ fn apply_action(app: &AppCtx, req: &Request) -> Result<Value, String> {
         tx.commit().map_err(|e| e.to_string())?;
     }
     if let Some(parent) = split::parent_id(app,&run.id)? { split::refresh_parent(app,&parent)?; }
+    sync_session_states(app);
     run = get(app, &run.id)?;
     review::deliver_handoff(app, &run, &target, &wire, &req.message_id)
 }
@@ -833,10 +843,73 @@ pub fn active(app: &AppCtx, id: &str) -> bool {
         [id],|_|Ok(())).optional().ok().flatten().is_some()
 }
 
+/// Synchronize active workflow wait roles into `session_state` so sessions awaiting another
+/// workflow peer do not raise user-facing Pending notifications on normal turn completions.
+pub fn sync_session_states(app: &AppCtx) {
+    let desired = compute_workflow_waits(app);
+    crate::session_state::sync_workflow_waits(app, desired);
+}
+
+fn compute_workflow_waits(app: &AppCtx) -> std::collections::HashMap<String, &'static str> {
+    use std::collections::{HashMap, HashSet};
+    let rows: Vec<(String, Option<String>, Option<String>, String, String)> = {
+        let Ok(conn) = app.db().conn.lock() else { return HashMap::new(); };
+        let Ok(mut stmt) = conn.prepare(
+            "SELECT r.planner_id, r.executor_id, r.reviewer_id, r.state, r.config \
+             FROM plan_execute_runs r \
+             JOIN sessions p ON p.id = r.planner_id AND p.archived_at IS NULL \
+             WHERE r.state NOT IN ('completed', 'stopped')",
+        ) else {
+            return HashMap::new();
+        };
+        let Ok(mapped) = stmt.query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        }) else {
+            return HashMap::new();
+        };
+        mapped.filter_map(Result::ok).collect()
+    };
+
+    let mut waits: HashMap<String, &'static str> = HashMap::new();
+    let mut planners_waiting_children: HashSet<String> = HashSet::new();
+    let mut planners_needing_attention: HashSet<String> = HashSet::new();
+
+    for (planner_id, executor_id, reviewer_id, state, config_json) in rows {
+        if let Some(exec_id) = executor_id {
+            waits.insert(exec_id, "parent");
+        }
+        if let Some(rev_id) = reviewer_id {
+            waits.insert(rev_id, "parent");
+        }
+        let review_enabled = serde_json::from_str::<Config>(&config_json)
+            .ok()
+            .and_then(|c| c.review_enabled);
+        // While work is dispatched to executors or an independent reviewer, the planner is waiting
+        // on those sessions rather than the user. Legacy runs (review_enabled = None) have the
+        // planner itself act as reviewer during `reviewing`.
+        let planner_passive =
+            state == "executing" || (state == "reviewing" && review_enabled == Some(true));
+        if planner_passive {
+            planners_waiting_children.insert(planner_id);
+        } else {
+            planners_needing_attention.insert(planner_id);
+        }
+    }
+
+    for planner_id in planners_waiting_children {
+        if !planners_needing_attention.contains(&planner_id) {
+            waits.entry(planner_id).or_insert("children");
+        }
+    }
+    waits
+}
+
 /// Observe turn boundaries, not a polling timer. A missing report is a blocker, never a pass.
 pub fn observe(app: &AppCtx, id: &str, event: &Value) {
     let kind = event["type"].as_str().unwrap_or("");
-    if !matches!(kind, "turnCompleted" | "turnInterrupted" | "exited") || event["released"] == true
+    if !matches!(kind, "turnCompleted" | "turnInterrupted" | "exited")
+        || event["released"] == true
+        || event["stopParked"] == true
     {
         return;
     }
@@ -902,6 +975,7 @@ fn observe_run(app: &AppCtx, id: &str, run: &Run, interrupted: bool) {
             "UPDATE plan_execute_runs SET state='blocked',summary=?2,review_status=CASE WHEN reviewer_id=?3 THEN 'blocked' ELSE review_status END WHERE id=?1",
             params![run.id, summary,id],
         );
+        sync_session_states(&app);
         crate::diagnostics::record(
             "WARN",
             "plan_execute_handoff",
@@ -920,7 +994,9 @@ fn observe_run(app: &AppCtx, id: &str, run: &Run, interrupted: bool) {
             "INSERT INTO plan_execute_messages(id,run_id,sender_id,target_id,action,round,fingerprint,wire,origin) VALUES (?1,?2,?3,?4,'notice',?5,'system',?6,?7)",
             params![message_id,run.id,id,target,run.round,wire,origin.to_string()]);
         if inserted.is_ok() {
-            let _ = deliver(&app, &run, target, &wire, &message_id);
+            if deliver(&app, &run, target, &wire, &message_id).is_err() {
+                crate::session_state::set_unread(&app, &id, true);
+            }
         }
 }
 
@@ -1028,5 +1104,102 @@ pub fn run_cli(args: &[String]) -> ! {
             eprintln!("vflow: {error}");
             std::process::exit(1)
         }
+    }
+}
+
+#[cfg(test)]
+mod workflow_wait_tests {
+    use super::*;
+
+    fn test_app(tag: &str) -> AppCtx {
+        let dir = std::env::temp_dir().join(format!("vlx-pe-wait-{tag}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = crate::db::Db::open(&dir.join("db.sqlite")).unwrap();
+        AppCtx::Headless(std::sync::Arc::new(crate::host::HeadlessHost::new(dir, db)))
+    }
+
+    fn seed_session(app: &AppCtx, id: &str, project_id: &str) {
+        let conn = app.db().conn.lock().unwrap();
+        let _ = conn.execute(
+            "INSERT OR IGNORE INTO projects(id,name,root_path,sort_order,created_at) VALUES (?1,'P','/tmp',0,1)",
+            [project_id],
+        );
+        conn.execute(
+            "INSERT INTO sessions(id,project_id,name,kind,engine,sort_order,created_at) VALUES (?1,?2,?1,'claude','chat',0,1)",
+            params![id, project_id],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn workflow_wait_roles_follow_run_state_and_review_mode() {
+        let _lock = crate::session_state::test_lock();
+        let app = test_app("roles");
+        for sid in ["owner", "plan", "exec", "rev", "legacy-plan", "legacy-exec", "split-plan", "split-exec-a", "split-exec-b"] {
+            seed_session(&app, sid, "proj");
+        }
+
+        // Single-task executing: executor awaits parent, planner awaits children.
+        {
+            let conn = app.db().conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO plan_execute_runs(id,owner_id,planner_id,executor_id,reviewer_id,review_status,config,task,state,round) \
+                 VALUES ('r1','owner','plan','exec','rev','pending',?1,'task','executing',1)",
+                [json!({"reviewEnabled": true}).to_string()],
+            )
+            .unwrap();
+            // Legacy run in reviewing: planner itself reviews, so only executor waits on parent.
+            conn.execute(
+                "INSERT INTO plan_execute_runs(id,owner_id,planner_id,executor_id,config,task,state,round) \
+                 VALUES ('r2','owner','legacy-plan','legacy-exec','{}','task','reviewing',1)",
+                [],
+            )
+            .unwrap();
+            // Split run where one child is executing and another is blocked: planner must remain alertable.
+            conn.execute(
+                "INSERT INTO plan_execute_runs(id,owner_id,planner_id,executor_id,config,task,state,round) \
+                 VALUES ('r3a','split-plan','split-plan','split-exec-a',?1,'task a','executing',1)",
+                [json!({"reviewEnabled": false}).to_string()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO plan_execute_runs(id,owner_id,planner_id,executor_id,config,task,state,round) \
+                 VALUES ('r3b','split-plan','split-plan','split-exec-b',?1,'task b','blocked',1)",
+                [json!({"reviewEnabled": false}).to_string()],
+            )
+            .unwrap();
+        }
+
+        sync_session_states(&app);
+        let states = crate::session_state::snapshot();
+        assert_eq!(states["exec"].workflow_wait.as_deref(), Some("parent"));
+        assert_eq!(states["rev"].workflow_wait.as_deref(), Some("parent"));
+        assert_eq!(states["plan"].workflow_wait.as_deref(), Some("children"));
+        assert_eq!(states["legacy-exec"].workflow_wait.as_deref(), Some("parent"));
+        assert_eq!(states.get("legacy-plan").and_then(|s| s.workflow_wait.as_deref()), None);
+        assert_eq!(states["split-exec-a"].workflow_wait.as_deref(), Some("parent"));
+        assert_eq!(states["split-exec-b"].workflow_wait.as_deref(), Some("parent"));
+        assert_eq!(states.get("split-plan").and_then(|s| s.workflow_wait.as_deref()), None);
+
+        // Independent review in `reviewing` keeps planner waiting on children.
+        app.db().conn.lock().unwrap().execute("UPDATE plan_execute_runs SET state='reviewing' WHERE id='r1'", []).unwrap();
+        sync_session_states(&app);
+        assert_eq!(crate::session_state::snapshot()["plan"].workflow_wait.as_deref(), Some("children"));
+
+        // Moving to `summarizing` clears planner wait while keeping executor/reviewer awaiting parent.
+        app.db().conn.lock().unwrap().execute("UPDATE plan_execute_runs SET state='summarizing' WHERE id='r1'", []).unwrap();
+        sync_session_states(&app);
+        let states = crate::session_state::snapshot();
+        assert_eq!(states["plan"].workflow_wait, None);
+        assert_eq!(states["exec"].workflow_wait.as_deref(), Some("parent"));
+        assert_eq!(states["rev"].workflow_wait.as_deref(), Some("parent"));
+
+        // Completing the workflow clears every role back to None.
+        app.db().conn.lock().unwrap().execute("UPDATE plan_execute_runs SET state='completed' WHERE id='r1'", []).unwrap();
+        sync_session_states(&app);
+        let states = crate::session_state::snapshot();
+        assert_eq!(states["plan"].workflow_wait, None);
+        assert_eq!(states["exec"].workflow_wait, None);
+        assert_eq!(states["rev"].workflow_wait, None);
     }
 }

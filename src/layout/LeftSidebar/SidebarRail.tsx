@@ -24,11 +24,13 @@ import { sidebarTabOfView, sidebarTabSection } from "./sidebarTreeLayout";
 import {
   isDefaultViewSection,
   liveTerminalIds,
+  pendingCountsBySection,
   pluginRailSection,
   RAIL_SECTIONS,
   SYSTEM_PROJECTS,
   SystemCollectionIcon,
   systemLabel,
+  type BuiltinRailSection,
   type DefaultViewSection,
 } from "./systemCollections";
 
@@ -43,8 +45,18 @@ export function SidebarRail() {
   const pick = useTermStore((s) => s.pickSidebarSection);
   // A backend without the fixed collections shows its old single tree, which has no sections to pick.
   const fixedLayout = useTermStore((s) => s.projects.some((p) => p.id === SYSTEM_PROJECTS));
-  // A number, so runtime updates that keep the same count do not re-render the bar.
-  const terminals = useTermStore((s) => liveTerminalIds(s.sessions, s.ephemeralSessions, s.runtimes).length);
+  // Packed primitive so runtime updates that keep the same counts do not re-render the bar.
+  const countKey = useTermStore((s) => {
+    const tCount = liveTerminalIds(s.sessions, s.ephemeralSessions, s.runtimes).length;
+    const p = pendingCountsBySection(s.sessions, s.runtimes, s.notifications);
+    return `${tCount},${p.projects},${p.tasks},${p.chat}`;
+  });
+  const [terminals, pendingProjects, pendingTasks, pendingChat] = countKey.split(",").map(Number);
+  const pendingBySection: Partial<Record<BuiltinRailSection, number>> = {
+    projects: pendingProjects,
+    tasks: pendingTasks,
+    chat: pendingChat,
+  };
   const defaultView = useTermStore((s) => s.defaultSidebarSection);
   const setDefaultView = useTermStore((s) => s.setDefaultSidebarSection);
   const railPlugins = useRailPlugins();
@@ -62,15 +74,19 @@ export function SidebarRail() {
       {fixedLayout && RAIL_SECTIONS.map((id) => {
         const active = section === id && !collapsed;
         const count = id === "terminals" ? terminals : 0;
+        const pending = pendingBySection[id] ?? 0;
         const label = systemLabel(t, id);
+        const pendingLabel = `${pending} ${t("tree.filterAsking")}`;
+        const title = pending > 0 ? `${label} · ${pendingLabel}` : label;
+        const ariaLabel = pending > 0 ? `${label} (${pendingLabel})` : count > 0 ? `${label} (${count})` : label;
         return (
           <Fragment key={id}>
           {id === "archive" && <span className="sidebar-rail-sep" aria-hidden="true" />}
           <button
             type="button"
             className={"sidebar-rail-btn" + (active ? " active" : "")}
-            title={label}
-            aria-label={count > 0 ? `${label} (${count})` : label}
+            title={title}
+            aria-label={ariaLabel}
             aria-pressed={active}
             onContextMenu={(event) => {
               // Archive and Knowledge open their own pages, so they cannot be a default view.
@@ -93,6 +109,11 @@ export function SidebarRail() {
             }}
           >
             <SystemCollectionIcon section={id} size={16} />
+            {pending > 0 && (
+              <span className="sidebar-rail-pending" aria-hidden="true">
+                {pending > 99 ? "99+" : pending}
+              </span>
+            )}
             {count > 0 && <span className="sidebar-rail-count" aria-hidden="true">{count > 99 ? "99+" : count}</span>}
           </button>
           </Fragment>

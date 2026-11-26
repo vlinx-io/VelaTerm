@@ -88,34 +88,72 @@ const es: typeof en = {
   "translation.network": "El servicio de traducción no está disponible. Vuelve a intentarlo.",
   "translation.paymentRequired": "El servicio de traducción requiere un pago (HTTP 402). Revisa el saldo o el estado de los pagos de tu cuenta de API.",
 
-  "tree.newPlanExecuteSession": "Nueva sesión de planificación/ejecución…",
+  "tree.orchestrationMenu": "Sesión de orquestación",
+  "tree.newPlanExecuteSession": "Nueva sesión de orquestación…",
+  "tree.bindPlanExecuteWorkflow": "Establecer como sesión de orquestación…",
+  "tree.bindAsExecutorWorkflow": "Establecer como sesión de ejecución…",
+  "tree.bindPlanExecuteSelected": "Establecer selección como orquestación…",
+  "tree.bindAsExecutorsSelected": "Establecer selección como sesiones de ejecución…",
+  "bindPlanExecute.title": "Vincular flujo de orquestación",
+  "bindPlanExecute.intro": "Asigna una conversación existente como sesión de mando y vincula opcionalmente conversaciones existentes como sesiones de ejecución.",
+  "bindPlanExecute.planSessionLabel": "Sesión de mando",
+  "bindPlanExecute.planPlaceholder": "Seleccionar sesión de mando…",
+  "bindPlanExecute.planSessionHint": "Elige una sesión en vista de conversación para dirigir la orquestación y recibir los informes de ejecución.",
+  "bindPlanExecute.execSessionsLabel": "Sesiones de ejecución",
+  "bindPlanExecute.execPlaceholder": "Ninguna (crear al asignar)",
+  "bindPlanExecute.execSummary": (n: number) => `${n} sesiones de ejecución seleccionadas`,
+  "bindPlanExecute.execHintNone": "Déjalo vacío para crear sesiones de ejecución cuando la sesión de mando asigne tareas.",
+  "bindPlanExecute.execHintSingle": "La sesión de ejecución seleccionada se reutilizará como ejecutor de una sola tarea.",
+  "bindPlanExecute.execHintMultiple": (n: number) => `Se vincularán ${n} sesiones de ejecución como flujos de tareas en paralelo bajo esta sesión de mando.`,
+  "bindPlanExecute.execHintExtend": (n: number) => `Selecciona al menos una sesión de ejecución para añadirla a esta orquestación activa (hasta ${n} más).`,
+  "bindPlanExecute.execLimitError": (n: number) => `Puedes vincular como máximo ${n} sesiones de ejecución.`,
+  "bindPlanExecute.tagChild": "Subsesión",
+  "bindPlanExecute.tagExtendable": "Añadir ejecutores",
+  "bindPlanExecute.tagInWorkflow": "En orquestación activa",
+  "bindPlanExecute.tagNotChat": "No es vista de conversación",
+  "bindPlanExecute.tagUnsupported": "Agente no compatible",
+  "bindPlanExecute.reparentLabel": "Mover las sesiones de ejecución bajo la sesión de mando",
+  "bindPlanExecute.reparentHint": "Organiza en el árbol lateral las sesiones de ejecución del mismo proyecto como subsesiones directas de la sesión de mando.",
+  "bindPlanExecute.activeWorkflowNotice": (tasks: number, remaining: number) => `Esta sesión de mando ya tiene una orquestación activa (${tasks} tareas; se pueden añadir hasta ${remaining} más).`,
+  "bindPlanExecute.lockedReviewEnabled": "La revisión independiente está activada y bloqueada para esta orquestación.",
+  "bindPlanExecute.lockedReviewDisabled": "La revisión independiente está desactivada y bloqueada para esta orquestación.",
+  "bindPlanExecute.lockedReviewLegacy": "Esta orquestación utiliza el protocolo clásico de mando y revisión.",
+  "bindPlanExecute.promptLabel": "Tarea o instrucciones adicionales (opcional)",
+  "bindPlanExecute.promptHint": "Opcional. Déjalo vacío para continuar a partir del contexto actual de la sesión de mando.",
+  "bindPlanExecute.submit": "Vincular orquestación",
+  "bindPlanExecute.submitExtend": "Añadir sesiones de ejecución",
+  "bindPlanExecute.binding": "Vinculando…",
+  "bindPlanExecute.footerHint": "Las conversaciones existentes se conservan intactas y reciben las instrucciones del protocolo de orquestación.",
+  "bindPlanExecute.plannerRequired": "Selecciona una sesión de mando válida.",
+  "bindPlanExecute.extendExecRequired": "Selecciona al menos una sesión de ejecución para añadirla a la orquestación activa.",
+  "bindPlanExecute.deliveryBlocked": "La orquestación se guardó, pero no se pudo notificar a la sesión de mando. Vuelve a intentarlo.",
   "launch.splitTasks": "Dividir automáticamente en varias tareas",
-  "launch.splitTasksHint": "La sesión de planificación propone tareas independientes. Revise las instrucciones, los agentes, los modelos y el esfuerzo de razonamiento antes de iniciar la ejecución.",
+  "launch.splitTasksHint": "La sesión de mando propone tareas independientes. Revise las instrucciones, los agentes, los modelos y el esfuerzo de razonamiento antes de iniciar la ejecución.",
   "launch.splitReview": "Revisar tareas de ejecución",
-  "launch.splitReviewHint": "El planificador coordina todas las tareas. La revisión independiente depende de la configuración del flujo de trabajo. La ejecución comienza tras tu confirmación.",
+  "launch.splitReviewHint": "La sesión de mando coordina todas las tareas. La revisión independiente depende de la configuración de orquestación. La ejecución comienza tras tu confirmación.",
   "launch.splitConfirmed": "Estas tareas ya se han confirmado.",
   "launch.splitClosed": "Esta propuesta ya no está pendiente de confirmación.",
   "launch.splitRetry": "Reintentar las entregas pendientes",
-  "launch.splitSharedDirectory": "Todas las sesiones de ejecución utilizan el directorio de trabajo de la sesión de planificación y comparten su árbol de trabajo si está habilitado.",
+  "launch.splitSharedDirectory": "Todas las sesiones de ejecución utilizan el directorio de trabajo de la sesión de mando y comparten su árbol de trabajo si está habilitado.",
   "launch.createIn": "Crear en",
   "launch.workingDirectory": "Ruta del directorio de trabajo",
   "launch.createAndStart": "Crear e iniciar",
-  "launch.planExecuteTaskHint": "Describe la tarea, los requisitos y los criterios de aceptación para la planificación.",
-  "launch.planExecuteResult": "Primero se inicia la sesión de planificación; cuando el plan está listo, esta crea la sesión de ejecución.",
+  "launch.planExecuteTaskHint": "Describe la tarea, los requisitos y los criterios de aceptación para la sesión de mando.",
+  "launch.planExecuteResult": "Primero se inicia la sesión de mando; cuando el plan está listo, esta crea la sesión de ejecución.",
   "launch.planExecuteWorktreeHint": "Los nuevos worktrees parten del commit actual, sin cambios pendientes de commit. Si no se puede crear un worktree, la sesión correspondiente no se inicia.",
-  "launch.workflowDirectorySharedHint": "Todas las sesiones del flujo de trabajo comparten un directorio y una rama nuevos.",
-  "launch.workflowDirectoryEachHint": "La sesión de planificación y cada sesión de ejecución tienen su propio worktree y su propia rama.",
-  "launch.legacyPlanTitle": "Planificación y revisión",
-  "launch.planTitle": "Planificación",
+  "launch.workflowDirectorySharedHint": "Todas las sesiones de orquestación comparten un directorio y una rama nuevos.",
+  "launch.workflowDirectoryEachHint": "La sesión de mando y cada sesión de ejecución tienen su propio worktree y su propia rama.",
+  "launch.legacyPlanTitle": "Mando y revisión",
+  "launch.planTitle": "Mando",
   "launch.reviewTitle": "Revisión",
   "launch.reviewEnabled": "Activar revisión independiente",
-  "launch.reviewEnabledHint": "Un revisor independiente comprueba los informes y solicita correcciones. El planificador recopila el progreso y resume la entrega.",
-  "launch.reviewDisabledHint": "Los informes de ejecución se envían directamente al planificador para resumir la entrega. No se realiza una revisión independiente.",
+  "launch.reviewEnabledHint": "Un revisor independiente comprueba los informes y solicita correcciones. La sesión de mando recopila el progreso y resume la entrega.",
+  "launch.reviewDisabledHint": "Los informes de ejecución se envían directamente a la sesión de mando para resumir la entrega. No se realiza una revisión independiente.",
   "chat.origin.review": "Revisión",
   "launch.execTitle": "Ejecución",
-  "launch.legacyPlanExecuteIntro": "Una sesión independiente planifica el trabajo, revisa el resultado y solicita correcciones.",
-  "launch.planExecuteIntro": "El planificador organiza el trabajo y resume la entrega. La revisión independiente es opcional.",
-  "chat.origin.plan": "Planificación",
+  "launch.legacyPlanExecuteIntro": "Una sesión de mando independiente dirige el trabajo, revisa el resultado y solicita correcciones.",
+  "launch.planExecuteIntro": "La sesión de mando organiza el trabajo y resume la entrega. La revisión independiente es opcional.",
+  "chat.origin.plan": "Mando",
   "chat.origin.exec": "Ejecución",
 
   // Project code intelligence and knowledge entry associations.
@@ -383,6 +421,8 @@ const es: typeof en = {
   "chat.imageActionFailed": "No se pudo completar la operación con la imagen. Inténtelo de nuevo.",
   "clipboard.unresponsive":
     "La aplicación de origen del portapapeles no responde, por lo que no se ha pegado nada. Inténtelo de nuevo en unos instantes.",
+  "service.restartedNotice":
+    "El servicio en segundo plano se reinició de forma inesperada, por lo que se detuvieron las sesiones que estaban en ejecución.",
   "common.copy": "Copiar", // Copy
   "common.cut": "Cortar", // Cut
   "common.paste": "Pegar", // Paste
@@ -429,6 +469,8 @@ const es: typeof en = {
   "status.working": "Procesando", // Working
   "status.asking": "Requiere confirmación", // Needs confirmation
   "status.waiting": "Visto", // Viewed
+  "status.awaitingParent": "Esperando a la sesión padre", // Waiting for parent session
+  "status.awaitingChildren": "Esperando a las sesiones hijas", // Waiting for child sessions
   "status.background": "Tareas en segundo plano activas", // Background tasks running
   "status.unavailable": "Estado no disponible",
   "indicator.unread": "No leído · por revisar", // Unread · awaiting review
@@ -1194,6 +1236,19 @@ const es: typeof en = {
   "sessionTitle.invalid": "El agente devolvió un título no válido. Inténtelo de nuevo.",
   "sessionTitle.changed": "La sesión cambió mientras se generaba el título, por lo que no se actualizó.",
   "sessionTitle.failed": "El agente no pudo generar un título. Inténtelo de nuevo.",
+  "sessionTitle.menuSelected": (n) => `Renombrar ${n} sesiones seleccionadas con IA…`,
+  "sessionTitle.menuGroup": (n) => `Renombrar ${n} sesiones del grupo con IA…`,
+  "sessionTitle.batchRename": "Renombrar en lote con IA",
+  "sessionTitle.batchConfirmHint": "El agente seleccionado leerá cada conversación por completo y sustituirá cada nombre de sesión por un nuevo título. Revise las sesiones y la configuración antes de confirmar.",
+  "sessionTitle.batchSessions": (selected, total) => `Sesiones (${selected} de ${total} seleccionadas)`,
+  "sessionTitle.batchSelectAll": "Seleccionar todo",
+  "sessionTitle.batchDeselectAll": "Borrar selección",
+  "sessionTitle.batchSubmit": (n) => (n === 1 ? "Renombrar 1 sesión" : `Renombrar ${n} sesiones`),
+  "sessionTitle.batchProgress": (done, total) => `Renombrando (${done}/${total})…`,
+  "sessionTitle.batchQueued": "En cola",
+  "sessionTitle.batchCancelled": "Cancelado",
+  "sessionTitle.batchSummary": (renamed, failed) => `${renamed} renombradas, ${failed} con error.`,
+  "sessionTitle.batchRetryFailed": (n) => (n === 1 ? "Reintentar 1 fallida" : `Reintentar ${n} fallidas`),
   "tree.sessionInfo": "Información de sesión", // Session Info
   "tree.groupInfo": "Información del grupo", // Group Info
   "tree.collectionInfo": "Información de la colección", // Collection Info
@@ -1204,7 +1259,9 @@ const es: typeof en = {
   "info.recentCommits": "Commits recientes", // Recent Commits
   "info.noCommits": "Sin commits", // No commits
   "tree.killProcess": "Terminar proceso", // Kill Process
+  "tree.killProcessSelected": (n: number) => `Terminar ${n} procesos`, // Kill {n} Processes
   "tree.killProcessConfirm": (name: string) => `¿Terminar el proceso de «${name}»? Se interrumpirá la tarea actual. Se conservarán el historial de conversación y los archivos guardados.`,
+  "tree.killProcessConfirmMany": (n: number) => `¿Terminar los procesos de ${n} sesiones en ejecución? Se interrumpirán las tareas actuales. Se conservarán el historial de conversación y los archivos guardados.`,
   "tree.archiveSession": "Archivar sesión", // Archive Session
   "tree.archiveGroup": "Archivar grupo", // Archive Group
   "tree.archiveCollection": "Archivar colección", // Archive Collection
@@ -1747,6 +1804,7 @@ const es: typeof en = {
   "transfer.savedToDownloads": "Guardado en Descargas", // Saved to Downloads
   "transfer.foldersUnsupported": "No se pueden subir carpetas.", // Folders can't be uploaded.
   "drop.browserFilesHint": "En el navegador, aquí solo se pueden soltar imágenes. Para usar otros archivos, súbalos primero al proyecto.", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
+  "paste.browserFilesHint": "En el navegador, aquí solo se pueden pegar imágenes. Para usar otros archivos, súbalos primero al proyecto.", // In the browser, only images can be pasted here. To use other files, upload them to the project first.
   "files.copyFailed": "No se pudieron copiar algunos archivos. Compruebe que todavía existen y que tiene permiso de escritura en esta carpeta.", // Some files could not be copied. Check that they still exist and that you can write to this folder.
   "files.pasteFailed": "No se pudieron pegar algunos elementos. Compruebe que el origen existe y que tiene permiso de escritura en esta carpeta.", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 

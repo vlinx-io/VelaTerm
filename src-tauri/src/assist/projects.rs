@@ -15,7 +15,7 @@ pub(super) const DOMAIN: Domain = Domain {
     guide: GUIDE,
     context,
     check: Check::Tree(validate),
-    backend: &["importProject", "createCollection", "moveToCollection", "createGroup", "rename", "move", "sort", "archiveSession", "deleteNode"],
+    backend: &["importProject", "createCollection", "moveToCollection", "createGroup", "rename", "move", "sort", "killProcess", "archiveSession", "deleteNode"],
     run,
 };
 
@@ -31,6 +31,7 @@ Changes:
   Omit groupId, parentSessionId and projectId to stay in place. Without order the item goes last.
 - {\"kind\":\"sort\",\"groupId\":\"group\" or \"projectId\":\"project root\" or \"parentSessionId\":\"session\",\"by\":\"name\"}
   or {\"kind\":\"sort\",\"groupId\":\"...\",\"order\":[\"ids, first to last\"]}. by name orders numbers by value (2 before 10); sessions and subgroups are sorted separately; items left out of order keep their relative order after the listed ones.
+- {\"kind\":\"killProcess\",\"id\":\"session\"} ends a running session's process (terminal or chat); saved conversation history and files are kept.
 - {\"kind\":\"archiveSession\",\"id\":\"session\"}
 - {\"kind\":\"deleteNode\",\"id\":\"any item\"} removes it from the sidebar; files on disk are kept.
 Opening a form or view (the user finishes it there):

@@ -13,6 +13,7 @@ import { isShareSurface } from "../ipc/shareBase";
 import { navigateMobileSession, useMobileSessionNavigation } from "./sessionNavigation";
 import { useSpawnNavigation } from "./useSpawnNavigation";
 import { SplitTaskConfirmModal } from "../components/SplitTaskConfirmModal";
+import { BindPlanExecuteModal } from "../components/BindPlanExecuteModal";
 import { SpawnConfirmModal } from "../components/SpawnConfirmModal";
 import { useNotifications } from "../hooks/useNotifications";
 import {
@@ -121,6 +122,7 @@ function MobileApp() {
       )}
       <SpawnConfirmModal />
       {!isShareSurface && <SplitTaskConfirmModal />}
+      {!isShareSurface && <BindPlanExecuteModal />}
       <ConnectionBanner />
     </div>
   );

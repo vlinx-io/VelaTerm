@@ -282,8 +282,25 @@ function FileRow({
   );
 }
 
-export function FilesTab({ rootPath, rootName }: { rootPath: string | null; rootName: string | null }) {
+/** True when `list_dir` or `search_files` failed because the target directory itself no longer exists. */
+export function isMissingDirectoryError(err: unknown): boolean {
+  const msg = String(err);
+  return /No such file or directory|Not a directory|cannot find the (?:path|file) specified|\(os error (?:2|3|20|267)\)/i.test(msg);
+}
+
+export function FilesTab({
+  rootPath,
+  rootName,
+  onMissingRoot,
+}: {
+  rootPath: string | null;
+  rootName: string | null;
+  /** Invoked instead of surfacing an error when `rootPath` no longer exists and a fallback root is available. */
+  onMissingRoot?: (missingPath: string) => void;
+}) {
   const t = useT();
+  const onMissingRootRef = useRef(onMissingRoot);
+  onMissingRootRef.current = onMissingRoot;
   const [root, setRoot] = useState<FileNodeT | null>(null);
   const rootRef = useRef(root);
   rootRef.current = root;
@@ -381,6 +398,10 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
       setRefreshErr(null);
     } catch (e) {
       if (gen !== searchGen.current) return;
+      if (isMissingDirectoryError(e) && onMissingRootRef.current) {
+        onMissingRootRef.current(targetRoot);
+        return;
+      }
       setRefreshErr(String(e));
     } finally {
       if (gen === searchGen.current) setSearching(false);
@@ -432,6 +453,10 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
       })
       .catch((e) => {
         if (cancelled) return;
+        if (isMissingDirectoryError(e) && onMissingRootRef.current) {
+          onMissingRootRef.current(rootPath);
+          return;
+        }
         setRefreshErr(String(e));
         node.children = [];
         node.loaded = true;
@@ -488,6 +513,17 @@ export function FilesTab({ rootPath, rootName }: { rootPath: string | null; root
       try {
         const results = await Promise.allSettled(paths.map((path) => listDir(path)));
         if (cancelled || revision !== treeRevision.current) return;
+        const rootIdx = rootPath ? paths.indexOf(rootPath) : -1;
+        const rootResult = rootIdx >= 0 ? results[rootIdx] : undefined;
+        if (
+          rootPath &&
+          rootResult?.status === "rejected" &&
+          isMissingDirectoryError(rootResult.reason) &&
+          onMissingRootRef.current
+        ) {
+          onMissingRootRef.current(rootPath);
+          return;
+        }
         setRoot((latest) => {
           if (!latest || latest.path !== rootPath) return latest;
           return results.reduce((tree, result, index) => result.status === "fulfilled"

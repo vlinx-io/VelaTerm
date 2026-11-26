@@ -56,6 +56,7 @@ fn plan_execute_rejects_unsupported_agents_before_creating_sessions_or_worktrees
 
 #[test]
 fn split_plan_execute_worktree_modes_cover_planner_executors_and_retries() {
+    let _state_guard = crate::session_state::test_lock();
     use crate::agent::plan_execute::{self as flow, menu, split};
     for linked_source in [false, true] {
     for entry in ["menu", "spawn"] {
@@ -177,6 +178,7 @@ fn split_plan_execute_worktree_modes_cover_planner_executors_and_retries() {
 
 #[test]
 fn split_plan_execute_confirmation_reports_and_independent_corrections() {
+    let _state_guard = crate::session_state::test_lock();
     use crate::agent::plan_execute::{self as flow, split};
     let app = split_fixture();
     {
@@ -347,6 +349,7 @@ fn split_plan_execute_confirmation_reports_and_independent_corrections() {
 
 #[test]
 fn split_plan_execute_cancel_and_stop_preserve_confirmation_boundary() {
+    let _state_guard = crate::session_state::test_lock();
     use crate::agent::plan_execute::{self as flow, split};
     let app = split_fixture();
     let proposed = split_propose(&app);
@@ -383,6 +386,7 @@ fn split_plan_execute_cancel_and_stop_preserve_confirmation_boundary() {
 
 #[test]
 fn split_plan_execute_missing_report_and_stop_are_isolated_per_task() {
+    let _state_guard = crate::session_state::test_lock();
     use crate::agent::plan_execute::{self as flow, split};
     let app = split_fixture();
     let proposal = split_propose(&app);

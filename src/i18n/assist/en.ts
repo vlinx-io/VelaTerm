@@ -33,6 +33,7 @@ export default {
   "assist.reason.notFile": "This is a folder, not a file.",
   "assist.reason.unavailable": "This part of the app is not available right now.",
   "assist.reason.builtIn": "Built-in collections cannot be renamed, moved or deleted.",
+  "assist.reason.notRunning": "No process is running for this session.",
 
   "assist.field.name": "Name",
   "assist.field.location": "Location",
@@ -68,6 +69,8 @@ export default {
   "assist.projects.move": (name: string, to: string) => `Move “${name}” to “${to}”`,
   "assist.projects.sortByName": (where: string) => `Sort the items in “${where}” by name`,
   "assist.projects.sortByOrder": (where: string) => `Reorder the items in “${where}”`,
+  "assist.projects.killProcess": (name: string) => `End the process for “${name}”`,
+  "assist.projects.killProcessNote": "The current task will be interrupted. Saved conversation history and files will be kept.",
   "assist.projects.archiveSession": (name: string) => `Archive the session “${name}”`,
   "assist.projects.deleteNode": (name: string) => `Remove “${name}” from the sidebar`,
   "assist.projects.deleteKeepsFiles": "Files on disk are kept.",

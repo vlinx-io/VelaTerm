@@ -143,7 +143,8 @@ fn main() {
         ) {
             Ok(path) => path,
             Err(e) => {
-                velaterm_lib::diagnostic_warn!("vela: {e}");
+                // Printed directly, not through diagnostic_warn!, which drops all format arguments.
+                eprintln!("vela: {e}");
                 std::process::exit(2);
             }
         };

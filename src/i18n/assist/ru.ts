@@ -35,6 +35,7 @@ const assist: typeof en = {
   "assist.reason.notFile": "Это папка, а не файл.",
   "assist.reason.unavailable": "Этот раздел приложения сейчас недоступен.",
   "assist.reason.builtIn": "Встроенные коллекции нельзя переименовывать, перемещать или удалять.",
+  "assist.reason.notRunning": "У этой сессии нет запущенного процесса.",
 
   "assist.field.name": "Название",
   "assist.field.location": "Расположение",
@@ -70,6 +71,8 @@ const assist: typeof en = {
   "assist.projects.move": (name: string, to: string) => `Переместить «${name}» в «${to}»`,
   "assist.projects.sortByName": (where: string) => `Отсортировать элементы в «${where}» по имени`,
   "assist.projects.sortByOrder": (where: string) => `Изменить порядок элементов в «${where}»`,
+  "assist.projects.killProcess": (name: string) => `Завершить процесс сессии «${name}»`,
+  "assist.projects.killProcessNote": "Текущая задача будет прервана. Сохранённая история переписки и файлы останутся.",
   "assist.projects.archiveSession": (name: string) => `Архивировать сессию «${name}»`,
   "assist.projects.deleteNode": (name: string) => `Убрать «${name}» с боковой панели`,
   "assist.projects.deleteKeepsFiles": "Файлы на диске сохранятся.",

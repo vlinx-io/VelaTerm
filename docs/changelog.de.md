@@ -1,3 +1,20 @@
+## v0.3.7 — 2026-11-26
+
+- 🧩 Bestehende Gesprächssitzungen lassen sich jetzt als Steuerungs- und Ausführungssitzungen zu einem Orchestrierungs-Workflow verbinden — oder einem laufenden Workflow hinzufügen — inklusive optionaler Baumgruppierung in der Seitenleiste und vereinheitlichter Orchestrierungs-Begriffe.
+- 🪐 Antigravity wird jetzt gleichberechtigt als Steuerungs-, Ausführungs- und Prüf-Agent in Orchestrierungs-Workflows unterstützt und verarbeitet Pausen während Hintergrundaufgaben ohne falsche Blockaden.
+- 🏷️ Mehrere ausgewählte Agent-Sitzungen oder alle Sitzungen einer Gruppe lassen sich jetzt auf einmal per KI stapelweise umbenennen — mit Auswahl einzelner Einträge, Live-Fortschritt, Abbruch und Ein-Klick-Wiederholung fehlgeschlagener Einträge.
+- 🛑 Bei Mehrfachauswahl von Sitzungen in der Seitenleiste bietet das Kontextmenü jetzt das gesammelte Beenden laufender Prozesse an, überspringt beendete und Browser-Sitzungen automatisch und erlaubt das erneute Ausführen fehlgeschlagener Einträge.
+- 🔔 Die Filterzähler in der Seitenleiste beziehen sich jetzt nur noch auf die aktive Ansicht (Projekte, Terminals, Aufgaben oder Chat), und die Aktivitätsleiste zeigt auf jedem Abschnittssymbol Zähler-Badges für ausstehende Sitzungen.
+- 🧭 Orchestrierungs-Workflows unterscheiden jetzt zwischen „Wartet auf übergeordnete Sitzung“ und „Wartet auf untergeordnete Sitzungen“, ohne bei regulären Übergaben unnötige Ausstehend-Hinweise oder Push-Benachrichtigungen auszulösen, während Berechtigungsanfragen weiterhin wie gewohnt benachrichtigen.
+- 📋 Beim Einfügen von Nicht-Bilddateien oder Ordnern aus dem Finder oder Datei-Explorer in Terminals, Gespräche oder den Quellcode-Editor werden jetzt deren Pfade eingefügt statt Dateisymbole als Bilder einzufügen; Screenshots und Bilddateien werden weiterhin normal angehängt.
+- 🤖 `vapp session list` kennzeichnet jetzt laufende Sitzungen, und mit `vapp session kill` können Agenten den Prozess einer laufenden Sitzung beenden, während Gesprächsverlauf und Dateien erhalten bleiben.
+- ⚡ Antigravity-Gespräche starten jetzt parallel ohne sich gegenseitig zu blockieren, bewahren den bestehenden Gesprächsverlauf bei vorübergehenden Fehlern beim Wiederöffnen und erhalten alle Nachrichten auch dann, wenn Gesprächsschritte zurückgesetzt werden.
+- 📚 `vkb` funktioniert jetzt auch aus temporären Terminals und projektübergreifend in importierten Projektverzeichnissen, verbindet sich lokal ohne Störung durch Proxy-Umgebungsvariablen und gibt verständliche Fehlermeldungen aus.
+- 📁 Unter macOS öffnen Terminals in Ordnern mit Nicht-ASCII-Zeichen geteilte Bereiche und den Dateien-Bereich jetzt im richtigen Verzeichnis, und der Dateien-Bereich fällt automatisch auf das Projektstammverzeichnis zurück, wenn der Ordner einer Sitzung gelöscht wurde.
+- 🛡️ Verbesserte Stabilität der Desktop-App unter Windows und macOS, die Abstürze bei intensiver paralleler Sitzungsaktivität sowie bei Interaktionen mit dem macOS-Dock oder dem integrierten Browser verhindert.
+- ⌨️ Das Drücken von Pfeiltasten in Textfeldern, beim Umbenennen von Tabs und in Textanmerkungen von Screenshots fügt unter macOS keine unerwünschten Steuerzeichen mehr ein.
+- ⚠️ In der Electron-App weist nach einem unerwarteten Neustart des Hintergrunddienstes jetzt ein schließbares Hinweisbanner darauf hin, dass zuvor laufende Sitzungen beendet wurden.
+
 ## v0.3.6 — 2026-11-24
 
 - 📝 Diff-Ansichten unterstützen jetzt Inline-Review-Kommentare für ausgewählte Zeilen sowie eine Übersichtsleiste zum Bearbeiten, Kopieren oder direkten Senden aller Kommentare an eine aktive Agent-Sitzung.

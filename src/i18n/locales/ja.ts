@@ -88,34 +88,72 @@ const ja: typeof en = {
   "translation.network": "翻訳サービスを利用できません。もう一度お試しください。",
   "translation.paymentRequired": "翻訳サービスの利用にはお支払いが必要です（HTTP 402）。API アカウントの残高または支払い状況を確認してください。",
 
-  "tree.newPlanExecuteSession": "計画・実行セッションを新規作成…",
+  "tree.orchestrationMenu": "オーケストレーションセッション",
+  "tree.newPlanExecuteSession": "オーケストレーションセッションを新規作成…",
+  "tree.bindPlanExecuteWorkflow": "オーケストレーションセッションに設定…",
+  "tree.bindAsExecutorWorkflow": "実行セッションに設定…",
+  "tree.bindPlanExecuteSelected": "選択したセッションをオーケストレーションに設定…",
+  "tree.bindAsExecutorsSelected": "選択したセッションを実行セッションに設定…",
+  "bindPlanExecute.title": "オーケストレーションの割り当て",
+  "bindPlanExecute.intro": "既存の会話セッションを指揮セッションに設定し、必要に応じて既存の会話セッションを実行セッションとして紐付けます。",
+  "bindPlanExecute.planSessionLabel": "指揮セッション",
+  "bindPlanExecute.planPlaceholder": "指揮セッションを選択…",
+  "bindPlanExecute.planSessionHint": "オーケストレーションを統括し、実行報告を受け取る会話ビューのセッションを選択してください。",
+  "bindPlanExecute.execSessionsLabel": "実行セッション",
+  "bindPlanExecute.execPlaceholder": "未選択（配信時に作成）",
+  "bindPlanExecute.execSummary": (n: number) => `${n} 件の実行セッションを選択中`,
+  "bindPlanExecute.execHintNone": "未選択のままにすると、指揮セッションがタスクを配信する際に実行セッションを新規作成します。",
+  "bindPlanExecute.execHintSingle": "選択した実行セッションを単一タスクの実行担当としてそのまま再利用します。",
+  "bindPlanExecute.execHintMultiple": (n: number) => `選択した ${n} 件の実行セッションを、この指揮セッション配下の並列タスクワークフローとして紐付けます。`,
+  "bindPlanExecute.execHintExtend": (n: number) => `進行中のオーケストレーションに追加する実行セッションを 1 件以上選択してください（残り最大 ${n} 件）。`,
+  "bindPlanExecute.execLimitError": (n: number) => `紐付けできる実行セッションは最大 ${n} 件です。`,
+  "bindPlanExecute.tagChild": "子セッション",
+  "bindPlanExecute.tagExtendable": "実行セッションを追加可能",
+  "bindPlanExecute.tagInWorkflow": "実行中のオーケストレーションに所属",
+  "bindPlanExecute.tagNotChat": "会話ビュー以外",
+  "bindPlanExecute.tagUnsupported": "非対応エージェント",
+  "bindPlanExecute.reparentLabel": "実行セッションを指揮セッションの配下へ移動",
+  "bindPlanExecute.reparentHint": "同一プロジェクト内の選択した実行セッションを、サイドバーツリーで指揮セッションの直下に整理します。",
+  "bindPlanExecute.activeWorkflowNotice": (tasks: number, remaining: number) => `この指揮セッションには進行中のオーケストレーションがあります（現在 ${tasks} 件のタスク、残り最大 ${remaining} 件追加可能）。`,
+  "bindPlanExecute.lockedReviewEnabled": "このオーケストレーションでは独立したレビューが有効で固定されています。",
+  "bindPlanExecute.lockedReviewDisabled": "このオーケストレーションでは独立したレビューが無効で固定されています。",
+  "bindPlanExecute.lockedReviewLegacy": "このオーケストレーションでは従来の指揮・検証プロトコルが使用されています。",
+  "bindPlanExecute.promptLabel": "タスクまたは補足指示（任意）",
+  "bindPlanExecute.promptHint": "任意入力です。空欄の場合は、指揮セッションの現在の会話文脈をもとに整理と配信を続行します。",
+  "bindPlanExecute.submit": "オーケストレーションを設定",
+  "bindPlanExecute.submitExtend": "実行セッションを追加",
+  "bindPlanExecute.binding": "設定中…",
+  "bindPlanExecute.footerHint": "既存の会話履歴はそのまま保持され、指揮セッションにオーケストレーション手順が送信されます。",
+  "bindPlanExecute.plannerRequired": "条件を満たす指揮セッションを選択してください。",
+  "bindPlanExecute.extendExecRequired": "進行中のオーケストレーションに追加する実行セッションを 1 件以上選択してください。",
+  "bindPlanExecute.deliveryBlocked": "オーケストレーションは保存されましたが、指揮セッションへの通知に失敗しました。再試行して送信してください。",
   "launch.splitTasks": "複数のタスクに自動分割",
-  "launch.splitTasksHint": "計画セッションが独立したタスクを提案します。実行前に、各タスクの指示、エージェント、モデル、推論の強度を確認できます。",
+  "launch.splitTasksHint": "指揮セッションが独立したタスクを提案します。実行前に、各タスクの指示、エージェント、モデル、推論の強度を確認できます。",
   "launch.splitReview": "実行タスクの確認",
-  "launch.splitReviewHint": "計画担当がすべてのタスクを調整します。独立したレビューの有無はワークフローの設定に従います。確認後に実行を開始します。",
+  "launch.splitReviewHint": "指揮セッションがすべてのタスクを調整します。独立したレビューの有無はオーケストレーション設定に従います。確認後に実行を開始します。",
   "launch.splitConfirmed": "これらのタスクは確認済みです。",
   "launch.splitClosed": "この提案は確認待ちではありません。",
   "launch.splitRetry": "未配信のメッセージを再送",
-  "launch.splitSharedDirectory": "すべての実行セッションは計画セッションの作業ディレクトリを使用します。ワークツリーを有効にした場合は、そのワークツリーを共有します。",
+  "launch.splitSharedDirectory": "すべての実行セッションは指揮セッションの作業ディレクトリを使用します。ワークツリーを有効にした場合は、そのワークツリーを共有します。",
   "launch.createIn": "作成先",
   "launch.workingDirectory": "作業ディレクトリのパス",
   "launch.createAndStart": "作成して起動",
-  "launch.planExecuteTaskHint": "計画に必要なタスクの目的、要件、受け入れ基準を入力してください。",
-  "launch.planExecuteResult": "まず計画セッションを開始し、計画が整ったら実行セッションを作成します。",
+  "launch.planExecuteTaskHint": "指揮セッションに必要なタスクの目的、要件、受け入れ基準を入力してください。",
+  "launch.planExecuteResult": "まず指揮セッションを開始し、準備が整ったら実行セッションを作成します。",
   "launch.planExecuteWorktreeHint": "新しいワークツリーは現在のコミットから作成され、未コミットの変更は含まれません。作成に失敗した場合、該当セッションは起動しません。",
-  "launch.workflowDirectorySharedHint": "すべてのワークフローセッションで、新しいディレクトリとブランチを共有します。",
-  "launch.workflowDirectoryEachHint": "計画セッションと各実行セッションに、それぞれ専用のワークツリーとブランチを作成します。",
-  "launch.legacyPlanTitle": "計画と検証",
-  "launch.planTitle": "計画",
+  "launch.workflowDirectorySharedHint": "すべてのオーケストレーションセッションで、新しいディレクトリとブランチを共有します。",
+  "launch.workflowDirectoryEachHint": "指揮セッションと各実行セッションに、それぞれ専用のワークツリーとブランチを作成します。",
+  "launch.legacyPlanTitle": "指揮と検証",
+  "launch.planTitle": "指揮",
   "launch.reviewTitle": "レビュー",
   "launch.reviewEnabled": "独立したレビューを有効にする",
-  "launch.reviewEnabledHint": "別のレビュー担当が実行報告を確認し、修正を依頼します。計画担当は進捗を把握し、成果をまとめます。",
-  "launch.reviewDisabledHint": "実行報告は計画担当に直接送られ、成果をまとめるために使われます。独立したレビューは行われません。",
+  "launch.reviewEnabledHint": "別のレビュー担当が実行報告を確認し、修正を依頼します。指揮セッションは進捗を把握し、成果をまとめます。",
+  "launch.reviewDisabledHint": "実行報告は指揮セッションに直接送られ、成果をまとめるために使われます。独立したレビューは行われません。",
   "chat.origin.review": "レビュー",
   "launch.execTitle": "実行",
-  "launch.legacyPlanExecuteIntro": "専用の計画セッションが作業を指示し、結果を検証して、実行セッションに修正を依頼します。",
-  "launch.planExecuteIntro": "計画担当が作業を整理し、成果をまとめます。独立したレビューは任意です。",
-  "chat.origin.plan": "計画",
+  "launch.legacyPlanExecuteIntro": "専用の指揮セッションが作業を指示し、結果を検証して、実行セッションに修正を依頼します。",
+  "launch.planExecuteIntro": "指揮セッションが作業を整理し、成果をまとめます。独立したレビューは任意です。",
+  "chat.origin.plan": "指揮",
   "chat.origin.exec": "実行",
 
   // Project code intelligence and knowledge entry associations.
@@ -383,6 +421,8 @@ const ja: typeof en = {
   "chat.imageActionFailed": "画像の操作に失敗しました。もう一度お試しください。",
   "clipboard.unresponsive":
     "クリップボードの提供元アプリが応答しないため、貼り付けできませんでした。しばらくしてからもう一度お試しください。",
+  "service.restartedNotice":
+    "バックグラウンドサービスが予期せず再起動したため、実行中だったセッションは停止しました。",
   "common.copy": "コピー", // Copy
   "common.cut": "切り取り", // Cut
   "common.paste": "貼り付け", // Paste
@@ -429,6 +469,8 @@ const ja: typeof en = {
   "status.working": "処理中", // Working
   "status.asking": "要確認", // Needs confirmation
   "status.waiting": "確認済み", // Viewed
+  "status.awaitingParent": "親セッション待ち", // Waiting for parent session
+  "status.awaitingChildren": "子セッション待ち", // Waiting for child sessions
   "status.background": "バックグラウンドタスク実行中", // Background tasks running
   "status.unavailable": "ステータス取得不可",
   "indicator.unread": "未読 · 確認待ち", // Unread · awaiting review
@@ -1191,6 +1233,19 @@ const ja: typeof en = {
   "sessionTitle.invalid": "エージェントが返したタイトルが無効です。もう一度お試しください。",
   "sessionTitle.changed": "タイトルの生成中にセッションが変更されたため、タイトルは更新されませんでした。",
   "sessionTitle.failed": "エージェントがタイトルを生成できませんでした。もう一度お試しください。",
+  "sessionTitle.menuSelected": (n) => `選択した ${n} 件のセッション名をAIで変更…`,
+  "sessionTitle.menuGroup": (n) => `グループ内の ${n} 件のセッション名をAIで変更…`,
+  "sessionTitle.batchRename": "AIで一括リネーム",
+  "sessionTitle.batchConfirmHint": "選択したエージェントが各セッションの対話全文を読み、新しいタイトルを生成してセッション名を置き換えます。対象セッションと設定を確認してから実行してください。",
+  "sessionTitle.batchSessions": (selected, total) => `セッション（${total} 件中 ${selected} 件を選択）`,
+  "sessionTitle.batchSelectAll": "すべて選択",
+  "sessionTitle.batchDeselectAll": "選択を解除",
+  "sessionTitle.batchSubmit": (n) => `${n} 件の名前を変更`,
+  "sessionTitle.batchProgress": (done, total) => `名前を変更中（${done}/${total}）…`,
+  "sessionTitle.batchQueued": "待機中",
+  "sessionTitle.batchCancelled": "キャンセル済み",
+  "sessionTitle.batchSummary": (renamed, failed) => `${renamed} 件を変更、${failed} 件が失敗しました。`,
+  "sessionTitle.batchRetryFailed": (n) => `失敗した ${n} 件を再試行`,
   "tree.sessionInfo": "セッション情報", // Session Info
   "tree.groupInfo": "グループ情報", // Group Info
   "tree.collectionInfo": "コレクション情報", // Collection Info
@@ -1201,7 +1256,9 @@ const ja: typeof en = {
   "info.recentCommits": "最近のコミット", // Recent Commits
   "info.noCommits": "コミットなし", // No commits
   "tree.killProcess": "プロセスを終了", // Kill Process
+  "tree.killProcessSelected": (n: number) => `${n} 件のプロセスを終了`, // Kill {n} Processes
   "tree.killProcessConfirm": (name: string) => `「${name}」のプロセスを終了しますか？実行中のタスクは中断されます。保存済みの会話履歴とファイルは保持されます。`,
+  "tree.killProcessConfirmMany": (n: number) => `実行中の ${n} 件のセッションのプロセスを終了しますか？実行中のタスクは中断されます。保存済みの会話履歴とファイルは保持されます。`,
   "tree.archiveSession": "セッションをアーカイブ", // Archive Session
   "tree.archiveGroup": "グループをアーカイブ", // Archive Group
   "tree.archiveCollection": "コレクションをアーカイブ", // Archive Collection
@@ -1735,6 +1792,7 @@ const ja: typeof en = {
   "transfer.savedToDownloads": "ダウンロードフォルダに保存しました", // Saved to Downloads
   "transfer.foldersUnsupported": "フォルダーはアップロードできません。", // Folders can't be uploaded.
   "drop.browserFilesHint": "ブラウザでは、ここにドロップできるのは画像だけです。その他のファイルは、先にプロジェクトへアップロードしてください。", // In the browser, only images can be dropped here. To use other files, upload them to the project first.
+  "paste.browserFilesHint": "ブラウザでは、ここに貼り付けられるのは画像だけです。その他のファイルは、先にプロジェクトへアップロードしてください。", // In the browser, only images can be pasted here. To use other files, upload them to the project first.
   "files.copyFailed": "一部のファイルをコピーできませんでした。ファイルがまだ存在するか、このフォルダーへの書き込み権限があるかを確認してください。", // Some files could not be copied. Check that they still exist and that you can write to this folder.
   "files.pasteFailed": "一部の項目を貼り付けできませんでした。元の項目が存在するか、貼り付け先フォルダーへの書き込み権限があるかを確認してください。", // Some items could not be pasted. Check that the sources exist and that you can write to this folder.
 

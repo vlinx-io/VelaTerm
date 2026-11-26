@@ -195,3 +195,151 @@ fn selected_subdirectory_does_not_expand_to_the_parent_repository() {
     f.app.db().conn.lock().unwrap().execute("UPDATE projects SET root_path=?1 WHERE id='p'",[sub.to_str().unwrap()]).unwrap();
     assert_eq!(roots(&f.app,"p").unwrap(),vec![sub.to_string_lossy().into_owned()]);
 }
+
+#[test]
+fn ephemeral_terminals_and_cross_project_directories_resolve_status_and_knowledge() {
+    let f = Fixture::new();
+    let sub = f.root.join("nested");
+    std::fs::create_dir_all(&sub).unwrap();
+    let unindexed = f.dir.join("scratch");
+    std::fs::create_dir_all(&unindexed).unwrap();
+    let entry = f.memory();
+
+    // Plain terminals use in-memory `eph-*` IDs without a SQLite session row.
+    // Outside any imported project (including $HOME), status and search report missing code index instead of 400.
+    let scratch_status = agent::query(&f.app, &json!({"sessionId":"eph-plain","cwd":unindexed,"action":"status","query":""})).unwrap();
+    assert!(scratch_status["index"].is_null());
+    assert_eq!(scratch_status["code"]["available"], false);
+    assert_eq!(scratch_status["code"]["reason"], "knowledge_index_missing");
+    assert!(scratch_status["runtime"]["version"].is_string());
+
+    if let Some(home) = crate::host::home_dir().filter(|p| p.is_dir()) {
+        let home_status = agent::query(&f.app, &json!({"sessionId":"eph-plain","cwd":home,"action":"status","query":""})).unwrap();
+        assert!(home_status["index"].is_null());
+        assert_eq!(home_status["code"]["reason"], "knowledge_index_missing");
+        let home_search = agent::query(&f.app, &json!({"sessionId":"eph-plain","cwd":home,"action":"search","query":"Run"})).unwrap();
+        assert_eq!(home_search["code"]["available"], false);
+        assert_eq!(home_search["memories"]["entries"][0]["id"], entry["id"]);
+    }
+
+    // Moving into an imported project (or its subdirectory) from an `eph-*` terminal resolves that project's index.
+    let proj_status = agent::query(&f.app, &json!({"sessionId":"eph-plain","cwd":sub,"action":"status","query":""})).unwrap();
+    assert_eq!(proj_status["index"]["projectId"], "p");
+    assert_eq!(proj_status["index"]["root"], f.root.to_str().unwrap());
+    assert_eq!(proj_status["index"]["status"], "disabled");
+
+    // Non-code actions work from ephemeral sessions as well.
+    let memories = agent::query(&f.app, &json!({"sessionId":"eph-plain","action":"memories","query":"Run"})).unwrap();
+    assert_eq!(memories["entries"][0]["id"], entry["id"]);
+
+    // A persisted session bound to a collection or another project still resolves the imported project at `cwd`.
+    let other_sid = {
+        let conn = f.app.db().conn.lock().unwrap();
+        conn.execute("INSERT INTO projects(id,name,root_path,sort_order,collapsed,created_at) VALUES('chat-col','Chat','',1,0,0)", []).unwrap();
+        crate::db::repo::create_session(&conn, "chat-col", None, "Chat", crate::models::SessionKind::Codex, None, None, None, None, None).unwrap().id
+    };
+    let cross_status = agent::query(&f.app, &json!({"sessionId":other_sid,"cwd":sub,"action":"status","query":""})).unwrap();
+    assert_eq!(cross_status["index"]["projectId"], "p");
+
+    // Unknown non-ephemeral session IDs remain rejected.
+    assert_eq!(
+        agent::query(&f.app, &json!({"sessionId":"missing-session","cwd":f.root,"action":"status","query":""})).unwrap_err(),
+        "knowledge_not_found"
+    );
+}
+
+#[test]
+fn cli_expands_real_errors_without_leaking_templates_or_internal_codes() {
+    for code in [
+        "knowledge_unauthorized", "knowledge_not_found", "knowledge_invalid",
+        "knowledge_missing_directory", "knowledge_invalid_directory", "knowledge_disabled",
+        "knowledge_runtime_missing", "memory_not_found", "kb_not_found", "knowledge_unknown_future",
+    ] {
+        let rendered = agent::format_cli_error(code);
+        assert!(!rendered.contains("knowledge_"), "{code} leaked raw code: {rendered}");
+        assert!(!rendered.contains("kb_"), "{code} leaked raw code: {rendered}");
+        assert!(!rendered.contains("memory_"), "{code} leaked raw code: {rendered}");
+        assert!(!rendered.contains("{error}"), "{code} left unexpanded placeholder: {rendered}");
+    }
+
+    let args = vec!["velaterm".into(), "--knowledge".into(), "status".into()];
+    assert_eq!(
+        agent::run_with_env(&args, None, Some("eph-1".into()), Some("tok".into()), Ok(PathBuf::from("."))).unwrap_err(),
+        "Run vkb inside a VelaTerm session."
+    );
+    assert_eq!(
+        agent::run_with_env(&args, Some("http://127.0.0.1:9".into()), None, Some("tok".into()), Ok(PathBuf::from("."))).unwrap_err(),
+        "Missing VelaTerm session."
+    );
+    assert_eq!(
+        agent::run_with_env(&args, Some("http://127.0.0.1:9".into()), Some("eph-1".into()), None, Ok(PathBuf::from("."))).unwrap_err(),
+        "Missing VelaTerm session credentials."
+    );
+    let unreachable = agent::run_with_env(
+        &args,
+        Some("http://127.0.0.1:9".into()),
+        Some("eph-1".into()),
+        Some("tok".into()),
+        Ok(std::env::temp_dir()),
+    ).unwrap_err();
+    assert!(unreachable.contains("http://127.0.0.1:9"), "unexpected transport error: {unreachable}");
+    assert!(unreachable.contains("sandbox"), "transport error should mention sandbox networking: {unreachable}");
+
+    let ok_decoded = agent::decode_response(r#"{"result":{"index":{"projectId":"p"}}}"#).unwrap();
+    let parsed_decoded: Value = serde_json::from_str(&ok_decoded).unwrap();
+    assert_eq!(parsed_decoded["index"]["projectId"], "p");
+    assert_eq!(
+        agent::decode_response(r#"{"error":"knowledge_invalid"}"#).unwrap_err(),
+        "Invalid vkb arguments. Run `vkb --help` for usage."
+    );
+    assert_eq!(
+        agent::decode_response(r#"{"error":"knowledge_unauthorized"}"#).unwrap_err(),
+        "Session credentials were rejected by VelaTerm. Open a new VelaTerm session and retry."
+    );
+
+    let loopback_allowed = std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|listener| std::net::TcpStream::connect(listener.local_addr()?))
+        .is_ok();
+    if loopback_allowed {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let f = Fixture::new();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let base = format!("http://127.0.0.1:{port}");
+        let app = f.app.clone();
+        let worker = std::thread::spawn(move || {
+            for _ in 0..3 {
+                let req = server.recv().unwrap();
+                agent::handle(app.clone(), crate::diagnostics::HttpRequest::new(req), "secret-token".into());
+            }
+        });
+        let ok_json = agent::run_with_env(
+            &args,
+            Some(base.clone()),
+            Some("eph-http".into()),
+            Some("secret-token".into()),
+            Ok(f.root.clone()),
+        ).unwrap();
+        let parsed: Value = serde_json::from_str(&ok_json).unwrap();
+        assert_eq!(parsed["index"]["projectId"], "p");
+
+        let bad_action = vec!["velaterm".into(), "--knowledge".into(), "bogus".into()];
+        let err_400 = agent::run_with_env(
+            &bad_action,
+            Some(base.clone()),
+            Some("eph-http".into()),
+            Some("secret-token".into()),
+            Ok(f.root.clone()),
+        ).unwrap_err();
+        assert_eq!(err_400, "Invalid vkb arguments. Run `vkb --help` for usage.");
+
+        let err_401 = agent::run_with_env(
+            &args,
+            Some(base),
+            Some("eph-http".into()),
+            Some("wrong-token".into()),
+            Ok(f.root.clone()),
+        ).unwrap_err();
+        assert_eq!(err_401, "Session credentials were rejected by VelaTerm. Open a new VelaTerm session and retry.");
+        worker.join().unwrap();
+    }
+}

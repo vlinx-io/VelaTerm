@@ -355,7 +355,7 @@ mod tests {
         let options = catalog();
         let mut workflow: Vec<_> = options.iter().filter(|option| option.supports_plan_execute).map(|option| option.id.as_str()).collect();
         workflow.sort_unstable();
-        assert_eq!(workflow, ["claude", "codex", "omp", "opencode", "pi"]);
+        assert_eq!(workflow, ["antigravity", "claude", "codex", "omp", "opencode", "pi"]);
         assert_eq!(options.iter().filter(|s| s.accepts_task).count(), 16);
         assert!(
             !options
