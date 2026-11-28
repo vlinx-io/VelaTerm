@@ -76,6 +76,7 @@
 .nsv-composer:focus-within { border-color: var(--accent-line); }
 .nsv-prompt {
   resize: none;
+  overflow-x: hidden;
   min-height: 64px;
   max-height: 40vh;
   padding: 14px 16px 6px;

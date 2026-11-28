@@ -1266,6 +1266,7 @@ a.sv-agent-version-update:hover, button.sv-agent-version-update:hover { text-dec
   z-index: 1;
 }
 .sv-composer textarea {
+  overflow-x: hidden;
   /* Includes the height of the running-turn hint, so the box does not change size when the hint appears. */
   min-height: 83px;
   max-height: 30vh;
@@ -2709,6 +2710,7 @@ select.sv-pill {
   margin: 0;
 }
 .sv-message-editor textarea {
+  overflow-x: hidden;
   width: 100%;
   box-sizing: border-box;
   resize: vertical;
