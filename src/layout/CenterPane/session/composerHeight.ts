@@ -7,6 +7,33 @@ export const COMPOSER_MIN_HEIGHT = 34;
 /** What the running-turn hint takes from the text box (22px hint + 8px gap), so the composer keeps its size. */
 export const COMPOSER_FEEDBACK_HEIGHT = 30;
 
+export function composerFitsOnOneLine(input: HTMLTextAreaElement) {
+  if (input.value.includes("\n")) return false;
+  if (!input.value || !input.clientWidth) return true;
+
+  const style = getComputedStyle(input);
+  const lineHeight = parseFloat(style.lineHeight) + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+  const measurement = input.cloneNode() as HTMLTextAreaElement;
+  measurement.value = input.value;
+  measurement.setAttribute("aria-hidden", "true");
+  measurement.tabIndex = -1;
+  // scrollHeight is at least clientHeight, so measure without the composer's visible height.
+  Object.assign(measurement.style, {
+    position: "absolute",
+    visibility: "hidden",
+    boxSizing: "border-box",
+    border: "0",
+    width: `${input.clientWidth}px`,
+    height: "0",
+    minHeight: "0",
+    overflow: "hidden",
+  });
+  input.after(measurement);
+  const fits = measurement.scrollHeight <= lineHeight + 1;
+  measurement.remove();
+  return fits;
+}
+
 /** Whether the text box can give up that height and still show a line; otherwise the feedback must not sit in the flow. */
 export function composerHasFeedbackRoom(draggedHeight: number | null, shortPane: boolean) {
   return draggedHeight !== null ? draggedHeight >= COMPOSER_MIN_HEIGHT + COMPOSER_FEEDBACK_HEIGHT : !shortPane;

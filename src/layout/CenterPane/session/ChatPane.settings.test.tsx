@@ -619,6 +619,34 @@ it("leaves multiline caret movement, selection, modified arrows and IME input to
   expect(input.value).toBe("History\nContinuation");
 });
 
+it("leaves soft-wrapped caret movement to the editor even in a tall composer", async () => {
+  snapshotOverrides = { rows: [{ kind: "user", id: "old", text: "History" }] };
+  const { container } = await mountPane();
+  const input = container.querySelector<HTMLTextAreaElement>(".sv-box textarea")!;
+  input.style.cssText = "height: 100px; min-height: 83px; line-height: 20px; padding: 0";
+  Object.defineProperty(input, "clientWidth", { value: 120 });
+  Object.defineProperty(input, "scrollHeight", { value: 100 });
+  const scrollHeight = vi.spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get").mockReturnValue(40);
+  try {
+    const draft = "This draft wraps onto a second visual line";
+    fireEvent.change(input, { target: { value: draft } });
+    input.setSelectionRange(draft.length, draft.length);
+    expect(fireEvent.keyDown(input, { key: "ArrowUp" })).toBe(true);
+    expect(input.value).toBe(draft);
+    input.setSelectionRange(0, 0);
+    expect(fireEvent.keyDown(input, { key: "ArrowDown" })).toBe(true);
+    expect(fireEvent.keyDown(input, { key: "ArrowUp" })).toBe(false);
+    expect(input.value).toBe("History");
+    scrollHeight.mockReturnValue(20);
+    fireEvent.change(input, { target: { value: "Short draft" } });
+    input.setSelectionRange(11, 11);
+    expect(fireEvent.keyDown(input, { key: "ArrowUp" })).toBe(false);
+    expect(input.value).toBe("History");
+  } finally {
+    scrollHeight.mockRestore();
+  }
+});
+
 it("keeps the history position when queued input becomes a row and when newer input arrives", async () => {
   snapshotOverrides = { rows: [{ kind: "user", id: "old", text: "Same input" }],
     queue: [{ id: "queued", text: "Same input" }] };

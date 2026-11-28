@@ -22,7 +22,7 @@ import { userMessageItems, type UserMessageItem } from "./userMessageRailItems";
 import { useUserMessageJump } from "./useUserMessageJump";
 import { ComposerOptionsButton, useComposerOptions } from "./ComposerOptions";
 import { ComposerToolbar } from "./ComposerToolbar";
-import { COMPOSER_FEEDBACK_HEIGHT, COMPOSER_MIN_HEIGHT, composerHasFeedbackRoom, setComposerHeight, startComposerResize, useComposerHeight, useShortPane } from "./composerHeight";
+import { COMPOSER_FEEDBACK_HEIGHT, COMPOSER_MIN_HEIGHT, composerFitsOnOneLine, composerHasFeedbackRoom, setComposerHeight, startComposerResize, useComposerHeight, useShortPane } from "./composerHeight";
 import type { ComposerChip } from "./composerLayout";
 import { navigateTranslation, settingsTranslationUrl, useTranslationRoute } from "../../../translation/navigation";
 import { TranslationProvider, useTranslationSession } from "../../../translation/state";
@@ -3406,14 +3406,11 @@ export function ChatPane({
                       return;
                     }
                     const input = e.currentTarget;
-                    const style = getComputedStyle(input);
-                    const singleLineHeight = Math.max(parseFloat(style.minHeight) || 0,
-                      parseFloat(style.lineHeight) + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom));
-                    const singleLine = !input.value.includes("\n") && input.scrollHeight <= singleLineHeight + 1;
                     // Let the browser move through explicit and visually wrapped lines before recalling history.
-                    const atBoundary = singleLine || (e.key === "ArrowUp"
-                      ? input.selectionStart === 0 : input.selectionEnd === input.value.length);
-                    if (input.selectionStart === input.selectionEnd && atBoundary && recallInput(e.key)) {
+                    const atBoundary = e.key === "ArrowUp"
+                      ? input.selectionStart === 0 : input.selectionEnd === input.value.length;
+                    if (input.selectionStart === input.selectionEnd &&
+                        (atBoundary || composerFitsOnOneLine(input)) && recallInput(e.key)) {
                       e.preventDefault();
                       e.stopPropagation();
                       return;
