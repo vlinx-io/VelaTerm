@@ -9,7 +9,7 @@
    hairline rule so the section stays short. */
 .turn-section .turn-context { padding-bottom: 6px; }
 .turn-section .turn-context .kv { padding: 2px 0; }
-.turn-section .turn-pill { margin-left: 8px; font-size: calc(var(--ui-fs) * 0.87); font-weight: 700; line-height: 1.6; padding: 0 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-variant-numeric: tabular-nums; }
+.turn-section .turn-pill { margin-left: 8px; font-size: max(9px, calc(var(--ui-fs) - 2.5px)); font-weight: 700; line-height: 1.6; padding: 0 7px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-variant-numeric: tabular-nums; }
 .turn-section .turn-meter { height: 4px; border-radius: 3px; background: var(--border); overflow: hidden; margin-top: 5px; }
 .turn-section .turn-meter i { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width 180ms ease; }
 .turn-section .turn-context.warn .turn-pill { background: color-mix(in srgb, var(--yellow) 18%, transparent); color: var(--yellow); }
@@ -21,34 +21,34 @@
 .turn-section .kv .k { color: var(--text-dim); }
 .turn-section .kv .v { font-variant-numeric: tabular-nums; }
 .turn-section .kv .v.turn-strong { color: var(--accent); font-weight: 700; }
-.turn-section .kv .v small { margin-left: 5px; font-size: calc(var(--ui-fs) * 0.87); font-weight: 400; color: var(--text-faint); }
+.turn-section .kv .v small { margin-left: 5px; font-size: max(9px, calc(var(--ui-fs) - 2.5px)); font-weight: 400; color: var(--text-faint); }
 .turn-section .turn-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 16px; }
 .turn-section .turn-metric { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.turn-section .turn-metric .m-k { color: var(--text-dim); font-size: calc(var(--ui-fs) * 0.96); }
-.turn-section .turn-metric .m-v { color: var(--text); font-size: var(--ui-fs); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.turn-status { margin: 2px 0 0; color: var(--text-faint); font-size: calc(var(--ui-fs) * 0.96); line-height: 1.5; }
+.turn-section .turn-metric .m-k { color: var(--text-dim); font-size: max(9px, calc(var(--ui-fs) - 1.5px)); }
+.turn-section .turn-metric .m-v { color: var(--text); font-size: max(9px, calc(var(--ui-fs) - 1px)); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.turn-status { margin: 2px 0 0; color: var(--text-faint); font-size: max(9px, calc(var(--ui-fs) - 1.5px)); line-height: 1.5; }
 /* The changed-file count opens the list in place of the statistics; it reads as a link, with a hover
    background sized to its content rather than the whole grid cell. */
 .turn-section .turn-metric .turn-files-link { align-self: flex-start; display: inline-flex; align-items: center; gap: 3px; margin: -2px -6px; padding: 2px 6px; border-radius: 4px; color: var(--accent); cursor: pointer; }
 .turn-section .turn-files-link:hover { background: var(--bg-hover); }
 .turn-section .turn-files-link:focus-visible { outline: 1px solid var(--accent-line); outline-offset: 1px; }
 .turn-section .turn-files-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
-.turn-section .turn-back { display: inline-flex; align-items: center; gap: 5px; margin-left: -6px; padding: 3px 8px 3px 5px; border: 1px solid transparent; border-radius: 5px; color: var(--text-mid); font-size: calc(var(--ui-fs) * 0.96); cursor: pointer; }
+.turn-section .turn-back { display: inline-flex; align-items: center; gap: 5px; margin-left: -6px; padding: 3px 8px 3px 5px; border: 1px solid transparent; border-radius: 5px; color: var(--text-mid); font-size: max(9px, calc(var(--ui-fs) - 1.5px)); cursor: pointer; }
 .turn-section .turn-back svg { transform: rotate(180deg); }
 .turn-section .turn-back:hover { background: var(--bg-hover); border-color: var(--border); color: var(--text); }
-.turn-section .turn-files-count { display: inline-flex; align-items: center; gap: 8px; color: var(--text-faint); font-size: calc(var(--ui-fs) * 0.96); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.turn-section .turn-lines { flex: none; display: inline-flex; gap: 5px; font-size: calc(var(--ui-fs) * 0.87); font-variant-numeric: tabular-nums; }
+.turn-section .turn-files-count { display: inline-flex; align-items: center; gap: 8px; color: var(--text-faint); font-size: max(9px, calc(var(--ui-fs) - 1.5px)); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.turn-section .turn-lines { flex: none; display: inline-flex; gap: 5px; font-size: max(9px, calc(var(--ui-fs) - 2.5px)); font-variant-numeric: tabular-nums; }
 .turn-section .turn-lines .plus { color: var(--green); }
 .turn-section .turn-lines .minus { color: var(--red); }
 /* Nine rows, then the list scrolls with the app scrollbar. The list itself extends into the section
    padding so row highlights keep their inset without the negative margins that would make a scrolling
    box overflow sideways. */
 .turn-section .turn-file-list { list-style: none; margin: 0 -6px; padding: 0; max-height: calc(var(--turn-file-row) * 9); overflow-y: auto; overflow-x: hidden; --turn-file-row: max(24px, calc(var(--ui-fs) + 8px)); }
-.turn-section .turn-file { width: 100%; height: var(--turn-file-row); padding: 0 6px; display: flex; align-items: center; gap: 7px; min-width: 0; border-radius: 4px; font-size: var(--ui-fs); text-align: left; color: var(--text); cursor: pointer; }
+.turn-section .turn-file { width: 100%; height: var(--turn-file-row); padding: 0 6px; display: flex; align-items: center; gap: 7px; min-width: 0; border-radius: 4px; font-size: max(9px, calc(var(--ui-fs) - 1px)); text-align: left; color: var(--text); cursor: pointer; }
 .turn-section .turn-file:hover:not(:disabled) { background: var(--bg-hover); }
 .turn-section .turn-file:disabled { cursor: default; }
 .turn-section .turn-file-icon { flex: none; display: grid; place-items: center; }
 .turn-section .turn-file-name { flex: none; max-width: 48%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.turn-section .turn-file-dir { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-size: calc(var(--ui-fs) * 0.91); }
-.turn-section .turn-files-empty { margin: 10px 0 2px; color: var(--text-mid); font-size: var(--ui-fs); }
+.turn-section .turn-file-dir { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-faint); font-size: max(9px, calc(var(--ui-fs) - 2px)); }
+.turn-section .turn-files-empty { margin: 10px 0 2px; color: var(--text-mid); font-size: max(9px, calc(var(--ui-fs) - 1px)); }
 .turn-section .turn-files .turn-status { margin-top: 8px; }
