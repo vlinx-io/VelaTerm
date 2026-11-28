@@ -201,7 +201,7 @@ button { font-family: inherit; color: inherit; background: none; border: none; c
 .tb-btn.remote-on:hover, .tb-btn.account-on:hover { color: var(--accent); background: var(--bg-hover); }
 .tb-btn.remote-on svg, .tb-btn.account-on svg { filter: drop-shadow(0 0 4px color-mix(in oklch, var(--accent) 60%, transparent)); }
 .tb-seg { display: flex; border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; }
-.tb-seg button { padding: 0 9px; height: 24px; color: var(--text-dim); }
+.tb-seg button { padding: 0 9px; min-height: 24px; color: var(--text-dim); }
 .tb-seg button.on { background: var(--accent-soft); color: var(--accent); }
 
 /* Alt-triggered menu bar (Windows/Linux only; macOS uses the system menu bar). Titles sit inline in the
