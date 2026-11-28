@@ -1,5 +1,6 @@
 /* New Session tab: a centered setup card above a chat-style composer, filling the center stage. */
 .nsv {
+  --seg-font-size: calc(var(--ui-fs) - 1px);
   position: absolute;
   inset: 0;
   display: flex;
@@ -15,10 +16,11 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  justify-content: safe center;
   gap: 18px;
   padding: 32px 24px 16px;
 }
+.nsv-main > * { flex-shrink: 0; }
 .nsv-hero {
   display: flex;
   flex-direction: column;
@@ -27,8 +29,8 @@
   text-align: center;
 }
 .nsv-hero-icon { display: grid; place-items: center; }
-.nsv-hero h1 { margin: 0; font-size: 20px; font-weight: 600; }
-.nsv-target { margin: 0; color: var(--text-dim); font-size: 12.5px; overflow-wrap: anywhere; }
+.nsv-hero h1 { margin: 0; font-size: calc(var(--ui-fs) + 7.5px); font-weight: 600; }
+.nsv-target { margin: 0; color: var(--text-dim); font-size: var(--ui-fs); overflow-wrap: anywhere; }
 .nsv-card {
   width: min(640px, 100%);
   box-sizing: border-box;
@@ -45,7 +47,8 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px 14px;
 }
-.nsv-grid .launch-field { min-width: 0; }
+.nsv-grid .vlx-field-label, .nsv .vlx-btn { font-size: calc(var(--ui-fs) - 0.5px); }
+.nsv-grid .vlx-field-hint { font-size: calc(var(--ui-fs) - 1.5px); }
 .nsv-empty { align-items: center; text-align: center; }
 .nsv-empty p { margin: 0; }
 .nsv-notice {
@@ -55,7 +58,7 @@
   justify-content: space-between;
   gap: 10px;
   color: var(--text-dim);
-  font-size: 12.5px;
+  font-size: var(--ui-fs);
 }
 .nsv-composer-wrap {
   flex: none;
@@ -84,9 +87,10 @@
   outline: none;
   background: transparent;
   color: var(--text);
-  font: inherit;
-  font-size: 14px;
-  line-height: 1.5;
+  font-family: var(--chat-font);
+  font-size: var(--chat-fs);
+  letter-spacing: var(--chat-tracking);
+  line-height: 1.6;
   field-sizing: content;
 }
 .nsv-prompt::placeholder { color: var(--text-faint); }
@@ -97,7 +101,7 @@
   gap: 10px;
   padding: 6px 8px 8px 16px;
 }
-.nsv-hint { color: var(--text-faint); font-size: 11.5px; }
+.nsv-hint { color: var(--text-faint); font-size: calc(var(--ui-fs) - 1px); }
 .nsv-start { display: inline-flex; align-items: center; gap: 6px; }
 .nsv-toolbar {
   display: flex;
@@ -111,22 +115,22 @@
   align-items: center;
   gap: 6px;
   color: var(--text-mid);
-  font-size: 12.5px;
+  font-size: var(--ui-fs);
   cursor: pointer;
 }
 .nsv-check.is-disabled { color: var(--text-faint); cursor: not-allowed; }
-.nsv-check-note { margin-left: -8px; color: var(--text-faint); font-size: 11.5px; }
+.nsv-check-note { margin-left: -8px; color: var(--text-faint); font-size: calc(var(--ui-fs) - 1px); }
 /* The shared .vlx-input supplies border, background, radius, font and focus; this only sizes it to the
    view switch beside it. */
 .vlx-input.nsv-worktree-name {
   width: 220px;
   max-width: 100%;
-  height: 26px;
+  height: calc(var(--ui-fs) + 13.5px);
   padding: 0 8px;
-  font-size: 12.5px;
+  font-size: var(--ui-fs);
 }
 .nsv-worktree-name::placeholder { color: var(--text-faint); }
-.nsv-error { margin: 0; padding: 0 6px; color: var(--red); font-size: 12.5px; overflow-wrap: anywhere; }
+.nsv-error { margin: 0; padding: 0 6px; color: var(--red); font-size: var(--ui-fs); overflow-wrap: anywhere; }
 
 @media (max-width: 560px) {
   .nsv-grid { grid-template-columns: minmax(0, 1fr); }
@@ -159,8 +163,8 @@
 .nsv-type:disabled { opacity: .5; cursor: default; }
 .nsv-type:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .nsv-type-head { display: flex; align-items: center; gap: 6px; }
-.nsv-type-name { font-weight: 600; font-size: 13px; }
-.nsv-type-hint { color: var(--text-dim); font-size: 11.5px; line-height: 1.4; }
+.nsv-type-name { font-weight: 600; font-size: calc(var(--ui-fs) + 0.5px); }
+.nsv-type-hint { color: var(--text-dim); font-size: calc(var(--ui-fs) - 1px); line-height: 1.4; }
 @media (max-width: 560px) {
   .nsv-types { grid-template-columns: minmax(0, 1fr); }
 }

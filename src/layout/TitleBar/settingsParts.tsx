@@ -27,7 +27,7 @@ export function Seg<T extends string>({
             disabled={disabled}
             style={{
               padding: "0 12px",
-              fontSize: 11.5,
+              fontSize: "var(--seg-font-size, 11.5px)",
               cursor: disabled ? "not-allowed" : undefined,
               opacity: disabled ? 0.45 : undefined,
             }}

@@ -43,6 +43,10 @@ const SIZES = {
   md: { height: 32, fontSize: 12.5, padding: "0 9px", rowPadding: "6px 8px" },
 } as const;
 
+function selectFontSize(size: number) {
+  return `calc(var(--ui-fs, 12.5px) + ${size - 12.5}px)`;
+}
+
 export type SelectSize = keyof typeof SIZES;
 
 /** Popup panel look, exported so the model combo box (an editable field with the same list hanging
@@ -75,7 +79,7 @@ export function selectRowStyle(
     borderRadius: 6,
     cursor: "pointer",
     fontFamily: mono ? "var(--font-mono)" : "inherit",
-    fontSize: SIZES[size].fontSize,
+    fontSize: selectFontSize(SIZES[size].fontSize),
     color: selected ? "var(--accent)" : "var(--text-primary)",
     background: selected ? "var(--accent-soft)" : active ? "var(--bg-hover)" : "transparent",
   };
@@ -386,7 +390,7 @@ export default function Select<T extends string>(props: SelectProps<T>) {
             flex: "none",
             padding: s.padding,
             lineHeight: `${s.height - 2}px`,
-            fontSize: s.fontSize,
+            fontSize: selectFontSize(s.fontSize),
             color: "var(--text-muted)",
             whiteSpace: "nowrap",
             borderRight: "1px solid var(--border)",
@@ -423,7 +427,7 @@ export default function Select<T extends string>(props: SelectProps<T>) {
           minWidth: 0,
           outline: "none",
           fontFamily: mono ? "var(--font-mono)" : "inherit",
-          fontSize: s.fontSize,
+          fontSize: selectFontSize(s.fontSize),
           cursor: disabled ? "default" : "pointer",
           opacity: disabled ? 0.6 : 1,
         }}
@@ -510,7 +514,7 @@ export default function Select<T extends string>(props: SelectProps<T>) {
                   borderRadius: 6,
                   outline: "none",
                   fontFamily: mono ? "var(--font-mono)" : "inherit",
-                  fontSize: s.fontSize,
+                  fontSize: selectFontSize(s.fontSize),
                 }}
               />
             </div>}
@@ -521,7 +525,7 @@ export default function Select<T extends string>(props: SelectProps<T>) {
             <div ref={optionsRef} id={multiple ? listId : undefined} role={multiple ? "listbox" : undefined} aria-label={multiple ? ariaLabel : undefined} aria-multiselectable={multiple || undefined}
               style={hasScrollBox ? { position: "relative", flex: "1 1 auto", minHeight: 0, overflowY: "auto" } : undefined}>
             {needle && !shown.length && noMatchLabel && !customShown && (
-              <div role="presentation" style={{ padding: s.rowPadding, fontSize: s.fontSize, color: "var(--text-muted)" }}>{noMatchLabel}</div>
+              <div role="presentation" style={{ padding: s.rowPadding, fontSize: selectFontSize(s.fontSize), color: "var(--text-muted)" }}>{noMatchLabel}</div>
             )}
             {shown.map((opt, i) => {
               const on = isOn(opt);
@@ -534,7 +538,7 @@ export default function Select<T extends string>(props: SelectProps<T>) {
                     border: "1px solid var(--border)",
                     borderRadius: 4,
                     color: "var(--text-muted)",
-                    fontSize: 10,
+                    fontSize: selectFontSize(10),
                     lineHeight: 1.4,
                   }}
                 >
@@ -565,7 +569,7 @@ export default function Select<T extends string>(props: SelectProps<T>) {
                       style={{
                         flex: "none",
                         color: "var(--text-muted)",
-                        fontSize: s.fontSize - 1,
+                        fontSize: selectFontSize(s.fontSize - 1),
                       }}
                     >
                       {opt.hint}
@@ -603,7 +607,7 @@ export default function Select<T extends string>(props: SelectProps<T>) {
                       <span
                         style={{
                           color: "var(--text-muted)",
-                          fontSize: s.fontSize - 1.5,
+                          fontSize: selectFontSize(s.fontSize - 1.5),
                           lineHeight: 1.4,
                           overflowWrap: "anywhere",
                           paddingLeft: (opt.icon ? 24 : 0) + (multiple ? 22 : 0),
@@ -676,7 +680,7 @@ export default function Select<T extends string>(props: SelectProps<T>) {
                   padding: "6px 8px",
                   borderTop: "1px solid var(--border)",
                   color: "var(--text-muted)",
-                  fontSize: s.fontSize - 1,
+                  fontSize: selectFontSize(s.fontSize - 1),
                   cursor: "pointer",
                 }}
               >
