@@ -93,7 +93,7 @@ function GraphCell({ row, lanes, merge }: { row: GraphRow; lanes: number; merge:
   const curve = (x1: number, y1: number, x2: number, y2: number) =>
     x1 === x2 ? `M${x1} ${y1}V${y2}` : `M${x1} ${y1}C${x1} ${(y1 + y2) / 2} ${x2} ${(y1 + y2) / 2} ${x2} ${y2}`;
   return (
-    <svg className="git-graph" width={lanes * LANE} height={ROW} viewBox={`0 0 ${lanes * LANE} ${ROW}`} aria-hidden="true">
+    <svg className="git-graph" width={lanes * LANE} height={ROW} preserveAspectRatio="none" viewBox={`0 0 ${lanes * LANE} ${ROW}`} aria-hidden="true">
       {row.through.map((i) => <path key={"t" + i} className={"lane-" + (i % 6)} d={`M${laneX(i)} 0V${ROW}`} />)}
       {row.incoming.map((i) => <path key={"i" + i} className={"lane-" + (i % 6)} d={curve(laneX(i), 0, x, MID)} />)}
       {row.outgoing.map((i) => <path key={"o" + i} className={"lane-" + (i % 6)} d={curve(x, MID, laneX(i), ROW)} />)}
