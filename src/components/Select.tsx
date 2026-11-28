@@ -39,12 +39,12 @@ export type SelectOption<T extends string> = {
 
 /** Trigger metrics. `sm` suits dense settings rows, `md` suits dialog form fields. */
 const SIZES = {
-  sm: { height: 26, fontSize: 11.5, padding: "0 8px", rowPadding: "5px 8px" },
-  md: { height: 32, fontSize: 12.5, padding: "0 9px", rowPadding: "6px 8px" },
+  sm: { height: 26, fontSize: 11.5, padding: "4px 8px", rowPadding: "5px 8px" },
+  md: { height: 32, fontSize: 12.5, padding: "5px 9px", rowPadding: "6px 8px" },
 } as const;
 
 function selectFontSize(size: number) {
-  return `calc(var(--ui-fs, 12.5px) + ${size - 12.5}px)`;
+  return `max(9px, calc(var(--ui-fs, 12.5px) - ${12.5 - size}px))`;
 }
 
 export type SelectSize = keyof typeof SIZES;
@@ -389,7 +389,7 @@ export default function Select<T extends string>(props: SelectProps<T>) {
           style={{
             flex: "none",
             padding: s.padding,
-            lineHeight: `${s.height - 2}px`,
+            lineHeight: 1.25,
             fontSize: selectFontSize(s.fontSize),
             color: "var(--text-muted)",
             whiteSpace: "nowrap",
@@ -417,7 +417,7 @@ export default function Select<T extends string>(props: SelectProps<T>) {
           alignItems: "center",
           gap: 6,
           width: "100%",
-          height: s.height,
+          minHeight: leading ? s.height - 2 : s.height,
           padding: s.padding,
           background: leading ? "transparent" : "var(--bg-app)",
           color: current ? "var(--text-primary)" : "var(--text-muted)",
@@ -428,6 +428,7 @@ export default function Select<T extends string>(props: SelectProps<T>) {
           outline: "none",
           fontFamily: mono ? "var(--font-mono)" : "inherit",
           fontSize: selectFontSize(s.fontSize),
+          lineHeight: 1.25,
           cursor: disabled ? "default" : "pointer",
           opacity: disabled ? 0.6 : 1,
         }}

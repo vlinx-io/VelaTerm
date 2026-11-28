@@ -47,6 +47,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px 14px;
 }
+.nsv-grid .launch-field { min-width: 0; }
 .nsv-grid .vlx-field-label, .nsv .vlx-btn { font-size: calc(var(--ui-fs) - 0.5px); }
 .nsv-grid .vlx-field-hint { font-size: calc(var(--ui-fs) - 1.5px); }
 .nsv-empty { align-items: center; text-align: center; }

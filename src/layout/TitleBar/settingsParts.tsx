@@ -15,7 +15,7 @@ export function Seg<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="tb-seg" style={{ height: 26 }}>
+    <div className="tb-seg">
       {options.map(([v, label]) => {
         const disabled = disabledOptions.includes(v);
         return (
@@ -26,8 +26,9 @@ export function Seg<T extends string>({
             className={value === v ? "on" : ""}
             disabled={disabled}
             style={{
-              padding: "0 12px",
+              padding: "4px 12px",
               fontSize: "var(--seg-font-size, 11.5px)",
+              lineHeight: 1.25,
               cursor: disabled ? "not-allowed" : undefined,
               opacity: disabled ? 0.45 : undefined,
             }}
